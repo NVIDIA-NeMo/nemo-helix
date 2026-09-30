@@ -7,7 +7,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Set, Type, TypeVar, get_type_hints
+from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Self, Set, Type, TypeVar, get_type_hints
 
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -15,6 +15,7 @@ from nemo_helix_plugin.client.errors import (
     UnprocessableEntityError,
     raise_for_status,
 )
+from nemo_helix_plugin.client.types import RESPONSE_VALIDATION_CONTEXT_KEY
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import (
     DeleteResponse,
@@ -26,7 +27,16 @@ from nemo_helix_plugin.entities.types import (
     ListEntitiesQueryParams,
 )
 from nemo_helix_plugin.filter_ops import FilterOperation
-from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, computed_field
+from pydantic import (
+    BaseModel,
+    Field,
+    ModelWrapValidatorHandler,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationInfo,
+    computed_field,
+    model_validator,
+)
 
 # Regex pattern for valid workspace names
 ID_PATTERN = r"^[\w\-\+.@:]+$"
@@ -91,6 +101,17 @@ class EntityTypeDefault(str):
         return re.sub(r"(?<!^)(?=[A-Z])", "_", objtype.__name__).lower()
 
 
+_OPTIONAL_DATETIME = TypeAdapter(Optional[datetime])
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    return _OPTIONAL_DATETIME.validate_python(value or None)
+
+
 class EntityBase(BaseModel):
     """Base class for all entities.
 
@@ -149,6 +170,35 @@ class EntityBase(BaseModel):
     _updated_by: str | None = PrivateAttr(default=None)
     _parent: str | None = PrivateAttr(default=None)
     _db_version: int = PrivateAttr(default=1)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _restore_store_metadata_from_response(
+        cls, data: Any, handler: ModelWrapValidatorHandler[Self], info: ValidationInfo
+    ) -> Self:
+        """Keep the store-managed metadata a typed client receives in a response.
+
+        The metadata lives in private attributes, which validation never fills,
+        so an entity parsed from a response would report ``id=""`` and
+        ``created_at=None``. The typed clients validate responses with
+        ``RESPONSE_VALIDATION_CONTEXT``; only then is the metadata restored, so
+        request bodies still cannot set it.
+        """
+        entity = handler(data)
+        if info.context and info.context.get(RESPONSE_VALIDATION_CONTEXT_KEY) and isinstance(data, Mapping):
+            entity._restore_store_metadata(data)
+        return entity
+
+    def _restore_store_metadata(self, data: Mapping[str, Any]) -> None:
+        self._id = _optional_str(data.get("id"))
+        self._parent = _optional_str(data.get("parent"))
+        self._created_by = _optional_str(data.get("created_by"))
+        self._updated_by = _optional_str(data.get("updated_by"))
+        self._created_at = _optional_datetime(data.get("created_at"))
+        self._updated_at = _optional_datetime(data.get("updated_at"))
+        db_version = data.get("db_version")
+        if isinstance(db_version, int):
+            self._db_version = db_version
 
     @computed_field
     @property

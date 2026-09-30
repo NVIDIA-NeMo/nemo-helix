@@ -26,20 +26,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/filesets"]
-
-
-[tool.vendor-package]
-package = "filesets"
-package_root = "packages/filesets"
-sdk_include_mode = "source-package"
-target_sdk_module = "filesets"
-included_paths = [
-    "**/*.py",
-]
-vendor_tests = false
-
-# Rewrite imports in _client.py to use our extended FilesResource classes
-[[tool.vendor-package.replaces]]
-class_names = ["FilesResource", "AsyncFilesResource"]
-original = [".resources.files", ".resources.files.files"]
-replacement = ".filesets.resources"

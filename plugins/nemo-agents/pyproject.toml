@@ -9,9 +9,6 @@ dependencies = [
     "nemo-helix",
     "nemo-helix-plugin",
     "nemo-deployments-plugin",
-    "nemo-agents-example-calculator",
-    "nemo-agents-example-email-phishing",
-    "nemo-agents-example-email-security",
     "nemo-agent-config-example-email-security-triage",
     # NAT 1.9 is the first line whose cryptography cap (>=48,<49) overlaps
     # data-designer's, so it is what makes the published nemo-helix[all]
@@ -107,9 +104,6 @@ packages = [
 nemo-deployments-plugin = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-nemo-agents-example-calculator = { workspace = true }
-nemo-agents-example-email-phishing = { workspace = true }
-nemo-agents-example-email-security = { workspace = true }
 nemo-agent-config-example-calculator = {workspace = true}
 nemo-agent-config-example-email-security-triage = { workspace = true }
 

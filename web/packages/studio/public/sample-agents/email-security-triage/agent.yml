@@ -22,12 +22,9 @@
 # indistinguishable in a score table. Routing is the thing this sample
 # demonstrates, so the relay is gone.
 #
-# The capability prompts come from the NAT email-security-analyst example
-# (plugins/nemo-agents/examples/email-security-analyst/src/nat_email_security_analyst/prompt.py),
-# with the shared untrusted-data guardrail hoisted to a single paragraph. One
-# deliberate change: that agent routed non-JSON input to the general review;
-# here plain text answers the question it carries, and reaches the review only
-# when it carries none — which is what the dataset-driven eval sends.
+# The capability prompts share an untrusted-data guardrail. Plain text answers
+# the question it carries, and reaches the general review only when it carries
+# none — which is what the dataset-driven eval sends.
 #
 # Studio sample: served as a static asset and fetched by the Create Example Agent
 # flow. `models.default.model` is overwritten with the user's selected model at

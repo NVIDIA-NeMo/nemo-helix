@@ -106,7 +106,7 @@ _DEFAULTS: dict[str, str] = {
     # resolves cleanly with ``uv pip install --prerelease=allow
     # 'nvidia-nat[most]==<ver>'`` against public PyPI.  Note: NAT does not
     # define an ``[all]`` extra — ``[most]`` is the comprehensive one
-    # (includes langchain / react-agent / wiki-search).
+    # (includes langchain and wiki-search).
     "nat_version": "1.8.0",
 }
 

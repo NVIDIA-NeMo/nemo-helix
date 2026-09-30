@@ -19,7 +19,7 @@ Full references (default tag `local`):
 - `my-registry/nemo-helix-dev/nhx-customizer-tasks:local`
 - `my-registry/nemo-helix-dev/nhx-automodel-training:local`
 
-Bake file: **`docker-bake.hcl`** at the Platform repo root (`context = "."`). Run all commands from the Platform repo root.
+Bake file: **`docker-bake.hcl`** at the NeMo Helix repo root (`context = "."`). Run all commands from the NeMo Helix repo root.
 
 ## `docker buildx bake --print`
 
@@ -31,10 +31,10 @@ Bake file: **`docker-bake.hcl`** at the Platform repo root (`context = "."`). Ru
 
 2. **Base image tag** - after building the base, set `BASE_TAG_AUTOMODEL` (or push to `BASE_REGISTRY`) before building tasks/training.
 
-## Build wheels and push to NGC (from Platform root)
+## Build wheels and push to NGC (from NeMo Helix root)
 
 ```bash
-cd /path/to/Platform
+cd /path/to/nemo-helix
 
 docker login nvcr.io
 
@@ -55,10 +55,10 @@ docker buildx bake \
 
 Override platform: `export BUILD_PLATFORM=linux/amd64` or `--set "*.platform=linux/amd64"`.
 
-## Build automodel images (from Platform root)
+## Build automodel images (from NeMo Helix root)
 
 ```bash
-cd /path/to/Platform
+cd /path/to/nemo-helix
 
 export WHEELS_TAG="${WHEELS_TAG:-3fd6986ff173b598446ffac06d9be3f84b482495}"
 export BAKE_TAG="${WHEELS_TAG}"
@@ -88,7 +88,7 @@ Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` 
 
 **Customizer tasks image (`nhx-customizer-tasks`):** `uv sync --package nhx-customization-common --package nhx-models --no-dev --inexact` from the customizer workspace slice (`docker/customizer/`). Hosts shared CPU steps (`file_io`, `model_entity`, `model_spec`, LoRA sidecar) for all customization backends.
 
-**Training image (`nhx-automodel-training`):** GPU training (`nhx.automodel.tasks.training`) and retrieval mining (`nhx.automodel.tasks.retrieval_mine`). Platform glue is installed with `uv pip install --overrides /app/docker/automodel/no_override_requirements.txt -e "/app/services/automodel[training]"` (alongside its platform dependencies), then `uv pip install --no-deps -e /opt/Automodel` re-pins `nemo_automodel` from the base clone (not PyPI). `uv sync` is not used here: it upgrades `transformers` and breaks `PreTrainedModel`.
+**Training image (`nhx-automodel-training`):** GPU training (`nhx.automodel.tasks.training`) and retrieval mining (`nhx.automodel.tasks.retrieval_mine`). NeMo Helix glue is installed with `uv pip install --overrides /app/docker/automodel/no_override_requirements.txt -e "/app/services/automodel[training]"` (alongside its platform dependencies), then `uv pip install --no-deps -e /opt/Automodel` re-pins `nemo_automodel` from the base clone (not PyPI). `uv sync` is not used here: it upgrades `transformers` and breaks `PreTrainedModel`.
 
 **Retrieval mining:** Data Designer's `retrieval-prepare` stages the encoder into shared job storage with `nhx-customizer-tasks`, then the training image loads it with `HF_HUB_OFFLINE=1`. All retrieval steps share one container-backed profile (`data_designer.job_executor_profile`, or `--profile`).
 

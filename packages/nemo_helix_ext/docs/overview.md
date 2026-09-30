@@ -9,8 +9,8 @@
 src/nemo_helix_ext/cli/
 ├── app.py                    # Main Typer app, global options callback
 ├── core/                     # Core logic for handling the CLI commands
-│   ├── context.py            # CLIContext - state management
-│   └── types.py              # Type definitions (OutputFormat, TimestampFormat)
+│   ├── context.py            # CLIContext - state management (implements nemo_helix_plugin.cli_state.CLIState)
+│   └── help_formatter.py     # NhxGroup - NeMo help rendering for every mounted command
 └── commands/                 # This is where all CLI commands are defined
     ├── api/                  # AUTO-GENERATED - do not edit manually
     │   ├── workspaces.py
@@ -119,18 +119,25 @@ def main(ctx: typer.Context, base_url: str | None = None, ...):
     ctx.obj = cli_context
 ```
 
-Subcommands access the context via `ctx.obj`:
+Subcommands access the context with `cli_state(ctx)`, typed as the `CLIState` protocol from
+`nemo_helix_plugin.cli_state` so core and plugin commands depend on the same interface. The shared
+command helpers (options, output formatting, pagination, error handling) also live in
+`nemo_helix_plugin`:
 
 ```python
+from nemo_helix_plugin.cli_state import cli_state
+from nemo_helix_plugin.models.client import ModelsClient
+
 def list_models(ctx: typer.Context):
-    cli_context: CLIContext = ctx.obj
+    state = cli_state(ctx)
 
-    # Get resolved SDK context (lazy loads on first access)
-    sdk_context = cli_context.get_sdk_context()
-
-    # Get API client
-    client = cli_context.get_client()
+    # Typed client sharing the CLI's base URL, auth, and transport
+    client = state.typed_client(ModelsClient)
+    output_format = state.get_output_format()
 ```
+
+Host-only code (config and auth commands) may annotate `ctx.obj` as `CLIContext` to reach methods the
+protocol does not expose, such as `get_sdk_context()`.
 
 ### Lazy Config Loading
 

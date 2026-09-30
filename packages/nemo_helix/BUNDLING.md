@@ -7,7 +7,7 @@
 
 Wrapper distribution for NeMo Helix. When users run `pip install nemo-helix[all]`, this is the wheel they get.
 
-The wheel bundles the SDK, shared runtime packages, default first-party plugins, and services directly from source via hatch force-include. As sub-packages are published independently to PyPI, they'll be removed from the bundle and added as normal dependencies instead.
+The wheel bundles the CLI (`nemo_helix_ext`), the typed clients (`nemo_helix_plugin`), shared runtime packages, default first-party plugins, and services directly from source via hatch force-include. As sub-packages are published independently to PyPI, they are removed from the bundle, listed under `[tool.bundle-package-published]`, and added as normal dependencies instead.
 
 ## How bundling works
 
@@ -16,7 +16,7 @@ All source bundling is configured in `pyproject.toml` via `[tool.bundle-package]
 ```toml
 [tool.bundle-package]
 nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
-nemo-helix-sdk = { source = "../../sdk/python/nemo-helix/src/nemo_helix", module = "nemo_helix", inherit = { "optional-dependencies" = true, scripts = true } }
+nemo-helix-ext = { source = "../../packages/nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", inherit = { "entry-points" = ["nemo.*"] }, scripts = [{ name = "nemo", value = "nemo_helix_ext.cli.app:cli" }] }
 nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor", inherit = { "entry-points" = ["nemo.*"] } }
 nhx-auth = { source = "../../services/core/auth/src/nhx/core/auth", module = "nhx/core/auth", deps_group = "auth-service" }
 ```
@@ -31,7 +31,7 @@ Each entry has:
 - **scripts** (optional) — explicit CLI entrypoints to register on the wrapper. Prefer `inherit.scripts` when copying scripts from the bundled package.
 - **force_include** (optional) — extra source files, directories, or globs to bundle with this package, keyed relative to the entry's `source` path and mapped to their target wheel path. When using a glob, make the target end in `/` to copy each match into that package directory.
 
-By default, bundled package metadata is not re-exported. `nemo-helix` opts into SDK scripts and SDK optional dependencies, and it opts into only `nemo.*` entry-point groups from the default first-party plugins. Other plugin entry-point groups, such as `data_designer.plugins`, are intentionally not inherited.
+By default, bundled package metadata is not re-exported. `nemo-helix` declares the public `nemo` and `nhx` scripts on the `nemo-helix-ext` bundle entry (the source package registers them under private names so the workspace venv only exposes one `nemo`), and it opts into only `nemo.*` entry-point groups from the CLI and the default first-party plugins. Other plugin entry-point groups, such as `data_designer.plugins`, are intentionally not inherited.
 
 Two tools read this config:
 
@@ -55,7 +55,7 @@ becomes this in the final wheel metadata:
 Requires-Dist: nemo-helix[nhx-common]
 ```
 
-A dependency with extras and a marker, such as `nemo-helix-sdk[aiohttp] ; python_version >= "3.11"`, becomes `nemo-helix[nemo-helix-sdk,aiohttp] ; python_version >= "3.11"`.
+With extras, `nemo-evaluator-sdk[harbor]` becomes `nemo-helix[nemo-evaluator-sdk,harbor]`.
 
 ### `make vendor` (vendor tool)
 
@@ -65,7 +65,7 @@ The `_process_bundle_packages()` phase in `vendor_package.py` reads `[tool.bundl
 
 1. Finds the bundled package's `pyproject.toml`, using the configured `source` path when needed
 2. Reads its `[project.dependencies]`
-3. Filters out workspace packages that are not bundled by the parent, because they are not installable from PyPI
+3. Filters out workspace packages that are not bundled by the parent, because they are not installable from PyPI. Members listed under `[tool.bundle-package-published]` release to PyPI on their own version line and stay regular requirements.
 4. Keeps bundled workspace dependency names readable in source metadata, so the wheel build hook can rewrite final `Requires-Dist` metadata to self-extras
 5. Writes the resulting deps into the generated extra named by `deps_group`, or by the bundle key when `deps_group` is omitted
 6. Copies only the metadata explicitly selected by `inherit`
@@ -85,7 +85,7 @@ The wrapper's `[project.dependencies]` is hand-written with the true workspace d
 
 ```toml
 dependencies = [
-  "nemo-helix-sdk",
+  "nemo-helix-ext",
   "nhx-common",
   "nemo-helix-plugin",
 ]
@@ -95,7 +95,7 @@ Those direct workspace dependencies are what editable installs and repo-local to
 
 ```toml
 dependencies = [
-  "nemo-helix[nemo-helix-sdk]",
+  "nemo-helix[nemo-helix-ext]",
   "nemo-helix[nhx-common]",
   "nemo-helix[nemo-helix-plugin]",
 ]
@@ -112,12 +112,12 @@ The `services` extra includes `plugins` because Python entry points are distribu
 
 Vendor-owned extras (those generated from `[tool.bundle-package]`) are marked with a `# Generated from [tool.bundle-package]; do not edit by hand.` comment immediately above the key, and `make vendor` will overwrite them on every run. Extras without the marker are hand-written — add new ones (like `all`) directly in the pyproject and they will be left alone. The wheel rewrite step assumes the generated `deps_group` extras already exist before the build starts.
 
-The wrapper's generated `[project.scripts]` currently re-exports only the SDK CLI entry points:
+The wrapper's generated `[project.scripts]` currently exposes only the CLI entry points:
 
 ```toml
 [project.scripts]
-nemo = "nemo_helix.cli.app:cli"
-nhx = "nemo_helix.cli.app:cli"
+nemo = "nemo_helix_ext.cli.app:cli"
+nhx = "nemo_helix_ext.cli.app:cli"
 ```
 
 Service-specific server scripts are not exposed by the umbrella `nemo-helix` wheel. Individual service packages may still expose their own scripts, and the wrapper uses `nemo services run` through the platform runner instead.
@@ -127,11 +127,12 @@ Service-specific server scripts are not exposed by the umbrella `nemo-helix` whe
 To publish a bundled package independently:
 
 1. Remove its entry from `[tool.bundle-package]`
-2. Add it as a normal dependency in `[project.dependencies]` (or in the appropriate optional group)
-3. Run `make vendor` to regenerate the dependency groups
+2. List it under `[tool.bundle-package-published]` so bundled packages can keep depending on it
+3. Add it as a normal dependency in `[project.dependencies]` if the base install needs it
+4. Run `make vendor` to regenerate the dependency groups
 
 The wheel gets thinner, the dependency metadata stays correct, and `pip install nemo-helix[all]` (and `[services]`) continues to work.
 
-## Other vendoring (`make vendor`)
+## Generated `nemo_helix` module
 
-The `make vendor` command also handles SDK client extensions (`nemo_helix_ext`, `data_designer_sdk`, `models`, `filesets`, `nemo_evaluator_sdk`). These are **not** bundled via `[tool.bundle-package]` — they use the older `[tool.vendor-package]` mechanism which copies source files into the SDK tree with import rewriting. This is separate from the bundling described above and is only relevant to SDK client-side extensions.
+The `nemo-helix-sdk` bundle entry ships the generated `nemo_helix` module from `sdk/python/nemo-helix` only because runtime packages still import it. The wheel takes no scripts, entry points, or extras from that package's pyproject. Remove the entry together with the `sdk/python/nemo-helix` directory.

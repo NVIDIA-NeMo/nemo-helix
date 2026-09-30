@@ -30,7 +30,9 @@ Keep custom metric code dependency-light. Local execution runs your metric in th
 
 ## Prerequisites
 
-Install the PyPI `nemo-helix` wrapper package, which includes the Evaluator SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap` from the repository root instead.
+For remote execution, use Python 3.13, the version the default Evaluator task image runs. A `cloudpickle` metric bundle only loads on the Python minor version that created it.
+
+Install the PyPI `nemo-helix` wrapper package, which includes the Evaluator SDK. The `all` extra is defined by the wrapper package; if you are working from a source checkout, run `make bootstrap PYTHON_VERSION=3.13` from the repository root instead.
 
 ```bash
 pip install "nemo-helix[all]"
@@ -386,6 +388,12 @@ The `nemo_evaluator_sdk` package provides metric and runtime types, such as `Met
 ## 7. Submit a Durable Evaluator Job
 
 Pass `CloudpickleMetricBundlePackager()` to `client.evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
+
+<Note>
+
+Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x; recreate the metric bundle with the runtime Python version.`
+
+</Note>
 
 ```python
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager

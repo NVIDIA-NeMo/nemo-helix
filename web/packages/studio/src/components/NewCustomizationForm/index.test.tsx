@@ -270,6 +270,30 @@ describe('NewCustomizationForm', () => {
     });
   });
 
+  /**
+   * Regression guard for the create-dataset modal navigating the page instead of creating
+   * a dataset. The modal renders its own `<form>`; when it was rendered from inside the
+   * wizard's `<form>`, browsers did not deliver the nested form's submit event to any
+   * ancestor (whatwg/dom#756), so React — which delegates `submit` at the root container —
+   * never ran the modal's `onSubmit`, nothing called `preventDefault`, and clicking
+   * "Add to Customization" did a native GET to the current URL.
+   *
+   * jsdom bubbles the nested submit, so it cannot reproduce the navigation; assert the
+   * structure that caused it instead.
+   */
+  it('renders the create-dataset modal outside the wizard form', async () => {
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" />);
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: 'New Dataset' }));
+
+    expect(await screen.findByText('Create New Dataset')).toBeInTheDocument();
+    // Testing Library has no query for DOM structure, and structure is the whole point here.
+    // eslint-disable-next-line testing-library/no-node-access
+    expect(document.querySelector('form form')).toBeNull();
+  });
+
   it('asks the API for fine-tunable models instead of filtering the page client-side', async () => {
     const user = userEvent.setup();
     renderRoute(<NewCustomizationForm workspace="default" />);

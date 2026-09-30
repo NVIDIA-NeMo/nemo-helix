@@ -46,6 +46,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_deployments_plugin.auth_proxy import auth_proxy_port
+from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.entities import (
@@ -67,6 +68,7 @@ from nemo_helix_plugin.auth.workload_identity import (
     get_workload_identity_token_audience,
     is_workload_identity_token_exchange_enabled,
 )
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
@@ -74,6 +76,7 @@ from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -395,24 +398,25 @@ def executor_for_mode(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> 
     return config.default_executor
 
 
-def _executor_entry(name: str | None) -> ExecutorConfigEntry | None:
-    """Return the deployments-plugin executor entry *name* resolves to.
+def executor_backend(name: str | None) -> str | None:
+    """Return the backend key the deployments plugin would run *name* on.
 
     An unset name is not "no executor": ``ExecutorRegistry.resolve`` falls back to
     the deployments plugin's own ``default_executor``, so resolving it here is what
-    makes callers see the executor that will actually run.
+    makes the mode check see the executor that will actually run.
     """
-    config = DeploymentsConfig.get()
-    resolved = name or config.default_executor
-    if not resolved:
+    entry = _executor_entry(_resolve_executor_name(name))
+    return entry.backend if entry else None
+
+
+def _resolve_executor_name(name: str | None) -> str | None:
+    return name or DeploymentsConfig.get().default_executor
+
+
+def _executor_entry(name: str | None) -> ExecutorConfigEntry | None:
+    if not name:
         return None
-    return next((entry for entry in config.executors if entry.name == resolved), None)
-
-
-def executor_backend(name: str | None) -> str | None:
-    """Return the backend key the deployments plugin would run *name* on."""
-    entry = _executor_entry(name)
-    return entry.backend if entry is not None else None
+    return next((entry for entry in DeploymentsConfig.get().executors if entry.name == name), None)
 
 
 def openshell_platform_egress_url(executor: str | None) -> str | None:
@@ -422,7 +426,7 @@ def openshell_platform_egress_url(executor: str | None) -> str | None:
     route its sandbox policy allows. None when the executor is not an openshell
     executor or grants no platform egress (``platform_egress: null``).
     """
-    entry = _executor_entry(executor)
+    entry = _executor_entry(_resolve_executor_name(executor))
     if entry is None or entry.backend != "openshell":
         return None
     egress = OpenShellExecutorConfig.model_validate(entry.config).platform_egress
@@ -443,12 +447,51 @@ def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) ->
     backend = executor_backend(executor)
     if backend is None or backend == mode:
         return
+    raise _backend_mismatch(executor, backend, mode)
+
+
+def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) -> ValueError:
     alternative = f", or deploy with deployment_mode {backend!r}" if backend in CONTAINER_DEPLOYMENT_MODES else ""
-    raise ValueError(
+    return ValueError(
         f"deployment_mode {mode!r} resolved to executor {executor!r}, which runs on "
-        f"{backend!r}. Set 'deployments.{mode}_executor' to an executor whose backend "
+        f"{backend!r}. Set 'agents.deployments.{mode}_executor' to an executor whose backend "
         f"is {mode!r}{alternative}."
     )
+
+
+def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
+    """Refuse a mode that could not run, before a deployment is persisted for it."""
+    if mode == "subprocess":
+        return
+    executor = _resolve_executor_name(executor_for_mode(config, mode))
+    entry = _executor_entry(executor)
+    if entry is None:
+        if executor:
+            raise ValueError(
+                f"deployment_mode {mode!r} resolved to executor {executor!r}, which is not listed "
+                "in 'deployments.executors'."
+            )
+        raise ValueError(
+            f"deployment_mode {mode!r} has no executor. Set 'agents.deployments.{mode}_executor' or "
+            "'agents.deployments.default_executor'."
+        )
+    if entry.backend != mode:
+        raise _backend_mismatch(entry.name, entry.backend, mode)
+    if mode == "docker":
+        try:
+            docker_host = DockerExecutorConfig.model_validate(entry.config).docker_host
+        except ValidationError as exc:
+            logger.debug("Docker executor %r has invalid config: %s", entry.name, exc)
+            raise ValueError(f"Docker executor {entry.name!r} has an invalid configuration.") from exc
+        try:
+            require_docker(docker_host=docker_host)
+        except CapabilityUnavailableError as exc:
+            logger.debug("Docker executor %r is unavailable: %s", entry.name, exc)
+            # The probe result is cached per process, as the deployments plugin's executor registry is.
+            raise ValueError(
+                f"The Docker daemon for executor {entry.name!r} was unreachable when last checked. "
+                "Start Docker, then restart the platform."
+            ) from exc
 
 
 _HTTP_PROTOCOLS = frozenset({"http", "https"})

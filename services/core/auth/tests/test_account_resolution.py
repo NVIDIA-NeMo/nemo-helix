@@ -186,6 +186,22 @@ async def test_platform_controller_service_principal_is_allowed(fake_store: _Fak
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("service_name", ["customizer", "unsloth", "rl"])
+async def test_customization_task_service_principal_is_allowed(fake_store: _FakeStore, service_name: str):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    context = await resolver.resolve_authz_input({"principal_id": f"service:{service_name}"})
+
+    assert context.to_policy_fields() == {
+        "caller_kind": "service_principal",
+        "actor_account_id": f"account-for-{service_name}",
+        "actor_aliases": [f"service:{service_name}"],
+    }
+    assert fake_store.calls[0]["subject"] == service_name
+    assert fake_store.calls[0]["account_type"] == "service"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "principal_id",
     [

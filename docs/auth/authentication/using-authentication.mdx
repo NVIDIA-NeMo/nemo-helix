@@ -49,13 +49,27 @@ All CLI and SDK commands now use the stored token automatically.
 
 ### Requesting Specific Scopes
 
-By default, the CLI requests the scopes configured in `auth.oidc.default_scopes` (typically `platform:read platform:write` plus OIDC standard scopes like `openid profile email offline_access`). Restrict the token's access by specifying fewer scopes:
+By default, the CLI requests the OAuth scopes returned by auth discovery in `default_scopes`. Deployments commonly include OIDC protocol scopes such as `openid`, `profile`, `email`, and `offline_access`, and may also include NeMo Helix API scope names such as `platform:read` and `platform:write`.
+
+The CLI sends API scopes in the form required by the configured OAuth application. If auth discovery includes a resource scope prefix, the login output shows both the short name and the fully qualified value:
+
+```text
+Requesting scopes:
+  platform:read (api://<app-client-id>/platform:read)
+  platform:write (api://<app-client-id>/platform:write)
+  openid
+  profile
+  email
+  offline_access
+```
+
+Pass `--scope` to override the NeMo Helix API scopes requested for one login. The CLI keeps the non-API OIDC defaults and applies the discovered prefix automatically:
 
 ```bash
 nemo auth login --scope "platform:read"
 ```
 
-See [API Scopes](/documentation/access-control/authorization/api-scopes) for the full list of available scopes.
+OAuth scopes requested during login are not group claims and do not grant workspace roles. Workspace authorization still comes from NeMo Helix role bindings over the configured identity claims. If the IdP returns recognized NeMo Helix API scopes in `scp` or `scope`, those scopes narrow the API calls that token can make. See [API Scopes](/documentation/access-control/authorization/api-scopes) for the authorization-scope model.
 
 ### Non-Interactive Login (CI/CD)
 

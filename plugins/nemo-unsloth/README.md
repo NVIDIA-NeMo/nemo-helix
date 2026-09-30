@@ -51,7 +51,7 @@ What happens after submit:
 
 ```bash
 nemo customization unsloth --help
-nemo customization unsloth submit JOB_JSON -w WORKSPACE [--profile P] [--cluster C] [-o k=v]
+nemo customization unsloth submit JOB_JSON -w WORKSPACE [--profile P] [-o k=v]
 nemo customization unsloth explain      # prints schemas
 ```
 

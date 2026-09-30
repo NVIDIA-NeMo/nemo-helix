@@ -434,9 +434,6 @@ nemo-safe-synthesizer-plugin = { workspace = true }
 nemo-switchyard = { workspace = true }
 nemo-agents-plugin = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
-nemo-agents-example-calculator = { workspace = true }
-nemo-agents-example-email-phishing = { workspace = true }
-nemo-agents-example-email-security = { workspace = true }
 nemo-agent-config-example-email-security-triage = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
 nemo-automodel-plugin = { workspace = true }
@@ -498,9 +495,6 @@ members = [
   "plugins/nemo-agents",
   "plugins/nemo-deployments",
   "plugins/nemo-insights",
-  "plugins/nemo-agents/examples/calculator-agent",
-  "plugins/nemo-agents/examples/email-phishing-analyzer",
-  "plugins/nemo-agents/examples/email-security-analyst",
   "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent",
   "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage",
   "plugins/nemo-customizer",
@@ -624,6 +618,8 @@ extra-paths = [
   "plugins/nemo-guardrails/src",
   # So ``integration.*`` and ``from .utils import`` resolve in plugin tests (PEP 420).
   "plugins/nemo-guardrails/tests",
+  # agent-hardener is a virtual workspace member (not installed by default); add its src so ty resolves it.
+  "plugins/nemo-agent-hardener/src",
   # So ``_doubles`` (the agent-hardener plugin's shared test stand-ins) resolves in its tests.
   "plugins/nemo-agent-hardener/tests/unit",
   # nemo-evaluator plugin is not a workspace member; add its src so ty can

@@ -68,7 +68,7 @@ the managed ClickHouse container before deleting any bind-mounted data.
 nemo --help                # All commands
 nemo models list           # Available models
 nemo chat                  # Chat with your default model
-nemo services status       # Platform health
+nemo services status       # platform health
 nemo skills list           # Skills installed on the platform
 ```
 
@@ -100,7 +100,7 @@ If `make bootstrap` reports that Studio asset bootstrap did not complete, the AP
 export NVIDIA_API_KEY=nvapi...
 export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b
 export NEMO_FAST_MODEL="$NEMO_DEFAULT_MODEL"
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 </details>
@@ -133,7 +133,7 @@ See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation
 
 ## Skills
 
-`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. Platform-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
+`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
 To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 
@@ -144,54 +144,11 @@ nemo skills install --path ~/.my-agent/skills
 nemo setup --install-skills --skills-path ~/.my-agent/skills
 ```
 
-## Try the demo agent
+## Try the sample agent
 
-`nemo setup --deploy-agent` deploys a demo calculator agent you can use to
-explore the platform's evaluate / optimize loop.
-
-```bash
-nemo agents invoke --agent calculator-agent --input "what is 12 * 8?"
-```
-
-The calculator-agent package is installed automatically (`plugins/nemo-agents/examples/calculator-agent/`).
-
-<details>
-<summary>Deploy it manually</summary>
-```bash
-nemo agents create --name calculator-agent \
-  --agent-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-agent.yml
-nemo agents deploy --agent calculator-agent
-nemo agents deployments wait --agent calculator-agent
-```
-</details>
-
-<details>
-<summary>Evaluate the agent</summary>
-```bash
-nemo agents evaluate \
-  --eval-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-eval.yml \
-  --agent calculator-agent
-```
-</details>
-
-<details>
-<summary>Optimize the agent</summary>
-```bash
-BUNDLE="$(pwd)/plugins/nemo-agents/examples/calculator-agent/src/calculator_agent"
-nemo agents optimize prepare-fileset \
-  --source "$BUNDLE" \
-  --optimize-config calculator-optimize.yml \
-  --fileset calculator-optimize \
-  --agent calculator-agent
-nemo agents optimize run-strategy \
-  --strategy legacy \
-  --optimize-config-fileset default/calculator-optimize \
-  --optimize-config calculator-optimize.yml \
-  --agent calculator-agent
-```
-</details>
-
-The demo agent uses `${NEMO_DEFAULT_MODEL}` for both execution and the judge LLM. To select different models for either/both, update the yaml config files.
+Interactive `nemo setup` can create a `sample` workspace with a Fabric-based
+email security agent and evaluation artifacts. Open the Studio link printed at
+the end of setup to explore them.
 
 ## Documentation
 

@@ -27,6 +27,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironment,
     AgentEnvironmentSpec,
     AgentSession,
+    DeploymentMode,
     DeploymentStatus,
 )
 from nemo_helix_plugin.agents.types import (
@@ -48,7 +49,7 @@ from nemo_helix_plugin.agents.types import (
     CreateSessionRequest as CreateSessionRequest,
 )
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Filters — extend NemoFilter so extra fields are rejected (extra="forbid")
@@ -96,6 +97,24 @@ class EnvironmentSpecFilter(NemoFilter):
 
 class ComputeSpecFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/compute-specs``."""
+
+
+class DeploymentModeAvailability(BaseModel):
+    """Whether this platform can run deployments in one ``deployment_mode``."""
+
+    mode: DeploymentMode = Field(description="The deployment mode.")
+    enabled: bool = Field(
+        description="True when a deployment in this mode would run on a matching executor backend.",
+    )
+    requires_image: bool = Field(
+        description="True when a deployment in this mode must set 'image' because no default image is configured.",
+    )
+
+
+class DeploymentModeList(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
+
+    data: list[DeploymentModeAvailability]
 
 
 # ---------------------------------------------------------------------------

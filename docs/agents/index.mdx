@@ -8,9 +8,9 @@ description: ""
 
 <a id="agents"></a>
 
-An agent on NeMo Helix calls tools, accesses models through shared Platform
+An agent on NeMo Helix calls tools, accesses models through shared NeMo Helix
 infrastructure, and runs as a service you can register, deploy, and
-invoke. New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml`
+invoke. New agents use the NeMo Helix-managed `nemo-agents-spec-v1` `agent.yaml`
 contract. Legacy NVIDIA NeMo Agent Toolkit (NAT) workflow configurations remain
 supported, including NAT-specific evaluation and optimization commands. Both
 formats are managed through the `nemo agents` command group.
@@ -76,7 +76,7 @@ Legacy NAT-only commands:
 
 ## Agent Definition
 
-### Platform-managed agents
+### NeMo Helix-managed agents
 
 #### About NeMo Fabric
 
@@ -94,7 +94,7 @@ through shared infrastructure.
 The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
 DeepAgents, and Hermes adapter implementations. It does not install the
 third-party harness packages. Choose an extra when the harness should share the
-Platform environment:
+NeMo Helix environment:
 
 | Harness selection | `nemo-helix` package expression | Source checkout plugin expression | Harness packages installed |
 |---|---|---|---|
@@ -105,7 +105,7 @@ Platform environment:
 | All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
 | Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
 
-Install the Agents plugin and one harness with its namespaced Platform extra.
+Install the Agents plugin and one harness with its namespaced NeMo Helix extra.
 For example, install DeepAgents with:
 
 ```bash
@@ -120,7 +120,7 @@ uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"
 
 Plain `pip install` also works in an environment you manage yourself.
 Add `all` to the extra list only when the environment must also run every local
-Platform service: `nemo-helix[all,nemo-agents-plugin-deepagents]`.
+NeMo Helix service: `nemo-helix[all,nemo-agents-plugin-deepagents]`.
 
 From a source checkout, use the standalone plugin extra instead:
 
@@ -129,7 +129,7 @@ uv sync --package nemo-agents-plugin --extra deepagents
 ```
 
 Hermes Agent 0.20 and later is not distributed through PyPI and has dependency
-conflicts with the Platform environment. Follow the
+conflicts with the NeMo Helix environment. Follow the
 [Hermes Agent installation guide](https://hermes-agent.nousresearch.com/docs/installation)
 to create a separate environment, then install the matching Fabric runtime and
 Hermes adapter into that environment:
@@ -156,7 +156,7 @@ Runtime behavior is described by the platform-managed `agent.yaml`:
 
 | Section | Purpose | Example |
 |---------|---------|---------|
-| `config_format` | Selects the versioned Platform agent contract. Use `nemo-agents-spec-v1`. | `nemo-agents-spec-v1` |
+| `config_format` | Selects the versioned NeMo Helix agent contract. Use `nemo-agents-spec-v1`. | `nemo-agents-spec-v1` |
 | `name` | Provides the agent name used in runtime metadata. | `calculator-agent` |
 | `description` | Summarizes the agent's purpose for users and image metadata. | `Calculator agent executed with DeepAgents` |
 | `instructions` | Defines shared instructions for every harness. `instructions.system.content` contains the system prompt. | `system.content: You are a concise calculator agent.` |
@@ -169,7 +169,7 @@ Runtime behavior is described by the platform-managed `agent.yaml`:
 | `environment` | Configures the agent's runtime workspace, artifacts directory, provider, and provider-specific settings. | `workspace: ./workspace`, `artifacts: ./artifacts` |
 | `telemetry` | Configures telemetry collection and output, including Relay, ATIF, and ATOF settings. | `provider: relay`, `atif.enabled: true`, `atof.enabled: true` |
 
-The calculator agent uses DeepAgents as its harness and the Platform Inference
+The calculator agent uses DeepAgents as its harness and the NeMo Helix Inference
 Gateway for model access. It answers arithmetic and numeric comparison
 requests and records ATIF and ATOF telemetry with NeMo Relay:
 

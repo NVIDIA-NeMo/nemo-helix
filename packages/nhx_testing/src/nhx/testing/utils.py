@@ -15,11 +15,22 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
-from nemo_helix import ConflictError, NeMoHelix, NotFoundError, omit
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix.types.workspaces import WorkspaceMember
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
+    CreateModelProviderRequest,
+    ModelProvider,
+    ServedModelMapping,
+    UpdateModelProviderStatusRequest,
+)
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, WorkspaceMember
 from nhx.common.auth import Principal
 from nhx.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nhx.common.entities.utils import get_random_id
@@ -138,7 +149,7 @@ def _serialize_mock_response_map(
 
 
 def wait_for_model_entity(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     model_name: str,
     timeout: float = _E2E_IGW_WAIT_TIMEOUT_SEC,
@@ -146,18 +157,17 @@ def wait_for_model_entity(
     ensure_virtual_model: bool = False,
     should_autoprovision_virtual_model: bool = True,
 ) -> None:
-    """Poll until a model entity is available in IGW's model cache.
+    """Poll until a model entity is routable through IGW.
 
-    Uses the OpenAI ``GET /v1/models/{name}`` route, which reads
-    :attr:`~nhx.core.inference_gateway.api.model_cache.ModelCache.model_entity_info_map`
-    and does **not** require a VirtualModel. Do not poll the model-entity proxy route
-    here — that route resolves a VirtualModel first and will 404 until IGW's separate
-    VirtualModel cache refreshes, even when the model entity is already served.
+    Polls ``GET /v1/models`` on the model-entity proxy route, which resolves the
+    entity's VirtualModel and then its provider from IGW's caches. Pass
+    ``ensure_virtual_model=True`` when the passthrough VirtualModel may not exist
+    yet, otherwise the route 404s until the VirtualModel cache refreshes.
 
     Useful in E2E tests that create a mock provider to wait for the model cache to refresh.
 
     Args:
-        sdk: The NeMoHelix SDK client.
+        client: Typed platform client.
         workspace: The workspace containing the model entity.
         model_name: The model entity name (without workspace prefix).
         timeout: Maximum time to wait in seconds (default: 60).
@@ -171,6 +181,7 @@ def wait_for_model_entity(
     Raises:
         TimeoutError: If the model entity is not available within the timeout.
     """
+    gateway_client = InferenceGatewayClient.from_client(client)
     start = time.time()
     last_error: Exception | None = None
 
@@ -178,16 +189,12 @@ def wait_for_model_entity(
         try:
             if ensure_virtual_model:
                 _create_passthrough_virtual_model_once(
-                    sdk,
+                    client,
                     workspace,
                     model_name,
                     autoprovisioned=should_autoprovision_virtual_model,
                 )
-            sdk.inference.gateway.model.get(
-                "v1/models",
-                name=model_name,
-                workspace=workspace,
-            )
+            gateway_client.model_get(workspace=workspace, name=model_name, trailing_uri="v1/models")
             return
         except NotFoundError as e:
             # Continue polling if model is not found yet
@@ -203,21 +210,20 @@ def wait_for_model_entity(
 
 
 def wait_for_virtual_model(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     name: str,
     timeout: float = _E2E_IGW_WAIT_TIMEOUT_SEC,
     poll_interval: float = 0.5,
 ) -> None:
-    """Poll until a VirtualModel exists in the entity store (platform SDK).
+    """Poll until a VirtualModel exists in the entity store.
 
     This confirms the VirtualModel document was persisted. It does **not** mean
-    IGW's in-process VirtualModel cache has refreshed yet — use
-    :func:`wait_for_igw_virtual_model` before hitting model-entity or OpenAI
-    inference proxy routes.
+    IGW's in-process VirtualModel cache has refreshed yet, so model-entity and
+    OpenAI inference proxy routes can still 404 briefly afterwards.
 
     Args:
-        sdk: The NeMoHelix SDK client.
+        client: Typed platform client.
         workspace: The workspace containing the VirtualModel.
         name: The VirtualModel name (without workspace prefix). For an
             autoprovisioned passthrough VM, this is the served model entity name.
@@ -227,12 +233,13 @@ def wait_for_virtual_model(
     Raises:
         TimeoutError: If the VirtualModel is not available within the timeout.
     """
+    virtual_models_client = VirtualModelsClient.from_client(client)
     start = time.time()
     last_error: Exception | None = None
 
     while time.time() - start < timeout:
         try:
-            sdk.inference.virtual_models.retrieve(name=name, workspace=workspace)
+            virtual_models_client.get_virtual_model(workspace=workspace, name=name)
             return
         except NotFoundError as e:
             last_error = e
@@ -245,25 +252,25 @@ def wait_for_virtual_model(
 
 
 def _create_passthrough_virtual_model_once(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     name: str,
     *,
     autoprovisioned: bool = True,
 ) -> None:
-    try:
-        sdk.inference.virtual_models.create(
-            workspace=workspace,
+    VirtualModelsClient.from_client(client).create_virtual_model(
+        workspace=workspace,
+        body=CreateVirtualModelRequest(
             name=name,
             default_model_entity=f"{workspace}/{name}",
             autoprovisioned=autoprovisioned,
-        )
-    except ConflictError:
-        pass
+        ),
+        exist_ok=True,
+    )
 
 
 def ensure_passthrough_virtual_model(
-    sdk: NeMoHelix,
+    client: NemoClient,
     workspace: str,
     name: str,
     timeout: float = 20,
@@ -277,22 +284,20 @@ def ensure_passthrough_virtual_model(
     routing by that entity name. Retrying create+retrieve makes the helper
     converge on the entity-specific VM the test requested.
     """
+    virtual_models_client = VirtualModelsClient.from_client(client)
     start = time.time()
     last_error: Exception | None = None
 
     while time.time() - start < timeout:
-        try:
-            _create_passthrough_virtual_model_once(
-                sdk,
-                workspace,
-                name,
-                autoprovisioned=autoprovisioned,
-            )
-        except Exception:
-            raise
+        _create_passthrough_virtual_model_once(
+            client,
+            workspace,
+            name,
+            autoprovisioned=autoprovisioned,
+        )
 
         try:
-            sdk.inference.virtual_models.retrieve(name=name, workspace=workspace)
+            virtual_models_client.get_virtual_model(workspace=workspace, name=name)
             return
         except NotFoundError as e:
             last_error = e
@@ -340,23 +345,26 @@ def unique_email(prefix: str = "user") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}@example.com"
 
 
+_ClientT = TypeVar("_ClientT", bound=NemoClient)
+
+
 def as_user(
-    sdk: NeMoHelix,
+    client: _ClientT,
     email: str,
     groups: list[str] | None = None,
-) -> NeMoHelix:
-    """Create a new SDK client authenticated as a specific user.
+) -> _ClientT:
+    """Return a copy of *client* that sends principal headers for *email*.
 
-    The SDK uses immutable default_headers set at construction time.
-    This function creates a new client with the specified principal headers.
+    The copy shares the base client's transport and merges the principal headers
+    on top of its default headers.
 
     Args:
-        sdk: The base SDK client to derive from
+        client: The base typed client to derive from
         email: The email/principal ID to authenticate as
         groups: Optional list of groups the user belongs to
 
     Returns:
-        A new SDK client with auth headers set
+        A typed client of the same type with auth headers set
     """
     headers = Principal(
         id=email,
@@ -364,41 +372,11 @@ def as_user(
         groups=groups or [],
         authz_aliases=[email],
     ).get_headers()
-    return sdk.with_options(set_default_headers=headers)
-
-
-def as_service_for(
-    sdk: NeMoHelix,
-    on_behalf_of: str,
-    service_name: str = "platform",
-) -> NeMoHelix:
-    """Create a new SDK client authenticated as a service principal acting on behalf of a user.
-
-    Mirrors the production pattern where services call internal APIs (e.g., the
-    generic Entities API) as ``service:<name>`` with the real user identity in
-    ``X-NHX-Principal-On-Behalf-Of``.  The service principal bypasses OPA
-    permission checks while the on-behalf-of header preserves audit attribution.
-
-    Args:
-        sdk: The base SDK client to derive from
-        on_behalf_of: The user's principal ID (typically email) to delegate for
-        service_name: Service identity suffix (default: "platform")
-
-    Returns:
-        A new SDK client with service principal + on-behalf-of headers
-    """
-    service_principal = Principal(
-        id=f"service:{service_name}",
-        authz_aliases=[f"service:{service_name}"],
-        on_behalf_of=on_behalf_of,
-        on_behalf_of_email=on_behalf_of if "@" in on_behalf_of else None,
-        on_behalf_of_authz_aliases=[on_behalf_of],
-    )
-    return sdk.with_options(set_default_headers=service_principal.get_headers())
+    return client.with_headers(headers)
 
 
 def grant_workspace_role(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     principal: str,
@@ -406,11 +384,14 @@ def grant_workspace_role(
     wait_role_propagation: bool = True,
 ) -> WorkspaceMember:
     """Grant workspace roles to a principal in auth-enabled tests."""
-    return sdk.workspaces.members.create(
-        workspace=workspace,
-        principal=principal,
-        roles=list(roles),
-        wait_role_propagation=wait_role_propagation,
+    return (
+        WorkspacesClient.from_client(client)
+        .create_workspace_member(
+            workspace=workspace,
+            body=CreateWorkspaceMemberRequest(principal=principal, roles=list(roles)),
+            query_params={"wait_role_propagation": wait_role_propagation},
+        )
+        .data()
     )
 
 
@@ -424,8 +405,8 @@ def igw_mock_provider_mode(prefix: str = "igw-mock-") -> Iterator[None]:
     mock prefix.
 
     Implemented as a ``Configuration`` override, which ``get_service_config`` honors ahead of the
-    env-derived config — so it works regardless of whether the IGW config was already read/cached
-    (an env var would lose that race) — and is scoped to the block, so it can't leak into unrelated
+    env-derived config, so it works regardless of whether the IGW config was already read/cached
+    (an env var would lose that race). It is scoped to the block, so it can't leak into unrelated
     suites. The prior ``InferenceGatewayConfig`` override (if any) is restored on exit.
     """
     from nhx.common.config import Configuration
@@ -441,7 +422,7 @@ def igw_mock_provider_mode(prefix: str = "igw-mock-") -> Iterator[None]:
 
 
 def add_mock_provider(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str | None = None,
@@ -453,7 +434,7 @@ def add_mock_provider(
     enabled_models: list[str] | None = None,
     should_autoprovision_virtual_model: bool = True,
 ) -> ModelProvider:
-    """Add a mock provider via the SDK API.
+    """Add a mock provider through the Models API.
 
     The provider name will be prefixed with the configured mock_provider_prefix
     (typically "igw-mock-") to ensure it's recognized as a mock provider by the IGW.
@@ -468,11 +449,11 @@ def add_mock_provider(
     To return dynamic responses based on the model name, set the `mock_response_body_by_model` parameter.
 
     Args:
-        sdk: The NeMoHelix SDK client.
+        client: Typed platform client.
         workspace: Provider workspace. Must be a valid entity name (see NAME_PATTERN).
         name: Provider name (will be auto-prefixed with "igw-mock-"). Must be a valid
             entity name so that the prefixed name matches NAME_PATTERN. If omitted, a
-            unique name is generated automatically — recommended when tests share a
+            unique name is generated automatically, recommended when tests share a
             workspace (ex. in Kubernetes e2e runs) to avoid 409 conflicts.
         mock_response_body: Optional mock response JSON body. If provided, all requests
             to this provider return this response. If None, the provider uses smart
@@ -512,7 +493,7 @@ def add_mock_provider(
         ) as ctx:
             # Simple usage - default model entity mapping created automatically
             provider = add_mock_provider(
-                ctx.sdk,
+                ctx.client,
                 workspace="default",
                 name="judge",  # Becomes "igw-mock-judge"
                 mock_response_body={
@@ -520,20 +501,21 @@ def add_mock_provider(
                     "choices": [{"message": {"role": "assistant", "content": "..."}}],
                 },
             )
+            gateway_client = InferenceGatewayClient.from_client(ctx.client)
             # Provider route
-            response = ctx.sdk.inference.gateway.provider.post(
-                "v1/chat/completions",
+            response = gateway_client.provider_post(
+                workspace="default",
                 name=provider.name,
-                workspace="default",
-                body={"model": "test", "messages": []},
-            )
+                trailing_uri="v1/chat/completions",
+                body=JsonBody({"model": "test", "messages": []}),
+            ).data()
             # Model entity route (uses default mapping: entity="judge", served="judge")
-            response = ctx.sdk.inference.gateway.model.post(
-                "v1/chat/completions",
-                name="judge",
+            response = gateway_client.model_post(
                 workspace="default",
-                body={"model": "test", "messages": []},
-            )
+                name="judge",
+                trailing_uri="v1/chat/completions",
+                body=JsonBody({"model": "test", "messages": []}),
+            ).data()
     """
     # Import IGW dependencies here to avoid circular imports at module load time
     from nhx.common.config import Configuration
@@ -610,27 +592,22 @@ def add_mock_provider(
 
     default_extra_headers[MOCK_SERVED_MODELS_HEADER] = json.dumps(list(served_models.keys()))
 
-    # Create the provider via SDK API (served_models not supported in SDK API).
-    # If a provider with the same name already exists (ex. in a shared workspace),
-    # delete it first so each test starts with a clean mock provider.
-
+    # The create endpoint does not accept served_models; those are persisted below
+    # through the status endpoint. If a provider with the same name already exists
+    # (ex. in a shared workspace), delete it first so each test starts with a clean
+    # mock provider.
+    models_client = ModelsClient.from_client(client)
+    create_request = CreateModelProviderRequest(
+        name=prefixed_name,
+        host_url=host_url,
+        default_extra_headers=default_extra_headers,
+        enabled_models=enabled_models or None,
+    )
     try:
-        provider = sdk.inference.providers.create(
-            workspace=workspace,
-            name=prefixed_name,
-            host_url=host_url,
-            default_extra_headers=default_extra_headers,
-            enabled_models=enabled_models or omit,
-        )
+        models_client.create_provider(workspace=workspace, body=create_request)
     except ConflictError:
-        sdk.inference.providers.delete(workspace=workspace, name=prefixed_name)
-        provider = sdk.inference.providers.create(
-            workspace=workspace,
-            name=prefixed_name,
-            host_url=host_url,
-            default_extra_headers=default_extra_headers,
-            enabled_models=enabled_models or omit,
-        )
+        models_client.delete_provider(workspace=workspace, name=prefixed_name)
+        models_client.create_provider(workspace=workspace, body=create_request)
 
     for entity_name in served_models:
         if not _ENTITY_NAME_PATTERN.match(entity_name):
@@ -646,68 +623,72 @@ def add_mock_provider(
         for entity_name, served_name in served_models.items()
     ]
 
-    # Create provider with served_models for cache (SDK API doesn't return served_models)
-    provider = ModelProvider(
-        id=get_random_id("provider"),
+    # Always persist served_models via the status endpoint so the Models API / IGW cache
+    # refresh sees the correct mapping. Without this, refresh_model_cache overwrites the
+    # local cache with providers from the API (which have empty served_models from create),
+    # causing 404 for model entity and OpenAI routes.
+    provider = models_client.update_provider_status(
         workspace=workspace,
         name=prefixed_name,
-        host_url=host_url,
-        default_extra_headers=default_extra_headers or None,
-        served_models=served_model_mappings,
-        enabled_models=enabled_models,
-        created_at=datetime.now(),
-        updated_at=datetime.now(),
-    )
+        body=UpdateModelProviderStatusRequest(served_models=served_model_mappings),
+    ).data()
 
-    # Always persist served_models via update_status so the Models API / IGW cache refresh
-    # sees the correct mapping. Without this, refresh_model_cache overwrites the local cache
-    # with providers from the API (which have empty served_models from create), causing 404
-    # for model entity and OpenAI routes.
-    sdk.inference.providers.update_status(
-        name=prefixed_name,
-        workspace=workspace,
-        served_models=[
-            {"model_entity_id": sm.model_entity_id, "served_model_name": sm.served_model_name}
-            for sm in served_model_mappings
-        ],
-    )
-
-    # Create a passthrough VirtualModel via the SDK for every served entity, mirroring
-    # the production provider reconciler's _ensure_passthrough_virtual_model behavior.
-    # The IGW now requires every inference request to resolve to a VirtualModel, and
-    # the IGW's background cache refresher rebuilds the VM map from the SDK list every
-    # few seconds — so any local-only seed would be wiped out at the next refresh tick.
-    # Going through the SDK ensures the VM exists in the entity store and survives refreshes.
-    # 409 ConflictError is treated as idempotent (matches the production reconciler).
+    # Create a passthrough VirtualModel for every served entity, mirroring the production
+    # provider reconciler's _ensure_passthrough_virtual_model behavior. The IGW requires
+    # every inference request to resolve to a VirtualModel, and the IGW's background cache
+    # refresher rebuilds the VM map from the API every few seconds, so a local-only seed
+    # would be wiped out at the next refresh tick. Creating the VM through the API ensures
+    # it exists in the entity store and survives refreshes. 409 conflicts are idempotent
+    # (matches the production reconciler).
     for entity_name in served_models:
         ensure_passthrough_virtual_model(
-            sdk,
+            client,
             workspace,
             entity_name,
             autoprovisioned=should_autoprovision_virtual_model,
         )
 
     try:
-        # From integration tests, we can directly update the local model cache to speed up subsequent requests
+        # From integration tests, we can directly update the local model cache to speed up
+        # subsequent requests. The IGW caches are typed with the generated SDK models, so the
+        # seeded entries are built from those types.
+        from nemo_helix.types.inference import ModelProvider as CacheModelProvider
+        from nemo_helix.types.inference import ServedModelMapping as CacheServedModelMapping
+        from nemo_helix.types.inference.virtual_model import VirtualModel as CacheVirtualModel
+
         model_cache = global_model_cache()
-        provider_info = ModelProviderInfo(model_provider=provider)
+        provider_info = ModelProviderInfo(
+            model_provider=CacheModelProvider(
+                id=get_random_id("provider"),
+                workspace=workspace,
+                name=prefixed_name,
+                host_url=host_url,
+                default_extra_headers=default_extra_headers or None,
+                served_models=[
+                    CacheServedModelMapping(
+                        model_entity_id=sm.model_entity_id,
+                        served_model_name=sm.served_model_name,
+                    )
+                    for sm in served_model_mappings
+                ],
+                enabled_models=enabled_models,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
+            )
+        )
         model_cache.update_model_info(provider_info)
         model_cache.rebuild_model_entity_map()
 
         # Also seed the local VirtualModel cache so requests fired immediately after
         # this call hit the right cache state without waiting for the IGW's next
         # background refresh tick. This in-place seed is purely a latency optimization.
-        from datetime import datetime as _datetime
-
-        from nemo_helix.types.inference.virtual_model import VirtualModel as _SDKVirtualModel
-
         virtual_model_cache = global_virtual_model_cache()
-        now = _datetime.now()
+        now = datetime.now()
         for entity_name in served_models:
             key = (workspace, entity_name)
             if key in virtual_model_cache.virtual_model_map:
                 continue
-            virtual_model_cache.virtual_model_map[key] = _SDKVirtualModel(
+            virtual_model_cache.virtual_model_map[key] = CacheVirtualModel(
                 id=f"{workspace}/{entity_name}",
                 entity_id=f"{workspace}/{entity_name}",
                 workspace=workspace,
@@ -727,7 +708,7 @@ def add_mock_provider(
         # the model entity and its VirtualModel to be visible before requests succeed.
         for entity_name in served_models.keys():
             wait_for_model_entity(
-                sdk,
+                client,
                 workspace,
                 entity_name,
                 timeout=60,
@@ -735,7 +716,7 @@ def add_mock_provider(
                 should_autoprovision_virtual_model=should_autoprovision_virtual_model,
             )
             ensure_passthrough_virtual_model(
-                sdk,
+                client,
                 workspace,
                 entity_name,
                 timeout=60,

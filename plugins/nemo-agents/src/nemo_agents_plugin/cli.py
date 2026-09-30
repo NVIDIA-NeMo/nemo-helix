@@ -46,8 +46,8 @@ import shlex
 import sys
 import tempfile
 import time
-from collections.abc import Callable
-from contextlib import closing
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2580,6 +2580,24 @@ def _platform_session_chat(
     )
 
 
+class _HttpxStreamingResponse:
+    """Adapt an already-sent streaming ``httpx.Response`` to the chat TUI's ``StreamingResponse``."""
+
+    def __init__(self, response: httpx.Response) -> None:
+        self._response = response
+
+    @property
+    def http_response(self) -> httpx.Response:
+        return self._response
+
+    @contextmanager
+    def stream(self) -> Iterator[Iterator[bytes]]:
+        try:
+            yield self._response.iter_bytes()
+        finally:
+            self._response.close()
+
+
 def _run_resolved_session_chat(
     *,
     base_url: str,
@@ -2621,7 +2639,7 @@ def _run_resolved_session_chat(
                     response.read()
                     response.close()
                     raise
-                return cast(StreamingResponse, closing(response))
+                return _HttpxStreamingResponse(response)
 
             run_chat_tui(
                 send_turn=send_turn,

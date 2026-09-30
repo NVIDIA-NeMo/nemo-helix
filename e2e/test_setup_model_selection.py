@@ -19,7 +19,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.cli.commands import setup as setup_commands
 from nemo_helix_ext.cli.commands.setup import ModelPair, SetupClients
 from nemo_helix_plugin.client.client import NemoClient
@@ -103,7 +102,6 @@ def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> M
         patch(f"{SETUP_MOD}._auto_setup", return_value=provider_name),
         patch(f"{SETUP_MOD}._save_model_pair") as save_pair,
         patch(f"{SETUP_MOD}._maybe_install_skills"),
-        patch(f"{SETUP_MOD}._maybe_deploy_agent"),
         patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
     ):
         clients = SetupClients(
@@ -117,7 +115,6 @@ def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> M
             workspace,
             client.base_url,
             install_skills=False,
-            deploy_agent=False,
         )
 
     if not save_pair.call_args_list:
@@ -125,7 +122,7 @@ def _run_auto_setup(client: NemoClient, workspace: str, provider_name: str) -> M
     return save_pair.call_args.args[1]
 
 
-def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_auto_setup_persists_a_default_the_account_can_serve(client: NemoClient, workspace: str):
     """The largest model that answers becomes the default, the smallest the fast model."""
     suffix = _unique_suffix()
     ultra = f"nvidia-nemotron-ultra-500b-{suffix}"
@@ -133,7 +130,7 @@ def test_auto_setup_persists_a_default_the_account_can_serve(sdk: NeMoHelix, cli
     nano = f"nvidia-nemotron-nano-9b-{suffix}"
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=f"selection-{suffix}",
         mock_response_body_by_model={
@@ -183,13 +180,13 @@ def test_auto_setup_waits_for_a_late_published_model_route(client: NemoClient, w
     assert saved == ModelPair(default=f"{workspace}/{entity}", fast=f"{workspace}/{entity}")
 
 
-def test_auto_setup_saves_nothing_when_no_model_answers(sdk: NeMoHelix, client: NemoClient, workspace: str):
+def test_auto_setup_saves_nothing_when_no_model_answers(client: NemoClient, workspace: str):
     """A provider whose models all fail leaves the default unset rather than broken."""
     suffix = _unique_suffix()
     entity = f"nvidia-nemotron-nano-9b-{suffix}"
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=f"unusable-{suffix}",
         mock_response_body={"detail": "Function not found for account"},

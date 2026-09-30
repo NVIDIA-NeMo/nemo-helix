@@ -28,11 +28,10 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.jobs.controllers.diagnostics import collect_job_diagnostics
-from nhx.testing import TEST_ADMIN_EMAIL, short_unique_name, unique_email
+from nhx.testing import TEST_ADMIN_EMAIL, grant_workspace_role, short_unique_name, unique_email
 from nhx.testing.e2e import wait_for_platform_job
 
 from tests.auth.integration.jobs_auth_helpers import job_exists_in_pages, managed_admin_workspace
-from tests.auth_idp.helpers import grant_workspace_role
 
 JOB_SOURCE = "integration-auth-test"
 logger = logging.getLogger(__name__)

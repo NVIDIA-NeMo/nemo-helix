@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -34,6 +35,12 @@ from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 
 @pytest.mark.parametrize(
@@ -1402,6 +1409,7 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
     )
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_over() -> None:
     """Telemetry wiring must not mutate the caller's config.

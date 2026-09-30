@@ -47,7 +47,6 @@ from nemo_evaluator_sdk.metrics.string_check import StringCheckMetric
 from nemo_evaluator_sdk.metrics.tool_calling import ToolCallingMetric
 from nemo_evaluator_sdk.values.results import EvaluationResult
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
@@ -113,7 +112,7 @@ def _chat_completion(content: str) -> dict[str, object]:
 
 
 def _add_mock_provider_or_skip(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     workspace: str,
     name: str,
@@ -123,7 +122,7 @@ def _add_mock_provider_or_skip(
     """Create an IGW mock provider (returning its name) or skip when the deployment does not support one."""
     try:
         return add_mock_provider(
-            sdk,
+            client,
             workspace=workspace,
             name=name,
             mock_response_body=mock_response_body,
@@ -273,7 +272,6 @@ def _wait_for_stable_model_chat_route(client: NemoClient, workspace: str, model_
 
 
 def _create_ready_mock_model(
-    sdk: NeMoHelix,
     client: NemoClient,
     *,
     workspace: str,
@@ -282,7 +280,7 @@ def _create_ready_mock_model(
 ) -> None:
     """Create a mock model and wait until its model-entity route is stable."""
     provider_name = _add_mock_provider_or_skip(
-        sdk,
+        client,
         workspace=workspace,
         name=name,
         mock_response_body=mock_response_body,
@@ -298,14 +296,14 @@ def _create_ready_mock_model(
         exist_ok=True,
     ).data()
     wait_for_model_entity(
-        sdk,
+        client,
         workspace,
         name,
         ensure_virtual_model=True,
         should_autoprovision_virtual_model=False,
     )
     ensure_passthrough_virtual_model(
-        sdk,
+        client,
         workspace,
         name,
         timeout=IGW_ROUTE_TIMEOUT_SECONDS,
@@ -641,14 +639,12 @@ def test_tool_calling_metric_preserves_structured_references(evaluator_client: N
 
 
 def test_online_evaluate_job_uses_mock_provider(
-    sdk: NeMoHelix,
     client: NemoClient,
     evaluator_client: NemoClient,
     evaluator_workspace: str,
 ) -> None:
     model_name = short_unique_name("eval-model")
     _create_ready_mock_model(
-        sdk,
         client,
         workspace=evaluator_workspace,
         name=model_name,
@@ -686,14 +682,12 @@ def test_online_evaluate_job_uses_mock_provider(
 
 
 def test_llm_judge_metric_resolves_model_ref(
-    sdk: NeMoHelix,
     client: NemoClient,
     evaluator_client: NemoClient,
     evaluator_workspace: str,
 ) -> None:
     model_name = short_unique_name("eval-judge")
     _create_ready_mock_model(
-        sdk,
         client,
         workspace=evaluator_workspace,
         name=model_name,
@@ -797,7 +791,6 @@ def _gym_task_payloads(limit: int) -> list[dict[str, object]]:
 
 @pytest.mark.gym_e2e
 def test_gym_agent_evaluate_job_completes(
-    sdk: NeMoHelix,
     client: NemoClient,
     evaluator_client: NemoClient,
     evaluator_workspace: str,
@@ -806,7 +799,6 @@ def test_gym_agent_evaluate_job_completes(
     """Submits mcqa as a real agent-evaluate job and verifies it completes with real rewards."""
     model_name = short_unique_name("gym-mcqa")
     _create_ready_mock_model(
-        sdk,
         client,
         workspace=evaluator_workspace,
         name=model_name,

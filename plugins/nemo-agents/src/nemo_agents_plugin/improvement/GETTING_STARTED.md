@@ -7,7 +7,7 @@ This guide walks through using the `nemo agents` plugin to improve an agent
 end-to-end: **run eval suites → analyze failures → optimize skills → verify**.
 
 If your agent has Harbor (`task.toml`) or NAT (`workflow.yml`) eval tasks, you
-can use this directly. The same workflow improves NeMo itself; the Platform repo
+can use this directly. The same workflow improves NeMo itself; the NeMo Helix repo
 ships `.agent-improver.yml` as an annotated config.
 
 ## What you need

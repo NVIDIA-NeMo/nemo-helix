@@ -660,6 +660,8 @@ Available markers are defined in `pytest.ini`:
 For tests that make inference calls through the Inference Gateway, use mock provider mode to return controlled responses without real LLM backends:
 
 ```python
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nhx.testing import ClientContext, add_mock_provider, create_test_client
 from nhx.core.inference_gateway.service import InferenceGatewayService
 
@@ -670,17 +672,17 @@ def mock_provider_clients() -> Generator[ClientContext, None, None]:
 
 def test_with_mock_llm(mock_provider_clients: ClientContext):
     provider = add_mock_provider(
-        mock_provider_clients.sdk,
+        mock_provider_clients.client,
         workspace="default",
         name="my-llm",
         mock_response_body={"choices": [{"message": {"content": "Hello!"}}]},
     )
-    response = mock_provider_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
+    response = InferenceGatewayClient.from_client(mock_provider_clients.client).provider_post(
         workspace="default",
-        body={"model": "test", "messages": []},
-    )
+        name=provider.name,
+        trailing_uri="v1/chat/completions",
+        body=JsonBody({"model": "test", "messages": []}),
+    ).data()
     assert response["choices"][0]["message"]["content"] == "Hello!"
 ```
 

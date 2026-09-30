@@ -25,7 +25,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
@@ -132,7 +131,7 @@ def _plain_response(model: str, content: str) -> dict[str, Any]:
     }
 
 
-def _mock_analyst_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> tuple[str, str]:
+def _mock_analyst_models(client: NemoClient, workspace: str) -> tuple[str, str]:
     """Register the Analyst's default/fast Model Entity pair against a mock provider.
 
     The pair must be workspace-qualified Model Entity refs — the Analyst
@@ -142,7 +141,7 @@ def _mock_analyst_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> 
     fast_model = unique_name("analyst-fast")
 
     provider = add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("analyst-provider"),
         mock_response_body_by_model={
@@ -180,7 +179,7 @@ def _mock_analyst_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> 
             ),
             exist_ok=True,
         ).data()
-        wait_for_model_entity(sdk, workspace, name)
+        wait_for_model_entity(client, workspace, name)
 
     return f"{workspace}/{default_model}", f"{workspace}/{fast_model}"
 
@@ -255,9 +254,7 @@ def _created_insight_id(report: str) -> str:
     return match.group("insight_id")
 
 
-def test_analysis_run_persists_insights_and_saves_its_report(
-    sdk: NeMoHelix, client: NemoClient, workspace: str
-) -> None:
+def test_analysis_run_persists_insights_and_saves_its_report(client: NemoClient, workspace: str) -> None:
     """One analysis run, end to end, through the supported API surface."""
     target_agent = unique_name("analyzed-agent")
     intake = IntakeClient.from_client(client)
@@ -294,7 +291,7 @@ def test_analysis_run_persists_insights_and_saves_its_report(
         time.sleep(1)
     else:
         pytest.fail("Seeded traces did not become queryable")
-    default_model, fast_model = _mock_analyst_models(sdk, client, workspace)
+    default_model, fast_model = _mock_analyst_models(client, workspace)
 
     created = _insights(client).analysis_runs.create(
         workspace=workspace,

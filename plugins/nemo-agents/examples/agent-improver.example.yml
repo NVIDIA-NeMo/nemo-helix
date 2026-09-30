@@ -10,12 +10,11 @@
 #     --anthropic-api-key-secret anthropic-api-key \
 #     --anthropic-base-url "$ANTHROPIC_BASE_URL"
 #
-# To submit to a configured cluster:
+# To submit to another configured context (cluster and credentials):
 #
-#   nemo agents optimize-skills --spec-file .agent-improver.yml \
+#   nemo --context <name> agents optimize-skills --spec-file .agent-improver.yml \
 #     --anthropic-api-key-secret anthropic-api-key \
-#     --anthropic-base-url "$ANTHROPIC_BASE_URL" \
-#     --cluster <name>
+#     --anthropic-base-url "$ANTHROPIC_BASE_URL"
 
 # ---------------------------------------------------------------------------
 # Agent + evals

@@ -79,7 +79,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="automodel.dataset.training" />
       </Harness>
     );
@@ -102,7 +102,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="automodel.dataset.validation" />
       </Harness>
     );
@@ -119,7 +119,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'unsloth' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="unsloth.dataset.validation_path" />
       </Harness>
     );
@@ -140,7 +140,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="automodel.dataset.training" />
         <FieldSpy name="automodel.dataset.validation" />
       </Harness>
@@ -176,7 +176,7 @@ describe('CustomizationFilesetSelect', () => {
           },
         }}
       >
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="automodel.dataset.validation" />
       </Harness>
     );
@@ -195,7 +195,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'unsloth' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="unsloth.dataset.path" />
       </Harness>
     );
@@ -209,11 +209,17 @@ describe('CustomizationFilesetSelect', () => {
     );
   });
 
-  it('opens the create-fileset modal when New Dataset is selected', async () => {
+  /**
+   * The picker asks its owner to open the modal rather than rendering it: the modal
+   * renders a `<form>`, and a form nested in the wizard's own form never receives its
+   * submit event, so submitting it would navigate the page instead of creating anything.
+   */
+  it('asks the owner to open the create-fileset modal when New Dataset is selected', async () => {
     const user = userEvent.setup();
+    const onRequestNewDataset = vi.fn();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={onRequestNewDataset} />
       </Harness>
     );
 
@@ -221,7 +227,8 @@ describe('CustomizationFilesetSelect', () => {
     await user.click(trigger);
     await user.click(await screen.findByRole('option', { name: 'New Dataset' }));
 
-    expect(await screen.findByText('Create New Dataset')).toBeInTheDocument();
+    await waitFor(() => expect(onRequestNewDataset).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Create New Dataset')).not.toBeInTheDocument();
   });
 
   it('surfaces the no-training-files error when the selected dataset has none', async () => {
@@ -233,7 +240,7 @@ describe('CustomizationFilesetSelect', () => {
           automodel: { ...FORM_DEFAULTS.automodel, dataset: { training: firstRef } },
         }}
       >
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
       </Harness>
     );
 
@@ -259,7 +266,7 @@ describe('CustomizationFilesetSelect', () => {
             },
           }}
         >
-          <CustomizationFilesetSelect />
+          <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
           <FieldSpy name="unsloth.dataset.apply_chat_template" />
         </Harness>
       );
@@ -287,7 +294,7 @@ describe('CustomizationFilesetSelect', () => {
             },
           }}
         >
-          <CustomizationFilesetSelect />
+          <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
           <FieldSpy name="unsloth.dataset.apply_chat_template" />
         </Harness>
       );

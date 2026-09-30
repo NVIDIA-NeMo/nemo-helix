@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -22,6 +23,11 @@ from typer.testing import CliRunner
 
 FIXTURES = Path(__file__).parent / "fixtures"
 JOB_JSON = FIXTURES / "minimal_sft_lora.json"
+
+
+def _platform(base_url: str) -> SimpleNamespace:
+    """Stand-in CLI state: the platform comes from ``nemo --base-url`` / the active context."""
+    return SimpleNamespace(get_base_url=lambda default=None: base_url)
 
 
 @pytest.fixture
@@ -55,7 +61,8 @@ def stub_submit(monkeypatch: pytest.MonkeyPatch) -> None:
 def _run(*args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(JOB_JSON), "--base-url", "https://nhx.test", *args],
+        ["submit", str(JOB_JSON), *args],
+        obj=_platform("https://nhx.test"),
     )
 
 
@@ -229,7 +236,8 @@ def _write_job(tmp_path: Path, **fields: Any) -> Path:
 def _run_job(job: Path, *args: str) -> Any:
     return CliRunner().invoke(
         AutomodelContributor().get_cli(),
-        ["submit", str(job), "--base-url", "https://nhx.test", *args],
+        ["submit", str(job), *args],
+        obj=_platform("https://nhx.test"),
     )
 
 
@@ -324,7 +332,8 @@ class TestJobJsonMayOmitUploadedFields:
     def _run_minimal(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), "--base-url", "https://nhx.test", *args],
+            ["submit", str(job), *args],
+            obj=_platform("https://nhx.test"),
         )
 
     def test_both_fields_can_be_omitted_when_both_are_uploaded(
@@ -380,7 +389,8 @@ class TestConflictingReferences:
     def _run_with(self, job: Path, *args: str) -> Any:
         return CliRunner().invoke(
             AutomodelContributor().get_cli(),
-            ["submit", str(job), "--base-url", "https://nhx.test", *args],
+            ["submit", str(job), *args],
+            obj=_platform("https://nhx.test"),
         )
 
     def test_a_filled_job_json_plus_a_flag_is_refused(

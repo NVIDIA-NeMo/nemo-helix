@@ -14,7 +14,7 @@ For the quickstart (no IdP), see the [email-based shortcut](/documentation/acces
 Start here — register an OAuth application in your IdP and configure NeMo Helix:
 
 - [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — Step-by-step: register an app, configure NeMo Helix, verify login.
-- [Azure AD (Entra ID)](/documentation/access-control/authentication/providers/azure-ad-entra-id) — Azure-specific walkthrough (app registration, scopes, claim mapping).
+- [Azure AD (Entra ID)](/documentation/access-control/authentication/providers/azure-ad-entra-id) — Azure-specific OIDC claim and configuration notes.
 - [Generic OIDC Provider](/documentation/access-control/authentication/providers/generic-oidc) — Checklist for any OIDC-compliant IdP.
 - IdP Integration References - provider manifests and runnable reference bundles under `contrib/auth/*`.
 
@@ -49,12 +49,12 @@ Response:
     "device_authorization_endpoint": "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode",
     "client_id": "...",
     "default_scopes": "platform:read platform:write openid profile email offline_access",
-    "scope_prefix": "api://nhx/"
+    "scope_prefix": "api://<client-id>/"
   }
 }
 ```
 
-The CLI and SDK call this endpoint automatically during `nemo auth login` or when initializing the client.
+The CLI and SDK call this endpoint automatically during `nemo auth login` or when initializing the client. `default_scopes` are the short scopes users see and pass to the CLI. When discovery includes `scope_prefix`, the CLI automatically expands NeMo Helix API scopes such as `platform:read` into the resource-qualified OAuth scope required by the configured IdP application.
 
 ## Related
 

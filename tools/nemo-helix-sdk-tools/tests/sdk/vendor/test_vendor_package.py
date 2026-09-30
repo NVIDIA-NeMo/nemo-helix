@@ -9,70 +9,6 @@ import tomlkit
 from nemo_helix_sdk_tools.sdk.vendor import vendor_package
 
 
-def test_load_package_config_finds_service_config(tmp_path: Path, monkeypatch) -> None:
-    services_root = tmp_path / "services/core/auth"
-    services_root.mkdir(parents=True)
-    pyproject_path = services_root / "pyproject.toml"
-    pyproject_path.write_text(
-        """
-[tool.vendor-package]
-package = "nhx_auth"
-package_root = "services/core/auth"
-source_module = "nhx.core.auth"
-target_sdk_module = "nhx.core.auth"
-top_level = true
-included_paths = ["**/*.py"]
-""".strip()
-        + "\n"
-    )
-
-    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
-
-    config = vendor_package._load_package_config("nhx_auth")
-
-    assert config["package"] == "nhx_auth"
-    assert config["package_root"] == "services/core/auth"
-
-
-def test_build_and_validate_package_path_uses_repo_relative_root(tmp_path: Path, monkeypatch) -> None:
-    source_path = tmp_path / "services/core/auth/src/nhx/core/auth"
-    source_path.mkdir(parents=True)
-
-    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
-
-    package_root_path, package_path = vendor_package._build_and_validate_package_path(
-        package="nhx_auth",
-        package_root="services/core/auth",
-        source_module="nhx.core.auth",
-        with_src=True,
-    )
-
-    assert package_root_path == tmp_path / "services/core/auth"
-    assert package_path == source_path
-
-
-def test_build_and_validate_target_paths_supports_top_level_targets(tmp_path: Path) -> None:
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
-    sdk_path.mkdir(parents=True)
-
-    top_level_path = vendor_package._build_and_validate_target_paths(sdk_path, "nhx.core.auth", top_level=True)
-    nested_path = vendor_package._build_and_validate_target_paths(sdk_path, "services.runner")
-
-    assert top_level_path == sdk_path / "src/nhx/core/auth"
-    assert nested_path == sdk_path / "src/nemo_helix/services/runner"
-
-
-def test_copy_included_paths_preserves_generated_header_for_empty_init(tmp_path: Path) -> None:
-    source_path = tmp_path / "source"
-    destination_path = tmp_path / "destination"
-    source_path.mkdir()
-    (source_path / "__init__.py").write_text("", encoding="utf-8")
-
-    vendor_package._copy_included_paths(source_path, destination_path, ["**/*.py"])
-
-    assert (destination_path / "__init__.py").read_text(encoding="utf-8") == vendor_package.GENERATED_FILE_HEADER
-
-
 def test_alias_package_imports_submodules_from_source_module(tmp_path: Path, monkeypatch) -> None:
     source_package = tmp_path / "source_pkg"
     source_package.mkdir()
@@ -200,129 +136,6 @@ def test_alias_package_loader_provides_runpy_get_code(tmp_path: Path, monkeypatc
             sys.modules.pop(module_name, None)
 
 
-def test_vendor_package_files_source_package_mode_writes_target_alias(tmp_path: Path, monkeypatch) -> None:
-    source_path = tmp_path / "packages/models/src/models"
-    source_path.mkdir(parents=True)
-    (source_path / "resources.py").write_text("VALUE = 1\n", encoding="utf-8")
-
-    stale_target = tmp_path / "sdk/python/nemo-helix/src/nemo_helix/models"
-    stale_target.mkdir(parents=True)
-    (stale_target / "resources.py").write_text("STALE = True\n", encoding="utf-8")
-
-    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
-
-    vendor_package._vendor_package_files(
-        {
-            "package": "models",
-            "package_root": "packages/models",
-            "sdk_include_mode": "source-package",
-            "target_sdk_module": "models",
-        }
-    )
-
-    alias_init = stale_target / "__init__.py"
-    assert alias_init.read_text(encoding="utf-8") == vendor_package.GENERATED_ALIAS_INIT_TEMPLATE.format(
-        source_module="models"
-    )
-    assert not (stale_target / "resources.py").exists()
-
-
-def test_vendor_package_files_source_package_mode_writes_top_level_aliases(tmp_path: Path, monkeypatch) -> None:
-    source_path = tmp_path / "packages/nemo_helix_ext/src/nemo_helix_ext"
-    (source_path / "cli").mkdir(parents=True)
-    (source_path / "quickstart").mkdir()
-    (source_path / "__pycache__").mkdir()
-
-    sdk_path = tmp_path / "sdk/python/nemo-helix/src/nemo_helix"
-    sdk_path.mkdir(parents=True)
-    stale_tests = tmp_path / "sdk/python/nemo-helix/tests/vendored/nemo_helix_ext"
-    stale_tests.mkdir(parents=True)
-    (stale_tests / "test_stale.py").write_text("STALE = True\n", encoding="utf-8")
-
-    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
-
-    vendor_package._vendor_package_files(
-        {
-            "package": "nemo_helix_ext",
-            "package_root": "packages/nemo_helix_ext",
-            "sdk_include_mode": "source-package",
-        }
-    )
-
-    assert (sdk_path / "cli/__init__.py").read_text(encoding="utf-8") == (
-        vendor_package.GENERATED_ALIAS_INIT_TEMPLATE.format(source_module="nemo_helix_ext.cli")
-    )
-    assert (sdk_path / "quickstart/__init__.py").read_text(encoding="utf-8") == (
-        vendor_package.GENERATED_ALIAS_INIT_TEMPLATE.format(source_module="nemo_helix_ext.quickstart")
-    )
-    assert not (sdk_path / "__pycache__").exists()
-    assert not stale_tests.exists()
-
-
-def test_vendor_package_files_source_package_mode_creates_beta_parent_init(tmp_path: Path, monkeypatch) -> None:
-    source_path = tmp_path / "packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk"
-    source_path.mkdir(parents=True)
-
-    sdk_path = tmp_path / "sdk/python/nemo-helix/src/nemo_helix"
-    sdk_path.mkdir(parents=True)
-
-    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
-
-    vendor_package._vendor_package_files(
-        {
-            "package": "nemo_evaluator_sdk",
-            "package_root": "packages/nemo_evaluator_sdk",
-            "sdk_include_mode": "source-package",
-            "source_module": "nemo_evaluator_sdk",
-            "target_sdk_module": "beta.evaluator",
-        }
-    )
-
-    assert (sdk_path / "beta/__init__.py").read_text(encoding="utf-8") == vendor_package.GENERATED_FILE_HEADER
-    assert (sdk_path / "beta/evaluator/__init__.py").read_text(encoding="utf-8") == (
-        vendor_package.GENERATED_ALIAS_INIT_TEMPLATE.format(source_module="nemo_evaluator_sdk")
-    )
-
-
-def test_update_dependencies_of_sdk_pyproject_merges_optional_dependency_groups(tmp_path: Path, monkeypatch) -> None:
-    """SDK client extension deps are written to the SDK pyproject."""
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
-    sdk_path.mkdir(parents=True)
-    package_root = tmp_path / "packages/nemo_evaluator_sdk"
-    package_root.mkdir(parents=True)
-
-    sdk_doc = tomlkit.document()
-    sdk_doc["project"] = tomlkit.table()
-    sdk_doc["project"]["name"] = "nemo-helix-sdk"
-    sdk_doc["project"]["dependencies"] = ["typer>=0.20.0"]
-    sdk_doc["project"]["optional-dependencies"] = tomlkit.table()
-    sdk_doc["project"]["optional-dependencies"]["evaluator"] = ["requests>=2.0.0"]
-
-    package_doc = tomlkit.document()
-    package_doc["project"] = tomlkit.table()
-    package_doc["project"]["dependencies"] = ["httpx>=0.27.0", "requests>=2.5.0"]
-
-    with open(sdk_path / "pyproject.toml", "w") as f:
-        tomlkit.dump(sdk_doc, f)
-
-    with open(package_root / "pyproject.toml", "w") as f:
-        tomlkit.dump(package_doc, f)
-
-    vendor_package._update_dependencies_of_sdk_pyproject(
-        sdk_path=sdk_path,
-        package_root_path=package_root,
-        excluded_dependencies=[],
-        optional_deps_name="evaluator",
-    )
-
-    with open(sdk_path / "pyproject.toml", "rb") as f:
-        sdk_updated = tomlkit.load(f)
-
-    sdk_deps = list(sdk_updated["project"]["optional-dependencies"]["evaluator"])
-    assert any(dep.startswith("requests") and ">=2.5.0" in dep for dep in sdk_deps)
-    assert "httpx>=0.27.0" in sdk_deps
-
-
 def test_create_core_local_extra_prepends_services_self_reference(tmp_path: Path, monkeypatch) -> None:
     """core-service and services extras are written to the wrapper only."""
     wrapper_path = tmp_path / "packages/nemo_helix"
@@ -355,7 +168,7 @@ switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchy
     monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
     monkeypatch.setattr(vendor_package, "WRAPPER_PATH", wrapper_path)
 
-    vendor_package._create_core_local_extra([])
+    vendor_package._create_core_local_extra()
 
     wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
     wrapper_optional = wrapper_updated["project"]["optional-dependencies"]
@@ -547,6 +360,57 @@ dependencies = ["openai>=2"]
     assert "test" not in optional
     assert "scripts" not in wrapper_updated["project"]
     assert not wrapper_updated["project"]["entry-points"]
+
+
+def test_process_bundle_packages_keeps_published_workspace_dependencies(tmp_path: Path, monkeypatch) -> None:
+    wrapper_path = tmp_path / "packages/nemo_helix"
+    evaluator_path = tmp_path / "packages/nemo_evaluator_sdk"
+    gym_path = tmp_path / "packages/sandboxed_gym"
+    unpublished_path = tmp_path / "packages/nhx_testing"
+    for path in (wrapper_path, evaluator_path, gym_path, unpublished_path):
+        path.mkdir(parents=True)
+
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.uv.workspace]
+members = ["packages/nemo_helix", "packages/nemo_evaluator_sdk", "packages/sandboxed_gym", "packages/nhx_testing"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (wrapper_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "nemo-helix"
+
+[project.optional-dependencies]
+
+[tool.bundle-package]
+nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }
+
+[tool.bundle-package-published]
+packages = ["nemo-sandboxed-gym"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (evaluator_path / "pyproject.toml").write_text(
+        """
+[project]
+name = "nemo-evaluator-sdk"
+dependencies = ["pydantic>=2.10.6", "nemo-sandboxed-gym", "nhx-testing"]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (gym_path / "pyproject.toml").write_text('[project]\nname = "nemo-sandboxed-gym"\n', encoding="utf-8")
+    (unpublished_path / "pyproject.toml").write_text('[project]\nname = "nhx-testing"\n', encoding="utf-8")
+
+    monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
+    vendor_package._process_bundle_packages()
+
+    wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
+    assert list(wrapper_updated["project"]["optional-dependencies"]["nemo-evaluator-sdk"]) == [
+        "pydantic>=2.10.6",
+        "nemo-sandboxed-gym",
+    ]
 
 
 def test_process_bundle_packages_rebuilds_generated_dependency_groups(tmp_path: Path, monkeypatch) -> None:
@@ -1022,256 +886,3 @@ nemo-helix-sdk = { workspace = true }
     )
 
     assert "\n\n\n[tool.uv.sources]" not in updated
-
-
-def test_vendor_scripts_writes_to_sdk(tmp_path: Path, monkeypatch) -> None:
-    """Scripts from SDK client extensions are written to the SDK pyproject."""
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
-    sdk_path.mkdir(parents=True)
-
-    doc = tomlkit.parse(
-        """
-[project]
-name = "example"
-"""
-    )
-    (sdk_path / "pyproject.toml").write_text(tomlkit.dumps(doc), encoding="utf-8")
-
-    vendor_package._vendor_scripts(
-        sdk_path=sdk_path,
-        scripts=[{"name": "nemo", "value": "nemo_helix.cli.app:cli"}],
-    )
-
-    sdk_updated = tomlkit.parse((sdk_path / "pyproject.toml").read_text(encoding="utf-8"))
-    assert sdk_updated["project"]["scripts"]["nemo"] == "nemo_helix.cli.app:cli"
-
-
-def test_vendor_entrypoints_writes_to_sdk(tmp_path: Path, monkeypatch) -> None:
-    """Entrypoints from SDK client extensions are written to the SDK pyproject."""
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
-    sdk_path.mkdir(parents=True)
-    wrapper_path = tmp_path / "packages/nemo_helix"
-    wrapper_path.mkdir(parents=True)
-
-    doc = tomlkit.parse(
-        """
-[project]
-name = "example"
-"""
-    )
-    (sdk_path / "pyproject.toml").write_text(tomlkit.dumps(doc), encoding="utf-8")
-    (wrapper_path / "pyproject.toml").write_text(tomlkit.dumps(doc), encoding="utf-8")
-
-    monkeypatch.setattr(vendor_package, "WRAPPER_PATH", wrapper_path)
-
-    vendor_package._vendor_entrypoints(
-        sdk_path=sdk_path,
-        entrypoints=[
-            {
-                "group": "data_designer.plugins",
-                "entrypoints": [{"name": "seed", "value": "pkg.module:func"}],
-            }
-        ],
-    )
-
-    sdk_updated = tomlkit.parse((sdk_path / "pyproject.toml").read_text(encoding="utf-8"))
-    assert sdk_updated["project"]["entry-points"]["data_designer.plugins"]["seed"] == "pkg.module:func"
-
-    wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
-    assert "entry-points" not in wrapper_updated["project"]
-
-
-def test_replace_client_methods_updates_init_and_getattr(tmp_path: Path, monkeypatch) -> None:
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
-    client_path = sdk_path / "src/nemo_helix/_client.py"
-    source_path = tmp_path / "packages/nemo_helix_ext/src/nemo_helix_ext/client/enhanced.py"
-    client_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    plugin_client_path = tmp_path / "nemo_helix_plugin/client"
-    plugin_client_path.mkdir(parents=True)
-    plugin_jobs_path = tmp_path / "nemo_helix_plugin/jobs"
-    plugin_jobs_path.mkdir(parents=True)
-    plugin_secrets_path = tmp_path / "nemo_helix_plugin/secrets"
-    plugin_secrets_path.mkdir(parents=True)
-    (client_path.parent / "__init__.py").write_text("", encoding="utf-8")
-    (client_path.parent / "_base_client.py").write_text(
-        """
-class DefaultAsyncHttpxClient:
-    pass
-
-
-class DefaultHttpxClient:
-    pass
-""".lstrip(),
-        encoding="utf-8",
-    )
-    (tmp_path / "nemo_helix_plugin/__init__.py").write_text("", encoding="utf-8")
-    (plugin_client_path / "__init__.py").write_text("", encoding="utf-8")
-    (plugin_client_path / "constants.py").write_text(
-        'WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR = "NHX_WORKLOAD_IDENTITY_TOKEN_FILE"\n',
-        encoding="utf-8",
-    )
-    (plugin_client_path / "tls.py").write_text(
-        "def client_verify_from_env() -> bool:\n    return True\n",
-        encoding="utf-8",
-    )
-    (plugin_jobs_path / "__init__.py").write_text("", encoding="utf-8")
-    (plugin_jobs_path / "client.py").write_text(
-        """
-class AsyncJobsClient:
-    pass
-
-
-class JobsClient:
-    pass
-""".lstrip(),
-        encoding="utf-8",
-    )
-    (plugin_secrets_path / "__init__.py").write_text("", encoding="utf-8")
-    (plugin_secrets_path / "compat.py").write_text(
-        """
-class AsyncSecretsResource:
-    pass
-
-
-class SecretsResource:
-    pass
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    client_path.write_text(
-        """
-from typing import Any
-from nemo_helix_ext.client.tls import client_verify_from_env
-
-
-def _should_bootstrap_config(config_path: object | None = None) -> bool:
-    return False
-
-
-class NeMoHelix:
-    def __init__(self) -> None:
-        self.value = 1
-
-
-class AsyncNeMoHelix:
-    def __init__(self) -> None:
-        self.value = 2
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    source_path.write_text(
-        """
-from pathlib import Path
-from typing import Any
-
-
-def _should_bootstrap_config(config_path: Path | None = None) -> bool:
-    return config_path is not None
-
-
-class NeMoHelix:
-    def __init__(self, config_path: Path | None = None) -> None:
-        self.config_path = config_path
-        self.should_bootstrap = _should_bootstrap_config(config_path)
-
-    def __getattr__(self, name: str) -> Any:
-        return name
-
-    @property
-    def jobs(self) -> JobsClient:
-        return JobsClient()
-
-    @property
-    def secrets(self) -> SecretsResource:
-        return SecretsResource()
-
-
-class AsyncNeMoHelix:
-    def __init__(self, config_path: Path | None = None) -> None:
-        self.config_path = config_path
-        self.should_bootstrap = _should_bootstrap_config(config_path)
-
-    def __getattr__(self, name: str) -> Any:
-        return name
-
-    @property
-    def jobs(self) -> AsyncJobsClient:
-        return AsyncJobsClient()
-
-    @property
-    def secrets(self) -> AsyncSecretsResource:
-        return AsyncSecretsResource()
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-    vendor_package._replace_client_methods(
-        sdk_path=sdk_path,
-        source_path=source_path,
-    )
-
-    updated = client_path.read_text(encoding="utf-8")
-
-    assert "from pathlib import Path" in updated
-    assert "from nemo_helix._base_client import DefaultAsyncHttpxClient, DefaultHttpxClient" in updated
-    assert "from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR" in updated
-    assert "from nemo_helix_plugin.client.tls import client_verify_from_env" in updated
-    assert "from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient" in updated
-    assert "from nemo_helix_plugin.secrets.compat import AsyncSecretsResource, SecretsResource" in updated
-    assert "from nemo_helix_ext.client.tls import client_verify_from_env" not in updated
-    assert "def _should_bootstrap_config(config_path: Path | None = None) -> bool:" in updated
-    assert "return config_path is not None" in updated
-    assert "return False" not in updated
-    assert "def __init__(self, config_path: Path | None = None) -> None:" in updated
-    assert updated.count("self.should_bootstrap = _should_bootstrap_config(config_path)") == 2
-    assert updated.count("def __getattr__(self, name: str) -> Any:") == 2
-    assert "def jobs(self) -> JobsClient:" in updated
-    assert "def jobs(self) -> AsyncJobsClient:" in updated
-    assert "def secrets(self) -> SecretsResource:" in updated
-    assert "def secrets(self) -> AsyncSecretsResource:" in updated
-    assert "self.value = 1" not in updated
-    assert "self.value = 2" not in updated
-
-    class BlockNemoHelixExt:
-        def find_spec(
-            self,
-            fullname: str,
-            path: object | None = None,
-            target: object | None = None,
-        ) -> None:
-            del path, target
-            if fullname == "nemo_helix_ext" or fullname.startswith("nemo_helix_ext."):
-                raise ModuleNotFoundError("nemo_helix_ext must not be imported")
-            return None
-
-    blocked_finder = BlockNemoHelixExt()
-    module_names = (
-        "nemo_helix",
-        "nemo_helix._base_client",
-        "nemo_helix._client",
-        "nemo_helix_plugin",
-        "nemo_helix_plugin.client",
-        "nemo_helix_plugin.client.constants",
-        "nemo_helix_plugin.client.tls",
-        "nemo_helix_plugin.secrets",
-        "nemo_helix_plugin.secrets.compat",
-    )
-    monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.syspath_prepend(str(sdk_path / "src"))
-    sys.meta_path.insert(0, blocked_finder)
-    try:
-        for module_name in module_names:
-            sys.modules.pop(module_name, None)
-
-        generated_client = import_module("nemo_helix._client")
-
-        assert generated_client.NeMoHelix(config_path=Path("config.yaml")).should_bootstrap is True
-    finally:
-        if blocked_finder in sys.meta_path:
-            sys.meta_path.remove(blocked_finder)
-        for module_name in module_names:
-            sys.modules.pop(module_name, None)

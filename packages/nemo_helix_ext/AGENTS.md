@@ -17,7 +17,10 @@ All the operations that the CLI provides fall in one of these categories:
 ## Structure
 
 - `app.py` - Entry point, command registration, global options (`--context`, `--base-url`, `--output-format`)
-- `core/` - Shared utilities: error handling, output formatting, input parsing, pagination, CLIContext
+- `core/` - CLI host internals: `CLIContext` (the concrete CLI state), help rendering (`NhxGroup`), lazy loading, waiters.
+  The helpers commands are built from (output formatting, options, pagination, error handling, input parsing,
+  `-f code`) live in `nemo_helix_plugin` (`cli`, `cli_state`, `cli_options`, `cli_output`, ...) so plugin
+  commands share them; the old `core/` module paths re-export them for existing core commands.
 - `commands/` - Command implementations:
   - `config.py` - kubectl-style config management
   - `quickstart/` - local deployment commands
@@ -26,13 +29,13 @@ All the operations that the CLI provides fall in one of these categories:
 
 ## Local Development Shortcut
 
-For rapid CLI iteration, run `_nhx` to execute the CLI directly from `packages/nemo_helix_ext` without vendoring.
+For rapid CLI iteration, run `_nhx` to execute the CLI directly from `packages/nemo_helix_ext`.
 
 ```shell
 uv run _nhx --help
 ```
 
-This is useful for testing new CLI changes before running `make vendor-nemo-helix-ext`.
+The `nemo-helix` wheel bundles this package from source and publishes the public `nemo` and `nhx` scripts (see `packages/nemo_helix/BUNDLING.md`); `_nhx` runs the same code without going through the wheel.
 
 ## CLI Command Groups
 
@@ -48,8 +51,8 @@ this and runs the CLI with `nemo_helix` un-importable.
 - Functional groups ship with the package that owns the service as `nemo.cli` entry points
   (`guardrail` in `plugins/nemo-guardrails`, `intake` and `experiments` in `services/intake`), so they
   appear only when that package is installed.
-- Commands obtain a service client with `state.typed_client(<Client>)`; `--output-format code`
-  renders the typed-client call via `cli/core/code_generator.py`.
+- Commands obtain a service client with `cli_state(ctx).typed_client(<Client>)`; `--output-format code`
+  renders the typed-client call via `nemo_helix_plugin.cli_codegen`. See the `nhx-cli` skill.
 
 Use `commands/secrets.py` and `tests/cli/commands/test_secrets.py` as the reference when adding a group:
 mirror the structure, add wire-level tests (real Typer app over a recorded `httpx.MockTransport`) and,
@@ -57,32 +60,12 @@ when the service can be hosted by `nhx.testing`, in-process integration tests.
 
 ### Build
 
-To vendor the CLI into the distribution package and regenerate its reference docs:
+To regenerate the CLI reference docs:
 ```shell
 make update-cli
 ```
 
-It includes 2 steps.
-
-#### Step 1.
-Once the CLI is generated, we vendored it into the `sdk/python/nemo-helix` package. This way we bundle the SDK and the CLI together and the user needs to only install a single package.
-
-In a nutshell, the vendoring process copies the code and updates all the imports.
-
-This step can be run with:
-```shell
-make vendor-nemo-helix-ext
-```
-
-Note: this vendors all the extensions, not just the CLI.
-
-#### Step 2.
-We generate CLI reference for our documentation.
-
-This step can be run with:
-```shell
-make generate-cli-reference-docs
-```
+The `nemo-helix` wheel picks up CLI changes automatically at build time; there is no vendoring step. If you change this package's dependencies or `nemo.*` entry points, run `make vendor` to refresh the wheel metadata in `packages/nemo_helix/pyproject.toml`.
 
 ---
 

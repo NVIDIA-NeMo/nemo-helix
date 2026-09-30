@@ -31,7 +31,7 @@ Both are built from the same call, so the flag names and help text cannot
 drift apart.
 """
 
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 
 import typer
 
@@ -89,4 +89,92 @@ def workspace_option(*, help: str = WORKSPACE_HELP, rich_help_panel: str | None 
 WorkspaceOption = Annotated[
     Optional[str],
     typer.Option(*WORKSPACE_FLAGS, help=WORKSPACE_HELP),
+]
+
+
+# Output formats. ``OutputFormat`` is what a user can store as a context
+# preference (``nemo config set``); commands add ``code`` on top, which prints
+# the equivalent typed-client Python instead of calling the API.
+OutputFormat = Literal["table", "json", "yaml", "markdown", "csv", "raw"]
+ListOutputFormat = Literal[OutputFormat, "code"]
+EntityOutputFormat = Literal["json", "yaml", "raw", "code"]
+ConfigOutputFormat = Literal["json", "yaml", "raw"]
+TimestampFormat = Literal["relative", "iso8601"]
+
+# Every command's format flag answers to the same names; per-command aliases
+# are how ``nemo agents`` drifted to ``--format``/``-o``.
+OUTPUT_FORMAT_FLAGS = ("--output-format", "--output", "-f")
+
+
+def _output_format_option(help: str) -> Any:
+    return typer.Option(
+        *OUTPUT_FORMAT_FLAGS,
+        show_choices=True,
+        help=help,
+        rich_help_panel="Output Options",
+    )
+
+
+# Resolve these with :func:`~nemo_helix_plugin.cli_state.resolve_output_format`
+# so an omitted flag falls through to the global ``--output-format`` and
+# context preference instead of a per-command default.
+ListOutputFormatOption = Annotated[
+    Optional[ListOutputFormat],
+    _output_format_option("Output format for the list of results."),
+]
+
+EntityOutputFormatOption = Annotated[
+    Optional[EntityOutputFormat],
+    _output_format_option("Output format for an entity."),
+]
+
+ConfigOutputFormatOption = Annotated[
+    Optional[ConfigOutputFormat],
+    _output_format_option("Output format for config."),
+]
+
+StreamOutputOption = Annotated[
+    bool,
+    typer.Option(
+        "--stream",
+        help="Emit newline-delimited JSON, one record per line. Requires JSON or raw output.",
+        rich_help_panel="Output Options",
+    ),
+]
+
+NoTruncateOption = Annotated[
+    Optional[bool],
+    typer.Option(
+        "--no-truncate",
+        help="Don't truncate long values in table/markdown/csv output.",
+        rich_help_panel="Output Options",
+    ),
+]
+
+TimestampFormatOption = Annotated[
+    Optional[TimestampFormat],
+    typer.Option(
+        help="Timestamp format for table/markdown/csv output. Overrides global.",
+        show_choices=True,
+        rich_help_panel="Output Options",
+    ),
+]
+
+OutputColumnsOption = Annotated[
+    Optional[str],
+    typer.Option(
+        "--output-columns",
+        "-c",
+        help="Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.",
+        rich_help_panel="Output Options",
+    ),
+]
+
+AllPagesOption = Annotated[
+    bool,
+    typer.Option(
+        "--all-pages",
+        help="Fetch all pages",
+        rich_help_panel="Pagination Options",
+    ),
 ]

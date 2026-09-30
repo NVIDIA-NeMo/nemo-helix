@@ -118,19 +118,6 @@ def _replace_job_submit(
             "--profile",
             help="Execution profile to run the job on. Uses the backend default when omitted.",
         ),
-        cluster: str | None = typer.Option(
-            None,
-            "--cluster",
-            help="Name of a cluster in the CLI config. Submits to that cluster's base URL.",
-        ),
-        base_url: str | None = typer.Option(
-            None,
-            "--base-url",
-            help=(
-                "Override platform API host. If omitted: --cluster, then CLI context, "
-                "then $NHX_BASE_URL, then http://localhost:8080."
-            ),
-        ),
         options: list[str] = typer.Option([], "-o", help="Backend option override, 'backend.key=value'."),
         options_file: Path | None = typer.Option(
             None,
@@ -221,8 +208,6 @@ def _replace_job_submit(
                 environment_source=upload_environment,
                 typer_ctx=typer_ctx,
                 workspace=workspace,
-                base_url=base_url,
-                cluster=cluster,
                 exist_ok=exist_ok,
                 hf_token_secret=hf_token_secret,
             )
@@ -233,8 +218,6 @@ def _replace_job_submit(
             options=options,
             options_file=options_file,
             profile=profile,
-            cluster=cluster,
-            base_url=base_url,
             workspace=workspace,
             config=None,
             config_file=None,
@@ -252,8 +235,6 @@ def _upload_then_validate(
     environment_source: str | None,
     typer_ctx: typer.Context,
     workspace: str,
-    base_url: str | None,
-    cluster: str | None,
     exist_ok: bool,
     hf_token_secret: str | None,
 ) -> str:
@@ -285,7 +266,7 @@ def _upload_then_validate(
         environment=environment_source is not None,
     )
 
-    resolved_base_url = resolve_submit_base_url(typer_ctx, base_url=base_url, cluster=cluster)
+    resolved_base_url = resolve_submit_base_url(typer_ctx)
     headers = resolve_submit_auth_headers(typer_ctx) or None
     report = run_uploads(
         model_source=model_source,

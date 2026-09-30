@@ -298,6 +298,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/deployment-modes:
+    get:
+      tags:
+      - Agent Deployments
+      summary: List Deployment Modes
+      description: List every deployment mode and whether this platform can run it.
+      operationId: list_deployment_modes_apis_agents_v2_workspaces__workspace__deployment_modes_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentModeList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/deployments:
     post:
       tags:
@@ -4665,6 +4692,46 @@ components:
       - next_offset
       title: DeploymentLogsResponse
       description: Response body for ``GET /deployments/{name}/logs``.
+    DeploymentModeAvailability:
+      properties:
+        mode:
+          type: string
+          enum:
+          - subprocess
+          - docker
+          - k8s
+          - openshell
+          title: Mode
+          description: The deployment mode.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: True when a deployment in this mode would run on a matching
+            executor backend.
+        requires_image:
+          type: boolean
+          title: Requires Image
+          description: True when a deployment in this mode must set 'image' because
+            no default image is configured.
+      type: object
+      required:
+      - mode
+      - enabled
+      - requires_image
+      title: DeploymentModeAvailability
+      description: Whether this platform can run deployments in one ``deployment_mode``.
+    DeploymentModeList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/DeploymentModeAvailability'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: DeploymentModeList
+      description: Response for ``GET /v2/workspaces/{workspace}/deployment-modes``.
     Endpoint:
       properties:
         name:

@@ -135,7 +135,7 @@ auth:
     groups_claim: groups
     # JWT claim to use as principal ID (maps to X-NHX-Principal-Id). Set explicitly for your IdP. | default: 'sub'
     subject_claim: sub
-    # Space-separated OAuth scopes to request during authentication. For Azure AD with custom API, use: 'api://{app-id}/.default openid profile email' | default: 'openid profile email offline_access'
+    # Space-separated OAuth scopes to request during authentication. Include short NeMo Helix API scopes such as 'platform:read platform:write' only when the IdP application exposes them. If the IdP requires resource-qualified API scope names, set scope_prefix instead of putting qualified values here. | default: 'openid profile email offline_access'
     default_scopes: openid profile email offline_access
     # Enable SDK workload identity token exchange using NHX_WORKLOAD_IDENTITY_TOKEN_FILE subject tokens. | default: False
     workload_token_exchange_enabled: false
@@ -165,7 +165,7 @@ auth:
     workload_subject_jwks_cache_ttl_seconds: 3600
     # Allow the NeMo auth service workload token exchange endpoint to validate Kubernetes projected service account subject tokens using the TokenReview API. | default: False
     workload_kubernetes_token_review_enabled: false
-    # Prefix to strip from token scopes before authorization. For example, if IdP returns 'api://my-app/models:read', set prefix to 'api://my-app/' to normalize to 'models:read'. If not set, scopes are used as-is.
+    # Optional provider prefix for NeMo Helix API scopes. Clients prepend it to short API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. For example, if IdP scopes use 'api://my-app/models:read', set prefix to 'api://my-app/' so NeMo Helix normalizes the value to 'models:read'. If not set, scopes are used as-is.
     scope_prefix:
     # TTL in seconds for caching IdP discovery document responses. Used by the discovery endpoint to avoid per-request IdP calls. Set to 0 to disable caching. | default: 300
     discovery_cache_ttl: 300

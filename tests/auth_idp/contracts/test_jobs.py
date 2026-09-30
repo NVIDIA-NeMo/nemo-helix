@@ -4,10 +4,10 @@
 import pytest
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+from nhx.testing import grant_workspace_role
 from nhx.testing.e2e import wait_for_job_logs, wait_for_platform_job
 
 from tests.auth_idp.common import managed_workload_workspace_get_command, nhx_api_image, require_capability
-from tests.auth_idp.helpers import grant_workspace_role
 
 pytestmark = [
     pytest.mark.auth_idp,

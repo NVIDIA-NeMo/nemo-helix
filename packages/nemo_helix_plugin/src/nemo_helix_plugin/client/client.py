@@ -59,6 +59,7 @@ from nemo_helix_plugin.client.response import (
 )
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.client.types import (
+    RESPONSE_VALIDATION_CONTEXT,
     BinaryContent,
     OffsetPagination,
     Paginated,
@@ -157,7 +158,7 @@ def _parse_json_body(response_type: type[ResponseT], data: object) -> ResponseT:
     ``TypeAdapter`` handles both model classes and arbitrary annotations such as
     ``list[Profile]`` while preserving the annotation's type for callers.
     """
-    return _type_adapter(response_type).validate_python(data)
+    return _type_adapter(response_type).validate_python(data, context=dict(RESPONSE_VALIDATION_CONTEXT))
 
 
 def _parse_response_body(response_type: type[ResponseT], response: httpx.Response) -> ResponseT:
