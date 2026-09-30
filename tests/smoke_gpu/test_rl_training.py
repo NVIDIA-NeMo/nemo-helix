@@ -194,9 +194,8 @@ def test_base_wandb_opentelemetry_compat():
     wandb imports the SDK metrics path at load time, so a skewed pin fails here before a job
     reaches the driver. docker/rl/opentelemetry-overrides.txt keeps the matched release line.
     """
-    from opentelemetry.util.types import _ExtendedAttributes  # noqa: F401
-
     import wandb  # noqa: F401
+    from opentelemetry.util.types import _ExtendedAttributes  # noqa: F401
 
 
 # --- per-worker venvs: where training actually runs ---------------------------------------------
