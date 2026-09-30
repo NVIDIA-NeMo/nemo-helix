@@ -5,7 +5,7 @@
 title: "Client APIs"
 description: ""
 ---
-The following reference provides detailed documentation for the synchronous and asynchronous clients of the NeMo Platform Python SDK.
+The following reference provides detailed documentation for the synchronous and asynchronous clients of the NeMo Helix Python SDK.
 
 ## Synchronous Client
 
@@ -44,7 +44,7 @@ NeMoPlatform(
 | Parameter | Description |
 | --- | --- |
 | `workspace` | Workspace name used by workspace-scoped routes. You can set it on the client or pass it to individual methods that accept a workspace argument. |
-| `base_url` | Base URL for the NeMo Platform API. If omitted, the client reads it from the active CLI context. |
+| `base_url` | Base URL for the NeMo Helix API. If omitted, the client reads it from the active CLI context. |
 | `inference_base_url` | Optional override for inference gateway requests. Defaults to `base_url`. |
 | `config_path` | Path to the CLI config file. Defaults to `~/.config/nmp/config.yaml`. |
 | `context_name` | Named CLI context to read from the config file. |
@@ -148,7 +148,7 @@ for SDK-level errors.
 
 ## Client Attributes
 
-The NeMo Platform clients provide access to API resources through the following attributes.
+The NeMo Helix clients provide access to API resources through the following attributes.
 For endpoint details, see the [REST API Reference](/documentation/reference/api-reference).
 
 ### Organization

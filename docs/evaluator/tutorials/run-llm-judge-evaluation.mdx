@@ -37,7 +37,7 @@ This tutorial takes approximately **20 minutes** to complete.
 </Tip>
 ## Prerequisites
 
-1. Install and start NeMo Platform using the [Setup guide](/documentation/get-started).
+1. Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 
 For PyPI installs, use the `nemo-platform` wrapper package. If you are working from a source checkout, run `make bootstrap` from the repository root instead.
 
@@ -60,7 +60,7 @@ Before you begin, here is a quick overview of the resources you will use:
 
 - **Evaluator resource**: The plugin SDK resource mounted at `client.evaluator`. Use it to run metrics locally or submit durable platform jobs.
 - **Metric**: An inline Python object that defines how to score model outputs. In this tutorial, we create LLM judge metrics that prompt a model to rate responses.
-- **Fileset**: A dataset registered with NeMo Platform. The evaluator plugin SDK accepts fileset references directly, so this tutorial passes the registered HelpSteer2 split to evaluations as a `FilesetRef`.
+- **Fileset**: A dataset registered with NeMo Helix. The evaluator plugin SDK accepts fileset references directly, so this tutorial passes the registered HelpSteer2 split to evaluations as a `FilesetRef`.
 - **Workspace**: A workspace that isolates your resources. Secrets, filesets, and jobs belong to a workspace.
 - **Job**: A durable remote platform task created with `evaluator.submit(...)`.
 - **Evaluation**: The process of scoring model outputs using one or more metrics. Use `evaluator.submit(...)` for durable jobs, or `nemo_evaluator_sdk.Evaluator` for local in-process execution
@@ -81,7 +81,7 @@ from nemo_platform import ConflictError, NeMoPlatform
 # Workspace for this tutorial.
 WORKSPACE = "llm-as-judge-tutorial"
 
-# Create an SDK instance to interact with the NeMo Platform.
+# Create an SDK instance to interact with the NeMo Helix.
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Evaluate Agents & Models"
-description: "Score agents and models in NeMo Platform — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
+description: "Score agents and models in NeMo Helix — dataset-driven metrics over labeled data and task-driven agent evaluation — with the same scoring interface across local and platform execution."
 ---
 
 <a id="nemo-ms-evaluator-about"></a>
@@ -136,10 +136,10 @@ the same and execution gains platform capabilities:
 | Capability | Local SDK | Platform (`client.evaluator`) |
 |------------|-----------|-------------------------------|
 | **Execution** | Local in-process run | Durable platform jobs |
-| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Platform [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
-| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Platform [Filesets](/documentation/get-started/core-concepts/manage-files) |
+| **Inference** | Direct model or agent endpoint calls | The same, and can route through the NeMo Helix [Inference Gateway](/documentation/models-and-inference) and platform-managed endpoints |
+| **Datasets** | Inline rows and local files | Inline rows, local paths resolved at submission time, and NeMo Helix [Filesets](/documentation/get-started/core-concepts/manage-files) |
 | **Results** | Returned in memory | Platform artifact storage with typed result download |
-| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Platform [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
+| **Authentication** | Local environment variables | Local env vars for local runs; NeMo Helix [Secrets](/documentation/get-started/core-concepts/manage-secrets) for remote jobs |
 
 ### Live vs. jobs, online vs. offline
 

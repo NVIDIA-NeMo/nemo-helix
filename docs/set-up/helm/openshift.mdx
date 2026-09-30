@@ -7,11 +7,11 @@ description: ""
 ---
 <a id="nemo-ms-install-openshift"></a>
 
-The NeMo Platform chart works on Red Hat OpenShift when security context overrides are applied. OpenShift’s **restricted** or **restricted-v2** Security Context Constraint (SCC) requires pods to run as non-root with explicit `runAsUser` and `runAsNonRoot`.
+The NeMo Helix chart works on Red Hat OpenShift when security context overrides are applied. OpenShift’s **restricted** or **restricted-v2** Security Context Constraint (SCC) requires pods to run as non-root with explicit `runAsUser` and `runAsNonRoot`.
 
 ## Values
 
-You can override the default values for the NeMo Platform chart to make it compatible with OpenShift.
+You can override the default values for the NeMo Helix chart to make it compatible with OpenShift.
 
 1. **Create the OpenShift values file.** Save the following as `openshift-values.yaml`:
 

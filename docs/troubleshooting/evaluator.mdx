@@ -45,9 +45,9 @@ Incoming request body={'messages': [{'content': 'The output string did not satis
 
 ## Dataset \{dataset} is not in the expected format; it needs to have the files_url property set
 
-This means that either the `files_url` is not provided as part of the dataset specification in the config, 
-or that the `files_url` is not provided in the expected format. 
-The dataset must be a JSON object with the `files_url` property set, 
+This means that either the `files_url` is not provided as part of the dataset specification in the config,
+or that the `files_url` is not provided in the expected format.
+The dataset must be a JSON object with the `files_url` property set,
 pointing to the path of the file in the NeMo Data Store in the format: `hf://datasets/<dataset-namespace>/<dataset-namespace>/<file-path>`.
 
 ## Error connecting to inference server
@@ -56,7 +56,7 @@ This means that for a custom evaluation, the target LLM endpoint is unable to co
 
 ## Inference SSL Error
 
-An evaluation job that uses an HTTPS model endpoint can fail if the endpoint certificate or DNS name is not trusted by the local environment. Verify that the model URL is reachable from the host running NeMo Platform and that the endpoint presents a valid certificate for its hostname.
+An evaluation job that uses an HTTPS model endpoint can fail if the endpoint certificate or DNS name is not trusted by the local environment. Verify that the model URL is reachable from the host running NeMo Helix and that the endpoint presents a valid certificate for its hostname.
 
 ```
 Error: HTTPSConnectionPool(host="<NIM Proxy URL>", port=443): Max retries exceeded with url: /v1/chat/completions (Caused by SSLError(SSLError))
@@ -67,21 +67,21 @@ Error: HTTPSConnectionPool(host="<NIM Proxy URL>", port=443): Max retries exceed
 This could mean that the dataset is not specified correctly, or that the NeMo Data Store itself is unresponsive.
 
 - Verify that the files URL is correct and that the dataset and file exists in the NeMo Data Store.
-- Verify that the NeMo Data Store is responsive and reachable. 
+- Verify that the NeMo Data Store is responsive and reachable.
 
-If the error contains the string `Dataset {file_ref} is not present on datastore`, 
+If the error contains the string `Dataset {file_ref} is not present on datastore`,
 it means that the datastore is responsive, but the file reference does not exist.
 
 ## Evaluation Job Takes a Long Time
 
-The time that an Evaluation job takes can vary from a few minutes to many hours, 
-depending on the target model, config, and other factors. 
+The time that an Evaluation job takes can vary from a few minutes to many hours,
+depending on the target model, config, and other factors.
 As long as the status is `RUNNING`, your job is still running.
 If there is a problem with your job, you will see `UNAVAILABLE` or `FAILED`.
 
-## Job cannot be launched 
+## Job cannot be launched
 
-This means that one of the pre-launch validations has failed. 
+This means that one of the pre-launch validations has failed.
 The error contains the details about the checks that failed.
 
 ## What is EVALUATOR_BASE_URL?
@@ -102,8 +102,8 @@ These are advanced troubleshooting steps that should only be done after all othe
 
 ### Evaluation Job Logs
 
-To download the log files, use the `download-results` endpoint. 
-This endpoint downloads the result directory containing configuration files, logs, and evaluation results for a specific evaluation run. 
+To download the log files, use the `download-results` endpoint.
+This endpoint downloads the result directory containing configuration files, logs, and evaluation results for a specific evaluation run.
 The result directory is packaged and provided as a downloadable archive.
 
 To download the evaluation results directory, use the following code.
@@ -115,13 +115,13 @@ curl -X 'GET' \
  -o result.zip
 ```
 
-After the download is complete, the log files are available inside the result.zip file. 
+After the download is complete, the log files are available inside the result.zip file.
 Log files can be found in the results folder with the file extension `*.log`.
 
 ## Skip validation checks
 
-When you launch an evaluation job, NeMo Evaluator performs availability checks (for example, checking if the dataset and files exist in NeMo Data Store). 
-To speed up job launch, or due to strict constraints of validation checks, you can pass the query parameter `skip_validation_checks` during job launch. 
+When you launch an evaluation job, NeMo Evaluator performs availability checks (for example, checking if the dataset and files exist in NeMo Data Store).
+To speed up job launch, or due to strict constraints of validation checks, you can pass the query parameter `skip_validation_checks` during job launch.
 
 Use the following code to create an evaluation job that skips validation checks.
 

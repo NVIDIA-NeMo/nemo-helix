@@ -125,7 +125,7 @@ If completion isn't working, make sure you've restarted your shell and that your
 
 ## Telemetry
 
-NeMo Platform collects anonymous usage data to improve the product. On your first run, the CLI prints a notice to standard error explaining what data is collected and how to opt out.
+NeMo Helix collects anonymous usage data to improve the product. On your first run, the CLI prints a notice to standard error explaining what data is collected and how to opt out.
 
 For the full product disclosure, including bundled library telemetry and third-party endpoint notes, see [Telemetry and Privacy](/documentation/reference/telemetry-and-privacy).
 
@@ -144,7 +144,7 @@ Collected data includes:
 
 The events are batched and sent to NVIDIA's telemetry endpoint with no user identifiers, device fingerprints, hostnames, or machine-derived identifiers attached.
 
-The only linking value is a random session identifier stored in local platform state. It carries no user or device identity and is automatically rotated every 30 days; if the local state file is missing a creation date, NeMo Platform replaces it with a new identifier.
+The only linking value is a random session identifier stored in local platform state. It carries no user or device identity and is automatically rotated every 30 days; if the local state file is missing a creation date, NeMo Helix replaces it with a new identifier.
 
 ### What Data Is Not Collected
 
@@ -183,19 +183,19 @@ The `--no-telemetry` flag disables telemetry for a single command only.
 
 <Note>
 
-These three layers are independent. NeMo Platform sends telemetry only when you have not disabled it in any of them. Setting any one layer to off disables telemetry, and no layer turns it back on. For example, if you leave the environment variable unset but set `telemetry_enabled: false` in your config file, telemetry stays off.
+These three layers are independent. NeMo Helix sends telemetry only when you have not disabled it in any of them. Setting any one layer to off disables telemetry, and no layer turns it back on. For example, if you leave the environment variable unset but set `telemetry_enabled: false` in your config file, telemetry stays off.
 
 </Note>
 
 ### Bundled Plugins
 
-NeMo Platform ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for NeMo tools that share this telemetry system. The config file setting and the `--no-telemetry` flag apply to the CLI.
+NeMo Helix ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for NeMo tools that share this telemetry system. The config file setting and the `--no-telemetry` flag apply to the CLI.
 
 ### First-Run Notice
 
 On your first run, the CLI writes this notice to standard error:
 
-> NeMo Platform collects anonymous usage data to improve the product. No prompts, data, or personal information leave your machine. Turn it off at any time with NEMO_TELEMETRY_ENABLED=false.
+> NeMo Helix collects anonymous usage data to improve the product. No prompts, data, or personal information leave your machine. Turn it off at any time with NEMO_TELEMETRY_ENABLED=false.
 
 The notice appears only once, and you can opt out at any time using one of the methods above.
 

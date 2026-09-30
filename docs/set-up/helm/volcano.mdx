@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Volcano"
-description: "Install Volcano as a cluster scheduler for multi-node NeMo Platform jobs."
+description: "Install Volcano as a cluster scheduler for multi-node NeMo Helix jobs."
 ---
 <a id="install-volcano"></a>
 
-The NeMo Platform Helm chart does **not** install [Volcano](https://volcano.sh/en/docs/). Volcano is **optional**. It is needed for multi-node jobs on the `volcano_job` backend (Customizer multi-node). Skip it and set `rbac.volcanoEnabled: false` if you are not running those jobs.
+The NeMo Helix Helm chart does **not** install [Volcano](https://volcano.sh/en/docs/). Volcano is **optional**. It is needed for multi-node jobs on the `volcano_job` backend (Customizer multi-node). Skip it and set `rbac.volcanoEnabled: false` if you are not running those jobs.
 
 The chart grants the core controller Volcano RBAC when `rbac.volcanoEnabled` is `true` (the default).
 

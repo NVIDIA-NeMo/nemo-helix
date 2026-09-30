@@ -2,22 +2,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Security for NeMo Platform"
+title: "Security for NeMo Helix"
 description: ""
 ---
 <a id="nemo-ms-admin-setup-security"></a>
 
-This page provides security guidelines and best practices for deploying and managing NeMo Platform in production environments.
+This page provides security guidelines and best practices for deploying and managing NeMo Helix in production environments.
 
 ## Security Considerations
 
-- The NeMo Platform does not impose rate limits. You must implement a rate-limiting strategy to restrict access to your application.
-- The NeMo Platform does not have an internal notion of a user. To restrict authorization to specific endpoints or users, implement an external mechanism such as an Envoy proxy.
+- The NeMo Helix does not impose rate limits. You must implement a rate-limiting strategy to restrict access to your application.
+- The NeMo Helix does not have an internal notion of a user. To restrict authorization to specific endpoints or users, implement an external mechanism such as an Envoy proxy.
 - The NeMo Data Store microservice does not provide object-class-specific access controls. All items reside within a single access control boundary.
-- The NeMo Platform, by design, can access all content in the NeMo Data Store microservice, including LoRA adapters, training data, evaluation data, and evaluation results. 
- This access is required for model evaluation. 
+- The NeMo Helix, by design, can access all content in the NeMo Data Store microservice, including LoRA adapters, training data, evaluation data, and evaluation results.
+ This access is required for model evaluation.
  Carefully weigh the risk of data exposure from serving customized models directly to production against the overhead of a separate deployment.
-- The NeMo Platform is not intended to be internet-facing. Deploy them as the logic (middle) tier in a three-tier architecture.
+- The NeMo Helix is not intended to be internet-facing. Deploy them as the logic (middle) tier in a three-tier architecture.
 - You are responsible for securing access to any application using the microservices. This includes:
  - Implementing an authentication layer between users and your application
  - Applying required authorization controls
@@ -47,7 +47,7 @@ The following table lists the default network ports for each microservice or def
 | 8080/TCP | Volcano Scheduler metrics |
 | 9009/TCP | NeMo Customizer callback |
 
-By default, the NeMo Platform Helm Chart configures databases with the following network ports. 
+By default, the NeMo Helix Helm Chart configures databases with the following network ports.
 Alternatively, you can configure each microservice to use an external database during installation.
 
 | Network Port | Database |
@@ -59,7 +59,7 @@ Alternatively, you can configure each microservice to use an external database d
 | 9091/TCP | Milvus metrics |
 | 19530/TCP | Milvus API |
 
-By default, the NeMo Platform Helm Chart installs an open telemetry collector, which uses the following network ports:
+By default, the NeMo Helix Helm Chart installs an open telemetry collector, which uses the following network ports:
 
 - 4317/TCP
 - 4318/TCP

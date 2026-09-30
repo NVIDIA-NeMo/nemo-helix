@@ -41,7 +41,7 @@ The model learns to maximize similarity between query and positive document whil
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **NGC API key** to pull NIM container images from nvcr.io (get one at [ngc.nvidia.com](https://ngc.nvidia.com/) → Setup → Generate API Key)
 4. **At least one GPU with CUDA 13+**
@@ -52,7 +52,7 @@ The SPECTER dataset and the tutorial's base model are public and do not require 
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
 
 ```sh
 export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
@@ -96,7 +96,7 @@ DEMO_QUERY = "Conditional Random Fields: Probabilistic Models for Segmenting and
 
 DEMO_DOCS = [
     "Bidirectional LSTM-CRF Models for Sequence Tagging",   # CRF-based paper
-    "An Introduction to Conditional Random Fields",         # CRF tutorial  
+    "An Introduction to Conditional Random Fields",         # CRF tutorial
     "Random Forests",                                       # Keyword trap! Unrelated.
     "Neural Architectures for Named Entity Recognition",    # Related to sequence labeling; may use CRFs
     "Support Vector Machines for Classification",           # Unrelated ML method
@@ -169,13 +169,13 @@ while True:
         name=BASELINE_DEPLOYMENT_NAME,
         workspace="default"
     )
-    
+
     elapsed = time.time() - start_time
     elapsed_str = f"{int(elapsed//60)}m {int(elapsed%60)}s"
-    
+
     clear_output(wait=True)
     print(f"Baseline deployment: {status.status} | {elapsed_str}")
-    
+
     if status.status == "READY":
         print("Baseline model ready!")
         if not client.models.wait_for_gateway(BASELINE_DEPLOYMENT_NAME, workspace="default", timeout=60):
@@ -185,7 +185,7 @@ while True:
         raise RuntimeError(f"Baseline deployment failed: {status.status}")
     if elapsed > TIMEOUT_MINUTES * 60:
         raise TimeoutError("Baseline deployment timeout")
-    
+
     time.sleep(10)
 
 
@@ -486,7 +486,7 @@ Submit to the **Automodel** backend using `AutomodelJobInput` with split `schedu
 
 **NOTE:**
 
-NeMo Platform does not support unmerged LoRA adapters for embedding models because the embedding NIM requires ONNX format, which cannot represent standalone adapters. This notebook uses all-weights fine-tuning. For merged LoRA, set `finetuning_type` to `lora_merged`:
+NeMo Helix does not support unmerged LoRA adapters for embedding models because the embedding NIM requires ONNX format, which cannot represent standalone adapters. This notebook uses all-weights fine-tuning. For merged LoRA, set `finetuning_type` to `lora_merged`:
 
 ```python
 training={
@@ -546,7 +546,7 @@ while True:
         name=job.job.name,
         workspace="default"
     )
-    
+
     clear_output(wait=True)
     print(f"Job Status: {status.model_dump_json(indent=2)}")
 
@@ -572,12 +572,12 @@ while True:
             print(f"Training Phase: {training_phase}")
     else:
         print("Training step not started yet or progress info not available")
-    
+
     # Exit loop when job is completed (or failed/cancelled)
     if status.status in ("completed", "failed", "cancelled", "error"):
         print(f"\nJob finished with status: {status.status}")
         break
-    
+
     time.sleep(10)
 
 if status.status != "completed":
@@ -660,31 +660,31 @@ while True:
         name=deployment.name,
         workspace="default"
     )
-    
+
     elapsed = time.time() - start_time
     elapsed_min = int(elapsed // 60)
     elapsed_sec = int(elapsed % 60)
-    
+
     clear_output(wait=True)
     print(f"Deployment: {deployment.name}")
     print(f"Status: {deployment_status.status}")
     print(f"Elapsed time: {elapsed_min}m {elapsed_sec}s")
-    
+
     # Check if deployment is ready
     if deployment_status.status == "READY":
         print("\nDeployment is ready!")
         if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
-    
+
     # Check for failure states
     if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
         raise RuntimeError(f"Deployment failed with status: {deployment_status.status}")
-    
+
     # Check timeout
     if elapsed > timeout_seconds:
         raise TimeoutError(f"Deployment timeout after {TIMEOUT_MINUTES} minutes")
-    
+
     time.sleep(15)
 ```
 
@@ -735,10 +735,10 @@ print("-" * 66)
 for rank in range(len(DEMO_DOCS)):
     b_idx, b_score = BASELINE_RANKING[rank]
     f_idx, f_score = FINETUNED_RANKING[rank]
-    
+
     b_label = f"{DEMO_LABELS[b_idx]} [{b_score:.3f}]" + (" *" if b_idx in DEMO_RELEVANT else "")
     f_label = f"{DEMO_LABELS[f_idx]} [{f_score:.3f}]" + (" *" if f_idx in DEMO_RELEVANT else "")
-    
+
     print(f"#{rank+1:<5} {b_label:<30} {f_label:<30}")
 
 print("\n* = relevant paper")

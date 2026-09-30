@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Install NeMo Platform Helm Chart"
+title: "Install NeMo Helix Helm Chart"
 description: ""
 ---
 
@@ -39,7 +39,7 @@ kubectl create namespace "$NMP_NAMESPACE"
 
 <Tab title="Stable NGC">
 
-Add the NeMo Platform Helm repository and inspect the values for the pinned stable chart version:
+Add the NeMo Helix Helm repository and inspect the values for the pinned stable chart version:
 
 ```sh
 helm repo add nemo-platform https://helm.ngc.nvidia.com/nvidia/nemo-platform \
@@ -67,7 +67,7 @@ helm show values "./nemo-platform-${NMP_HELM_CHART_VERSION}.tgz" > values.yaml
 </Tab>
 <Tab title="Nightly GHCR">
 
-NeMo Platform also publishes nightly Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-platform/nemo-platform](https://github.com/NVIDIA-NeMo/nemo-platform/pkgs/container/nemo-platform%2Fnemo-platform), and the Helm OCI reference is:
+NeMo Helix also publishes nightly Helm charts to GitHub Container Registry for testing before a stable NGC release. The package is available at [nemo-platform/nemo-platform](https://github.com/NVIDIA-NeMo/nemo-platform/pkgs/container/nemo-platform%2Fnemo-platform), and the Helm OCI reference is:
 
 ```sh
 export NMP_HELM_CHART_REF=oci://ghcr.io/nvidia-nemo/nemo-platform/nemo-platform
@@ -105,7 +105,7 @@ imagePullSecrets:
   - name: nvcrimagepullsecret
 ```
 
-Review the [NeMo Platform Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) before installing. The most common cluster-specific settings are:
+Review the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) before installing. The most common cluster-specific settings are:
 
 | Cluster type              | What to configure                                                                                                                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
