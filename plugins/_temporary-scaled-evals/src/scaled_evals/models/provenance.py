@@ -584,6 +584,7 @@ def _runtime(row: Mapping[str, Any], *, backend: str | None, handle: str | None)
 
 
 def _opensandbox_applied_egress(row: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Return the per-sandbox egress records the evidence builder loaded, ignoring malformed entries."""
     return [item for item in row.get("opensandbox_applied_egress") or [] if isinstance(item, Mapping)]
 
 

@@ -77,9 +77,13 @@ from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, RuntimeStatus
 
 LOG = logging.getLogger(__name__)
 
+# Harbor environment class the rendered config loads for every trial.
 NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
+# Run-level artifact of per-sandbox egress records, read back by the evidence builder for provenance.
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
+# Evaluation network policies this runtime accepts.
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
+# Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
 CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 
 # Template kwargs that tune Harbor's adapter without touching isolation. Everything else in the
@@ -87,15 +91,23 @@ CLEANUP_MODULE = "scaled_evals.harbor_opensandbox_cleanup"
 _TEMPLATE_ENVIRONMENT_KWARGS = frozenset(
     {"use_server_proxy", "request_timeout_sec", "ready_timeout_sec", "health_check_poll_interval_sec"}
 )
+# Top-level Harbor config keys this backend sets; an evaluation profile that sets any of them is rejected.
 _BACKEND_OWNED_TOP_LEVEL = ("environment", "datasets", "tasks", "jobs_dir", "job_name")
+# File names that mark a multi-container (Compose) task, which one sandbox per trial can't run.
 _COMPOSE_FILENAMES = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 
+# (argv, env, timeout_s) -> completed process. Injected in tests so nothing is spawned.
 CleanupRunner = Callable[[Sequence[str], Mapping[str, str], float], subprocess.CompletedProcess[str]]
 # (argv, cwd, log_path, env) -> None. Injected in tests so nothing is spawned.
 EnvRunner = Callable[[list[str], Path, Path, Mapping[str, str]], None]
 
 
 class HarborOpenSandboxBackend(CallableRuntimeBackend):
+    """Runtime backend wiring the submitter, status reader and terminator built in this module.
+
+    With no submitter (the runtime is disabled), launches fail with a message naming the setting to enable.
+    """
+
     name = HARBOR_OPENSANDBOX_RUNTIME
 
     def __init__(
@@ -119,6 +131,7 @@ class HarborOpenSandboxBackend(CallableRuntimeBackend):
 
 
 def _split_hosts(value: str) -> list[str]:
+    """Split a comma-separated host setting, dropping blanks."""
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
@@ -203,6 +216,7 @@ def bind_task_image(task_dir: Path, image_ref: str) -> None:
 
 
 def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
+    """Render the evaluation's Harbor profile into config overrides, rejecting keys this backend owns."""
     template_text, profile_env = _normalize_harbor_profile_config(profile_config)
     if not template_text:
         return {}
@@ -217,6 +231,7 @@ def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def ownership_metadata(spec: LaunchSpec) -> dict[str, str]:
+    """Labels every sandbox of this evaluation carries: the cleanup selector, plus the benchmark run if any."""
     metadata = ownership_selector(
         deployment_id=settings.harbor_opensandbox_deployment_id,
         evaluation_id=spec.evaluation_id,
@@ -284,12 +299,14 @@ def connection_env(base: Mapping[str, str], env_file: str | None) -> dict[str, s
 
 
 def _opensandbox_sdk_version(harbor_dir: Path) -> str | None:
+    """Read the OpenSandbox SDK version installed in a Harbor runner venv, for provenance."""
     for dist_info in sorted((harbor_dir / ".venv").glob("lib/python*/site-packages/opensandbox-*.dist-info")):
         return dist_info.name.removeprefix("opensandbox-").removesuffix(".dist-info")
     return None
 
 
 def _write_env_file(path: Path, values: Mapping[str, str]) -> Path:
+    """Write the agent env file Harbor passes to trials, owner-readable only."""
     base = path.with_suffix(".base.env")
     base.parent.mkdir(parents=True, exist_ok=True)
     base.write_text("")
@@ -298,6 +315,7 @@ def _write_env_file(path: Path, values: Mapping[str, str]) -> Path:
 
 
 def _spawn_with_env(argv: list[str], cwd: Path, log_path: Path, env: Mapping[str, str]) -> None:
+    """Default ``EnvRunner``: start Harbor detached with the OpenSandbox connection environment."""
     _spawn_detached(argv, cwd, log_path, env=env)
 
 
@@ -311,6 +329,11 @@ def make_harbor_opensandbox_submitter(
     runner: EnvRunner | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> Callable[[LaunchSpec], LaunchHandle]:
+    """Build the submitter: preflight, stage the task, render the Harbor config, then start Harbor.
+
+    The returned handle carries the ownership labels cleanup selects on and the launch-time facts
+    provenance records.
+    """
     runner = runner or _spawn_with_env
     default_harbor = Path(harbor_dir).expanduser()
     template_path = Path(config_path).expanduser()
@@ -420,6 +443,7 @@ def write_applied_egress_summary(job_dir: Path) -> None:
 
 
 def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
+    """Read Harbor's status like ``sandbox_k8s``, and write the applied-egress summary once the run ends."""
     read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
 
     def read(handle: LaunchHandle) -> RuntimeStatus:
@@ -438,6 +462,7 @@ def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> 
 def _run_cleanup_process(
     argv: Sequence[str], env: Mapping[str, str], timeout_s: float
 ) -> subprocess.CompletedProcess[str]:
+    """Default ``CleanupRunner``: run the cleanup module and capture its JSON report."""
     return subprocess.run(list(argv), env=dict(env), capture_output=True, text=True, timeout=timeout_s, check=False)
 
 
@@ -501,6 +526,7 @@ def make_harbor_opensandbox_terminator(
 
 
 def _parse_cleanup_report(stdout: str) -> dict[str, Any]:
+    """Return the last JSON object the cleanup module printed, or an error entry if there is none."""
     for line in reversed(stdout.strip().splitlines()):
         try:
             loaded = json.loads(line)
@@ -512,6 +538,7 @@ def _parse_cleanup_report(stdout: str) -> dict[str, Any]:
 
 
 def validate_settings() -> None:
+    """Fail at startup, not at first launch, when the runtime is enabled but misconfigured."""
     if not settings.harbor_opensandbox_enabled:
         return
     if not settings.harbor_opensandbox_config_path:
@@ -528,6 +555,7 @@ def validate_settings() -> None:
 
 
 def build_backend() -> HarborOpenSandboxBackend:
+    """Build the backend from settings; when disabled, one that refuses every launch."""
     if not settings.harbor_opensandbox_enabled:
         return HarborOpenSandboxBackend()
     validate_settings()
@@ -553,10 +581,12 @@ def build_backend() -> HarborOpenSandboxBackend:
 
 
 def _artifact_root(evaluation_id: str) -> Path:
+    """Harbor's job directory for one evaluation; the worker uploads it as the evaluation's artifacts."""
     return Path(settings.harbor_dir).expanduser() / settings.harbor_opensandbox_jobs_dir / evaluation_id
 
 
 def register_runtime_backends(registry: Any) -> None:
+    """Plugin entry point the runtime registry calls to register ``harbor_opensandbox``."""
     registry.register(
         RuntimeBackendRegistration(
             name=HARBOR_OPENSANDBOX_RUNTIME,

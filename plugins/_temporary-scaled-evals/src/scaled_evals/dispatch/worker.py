@@ -160,6 +160,7 @@ _HARBOR_PROFILE_TEMPLATE_KEYS = ("config", "harbor_config", "template", "harbor_
 # sandbox_k8s stops a sandbox after this long when the profile omits lifecycle_timeout.
 _SANDBOX_LIFECYCLE_DEFAULT_SECONDS = 3600.0
 _SANDBOX_K8S_RUNTIME = "sandbox_k8s"
+# Runtimes whose sandboxes the worker tears down after a successful run, not only on failure or cancel.
 _SUCCESS_TEARDOWN_RUNTIMES = frozenset({_SANDBOX_K8S_RUNTIME, "harbor_opensandbox"})
 
 

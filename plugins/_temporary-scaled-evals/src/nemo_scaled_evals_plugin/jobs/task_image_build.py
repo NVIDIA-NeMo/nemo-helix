@@ -140,6 +140,7 @@ def resolve_executor(
 
 
 def _shared_secret_refs() -> dict[str, str]:
+    """Map each environment variable every Platform Job needs to the Platform Secret that holds it."""
     return {
         "PGPASSWORD": settings.platform_jobs_postgres_password_secret,
         "CREDENTIALS_ENCRYPTION_KEY": settings.platform_jobs_credentials_encryption_key_secret,
@@ -160,6 +161,7 @@ def resolve_evaluation_secret_environment() -> list[EnvironmentVariable] | None:
 
 
 def _secret_environment(refs: dict[str, str]) -> list[EnvironmentVariable] | None:
+    """Turn variable-to-secret refs into Job environment entries, skipping unconfigured secrets."""
     environment = [
         EnvironmentVariable(name=name, from_secret=EnvironmentVariableFromSecret(name=secret))
         for name, secret in refs.items()
