@@ -3,17 +3,17 @@
 
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type {
-  QuickstartStep,
-  QuickstartView,
-} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/quickstartContent';
-import { StepActions } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/QuickstartStepRow/StepActions';
-import { StepCommands } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/QuickstartStepRow/StepCommands';
+  QuickstartSampleStep,
+  QuickstartSampleView,
+} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/quickstartSampleContent';
+import { StepActions } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSampleStepRow/StepActions';
+import { StepCommands } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSampleStepRow/StepCommands';
 import cn from 'classnames';
 import type { FC } from 'react';
 
-interface QuickstartStepRowProps {
-  step: QuickstartStep;
-  view: QuickstartView;
+interface QuickstartSampleStepRowProps {
+  step: QuickstartSampleStep;
+  view: QuickstartSampleView;
   isLast: boolean;
 }
 
@@ -21,7 +21,11 @@ interface QuickstartStepRowProps {
  * One entry in the quickstart timeline, following the KUI activity-feed pattern. Per the
  * design it uses glyph markers rather than severity dots, and carries no timestamp.
  */
-export const QuickstartStepRow: FC<QuickstartStepRowProps> = ({ step, view, isLast }) => {
+export const QuickstartSampleStepRow: FC<QuickstartSampleStepRowProps> = ({
+  step,
+  view,
+  isLast,
+}) => {
   const Icon = step.icon;
   const isCli = view === 'cli';
 
@@ -43,7 +47,7 @@ export const QuickstartStepRow: FC<QuickstartStepRowProps> = ({ step, view, isLa
         </Flex>
         {!isLast && (
           <div
-            data-testid="quickstart-step-connector"
+            data-testid="quickstart-sample-step-connector"
             className="w-0.5 flex-1 bg-accent-gray-subtle"
           />
         )}

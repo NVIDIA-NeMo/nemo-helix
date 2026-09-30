@@ -6,9 +6,11 @@ import {
   getAgentDetailRoute,
   getAgentEvaluationsTabRoute,
   getAgentOptimizationsTabRoute,
+  getAgentOptimizeRoute,
+  getAgentRunEvaluationRoute,
   getIntakeTracesRoute,
 } from '@studio/routes/utils';
-import { QuickstartPanel } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel';
+import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
@@ -28,10 +30,10 @@ const CLI_STEP_TITLES = [
   'Optimize',
 ];
 
-const renderPanel = (props: Partial<ComponentProps<typeof QuickstartPanel>> = {}) =>
+const renderPanel = (props: Partial<ComponentProps<typeof QuickstartSamplePanel>> = {}) =>
   render(
     <MemoryRouter>
-      <QuickstartPanel
+      <QuickstartSamplePanel
         workspace={WS}
         agent={{
           name: AGENT_NAME,
@@ -60,12 +62,12 @@ const waitForAllSnippets = async () => {
   );
 };
 
-describe('QuickstartPanel', () => {
+describe('QuickstartSamplePanel', () => {
   describe('the sandboxed agent', () => {
     it('shows the agent name, description, and status', () => {
       renderPanel();
 
-      const row = screen.getByTestId('quickstart-agent-row');
+      const row = screen.getByTestId('quickstart-sample-agent-row');
       expect(within(row).getByText(AGENT_NAME)).toBeInTheDocument();
       expect(within(row).getByText(AGENT_DESCRIPTION)).toBeInTheDocument();
       expect(within(row).getByText('Running')).toBeInTheDocument();
@@ -83,7 +85,7 @@ describe('QuickstartPanel', () => {
     it('links the whole row to the agent page', () => {
       renderPanel();
 
-      expect(screen.getByTestId('quickstart-agent-row')).toHaveAttribute(
+      expect(screen.getByTestId('quickstart-sample-agent-row')).toHaveAttribute(
         'href',
         getAgentDetailRoute(WS, AGENT_NAME)
       );
@@ -96,7 +98,7 @@ describe('QuickstartPanel', () => {
         agent: { name: AGENT_NAME, description: 'x'.repeat(400), status: 'Running' },
       });
 
-      expect(screen.getByTestId('quickstart-agent-description')).toHaveClass('truncate');
+      expect(screen.getByTestId('quickstart-sample-agent-description')).toHaveClass('truncate');
     });
 
     it('renders nothing when no sample agent is installed', () => {
@@ -129,7 +131,7 @@ describe('QuickstartPanel', () => {
     it('closes the timeline by dropping the connector after the last step', () => {
       renderPanel();
 
-      expect(screen.getAllByTestId('quickstart-step-connector')).toHaveLength(
+      expect(screen.getAllByTestId('quickstart-sample-step-connector')).toHaveLength(
         STUDIO_STEP_TITLES.length - 1
       );
     });
@@ -165,29 +167,19 @@ describe('QuickstartPanel', () => {
       );
     });
 
-    it('omits the modal actions when the caller cannot open them', () => {
+    it('links the modal actions to the agent page, which opens them on arrival', () => {
       renderPanel();
 
-      // Scoped to the control, not the text — step 4's heading is also "Optimize".
-      expect(
-        within(stepAt(2)).queryByRole('button', { name: 'Run Evaluation' })
-      ).not.toBeInTheDocument();
-      expect(within(stepAt(3)).queryByRole('button', { name: 'Optimize' })).not.toBeInTheDocument();
-      expect(within(stepAt(3)).getAllByRole('link')).toHaveLength(1);
-    });
-
-    it('offers the modal actions as buttons when handlers are supplied', async () => {
-      const onRunEvaluation = vi.fn();
-      const onOptimize = vi.fn();
-      const user = userEvent.setup();
-      renderPanel({ onRunEvaluation, onOptimize });
-
-      // A button, not a link — these open modals and have no URL of their own.
-      await user.click(within(stepAt(2)).getByRole('button', { name: 'Run Evaluation' }));
-      await user.click(within(stepAt(3)).getByRole('button', { name: 'Optimize' }));
-
-      expect(onRunEvaluation).toHaveBeenCalledTimes(1);
-      expect(onOptimize).toHaveBeenCalledTimes(1);
+      // Links, not buttons — the modals live on the agent page. Scoped to the step, since
+      // step 4's heading is also "Optimize".
+      expect(within(stepAt(2)).getByRole('link', { name: 'Run Evaluation' })).toHaveAttribute(
+        'href',
+        getAgentRunEvaluationRoute(WS, AGENT_NAME)
+      );
+      expect(within(stepAt(3)).getByRole('link', { name: 'Optimize' })).toHaveAttribute(
+        'href',
+        getAgentOptimizeRoute(WS, AGENT_NAME)
+      );
     });
   });
 
@@ -220,7 +212,7 @@ describe('QuickstartPanel', () => {
     it('drops the connector for whatever step ends up last', () => {
       renderPanel({ agentOptimizationsEnabled: false });
 
-      expect(screen.getAllByTestId('quickstart-step-connector')).toHaveLength(2);
+      expect(screen.getAllByTestId('quickstart-sample-step-connector')).toHaveLength(2);
     });
 
     it('renders nothing when the agents routes are disabled', () => {

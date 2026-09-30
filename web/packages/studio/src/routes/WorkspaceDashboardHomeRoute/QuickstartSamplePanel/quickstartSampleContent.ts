@@ -7,17 +7,21 @@ import {
   getAgentDetailRoute,
   getAgentEvaluationsTabRoute,
   getAgentOptimizationsTabRoute,
+  getAgentOptimizeRoute,
+  getAgentRunEvaluationRoute,
   getIntakeTracesRoute,
 } from '@studio/routes/utils';
 import { MessagesSquare, type LucideIcon } from 'lucide-react';
 
-export type QuickstartView = 'studio' | 'cli';
+export type QuickstartSampleView = 'studio' | 'cli';
 
-export interface QuickstartAgent {
+export interface QuickstartSampleAgent {
   readonly name: string;
   readonly description: string;
   /** Looked up in `badgeStatus` (lowercased); anything unmapped renders as "Unknown". */
   readonly status: string;
+  /** Overrides the badge text, for states with no status of their own (e.g. no deployments). */
+  readonly statusLabel?: string;
   /**
    * Not the agent name: absent an explicit `--name`, deployments are `${agent}-${8 hex}`.
    * Omitted leaves a placeholder in the command rather than a name that would 404.
@@ -25,24 +29,25 @@ export interface QuickstartAgent {
   readonly deploymentName?: string;
 }
 
-export interface QuickstartAction {
+export interface QuickstartSampleAction {
   readonly label: string;
-  readonly href?: string;
-  /** For affordances that are modals on the agent page rather than routes. */
-  readonly onClick?: () => void;
+  /** Modals on the agent page are reached through its `?action=` param, so this is always a route. */
+  readonly href: string;
 }
 
-interface QuickstartStepCopy {
+interface QuickstartSampleStepCopy {
   readonly title: string;
   readonly description: string;
 }
 
-export interface QuickstartStep {
+export interface QuickstartSampleStep {
   readonly id: string;
   readonly icon: LucideIcon;
-  readonly studio: QuickstartStepCopy & { readonly actions: readonly QuickstartAction[] };
+  readonly studio: QuickstartSampleStepCopy & {
+    readonly actions: readonly QuickstartSampleAction[];
+  };
   /** Carries its own copy: step 1 is "Chat with the agent" here, "Try the agent" in Studio. */
-  readonly cli: QuickstartStepCopy & { readonly commands: readonly string[] };
+  readonly cli: QuickstartSampleStepCopy & { readonly commands: readonly string[] };
 }
 
 /**
@@ -56,22 +61,16 @@ const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)
  * dead link. Both views drop together: the two carry the same steps in the same order, and a
  * step that Studio cannot reach is not one to hand someone a CLI command for either.
  */
-export interface QuickstartFeatures {
+export interface QuickstartSampleFeatures {
   /** `getIntakeTracesRoute` — the whole intake group is registered behind this. */
   readonly intakeEnabled?: boolean;
   /** Gates the agent page's Optimizations tab, which is where step 4 points. */
   readonly agentOptimizationsEnabled?: boolean;
 }
 
-export interface BuildQuickstartStepsOptions extends QuickstartFeatures {
+export interface BuildQuickstartSampleStepsOptions extends QuickstartSampleFeatures {
   readonly workspace: string;
-  readonly agent: QuickstartAgent;
-  /**
-   * Opens the Run Evaluation modal — component state, not a route. Without a handler the
-   * action is dropped rather than duplicating where "View results" already points.
-   */
-  readonly onRunEvaluation?: () => void;
-  readonly onOptimize?: () => void;
+  readonly agent: QuickstartSampleAgent;
 }
 
 /**
@@ -83,14 +82,12 @@ export interface BuildQuickstartStepsOptions extends QuickstartFeatures {
  * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALUATOR_ENABLED` gates
  * the standalone evaluator routes this panel never links to.
  */
-export const buildQuickstartSteps = ({
+export const buildQuickstartSampleSteps = ({
   workspace,
   agent,
-  onRunEvaluation,
-  onOptimize,
   intakeEnabled = INTAKE_ENABLED,
   agentOptimizationsEnabled = AGENT_OPTIMIZATIONS_ENABLED,
-}: BuildQuickstartStepsOptions): readonly QuickstartStep[] => {
+}: BuildQuickstartSampleStepsOptions): readonly QuickstartSampleStep[] => {
   const ws = shellQuote(workspace);
   const deployment = agent.deploymentName
     ? shellQuote(agent.deploymentName)
@@ -114,7 +111,9 @@ export const buildQuickstartSteps = ({
         title: 'Chat with the agent',
         description: 'Chat with the sample agent to see how it responds.',
         commands: [
-          `nemo agents chat --agent-deployment ${deployment} --input "Hello agent!" --workspace ${ws}`,
+          // Single quotes, not double: interactive zsh (the macOS default) and bash 3.2 read
+          // `!"` as history expansion, so a double-quoted "Hello agent!" never runs on paste.
+          `nemo agents chat --agent-deployment ${deployment} --input 'Hello agent!' --workspace ${ws}`,
         ],
       },
     },
@@ -149,7 +148,8 @@ export const buildQuickstartSteps = ({
         description: 'Run your own evaluation or view results from a sample evaluation run.',
         actions: [
           { label: 'View results', href: getAgentEvaluationsTabRoute(workspace, agent.name) },
-          ...(onRunEvaluation ? [{ label: 'Run Evaluation', onClick: onRunEvaluation }] : []),
+          // The modal lives on the agent page, which opens it from `?action=` on arrival.
+          { label: 'Run Evaluation', href: getAgentRunEvaluationRoute(workspace, agent.name) },
         ],
       },
       cli: {
@@ -173,7 +173,7 @@ export const buildQuickstartSteps = ({
                   label: 'View results',
                   href: getAgentOptimizationsTabRoute(workspace, agent.name),
                 },
-                ...(onOptimize ? [{ label: 'Optimize', onClick: onOptimize }] : []),
+                { label: 'Optimize', href: getAgentOptimizeRoute(workspace, agent.name) },
               ],
             },
             cli: {
