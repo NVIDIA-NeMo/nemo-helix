@@ -131,7 +131,7 @@ contexts:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert "Active context: production (workspace: prod-ns)" in result.stdout
+    assert "Active context: production (workspace: prod-ns, platform: https://api.example.com)" in result.stdout
     assert result.stdout.count("Active context:") == 1
     assert result.stdout.index("Active context:") < result.stdout.index("Usage:")
 
@@ -160,7 +160,7 @@ contexts:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "Active context: production (workspace: prod-ns)" in result.stdout
+    assert "Active context: production (workspace: prod-ns, platform: https://api.example.com)" in result.stdout
     assert result.stdout.count("Active context:") == 1
     assert result.stdout.index("Active context:") < result.stdout.index("Usage:")
 
@@ -198,8 +198,39 @@ contexts:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert "Active context: staging (workspace: staging-ns)" in result.stdout
+    assert "Active context: staging (workspace: staging-ns, platform: https://staging.example.com)" in result.stdout
     assert "Active context: production" not in result.stdout
+
+
+def test_root_help_redacts_platform_url_credentials(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+current_context: production
+clusters:
+  - name: production
+    base_url: https://s3cr3t-userinfo@api.example.com:8443/nhx?token=abc123#frag
+users:
+  - name: production
+    type: no-auth
+contexts:
+  - name: production
+    cluster: production
+    user: production
+    workspace: prod-ns
+"""
+    )
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_path))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert (
+        "Active context: production (workspace: prod-ns, platform: https://api.example.com:8443/nhx)" in result.stdout
+    )
+    assert "s3cr3t-userinfo" not in result.stdout
+    assert "abc123" not in result.stdout
 
 
 def test_root_no_arg_help_skips_active_context_when_config_unavailable(tmp_path, monkeypatch):

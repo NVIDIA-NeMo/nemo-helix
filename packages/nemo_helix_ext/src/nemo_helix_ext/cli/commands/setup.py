@@ -3046,7 +3046,10 @@ def _print_setup_complete(
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
-    lines = [f"[bold]Provider:[/bold] {provider_name}"]
+    lines = [
+        f"[bold]Platform:[/bold] {base_url.rstrip('/')}",
+        f"[bold]Provider:[/bold] {provider_name}",
+    ]
     if default_model:
         lines.append(f"[bold]Default model:[/bold] {_display_model_name(default_model)}")
     if fast_model:

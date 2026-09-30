@@ -4914,6 +4914,7 @@ class TestPrintSetupComplete:
         panel = mock_console.print.call_args.args[0]
         assert panel.title == "[bold]Setup complete[/bold]"
         assert panel.border_style == "green"
+        assert "Platform:[/bold] http://localhost:8080" in panel.renderable
         assert "Provider:[/bold] nvidia-build" in panel.renderable
         assert "Default model:[/bold] some-model" in panel.renderable
         assert "Fast model:[/bold] fast-model" in panel.renderable

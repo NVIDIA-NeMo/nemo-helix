@@ -18,6 +18,7 @@ import sys
 import time
 from io import StringIO
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import urlsplit, urlunsplit
 
 import click
 from click import Command
@@ -579,7 +580,11 @@ class NhxGroup(NhxErrorHandlingMixin, TyperGroup):
         except Exception:
             return None
 
-        return f"Active context: {display_context.context_name} (workspace: {display_context.workspace})"
+        platform_url = _display_url(str(display_context.cluster.base_url))
+        return (
+            f"Active context: {display_context.context_name} "
+            f"(workspace: {display_context.workspace}, platform: {platform_url})"
+        )
 
     def command(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Command] | Command:  # pyright: ignore [reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]
         """Override command decorator to use NhxCommand."""
@@ -813,6 +818,13 @@ def create_typer_app(**kwargs) -> Typer:
     """
     kwargs.setdefault("cls", NhxGroup)
     return plugin_create_typer_app(**kwargs)
+
+
+def _display_url(url: str) -> str:
+    """Drop userinfo, query, and fragment so help output never echoes URL credentials."""
+    parts = urlsplit(url)
+    host = parts.netloc.rpartition("@")[2]
+    return urlunsplit((parts.scheme, host, parts.path, "", "")).rstrip("/")
 
 
 def _maybe_format_agent_helpers(ctx: click.Context, formatter: click.HelpFormatter) -> None:

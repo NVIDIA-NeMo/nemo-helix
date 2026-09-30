@@ -85,14 +85,58 @@ relevant rows as a numbered list.
 
 ## Pre-flight
 
-Before handing off, run a host-wide platform scan. Three signals, in order — the first one that fires wins:
+Before handing off, find out which platform the CLI points at. `nemo setup` can connect the active context to a remote cluster, so do not assume `localhost:8080`:
 
 ```bash
-# 1. Ground truth: is anything listening on the canonical port?
-lsof -iTCP:8080 -sTCP:LISTEN 2>/dev/null
+# 0. Which platform does the active context use? Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT.
+#    Prints "no-config" when there is no CLI install or config file yet.
+if [ -x .venv/bin/python ]; then
+  NHX_URL=$(.venv/bin/python -c '
+from nemo_helix_ext.config.config import get_context
+try:
+    print(str(get_context().cluster.base_url).rstrip("/"))
+except FileNotFoundError:
+    print("no-config")
+') || { echo "CONFIG_ERROR (see error above)"; exit 1; }
+else
+  NHX_URL=no-config
+fi
+echo "$NHX_URL"
+```
+
+If this prints `CONFIG_ERROR`, the CLI config exists but the active context cannot be resolved (for example, `NHX_CURRENT_CONTEXT` names a missing context). Stop and show the user the error. Do not fall through to the local scan, and do not route to `setup`; suggest `nemo config view --all-contexts` and `nemo config use-context <name>`.
+
+`nemo --help` prints the same information on its first line (`Active context: <name> (workspace: <ws>, platform: <url>)`), and `nemo config view` shows the full active context.
+
+### Remote platform
+
+If `NHX_URL` is set and its host is not `localhost`, `127.0.0.1`, or `::1`, the user has already run `nemo setup` against a remote cluster. Probe only that URL. Do not use the local port and process scans below, and do not suggest `nemo setup` as an install step.
+
+```bash
+for path in /health/ready /cluster-info; do
+  code=$(curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL$path" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "no-response")
+  echo "$path $code"
+done
+```
+
+| What you observe | Hand off to | Why |
+|---|---|---|
+| Either path returns `200` | the requested downstream skill | Remote platform is configured and reachable. Tell the user which URL and context you are using. |
+| Neither path returns `200` | **stop, do not hand off yet** | The configured remote is unreachable from here (VPN, sandbox network policy, expired credentials, or cluster down). Report the URL and codes, then ask the user to check it. Offer `nemo config view` to inspect or `nemo config use-context <name>` to switch contexts. |
+
+### Local platform
+
+If `NHX_URL` is local (or `no-config`), run a host-wide platform scan. Three signals, in order — the first one that fires wins:
+
+```bash
+[ "$NHX_URL" = no-config ] && NHX_URL=http://localhost:8080
+LOCAL_PORT=$(python3 -c 'import sys; from urllib.parse import urlsplit; print(urlsplit(sys.argv[1]).port or 8080)' "$NHX_URL")
+
+# 1. Ground truth: is anything listening on the configured port?
+lsof -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null
 
 # 2. Functional check: does the platform readiness endpoint answer?
-curl -sS --connect-timeout 2 --max-time 5 http://localhost:8080/health/ready -o /dev/null -w "%{http_code}\n" 2>/dev/null || echo "no-response"
+curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL/health/ready" -o /dev/null -w "%{http_code}\n" 2>/dev/null || echo "no-response"
 
 # 3. Conflict check: other platform processes / data dirs / configs on this host?
 ps -eo pid=,user=,comm=,args= 2>/dev/null \
@@ -106,7 +150,7 @@ Interpretation:
 | What you observe | Hand off to | Why |
 |---|---|---|
 | (1) returns a listener AND (2) returns `200` | the requested downstream skill | Platform is up and ready. Skip `setup`. |
-| (1) returns a listener but (2) returns `no-response` or non-200 | `nemo-status` | Something is bound to :8080 but the platform is not ready. Do not start a second platform. |
+| (1) returns a listener but (2) returns `no-response` or non-200 | `nemo-status` | Something is bound to the platform port but the platform is not ready. Do not start a second platform. |
 | (1) empty but (3) finds another `nemo services` process OR more than one data dir / config | **stop, do not hand off yet** | Another install on this host, possibly on a different port. Surface only the redacted PID, user, and executable inventory emitted above. Ask whether to tear that one down first, pick a different port + data dir, or abort. Two installs writing to the same `~/.config/nhx/config.yaml` is how users end up with one Studio frontend pointing at the wrong backend. |
 | (1), (2), and (3) all empty | `setup` | Clean machine, no platform installed. |
 
@@ -151,7 +195,7 @@ Which one fits what you're trying to do?
 For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evaluator`, `nemo-auditor`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
 
 If the pre-flight finds no platform but the user insists they have installed one: ask them to report
-the output of `lsof -iTCP:8080 -sTCP:LISTEN` and the redacted scan below from the shell where they ran
+the output of `lsof -iTCP:<port> -sTCP:LISTEN` (the port from `NHX_URL`, usually `8080`) and the redacted scan below from the shell where they ran
 setup. The platform may be bound to a non-default port, or the install may be in a venv whose `nemo`
 binary is not on `PATH`.
 
