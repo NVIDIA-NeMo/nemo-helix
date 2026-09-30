@@ -17,6 +17,7 @@ from nemo_evaluator.jobs.gym_environment_package import (
 from nemo_evaluator.jobs.gym_registered_agent_package import (
     ENVIRONMENT_MOUNT_PATH,
     GymRegisteredAgentPackageSpec,
+    download_wheels,
     wheel_download_command,
     write_registered_agent_package,
 )
@@ -34,14 +35,15 @@ def _spec(**overrides) -> GymRegisteredAgentPackageSpec:
         agent=AgentRef(root="dev/Calc-Agent"),
         resolved_config=_CONFIG,
         requirements=["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"],
+        constraints=["openai<=2.7.2"],
     )
     fields.update(overrides)
     return GymRegisteredAgentPackageSpec(**fields)
 
 
 def _fake_download(calls: list):
-    def download(requirements, destination: Path, python_version: str, platform):
-        calls.append((list(requirements), python_version, platform))
+    def download(requirements, constraints, destination: Path, python_version: str, platform):
+        calls.append((list(requirements), list(constraints), python_version, platform))
         (destination / "nemo_fabric-0.3.0-py3-none-any.whl").write_bytes(b"")
 
     return download
@@ -86,7 +88,7 @@ def test_the_package_is_a_valid_wheels_v1_environment_running_the_platform_compo
     }  # bound by the resolver's Hydra override
     assert instance["model_server"] == {"type": "responses_api_models", "name": "policy_model"}
     assert instance["timeout"] == 900
-    assert calls == [(["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"], "3.13", None)]
+    assert calls == [(["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"], ["openai<=2.7.2"], "3.13", None)]
 
 
 def test_a_users_wheels_environment_is_extended_and_a_native_one_refused(tmp_path: Path) -> None:
@@ -129,7 +131,8 @@ def test_a_users_wheels_environment_is_extended_and_a_native_one_refused(tmp_pat
 
 def test_the_wheelhouse_is_downloaded_for_the_hosts_interpreter_not_the_job_containers(tmp_path: Path) -> None:
     """pip matches platform tags exactly, so both manylinux tags a wheel may carry are requested."""
-    command = wheel_download_command(["nemo-fabric[relay]==0.3.0"], tmp_path, "3.13", "arm64")
+    command = wheel_download_command(["nemo-fabric[relay]==0.3.0"], tmp_path / "pins.txt", tmp_path, "3.13", "arm64")
+    assert command[command.index("--constraint") + 1] == str(tmp_path / "pins.txt")
     assert command[command.index("--python-version") + 1] == "3.13"
     assert command[command.index("--abi") + 1] == "cp313"
     assert "--only-binary=:all:" in command
@@ -138,6 +141,25 @@ def test_the_wheelhouse_is_downloaded_for_the_hosts_interpreter_not_the_job_cont
         "manylinux_2_28_aarch64",
     ]
     assert command[-1] == "nemo-fabric[relay]==0.3.0"
-    assert "--platform" in wheel_download_command(
-        ["x"], tmp_path, "3.13", None
-    )  # the container's own arch, still Linux tags
+    unconstrained = wheel_download_command(["x"], None, tmp_path, "3.13", None)
+    assert "--platform" in unconstrained  # the container's own arch, still Linux tags
+    assert "--constraint" not in unconstrained
+
+
+def test_download_wheels_hands_pip_a_constraints_file_and_cleans_it_up(tmp_path: Path, mocker) -> None:
+    """The host's Gym pins travel to pip as a constraints file that lives only for the invocation."""
+    seen: dict[str, object] = {}
+
+    def run(command, **kwargs):
+        idx = command.index("--constraint")
+        seen["constraints"] = Path(command[idx + 1]).read_text()
+        return mocker.Mock(returncode=0, stderr="")
+
+    mocker.patch("nemo_evaluator.jobs.gym_registered_agent_package.subprocess.run", side_effect=run)
+    wheelhouse = tmp_path / "wheels"
+    wheelhouse.mkdir()
+
+    download_wheels(["nemo-fabric[relay]==0.3.0"], ["openai<=2.7.2", "httpx<1"], wheelhouse, "3.13", None)
+
+    assert seen["constraints"] == "openai<=2.7.2\nhttpx<1\n"
+    assert not (tmp_path / ".wheel-constraints.txt").exists()

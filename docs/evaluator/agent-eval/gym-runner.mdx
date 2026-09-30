@@ -461,6 +461,9 @@ What this requires:
   not `localhost`.
 - The wheelhouse is downloaded from a package index by the job container on every run, tens of
   megabytes per harness. Image-side packaging is planned to replace this.
+- The wheelhouse is resolved under `sandbox_gym_wheel_constraints` (default `openai<=2.7.2`, the cap
+  `nemo-gym` 0.5.0 carries) so the harness and Gym's own servers install from one consistent set.
+  Change the constraints together with `sandbox_runtime_image` when the host image moves to a newer Gym.
 - A registered agent that binds several models keeps only its default through Gym's policy server;
   named secondary models still call the gateway directly. Relay/ATIF trajectory capture from inside
   the Gym host is not wired yet; the rollout record carries the agent's messages as Responses items.

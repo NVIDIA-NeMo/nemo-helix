@@ -44,7 +44,7 @@ AGENT_FILES_SUBDIR = "agents"
 #: The Gym host image's interpreter; wheels are downloaded for it, not for the job container's.
 DEFAULT_WHEEL_PYTHON_VERSION = "3.13"
 
-WheelDownloader = Callable[[Sequence[str], Path, str, str | None], None]
+WheelDownloader = Callable[[Sequence[str], Sequence[str], Path, str, str | None], None]
 
 
 class GymRegisteredAgentPackageSpec(BaseModel):
@@ -58,6 +58,11 @@ class GymRegisteredAgentPackageSpec(BaseModel):
         min_length=1,
         description="Requirement specifiers for the wheelhouse: the Fabric harness extra and companions.",
     )
+    constraints: list[str] = Field(
+        default_factory=list,
+        description="Version constraints the wheelhouse is resolved under: the pins of the Gym the host runs, so "
+        "the component and Gym's own servers resolve against one consistent set.",
+    )
     wheel_python_version: str = Field(default=DEFAULT_WHEEL_PYTHON_VERSION)
     wheel_architecture: str | None = Field(
         default=None,
@@ -70,7 +75,11 @@ _ARCH_ALIASES = {"amd64": "x86_64", "arm64": "aarch64"}
 
 
 def wheel_download_command(
-    requirements: Sequence[str], destination: Path, python_version: str, architecture: str | None
+    requirements: Sequence[str],
+    constraints_file: Path | None,
+    destination: Path,
+    python_version: str,
+    architecture: str | None,
 ) -> list[str]:
     """The ``pip download`` invocation for a wheelhouse the Gym host's interpreter can install offline.
 
@@ -96,21 +105,32 @@ def wheel_download_command(
         f"manylinux2014_{arch}",
         "--platform",
         f"manylinux_2_28_{arch}",
+        *(["--constraint", str(constraints_file)] if constraints_file else []),
         *requirements,
     ]
 
 
 def download_wheels(
-    requirements: Sequence[str], destination: Path, python_version: str, architecture: str | None
+    requirements: Sequence[str],
+    constraints: Sequence[str],
+    destination: Path,
+    python_version: str,
+    architecture: str | None,
 ) -> None:
     """Fill ``destination`` with wheels for ``requirements`` and everything they need, for the host's interpreter."""
-    command = wheel_download_command(requirements, destination, python_version, architecture)
+    constraints_file = None
+    if constraints:
+        constraints_file = destination.parent / ".wheel-constraints.txt"
+        constraints_file.write_text("\n".join(constraints) + "\n", encoding="utf-8")
+    command = wheel_download_command(requirements, constraints_file, destination, python_version, architecture)
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0 and "No module named pip" in result.stderr:
         # The task image's interpreter has no pip; uv brings one for the invocation.
         result = subprocess.run(
             ["uv", "run", "--no-project", "--with", "pip", "python", *command[1:]], capture_output=True, text=True
         )
+    if constraints_file is not None:
+        constraints_file.unlink(missing_ok=True)
     if result.returncode != 0:
         raise RuntimeError(f"wheelhouse download failed for {list(requirements)}: {result.stderr.strip()[-2000:]}")
 
@@ -181,7 +201,9 @@ def write_registered_agent_package(
 
     wheelhouse = root / WHEELHOUSE_SUBDIR
     wheelhouse.mkdir(exist_ok=True)
-    (download or download_wheels)(spec.requirements, wheelhouse, spec.wheel_python_version, spec.wheel_architecture)
+    (download or download_wheels)(
+        spec.requirements, spec.constraints, wheelhouse, spec.wheel_python_version, spec.wheel_architecture
+    )
 
     manifest = _merged_manifest(root, config_path, spec.agent.root.rpartition("/")[2])
     (root / ENVIRONMENT_MANIFEST_FILENAME).write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
