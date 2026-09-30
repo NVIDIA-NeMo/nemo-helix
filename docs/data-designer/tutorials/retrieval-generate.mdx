@@ -7,7 +7,7 @@ description: ""
 
 [Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/data-designer/tutorials/retrieval-generate.ipynb)
 
-Run Nemotron Stage 0 on NeMo Platform: turn a document corpus into judged question-and-answer pairs with `nemo data-designer retrieval-generate`. Use this when the training data has to come from your own documents.
+Run Nemotron Stage 0 on NeMo Helix: turn a document corpus into judged question-and-answer pairs with `nemo data-designer retrieval-generate`. Use this when the training data has to come from your own documents.
 
 The faster path skips generation entirely and starts from NVIDIA's published NVDocs dump in [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job).
 
@@ -15,7 +15,7 @@ The [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/do
 
 ## Prerequisites
 
-- A running NeMo Platform at `NMP_BASE_URL`, default `http://localhost:8080`
+- A running NeMo Helix at `NMP_BASE_URL`, default `http://localhost:8080`
 - A corpus fileset of UTF-8 `.txt` or `.md` files, or an `hf://` URI
 - An Inference Gateway chat provider, plus the chat and embedding model names it serves
 - At least 50 documents, and 500 or more for good domain coverage. Below that, Stage 1 can put nearly every query in the test split

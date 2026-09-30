@@ -97,7 +97,7 @@ Users can list and revoke their own keys. Rotation is not implemented.
 
 Scoped Access Keys are an auth-service feature exposed under the auth CLI
 namespace (`nemo auth access-keys ...`) and the `/apis/auth/v2/access-keys` API routes.
-They are not a standalone NeMo Platform plugin.
+They are not a standalone NeMo Helix plugin.
 
 Scoped Access Keys are disabled by default. Enable them only when the auth
 service has a shared RSA signing key:
@@ -203,7 +203,7 @@ containers need different network-reachable IdP URLs.
 
 For Docker-backed job runtimes, `auth.oidc.workload_token_exchange_enabled`
 controls workload identity. When enabled, job steps with a delegation auth
-context receive a NeMo Platform opaque workload proof token at
+context receive a NeMo Helix opaque workload proof token at
 `NMP_WORKLOAD_IDENTITY_TOKEN_FILE`.
 
 For Kubernetes-backed job runtimes, the jobs backend can project a Kubernetes

@@ -15,7 +15,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 ### Tutorial-Specific Prerequisites
 
-- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Platform locally.
+- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Helix locally.
 - Installed the Python SDK and any tutorial packages you need in your environment.
 - A Hugging Face token with access to the private or gated model repository.
 - A Hugging Face model with a compatible architecture. This tutorial uses `google/gemma-2-2b-it` as an example, but success depends on architectural compatibility.
@@ -23,7 +23,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 <Note>
 
-This tutorial uses the current NeMo Platform SDK resources: `client.files.filesets`, `client.models`, `client.customization.automodel.jobs`, and `client.inference.gateway`.
+This tutorial uses the current NeMo Helix SDK resources: `client.files.filesets`, `client.models`, `client.customization.automodel.jobs`, and `client.inference.gateway`.
 
 </Note>
 
@@ -59,7 +59,7 @@ For a complete list of tested models, see the [Model Catalog](/documentation/cus
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Platform server URL. By default, this tutorial uses `http://localhost:8080`.
+The SDK needs your NeMo Helix server URL. By default, this tutorial uses `http://localhost:8080`.
 
 ```sh
 export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
@@ -103,7 +103,7 @@ client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
 
 ### 2. Store the Hugging Face Token
 
-Private and gated Hugging Face repositories require a token. Store it as a NeMo Platform secret and reference that secret from the Hugging Face fileset.
+Private and gated Hugging Face repositories require a token. Store it as a NeMo Helix secret and reference that secret from the Hugging Face fileset.
 
 ```python
 def create_or_get_secret(name: str, value: str | None, label: str) -> PlatformSecretResponse:

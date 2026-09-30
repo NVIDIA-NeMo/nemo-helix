@@ -44,7 +44,7 @@ import nemo_evaluator_sdk
 print(nemo_evaluator_sdk.version)
 ```
 
-You do not need a running NeMo Platform instance to define the metric or run it locally. Start NeMo Platform and configure platform resources before submitting the durable remote job.
+You do not need a running NeMo Helix instance to define the metric or run it locally. Start NeMo Helix and configure platform resources before submitting the durable remote job.
 
 ## 1. Understand the Metric Contract
 
@@ -276,7 +276,7 @@ With this mapping in place, every row still preserves its original `model_expres
 
 ## 6. Prepare Platform Resources
 
-To run the same metric remotely, install and start NeMo Platform using the [Setup guide](/documentation/get-started). You also need:
+To run the same metric remotely, install and start NeMo Helix using the [Setup guide](/documentation/get-started). You also need:
 
 - A model entity that can be referenced as `workspace/model-name`. See [Model Configuration](/documentation/evaluate-models/metrics/model-configuration) for model setup details.
 - A platform secret for the model, if the model requires an API key.

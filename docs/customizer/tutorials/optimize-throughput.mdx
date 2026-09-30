@@ -8,7 +8,7 @@ description: ""
 [Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
 
 ## About
-Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime. 
+Learn how to use the NeMo Helix Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime.
 
 **In this tutorial, you will:**
 1. Fine-tune [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
@@ -21,7 +21,7 @@ Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
@@ -29,7 +29,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
 
 ```sh
 export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
@@ -333,7 +333,7 @@ print(f"Output adapter: {PACK_OUTPUT_NAME}")
 
 ### 6. Track Fine-Tuning Progress
 
-A training job contains multiple steps: 
+A training job contains multiple steps:
 - Model and dataset downloading
 - Fine-tuning where LoRA adapter weights are trained
 - Creating a fileset entry for the fine-tuned model

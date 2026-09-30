@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="auditor-targets"></a>
 
-An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in the NeMo Platform entity store and referenced by name from `client.auditor.run(...)`.
+An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in the NeMo Helix entity store and referenced by name from `client.auditor.run(...)`.
 
 ## What an AuditTarget Holds
 
@@ -24,7 +24,7 @@ See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for th
 
 ### NIM via Inference Gateway
 
-Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Platform provider:
+Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix provider:
 
 ```python
 # List providers registered in your deployment and pick one.

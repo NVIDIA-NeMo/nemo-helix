@@ -410,7 +410,7 @@ The plugin uses two different header-forwarding paths for main models and task m
 
 The main model is the one IGW resolves from `default_model_entity` and that handles generation. When the plugin builds the per-request main LLM, it forwards a curated allowlist from the inbound request:
 
-- All headers starting with `x-` or `X-` — NeMo Platform principal headers, `x-otel-*`, and any custom `X-Foo` headers your client sets.
+- All headers starting with `x-` or `X-` — NeMo Helix principal headers, `x-otel-*`, and any custom `X-Foo` headers your client sets.
 - W3C Trace Context headers: `traceparent`, `tracestate`, `baggage`.
 
 `Authorization` and other non-allowlisted headers are intentionally dropped — IGW handles auth.
