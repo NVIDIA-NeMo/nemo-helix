@@ -97,6 +97,7 @@ _CLAIM_SQL = f"""
         SELECT e.id, e.status
         FROM evaluations e
         WHERE {_CLAIMABLE_SQL}
+          AND (%s::text IS NULL OR e.id = %s::text)
         ORDER BY
             CASE e.status
                 WHEN 'running' THEN 0
@@ -1190,9 +1191,18 @@ class EvaluationRepository:
             )
             return cur.rowcount != 0
 
-    def claim_next(self, *, claim_timeout: float, worker_id: str) -> dict | None:
+    def claim_next(
+        self,
+        *,
+        claim_timeout: float,
+        worker_id: str,
+        evaluation_id: str | None = None,
+    ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
-            cur.execute(_CLAIM_SQL, (claim_timeout, worker_id, claim_timeout))
+            cur.execute(
+                _CLAIM_SQL,
+                (claim_timeout, evaluation_id, evaluation_id, worker_id, claim_timeout),
+            )
             row = cur.fetchone()
             if row is not None and row.get("previous_status") == "queued" and row.get("status") == "provisioning":
                 self.insert_status_event(
