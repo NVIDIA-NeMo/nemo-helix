@@ -21,7 +21,12 @@ from nemo_evaluator.api.schemas import (
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash
 from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentEvalTaskInput, ResolvedTask
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalSpec,
+    AgentEvalTaskInput,
+    GymAgentSource,
+    ResolvedTask,
+)
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS
 from nemo_evaluator.jobs.kinds.types import LoadedTask, SubmitContext
@@ -786,7 +791,9 @@ def _direct_target(kind):
                 config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
             )
         ),
-        "gym": lambda: GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+        "gym": lambda: GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+        ),
         "offline": lambda: None,
     }[kind]()
 
@@ -1003,7 +1010,9 @@ async def test_gym_content_rejected_before_environment_resolution(source, field,
         await AgentEvalJob.to_spec(
             AgentEvalInputSpec(
                 tasks=sources[source],
-                target=GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
+                target=GymRunnerTarget(
+                    source=GymAgentSource(component="simple_agent", config="simple.yaml"), resources_server="mcqa"
+                ),
             ),
             workspace="default",
             entity_client=entity_store,

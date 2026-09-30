@@ -17,7 +17,10 @@ from typing import Any
 import pytest
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    GymAgentSource,
+    GymRunnerTarget,
+)
 from nemo_evaluator.jobs.gym_sandbox import (
     CollectionTimeoutError,
     SandboxPlan,
@@ -45,7 +48,10 @@ def target(**overrides: Any) -> GymRunnerTarget:
         "resources_server": "mcqa",
     }
     fields.update(overrides)
-    return GymRunnerTarget(**fields)
+    source = GymAgentSource(
+        component=fields.pop("agent"), config=fields.pop("agent_config"), instance=fields.pop("agent_ref_name", None)
+    )
+    return GymRunnerTarget(source=source, **fields)
 
 
 def capable_config(**overrides: Any) -> EvaluatorConfig:
@@ -170,7 +176,7 @@ def test_custom_environment_omits_agent_config_when_the_package_supplies_the_age
 
 
 def test_agent_config_is_required_without_an_environment_package() -> None:
-    with pytest.raises(ValueError, match="agent_config field is required"):
+    with pytest.raises(ValueError, match="source.config` is required"):
         target(agent_config=None)
 
 

@@ -25,7 +25,7 @@ import httpx
 import pytest
 from nemo_evaluator.api.schemas import MetricInline, MetricRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec
 from nemo_evaluator.sdk.job_resources import EvaluatorJobResource
 from nemo_evaluator.sdk.resources import Evaluator
@@ -808,8 +808,9 @@ def test_gym_agent_evaluate_job_completes(
     task_dicts = _gym_task_payloads(2)  # keep the run cheap; this is a wiring test
 
     target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="mcqa",
         num_repeats=1,
         concurrency=2,
@@ -860,8 +861,9 @@ def test_gym_agent_evaluate_job_invalid_config_fails(
 ) -> None:
     """Rejects an invalid Gym selection before starting its environment servers."""
     target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="missing-e2e-resources-server",
         num_repeats=1,
         concurrency=1,
