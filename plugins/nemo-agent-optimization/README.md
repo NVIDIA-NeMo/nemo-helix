@@ -117,8 +117,6 @@ reached the command reports that on stderr and exits non-zero rather than
 listing this environment, because this environment describes a different
 machine.
 
-Only the names go to stdout, one per line, so piping stays clean.
-
 The list is whatever the platform has installed: each entry is a job's
 declared `nemo_agent_optimization_strategy`, so installing a plugin that ships
 one adds it without any change to this package.
