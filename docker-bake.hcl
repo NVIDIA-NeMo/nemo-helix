@@ -755,6 +755,37 @@ target "nhx-tasks-smoke-test" {
   platforms  = get_platforms()
 }
 
+# OpenShell-compatible CPU tasks image: sandbox user,
+# supervisor apt deps, and a baked jobs-launcher. Not in docker-cpu; build with
+# `make docker-load DOCKER_TARGET=nhx-tasks-openshell-docker`.
+target "nhx-tasks-openshell-docker" {
+  target     = "openshell"
+  context    = "."
+  dockerfile = "docker/Dockerfile.nhx-tasks"
+  contexts = {
+    nhx-python-base           = "target:nhx-python-base"
+    nhx-workspace             = "target:nhx-workspace"
+    nhx-jobs-launcher         = "target:nhx-jobs-launcher"
+    root-busybox              = "target:root-busybox"
+  }
+  args = {
+    NHX_COLLECT_SOURCES        = NHX_COLLECT_SOURCES
+    NHX_CPU_TASKS_RUNTIME_BASE = NHX_CPU_TASKS_RUNTIME_BASE
+  }
+  cache-from = maybe_registry_cache_from("nhx-tasks")
+  tags       = sha_and_maybe_latest_tags("nhx-tasks-openshell")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+# Runs jobs-launcher as the sandbox user with PATH reset, mirroring OpenShell.
+target "nhx-tasks-openshell-smoke-test" {
+  inherits = ["nhx-tasks-openshell-docker"]
+  target   = "openshell-smoke-test"
+  tags     = []
+  output   = ["type=cacheonly"]
+}
+
 # Dedicated colocated Gym task image. Gym and Ray remain isolated from the shared CPU task image.
 target "nhx-gym-tasks-docker" {
   target     = "runtime"
