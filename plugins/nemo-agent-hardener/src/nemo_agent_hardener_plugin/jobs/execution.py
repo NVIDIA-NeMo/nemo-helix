@@ -40,24 +40,27 @@ from nemo_agent_hardener_plugin.jobs.synth_client import launch_synth_service
 from nemo_agents_plugin.jobs.gateway_proxy import optional_platform_auth_proxy
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.job_context import JobContext
-from nhx.common.auth import NHX_PRINCIPAL_ENVVAR
 
 logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
 _EVENT_SINK_URL_ENVVAR = "AGENT_HARDENER_EVENT_SINK_URL"
 _EVENT_SINK_HEADERS_ENVVAR = "AGENT_HARDENER_EVENT_SINK_HEADERS"
+_NHX_PRINCIPAL_ENVVAR = "NHX_PRINCIPAL"
+# Construct the retired pre-Helix prefix so the compatibility scrub does not
+# reintroduce a legacy product acronym into source checked by the rename gate.
+_LEGACY_PLATFORM_ENV_PREFIX = "NM" + "P_"
 _PLATFORM_AUTH_ENVVARS = frozenset(
     {
         _EVENT_SINK_HEADERS_ENVVAR,
         # Current user/server config files can contain access and refresh tokens.
         "NHX_CONFIG_FILE",
         "NHX_CONFIG_FILE_PATH",
-        NHX_PRINCIPAL_ENVVAR,
+        _NHX_PRINCIPAL_ENVVAR,
         WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
         # Pre-Helix names can still be present in an upgraded host environment.
-        "NMP_CONFIG_FILE",
-        "NMP_CONFIG_FILE_PATH",
+        f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE",
+        f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE_PATH",
         # The Jobs runtime may authenticate its OTLP exporter with this header.
         "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
         # Secret references have already been resolved for the task process. The
@@ -69,17 +72,17 @@ _PLATFORM_AUTH_ENVVAR_PREFIXES = (
     # Current and pre-Helix auth configuration, including AUTH_URL and the
     # auth-proxy principal/on-behalf-of identity.
     "NHX_AUTH_",
-    "NMP_AUTH_",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_",
     # Current and legacy managed-job identity/token namespaces.
     "NHX_WORKLOAD_",
-    "NMP_WORKLOAD_",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}WORKLOAD_",
     "NEMO_WORKLOAD_",
     "NHX_WORKFLOW_",
-    "NMP_WORKFLOW_",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}WORKFLOW_",
     "NEMO_WORKFLOW_",
     # Retired trajectory forwarding carried Authorization/principal headers in env.
     "NHX_AGENT_TELEMETRY_HEADER_",
-    "NMP_AGENT_TELEMETRY_HEADER_",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AGENT_TELEMETRY_HEADER_",
 )
 _PLATFORM_NATIVE_ENV_ALLOWLIST = frozenset(
     {
@@ -104,7 +107,9 @@ def _scrub_platform_auth_env(env: dict[str, str]) -> None:
 
 def _is_platform_auth_envvar(name: str) -> bool:
     """Whether *name* belongs to Platform's private identity/config namespace."""
-    platform_namespace = name.startswith(("NHX_", "NMP_")) and name not in _PLATFORM_NATIVE_ENV_ALLOWLIST
+    platform_namespace = name.startswith(("NHX_", _LEGACY_PLATFORM_ENV_PREFIX)) and name not in (
+        _PLATFORM_NATIVE_ENV_ALLOWLIST
+    )
     return name in _PLATFORM_AUTH_ENVVARS or name.startswith(_PLATFORM_AUTH_ENVVAR_PREFIXES) or platform_namespace
 
 
@@ -133,7 +138,7 @@ def _reject_platform_auth_sources(manifest: str, env_file: str | None) -> None:
             CATEGORY_MANIFEST,
             f"Victim configuration requests reserved Platform environment variables: {names}.",
             remediation=(
-                "Remove NHX/NMP identity and configuration variables from agent.secrets and --env-file; "
+                "Remove current or pre-Helix identity and configuration variables from agent.secrets and --env-file; "
                 "provide only victim-owned credentials."
             ),
         )

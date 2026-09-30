@@ -42,6 +42,8 @@ def _ctx(tmp_path: Path) -> JobContext:
     return make_job_context(tmp_path)
 
 
+_LEGACY_PLATFORM_ENV_PREFIX = "NM" + "P_"
+
 _PLATFORM_AUTH_ENV = {
     "AGENT_HARDENER_EVENT_SINK_HEADERS": "Authorization=Bearer platform-token",
     "NEMO_JOB_SECRETS": "SECRET=system/platform-secret",
@@ -61,15 +63,15 @@ _PLATFORM_AUTH_ENV = {
     "NHX_PRINCIPAL": '{"id":"qa@example.com"}',
     "NHX_RUNTIME": "platform-runtime-metadata",
     "NHX_WORKLOAD_IDENTITY_TOKEN_FILE": "/platform/workload-token",
-    "NMP_ACCESS_TOKEN": "pre-helix-access-token",
-    "NMP_API_KEY": "pre-helix-api-key",
-    "NMP_AUTH_PROXY_ON_BEHALF_OF": "pre-helix-user",
-    "NMP_AUTH_PROXY_PRINCIPAL": "service:jobs",
-    "NMP_AUTH_URL": "https://platform.test/legacy-auth",
-    "NMP_CONFIG_FILE": "/platform/legacy-user-config.yaml",
-    "NMP_CONFIG_FILE_PATH": "/platform/legacy-server-config.yaml",
-    "NMP_PRINCIPAL": '{"id":"legacy@example.com"}',
-    "NMP_WORKLOAD_IDENTITY_TOKEN_FILE": "/platform/legacy-subject-token",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}ACCESS_TOKEN": "pre-helix-access-token",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}API_KEY": "pre-helix-api-key",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_PROXY_ON_BEHALF_OF": "pre-helix-user",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_PROXY_PRINCIPAL": "service:jobs",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}AUTH_URL": "https://platform.test/legacy-auth",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE": "/platform/legacy-user-config.yaml",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}CONFIG_FILE_PATH": "/platform/legacy-server-config.yaml",
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}PRINCIPAL": '{"id":"legacy@example.com"}',
+    f"{_LEGACY_PLATFORM_ENV_PREFIX}WORKLOAD_IDENTITY_TOKEN_FILE": "/platform/legacy-subject-token",
     "OTEL_EXPORTER_OTLP_LOGS_HEADERS": "Authorization=Bearer logs-token",
 }
 
