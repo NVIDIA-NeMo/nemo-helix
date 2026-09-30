@@ -2120,6 +2120,51 @@ async def test_auth_demoted_provider_not_escalated_to_lost(reconciler, _make_pro
 
 
 @pytest.mark.asyncio
+async def test_auth_demoted_provider_survives_transient_blip_not_lost(reconciler, _make_provider):
+    """Regression: a transient discovery failure on an already auth-demoted ERROR provider must
+    PRESERVE the auth marker (never LOST it).
+
+    Sequence guarded: a mature (previously-READY) provider is demoted READY→ERROR by an
+    authoritative 401/403 (status_message stamped with _AUTH_FAILURE_STATUS_PREFIX). On a later
+    retry cycle discovery hits a *transient* error (timeout, not 401/403) rather than the auth
+    error. Before the fix, _on_transient_failure's ERROR branch unconditionally overwrote the
+    status_message with 'Discovery retry failed: …', destroying the auth marker — so on the FOLLOWING
+    cycle _is_auth_demoted returned False and the created-age LOST gate buried the (fixable)
+    provider as LOST. The fix preserves the auth-prefixed status_message for an auth-demoted
+    provider, so its F1 exemption survives transient blips. served_models stay intact.
+    """
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        # Old enough that the created-age LOST gate WOULD fire if the marker were lost.
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now - timedelta(seconds=PROVIDER_ERROR_RETRY_INTERVAL_SECONDS + 5),
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 401)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    # This retry cycle fails TRANSIENTLY (network/timeout), NOT with an auth error.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryTransientError(message="timed out reaching GET /v1/models"),
+    ) as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # Discovery was retried (cooldown had elapsed) and the provider re-written as ERROR — crucially
+    # KEEPING the auth marker, so it stays exempt from the LOST gate on the next cycle.
+    mock_query.assert_called_once()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert call_kwargs["status"] != "LOST"
+    # The auth marker MUST be preserved (not overwritten by the transient 'Discovery retry failed').
+    assert call_kwargs["status_message"].startswith(_AUTH_FAILURE_STATUS_PREFIX)
+
+
+@pytest.mark.asyncio
 async def test_auth_demoted_provider_within_cooldown_is_left_untouched(reconciler, _make_provider):
     """An auth-demoted ERROR provider still inside its retry cooldown is neither escalated to LOST
     nor re-probed — it is simply left alone until the cooldown elapses."""

@@ -837,16 +837,27 @@ class ModelProviderReconciler:
                     },
                 )
         elif provider.status == ModelProviderStatus.ERROR:
-            # Bump updated_at to pace the next retry
+            # Bump updated_at to pace the next retry. A provider demoted to ERROR by an
+            # authoritative auth failure carries the _AUTH_FAILURE_STATUS_PREFIX marker; a later
+            # transient blip must NOT overwrite it, or _is_auth_demoted would stop recognising the
+            # provider next cycle and the created-age LOST gate would bury a fixable, previously
+            # -READY provider (the exact F1 regression). Preserve the auth marker in that case and
+            # only refresh the message for a genuinely non-auth ERROR provider.
+            if self._is_auth_demoted(provider):
+                status_message = provider.status_message
+            else:
+                status_message = (
+                    f"Discovery retry failed: {err.message}"
+                    if err.message
+                    else "Discovery retry failed: still unable to reach GET /v1/models"
+                )
             try:
                 await self._models_client.update_provider_status(
                     name=provider.name,
                     workspace=provider.workspace,
                     body=UpdateModelProviderStatusRequest(
                         status=ModelProviderStatus.ERROR,
-                        status_message=f"Discovery retry failed: {err.message}"
-                        if err.message
-                        else "Discovery retry failed: still unable to reach GET /v1/models",
+                        status_message=status_message,
                     ),
                 )
             except Exception:
