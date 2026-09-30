@@ -270,6 +270,13 @@ def test_writer_upserts_with_compare_and_swap_and_resumes_from_the_watermark() -
     assert (updated.id, updated.db_version, updated.status) == ("entity-1", 7, "failed")
     assert len(client.stored) == 1
 
+    # The Job and the controller both project; a row read before the stored one
+    # must not win, or the regression would outlive the controller's watermark.
+    stale = _row(status="running")
+    stale["updated_at"] = _row()["updated_at"] - timedelta(seconds=1)
+    writer.project(stale)
+    assert client.stored[_row()["id"]].status == "failed"
+
     client.page = [updated]
     assert writer.watermark() == updated.row_updated_at
     assert client.list_calls[-1]["sort"] == "-row_updated_at"
