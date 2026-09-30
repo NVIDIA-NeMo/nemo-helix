@@ -56,6 +56,12 @@ from nemo_evaluator.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
+    MODEL_CALLS_RESULT_KEY,
+    SandboxedGymAgentTaskRunner,
+    SandboxedGymRuntimeConfig,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
@@ -284,6 +290,84 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     assert (ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME).exists()
     assert (ctx.storage.persistent / "results" / SUMMARY_RESULT_NAME).exists()
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
+
+
+def _run_sandboxed_gym_job(ctx: JobContext, mocker: MockerFixture) -> Path:
+    """Run a one-task sandboxed Gym job with the host call faked; return the downloaded artifact."""
+
+    async def host(_runner: SandboxedGymAgentTaskRunner, examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                NG_TASK_INDEX: example[NG_TASK_INDEX],
+                NG_ROLLOUT_INDEX: example[NG_ROLLOUT_INDEX],
+                "reward": 1.0,
+                MODEL_CALLS_RESULT_KEY: [{"model_call_id": "c0", "started_at": 1788534870.5}],
+            }
+            for example in examples
+        ]
+
+    mocker.patch.object(SandboxedGymAgentTaskRunner, "_collect", autospec=True, side_effect=host)
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url="http://gym-host.example/run"))
+    mocker.patch.object(AgentEvalJob, "_resolve_target", return_value=(runner, None, None))
+    task = ResolvedTask(
+        id="task-1",
+        spec=ResolvedEvaluatorTaskDefinition(
+            kind="evaluator",
+            intent="Answer the question.",
+            inputs=_task_inputs(gym_row={"input": "What is 2+2?"}),
+            metrics=[_inline_metric()],
+        ),
+        metadata=[MetadataItem(key="gym_row_extras", value={})],
+    )
+    spec = AgentEvalSpec(
+        tasks=[task],
+        target=GymRunnerTarget(agent="simple_agent", agent_config="simple_agent.yaml", resources_server="mcqa"),
+    )
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+    return ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+
+
+def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bundle(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Gym rollouts and model-call captures must ship in the artifact with bundle-relative refs.
+
+    Anywhere else, they die with the Job's container and the trials reference paths nobody can open.
+    """
+    downloaded = _run_sandboxed_gym_job(_job_context(tmp_path), mocker)
+
+    [trial] = [json.loads(line) for line in (downloaded / "trials.jsonl").read_text(encoding="utf-8").splitlines()]
+    refs = {
+        name: descriptor["ref"]
+        for name, descriptor in trial["evidence"]["descriptors"].items()
+        if descriptor.get("ref")
+    }
+    assert set(refs) == {"rollouts", "ng_trajectory"}
+    for ref in refs.values():
+        assert not Path(ref).is_absolute()
+        assert (downloaded / ref).is_file()
+    capture = (downloaded / refs["ng_trajectory"]).read_text(encoding="utf-8")
+    assert json.loads(capture)["model_call_id"] == "c0"
+
+
+def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
+    """A retried job (Volcano ``maxRetry``) reuses the failed attempt's persistent storage; leftover Gym output
+    must not block or leak.
+
+    Gym refuses to collect into a directory that holds rollouts, and leftover files would upload with
+    the new attempt's artifact.
+    """
+    ctx = _job_context(tmp_path)
+    leftover = ctx.storage.persistent / AGENT_BUNDLE_DIR
+    (leftover / "gym_run" / "model_calls").mkdir(parents=True)
+    (leftover / "gym_run" / "rollouts.jsonl").write_text('{"reward": 0.0}\n', encoding="utf-8")
+    (leftover / "gym_run" / "model_calls" / "stale.capture.jsonl").write_text("{}\n", encoding="utf-8")
+
+    downloaded = _run_sandboxed_gym_job(ctx, mocker)
+
+    assert not (downloaded / "gym_run" / "model_calls" / "stale.capture.jsonl").exists()
+    rollouts = [json.loads(line) for line in (downloaded / "gym_run" / "rollouts.jsonl").read_text().splitlines()]
+    assert [rollout["reward"] for rollout in rollouts] == [1.0]
 
 
 def test_agent_eval_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
