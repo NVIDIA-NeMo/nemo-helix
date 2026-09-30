@@ -4304,6 +4304,39 @@ components:
       - fileset_ref
       - files_hash
       title: HarborArchiveSource
+    HarborBuiltinAgentSource:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Built-in Harbor agent to run, e.g. `oracle`.
+        model_name:
+          title: Model Name
+          description: Optional model slug passed to the agent.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: HarborBuiltinAgentSource
+      description: One of Harbor's built-in agents, selected by name.
+    HarborImportedAgentSource:
+      properties:
+        import_path:
+          type: string
+          title: Import Path
+          description: Harbor agent import path, e.g. `harbor_wrapper:WrappedAgent`.
+            The module must already be importable in the run environment.
+        model_name:
+          title: Model Name
+          description: Optional model slug passed to the agent.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - import_path
+      title: HarborImportedAgentSource
+      description: A Harbor agent class the run environment can already import.
     HarborRunnerTarget:
       properties:
         kind:
@@ -4311,22 +4344,13 @@ components:
           const: harbor
           title: Kind
           default: harbor
-        agent_name:
-          title: Agent Name
-          description: Built-in Harbor agent to run (e.g. 'oracle'). Ignored when
-            `agent_import_path` is set.
-          default: oracle
-          type: string
-        agent_import_path:
-          title: Agent Import Path
-          description: Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent');
-            overrides `agent_name`. The module must already be importable in the run
-            environment.
-          type: string
-        agent_model_name:
-          title: Agent Model Name
-          description: Optional model slug passed to the Harbor agent.
-          type: string
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/HarborBuiltinAgentSource'
+          - $ref: '#/components/schemas/HarborImportedAgentSource'
+          title: Source
+          description: 'The agent Harbor runs in each task container: a built-in agent
+            by `name`, or your own by `import_path`.'
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'

@@ -12,6 +12,7 @@ each other.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
@@ -33,6 +34,8 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_evaluator_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_evaluator_sdk.values.agents import AgentBase
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ModelTarget(BaseModel):
@@ -102,6 +105,34 @@ class FabricRunnerTarget(BaseModel):
     )
 
 
+class HarborBuiltinAgentSource(BaseModel):
+    """One of Harbor's built-in agents, selected by name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Built-in Harbor agent to run, e.g. `oracle`.")
+    model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+
+
+class HarborImportedAgentSource(BaseModel):
+    """A Harbor agent class the run environment can already import."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    import_path: str = Field(
+        description="Harbor agent import path, e.g. `harbor_wrapper:WrappedAgent`. The module must already be "
+        "importable in the run environment.",
+    )
+    model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+
+
+#: What Harbor runs in each task container. The shapes share no required field, so a document is exactly
+#: one of them.
+HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource
+
+_LEGACY_HARBOR_AGENT_FIELDS = ("agent_name", "agent_import_path", "agent_model_name")
+
+
 class HarborRunnerTarget(BaseModel):
     """Generate trials by driving a Harbor job through the SDK's :class:`HarborAgentTaskRunner`.
 
@@ -116,16 +147,11 @@ class HarborRunnerTarget(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["harbor"] = "harbor"
-    agent_name: str | None = Field(
-        default="oracle",
-        description="Built-in Harbor agent to run (e.g. 'oracle'). Ignored when `agent_import_path` is set.",
+    source: HarborAgentSource = Field(
+        default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
+        description="The agent Harbor runs in each task container: a built-in agent by `name`, or your own by "
+        "`import_path`.",
     )
-    agent_import_path: str | None = Field(
-        default=None,
-        description="Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent'); overrides `agent_name`. "
-        "The module must already be importable in the run environment.",
-    )
-    agent_model_name: str | None = Field(default=None, description="Optional model slug passed to the Harbor agent.")
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
@@ -158,6 +184,27 @@ class HarborRunnerTarget(BaseModel):
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_agent_fields(cls, data: Any) -> Any:
+        """Accept the pre-``source`` flat fields for one release. Deprecated since 0.8; remove in 0.9."""
+        if not isinstance(data, dict) or "source" in data or not any(k in data for k in _LEGACY_HARBOR_AGENT_FIELDS):
+            return data
+        lifted = {key: value for key, value in data.items() if key not in _LEGACY_HARBOR_AGENT_FIELDS}
+        model_name = data.get("agent_model_name")
+        with_model = {"model_name": model_name} if model_name is not None else {}
+        if data.get("agent_import_path") is not None:
+            lifted["source"] = {"import_path": data["agent_import_path"], **with_model}
+        elif data.get("agent_name") is not None:
+            lifted["source"] = {"name": data["agent_name"], **with_model}
+        elif model_name is not None:
+            lifted["source"] = {"name": "oracle", **with_model}
+        logger.warning(
+            "HarborRunnerTarget: top-level `agent_name` / `agent_import_path` / `agent_model_name` are deprecated; "
+            "select the agent under `source`. This shape stops being accepted in the release after 0.8."
+        )
+        return lifted
+
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> Self:
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
@@ -167,6 +214,21 @@ class HarborRunnerTarget(BaseModel):
     def _env_vars_are_harbor_safe(self) -> Self:
         validate_harbor_env(self.env_vars, self.env_secrets)
         return self
+
+    @property
+    def agent_name(self) -> str | None:
+        """The built-in Harbor agent the source names, if it names one."""
+        return self.source.name if isinstance(self.source, HarborBuiltinAgentSource) else None
+
+    @property
+    def agent_import_path(self) -> str | None:
+        """The Harbor agent class to import, if the source names one."""
+        return self.source.import_path if isinstance(self.source, HarborImportedAgentSource) else None
+
+    @property
+    def agent_model_name(self) -> str | None:
+        """The model slug handed to the agent."""
+        return self.source.model_name
 
 
 class GymRunnerTarget(BaseModel):

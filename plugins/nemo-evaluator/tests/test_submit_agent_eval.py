@@ -10,7 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from nemo_evaluator.api.fields import TasksetRef
-from nemo_evaluator.jobs.agent_spec import GymPlacement
+from nemo_evaluator.jobs.agent_spec import (
+    GymPlacement,
+    HarborBuiltinAgentSource,
+)
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
@@ -104,7 +107,7 @@ def test_harbor_submission_converts_target_before_creating_job(monkeypatch, tmp_
     assert kwargs["workspace"] == "default"
     assert kwargs["spec"].tasks == tasks
     assert kwargs["spec"].target == HarborRunnerTarget(
-        agent_name="oracle", reward_key="score", n_attempts=2, n_concurrent_trials=3
+        source=HarborBuiltinAgentSource(name="oracle"), reward_key="score", n_attempts=2, n_concurrent_trials=3
     )
     assert "jobs_dir" not in kwargs["spec"].target.model_dump()
     if directory == "path":
