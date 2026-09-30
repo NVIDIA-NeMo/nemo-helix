@@ -495,6 +495,7 @@ def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
     repo.claim_cleanup.return_value = None
     monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
     monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
 
     @contextmanager
     def connect():
@@ -502,7 +503,6 @@ def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
 
     worker = Dispatcher(connect=connect)
     for method in (
-        # Drained first now that Platform Jobs is the default execution path.
         "claim_next_execution_cleanup",
         "claim_next",
         "claim_next_evidence",
