@@ -38,8 +38,8 @@ vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => ({
 
 const TEST_WORKSPACE = 'test-workspace';
 
-const renderRoute = () => {
-  const dashboardPath = generatePath(ROUTES.workspace.dashboard, { workspace: TEST_WORKSPACE });
+const renderRoute = (workspace = TEST_WORKSPACE) => {
+  const dashboardPath = generatePath(ROUTES.workspace.dashboard, { workspace });
 
   const router = createMemoryRouter(
     [{ path: ROUTES.workspace.dashboard, element: <WorkspaceDashboardHomeRoute /> }],
@@ -70,6 +70,17 @@ describe('WorkspaceDashboardHomeRoute', () => {
     expect(screen.getByText('Agents')).toBeInTheDocument();
     expect(screen.getByText('Quickstart')).toBeInTheDocument();
     expect(screen.getByText('Connect an Agent')).toBeInTheDocument();
+  });
+
+  it('shows the sample sandbox banner only in the sample workspace', async () => {
+    const { unmount } = renderRoute('sample');
+
+    expect(await screen.findByText(/Sample Sandbox\./)).toBeInTheDocument();
+    unmount();
+
+    renderRoute();
+    expect(await screen.findByText('Dashboard')).toBeInTheDocument();
+    expect(screen.queryByText(/Sample Sandbox\./)).not.toBeInTheDocument();
   });
 
   it('marks the get-started area for the Welcome Tour', async () => {
