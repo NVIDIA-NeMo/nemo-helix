@@ -347,6 +347,7 @@ def _normalize_job_config(job_config: Any) -> dict[str, Any]:
 class CreateJobTestContext:
     sdk: NeMoHelix
     async_sdk: AsyncNeMoHelix
+    client: NemoClient
     config: dict[str, Any]
     job_ctx: JobContext
 
@@ -363,7 +364,7 @@ class CreateJobTestContext:
 
             try:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                    result = CreateJob().run(self.config, ctx=self.job_ctx, sdk=self.sdk)
+                    result = CreateJob().run(self.config, ctx=self.job_ctx, sdk=self.client)
                     exit_code = result["exit_code"]
             except SystemExit as e:
                 exit_code = e.code if isinstance(e.code, int) else 1
@@ -439,13 +440,14 @@ async def task_context(
                 results=HelixJobResults(
                     job_name=job_name,
                     workspace="default",
-                    client=client_from_platform(client_context.sdk, NemoClient),
+                    client=client_context.client,
                 ),
                 job_id=job.id,
             )
             yield CreateJobTestContext(
                 sdk=client_context.sdk,
                 async_sdk=client_context.async_sdk,
+                client=client_context.client,
                 config=step_config,
                 job_ctx=job_ctx,
             )

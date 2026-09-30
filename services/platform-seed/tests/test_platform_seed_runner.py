@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import CreateModelProviderRequest
 from nhx.platform_seed.config import HelixSeedConfig
 from nhx.platform_seed.tasks.seed import run_platform_seed
@@ -20,7 +21,7 @@ def entity_client():
 
 
 @pytest.fixture
-def sdk():
+def client():
     return AsyncMock()
 
 
@@ -44,9 +45,9 @@ def config_enabled():
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_disabled(config_disabled, entity_client, sdk):
+async def test_run_platform_seed_disabled(config_disabled, entity_client, client):
     """When config.enabled is False, no seed steps run."""
-    result = await run_platform_seed(entity_client, sdk, config_disabled)
+    result = await run_platform_seed(entity_client, client, config_disabled)
     assert result.auth_ok is False
     assert result.guardrails_ok is False
     assert result.models_ok is False
@@ -55,12 +56,12 @@ async def test_run_platform_seed_disabled(config_disabled, entity_client, sdk):
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_guardrails_only(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_guardrails_only(config_enabled, entity_client, client):
     """Guardrails seed is called when guardrails_enabled is True."""
     config_enabled.guardrails_enabled = True
 
     with patch("nhx.guardrails.app.utils.config_store.populate_config_store", new_callable=AsyncMock) as mock_populate:
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
         mock_populate.assert_called_once_with(entity_client, config_enabled.guardrails_config_store_path)
         assert result.auth_ok is False
         assert result.guardrails_ok is True
@@ -68,7 +69,7 @@ async def test_run_platform_seed_guardrails_only(config_enabled, entity_client, 
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_guardrails_failure(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_guardrails_failure(config_enabled, entity_client, client):
     """Guardrails seed failure is recorded and other steps still run."""
     config_enabled.guardrails_enabled = True
 
@@ -77,7 +78,7 @@ async def test_run_platform_seed_guardrails_failure(config_enabled, entity_clien
         new_callable=AsyncMock,
         side_effect=RuntimeError("bad"),
     ):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     assert result.guardrails_ok is False
     assert len(result.errors) == 1
@@ -85,8 +86,8 @@ async def test_run_platform_seed_guardrails_failure(config_enabled, entity_clien
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_plugin_seed_jobs(config_enabled, entity_client, sdk):
-    """Discovered plugin seed jobs are run with injected sdk and entity client."""
+async def test_run_platform_seed_plugin_seed_jobs(config_enabled, entity_client, client):
+    """Discovered plugin seed jobs are run with injected client and entity client."""
     mock_seed_cls = MagicMock()
     mock_seed_instance = MagicMock()
     mock_seed_instance.run = AsyncMock()
@@ -96,16 +97,16 @@ async def test_run_platform_seed_plugin_seed_jobs(config_enabled, entity_client,
         "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_seed_cls},
     ):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     mock_seed_instance.run.assert_awaited_once_with()
-    assert mock_seed_instance.sdk is sdk
+    assert mock_seed_instance.sdk is client
     assert mock_seed_instance.entities_client is entity_client
     assert result.plugin_results == {"example": True}
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_plugin_seed_job_failure(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_plugin_seed_job_failure(config_enabled, entity_client, client):
     """Plugin seed failures are recorded without failing the whole run."""
     mock_seed_cls = MagicMock()
     mock_seed_instance = MagicMock()
@@ -116,7 +117,7 @@ async def test_run_platform_seed_plugin_seed_job_failure(config_enabled, entity_
         "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_seed_cls},
     ):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     assert result.plugin_results == {"example": False}
     assert any("Plugin seed job 'example' failed" in error for error in result.errors)
@@ -124,7 +125,7 @@ async def test_run_platform_seed_plugin_seed_job_failure(config_enabled, entity_
 
 @pytest.mark.asyncio
 async def test_run_platform_seed_plugin_seed_jobs_can_be_disabled_per_plugin(
-    config_enabled, entity_client, sdk, monkeypatch
+    config_enabled, entity_client, client, monkeypatch
 ):
     """Only plugin seed jobs with enabled env toggles should run."""
     mock_example_seed_cls = MagicMock()
@@ -143,7 +144,7 @@ async def test_run_platform_seed_plugin_seed_jobs_can_be_disabled_per_plugin(
         "nhx.platform_seed.tasks.seed.run.discover_seed_jobs",
         return_value={"example": mock_example_seed_cls, "other-plugin": mock_other_seed_cls},
     ):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     mock_example_seed_instance.run.assert_not_called()
     mock_other_seed_instance.run.assert_awaited_once_with()
@@ -152,27 +153,27 @@ async def test_run_platform_seed_plugin_seed_jobs_can_be_disabled_per_plugin(
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_auth_called(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_auth_called(config_enabled, entity_client, client):
     """Auth seed is called when auth_enabled is True."""
     config_enabled.auth_enabled = True
 
     with patch("nhx.core.auth.app.seeding.run_seeding", new_callable=AsyncMock) as mock_run_seeding:
         mock_run_seeding.return_value = True
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+        result = await run_platform_seed(entity_client, client, config_enabled)
         mock_run_seeding.assert_called_once_with(entity_client)
         assert result.auth_ok is True
         assert result.errors == []
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_model_provider_called(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_model_provider_called(config_enabled, entity_client, client):
     """Model provider seed is called when model_provider_enabled is True."""
     config_enabled.model_provider_enabled = True
     models = MagicMock()
     models.create_provider = AsyncMock()
 
-    with patch("nhx.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+    with patch.object(AsyncModelsClient, "from_client", return_value=models):
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     models.create_provider.assert_awaited_once_with(
         workspace="system",
@@ -187,15 +188,15 @@ async def test_run_platform_seed_model_provider_called(config_enabled, entity_cl
 
 
 @pytest.mark.asyncio
-async def test_run_platform_seed_model_provider_conflict(config_enabled, entity_client, sdk):
+async def test_run_platform_seed_model_provider_conflict(config_enabled, entity_client, client):
     """ConflictError when creating provider is handled gracefully (not a failure)."""
     config_enabled.model_provider_enabled = True
     models = MagicMock()
     response = httpx.Response(409, request=httpx.Request("POST", "http://models/providers"))
     models.create_provider = AsyncMock(side_effect=ConflictError(response))
 
-    with patch("nhx.platform_seed.tasks.seed.run.client_from_platform", return_value=models):
-        result = await run_platform_seed(entity_client, sdk, config_enabled)
+    with patch.object(AsyncModelsClient, "from_client", return_value=models):
+        result = await run_platform_seed(entity_client, client, config_enabled)
 
     assert result.models_ok is True
     assert result.errors == []

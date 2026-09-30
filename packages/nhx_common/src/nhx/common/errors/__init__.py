@@ -59,8 +59,8 @@ from nhx.common.errors.matchers import (
     StartsWithMatcher,
 )
 from nhx.common.errors.sdk_exception_handlers import (
+    nemo_client_error_handler,
     register_sdk_exception_handlers,
-    sdk_status_error_handler,
 )
 from nhx.common.errors.types import (
     DefaultExceptionHandler,
@@ -70,9 +70,9 @@ from nhx.common.errors.types import (
 )
 
 __all__ = [
-    # SDK exception handlers
+    # Typed client exception handlers
+    "nemo_client_error_handler",
     "register_sdk_exception_handlers",
-    "sdk_status_error_handler",
     # Matchers
     "AllKeywordsMatcher",
     "AnyKeywordMatcher",

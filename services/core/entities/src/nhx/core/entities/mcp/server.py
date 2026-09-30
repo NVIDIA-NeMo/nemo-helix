@@ -13,11 +13,10 @@ import logging
 from typing import Any
 
 from fastmcp import FastMCP
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest, ListWorkspacesQueryParams
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.mcp import format_error_response
-from nhx.common.sdk_factory import get_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +37,8 @@ def create_server(base_url: str | None = None) -> FastMCP:
     # Initialize FastMCP server for entities service
     server = FastMCP("NeMo Entities Service")
 
-    # Create NeMo SDK client using shared factory
-    nemo_client = get_platform_sdk(base_url=base_url)
-    workspaces_client = client_from_platform(nemo_client, WorkspacesClient)
+    # Create the platform client using the shared factory
+    workspaces_client = WorkspacesClient.from_client(get_nemo_client(base_url=base_url))
 
     # === WORKSPACE TOOLS ===
 

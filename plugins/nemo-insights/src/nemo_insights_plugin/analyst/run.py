@@ -8,8 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.nooa_model_client import (
     ConfiguredModelClients,
@@ -40,7 +39,7 @@ async def run_analyst(
     ethos: str | None,
     workspace: str,
     base_url: str | None,
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     insights_output: str | Path | None = None,
     local_only: bool = False,
     verbose: bool = False,
@@ -103,7 +102,7 @@ async def run_analyst_change_set(
     ethos: str | None = None,
     workspace: str,
     base_url: str | None,
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     insights_output: str | Path | None = None,
     local_only: bool = False,
     verbose: bool = False,
@@ -128,7 +127,7 @@ async def run_analyst_change_set(
     model_clients: ConfiguredModelClients | None = None
     insights_output_path = str(insights_output) if insights_output else None
     try:
-        models_client = client_from_platform(client, AsyncModelsClient)
+        models_client = AsyncModelsClient.from_client(client)
         model_clients = await resolve_model_clients(models_client, model_refs)
         backend = make_analyst_backend(
             client=client,

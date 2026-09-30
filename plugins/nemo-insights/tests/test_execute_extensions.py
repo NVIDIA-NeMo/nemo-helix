@@ -55,7 +55,7 @@ def test_insights_extension_persists_analyst_result_and_saves_report(
     client = FakeClient()
     backend = FakeBackend()
 
-    monkeypatch.setattr("nemo_insights_plugin.execute_extensions.get_async_task_sdk", lambda service: client)
+    monkeypatch.setattr("nemo_insights_plugin.execute_extensions.get_async_task_nemo_client", lambda service: client)
     monkeypatch.setattr("nemo_insights_plugin.execute_extensions.make_analyst_backend", lambda **_kwargs: backend)
 
     extension = InsightsAnalysisExtension()

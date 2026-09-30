@@ -38,7 +38,7 @@ def _agent_config(settings: dict[str, Any]) -> contract.AgentConfig:
 
 
 class _StubClient:
-    """Stands in for the async SDK handle so a leak shows up as an unclosed client."""
+    """Stands in for the async client handle so a leak shows up as an unclosed client."""
 
     def __init__(self, service: str) -> None:
         self.service = service
@@ -51,7 +51,7 @@ class _StubClient:
         self.closed = True
 
 
-def _stub_sdk_factory(clients: list[_StubClient]) -> Any:
+def _stub_client_factory(clients: list[_StubClient]) -> Any:
     """Record every client handed out so a test can assert none were left open."""
 
     def factory(service: str) -> _StubClient:
@@ -92,7 +92,7 @@ async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) ->
         return AnalystResult(summary="No high-impact failures found."), object()
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start(
@@ -141,7 +141,7 @@ async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid
     async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
         raise AssertionError("run_analyst_change_set should not be reached")
 
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
@@ -177,7 +177,7 @@ async def test_fabric_adapter_logs_the_failure_with_its_traceback(monkeypatch, c
         raise RuntimeError("gateway returned 502")
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail)
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
@@ -208,7 +208,7 @@ async def test_fabric_adapter_logs_the_whole_cause_chain(monkeypatch, caplog) ->
             raise RuntimeError(raised) from cause
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail)
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory(clients))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
@@ -280,7 +280,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
     monkeypatch.setattr(fabric_adapter.relay_plugin, "plugin", fake_plugin)
-    monkeypatch.setattr(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory([]))
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
 
     runtime = fabric_adapter.InsightsAnalystRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
@@ -314,7 +314,7 @@ async def test_without_relay_the_agent_runs_unscoped() -> None:
 
     with (
         mock.patch.object(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set),
-        mock.patch.object(fabric_adapter, "get_async_task_sdk", _stub_sdk_factory([])),
+        mock.patch.object(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([])),
     ):
         await runtime.invoke(_request({"job_workspace": "w"}), _runtime_context(None))
 
