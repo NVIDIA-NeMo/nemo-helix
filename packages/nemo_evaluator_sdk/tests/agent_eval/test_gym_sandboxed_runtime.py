@@ -150,14 +150,47 @@ async def test_each_repeat_becomes_its_own_trial(tasks, tmp_path, monkeypatch) -
     assert len({trial.id for trial in trials}) == 6, "repeats of one task must not share a trial id"
 
 
-async def test_concurrency_is_sent_to_the_host(tasks, tmp_path, monkeypatch) -> None:
+async def test_without_a_collector_the_whole_run_is_one_post_of_examples(tasks, tmp_path, monkeypatch) -> None:
     host = _FakeHost()
-    runner = runner_against(host, monkeypatch, num_repeats=5, concurrency=2)
+    runner = runner_against(host, monkeypatch, num_repeats=2)
 
     await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
 
-    assert host.payload["concurrency"] == 2
-    assert len(host.posted) == 10, "concurrency bounds parallelism, never the number of rollouts"
+    assert len(host.requests) == 1
+    assert list(host.payload) == ["examples"], "the host's /rollouts/run contract is `examples` alone"
+    assert len(host.posted) == 4
+
+
+async def test_an_injected_collector_replaces_the_post(tasks, tmp_path, monkeypatch) -> None:
+    """A caller holding a session collects through it instead, e.g. chunked with retries."""
+    host = _FakeHost(rewards={0: 1.0, 1: 0.0}, model_calls=[_model_call("c0", 1788534870.5)])
+    bind_http_transport(monkeypatch, host.transport())
+    batches: list[list[dict[str, Any]]] = []
+
+    async def collect(examples: list[dict[str, Any]]) -> list[Any]:
+        batches.append(examples)
+        records: list[Any] = []
+        for start in range(0, len(examples), 3):
+            async with httpx.AsyncClient() as client:
+                response = await client.post(ROLLOUT_URL, json={"examples": examples[start : start + 3]})
+            records.extend(response.json()["results"])
+        return [*records, "not a record"]
+
+    runner = SandboxedGymAgentTaskRunner(
+        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, num_repeats=3), collect=collect
+    )
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    (batch,) = batches
+    assert [(e[NG_TASK_INDEX], e[NG_ROLLOUT_INDEX]) for e in batch] == [(t, r) for t in (0, 1) for r in range(3)]
+    assert len(host.requests) == 2
+    assert len(trials) == 6
+    rewards = {trial.task_id: {trial.metadata["reward"]} for trial in trials}
+    assert rewards == {tasks[0].id: {1.0}, tasks[1].id: {0.0}}
+    assert all(trial.evidence and trial.evidence.get("ng_trajectory") for trial in trials), (
+        "captures returned through the collector must still be unpacked"
+    )
 
 
 async def test_the_auth_token_is_sent_as_the_proxy_header(tasks, tmp_path, monkeypatch) -> None:
@@ -345,9 +378,7 @@ async def test_a_task_the_host_never_answered_fails_the_run(tasks, tmp_path, mon
 
 def test_runner_info_records_the_host_but_not_the_token() -> None:
     runner = SandboxedGymAgentTaskRunner(
-        config=SandboxedGymRuntimeConfig(
-            rollout_url=ROLLOUT_URL, auth_token="sk-secret-value", num_repeats=3, concurrency=2
-        )
+        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, auth_token="sk-secret-value", num_repeats=3)
     )
 
     info = runner.runner_info()
@@ -356,7 +387,7 @@ def test_runner_info_records_the_host_but_not_the_token() -> None:
     assert info.config["mode"] == "sandboxed"
     assert info.config["rollout_url"] == ROLLOUT_URL
     assert info.config["num_repeats"] == 3
-    assert info.config["concurrency"] == 2
+    assert info.config["timeout_s"] == 3600.0
     assert "sk-secret-value" not in json.dumps(info.config), "the token must not reach the run bundle"
 
 

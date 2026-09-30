@@ -17,6 +17,7 @@ Gym loads them inside the sandbox where the environment is mounted.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from pathlib import Path
@@ -38,6 +39,7 @@ _CREDENTIAL_PATTERN = re.compile(r"(API_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDEN
 #: Removed by the Gym host before handing the config to NeMo Gym.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
 GYM_HOST_IMAGE = "nhx-gym-host"
+_MAX_ROLLOUT_POSTS_IN_FLIGHT = 8
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -321,6 +323,12 @@ def host_env(target: GymRunnerTarget) -> dict[str, str]:
     return env
 
 
+def rollout_parallelism(concurrency: int) -> tuple[int, int]:
+    """``(rollout_chunk_size, rollout_max_in_flight)`` running at most ``concurrency`` rollouts at once."""
+    chunk_size = math.ceil(concurrency / _MAX_ROLLOUT_POSTS_IN_FLIGHT)
+    return chunk_size, concurrency // chunk_size
+
+
 def serve_config(
     target: GymRunnerTarget,
     plan: SandboxPlan,
@@ -365,6 +373,8 @@ def serve_config(
         environment_sub_path = plan.environment_sub_path
         workspace_sub_path = plan.workspace_sub_path
 
+    chunk_size, max_in_flight = rollout_parallelism(target.concurrency)
+
     return {
         "job_id": job_id,
         "host_provider": plan.host_provider,
@@ -378,6 +388,8 @@ def serve_config(
             "workspace_pvc_claim": environment_pvc_claim,
             "workspace_sub_path": workspace_sub_path,
             "resources": plan.resources,
+            "rollout_chunk_size": chunk_size,
+            "rollout_max_in_flight": max_in_flight,
             "host_provider_options": host_provider_options,
             "network_policy": {"egress_allow": _egress_rules(plan)},
         },
@@ -428,13 +440,15 @@ class SessionBackedGymRunner:
         self._workspace = workspace
         self._persistent_storage_path = persistent_storage_path
         self._delegate: Any | None = None
+        self._rollout_settings: dict[str, Any] = {}
 
     def runner_info(self) -> Any:
         """Identify the run before a session exists, so provenance does not depend on provisioning."""
         from nemo_evaluator_sdk.agent_eval.trials import RunnerInfo
 
         if self._delegate is not None:
-            return self._delegate.runner_info()
+            info = self._delegate.runner_info()
+            return info.model_copy(update={"config": {**info.config, **self._rollout_settings}})
         return RunnerInfo(
             name="gym",
             kind="runner",
@@ -467,9 +481,15 @@ class SessionBackedGymRunner:
             workspace=self._workspace,
             persistent_storage_path=self._persistent_storage_path,
         )
+        serve = SandboxedGymServeConfig.model_validate(payload)
+        self._rollout_settings = {
+            "rollout_chunk_size": serve.sandbox.rollout_chunk_size,
+            "rollout_max_in_flight": serve.sandbox.rollout_max_in_flight,
+            "rollout_timeout_s": serve.sandbox.rollout_timeout_s,
+        }
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
-        session = await asyncio.to_thread(orchestrator.start, SandboxedGymServeConfig.model_validate(payload))
+        session = await asyncio.to_thread(orchestrator.start, serve)
         try:
             descriptor = session.descriptor()
             self._delegate = SandboxedGymAgentTaskRunner(
@@ -479,9 +499,9 @@ class SessionBackedGymRunner:
                     headers=dict(descriptor.headers),
                     agent_ref_name=self._target.agent_ref_name or self._target.agent,
                     num_repeats=self._target.num_repeats,
-                    concurrency=self._target.concurrency,
                     reward_key=self._target.reward_key,
-                )
+                ),
+                collect=lambda examples: asyncio.to_thread(session.run_rollouts, examples),
             )
             return await self._delegate.run_tasks(tasks, config)
         finally:

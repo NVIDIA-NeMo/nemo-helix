@@ -3,7 +3,6 @@
 
 import asyncio
 import collections
-import contextlib
 import io
 import json
 import os
@@ -120,76 +119,6 @@ def test_rollouts_run_returns_results(ready_server):
         body = json.loads(resp.read().decode())
     assert len(body["results"]) == 1
     assert body["results"][0]["reward"] == 0.0
-
-
-class _GymShapedRolloutHelper:
-    """Runs rows concurrently under the caller's semaphore, as Gym's ``run_examples`` does, and
-    records the most rollouts it ever had in flight."""
-
-    def __init__(self) -> None:
-        self.in_flight = 0
-        self.peak = 0
-
-    def run_examples(self, examples, head_server_config=None, semaphore=None):
-        async def _one(row):
-            async with semaphore or contextlib.nullcontext():
-                self.in_flight += 1
-                self.peak = max(self.peak, self.in_flight)
-                for _ in range(3):
-                    await asyncio.sleep(0)
-                self.in_flight -= 1
-            return row, {"reward": 1.0}
-
-        return asyncio.as_completed([_one(row) for row in examples])
-
-
-def test_rollouts_run_bounds_concurrent_rollouts_by_the_requested_concurrency(ready_server):
-    import urllib.request
-
-    helper = _GymShapedRolloutHelper()
-    runtime._ROLLOUT_HELPER = helper
-    payload = json.dumps({"examples": [{"agent_ref": {"name": "a"}, "id": i} for i in range(5)], "concurrency": 2})
-    req = urllib.request.Request(
-        f"{ready_server}/rollouts/run",
-        data=payload.encode(),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        body = json.loads(resp.read().decode())
-
-    assert len(body["results"]) == 5, "concurrency bounds parallelism, never the number of rollouts"
-    assert helper.peak == 2
-
-
-def test_a_request_without_concurrency_runs_every_rollout_at_once():
-    """A caller that does not send the field keeps the behaviour it had before the field existed."""
-    helper = _GymShapedRolloutHelper()
-
-    results = asyncio.run(
-        runtime._collect_rollout_results([{"agent_ref": {"name": "a"}, "id": i} for i in range(5)], MagicMock(), helper)
-    )
-
-    assert len(results) == 5
-    assert helper.peak == 5
-
-
-@pytest.mark.parametrize("concurrency", [0, -1, True, "2", 1.5])
-def test_rollouts_run_rejects_a_concurrency_that_is_not_a_positive_integer(ready_server, concurrency):
-    import urllib.error
-    import urllib.request
-
-    req = urllib.request.Request(
-        f"{ready_server}/rollouts/run",
-        data=json.dumps({"examples": [], "concurrency": concurrency}).encode(),
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with pytest.raises(urllib.error.HTTPError) as exc:
-        urllib.request.urlopen(req, timeout=5)
-
-    assert exc.value.code == 400
-    assert "concurrency" in json.loads(exc.value.read().decode())["error"]["message"]
 
 
 def test_rollouts_run_rejects_oversize_request(ready_server):

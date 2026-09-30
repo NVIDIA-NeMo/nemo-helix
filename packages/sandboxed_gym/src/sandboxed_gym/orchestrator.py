@@ -31,6 +31,7 @@ from sandboxed_gym.host.models import (
     GymHostSpec,
     GymHostVolumeMount,
     build_bootstrap_env,
+    render_host_error,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.runtime.gym_host_runtime import (
@@ -76,10 +77,7 @@ def _sandbox_reported_error(body: str) -> str | None:
     decoded = _decode_json_object(body)
     if decoded is None or decoded.get("error") is None:
         return None
-    error = decoded["error"]
-    if isinstance(error, Mapping):
-        return f"{error.get('code', 'unknown')}: {error.get('message', '')}".strip()
-    return str(error)
+    return render_host_error(decoded["error"])
 
 
 def _proxy_reported_error(body: str) -> str | None:
@@ -611,7 +609,7 @@ class SandboxedGymSession:
             # A 200 carrying an error: the host had already committed its status line when it
             # failed, so this is the only channel it had left.
             raise RolloutTransportError(
-                f"the sandboxed Gym host reported {decoded['error']}",
+                f"the sandboxed Gym host reported {render_host_error(decoded['error'])}",
                 retryable=False,
                 origin="sandbox",
             )

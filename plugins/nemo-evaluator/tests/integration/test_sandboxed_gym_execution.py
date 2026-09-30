@@ -22,8 +22,9 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,12 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
     #: Set by the fixture; the spec the provider was asked to create a host for.
     received_specs: list[Any] = []
     received_payloads: list[dict[str, Any]] = []
+    reply: tuple[int, dict[str, Any]] | None = None
+    #: Held per POST, so concurrent POSTs overlap long enough to be counted.
+    delay_s = 0.0
+    in_flight = 0
+    peak_in_flight = 0
+    _lock = threading.Lock()
 
     def log_message(self, *args: Any) -> None:  # keep pytest output readable
         return
@@ -111,7 +118,18 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode())
-        self.received_payloads.append(payload)
+        cls = type(self)
+        with cls._lock:
+            cls.received_payloads.append(payload)
+            cls.in_flight += 1
+            cls.peak_in_flight = max(cls.peak_in_flight, cls.in_flight)
+        time.sleep(cls.delay_s)
+        with cls._lock:
+            cls.in_flight -= 1
+        if cls.reply is not None:
+            status, reply = cls.reply
+            self._send(status, reply)
+            return
         # Echo the caller's own indices back, which is what a real Gym host does with a stamped row.
         results = [
             {
@@ -122,8 +140,11 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
             }
             for example in payload["examples"]
         ]
-        body = json.dumps({"results": results}).encode()
-        self.send_response(200)
+        self._send(200, {"results": results})
+
+    def _send(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -142,13 +163,13 @@ class _StubHostProvider:
     def __init__(self) -> None:
         self.created: list[Any] = []
         self.destroyed: list[str] = []
-        self._server: HTTPServer | None = None
+        self._server: ThreadingHTTPServer | None = None
 
     async def create_host(self, spec: Any) -> Any:
         from sandboxed_gym.host.models import GymHostHandle
 
         self.created.append(spec)
-        self._server = HTTPServer(("127.0.0.1", 0), _StubGymHostHandler)
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), _StubGymHostHandler)
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
         base = f"http://127.0.0.1:{self._server.server_address[1]}"
         return GymHostHandle(
@@ -173,6 +194,9 @@ class _StubHostProvider:
 @pytest.fixture
 def stub_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[_StubHostProvider]:
     _StubGymHostHandler.received_payloads = []
+    _StubGymHostHandler.reply = None
+    _StubGymHostHandler.delay_s = 0.0
+    _StubGymHostHandler.in_flight = _StubGymHostHandler.peak_in_flight = 0
     provider = _StubHostProvider()
     # Patched where the orchestrator looks it up, so the orchestrator itself stays untouched.
     monkeypatch.setattr("sandboxed_gym.orchestrator.get_host_provider", lambda *a, **k: provider)
@@ -193,21 +217,85 @@ async def test_a_sandboxed_run_provisions_a_host_and_returns_attributed_trials(
     assert rewards[tasks[1].id] == 1.0, "each trial must carry its own task's reward, not a neighbour's"
 
 
-async def test_the_targets_repeats_and_concurrency_reach_the_host(
+async def test_repeats_reach_the_host_in_chunks_sized_by_concurrency(
     stub_provider: _StubHostProvider, tmp_path: Path
 ) -> None:
+    """The run is split across POSTs, so no one request carries, or waits on, all of it."""
     tasks = _tasks(tmp_path)
     runner = SessionBackedGymRunner(
-        target=_target(num_repeats=5, concurrency=2), plan=_plan(), job_id="eval-job-repeats"
+        target=_target(num_repeats=5, concurrency=16), plan=_plan(), job_id="eval-job-repeats"
     )
 
     trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
 
-    (payload,) = _StubGymHostHandler.received_payloads
-    assert payload["concurrency"] == 2
+    payloads = _StubGymHostHandler.received_payloads
+    assert sorted(len(payload["examples"]) for payload in payloads) == [2] * 5, "concurrency 16 is 8 chunks of 2"
+    assert all(list(payload) == ["examples"] for payload in payloads)
     assert len(trials) == 10
     for task in tasks:
         assert sorted(t.metadata[NG_ROLLOUT_INDEX] for t in trials if t.task_id == task.id) == [0, 1, 2, 3, 4]
+    info = runner.runner_info().config
+    assert (info["num_repeats"], info["rollout_chunk_size"], info["rollout_max_in_flight"]) == (5, 2, 8)
+    assert "timeout_s" not in info, "the SDK runner's own POST timeout does not apply to session collection"
+
+
+async def test_an_explicit_concurrency_bounds_the_rollouts_in_flight(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    _StubGymHostHandler.delay_s = 0.1
+    runner = SessionBackedGymRunner(
+        target=_target(num_repeats=3, concurrency=2), plan=_plan(), job_id="eval-job-concurrency"
+    )
+
+    trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(trials) == 6
+    assert [len(payload["examples"]) for payload in _StubGymHostHandler.received_payloads] == [1] * 6
+    assert _StubGymHostHandler.peak_in_flight == 2
+    info = runner.runner_info().config
+    assert (info["rollout_chunk_size"], info["rollout_max_in_flight"]) == (1, 2)
+
+
+async def test_a_host_bootstrap_failure_fails_the_run_with_the_hosts_output(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    _StubGymHostHandler.reply = (
+        503,
+        {
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "Gym host failed to start",
+                "host_output_tail": ["ModuleNotFoundError: No module named 'mcqa'"],
+            }
+        },
+    )
+    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-bootstrap")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    message = str(excinfo.value)
+    assert "bootstrap_failed" in message
+    assert "--- gym host output (1 lines) ---\nModuleNotFoundError: No module named 'mcqa'" in message
+    assert len(_StubGymHostHandler.received_payloads) == 2, "one POST per chunk: a host-reported failure is not retried"
+    assert stub_provider.destroyed == ["stub-host"]
+
+
+async def test_a_rollout_error_reported_on_a_200_fails_the_run_with_the_hosts_output(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    _StubGymHostHandler.reply = (
+        200,
+        {"error": {"code": "internal", "message": "KeyError: 'agent_ref'", "host_output_tail": ["Traceback ..."]}},
+    )
+    runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-rollout-error")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    message = str(excinfo.value)
+    assert "KeyError: 'agent_ref'" in message
+    assert "--- gym host output (1 lines) ---\nTraceback ..." in message
 
 
 async def test_the_host_is_created_from_the_deployment_config_and_the_targets_selection(
