@@ -34,7 +34,9 @@ Reference plugins such as `plugins/example-plugin/` are not installed by default
 name is `nemo-switchyard-plugin`, while the `nemo-switchyard` middleware entry
 point remains the name used by VirtualModels.
 
-The middleware is installed by default through the root workspace's `enabled-plugins` group. The plugin vendors the required subset of the Switchyard library under `plugins/nemo-switchyard/vendor/switchyard/`, so no separate checkout, `SWITCHYARD_PATH`, or PyPI-shadow workaround is needed.
+The middleware is installed by default through the root workspace's
+`enabled-plugins` group and depends on `nemo-switchyard==0.3.0` for the native
+Python bindings.
 
 ```bash
 uv sync
@@ -47,8 +49,12 @@ With the platform running, use `nemo-switchyard` in VirtualModel middleware conf
 ```json
 {
   "name": "nemo-switchyard",
-  "config_type": "translate",
-  "config": {"target_format": "auto", "enable_stats": false}
+  "config_type": "random_routing",
+  "config": {
+    "strong": {"model": "workspace/model-a"},
+    "weak": {"model": "workspace/model-b"},
+    "strong_probability": 0.5
+  }
 }
 ```
 

@@ -148,10 +148,6 @@
 -e ./plugins/nemo-rl ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-safe-synthesizer
 -e ./plugins/nemo-switchyard ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-switchyard/vendor/switchyard ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-helix
-    #   nemo-switchyard-plugin
 -e ./plugins/nemo-unsloth ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./sdk/python/nemo-helix ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
@@ -358,7 +354,6 @@ anthropic==0.120.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     #   nemo-agents-plugin
     #   nemo-helix
     #   nemo-helix-plugin
-    #   switchyard-vendored
 anyascii==0.3.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:c94e9dd9d47b3d9494eca305fef9447d00b4bf1a32aff85aa746fa3ec7fb95c3 \
     --hash=sha256:f5ab5e53c8781a36b5a40e1296a0eeda2f48c649ef10c3921c1381b1d00dee7a
@@ -1299,6 +1294,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-insights-plugin
     #   nemo-safe-synthesizer
     #   nemo-safe-synthesizer-plugin
+    #   nemo-switchyard-plugin
     #   nemoguardrails
     #   nhx-auth
     #   nhx-automodel
@@ -1317,7 +1313,6 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   supabase
     #   supabase-auth
     #   supabase-functions
-    #   switchyard-vendored
     #   trace-ingest
 httpx-retries==0.6.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:3e0b404969a564829d368417964fd21e6b400a10d17c92d29b8bc247ce8186e3 \
@@ -2130,6 +2125,14 @@ nemo-safe-synthesizer==0.1.13 ; (platform_machine == 'arm64' and sys_platform ==
     # via
     #   nemo-helix
     #   nemo-safe-synthesizer-plugin
+nemo-switchyard==0.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:8eb5cf8ff9cb51d50aa9b1927559d4add807eef5041de9c27ab51ccf111d7b4c \
+    --hash=sha256:bb40a39da460cc28d0c2143044233fef69b2c113813c511255f813ef0ac5bf1b \
+    --hash=sha256:cdc64503e427095c73e7840f0de093f0ee35fc3e306825e522050cd6e6825039 \
+    --hash=sha256:f0c3728517a7015d87bbdf6a21303a344c9d886ae98d910dee6a01c67f8657d3
+    # via
+    #   nemo-helix
+    #   nemo-switchyard-plugin
 nemoguardrails==0.23.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:91106c9718748fd760e873dd872915c6ed15d15c80300d538c8a1f4024eff92a
     # via
@@ -2389,7 +2392,6 @@ openai==2.53.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     #   nemoguardrails
     #   nhx-guardrails
     #   ragas
-    #   switchyard-vendored
 openai-codex==0.144.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:91c63a7cb213441569f130e593386b34657ab9e726ae88af255f0ecb8de08ea5 \
     --hash=sha256:de1513a6e94b9a8d7728a3b74298bc1469428ade10ba0ef2d5db47dd1cb606f5
@@ -3086,7 +3088,6 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   sqlmodel
     #   storage3
     #   supabase-auth
-    #   switchyard-vendored
     #   trace-ingest
     #   unsloth
     #   wandb
