@@ -65,6 +65,9 @@ RUN set -eu; \
     test -s /opt/harbor/selectable-versions.txt; \
     python -c 'import urllib.request; urllib.request.urlretrieve("https://bootstrap.pypa.io/pip/pip.pyz", "/opt/harbor/pip.pyz")'
 
+# Each selectable Harbor version installs from its own requirements file, so
+# versions can carry different extras. Versions that pin the OpenSandbox SDK
+# also check that Harbor's OpenSandbox environment imports.
 COPY plugins/_temporary-scaled-evals/harbor-runners /opt/harbor/requirements
 
 RUN --mount=type=cache,target=/root/.cache/uv \
