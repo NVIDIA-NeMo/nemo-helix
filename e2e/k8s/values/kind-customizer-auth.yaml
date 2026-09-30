@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Overlay on kind.yaml that enables auth for customization job e2e tests.
+#
+# Usage:
+#   helm upgrade -i nemo-helix k8s/helm -f e2e/k8s/values/kind.yaml \
+#     -f e2e/k8s/values/kind-customizer-auth.yaml \
+#     --set platformConfig.customizer.tasks_image=<registry>/nhx-tasks:<tag>
+
+platformConfig:
+  auth:
+    enabled: true
+    policy_decision_point_provider: embedded
+    policy_data_refresh_interval: 2
+    bundle_cache_seconds: 2
+    # Principal the e2e harness sends.
+    admin_email: "admin@example.com"
+    allowed_service_principals:
+      - e2e-test
+      - e2e-test-on-behalf
