@@ -8,7 +8,7 @@ it runs on every PR. This one actually runs Harbor in Docker, which is the only 
 changing *what* it stamps rather than the SDK mis-reading what it stamped.
 
 Marked ``integration`` rather than ``e2e``/``slow`` on purpose: that combination (used by
-``test_harbor_runtime_e2e.py``) is selected by no make target and no CI job. ``integration`` at least
+``tests/e2e/test_harbor_runtime.py``) is selected by no make target and no CI job. ``integration`` at least
 runs wherever the plugin's ``test_harbor_plugin_run.py`` does. This older error-rollup check remains
 optional.
 """

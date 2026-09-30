@@ -196,13 +196,13 @@ container. A platform-submitted job cannot see the submitter's `~/.codex/auth.js
 
 ## End-to-end test
 
-[`tests/agent_eval/test_harbor_runtime_e2e.py`](../../tests/agent_eval/test_harbor_runtime_e2e.py)
+[`tests/e2e/test_harbor_runtime.py`](../../tests/e2e/test_harbor_runtime.py)
 calls `run_harbor_eval` over the hello-world dataset and asserts the SDK scores it
 as `reward == 1.0`. It is marked `e2e`/`slow` and skips automatically when
 `harbor` or Docker is unavailable:
 
 ```bash
-uv run --frozen pytest packages/nemo_evaluator_sdk/tests/agent_eval/test_harbor_runtime_e2e.py -v
+uv run --frozen pytest packages/nemo_evaluator_sdk/tests/e2e/test_harbor_runtime.py -v
 ```
 
 Harbor bind-mounts the container's `/logs` back to the job directory to collect
