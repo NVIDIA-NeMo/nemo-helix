@@ -190,9 +190,7 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
     def _nan_result(self) -> MetricResult:
         outputs: list[MetricOutput] = []
         for score in self.scores:
-            outputs.append(MetricOutput(name=score.name, value=float("nan")))
-            if isinstance(score, RubricScore):
-                outputs.append(MetricOutput(name=f"{score.name}.label", value=""))
+            outputs.extend(_score_outputs(score, float("nan"), ""))
         return MetricResult(outputs=outputs)
 
     async def resolve_models(self, model_resolver: ModelResolver) -> None:
@@ -387,18 +385,21 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
         for score_name, parser in self._parsers.items():
             score = parser.parse(output_text)
             _logger.debug("Parsed score %s: %s", score_name, score.value)
-            result.outputs.append(MetricOutput(name=score.name, value=score.value))
-            label = _selected_rubric_label(score)
-            if label is not None:
-                result.outputs.append(MetricOutput(name=f"{score.name}.label", value=label))
+            result.outputs.extend(_score_outputs(parser.score, score.value, _selected_rubric_label(score)))
         return result
 
 
-def _selected_rubric_label(score: MetricScore) -> str | None:
-    """Return the selected rubric label recorded by the parser, if any."""
-    if not score.stats or not score.stats.rubric_distribution:
-        return None
-    for rubric_stat in score.stats.rubric_distribution:
+def _score_outputs(score: Score, value: float, label: str) -> list[MetricOutput]:
+    outputs = [MetricOutput(name=score.name, value=value)]
+    if isinstance(score, RubricScore):
+        outputs.append(MetricOutput(name=f"{score.name}.label", value=label))
+    return outputs
+
+
+def _selected_rubric_label(score: MetricScore) -> str:
+    """Return the selected rubric label recorded by the parser, or ``""`` when none was selected."""
+    rubric_distribution = score.stats.rubric_distribution if score.stats else None
+    for rubric_stat in rubric_distribution or []:
         if rubric_stat.count:
             return rubric_stat.label
     return ""
