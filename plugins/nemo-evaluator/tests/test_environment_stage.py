@@ -180,7 +180,7 @@ def test_a_registered_gym_agent_stages_its_files_and_package_on_top_of_the_envir
     downloaded: list = []
     mocker.patch(
         "nemo_evaluator.jobs.gym_registered_agent_package.download_wheels",
-        side_effect=lambda reqs, dest, pv, plat: (
+        side_effect=lambda reqs, cons, dest, pv, plat: (
             downloaded.append(list(reqs)) or (dest / "nemo_fabric-0.3.0-py3-none-any.whl").write_bytes(b"")
         ),
     )

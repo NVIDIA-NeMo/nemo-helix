@@ -243,14 +243,15 @@ def _staged_fileset(spec: AgentEvalSpec) -> EnvironmentStageSpec | None:
     target = spec.target
     if isinstance(target, GymRunnerTarget):
         if isinstance(target.source, RegisteredAgentSource):
-            config = registered_agent_config(target) or {}
+            agent_config = registered_agent_config(target) or {}
             return EnvironmentStageSpec(
                 environment=target.environment,
                 agent_files=registered_agent_files(target),
                 gym_registered_agent=GymRegisteredAgentPackageSpec(
                     agent=target.source.agent,
-                    resolved_config=config,
-                    requirements=fabric_harness_requirements(config["harness"]["adapter_id"]),
+                    resolved_config=agent_config,
+                    requirements=fabric_harness_requirements(agent_config["harness"]["adapter_id"]),
+                    constraints=list(config.sandbox_gym_wheel_constraints),
                 ),
             )
         return EnvironmentStageSpec(environment=target.environment) if target.environment is not None else None
