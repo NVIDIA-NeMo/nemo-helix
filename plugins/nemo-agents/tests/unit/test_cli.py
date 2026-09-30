@@ -1036,8 +1036,6 @@ def test_deploy_rejects_image_entrypoint_for_openshell() -> None:
                 "openshell",
                 "--use-image-entrypoint",
                 "--no-wait",
-                "--base-url",
-                "http://test",
             ],
         )
 
@@ -1057,7 +1055,7 @@ def test_deploy_accepts_openshell_mode() -> None:
     with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "a1", "--mode", "openshell", "--no-wait", "--base-url", "http://test"],
+            ["deploy", "--agent", "a1", "--mode", "openshell", "--no-wait"],
         )
 
     assert result.exit_code == 0, result.output
