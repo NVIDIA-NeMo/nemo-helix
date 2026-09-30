@@ -91,8 +91,9 @@ RUN umask 022 && \
     curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh && \
     cp /root/.local/bin/uv /usr/local/bin/uv && \
     python3.13 -c 'import ssl, urllib.request; print(ssl.OPENSSL_VERSION)'
-COPY docker/scripts/collect-apt-sources.sh \
+COPY --chmod=755 docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-python-sdists.py \
+    docker/rl/scripts/chmod-newer-than.sh \
     /usr/local/bin/
 
 # Build as a non-runtime user. umask 022 keeps artifacts readable; the runtime
@@ -187,6 +188,7 @@ ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 RUN <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+stamp=$(chmod-newer-than.sh mark)
 SKIP=(
     --no-install-package causal-conv1d
     --no-install-package mamba-ssm
@@ -216,6 +218,7 @@ find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d \
     \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
+chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv
 EOF
 
 # Own layer so a pin edit does not rebuild the sync above.
@@ -225,6 +228,7 @@ RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/o
     <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+stamp=$(chmod-newer-than.sh mark)
 mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
 OTEL_UPGRADE=()
 for pin in "${OTEL_PINS[@]}"; do
@@ -243,6 +247,7 @@ uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     -e /opt/nemo-rl/3rdparty/Gym-workspace/Gym
 uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
     "nemo-sandboxed-gym==${NEMO_SANDBOXED_GYM_VERSION}"
+chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
 EOF
 
 # After the sync, so a source-only bump reuses that layer.
@@ -257,7 +262,12 @@ RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
 
 # Editable root only. Dependencies were installed by the sync above.
-RUN umask 022 && uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps -e /opt/nemo-rl
+RUN <<"EOF" bash -eu
+umask 022
+stamp=$(chmod-newer-than.sh mark)
+uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps -e /opt/nemo-rl
+chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
+EOF
 
 # ---- Per-worker venvs under /opt/ray_venvs ----
 # Filters are substrings of actor FQNs (extras from actor_environments.py).
@@ -277,6 +287,7 @@ RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
     <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+stamp=$(chmod-newer-than.sh mark)
 NRL_PREFETCH_SKIP_INITIAL_SYNC=1 UV_NO_SYNC=1 \
 uv run nemo_rl/utils/prefetch_venvs.py \
     dtensor_policy_worker_v2.DTensorPolicyWorkerV2 \
@@ -317,6 +328,7 @@ sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAs
 sync_venv /opt/ray_venvs/nemo_rl.experience.sync_rollout_actor.SyncRolloutActor --extra vllm
 sync_venv /opt/ray_venvs/nemo_rl.environments.nemo_gym.NemoGym --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor --extra nemo_gym
+chmod-newer-than.sh "${stamp}" /opt/ray_venvs /opt/nemo_rl_venv
 EOF
 
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----
@@ -333,6 +345,7 @@ RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/o
     <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+stamp=$(chmod-newer-than.sh mark)
 mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
 OTEL_UPGRADE=()
 for pin in "${OTEL_PINS[@]}"; do
@@ -401,6 +414,7 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
     rm -rf "${d}"
 done
+chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs
 EOF
 
 USER root
@@ -451,13 +465,10 @@ ENV VIRTUAL_ENV=/opt/nemo_rl_venv \
     UV_FIND_LINKS=/opt/gym-wheels \
     NO_VCS_VERSION=1
 
-# Parents of the venv dirs are group-writable so runtime can add venvs.
-# Prefetched venvs stay build-owned. uv writes some cache files mode 0600;
-# the runtime user still has to read them, because the venvs symlink into
-# /opt/uv_cache. The cache stays owned by root, so Gym code cannot rewrite it.
+# Group-writable parents so the runtime user can add venvs. File modes are set
+# in the RUN that creates them; chmod -R here would copy every inode up.
 RUN chown root:${RUNTIME_GID} /opt/ray_venvs /opt/gym_venvs && \
-    chmod 1775 /opt/ray_venvs /opt/gym_venvs && \
-    chmod -R a+rX /opt/cpython /opt/nemo_rl_venv /opt/nemo-rl /opt/gym_venvs /opt/ray_venvs
+    chmod 1775 /opt/ray_venvs /opt/gym_venvs
 
 # NeMo-RL patches vllm in place and writes a per-venv py_executable. The shared
 # symlink is read-only and would be one copy for every venv. cp -rL makes each
