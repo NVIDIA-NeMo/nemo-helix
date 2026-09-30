@@ -119,7 +119,29 @@ def test_default_install_is_a_plain_pypi_install(tmp_path: Path, monkeypatch: py
         "install",
         "--python",
         str(cfg.venv_path / "bin" / "python"),
-        "nvidia-agent-hardener>=0.0.11",
+        "nvidia-agent-hardener>=0.0.12",
+    ]
+
+
+def test_existing_venv_is_upgraded_to_the_configured_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A source refresh must not silently keep an older native Hardener binary."""
+    cfg = _config(tmp_path)
+    cfg.agent_hardener_bin.parent.mkdir(parents=True, exist_ok=True)
+    cfg.agent_hardener_bin.touch()
+    commands = _capture_provision(monkeypatch, cfg)
+
+    provisioning.provision_venv(cfg, force=False)
+
+    assert not any(command[:2] == ["uv", "venv"] for command in commands)
+    assert commands == [
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(cfg.venv_path / "bin" / "python"),
+            "nvidia-agent-hardener>=0.0.12",
+        ]
     ]
 
 

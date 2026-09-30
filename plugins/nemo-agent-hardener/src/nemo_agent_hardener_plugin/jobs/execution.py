@@ -22,10 +22,11 @@ from typing import Any
 
 import yaml
 from nemo_agent_hardener_plugin.cli.client import base_url
-from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+from nemo_agent_hardener_plugin.config import AgentHardenerConfig, read_env_file
 from nemo_agent_hardener_plugin.jobs import _common, benign_suite
 from nemo_agent_hardener_plugin.jobs.errors import (
     AGENT_HARDENER_ERROR_FILE_ENVVAR,
+    CATEGORY_MANIFEST,
     CATEGORY_SYNTH_SERVICE,
     AgentHardenerRunError,
     RunFailure,
@@ -36,11 +37,125 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 from nemo_agent_hardener_plugin.jobs.hitl import StatusDetailsChannel, drive_synth_hitl
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.synth_client import launch_synth_service
+from nemo_agents_plugin.jobs.gateway_proxy import optional_platform_auth_proxy
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.job_context import JobContext
+from nhx.common.auth import NHX_PRINCIPAL_ENVVAR
 
 logger = logging.getLogger(__name__)
 
 _LOG_TAIL = 4000
+_EVENT_SINK_URL_ENVVAR = "AGENT_HARDENER_EVENT_SINK_URL"
+_EVENT_SINK_HEADERS_ENVVAR = "AGENT_HARDENER_EVENT_SINK_HEADERS"
+_PLATFORM_AUTH_ENVVARS = frozenset(
+    {
+        _EVENT_SINK_HEADERS_ENVVAR,
+        # Current user/server config files can contain access and refresh tokens.
+        "NHX_CONFIG_FILE",
+        "NHX_CONFIG_FILE_PATH",
+        NHX_PRINCIPAL_ENVVAR,
+        WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
+        # Pre-Helix names can still be present in an upgraded host environment.
+        "NMP_CONFIG_FILE",
+        "NMP_CONFIG_FILE_PATH",
+        # The Jobs runtime may authenticate its OTLP exporter with this header.
+        "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        # Secret references have already been resolved for the task process. The
+        # native child needs the selected values, not the platform lookup map.
+        "NEMO_JOB_SECRETS",
+    }
+)
+_PLATFORM_AUTH_ENVVAR_PREFIXES = (
+    # Current and pre-Helix auth configuration, including AUTH_URL and the
+    # auth-proxy principal/on-behalf-of identity.
+    "NHX_AUTH_",
+    "NMP_AUTH_",
+    # Current and legacy managed-job identity/token namespaces.
+    "NHX_WORKLOAD_",
+    "NMP_WORKLOAD_",
+    "NEMO_WORKLOAD_",
+    "NHX_WORKFLOW_",
+    "NMP_WORKFLOW_",
+    "NEMO_WORKFLOW_",
+    # Retired trajectory forwarding carried Authorization/principal headers in env.
+    "NHX_AGENT_TELEMETRY_HEADER_",
+    "NMP_AGENT_TELEMETRY_HEADER_",
+)
+_PLATFORM_NATIVE_ENV_ALLOWLIST = frozenset(
+    {
+        # Routing metadata only. Native integrations use this to address the
+        # deployment, but it conveys no authority by itself.
+        "NHX_BASE_URL",
+    }
+)
+
+
+def _scrub_platform_auth_env(env: dict[str, str]) -> None:
+    """Keep platform identity/auth material out of native child processes.
+
+    Model and victim variables intentionally remain available. In particular,
+    ``NHX_BASE_URL`` is routing metadata rather than a credential, and the
+    separately constructed event-sink URL points at the scoped loopback proxy.
+    """
+    for name in tuple(env):
+        if _is_platform_auth_envvar(name):
+            env.pop(name, None)
+
+
+def _is_platform_auth_envvar(name: str) -> bool:
+    """Whether *name* belongs to Platform's private identity/config namespace."""
+    platform_namespace = name.startswith(("NHX_", "NMP_")) and name not in _PLATFORM_NATIVE_ENV_ALLOWLIST
+    return name in _PLATFORM_AUTH_ENVVARS or name.startswith(_PLATFORM_AUTH_ENVVAR_PREFIXES) or platform_namespace
+
+
+def _reject_platform_auth_sources(manifest: str, env_file: str | None) -> None:
+    """Reject victim inputs that try to reintroduce Platform credentials.
+
+    The inherited environment is scrubbed before dotenv generation, but a
+    manifest can also request a reserved variable by name and a caller can pass
+    an explicit dotenv. Fail closed on names only; values are never reported.
+    """
+    reserved: set[str] = set()
+    try:
+        data = yaml.safe_load(Path(manifest).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        data = {}
+    agent = data.get("agent", {}) if isinstance(data, dict) else {}
+    if isinstance(agent, dict):
+        reserved.update(
+            name for name in (agent.get("secrets") or []) if isinstance(name, str) and _is_platform_auth_envvar(name)
+        )
+    if env_file:
+        reserved.update(name for name in read_env_file(Path(env_file)) if _is_platform_auth_envvar(name))
+    if reserved:
+        names = ", ".join(sorted(reserved))
+        raise AgentHardenerRunError(
+            CATEGORY_MANIFEST,
+            f"Victim configuration requests reserved Platform environment variables: {names}.",
+            remediation=(
+                "Remove NHX/NMP identity and configuration variables from agent.secrets and --env-file; "
+                "provide only victim-owned credentials."
+            ),
+        )
+
+
+def _build_native_subprocess_env(
+    plugin_config: AgentHardenerConfig, extra_env: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Build the native Agent Hardener environment without platform identity material.
+
+    Callers use this before both victim dotenv materialization and subprocess
+    execution.  Scrubbing only at the process boundary is too late: a manifest
+    can declare a platform variable as an agent secret, causing the unfiltered
+    parent value to be written to ``--env-file`` and reloaded by the child.
+    """
+    env = (
+        _common.build_subprocess_env(plugin_config, extra_env)
+        if extra_env is not None
+        else _common.build_subprocess_env(plugin_config)
+    )
+    _scrub_platform_auth_env(env)
+    return env
 
 
 @dataclass
@@ -60,9 +175,9 @@ class RunOutcome:
     failure: RunFailure | None = None
 
 
-def _event_sink_url(workspace: str, run_name: str) -> str:
+def _event_sink_url(workspace: str, run_name: str, *, origin: str | None = None) -> str:
     """Where agent-hardener's EventBus POSTs live events for this run (relayed to Studio over SSE)."""
-    return f"{base_url()}/apis/agent-hardener/v2/workspaces/{workspace}/runs/{run_name}/events"
+    return f"{(origin or base_url()).rstrip('/')}/apis/agent-hardener/v2/workspaces/{workspace}/runs/{run_name}/events"
 
 
 def _run_command(
@@ -108,6 +223,10 @@ def _run_agent_hardener(
     if err_path.exists():
         err_path.unlink()  # a stale file from an earlier command in this run would misattribute the cause
     cmd_env = {**env, AGENT_HARDENER_ERROR_FILE_ENVVAR: str(err_path)}
+    # Defense in depth at the actual process boundary. Most callers prepare a
+    # scrubbed env earlier so victim-secret validation sees the same values the
+    # child receives, but this also protects direct/future invocation paths.
+    _scrub_platform_auth_env(cmd_env)
     completed, log_text, log_ref = _common.execute(cmd, cmd_env, log_path, ctx, artifact_name=artifact_name)
     failure: RunFailure | None = None
     if completed.returncode != 0:
@@ -142,7 +261,11 @@ def _prepare_invocation(
         rounds=rounds,
         replay_args=replay_args,
     )
-    env = _common.build_subprocess_env(plugin_config, model_env)
+    _reject_platform_auth_sources(manifest, env_file)
+    env = _build_native_subprocess_env(plugin_config, model_env)
+    # The parent retains platform identity for the loopback auth proxy. The
+    # native process needs victim/model credentials but not the job principal
+    # or workload subject-token path.
     _common.check_victim_secrets(manifest, env, env_file)
     return cmd, env
 
@@ -204,7 +327,8 @@ def _run_service_driven(
         raise RuntimeError(
             "service-driven mode needs a submitted platform job (Studio drives the HITL via status_details)."
         )
-    env = _common.build_subprocess_env(plugin_config, model_env)
+    _reject_platform_auth_sources(manifest, env_file)
+    env = _build_native_subprocess_env(plugin_config, model_env)
     _common.check_victim_secrets(manifest, env, env_file)
 
     # Record the run up front so its name addresses the SSE event stream; point agent-hardener's sink at it.
@@ -224,25 +348,33 @@ def _run_service_driven(
             source_run=source_run,
         ),
     )
-    if record_name:
-        env["AGENT_HARDENER_EVENT_SINK_URL"] = _event_sink_url(ctx.workspace, record_name)
-
     try:
-        return _drive_service_run(
-            manifest,
-            env_file,
-            env,
-            plugin_config.agent_hardener_bin,
-            ctx,
-            sdk,
-            manifest_id=manifest_id,
-            cached_suite=cached_suite,
-            stop_after_synth=stop_after_synth,
-            rounds=rounds,
-            replay_args=replay_args,
-            benign_suite_override=benign_suite_override,
-            record_name=record_name,
-        )
+        # Keep credentials in the task process.  The loopback proxy authenticates
+        # each forwarded callback with the job identity and refreshes workload
+        # tokens on demand, so long-running/multi-round jobs never inherit a
+        # bearer token or pin themselves to one token's lifetime.
+        with optional_platform_auth_proxy() as proxy_origin:
+            if record_name:
+                env[_EVENT_SINK_URL_ENVVAR] = _event_sink_url(
+                    ctx.workspace,
+                    record_name,
+                    origin=proxy_origin,
+                )
+            return _drive_service_run(
+                manifest,
+                env_file,
+                env,
+                plugin_config.agent_hardener_bin,
+                ctx,
+                sdk,
+                manifest_id=manifest_id,
+                cached_suite=cached_suite,
+                stop_after_synth=stop_after_synth,
+                rounds=rounds,
+                replay_args=replay_args,
+                benign_suite_override=benign_suite_override,
+                record_name=record_name,
+            )
     except Exception as exc:  # classify + finalize the record rather than orphaning it as `running`
         failure = classify_exception(exc)
         logger.exception("service-driven war-game failed [%s]: %s", failure.category, failure.message)

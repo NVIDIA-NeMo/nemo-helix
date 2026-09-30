@@ -124,6 +124,9 @@ Passthrough kwargs:
 - `job_result_routes: list[HelixJobResultRoute]` — custom result download endpoints.
 - `generate_job_name: Callable[..., str]` — name generator for unnamed submissions.
 - `default_profile: str = "default"` — profile stamped onto compiled steps when the plugin's `compile()` didn't set one.
+- `job_discriminator: str` — stable collection identifier when multiple job schemas intentionally share one
+  service source. New records are tagged and every list/read/mutation route is isolated to that identifier;
+  pre-existing untagged records remain accessible only through the core Jobs API.
 
 ## Compilation
 
