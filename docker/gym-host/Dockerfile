@@ -30,6 +30,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-install-project \
         --no-editable
 
+# CVE remediation for the gym-host base venv.
+# cryptography 50.x is not lockable yet because nemo-gym pulls mlflow>=3.15.1,
+# whose current metadata caps cryptography at <50. Pin the post-sync override so
+# the scanner-visible artifact is deterministic until that upstream cap moves.
+# Same pattern as docker/Dockerfile.nhx-gym-tasks (GHSA-g6cj-pr64-35w5).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv UV_LINK_MODE=copy \
+    uv pip install --python /opt/gym-host-venv/bin/python --no-deps "cryptography==50.0.0"
+
 # Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
 # resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
 # of on every container start.
