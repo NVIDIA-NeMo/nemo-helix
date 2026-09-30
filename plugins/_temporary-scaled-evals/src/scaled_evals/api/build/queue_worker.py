@@ -49,39 +49,6 @@ class TaskBuildWorker:
     retry_delay: float = 30.0
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
 
-    def claim_next(self) -> TaskBuildJob | None:
-        with self.connect() as conn:
-            return TaskBuildRepository(conn).claim_next(
-                worker_id=self.worker_id,
-                claim_timeout=self.claim_timeout,
-                max_attempts=self.max_attempts,
-            )
-
-    def work_once(self) -> bool:
-        if settings.platform_build_jobs_enabled:
-            return False
-        job = self.claim_next()
-        if job is None:
-            return False
-        self.run(job)
-        return True
-
-    def work_forever(self, *, idle_sleep: float = 2.0) -> None:
-        next_presence_heartbeat = 0.0
-        while True:
-            try:
-                now = time.monotonic()
-                if now >= next_presence_heartbeat:
-                    self._heartbeat_presence()
-                    next_presence_heartbeat = now + self.heartbeat_interval
-                worked = self.work_once()
-            except Exception:  # noqa: BLE001 - transient DB failures must not kill the worker
-                LOG.exception("task build queue poll failed; retrying")
-                self.sleep(idle_sleep)
-                continue
-            if not worked:
-                self.sleep(idle_sleep)
-
     def run(self, job: TaskBuildJob) -> bool:
         stop = threading.Event()
         heartbeat = threading.Thread(
@@ -159,10 +126,6 @@ class TaskBuildWorker:
                     job.task_id,
                     job.revision,
                 )
-
-    def _heartbeat_presence(self) -> None:
-        with self.connect() as conn:
-            TaskBuildRepository(conn).heartbeat_worker(self.worker_id)
 
 
 def execute_task_build(job: TaskBuildJob) -> tuple[str, str]:
