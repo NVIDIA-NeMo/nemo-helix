@@ -149,6 +149,7 @@ def trusted_allowed_hosts() -> list[str]:
 
 def preflight(spec: LaunchSpec) -> None:
     """Reject evaluations this runtime cannot isolate before any work is staged."""
+    # NemoOpenSandboxEnvironment subclasses one specific Harbor release.
     if spec.framework != "harbor":
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} runs Harbor evaluations only, not {spec.framework!r}")
     if spec.framework_version != HARBOR_OPENSANDBOX_HARBOR_VERSION:
@@ -156,6 +157,8 @@ def preflight(spec: LaunchSpec) -> None:
             f"{HARBOR_OPENSANDBOX_RUNTIME} requires Harbor {HARBOR_OPENSANDBOX_HARBOR_VERSION}, "
             f"got {spec.framework_version!r}"
         )
+
+    # Egress is always default-deny plus the operator allowlist; evaluations can't configure it.
     if spec.network_policy not in SUPPORTED_NETWORK_POLICIES:
         raise ValueError(
             f"{HARBOR_OPENSANDBOX_RUNTIME} supports network_policy "
@@ -166,10 +169,15 @@ def preflight(spec: LaunchSpec) -> None:
             f"{HARBOR_OPENSANDBOX_RUNTIME} takes its egress allowlist from operator settings; "
             "omit network_policy_config"
         )
+
+    # sandbox_k8s features this runtime hasn't implemented.
     if spec.agent_bundle:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support agent bundles yet")
     if spec.switchyard is not None:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support Switchyard leases yet")
+
+    # The task must be an uploaded pack with a prebuilt image: submit stages the pack, and
+    # OpenSandbox can only run existing images.
     if spec.harbor_dataset_image_imports:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} requires an uploaded task pack, not dataset image imports")
     if not (spec.image_ref and spec.image_digest):
@@ -182,12 +190,17 @@ def preflight(spec: LaunchSpec) -> None:
 
 def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
     """Checks that need the staged task tree: compose, and task-declared egress."""
+    # Each trial gets exactly one sandbox, so multi-container (Compose) tasks can't run.
     for name in _COMPOSE_FILENAMES:
         if (task_dir / "environment" / name).exists() or (task_dir / name).exists():
             raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} runs single-container tasks; the task ships {name}")
+
     task_toml = task_dir / "task.toml"
     if not task_toml.is_file():
         raise ValueError(f"staged task has no task.toml: {task_dir}")
+
+    # A task may narrow egress to a subset of the operator allowlist, but asking for any other
+    # host fails the evaluation instead of silently dropping it.
     environment = tomlkit.parse(task_toml.read_text(encoding="utf-8")).get("environment") or {}
     if environment.get("network_mode") == "allowlist":
         requested = [str(host) for host in environment.get("allowed_hosts") or []]
@@ -201,6 +214,7 @@ def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
 
 def bind_task_image(task_dir: Path, image_ref: str) -> None:
     """Point the staged task at its prebuilt image; OpenSandbox never builds images."""
+    # tomlkit keeps the rest of the author's task.toml (comments, ordering) as-is.
     task_toml = task_dir / "task.toml"
     document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
     environment = document.get("environment")
@@ -210,6 +224,8 @@ def bind_task_image(task_dir: Path, image_ref: str) -> None:
     if not isinstance(environment, MutableMapping):
         raise ValueError(f"task [environment] must be a TOML table: {task_toml}")
     environment["docker_image"] = image_ref
+
+    # Write to a temporary file and swap it in, so a crash never leaves a half-written task.toml.
     temporary = task_toml.with_suffix(".toml.tmp")
     temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
     os.replace(temporary, task_toml)
@@ -217,6 +233,7 @@ def bind_task_image(task_dir: Path, image_ref: str) -> None:
 
 def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
     """Render the evaluation's Harbor profile into config overrides, rejecting keys this backend owns."""
+    # The profile is YAML text with $VARIABLES, filled from the profile's own env values.
     template_text, profile_env = _normalize_harbor_profile_config(profile_config)
     if not template_text:
         return {}
@@ -224,6 +241,8 @@ def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
     loaded = yaml.safe_load(rendered) or {}
     if not isinstance(loaded, dict):
         raise ValueError("Harbor profile config must be a mapping")
+
+    # Profiles tune agents, retries and timeouts; they can't touch what this backend sets.
     owned = [key for key in _BACKEND_OWNED_TOP_LEVEL if key in loaded]
     if owned:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} sets {', '.join(owned)} itself; remove it from the profile")
@@ -253,6 +272,9 @@ def render_harbor_config(
     template = yaml.safe_load(template_text) or {}
     if not isinstance(template, dict):
         raise ValueError("harbor_opensandbox config template must be a mapping")
+
+    # From the operator template's environment block, keep only the adapter tuning kwargs
+    # (proxy use, request and readiness timeouts). Anything else is rejected, not ignored.
     template_environment = template.pop("environment", None) or {}
     if not isinstance(template_environment, Mapping):
         raise ValueError("harbor_opensandbox template environment must be a mapping")
@@ -260,15 +282,22 @@ def render_harbor_config(
     rejected = sorted(set(template_kwargs) - _TEMPLATE_ENVIRONMENT_KWARGS)
     if rejected:
         raise ValueError(f"harbor_opensandbox template environment.kwargs may not set {', '.join(rejected)}")
+
+    # The run executes exactly the staged task, so drop any task sources the template lists.
     for key in ("datasets", "tasks"):
         template.pop(key, None)
 
+    # Profile values override the template. Then set the per-evaluation job fields.
     config = _deep_merge_harbor_config(template, _profile_overrides(spec.harbor_config))
     config["job_name"] = spec.evaluation_id
     config["jobs_dir"] = jobs_dir
     config["n_attempts"] = spec.n_attempts
     config["n_concurrent_trials"] = spec.parallelism
     config["tasks"] = [{"path": str(task_path)}]
+
+    # The environment block is written last and only here: the sandbox class, egress allowlist,
+    # verification mode and ownership labels all come from operator settings. "delete" makes
+    # Harbor remove each sandbox when its trial ends.
     config["environment"] = {
         "import_path": NEMO_OPENSANDBOX_IMPORT_PATH,
         "delete": True,
@@ -286,9 +315,12 @@ def render_harbor_config(
 
 def connection_env(base: Mapping[str, str], env_file: str | None) -> dict[str, str]:
     """Process env plus the operator env file, with ``OPEN_SANDBOX_*`` aliased to the SDK names."""
+    # Values in the operator env file win over the process environment.
     env = dict(base)
     if env_file:
         env.update(load_env_file(Path(env_file).expanduser()))
+
+    # Raise a message that names where to set the connection settings, not just which one is missing.
     try:
         return _sdk_connection_env(env)
     except ValueError as exc:
@@ -306,7 +338,9 @@ def _opensandbox_sdk_version(harbor_dir: Path) -> str | None:
 
 
 def _write_env_file(path: Path, values: Mapping[str, str]) -> Path:
-    """Write the agent env file Harbor passes to trials, owner-readable only."""
+    """Write the agent env file Harbor loads with ``--env-file``, owner-readable only."""
+    # Reuse merged_env_file for its value quoting. It needs a source file to append to, and this
+    # runtime has none, so start from an empty one (also what Harbor gets when there are no credentials).
     base = path.with_suffix(".base.env")
     base.parent.mkdir(parents=True, exist_ok=True)
     base.write_text("")
@@ -340,15 +374,29 @@ def make_harbor_opensandbox_submitter(
     work = Path(work_dir).expanduser()
 
     def submit(spec: LaunchSpec) -> LaunchHandle:
+        # Reject unsupported evaluations, and missing OpenSandbox connection settings, before
+        # anything is downloaded or written.
         preflight(spec)
         harbor_env = connection_env(os.environ if environ is None else environ, env_file)
+
+        # The evaluation may pin its own Harbor runner venv; otherwise use the deployment default.
         selected_harbor = Path(spec.harbor_dir or default_harbor).expanduser()
         run_dir = work / spec.evaluation_id
         task_dir = run_dir / _staged_task_name(spec)
-        if spec.tarball_object_key is None or not _stage_task_tree(spec.tarball_object_key, task_dir):
+
+        # Download the task pack and unpack its Harbor task tree into the run directory.
+        # Everything below edits this staged copy, never the uploaded pack.
+        staged = spec.tarball_object_key is not None and _stage_task_tree(spec.tarball_object_key, task_dir)
+        if not staged:
             raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} task pack contains no Harbor task tree")
+
+        # Checks that need the task files: no Compose tasks, and no task egress beyond the operator allowlist.
         trusted_hosts = trusted_allowed_hosts()
         preflight_staged_task(task_dir, trusted_hosts)
+
+        # Apply the evaluation's task customizations, shared with sandbox_k8s: extra skill files,
+        # instruction prefix/postfix, and the agent timeout floor. The skill list and final
+        # instruction are saved as run artifacts; the timeout change is kept for the launch handle.
         if spec.extra_skill_object_keys:
             materials = _inject_extra_skills(task_dir, spec.extra_skill_object_keys)
             _save_extra_skill_materials_artifact(materials, spec.evaluation_id, harbor_dir=selected_harbor)
@@ -359,9 +407,13 @@ def make_harbor_opensandbox_submitter(
             if spec.agent_timeout_floor_sec is not None
             else None
         )
+
+        # OpenSandbox can't build images, so point task.toml at the task image built at upload time.
         task_image_ref = _task_image_ref_for_sandbox(spec)
         bind_task_image(task_dir, task_image_ref)
 
+        # Render the Harbor config: the operator template plus the evaluation profile, with the
+        # environment block (sandbox class, egress allowlist, ownership labels) set by this backend.
         config = render_harbor_config(
             template_path.read_text(),
             spec,
@@ -372,12 +424,20 @@ def make_harbor_opensandbox_submitter(
         rendered_path = run_dir / "harbor-config.yaml"
         rendered_path.write_text(yaml.safe_dump(config, sort_keys=False))
 
+        # Harbor gets its environment from two places:
+        # - harbor_env is the process environment it's spawned with, carrying the OpenSandbox API
+        #   connection settings the environment class uses to create sandboxes.
+        # - agent_env is written to an owner-only file that Harbor loads with --env-file. It holds
+        #   the model credentials and any scripted user turns that agents read.
         agent_env = dict(spec.credential_env)
         if spec.initial_user_turns:
             agent_env[_INITIAL_USER_TURNS_ENV] = json.dumps(spec.initial_user_turns, separators=(",", ":"))
         agent_env_file = _write_env_file(run_dir / "harbor.env", agent_env)
+
         log_path = run_dir / "harbor.log"
         argv = [*_harbor_run_argv(selected_harbor), "-c", str(rendered_path), "--env-file", str(agent_env_file), "-y"]
+
+        # Launch-time facts the provenance manifest records; stored on the launch handle below.
         provenance = {
             "harbor_version": spec.framework_version,
             "opensandbox_sdk_version": _opensandbox_sdk_version(selected_harbor),
@@ -388,13 +448,21 @@ def make_harbor_opensandbox_submitter(
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,
         }
+
+        # Only credential names are logged, never values.
         LOG.info(
             "dispatch %s: harbor_opensandbox launch trusted_hosts=%s credential_env keys=%s",
             spec.evaluation_id,
             trusted_hosts,
             sorted(spec.credential_env),
         )
+
+        # Start Harbor detached and return immediately; the status reader polls it from here on.
         runner(argv, selected_harbor, log_path, harbor_env)
+
+        # The worker saves the handle in the evaluations table. The status reader and terminator
+        # use the pid, exit and log paths plus harbor_dir; cleanup selects sandboxes by
+        # "ownership"; the evidence builder reads "provenance" and "agent_timeout_apply".
         return LaunchHandle(
             backend=HARBOR_OPENSANDBOX_RUNTIME,
             external_id=spec.evaluation_id,
@@ -417,6 +485,8 @@ def make_harbor_opensandbox_submitter(
 
 def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
     """Read the per-trial records ``NemoOpenSandboxEnvironment`` wrote after verification."""
+    # Harbor gives each trial its own directory under the job dir. Only sandboxes that passed
+    # verification have a record; unreadable ones are skipped so one bad file can't hide the rest.
     records: list[dict[str, Any]] = []
     for path in sorted(job_dir.glob(f"*/{APPLIED_EGRESS_FILENAME}")):
         try:
@@ -424,6 +494,8 @@ def collect_applied_egress(job_dir: Path) -> list[dict[str, Any]]:
         except (OSError, ValueError):
             LOG.warning("unreadable applied-egress record %s", path)
             continue
+
+        # Keep just the fields provenance reports; the directory name identifies the trial.
         records.append(
             {
                 "trial": path.parent.name,
@@ -447,7 +519,11 @@ def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> 
     read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
 
     def read(handle: LaunchHandle) -> RuntimeStatus:
+        # Harbor writes the same result.json as under sandbox_k8s, so reuse that runtime's reader.
         status = read_harbor(handle)
+
+        # Once Harbor has finished, every trial has written its record, so summarize them now.
+        # A failed write is logged, not raised: it must not change the evaluation's outcome.
         if status.phase in {"succeeded", "failed"}:
             job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
             try:
@@ -478,7 +554,11 @@ def make_harbor_opensandbox_terminator(
     cleanup_runner = cleanup_runner or _run_cleanup_process
 
     def terminate(handle: LaunchHandle) -> None:
+        # Every step below runs even if an earlier one fails. Failures are collected and raised
+        # together at the end, so a stuck Harbor process never stops sandbox cleanup.
         failures: list[str] = []
+
+        # Stop Harbor first, so it can't create new sandboxes while cleanup is killing them.
         try:
             _stop_detached_runner(handle)
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
@@ -486,11 +566,17 @@ def make_harbor_opensandbox_terminator(
 
         selector = dict(handle.raw.get("ownership") or {})
         try:
+            # Only kill sandboxes labelled with this deployment and this evaluation. A handle whose
+            # labels don't match could otherwise delete another deployment's or evaluation's sandboxes.
             validate_selector(selector)
             if selector.get(DEPLOYMENT_METADATA_KEY) != settings.harbor_opensandbox_deployment_id:
                 raise ValueError("launch handle belongs to another deployment")
             if selector.get(EVALUATION_METADATA_KEY) != handle.external_id:
                 raise ValueError("launch handle ownership does not match its evaluation")
+
+            # Run cleanup with the Harbor runner's interpreter: the OpenSandbox SDK is installed
+            # only in that venv. Select on exactly the deployment and evaluation labels; the
+            # optional benchmark-run label would only narrow the match.
             selected_harbor = Path(str(handle.raw.get("harbor_dir") or harbor_dir)).expanduser()
             timeout_s = float(settings.harbor_opensandbox_cleanup_timeout_seconds)
             argv = [
@@ -505,6 +591,9 @@ def make_harbor_opensandbox_terminator(
             for key, value in sorted(selector.items()):
                 if key in (DEPLOYMENT_METADATA_KEY, EVALUATION_METADATA_KEY):
                     argv += ["--selector", f"{key}={value}"]
+
+            # The process timeout gives the module a minute beyond its own wait for sandboxes to die.
+            # On a non-zero exit its JSON report says why: an error, or the sandboxes still live.
             env = connection_env(os.environ if environ is None else environ, env_file)
             completed = cleanup_runner(argv, env, timeout_s + 60)
             if completed.returncode != 0:
@@ -514,11 +603,13 @@ def make_harbor_opensandbox_terminator(
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
             failures.append(f"OpenSandbox cleanup failed: {exc}")
 
+        # Also write the summary here: a cancelled run never reaches a terminal phase in the status reader.
         job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
         try:
             write_applied_egress_summary(job_dir)
         except OSError as exc:
             LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
+
         if failures:
             raise RuntimeError("; ".join(failures))
 
@@ -527,6 +618,7 @@ def make_harbor_opensandbox_terminator(
 
 def _parse_cleanup_report(stdout: str) -> dict[str, Any]:
     """Return the last JSON object the cleanup module printed, or an error entry if there is none."""
+    # The report is the module's final stdout line; anything before it is log output.
     for line in reversed(stdout.strip().splitlines()):
         try:
             loaded = json.loads(line)
@@ -541,6 +633,8 @@ def validate_settings() -> None:
     """Fail at startup, not at first launch, when the runtime is enabled but misconfigured."""
     if not settings.harbor_opensandbox_enabled:
         return
+
+    # Files the submitter reads on every launch must exist.
     if not settings.harbor_opensandbox_config_path:
         raise RuntimeError("HARBOR_OPENSANDBOX_ENABLED is set but HARBOR_OPENSANDBOX_CONFIG_PATH is not")
     if not Path(settings.harbor_opensandbox_config_path).expanduser().is_file():
@@ -548,8 +642,12 @@ def validate_settings() -> None:
     env_file = settings.harbor_opensandbox_env_file
     if env_file and not Path(env_file).expanduser().is_file():
         raise RuntimeError(f"HARBOR_OPENSANDBOX_ENV_FILE does not exist: {env_file}")
+
+    # Cleanup selects sandboxes by deployment ID; an empty ID would match other deployments' sandboxes.
     if not settings.harbor_opensandbox_deployment_id.strip():
         raise RuntimeError("HARBOR_OPENSANDBOX_DEPLOYMENT_ID must be non-empty")
+
+    # Valid but probably a mistake: without a model endpoint host, agents can't reach their model.
     if not settings.harbor_opensandbox_model_endpoint_hosts.strip():
         LOG.warning("harbor_opensandbox has no model endpoint host; trials can reach only the operator allowlist")
 
@@ -558,8 +656,12 @@ def build_backend() -> HarborOpenSandboxBackend:
     """Build the backend from settings; when disabled, one that refuses every launch."""
     if not settings.harbor_opensandbox_enabled:
         return HarborOpenSandboxBackend()
+
+    # validate_settings guarantees the config path is set; the assert narrows the type.
     validate_settings()
     assert settings.harbor_opensandbox_config_path is not None
+
+    # All three share the Harbor runner and jobs dir, so they agree on where each run's files live.
     return HarborOpenSandboxBackend(
         submitter=make_harbor_opensandbox_submitter(
             harbor_dir=settings.harbor_dir,
