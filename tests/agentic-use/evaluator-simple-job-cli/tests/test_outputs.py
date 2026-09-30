@@ -10,7 +10,8 @@ quickstart environment does not include the job execution worker.
 
 import os
 
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 
@@ -18,19 +19,19 @@ WORKSPACE = "eval-test-workspace"
 FILESET = "eval-dataset"
 
 
-def _get_client() -> NemoClient:
+def _get_client() -> NeMoHelix:
     nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-    return NemoClient(base_url=nhx_base_url)
+    return NeMoHelix(base_url=nhx_base_url)
 
 
 def _get_files_client() -> FilesClient:
-    return FilesClient.from_client(_get_client())
+    return client_from_platform(_get_client(), FilesClient)
 
 
 def test_workspace_exists():
     """Verify the eval-test-workspace was created."""
     client = _get_client()
-    response = WorkspacesClient.from_client(client).list_workspaces()
+    response = client_from_platform(client, WorkspacesClient).list_workspaces()
     workspace_names = [ws.name for ws in response.items()]
     assert WORKSPACE in workspace_names, f"Workspace '{WORKSPACE}' not found. Found: {workspace_names}"
 

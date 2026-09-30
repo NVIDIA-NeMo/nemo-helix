@@ -14,7 +14,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from nemo_evaluator.jobs.evaluate import EvaluateSpec
 from nemo_evaluator.sdk import FilesetRef
@@ -116,7 +116,7 @@ async def _new_client() -> AsyncNemoClient:
         timeout=30000.0,
     )
     try:
-        await cast(AsyncEvaluator, client.evaluator).plugin_status()
+        await AsyncEvaluator.from_client(client).plugin_status()
     except NemoClientError as e:
         await _close_client(client)
         raise RuntimeError(
@@ -134,7 +134,7 @@ def _new_sync_client() -> NemoClient:
         timeout=30000.0,
     )
     try:
-        cast(SyncEvaluator, client.evaluator).plugin_status()
+        SyncEvaluator.from_client(client).plugin_status()
     except NemoClientError as e:
         client.close()
         raise RuntimeError(
@@ -494,7 +494,7 @@ async def _run_online_metric_example_body(
     Shared body for the FilesetRef and local-file driver examples; callers are
     responsible for constructing the dataset and managing the client lifecycle.
     """
-    evaluator_plugin_client = cast(AsyncEvaluator, client.evaluator)
+    evaluator_plugin_client = AsyncEvaluator.from_client(client)
     run_kwargs: dict[str, Any] = {}
     metric: Metric = _offline_exact_match_metric()
     config: RunConfig | RunConfigOnlineModel = RunConfig(limit_samples=limit_samples)
@@ -563,7 +563,7 @@ def run_nhx_online_metric_example_sync_client(
     client = _new_sync_client()
     try:
         dataset = ensure_example_fileset_sync(client)
-        evaluator_plugin_client = cast(SyncEvaluator, client.evaluator)
+        evaluator_plugin_client = SyncEvaluator.from_client(client)
         run_kwargs: dict[str, Any] = {}
         metric: Metric = _offline_exact_match_metric()
         config: RunConfig | RunConfigOnlineModel = RunConfig(limit_samples=limit_samples)
@@ -651,7 +651,7 @@ async def run_nhx_llm_judge_example(
             workspace=DEFAULT_WORKSPACE,
             client=client,
         )
-        evaluator_plugin_client = cast(AsyncEvaluator, client.evaluator)
+        evaluator_plugin_client = AsyncEvaluator.from_client(client)
         config: RunConfig | RunConfigOnlineModel = RunConfig(limit_samples=limit_samples)
 
         if is_online:

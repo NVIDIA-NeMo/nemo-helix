@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -95,6 +95,13 @@ def _optional_list(value: Sequence[str] | None) -> list[str] | None:
     if value is None:
         return None
     return list(value)
+
+
+def _own_transport(kwargs: dict[str, Any], build: Callable[[], Any]) -> None:
+    """Give the client a factory-built transport it owns; an injected one stays the caller's."""
+    if "http_client" not in kwargs:
+        kwargs["http_client"] = build()
+        kwargs.setdefault("owns_http_client", True)
 
 
 class ServiceMode(StrEnum):
@@ -353,17 +360,19 @@ class DaemonServiceHandle:
 
     def client(self, **kwargs: Any) -> NemoClient:
         if self.transport == "uds":
-            if self.socket_path is None:
+            socket_path = self.socket_path
+            if socket_path is None:
                 raise ServicesError("UDS service handle is missing socket_path")
-            kwargs.setdefault("http_client", build_sync_http_client(self.socket_path))
+            _own_transport(kwargs, lambda: build_sync_http_client(socket_path))
         kwargs.setdefault("base_url", self.base_url)
         return NemoClient(**kwargs)
 
     def async_client(self, **kwargs: Any) -> AsyncNemoClient:
         if self.transport == "uds":
-            if self.socket_path is None:
+            socket_path = self.socket_path
+            if socket_path is None:
                 raise ServicesError("UDS service handle is missing socket_path")
-            kwargs.setdefault("http_client", build_async_http_client(self.socket_path))
+            _own_transport(kwargs, lambda: build_async_http_client(socket_path))
         kwargs.setdefault("base_url", self.base_url)
         return AsyncNemoClient(**kwargs)
 
@@ -383,12 +392,12 @@ class EmbeddedServiceHandle:
         return None
 
     def client(self, **kwargs: Any) -> NemoClient:
-        kwargs.setdefault("http_client", build_sync_asgi_http_client(self.app))
+        _own_transport(kwargs, lambda: build_sync_asgi_http_client(self.app))
         kwargs.setdefault("base_url", EMBEDDED_BASE_URL)
         return NemoClient(**kwargs)
 
     def async_client(self, **kwargs: Any) -> AsyncNemoClient:
-        kwargs.setdefault("http_client", build_async_asgi_http_client(self.app))
+        _own_transport(kwargs, lambda: build_async_asgi_http_client(self.app))
         kwargs.setdefault("base_url", EMBEDDED_BASE_URL)
         return AsyncNemoClient(**kwargs)
 

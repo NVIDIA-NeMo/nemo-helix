@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from nemo_helix_ext.local import _service_child, services
 from nemo_helix_ext.local.process import (
@@ -451,11 +452,13 @@ def test_daemon_service_handle_uds_client_uses_socket_transport(tmp_path: Path) 
     )
 
     client = handle.client()
+    transport = client._http
     try:
         assert str(client.base_url).rstrip("/") == UDS_BASE_URL
         assert handle.gateway_base_url == "http://127.0.0.1:9999"
     finally:
         client.close()
+    assert transport.is_closed
 
 
 def test_embedded_handle_async_client_uses_asgi_transport() -> None:
@@ -475,9 +478,21 @@ def test_embedded_handle_async_client_uses_asgi_transport() -> None:
     platform_cls.assert_called_once_with(
         auth="test-token",
         http_client=http_client,
+        owns_http_client=True,
         base_url=services.EMBEDDED_BASE_URL,
     )
     assert client is client_value
+
+
+def test_embedded_handle_leaves_an_injected_transport_to_its_owner() -> None:
+    handle = services.EmbeddedServiceHandle(app=MagicMock(), runtime=MagicMock())
+    injected = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+
+    client = handle.client(http_client=injected)
+    client.close()
+
+    assert not injected.is_closed
+    injected.close()
 
 
 def test_ensure_services_dispatches_to_embedded_mode() -> None:
