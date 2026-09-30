@@ -22,7 +22,7 @@ import { useTemplateSetup } from '@studio/components/CreateCustomizationStart/us
 import { StartOptionCard } from '@studio/components/StartOptions/StartOptionCard';
 import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplates';
 import { ArrowRight } from 'lucide-react';
-import { useState, type FC } from 'react';
+import { useEffect, useRef, useState, type FC } from 'react';
 
 /** Why Continue is unavailable, shown next to the disabled button. */
 const BLOCKED_HINT: Partial<Record<StartOptionId, string>> = {
@@ -38,6 +38,18 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
 
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
+
+  // Setup runs long enough that leaving the page part-way through is a realistic move, and
+  // nothing here blocks it. The promise resolves regardless of whether this is still on
+  // screen, and `onContinue` navigates — so without this, finishing setup would yank the
+  // user to the form from wherever they had gone.
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    []
+  );
 
   const selectedOption = START_OPTIONS.find((option) => option.id === selectedId) ?? null;
 
@@ -70,8 +82,9 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     // reference them, so it happens here rather than on the next screen.
     const initialValues = await runTemplateSetup(template);
     // The guard above stops the selection moving, but the await still spans a render — only
-    // hand over values that match what is selected now.
-    if (initialValues && selectedTemplateId === template.id) {
+    // hand over values that match what is selected now, and only if there is still a picker
+    // to hand them over from.
+    if (initialValues && mounted.current && selectedTemplateId === template.id) {
       onContinue({ optionId: 'template', initialValues });
     }
   };
