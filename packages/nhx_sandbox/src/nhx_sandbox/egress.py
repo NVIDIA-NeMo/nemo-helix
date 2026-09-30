@@ -22,8 +22,10 @@ from pydantic import BaseModel, ConfigDict
 
 LOGGER = logging.getLogger(__name__)
 
+# A parsed allow target or deny range, in either address family.
 IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
+# Where local_resolver_addresses reads nameservers from by default.
 RESOLV_CONF_PATH = "/etc/resolv.conf"
 
 
@@ -52,11 +54,7 @@ class EgressPolicy(BaseModel):
 
 
 class EgressAllowlist(BaseModel):
-    """The allow-only inputs a trusted caller supplies to policy construction.
-
-    Every caller describes egress with exactly these four values, so they carry this model rather
-    than four loose fields each. Building a policy is then one function with one call shape, and
-    callers cannot drift apart in what they can express.
+    """The allow-only inputs a trusted caller passes to :func:`build_egress_policy`.
 
     Attributes:
         targets: Allowed FQDNs, addresses, or CIDRs. Wildcard suffixes such as ``*.com`` are
@@ -77,6 +75,7 @@ class EgressAllowlist(BaseModel):
     resolver_addresses: tuple[str, ...] | None = None
 
 
+# Domain suffixes an allowlist gets when it sets ``allow_internet``; public space is reached only by name.
 DEFAULT_PUBLIC_DNS_SUFFIXES: tuple[str, ...] = ("*.com", "*.org")
 
 # Everything a sandbox has no business reaching by address. Public space is deliberately absent:
@@ -117,6 +116,7 @@ _DENIED_IPV6_CIDRS: tuple[str, ...] = (
 
 
 def _unique_targets(targets: Iterable[str]) -> tuple[str, ...]:
+    """Strip whitespace and trailing dots, then drop empty and repeated targets, keeping first-seen order."""
     return tuple(
         dict.fromkeys(target.strip().rstrip(".") for target in targets if target and target.strip().rstrip("."))
     )

@@ -17,8 +17,10 @@ from nhx_sandbox.egress import EgressPolicy
 
 LOGGER = logging.getLogger(__name__)
 
+# Key in the OpenSandbox create options that carries the egress policy.
 NETWORK_POLICY_KEY = "network_policy"
 
+# How strictly verify_applied_egress compares the applied policy; see its docstring for each mode.
 EgressVerificationMode = Literal["off", "default_action", "strict"]
 
 
