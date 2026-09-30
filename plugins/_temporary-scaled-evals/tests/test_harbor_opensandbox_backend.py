@@ -318,7 +318,11 @@ def _terminator(tmp_path: Path, recorder: _CleanupRecorder):
     )
 
 
-def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_records_provenance(tmp_path: Path) -> None:
+def _applied_summary(tmp_path: Path) -> dict[str, Any]:
+    return json.loads((tmp_path / "harbor" / "jobs" / "ev_os1" / backend.APPLIED_EGRESS_SUMMARY_FILENAME).read_text())
+
+
+def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress(tmp_path: Path) -> None:
     _write_applied(tmp_path, "trial-a", "1" * 64)
     _write_applied(tmp_path, "trial-b", "1" * 64)
     recorder = _CleanupRecorder()
@@ -333,22 +337,20 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_records_provenance(tm
         f"{cleanup.EVALUATION_METADATA_KEY}=ev_os1",
     ]
     assert env["OPENSANDBOX_API_KEY"] == "k"
-    provenance = json.loads((tmp_path / "harbor" / "jobs" / "ev_os1" / backend.PROVENANCE_FILENAME).read_text())
-    assert provenance["harbor_version"] == "0.20.0"
-    assert provenance["applied_policy_sha256s"] == ["1" * 64]
-    assert [item["trial"] for item in provenance["applied_egress"]] == ["trial-a", "trial-b"]
-    assert provenance["cleanup"]["killed"] == ["sb-1"]
-    assert provenance["cleanup"]["exit_code"] == 0
+    assert _applied_summary(tmp_path)["sandboxes"] == [
+        {"trial": "trial-a", "sandbox_id": "sb-trial-a", "network_mode": "public", "policy_sha256": "1" * 64},
+        {"trial": "trial-b", "sandbox_id": "sb-trial-b", "network_mode": "public", "policy_sha256": "1" * 64},
+    ]
 
 
-def test_terminator_raises_and_records_when_sandboxes_survive(tmp_path: Path) -> None:
+def test_terminator_raises_and_still_writes_applied_egress_when_sandboxes_survive(tmp_path: Path) -> None:
+    _write_applied(tmp_path, "trial-a", "1" * 64)
     recorder = _CleanupRecorder(returncode=1, report={"killed": [], "failed": [], "remaining": ["sb-9"]})
 
     with pytest.raises(RuntimeError, match="sb-9"):
         _terminator(tmp_path, recorder)(_handle(tmp_path))
 
-    provenance = json.loads((tmp_path / "harbor" / "jobs" / "ev_os1" / backend.PROVENANCE_FILENAME).read_text())
-    assert provenance["cleanup"]["remaining"] == ["sb-9"]
+    assert [item["trial"] for item in _applied_summary(tmp_path)["sandboxes"]] == ["trial-a"]
 
 
 @pytest.mark.parametrize(
@@ -368,7 +370,7 @@ def test_terminator_refuses_foreign_or_incomplete_ownership(tmp_path: Path, owne
     assert recorder.calls == []
 
 
-def test_status_reader_writes_provenance_when_terminal(tmp_path: Path) -> None:
+def test_status_reader_writes_applied_egress_when_terminal(tmp_path: Path) -> None:
     job_dir = tmp_path / "harbor" / "jobs" / "ev_os1"
     _write_applied(tmp_path, "trial-a", "2" * 64)
     (job_dir / "result.json").write_text(
@@ -379,8 +381,7 @@ def test_status_reader_writes_provenance_when_terminal(tmp_path: Path) -> None:
     status = read(_handle(tmp_path))
 
     assert status.phase == "succeeded"
-    provenance = json.loads((job_dir / backend.PROVENANCE_FILENAME).read_text())
-    assert provenance["applied_policy_sha256s"] == ["2" * 64]
+    assert [item["policy_sha256"] for item in _applied_summary(tmp_path)["sandboxes"]] == ["2" * 64]
 
 
 def test_backend_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
