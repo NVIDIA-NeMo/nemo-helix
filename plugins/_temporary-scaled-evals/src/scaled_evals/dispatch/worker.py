@@ -477,16 +477,14 @@ class Dispatcher:
     def claim_next(self) -> str | None:
         """Claim one active evaluation row for this worker process.
 
-        The row lock is held only for this short claim transaction. Long-running
-        backend work happens in :meth:`run`; status transitions on the row are
-        the durable recovery marker if the process exits mid-run.
+        The claim is a short conditional update. Long-running backend work
+        happens in :meth:`run`; status transitions on the row are the durable
+        recovery marker if the process exits mid-run.
         """
         with self.connect() as conn:
             row = EvaluationRepository(conn).claim_next(
                 claim_timeout=self.claim_timeout,
                 worker_id=self.worker_id,
-                cluster_slot_limit=settings.control_plane_cluster_run_limit,
-                per_user_slot_limit=settings.control_plane_per_user_run_limit,
             )
             return None if row is None else row["id"]
 

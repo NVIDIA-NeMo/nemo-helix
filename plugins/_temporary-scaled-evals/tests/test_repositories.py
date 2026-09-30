@@ -397,7 +397,7 @@ def test_evaluation_stale_dispatch_jobs_parameterize_reconcile_window() -> None:
     assert params == (45.5, 7)
 
 
-def test_evaluation_reconciler_claim_is_leased_and_skip_locked() -> None:
+def test_evaluation_reconciler_claim_is_leased_without_row_locks() -> None:
     conn, cur = _conn()
 
     EvaluationRepository(conn).claim_stale_dispatch_job(
@@ -407,10 +407,10 @@ def test_evaluation_reconciler_claim_is_leased_and_skip_locked() -> None:
     )
 
     sql, params = _executed_sql_and_params(cur)
-    assert "FOR UPDATE OF e SKIP LOCKED" in sql
+    assert "SKIP LOCKED" not in sql
     assert "dispatch_reconcile_claimed_at" in sql
     assert "evaluation_execution_cleanups" in sql
-    assert params == (45.5, 90, "worker-1")
+    assert params == (45.5, 90, "worker-1", 90)
 
 
 def test_execution_cleanup_claim_is_bounded_and_skip_locked() -> None:
