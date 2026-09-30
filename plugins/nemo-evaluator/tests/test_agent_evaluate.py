@@ -350,8 +350,9 @@ def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bun
     assert json.loads(capture)["model_call_id"] == "c0"
 
 
-def test_agent_eval_job_rerun_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
-    """A rerun shares a failed attempt's persistent storage; leftover Gym output must not block or leak.
+def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
+    """A retried job (Volcano ``maxRetry``) reuses the failed attempt's persistent storage; leftover Gym output
+    must not block or leak.
 
     Gym refuses to collect into a directory that holds rollouts, and leftover files would upload with
     the new attempt's artifact.
