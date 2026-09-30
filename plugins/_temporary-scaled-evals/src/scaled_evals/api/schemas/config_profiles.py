@@ -6,16 +6,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ConfigProfileType = Literal["harbor", "gym", "switchyard", "intake"]
+ConfigProfileType = Literal["harbor", "gym", "intake"]
 
-# NOTE: a harbor profile may not be needed long-term — switchyard/intake are the real reuse cases.
+# NOTE: a harbor profile may not be needed long-term — intake is the real reuse case.
 
 _CONFIG_DESCRIPTION = (
     "Profile-specific non-secret configuration. OpenAPI intentionally represents this "
     "as an extensible JSON object because the sibling type field selects the schema and "
-    "Harbor and Switchyard support independently versioned fields. "
+    "Harbor supports independently versioned fields. "
     "The API validates all known fields by profile type: Harbor runner envelopes, strict "
-    "Gym v1 configs, Switchyard managed/external configs, and Intake routing configs "
+    "Gym v1 configs, and Intake routing configs "
     "with a required workspace. See docs/API.md#config-profiles for each contract."
 )
 
@@ -28,8 +28,8 @@ class ConfigProfileCreate(BaseModel):
     type: ConfigProfileType = Field(
         description=(
             "Profile kind. Framework profiles use 'harbor' for framework='harbor' "
-            "and 'gym' for framework='nemo_gym'; 'switchyard' and 'intake' "
-            "profiles wire optional observability/inference config."
+            "and 'gym' for framework='nemo_gym'; 'intake' "
+            "profiles wire optional observability config."
         )
     )
     config: dict[str, Any] = Field(default_factory=dict, description=_CONFIG_DESCRIPTION)
@@ -48,7 +48,7 @@ class ConfigProfileUpdate(BaseModel):
 class ConfigProfile(BaseModel):
     id: str
     name: str
-    type: ConfigProfileType = Field(description=("Profile kind: 'harbor', 'gym', 'switchyard', or 'intake'."))
+    type: ConfigProfileType = Field(description=("Profile kind: 'harbor', 'gym', or 'intake'."))
     config: dict[str, Any]
     created_at: datetime
     updated_at: datetime

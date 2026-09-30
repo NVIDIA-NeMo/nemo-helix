@@ -32,12 +32,6 @@ from scaled_evals.dispatch import (
     RuntimeStatus,
     summarize_harbor_result,
 )
-from scaled_evals.dispatch.switchyard import (
-    SwitchyardProfileConfig,
-    SwitchyardRender,
-    render_switchyard,
-    write_switchyard_artifacts,
-)
 from scaled_evals.dispatch.worker import (
     Dispatcher,
 )
@@ -79,7 +73,6 @@ def _eval_row(**overrides) -> dict:
         "task_revision": 2,
         "framework_profile_id": None,
         "harbor_profile_id": None,
-        "switchyard_profile_id": None,
         "intake_profile_id": None,
         "credentials": {},
         "runtime": "sandbox_k8s",
@@ -450,7 +443,7 @@ def test_create_422_on_malformed_profile_id() -> None:
     assert response.json()["detail"]["error"]["code"] == "invalid_reference"
 
 
-def test_create_records_default_deny_without_switchyard() -> None:
+def test_create_records_default_deny() -> None:
     conn = _conn(
         fetchone=[
             {"status": "ready"},
@@ -474,8 +467,8 @@ def test_create_records_default_deny_without_switchyard() -> None:
     assert response.json()["network_policy"] == "default_deny"
     execute_calls = conn.cursor.return_value.__enter__.return_value.execute.call_args_list
     insert_call = next(call for call in execute_calls if "INSERT INTO evaluations" in call.args[0])
-    assert insert_call.args[1][24] == "default_deny"
-    assert insert_call.args[1][25].obj == {}
+    assert insert_call.args[1][23] == "default_deny"
+    assert insert_call.args[1][24].obj == {}
 
 
 def test_create_resolves_harbor_version_before_queueing() -> None:
@@ -742,10 +735,10 @@ def test_create_422_when_profile_missing() -> None:
 
 
 def test_create_422_when_profile_wrong_type() -> None:
-    # harbor_profile_id points at a switchyard-typed profile.
+    # harbor_profile_id points at an intake-typed profile.
     conn = _conn(
         fetchone=[{"status": "ready"}],
-        fetchall=[[{"id": "cfg_sw", "type": "switchyard"}]],
+        fetchall=[[{"id": "cfg_sw", "type": "intake"}]],
     )
     _override_conn(conn)
 
@@ -925,7 +918,7 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
         "output_tokens": 30,
         "cached_tokens": 10,
         "cache_creation_tokens": 5,
-        "usage_source": "switchyard-session-stats",
+        "usage_source": "atif",
         "turn_count": 4,
         "tool_call_count": 2,
         "cost_usd": 0.25,
@@ -988,7 +981,7 @@ def test_get_telemetry_returns_attempt_aware_usage_and_raw_handoff_links() -> No
         "output_tokens": 30,
         "cached_tokens": 10,
         "cache_creation_tokens": 5,
-        "source": "switchyard-session-stats",
+        "source": "atif",
     }
     assert body["executions"][0]["interactions"] == {"turns": 4, "tool_calls": 2}
     assert body["executions"][0]["cost"] == {
@@ -1029,7 +1022,6 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
                 status="failed",
                 framework_profile_id="cfg_h",
                 harbor_profile_id="cfg_h",
-                switchyard_profile_id="cfg_s",
                 intake_profile_id="cfg_i",
                 credentials={"openai": "cred_openai"},
                 n_attempts=3,
@@ -1057,7 +1049,6 @@ def test_reproduce_returns_safe_rerun_request_and_command() -> None:
         "framework_version": None,
         "framework_profile_id": "cfg_h",
         "harbor_profile_id": "cfg_h",
-        "switchyard_profile_id": "cfg_s",
         "intake_profile_id": "cfg_i",
         "credentials": {"openai": "cred_openai"},
         "agent_bundle_id": None,
@@ -1546,16 +1537,16 @@ def test_events_stream_emits_terminal_event_after_status_flip(monkeypatch) -> No
     assert [(event["event"], event["data"].get("status")) for event in events] == [("status", "succeeded")]
 
 
-def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) -> None:  # noqa: ANN001
+def test_events_stream_does_not_stop_on_lifecycle_event(monkeypatch) -> None:  # noqa: ANN001
     async def no_sleep(_seconds: float) -> None:
         return None
 
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.asyncio.sleep", no_sleep)
-    switchyard = {
+    lifecycle = {
         "id": 1,
-        "type": "switchyard",
+        "type": "lifecycle",
         "status": "succeeded",
-        "detail": "switchyard draining until later",
+        "detail": "runtime draining until later",
         "created_at": NOW,
     }
     succeeded = {
@@ -1565,7 +1556,7 @@ def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) 
         "detail": "1/1 trials completed",
         "created_at": NOW + timedelta(microseconds=1),
     }
-    conn = _conn(fetchone=[{"id": "ev_test123"}], fetchall=[[switchyard], [succeeded]])
+    conn = _conn(fetchone=[{"id": "ev_test123"}], fetchall=[[lifecycle], [succeeded]])
     _override_conn(conn)
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
@@ -1573,7 +1564,7 @@ def test_events_stream_does_not_stop_on_switchyard_lifecycle_event(monkeypatch) 
     assert response.status_code == 200
     events = _sse_events(response.text)
     assert [(event["event"], event["data"].get("status")) for event in events] == [
-        ("switchyard", "succeeded"),
+        ("lifecycle", "succeeded"),
         ("status", "succeeded"),
     ]
 
@@ -1921,26 +1912,6 @@ def test_logs_include_ng_run_for_gym(monkeypatch, tmp_path) -> None:  # noqa: AN
     assert "harbor_agent ready" in lines
 
 
-def test_logs_include_switchyard_capture_files(monkeypatch, tmp_path) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "gym_daytona_work_dir", str(tmp_path))
-    work = tmp_path / "ev_test123" / "switchyard"
-    work.mkdir(parents=True)
-    (work / "switchyard.log").write_text("switchyard accepted request\n")
-    (work / "switchyard.previous.log").write_text("switchyard restarted once\n")
-    (work / "status.json").write_text('{"availableReplicas":1}\n')
-    _override_conn(_conn_with_fetchone(_eval_row(status="running", runtime="gym_daytona", backend_handle="ev_test123")))
-
-    response = client.get("/v1/evaluations/ev_test123/logs", params={"tail_lines": 20})
-
-    assert response.status_code == 200
-    lines = response.json()["lines"]
-    assert "--- switchyard.log ---" in lines
-    assert "switchyard accepted request" in lines
-    assert "--- switchyard.previous.log ---" in lines
-    assert "switchyard restarted once" in lines
-    assert "--- status.json ---" in lines
-
-
 def test_log_stream_returns_sse_snapshot() -> None:
     row = _eval_row(status="succeeded", result={"logs": ["done"]})
     _override_conn(_conn_with_fetchone(row, row))
@@ -2011,102 +1982,6 @@ class _FakeBackend:
     def summarize(self, result):  # noqa: ANN001, ANN201
         # Mirrors the real backends: reduce the (Harbor-shaped) result envelope.
         return summarize_harbor_result(result)
-
-
-class _FakeSwitchyardProvisioner:
-    def __init__(self) -> None:
-        self.provisions: list[dict] = []
-        self.captures: list[str] = []
-        self.capture_session_ids: list[tuple[str, ...]] = []
-        self.deletes: list[str] = []
-        self.delete_artifact_roots: list[Path | None] = []
-        self.ensure_ready_checks: list[str] = []
-        self.ensure_ready_error: Exception | None = None
-        self.ensure_ready_errors: list[Exception | None] = []
-        self.invoke_persist_lease = False
-        self.provision_error: Exception | None = None
-
-    def provision(
-        self,
-        *,
-        evaluation_id: str,
-        profile_id: str,
-        raw_config,
-        credential_env,
-        artifact_root: Path,
-        benchmark_run_id=None,
-        persist_lease=None,
-    ) -> SwitchyardRender:
-        self.provisions.append(
-            {
-                "evaluation_id": evaluation_id,
-                "profile_id": profile_id,
-                "raw_config": dict(raw_config),
-                "credential_env": dict(credential_env),
-                "benchmark_run_id": benchmark_run_id,
-            }
-        )
-        render = render_switchyard(
-            evaluation_id=evaluation_id,
-            profile_id=profile_id,
-            config=SwitchyardProfileConfig.model_validate(raw_config),
-            credential_env=credential_env,
-            artifact_root=artifact_root,
-            benchmark_run_id=benchmark_run_id,
-            external_allowed_hosts=("switchyard.example.com",),
-        )
-        write_switchyard_artifacts(render, artifact_root)
-        if self.invoke_persist_lease and persist_lease is not None:
-            persist_lease(render.lease)
-        if self.provision_error is not None:
-            raise self.provision_error
-        return render
-
-    def capture(  # noqa: ANN001, ANN201
-        self, lease, artifact_root: Path, *, final=False, session_ids=()
-    ):
-        self.captures.append(lease.name)
-        self.capture_session_ids.append(tuple(session_ids))
-        root = artifact_root / "switchyard"
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "switchyard.log").write_text("switchyard routed request\n")
-        (root / "status.json").write_text('{"ready":true}\n')
-        if final:
-            sessions = {
-                session_id: {
-                    "session_id": session_id,
-                    "total_calls": 1,
-                    "total_prompt_tokens": 1,
-                    "total_cached_tokens": 0,
-                    "total_cache_creation_tokens": 0,
-                    "total_completion_tokens": 1,
-                    "models": {
-                        "nvidia/unknown-test-model": {
-                            "calls": 1,
-                            "prompt_tokens": 1,
-                            "cached_tokens": 0,
-                            "cache_creation_tokens": 0,
-                            "completion_tokens": 1,
-                        }
-                    },
-                }
-                for session_id in session_ids
-            }
-            (root / "routing_stats_final.json").write_text(json.dumps({"requests": 1, "sessions": sessions}) + "\n")
-        return None
-
-    def delete(self, lease, artifact_root: Path | None = None) -> None:  # noqa: ANN001
-        self.deletes.append(lease.name)
-        self.delete_artifact_roots.append(artifact_root)
-
-    def ensure_ready(self, lease) -> None:  # noqa: ANN001
-        self.ensure_ready_checks.append(lease.name)
-        if self.ensure_ready_errors:
-            if error := self.ensure_ready_errors.pop(0):
-                raise error
-            return
-        if self.ensure_ready_error is not None:
-            raise self.ensure_ready_error
 
 
 def _worker_conn(row: dict | None) -> tuple[MagicMock, list]:
@@ -2350,3 +2225,16 @@ def _fake_download(pack: Path):  # noqa: ANN202
 
 
 # ---------- result summary + status reader (no cluster) -------------------
+
+
+def test_dispatch_fails_retired_switchyard_evaluation_without_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = _FakeBackend()
+    conn, executed = _worker_conn(_eval_row(status="queued", switchyard_profile_id="cfg_sw"))
+    worker = _dispatcher(backend, conn)
+    for method in ("_sync_artifacts_warn", "_build_archive_warn", "_write_provenance_warn"):
+        monkeypatch.setattr(worker, method, lambda *args, **kwargs: None)
+
+    worker.run("ev_test123")
+
+    assert not backend.launched
+    assert "switchyard_unsupported" in _status_update_params(executed, "failed")

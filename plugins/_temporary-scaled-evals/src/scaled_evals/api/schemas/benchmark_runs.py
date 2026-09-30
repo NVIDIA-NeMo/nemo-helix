@@ -43,7 +43,6 @@ class CreateBenchmarkRunRequest(BaseModel):
         default=None,
         description="Compatibility alias for framework_profile_id on Harbor requests.",
     )
-    switchyard_profile_id: str | None = None
     intake_profile_id: str | None = None
     credentials: dict[str, str] = Field(default_factory=dict)
     agent_bundle_id: str | None = None
@@ -58,15 +57,6 @@ class CreateBenchmarkRunRequest(BaseModel):
     # Trials within each member task; cross-task concurrency comes from the
     # dispatch worker pool, not this knob.
     parallelism: int = Field(default=1, ge=1, le=256)
-    max_concurrent_members: int | None = Field(
-        default=None,
-        ge=1,
-        le=4096,
-        description=(
-            "Caps members concurrently sharing the managed Switchyard gateway. Only "
-            "enforced with a Switchyard profile; otherwise members are not throttled."
-        ),
-    )
     visibility: Visibility = "private"
 
     @field_validator("initial_user_turns")
@@ -84,11 +74,6 @@ class CreateBenchmarkRunRequest(BaseModel):
             raise ValueError("agent_bundle_id requires a Harbor framework_profile_id")
         if self.initial_user_turns and self.framework != "harbor":
             raise ValueError('initial_user_turns is only valid for framework="harbor"')
-        if self.switchyard_profile_id is not None:
-            if self.runtime != "sandbox_k8s":
-                raise ValueError("shared Switchyard campaigns require runtime='sandbox_k8s'")
-            if self.parallelism != 1:
-                raise ValueError("shared Switchyard campaigns require parallelism=1")
         if self.framework == "harbor":
             if self.framework_profile_id is not None and self.harbor_profile_id is not None:
                 if self.framework_profile_id != self.harbor_profile_id:
@@ -143,14 +128,12 @@ class BenchmarkRun(BaseModel):
     benchmark_revision: int
     framework_profile_id: str | None = None
     harbor_profile_id: str | None = None
-    switchyard_profile_id: str | None = None
     intake_profile_id: str | None = None
     credentials: dict[str, str] = Field(default_factory=dict)
     runtime: str
     network_policy: NetworkPolicyMode = "unrestricted"
     network_policy_config: dict[str, Any] = Field(default_factory=dict)
     parallelism: int
-    max_concurrent_members: int | None = None
     visibility: Visibility
     status: EvaluationStatus
     status_detail: str | None = None

@@ -113,13 +113,11 @@ registries outside `HARBOR_DATASET_UPSTREAM_ALLOWED_REGISTRIES` before network
 I/O. Bearer-token challenges must remain on the registry host; Docker Hub may
 also use `auth.docker.io`.
 
-**Not mounted:** Switchyard lease/publish (`/v1/switchyard/*`). Switchyard modules remain in-tree for dispatch import compatibility but are out of Phase 1 product surface.
-
 **Removed:** OAuth client discovery (`/v1/auth/config`), which existed only to
 hand the CLI login flow the coordinates of a fixed internal identity provider.
 
 There is no second way to serve these routes. The package used to also ship a
-standalone FastAPI app (`scaled-evals-api`) that mounted the Switchyard router and
+standalone FastAPI app (`scaled-evals-api`) that mounted extra routers and
 registered the external auth middleware, so installing the package handed you a
 command that bypassed the curation above. That app is gone: this service class is
 the only HTTP surface, which makes "not mounted" a property of the code rather
@@ -215,18 +213,14 @@ and safe to replay at startup. No new platform database or Studio UI is introduc
 ### Provider boundary
 
 Archive assembly, input integrity, and the typed manifest are provider-independent.
-The dispatcher injects evidence checks; Switchyard-specific campaign reference
-validation lives in `dispatch/switchyard_archive.py`, not in the generic exporter.
-Future workload implementations can supply their own evidence checks without
-modifying archive assembly. Callers of the HTTP API cannot disable these checks.
+Workload implementations can supply their own evidence checks without modifying
+archive assembly. Callers of the HTTP API cannot disable these checks.
 
-The existing Switchyard provisioning/cleanup lifecycle still belongs to the
-standalone-compatible dispatcher. When moving it into a separate workload service,
-that boundary should own provisioning, readiness, cleanup, lease persistence and
-public evidence publication together. The dispatcher would sequence the workload
-contract, and the archive would consume its published evidence through the same
-validator seam. This port does not introduce a speculative workload framework or
-rewrite existing execution/credential lifecycle behavior.
+Switchyard is not managed by this plugin. Evaluations and benchmark runs no longer
+accept a Switchyard profile; migration `043_retire_switchyard.sql` soft-deletes
+existing Switchyard profiles and credentials, and any queued evaluation that still
+references one fails with `switchyard_unsupported` instead of running without its
+model-traffic fence.
 
 ## Who a caller is
 

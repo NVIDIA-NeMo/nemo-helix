@@ -39,11 +39,9 @@ WORK="$(mktemp -d)"
 SLOW_SECONDS="${SLOW_SECONDS:-240}"
 # Enough members to see a ramp, small enough that one run fits in a coffee break.
 MEMBERS="${MEMBERS:-10}"
-# The per-run cap sent with the request. It is only enforced for members sharing
-# a managed Switchyard gateway, and this smoke uses none, so it must not bind.
-MEMBER_CAP="${MEMBER_CAP:-$MEMBERS}"
-# What in-flight count the run is asserted against.
-ASSERT_CAP="${ASSERT_CAP:-$MEMBER_CAP}"
+# What in-flight count the run is asserted against. Runs have no member cap, so
+# by default every member may be in flight at once.
+ASSERT_CAP="${ASSERT_CAP:-$MEMBERS}"
 SCENARIO="${1:-happy}"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
@@ -421,11 +419,11 @@ print(json.dumps({
   note "benchmark_id: $bm_id"
 
   curl -sf -X POST "$BASE/v1/benchmark-runs" -H 'content-type: application/json' \
-    -d "{\"name\":\"$NAME-run\",\"benchmark_id\":\"$bm_id\",\"runtime\":\"sandbox_k8s\",\"max_concurrent_members\":$MEMBER_CAP}" \
+    -d "{\"name\":\"$NAME-run\",\"benchmark_id\":\"$bm_id\",\"runtime\":\"sandbox_k8s\"}" \
     -o "$WORK/run.json" || fail "benchmark run create"
   local run_id
   run_id="$(json "$WORK/run.json" id)"
-  note "benchmark_run_id: $run_id   run cap: $MEMBER_CAP   asserting: $ASSERT_CAP"
+  note "benchmark_run_id: $run_id   asserting: $ASSERT_CAP"
 
   step "watching the fan-out"
   python3 "$(dirname "$0")/fanout-probe.py" "$BASE" "$run_id" \
