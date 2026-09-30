@@ -385,8 +385,8 @@ class Dispatcher:
     max_polls: int = field(default_factory=lambda: settings.dispatch_run_max_polls)
     claim_timeout: float = 30.0
     worker_id: str = field(default_factory=lambda: f"{socket.gethostname()}:{os.getpid()}:{time.time_ns()}")
-    _expected_dispatch_owner: str | None = field(default=None, init=False, repr=False)
-    _claim_lost: threading.Event | None = field(default=None, init=False, repr=False)
+    # Called with the fresh projection row after each status or result write.
+    on_change: Callable[[dict[str, Any]], None] | None = None
 
     def cleanup_benchmark_archives(self, run_id: str, *, object_keys: list[str] | None = None) -> None:
         """Best-effort immediate cleanup; durable periodic sweeps retry failures."""
@@ -467,6 +467,7 @@ class Dispatcher:
             self.build_evidence(evaluation_id)
         if self.claim_next_archive(evaluation_id) is not None:
             self.build_archive(evaluation_id)
+        self._changed(evaluation_id)
 
     def build_evidence(self, evaluation_id: str) -> None:
         """Generate terminal evidence and upload it before the archive is built."""
@@ -550,37 +551,45 @@ class Dispatcher:
             execution_number=execution_number,
         )
 
-    def run(self, evaluation_id: str, *, expected_execution_number: int | None = None) -> None:
-        """Run one evaluation execution, fenced by its ``dispatch_job_name``."""
-        if expected_execution_number is None:
-            self._run_claimed(evaluation_id)
-        else:
-            self._run_claimed(evaluation_id, expected_execution_number=expected_execution_number)
+    def run(
+        self,
+        evaluation_id: str,
+        *,
+        expected_execution_number: int | None = None,
+        inputs: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Run one evaluation execution.
 
-    def _renew_inline_claim(self, evaluation_id: str) -> None:
-        if self._expected_dispatch_owner is None:
+        Args:
+            evaluation_id: the evaluation to run.
+            expected_execution_number: skip the run unless this is the current execution.
+            inputs: the execution's immutable launch inputs; ``None`` loads them from Postgres.
+
+        """
+        self._run_claimed(evaluation_id, expected_execution_number=expected_execution_number, inputs=inputs)
+        self._changed(evaluation_id)
+
+    def _changed(self, evaluation_id: str) -> None:
+        if self.on_change is None:
             return
-        if self._claim_lost is not None and self._claim_lost.is_set():
-            raise DispatchClaimLost(evaluation_id)
-        with self.connect() as conn:
-            owned = EvaluationRepository(conn).heartbeat_claim(
-                evaluation_id,
-                worker_id=self._expected_dispatch_owner,
-            )
-        if not owned:
-            if self._claim_lost is not None:
-                self._claim_lost.set()
-            raise DispatchClaimLost(evaluation_id)
+        try:
+            with self.connect() as conn:
+                row = EvaluationRepository(conn).load_for_projection(evaluation_id)
+            if row is not None:
+                self.on_change(row)
+        except Exception:  # noqa: BLE001 — the controller's projection pass catches up
+            LOG.warning("projecting %s from the job failed", evaluation_id, exc_info=True)
 
     def _run_claimed(
         self,
         evaluation_id: str,
         *,
         expected_execution_number: int | None = None,
+        inputs: Mapping[str, Any] | None = None,
     ) -> None:
         """Load, launch, poll to terminal, persist result, optionally upload ATIF.
 
-        Safe to call directly (unit tests, future out-of-process worker). One
+        One
         evaluation id in; terminal ``evaluations.status`` out. Never raises for
         launch/poll/backend failures — those become ``status='failed'`` with
         ``status_detail``.
@@ -610,9 +619,8 @@ class Dispatcher:
            summarized and retained for outcome diagnostics; pure
            dispatch/control-plane failures have no ``result`` row.
 
-        The poll loop blocks this worker process for the whole run (~1h baseline
+        The poll loop blocks the evaluation's Job for the whole run (~1h baseline
         at 10s intervals, extended by a longer finite profile lifecycle timeout).
-        Scale dispatch by running multiple worker processes.
 
         The worker only runs single task evaluations. A benchmark run is just a
         ``benchmark_runs`` row plus one ordinary member evaluation per task
@@ -622,7 +630,9 @@ class Dispatcher:
         ``benchmark_run_repository.derive_run_view``), so there is no fan-in here.
         """
         with self.connect() as conn:
-            row: dict[str, Any] | None = self._load(conn, evaluation_id)
+            row: dict[str, Any] | None = (
+                self._load(conn, evaluation_id) if inputs is None else self._load_state(conn, evaluation_id, inputs)
+            )
             if row is None:
                 return
             if row["status"] == "cancelled" and row.get("cancel_teardown_status") == "pending":
@@ -865,7 +875,6 @@ class Dispatcher:
                 handle = self._resume_handle(row)
             else:
                 try:
-                    self._renew_inline_claim(evaluation_id)
                     if agent_floor is not None:
                         assert_lifecycle_covers_agent_floor(row, agent_floor)
                     if (
@@ -877,7 +886,6 @@ class Dispatcher:
                             conn,
                             datasets=dataset_configs(spec.harbor_config),
                             harbor_dir=str(spec.harbor_dir or settings.harbor_dir),
-                            renew=lambda: self._renew_inline_claim(evaluation_id),
                         )
                         spec = spec.model_copy(
                             update={"harbor_dataset_image_imports": [asdict(item) for item in imports]}
@@ -888,14 +896,7 @@ class Dispatcher:
                         # the platform admission controller remains final authority.
                         verify_stored_task_image(spec.image_ref, spec.image_digest)
                     handle = backend.launch(spec)
-                    try:
-                        self._renew_inline_claim(evaluation_id)
-                    except DispatchClaimLost:
-                        self._teardown_failed_runtime_warn(backend, handle)
-                        raise
                 except Exception as exc:  # noqa: BLE001 — record any launch failure
-                    if isinstance(exc, DispatchClaimLost):
-                        raise
                     detail = str(exc)
                     self._write_provenance_warn(row, status="failed", artifact_root=artifact_root)
                     self._sync_artifacts_warn(
@@ -991,7 +992,6 @@ class Dispatcher:
             return
 
         with self.connect() as conn:
-            self._renew_inline_claim(evaluation_id)
             if status.phase == "cancelled":
                 self._teardown_cancelled_runtime(
                     evaluation_id,
@@ -1031,7 +1031,6 @@ class Dispatcher:
                         failure_code=failure_code,
                         failure_category=failure_category_for_code(failure_code, detail),
                         delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-                        expected_dispatch_owner=self._expected_dispatch_owner,
                     )
                     if scheduled is not None:
                         return
@@ -1241,14 +1240,6 @@ class Dispatcher:
     ) -> str:
         with self.connect() as conn:
             repo = EvaluationRepository(conn)
-            if self._expected_dispatch_owner is not None and not repo.heartbeat_claim(
-                evaluation_id,
-                worker_id=self._expected_dispatch_owner,
-                expected_execution_number=execution_number,
-            ):
-                if self._claim_lost is not None:
-                    self._claim_lost.set()
-                raise DispatchClaimLost(evaluation_id)
             status = repo.load_runtime_status(
                 evaluation_id,
                 expected_execution_number=execution_number,
@@ -1731,6 +1722,12 @@ class Dispatcher:
     def _load(conn: psycopg.Connection, evaluation_id: str) -> dict | None:
         return EvaluationRepository(conn).load_for_dispatch(evaluation_id)
 
+    @staticmethod
+    def _load_state(conn: psycopg.Connection, evaluation_id: str, inputs: Mapping[str, Any]) -> dict | None:
+        """Overlay the row's live state, which the API still writes, on the immutable inputs."""
+        state = EvaluationRepository(conn).load_dispatch_state(evaluation_id)
+        return None if state is None else {**inputs, **state}
+
     def _set_status(
         self,
         conn: psycopg.Connection,
@@ -1742,8 +1739,6 @@ class Dispatcher:
         handle: str | None = None,
         failure_code: str | None = None,
     ) -> None:
-        if self._claim_lost is not None and self._claim_lost.is_set():
-            raise DispatchClaimLost(evaluation_id)
         telemetry = ExecutionTelemetryRepository(conn)
         if status in {"provisioning", "running"}:
             telemetry.record_phase(
@@ -1764,13 +1759,11 @@ class Dispatcher:
             detail=detail,
             handle=handle,
             failure_code=failure_code,
-            expected_dispatch_owner=self._expected_dispatch_owner,
             expected_execution_number=execution_number,
         )
         if not updated:
-            if self._claim_lost is not None:
-                self._claim_lost.set()
             raise DispatchClaimLost(evaluation_id)
+        self._changed(evaluation_id)
 
     def _persist_result(
         self,
@@ -1793,8 +1786,6 @@ class Dispatcher:
         note from :meth:`_maybe_upload_atif`) is appended to the trial-count
         ``status_detail`` when present.
         """
-        if self._claim_lost is not None and self._claim_lost.is_set():
-            raise DispatchClaimLost(evaluation_id)
         ExecutionTelemetryRepository(conn).record_phase(
             evaluation_id,
             execution_number=execution_number,
@@ -1807,13 +1798,11 @@ class Dispatcher:
             terminal_status=terminal_status,
             status_detail=status_detail,
             failure_code=failure_code,
-            expected_dispatch_owner=self._expected_dispatch_owner,
             expected_execution_number=execution_number,
         )
         if not updated:
-            if self._claim_lost is not None:
-                self._claim_lost.set()
             raise DispatchClaimLost(evaluation_id)
+        self._changed(evaluation_id)
 
 
 def get_dispatcher() -> Dispatcher:
