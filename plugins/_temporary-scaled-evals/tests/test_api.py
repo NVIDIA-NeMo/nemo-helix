@@ -144,11 +144,9 @@ def test_metrics_scrape_does_not_probe_dependencies(monkeypatch) -> None:  # noq
 def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(settings, "build_worker_required", False)
     monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
     monkeypatch.setattr(ops, "_schema_probe", lambda: None)
     monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
-    # Required by default now that Platform Jobs is the default execution path.
     monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
 
     def fail_probe() -> None:
@@ -162,34 +160,11 @@ def test_dependency_checks_skip_disabled_build_services(monkeypatch) -> None:  #
     assert required_ok is True
     assert checks["buildkit"] == "skipped: disabled"
     assert checks["registry"] == "skipped: disabled"
-    assert checks["build_worker"] == "skipped: disabled"
-
-
-def test_dependency_checks_require_fresh_build_worker(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "buildkit_enabled", False)
-    monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(settings, "build_worker_required", True)
-    monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
-    monkeypatch.setattr(ops, "_schema_probe", lambda: None)
-    monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
-
-    def stale_worker() -> None:
-        raise RuntimeError("no fresh build worker heartbeat")
-
-    monkeypatch.setattr(ops, "_build_worker_probe", stale_worker)
-
-    checks, required_ok = ops._run_dependency_checks()
-
-    assert required_ok is False
-    assert checks["build_worker"] == "fail: RuntimeError"
 
 
 def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None:  # noqa: ANN001
-    monkeypatch.setattr(settings, "platform_build_jobs_enabled", True)
-    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(settings, "build_worker_required", False)
     monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
     monkeypatch.setattr(ops, "_schema_probe", lambda: None)
     monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
@@ -203,15 +178,14 @@ def test_dependency_checks_require_platform_jobs_controller(monkeypatch) -> None
 
     assert required_ok is False
     assert checks["platform_jobs_controller"] == "fail: RuntimeError"
-    assert checks["build_worker"] == "skipped: disabled"
 
 
 def test_dependency_checks_require_compatible_schema(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setattr(settings, "buildkit_enabled", False)
     monkeypatch.setattr(settings, "registry_enabled", False)
-    monkeypatch.setattr(settings, "build_worker_required", False)
     monkeypatch.setattr(ops, "_postgres_probe", lambda: None)
     monkeypatch.setattr(ops.s3, "check_bucket", lambda: None)
+    monkeypatch.setattr(ops, "_platform_jobs_controller_probe", lambda: None)
 
     def drifted_schema() -> None:
         raise RuntimeError('column "current_execution" does not exist')
@@ -232,7 +206,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
             {
                 "postgres": "ok",
                 "object_store": "ok",
-                "build_worker": "ok",
+                "platform_jobs_controller": "ok",
                 "buildkit": "skipped: disabled",
                 "registry": "ok",
                 "gym_dispatch": "skipped: disabled",
@@ -246,7 +220,7 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
     assert "checks" in body
     assert "postgres" in body["checks"]
     assert "object_store" in body["checks"]
-    assert "build_worker" in body["checks"]
+    assert "platform_jobs_controller" in body["checks"]
     assert "buildkit" in body["checks"]
     assert "registry" in body["checks"]
     assert "gym_dispatch" in body["checks"]
@@ -254,22 +228,6 @@ def test_readyz_reports_dependency_checks(monkeypatch) -> None:  # noqa: ANN001
     assert "stub" not in body
     assert body["status"] in {"ok", "degraded"}
     assert response.status_code in {200, 503}
-
-
-def test_dispatch_worker_health_endpoint_is_required_when_configured(monkeypatch) -> None:  # noqa: ANN001
-    class HealthyResponse:
-        def raise_for_status(self) -> None:
-            return None
-
-    monkeypatch.setattr(
-        settings,
-        "dispatch_worker_health_url",
-        "http://scaled-evals-mr-588-dispatch-worker:8081/",
-    )
-    monkeypatch.setattr(ops.httpx, "get", lambda url, timeout: HealthyResponse())
-
-    assert ops._dependency_is_required("dispatch_worker") is True
-    ops._dispatch_worker_probe()
 
 
 def test_users_me_reports_owner_backed_capacity(_user_db_override: MagicMock) -> None:

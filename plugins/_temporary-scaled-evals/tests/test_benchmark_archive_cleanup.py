@@ -136,33 +136,6 @@ def test_cleanup_delete_failure_can_be_retried(monkeypatch):
     assert deleted.call_count == 2
 
 
-def test_idle_dispatcher_reconciles_crashed_upload(monkeypatch):
-    from scaled_evals.api.settings import settings
-
-    repo = MagicMock(spec=BenchmarkArchiveRepository)
-    repo.claim.return_value = None
-    repo.claim_cleanup.return_value = "bmr_1"
-    repo.lock_for_cleanup.return_value = job(status="ready", object_key=OTHER)
-    monkeypatch.setattr("scaled_evals.dispatch.worker.BenchmarkArchiveRepository", lambda conn: repo)
-    monkeypatch.setattr("scaled_evals.benchmark_archive_cleanup.BenchmarkArchiveRepository", lambda conn: repo)
-    monkeypatch.setattr(settings, "dispatch_kubernetes_jobs_enabled", False)
-    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", False)
-    monkeypatch.setattr(s3, "list_objects", lambda prefix: [{"key": KEY}, {"key": OTHER}])
-    deleted = MagicMock()
-    monkeypatch.setattr(s3, "delete_object", deleted)
-    worker = Dispatcher(connect=connect)
-    for method in (
-        "claim_next_execution_cleanup",
-        "claim_next",
-        "claim_next_evidence",
-        "claim_next_archive",
-    ):
-        monkeypatch.setattr(worker, method, lambda: None)
-    assert worker.work_once() is True
-    repo.claim_cleanup.assert_called_once_with(interval_seconds=settings.benchmark_archive_cleanup_interval_seconds)
-    deleted.assert_called_once_with(KEY)
-
-
 def test_repeated_reconciliation_catches_upload_that_finished_after_worker_death(monkeypatch):
     repo = MagicMock(spec=BenchmarkArchiveRepository)
     repo.lock_for_cleanup.return_value = job(status="failed", object_key=None)

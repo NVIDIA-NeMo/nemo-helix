@@ -287,13 +287,6 @@ def test_repair_and_cleanup_sql_preserve_recoverability() -> None:
     assert "status = 'pending'" in insert_sql
 
 
-def test_worker_namespace_is_portable() -> None:
-    workers = (Path(__file__).parents[1] / "deploy/k8s/workers.yaml").read_text()
-    assert 'namespace="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"' in workers
-    assert "namespace: ${namespace}" in workers
-    assert "namespace: nemo-helix-scaled-evals" not in workers
-
-
 def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pid_path = tmp_path / "runner.pid"
     exit_path = tmp_path / "runner.exit.json"
