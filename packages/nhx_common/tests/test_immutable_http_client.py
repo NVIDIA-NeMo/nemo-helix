@@ -40,22 +40,22 @@ def test_immutable_sdk_client_still_builds_requests() -> None:
 
 def test_immutable_sdk_client_blocks_client_configuration_assignment() -> None:
     with _FrozenClient() as client:
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client.headers = httpx.Headers({"Authorization": "Bearer stale"})
 
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client.base_url = httpx.URL("http://other.example.test")
 
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client.params = {"debug": "true"}
 
 
 def test_immutable_sdk_client_blocks_transport_assignment() -> None:
     with _FrozenClient() as client:
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client._transport = httpx.HTTPTransport()
 
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client._mounts = {}
 
         assert isinstance(client._mounts, MappingProxyType)
@@ -64,10 +64,10 @@ def test_immutable_sdk_client_blocks_transport_assignment() -> None:
 @pytest.mark.asyncio
 async def test_immutable_async_sdk_client_blocks_transport_assignment() -> None:
     async with _FrozenAsyncClient() as client:
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client._transport = httpx.AsyncHTTPTransport()
 
-        with pytest.raises(AttributeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(AttributeError, match="This HTTP client is immutable"):
             client._mounts = {}
 
         assert isinstance(client._mounts, MappingProxyType)
@@ -75,19 +75,19 @@ async def test_immutable_async_sdk_client_blocks_transport_assignment() -> None:
 
 def test_immutable_sdk_client_blocks_header_mutation() -> None:
     with _FrozenClient() as client:
-        with pytest.raises(TypeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(TypeError, match="This HTTP client is immutable"):
             client.headers["Authorization"] = "Bearer stale"
 
-        with pytest.raises(TypeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(TypeError, match="This HTTP client is immutable"):
             client.headers.update({"Authorization": "Bearer stale"})
 
-        with pytest.raises(TypeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(TypeError, match="This HTTP client is immutable"):
             client.headers.pop("X-Initial")
 
 
 def test_immutable_sdk_client_blocks_cookie_mutation_and_ignores_response_cookies() -> None:
     with _FrozenClient() as client:
-        with pytest.raises(TypeError, match="SDK HTTP clients are immutable"):
+        with pytest.raises(TypeError, match="This HTTP client is immutable"):
             client.cookies["session"] = "stale"
 
         request = client.build_request("GET", "http://nhx.example.test/health")

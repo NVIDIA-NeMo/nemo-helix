@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -32,6 +33,7 @@ from nemo_helix_plugin.client.constants import (
     is_workload_identity_token_file_set,
 )
 from nhx.common.auth import Principal, principal_from_env
+from nhx.common.immutable_http_client import ImmutableDefaultAsyncHttpxClient, ImmutableDefaultHttpxClient
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.common.observability.otel import get_otel_headers
 from nhx.common.platform_endpoint import HelixEndpoint, resolve_platform_endpoint
@@ -43,21 +45,38 @@ logger = logging.getLogger(__name__)
 def _sync_http_client_for_endpoint(
     endpoint: HelixEndpoint,
     http_client: httpx.Client | None,
+    base_url: str | None = None,
 ) -> httpx.Client:
-    """Endpoint-aware sync client, honoring explicit clients first."""
+    """Endpoint-aware sync client, honoring explicit clients first.
+
+    An explicit *base_url* with no per-service endpoints gets a plain default
+    client, so requests are not routed back to the configured platform.
+    """
     if http_client is not None:
         return http_client
+    if base_url is not None and not endpoint.service_endpoints:
+        return ImmutableDefaultHttpxClient()
     return endpoint.sync_sdk_http_client()
 
 
 def _async_http_client_for_endpoint(
     endpoint: HelixEndpoint,
     http_client: httpx.AsyncClient | None,
+    base_url: str | None = None,
 ) -> httpx.AsyncClient:
     """Async counterpart of :func:`_sync_http_client_for_endpoint`."""
     if http_client is not None:
         return http_client
+    if base_url is not None and not endpoint.service_endpoints:
+        return ImmutableDefaultAsyncHttpxClient()
     return endpoint.async_sdk_http_client()
+
+
+def _url_resolver(endpoint: HelixEndpoint, base_url: str | None) -> Callable[[str], httpx.URL] | None:
+    """Route request URLs through *endpoint*, unless an explicit *base_url* pins the target."""
+    if base_url is not None:
+        return None
+    return lambda url: endpoint.route_request_url(url).url
 
 
 def _workload_identity_auth(base_url: str) -> TokenProvider:
@@ -103,6 +122,7 @@ def get_nemo_client(
     on_behalf_of: str | Principal | None = None,
     workspace: str | None = None,
     http_client: httpx.Client | None = None,
+    base_url: str | None = None,
 ) -> NemoClient:
     """Build a sync :class:`NemoClient` configured with platform internals.
 
@@ -117,6 +137,8 @@ def get_nemo_client(
             protocol narrows ``on_behalf_of`` to ``str | None``.
         workspace: Default workspace used to fill ``{workspace}`` path params.
         http_client: Optional sync HTTP client; defaults to an endpoint-aware client.
+        base_url: Optional platform base URL; defaults to the configured endpoint.
+            Requests go to it directly instead of through endpoint routing.
 
     Note:
         OTEL trace-propagation headers are captured once, at construction, from
@@ -125,6 +147,7 @@ def get_nemo_client(
         stale (mirrors ``get_platform_sdk``).
     """
     endpoint = resolve_platform_endpoint()
+    resolved_base_url = base_url or endpoint.connect_base_url
     if _should_bootstrap_workload_identity(
         as_service=as_service,
         on_behalf_of=on_behalf_of,
@@ -132,20 +155,20 @@ def get_nemo_client(
         endpoint=endpoint,
     ):
         return NemoClient(
-            base_url=endpoint.connect_base_url,
+            base_url=resolved_base_url,
             workspace=workspace,
-            auth=_workload_identity_auth(endpoint.connect_base_url),
+            auth=_workload_identity_auth(resolved_base_url),
             default_headers=_workload_identity_headers(internal) or None,
-            http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=lambda url: endpoint.route_request_url(url).url,
+            http_client=_sync_http_client_for_endpoint(endpoint, http_client, base_url),
+            url_resolver=_url_resolver(endpoint, base_url),
         )
     headers = _platform_headers(as_service, internal, on_behalf_of)
     return NemoClient(
-        base_url=endpoint.connect_base_url,
+        base_url=resolved_base_url,
         workspace=workspace,
         default_headers=headers or None,
-        http_client=_sync_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=lambda url: endpoint.route_request_url(url).url,
+        http_client=_sync_http_client_for_endpoint(endpoint, http_client, base_url),
+        url_resolver=_url_resolver(endpoint, base_url),
     )
 
 
@@ -156,6 +179,7 @@ def get_async_nemo_client(
     on_behalf_of: str | Principal | None = None,
     workspace: str | None = None,
     http_client: httpx.AsyncClient | None = None,
+    base_url: str | None = None,
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
@@ -163,6 +187,7 @@ def get_async_nemo_client(
     creates one from the resolved platform endpoint.
     """
     endpoint = resolve_platform_endpoint()
+    resolved_base_url = base_url or endpoint.connect_base_url
     if _should_bootstrap_workload_identity(
         as_service=as_service,
         on_behalf_of=on_behalf_of,
@@ -170,20 +195,20 @@ def get_async_nemo_client(
         endpoint=endpoint,
     ):
         return AsyncNemoClient(
-            base_url=endpoint.connect_base_url,
+            base_url=resolved_base_url,
             workspace=workspace,
-            auth=_workload_identity_auth(endpoint.connect_base_url),
+            auth=_workload_identity_auth(resolved_base_url),
             default_headers=_workload_identity_headers(internal) or None,
-            http_client=_async_http_client_for_endpoint(endpoint, http_client),
-            url_resolver=lambda url: endpoint.route_request_url(url).url,
+            http_client=_async_http_client_for_endpoint(endpoint, http_client, base_url),
+            url_resolver=_url_resolver(endpoint, base_url),
         )
     headers = _platform_headers(as_service, internal, on_behalf_of)
     return AsyncNemoClient(
-        base_url=endpoint.connect_base_url,
+        base_url=resolved_base_url,
         workspace=workspace,
         default_headers=headers or None,
-        http_client=_async_http_client_for_endpoint(endpoint, http_client),
-        url_resolver=lambda url: endpoint.route_request_url(url).url,
+        http_client=_async_http_client_for_endpoint(endpoint, http_client, base_url),
+        url_resolver=_url_resolver(endpoint, base_url),
     )
 
 

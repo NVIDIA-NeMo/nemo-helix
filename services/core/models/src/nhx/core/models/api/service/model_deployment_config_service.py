@@ -6,7 +6,7 @@
 import json
 import logging
 
-from nemo_helix import PermissionDeniedError
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError

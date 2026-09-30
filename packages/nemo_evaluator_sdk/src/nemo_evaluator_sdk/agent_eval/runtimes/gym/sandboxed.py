@@ -30,11 +30,12 @@ token off the descriptor, and hand them to this runner.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -158,14 +159,24 @@ class SandboxedGymRuntimeConfig(BaseModel):
         "instance an agent config's top-level key defines (`rewoo_agent`), not the component it configures "
         "(`simple_agent`).",
     )
+    num_repeats: int = Field(default=1, ge=1, description="Attempts per row; each attempt becomes one trial.")
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from each rollout record.")
 
 
-class SandboxedGymAgentTaskRunner:
-    """An ``AgentTaskRunner`` that collects rollouts from a sandboxed Gym host over HTTP."""
+RolloutCollector = Callable[[list[dict[str, Any]]], Awaitable[list[Any]]]
 
-    def __init__(self, *, config: SandboxedGymRuntimeConfig) -> None:
+
+class SandboxedGymAgentTaskRunner:
+    """An ``AgentTaskRunner`` that collects rollouts from a sandboxed Gym host over HTTP.
+
+    By default every example goes to ``config.rollout_url`` in one POST. ``collect`` replaces that
+    step, e.g. with a session's ``arun_rollouts``, which chunks the batch and retries.
+    """
+
+    def __init__(self, *, config: SandboxedGymRuntimeConfig, collect: RolloutCollector | None = None) -> None:
         self._config = config
+        self._injected_collector = collect is not None
+        self._collect_rollouts: RolloutCollector = collect or self._collect
         self._run_aggregations: dict[str, Any] | None = None
 
     def run_aggregate_scores(self) -> Sequence[AggregateScore]:
@@ -184,17 +195,16 @@ class SandboxedGymAgentTaskRunner:
         exactly one credential here and nothing about it is worth recording.
         """
         cfg = self._config
-        return RunnerInfo(
-            name="gym",
-            kind="runner",
-            config={
-                "mode": "sandboxed",
-                "rollout_url": cfg.rollout_url,
-                "agent_ref_name": cfg.agent_ref_name,
-                "reward_key": cfg.reward_key,
-                "timeout_s": cfg.timeout_s,
-            },
-        )
+        config: dict[str, Any] = {
+            "mode": "sandboxed",
+            "rollout_url": cfg.rollout_url,
+            "agent_ref_name": cfg.agent_ref_name,
+            "num_repeats": cfg.num_repeats,
+            "reward_key": cfg.reward_key,
+        }
+        if not self._injected_collector:
+            config["timeout_s"] = cfg.timeout_s
+        return RunnerInfo(name="gym", kind="runner", config=config)
 
     def _request_headers(self) -> dict[str, str]:
         headers = dict(self._config.headers)
@@ -256,7 +266,7 @@ class SandboxedGymAgentTaskRunner:
                 f"{self._config.rollout_url} ({exc}); first 200 bytes: {text[:200]!r}"
             ) from exc
 
-    async def _collect(self, examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def _collect(self, examples: list[dict[str, Any]]) -> list[Any]:
         """POST the examples and return the host's rollout records."""
         started = time.monotonic()
         async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
@@ -292,7 +302,7 @@ class SandboxedGymAgentTaskRunner:
                 f"sandboxed Gym host returned no `results` list from {self._config.rollout_url}; "
                 f"got {type(results).__name__}"
             )
-        return [record for record in results if isinstance(record, dict)]
+        return results
 
     async def run_tasks(
         self,
@@ -321,6 +331,7 @@ class SandboxedGymAgentTaskRunner:
             # which is how multi-agent Gym datasets are meant to work.
             for example in examples:
                 example.setdefault("agent_ref", {"name": cfg.agent_ref_name})
+        examples = [copy.deepcopy(example) for example in examples for _ in range(cfg.num_repeats)]
         _stamp_rollout_indices(examples)
         logger.info(
             "Collecting %d example(s) from %s via sandboxed Gym host %s.",
@@ -329,7 +340,7 @@ class SandboxedGymAgentTaskRunner:
             cfg.rollout_url,
         )
 
-        records = await self._collect(examples)
+        records = [record for record in await self._collect_rollouts(examples) if isinstance(record, dict)]
 
         # Before the records are written: unpacking strips the transport key, and `rollouts.jsonl`
         # has to be the shape Gym itself would have written for the shared parser to read it.
