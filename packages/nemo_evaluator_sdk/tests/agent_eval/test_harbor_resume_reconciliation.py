@@ -21,7 +21,7 @@ from harbor.cli.jobs import jobs_app, resume
 from harbor.job import Job
 from harbor.models.job.config import DatasetConfig, JobConfig, RetryConfig
 from harbor_fixtures import write_harbor_trial_result
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     _CACHE_IRRELEVANT_OPTIONS,
     HarborAgentTaskRunner,
     HarborRewardMetric,
@@ -32,7 +32,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     _write_cache_stamp,
     build_trials_from_job_dir,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import _iter_harbor_trial_results
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter import _iter_harbor_trial_results
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
 
@@ -271,7 +271,7 @@ def test_all_tasks_cached_accepts_an_errored_only_n_attempts_of_one(tmp_path: Pa
 async def test_errored_stamped_job_is_served_without_invoking_harbor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     config, job_dir, task = _sdk_errored_job(tmp_path)
     calls: list[bool] = []

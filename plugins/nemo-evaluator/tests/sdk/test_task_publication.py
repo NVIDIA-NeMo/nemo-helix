@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricInline
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
 from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
 
 
@@ -238,7 +238,7 @@ def test_restored_harbor_record_rejected_before_bundling(tmp_path):
 
 def test_discovered_views_defer_runner_reward_outputs(tmp_path):
     from nemo_evaluator.sdk.task_preparation import _scoring
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _typed_task_dirs
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _typed_task_dirs
     from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 
     _package_files(tmp_path)

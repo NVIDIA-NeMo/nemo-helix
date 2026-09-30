@@ -1232,7 +1232,7 @@ jobs:
             packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_surface.py -v
 
   # Installs only nemo-evaluator-sdk (no workspace/extras/dev) and imports
-  # agent_eval.runtimes.harbor_runtime. Catches undeclared deps (workspace sync hides them)
+  # agent_eval.runtimes.harbor.runtime. Catches undeclared deps (workspace sync hides them)
   # and broken lazy barrels that pull in the metric/execution stack.
   evaluator-sdk-closure-smoke:
     name: Evaluator SDK dependency-closure smoke (Linux, py${{ matrix.python-version }})

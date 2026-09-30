@@ -26,7 +26,7 @@ from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinit
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_env import validate_harbor_env
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial

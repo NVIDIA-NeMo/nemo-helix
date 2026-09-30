@@ -10,8 +10,8 @@ import pytest
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, ResolvedHarborTaskDefinition
 from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
 from nemo_evaluator.jobs.harbor_scoring import harbor_scoring_task
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import normalize_harbor_instruction
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import normalize_harbor_instruction
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
 
 @pytest.mark.parametrize("instruction", ["", " \n\t", "<!-- SPDX-License-Identifier: Apache-2.0 -->\n"])

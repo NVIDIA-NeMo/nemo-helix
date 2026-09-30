@@ -137,7 +137,7 @@ Discover local task packages, publish each task, then create a taskset from the 
 ```python
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
@@ -249,7 +249,7 @@ from pathlib import Path
 
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
@@ -322,7 +322,7 @@ results = evaluator.agent_eval_results.list(job_id=job.name)
   an output does not reinterpret the primary value.
 - **Older trials:** Missing reward-key metadata is rejected. Re-import original results with the
   current SDK's `build_trials_from_job_dir(job_dir, tasks, reward_key="reward")` from
-  `nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`, using SDK tasks with the original native
+  `nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime`, using SDK tasks with the original native
   IDs and the original reward key (`"reward"` is illustrative). This rebuilds metadata without
   rerunning Harbor. Keep or publish referenced evidence where the scoring worker can read it.
 
@@ -407,7 +407,7 @@ import asyncio
 from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     discover_harbor_tasks,
@@ -486,7 +486,7 @@ execution profile, which must use the `subprocess` job executor.
 ```python
 from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.sdk.resources import Evaluator
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig, discover_harbor_tasks
 from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
 evaluator = Evaluator(client=EvaluatorClient(base_url="http://localhost:8080", workspace="default"))
@@ -873,7 +873,7 @@ The SDK stores the cache stamp in `jobs_dir/<job_name>/.nemo-eval-harbor-cache.j
 import asyncio
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 
 config = HarborRuntimeConfig(
     jobs_dir=Path("./harbor-jobs"),
@@ -895,7 +895,7 @@ steps above — discover, run, score — into a single call:
 import asyncio
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 
 result = asyncio.run(
     run_harbor_eval(

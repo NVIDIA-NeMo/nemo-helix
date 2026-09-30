@@ -57,7 +57,7 @@ from typing import Any
 
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.reward_keys import validate_reward_key
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import (
     TASK_CONFIG_FILENAME,
     TASK_TEMPLATE_DIRNAME,
     capture_validated_task,
@@ -65,19 +65,19 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
     normalize_harbor_instruction,
     private_directory,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_env import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import (
     harbor_env_templates,
     validate_harbor_env,
     warn_unscrubbed_secret_keys,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_scoring import harbor_scoring_metrics
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
     HarborAgentEvalTask,
     HarborTaskCollection,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter import (
     _HARBOR_EXTRA_REQUIRED_MESSAGE,
     _iter_harbor_trial_results,
     _trial_from_harbor_result,
@@ -975,7 +975,7 @@ def _build_native_job(
             than applied via ``model_copy`` so the caller's config is never mutated
             and the job name stays fixed.
         env_templates: ``${<source var>}`` template per ``config.env_secrets`` key, from
-            :func:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_env.harbor_env_templates`. Required, with
+            :func:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor.env.harbor_env_templates`. Required, with
             no default: computing it here would look secrets up after the ``force_rerun`` rmtree, and an
             empty default would silently drop them. For example, with
             ``env_secrets={"OPENAI_API_KEY": SecretRef("my-workspace/openai-api-key")}`` and only

@@ -6,7 +6,7 @@
 The sibling ``run_fabric_deepagents_example`` needs a ``python:3.12-slim`` task image, because
 ``FabricAgent`` installs Fabric with the image's own ``python3``. This one points at a bare
 ``ubuntu:24.04`` image -- no python, no pip, no curl -- and swaps in
-:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent.FabricInstalledAgent`,
+:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent.FabricInstalledAgent`,
 which provisions curl, uv, and a uv-managed interpreter before installing Fabric. That is the only
 difference between the two scripts, and it is what makes Fabric runnable on an arbitrary Harbor task.
 
@@ -26,8 +26,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NVIDIA_MODEL_BASE_URL
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NVIDIA_MODEL_BASE_URL
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import SecretRef
 from pydantic import JsonValue
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 #: hello-world on a bare `ubuntu:24.04`: no Fabric, no Python, not even curl to fetch one with.
 BARE_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "bare_hello_world_dataset"
-FABRIC_INSTALLED_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent"
+FABRIC_INSTALLED_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
 DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
 

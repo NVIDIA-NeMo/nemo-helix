@@ -15,8 +15,8 @@ pytest.importorskip("harbor", reason="FabricInstalledAgent builds on Harbor's Ba
 import harbor
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NemoFabricAgent
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
     DEFAULT_FABRIC_MAX_TURNS,
     DEFAULT_UV_VERSION,
     FabricInstalledAgent,

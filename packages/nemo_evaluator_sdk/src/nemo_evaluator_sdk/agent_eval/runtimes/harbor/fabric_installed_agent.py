@@ -12,7 +12,7 @@ from a uv-managed interpreter. Nothing is required of the task's Dockerfile.
 Select it with ``agent_import_path`` and hand it the agent through ``agent_kwargs``::
 
     HarborRuntimeConfig(
-        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent",
+        agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
             "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
@@ -43,7 +43,7 @@ from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NemoFabricAgent
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
 
 #: Interpreter uv provisions for the Fabric virtualenv. Fabric's Harbor extra needs >= 3.12.
 DEFAULT_FABRIC_PYTHON_VERSION = "3.12"

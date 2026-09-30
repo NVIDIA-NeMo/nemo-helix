@@ -317,7 +317,7 @@ def test_online_preparation_uses_ordered_verified_members(tmp_path, monkeypatch,
     from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
     from nemo_evaluator.harbor.tasks import StoredHarborTask
     from nemo_evaluator.jobs.agent_spec import ResolvedTask
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import NativeTask
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import NativeTask
     from nemo_helix_plugin.client.client import NemoClient
 
     snapshots = []

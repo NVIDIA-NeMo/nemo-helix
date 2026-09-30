@@ -59,7 +59,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
     from nemo_evaluator_sdk.agent_eval.runtimes.docker_sandbox import DockerSandboxAgentRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
     from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 
     async def _agent_fn(task):  # pragma: no cover - never called
         return None
@@ -177,7 +177,7 @@ def test_harbor_records_the_effective_agent_when_a_custom_import_path_overrides_
     # would give two runs with different custom agents identical provenance.
     from pathlib import Path
 
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 
     def _info(**kwargs):
         return HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=Path("/jobs"), **kwargs)).runner_info().config
@@ -300,7 +300,7 @@ def test_harbor_agent_kwargs_cannot_carry_a_credential_into_the_run_bundle() -> 
     # reaches the run bundle is what a caller may safely pass.
     from pathlib import Path
 
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 
     with pytest.raises(ValueError, match="extra_env.OPENAI_API_KEY"):
         HarborRuntimeConfig(
@@ -324,7 +324,7 @@ def test_harbor_agent_kwargs_cannot_carry_a_credential_into_the_run_bundle() -> 
 def test_harbor_records_env_secret_refs_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
     from pathlib import Path
 
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
     from nemo_evaluator_sdk.values.common import SecretRef
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-should-not-be-recorded")
