@@ -941,3 +941,20 @@ async def test_recovery_that_gives_up_reports_failed() -> None:
     assert dep.status == "failed"
     assert "Drift recovery failed" in dep.error
     assert ("default", "dep-1") not in ctrl._recovering
+
+
+@pytest.mark.asyncio
+async def test_recovery_finished_after_a_controller_restart_clears_the_error() -> None:
+    # A restarted controller has no in-memory recovery marker, but the persisted recovery
+    # error must still not outlive the return to running.
+    ctrl, backend = _make_controller()
+    ctrl._observe_runtime_instance = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    dep.status = "starting"
+    dep.error = "Runtime went offline; the deployments plugin is recovering it."
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="running"))
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "running"
+    assert dep.error == ""

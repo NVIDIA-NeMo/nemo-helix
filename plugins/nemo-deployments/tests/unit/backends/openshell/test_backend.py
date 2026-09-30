@@ -29,6 +29,7 @@ from nemo_deployments_plugin.backends.openshell.backend import (
     _MAX_ROUTABLE_NAME_LEN,
     _READINESS_EXEC_TIMEOUT_MARGIN_SECONDS,
     _SERVE_DEAD_EXIT,
+    _SERVE_LOG,
     _SERVE_PENDING_EXIT,
     _SERVE_PID_GRACE_SECONDS,
     _SERVE_PIDFILE,
@@ -36,6 +37,7 @@ from nemo_deployments_plugin.backends.openshell.backend import (
     _delivery_script,
     _readiness_probe_command,
     _sandbox_name,
+    _serve_launch_script,
     _service_name,
 )
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES
@@ -1520,3 +1522,58 @@ async def test_config_delivery_with_marker_but_no_exit_event_succeeds(
     assert len(_delivery_requests(mock_stub)) == 1
     # Launch proceeded after the confirmed delivery.
     assert any("setsid" in p for r in _exec_requests(mock_stub) for p in r.command)
+
+
+def _run_launch_script(
+    tmp_path: Path, workdir: str, *, home: Path | None = None
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    marker, pidfile, log = tmp_path / "launched", tmp_path / "serve.pid", tmp_path / "serve.log"
+    script = (
+        _serve_launch_script(["pwd"], workdir)
+        .replace(_LAUNCH_MARKER, str(marker))
+        .replace(_SERVE_PIDFILE, str(pidfile))
+        .replace(_SERVE_LOG, str(log))
+    )
+    env = {**os.environ, "HOME": str(home or tmp_path)}
+    proc = subprocess.run(["/bin/sh", "-c", script], capture_output=True, text=True, check=False, env=env)
+    return proc, marker, pidfile
+
+
+def test_launch_script_fails_without_a_marker_when_the_workdir_is_unusable(tmp_path: Path) -> None:
+    # A sandbox identity that cannot enter the workdir (the k8s driver runs as a
+    # different uid than the docker driver) must fail the launch with the shell's
+    # error, not report a launch whose workload never started.
+    proc, marker, pidfile = _run_launch_script(tmp_path, str(tmp_path / "missing"))
+
+    assert proc.returncode != 0
+    assert "missing" in proc.stderr
+    assert not marker.exists()
+    assert not pidfile.exists()
+
+
+def test_launch_script_starts_the_workload_in_a_usable_workdir(tmp_path: Path) -> None:
+    proc, marker, pidfile = _run_launch_script(tmp_path, str(tmp_path))
+
+    assert proc.returncode == 0
+    assert marker.exists()
+    for _ in range(50):
+        if pidfile.exists():
+            break
+        time.sleep(0.05)
+    assert pidfile.exists()
+
+
+def test_launch_script_defaults_to_the_sandbox_identitys_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+
+    proc, marker, pidfile = _run_launch_script(tmp_path, "~", home=home)
+
+    assert proc.returncode == 0
+    assert marker.exists()
+    log = tmp_path / "serve.log"
+    for _ in range(50):
+        if log.exists() and log.read_text().strip():
+            break
+        time.sleep(0.05)
+    assert log.read_text().strip() == str(home)

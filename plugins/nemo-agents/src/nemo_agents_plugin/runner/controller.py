@@ -664,9 +664,8 @@ class AgentDeploymentController(NemoController):
             if info.status == "running":
                 dep.status = "running"
                 dep.endpoint = ""
-                if key in self._recovering:
-                    self._recovering.discard(key)
-                    dep.error = ""
+                dep.error = ""
+                self._recovering.discard(key)
                 self._starting_since.pop((dep.workspace, dep.name), None)
                 await self._observe_runtime_instance(dep)
                 await self._save(dep)

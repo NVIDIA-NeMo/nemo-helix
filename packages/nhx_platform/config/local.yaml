@@ -156,9 +156,6 @@ deployments:
         # :17670 is OpenShell's documented docker-driver default. NOT :8080, which the
         # platform owns.
         gateway_endpoint: http://127.0.0.1:17670
-        # A packaged agent image's /workspace contents are owned by its 'agent' user,
-        # so the serve command runs from a sandbox-writable dir.
-        serve_workdir: /home/sandbox
         # The sandbox's only route to the platform (and its models, via the Inference
         # Gateway). The docker supervisor runs on the host network, so this reaches the
         # platform listening on :8080.

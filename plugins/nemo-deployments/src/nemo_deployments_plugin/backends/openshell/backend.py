@@ -203,6 +203,24 @@ def _phase_to_status(phase: int) -> DeploymentStatus:
     return _PHASE_TO_STATUS.get(phase, "UNKNOWN")
 
 
+def _serve_launch_script(serve_command: list[str], workdir: str) -> str:
+    """Return the shell script that starts *serve_command* detached in *workdir*.
+
+    The inner shell records its own pid and then execs, so the pidfile holds the
+    workload's pid whether or not setsid forks. The marker is written synchronously
+    so a poll racing the background start does not relaunch, and holds the launch
+    time so the probe can age out a pidfile that never appears. A workdir of ``~``
+    is the sandbox identity's home. A workdir the identity cannot enter fails the
+    launch before the marker is written.
+    """
+    inner = f"echo $$ >{_SERVE_PIDFILE}; exec {shlex.join(serve_command)} >{_SERVE_LOG} 2>&1"
+    launch = f"setsid /bin/sh -c {shlex.quote(inner)} </dev/null >/dev/null 2>&1 & date +%s >{_LAUNCH_MARKER}"
+    if workdir:
+        target = "" if workdir == "~" else f" {shlex.quote(workdir)}"
+        launch = f"cd{target} || exit 1; {launch}"
+    return launch
+
+
 class OpenShellDeploymentBackend(DeploymentBackend):
     """Manage deployments as OpenShell sandboxes via the gateway gRPC API."""
 
@@ -721,16 +739,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         workdir/shell or a non-zero launcher exit). The backgrounded serve process is
         not supervised, so this catches launch-time failures, not later serve crashes.
         """
-        serve = shlex.join(serve_command)
-        # The inner shell records its own pid and then execs, so the pidfile holds the
-        # workload's pid whether or not setsid forks. The marker is written synchronously
-        # so a poll racing the background start does not relaunch, and holds the launch
-        # time so the probe can age out a pidfile that never appears.
-        inner = f"echo $$ >{_SERVE_PIDFILE}; exec {serve} >{_SERVE_LOG} 2>&1"
-        launch = f"setsid /bin/sh -c {shlex.quote(inner)} </dev/null >/dev/null 2>&1 & date +%s >{_LAUNCH_MARKER}"
-        workdir = self._executor_config.serve_workdir
-        if workdir:
-            launch = f"cd {shlex.quote(workdir)} && {launch}"
+        launch = _serve_launch_script(serve_command, self._executor_config.serve_workdir)
         try:
             exit_code, output = await self._exec_detached(sandbox_name, ["/bin/sh", "-lc", launch])
         except grpc.RpcError as exc:

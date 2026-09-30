@@ -109,11 +109,13 @@ class OpenShellExecutorConfig(BaseModel):
         ),
     )
     serve_workdir: str = Field(
-        default="/home/sandbox",
+        default="~",
         description=(
             "Working directory for the detached serve command. Must be writable by the sandbox "
-            "user: a packaged agent image's /workspace contents are owned by its 'agent' user, so "
-            "NAT's per-run temp dir is written here instead. Empty string disables the chdir."
+            "identity: a packaged agent image's /workspace contents are owned by its 'agent' user. "
+            "'~' (default) is that identity's home, which differs by compute driver (the docker "
+            "driver runs as the policy's 'sandbox' user, the kubernetes driver as its own uid with "
+            "HOME=/sandbox). Empty string disables the chdir."
         ),
     )
     serve_path: str = Field(
