@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_evaluator.config import EvaluatorConfig
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymRunnerTarget, RegisteredAgentSource
 from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     VolcanoJobExecutionProfile,
@@ -71,6 +71,11 @@ def _asset_config_path(parent: str, value: str) -> str:
     return f"{parent}/{name}/configs/{flavor or name}.yaml"
 
 
+def has_staged_environment(target: GymRunnerTarget) -> bool:
+    """Whether the job stages an environment tree the host must mount: a FileSet, a registered agent's package, or both."""
+    return target.environment is not None or isinstance(target.source, RegisteredAgentSource)
+
+
 def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
     """Build the Gym global config for a target, as nested data rather than Hydra strings.
 
@@ -106,7 +111,7 @@ def gym_global_config(target: GymRunnerTarget) -> dict[str, Any]:
         else:
             config[key] = value
 
-    if target.environment is not None:
+    if has_staged_environment(target):
         # Gym does not read this key. The host uses it to rebuild config_paths.
         config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY] = {
             "agent_instance": target.agent_ref_name or target.agent,
@@ -214,7 +219,7 @@ def resolve_sandbox_plan(
     quietly running user environment code beside this job's credentials. A FileSet environment
     cannot run colocated at all -- ``GymAgentTaskRunner`` would ignore the staged package.
     """
-    if target.environment is not None:
+    if has_staged_environment(target):
         require_fileset_environment_sandboxed(target, config)
     if not config.sandboxed_gym_default:
         return None
@@ -248,12 +253,17 @@ def resolve_sandbox_plan(
 
 def require_fileset_environment_sandboxed(target: GymRunnerTarget, config: EvaluatorConfig) -> None:
     """Refuse a custom environment that colocated execution would silently ignore."""
-    if target.environment is None:
+    if not has_staged_environment(target):
         return
     if not config.sandboxed_gym_default:
+        what = (
+            "A registered agent's Gym package"
+            if isinstance(target.source, RegisteredAgentSource)
+            else "Gym environment FileSets"
+        )
         raise SandboxUnavailableError(
-            "Gym environment FileSets require sandboxed execution. Enable `sandboxed_gym_default`, "
-            "or omit `target.environment` so colocated GymAgentTaskRunner cannot ignore the staged package."
+            f"{what} require sandboxed execution. Enable `sandboxed_gym_default`, or select a Gym agent by "
+            "`component` without `target.environment`, so colocated GymAgentTaskRunner cannot ignore the staged package."
         )
     require_sandbox_available(config)
     require_no_plaintext_credentials(target)
@@ -274,7 +284,7 @@ def require_fileset_sandbox_storage_identity(
     execution_profile: BaseExecutionProfile | None,
 ) -> None:
     """Fail when staging would write PVC A and OpenSandbox would mount PVC B."""
-    if target.environment is None or config.sandbox_host_provider == "docker":
+    if not has_staged_environment(target) or config.sandbox_host_provider == "docker":
         return
     job_claim = job_storage_pvc_name(execution_profile) if execution_profile is not None else None
     sandbox_claim = config.sandbox_job_storage_pvc_claim
@@ -354,7 +364,7 @@ def serve_config(
     """
     environment_pvc_claim = plan.job_storage_pvc_claim
     host_provider_options = dict(plan.host_provider_options)
-    fileset_environment = target.environment is not None
+    fileset_environment = has_staged_environment(target)
 
     if fileset_environment:
         # Each FileSet is staged onto this job's persistent directory. A shared environment mount

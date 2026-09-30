@@ -46,6 +46,7 @@ from nemo_evaluator.jobs.agent_spec import (
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     ResolvedTask,
     Target,
     registered_agent_files,
@@ -383,7 +384,9 @@ class _AgentEvalJobBase(NemoJob):
             # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
             # to clean the snapshot up, so it goes here.
             snapshot = (
-                registered_agent_files(target) if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) else None
+                registered_agent_files(target)
+                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+                else None
             )
             if snapshot is not None:
                 await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
@@ -609,6 +612,11 @@ class _AgentEvalJobBase(NemoJob):
                     "Gym environment FileSets require sandboxed execution. Enable `sandboxed_gym_default`, "
                     "or omit `target.environment` so colocated GymAgentTaskRunner cannot ignore the staged package."
                 )
+            if isinstance(target.source, RegisteredAgentSource):
+                raise SandboxUnavailableError(
+                    "A registered agent runs from the environment package the staging step assembles, which only "
+                    "the sandboxed Gym host mounts. Enable `sandboxed_gym_default`, or select a Gym agent by `component`."
+                )
             if target.agent_ref_name is not None:
                 raise SandboxUnavailableError(
                     "The agent_ref_name field requires sandboxed execution; colocated GymAgentTaskRunner "
@@ -775,7 +783,7 @@ class _AgentEvalJobBase(NemoJob):
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
         snapshot = (
             registered_agent_files(spec.target)
-            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget))
+            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
             else None
         )
         if snapshot is not None:

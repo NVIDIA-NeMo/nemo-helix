@@ -4307,10 +4307,25 @@ components:
             package. The complete FileSet is staged read-only; file fragments are
             not supported.
         source:
-          allOf:
+          anyOf:
           - $ref: '#/components/schemas/GymAgentSource'
-          description: 'The agent Gym collects rollouts with: a `component`, its `config`,
-            and optionally the `instance` the package registers it under.'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
+          title: Source
+          description: "The agent Gym collects rollouts with: a Gym agent by `component`\
+            \ (with its `config` and optionally the `instance` the package registers\
+            \ it under), or a registered platform `agent` (with an optional `environment`).\
+            \ A registered agent is resolved at submit into `resolved_config`; the\
+            \ job's staging step turns that into an environment package running the\
+            \ platform's Gym agent component, so the agent runs as registered \u2014\
+            \ identity, skills, MCP servers \u2014 with its model on Gym's policy\
+            \ server."
+        resolved_config:
+          title: Resolved Config
+          description: 'Set by submit-time resolution of a registered `agent`, never
+            by the submitter: the Fabric config the agent resolved to, which the staging
+            step writes into the Gym environment package.'
+          additionalProperties: true
+          type: object
         resources_server:
           type: string
           title: Resources Server
