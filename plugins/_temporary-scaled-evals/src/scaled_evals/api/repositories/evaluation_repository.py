@@ -36,7 +36,7 @@ EVALUATION_COLUMNS = (
     "task_id, task_revision, "
     "benchmark_run_id, "
     "framework_profile_id, "
-    "harbor_profile_id, switchyard_profile_id, intake_profile_id, "
+    "harbor_profile_id, intake_profile_id, "
     "credentials, runtime, network_policy, network_policy_config, n_attempts, parallelism, "
     "visibility, status, status_detail, "
     "cancel_teardown_status, cancel_teardown_error, cancel_teardown_updated_at, "
@@ -55,7 +55,7 @@ EVALUATION_DETAIL_COLUMNS = (
     "e.task_id, e.task_revision, "
     "e.benchmark_run_id, "
     "e.framework_profile_id, "
-    "e.harbor_profile_id, e.switchyard_profile_id, e.intake_profile_id, "
+    "e.harbor_profile_id, e.intake_profile_id, "
     "e.credentials, e.extra_skill_object_keys, e.instruction_prefix, "
     "e.instruction_postfix, e.initial_user_turns, "
     "e.runtime, e.network_policy, e.network_policy_config, e.n_attempts, "
@@ -143,7 +143,6 @@ _LOAD_FOR_DISPATCH_SQL = """
         e.task_id,
         e.task_revision,
         e.benchmark_run_id,
-        br.max_concurrent_members,
         e.runtime,
         e.network_policy,
         e.network_policy_config,
@@ -246,14 +245,6 @@ _EVIDENCE_CLAIM_SQL = """
           AND status IN ('succeeded', 'failed', 'cancelled')
           AND evidence_status = 'building'
           AND evidence_build_attempts < 5
-          AND (
-              benchmark_run_id IS NULL
-              OR NOT EXISTS (
-                  SELECT 1 FROM benchmark_switchyard_campaigns c
-                  WHERE c.benchmark_run_id = evaluations.benchmark_run_id
-                    AND c.evidence_status NOT IN ('ready', 'unavailable')
-              )
-          )
           AND (
               evidence_claimed_at IS NULL
               OR evidence_claimed_at < NOW() - (%s * INTERVAL '1 second')
@@ -467,7 +458,6 @@ class EvaluationRepository:
         benchmark_run_id: str | None,
         framework_profile_id: str | None,
         harbor_profile_id: str | None,
-        switchyard_profile_id: str | None,
         intake_profile_id: str | None,
         credentials: dict[str, str],
         extra_skill_object_keys: builtins.list[str],
@@ -517,7 +507,6 @@ class EvaluationRepository:
             profile_ids={
                 "framework": framework_profile_id,
                 "harbor": harbor_profile_id,
-                "switchyard": switchyard_profile_id,
                 "intake": intake_profile_id,
             },
             credentials=credentials,
@@ -531,7 +520,7 @@ class EvaluationRepository:
                 framework_adapter_version, sandbox_k8s_version, runner_metadata,
                 task_id, task_revision,
                 benchmark_run_id,
-                framework_profile_id, harbor_profile_id, switchyard_profile_id,
+                framework_profile_id, harbor_profile_id,
                 intake_profile_id, credentials, extra_skill_object_keys,
                 instruction_prefix, instruction_postfix, initial_user_turns,
                 runtime, network_policy, network_policy_config, n_attempts,
@@ -540,7 +529,7 @@ class EvaluationRepository:
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s
             )
             RETURNING {EVALUATION_COLUMNS}
             """,
@@ -561,7 +550,6 @@ class EvaluationRepository:
                 benchmark_run_id,
                 framework_profile_id,
                 harbor_profile_id,
-                switchyard_profile_id,
                 intake_profile_id,
                 Json(credentials),
                 extra_skill_object_keys,
@@ -599,7 +587,6 @@ class EvaluationRepository:
         task_revision: int,
         framework_profile_id: str | None,
         harbor_profile_id: str | None,
-        switchyard_profile_id: str | None,
         intake_profile_id: str | None,
         credentials: dict[str, str],
         extra_skill_object_keys: builtins.list[str],
@@ -640,7 +627,6 @@ class EvaluationRepository:
                 benchmark_run_id=benchmark_run_id,
                 framework_profile_id=framework_profile_id,
                 harbor_profile_id=harbor_profile_id,
-                switchyard_profile_id=switchyard_profile_id,
                 intake_profile_id=intake_profile_id,
                 credentials=credentials,
                 extra_skill_object_keys=extra_skill_object_keys,
@@ -1472,7 +1458,6 @@ class EvaluationRepository:
                 row.get("max_infrastructure_retries") or 0
             )
             backend_handle = row.get("backend_handle")
-            self._mark_failed_execution_resources(cur, evaluation_id)
             if backend_handle:
                 cur.execute(
                     """
@@ -1639,32 +1624,6 @@ class EvaluationRepository:
             )
             return {"action": "failed", "retry": False}
 
-    @staticmethod
-    def _mark_failed_execution_resources(cur: psycopg.Cursor, evaluation_id: str) -> None:
-        cur.execute(
-            """
-            UPDATE evaluation_runtime_resources AS resource
-            SET status = 'draining', drain_until = NOW(),
-                teardown_claimed_at = NULL, teardown_claimed_by = NULL,
-                updated_at = NOW()
-            FROM evaluations AS evaluation
-            WHERE resource.evaluation_id = %s
-              AND evaluation.id = resource.evaluation_id
-              AND resource.execution_number = evaluation.current_execution
-              AND resource.kind = 'switchyard'
-              AND resource.status IN ('provisioned', 'draining', 'delete_failed')
-            """,
-            (evaluation_id,),
-        )
-        cur.execute(
-            """
-            UPDATE benchmark_switchyard_launches
-            SET status = 'cleanup_pending', permit_expires_at = NOW(), updated_at = NOW()
-            WHERE evaluation_id = %s AND status IN ('launching', 'running')
-            """,
-            (evaluation_id,),
-        )
-
     def _queue_infrastructure_retry(
         self,
         cur: psycopg.Cursor,
@@ -1813,34 +1772,6 @@ class EvaluationRepository:
             updated = cur.rowcount != 0
             if updated:
                 self.insert_status_event(cur, evaluation_id, "failed", detail)
-                cur.execute(
-                    """
-                    UPDATE evaluation_runtime_resources AS resource
-                    SET status = 'draining',
-                        drain_until = NOW(),
-                        teardown_claimed_at = NULL,
-                        teardown_claimed_by = NULL,
-                        updated_at = NOW()
-                    FROM evaluations AS evaluation
-                    WHERE resource.evaluation_id = %s
-                      AND evaluation.id = resource.evaluation_id
-                      AND resource.execution_number = evaluation.current_execution
-                      AND resource.kind = 'switchyard'
-                      AND resource.status IN ('provisioned', 'draining', 'delete_failed')
-                    """,
-                    (evaluation_id,),
-                )
-                cur.execute(
-                    """
-                    UPDATE benchmark_switchyard_launches
-                    SET status = 'cleanup_pending',
-                        permit_expires_at = NOW(),
-                        updated_at = NOW()
-                    WHERE evaluation_id = %s
-                      AND status IN ('launching', 'running')
-                    """,
-                    (evaluation_id,),
-                )
             return updated
 
     def load_for_dispatch(self, evaluation_id: str) -> dict | None:
@@ -1972,18 +1903,6 @@ class EvaluationRepository:
                 SELECT config
                 FROM config_profiles
                 WHERE id = %s AND type IN ('harbor', 'gym') AND deleted_at IS NULL
-                """,
-                (profile_id,),
-            )
-            return cur.fetchone()
-
-    def load_switchyard_profile(self, profile_id: str) -> dict | None:
-        with self.conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT config
-                FROM config_profiles
-                WHERE id = %s AND type = 'switchyard' AND deleted_at IS NULL
                 """,
                 (profile_id,),
             )

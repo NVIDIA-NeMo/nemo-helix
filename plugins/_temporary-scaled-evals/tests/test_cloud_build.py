@@ -123,7 +123,7 @@ def test_cloud_build_accepts_operation_response(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_submit_cloud_build_returns_without_polling_and_keeps_metadata() -> None:
-    image_ref = "us-central1-docker.pkg.dev/project-1/repo/switchyard:git-abc"
+    image_ref = "us-central1-docker.pkg.dev/project-1/repo/server:git-abc"
     FakeClient.responses = [
         httpx.Response(
             200,
@@ -135,15 +135,15 @@ def test_submit_cloud_build_returns_without_polling_and_keeps_metadata() -> None
     ]
 
     build = cloud_build.submit_image_build_from_gcs(
-        "switchyard/context.tar.gz",
+        "server/context.tar.gz",
         image_ref,
-        substitutions={"_SCALED_EVALS_SWITCHYARD_PURPOSE": "publish"},
+        substitutions={"_SCALED_EVALS_PURPOSE": "publish"},
     )
 
     assert build == {"id": "build-async", "status": "QUEUED"}
     assert FakeClient.gets == []
     payload = FakeClient.posts[0][1]
-    assert payload["substitutions"] == {"_SCALED_EVALS_SWITCHYARD_PURPOSE": "publish"}
+    assert payload["substitutions"] == {"_SCALED_EVALS_PURPOSE": "publish"}
     assert payload["options"]["substitutionOption"] == "ALLOW_LOOSE"
 
 

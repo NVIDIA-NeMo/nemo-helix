@@ -22,7 +22,6 @@ _INFRASTRUCTURE_CODES = frozenset(
         "OSError",
         "KubernetesJobError",
         "SandboxExecutionError",
-        "SwitchyardReadinessError",
     }
 )
 _PROVIDER_CODES = frozenset(
@@ -45,7 +44,6 @@ _RETRYABLE_INFRASTRUCTURE_CODES = frozenset(
         "runner_deadline_exceeded",
         "runner_handoff_lost",
         "object_store_unavailable",
-        "SwitchyardReadinessError",
     }
 )
 _RETRYABLE_PROVIDER_CODES = frozenset(

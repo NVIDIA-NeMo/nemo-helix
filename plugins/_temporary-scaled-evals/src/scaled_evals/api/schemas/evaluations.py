@@ -131,10 +131,6 @@ class CreateEvaluationRequest(BaseModel):
             "must match."
         ),
     )
-    switchyard_profile_id: str | None = Field(
-        default=None,
-        description="Optional switchyard config profile id.",
-    )
     intake_profile_id: str | None = Field(
         default=None,
         description="Optional intake config profile id.",
@@ -156,10 +152,7 @@ class CreateEvaluationRequest(BaseModel):
     runtime: str = "sandbox_k8s"
     network_policy: NetworkPolicyMode = Field(
         default="unrestricted",
-        description=(
-            "Direct sandbox egress policy. Switchyard routing and book mode are "
-            "configured independently by the selected Switchyard profile."
-        ),
+        description=("Direct sandbox egress policy."),
     )
     network_policy_config: dict[str, Any] = Field(
         default_factory=dict,
@@ -240,7 +233,6 @@ class Evaluation(BaseModel):
         description="Generic framework config profile id used by this evaluation.",
     )
     harbor_profile_id: str | None = Field(description="Deprecated Harbor compatibility alias for framework_profile_id.")
-    switchyard_profile_id: str | None
     intake_profile_id: str | None
     credentials: dict[str, str]
     runtime: str

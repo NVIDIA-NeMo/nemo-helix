@@ -25,7 +25,6 @@ from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
-from scaled_evals.dispatch.switchyard_archive import check_campaign_evidence
 from scaled_evals.dispatch.worker import Dispatcher
 
 NOW = datetime(2026, 9, 11, tzinfo=UTC)
@@ -143,9 +142,7 @@ def build(monkeypatch, tmp_path, sources, *, benchmark_artifacts=None, listing=N
         return destination.stat().st_size
 
     monkeypatch.setattr(s3, "upload_file", upload)
-    built = build_benchmark_archive(
-        job(members=members), check_claim=lambda: None, evidence_checks=(check_campaign_evidence,)
-    )
+    built = build_benchmark_archive(job(members=members), check_claim=lambda: None)
     assert built["size_bytes"] > 0
     assert built["sha256"] == hashlib.sha256((tmp_path / "result.tar.gz").read_bytes()).hexdigest()
     assert captured["key"] == "benchmark-runs/bmr_1/archives/gen/claim.tar.gz"
@@ -394,16 +391,10 @@ def test_export_preserves_package_task_identity(monkeypatch, tmp_path):
     assert result["config"]["task"] == task
 
 
-@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
-def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path, digest_prefix):
-    key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
+def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path):
+    key = "benchmark-runs/bmr_1/artifacts/stats.json"
     stats = b'{"requests": 4, "cost_usd": 0.25}'
     source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {
-        "status": "ready",
-        "routing_stats_object_key": key,
-        "routing_stats_sha256": digest_prefix + hashlib.sha256(stats).hexdigest(),
-    }
     binary = b"\x00\xffbenchmark evidence"
     artifacts = {key: stats, "benchmark-runs/bmr_1/artifacts/trace.bin": binary}
     files = build(
@@ -421,10 +412,7 @@ def test_export_captures_shared_benchmark_artifacts_once(monkeypatch, tmp_path, 
         assert files[f"bmr_1/{entry['path']}"] == body
         assert entry["sha256"] == hashlib.sha256(body).hexdigest()
         assert entry["size_bytes"] == len(body)
-    assert files["bmr_1/_scaled_evals/benchmark/artifacts/switchyard/routing_stats_final.json"] == stats
-    for member in manifest["members"]:
-        path = f"bmr_1/_scaled_evals/evaluations/{member['id']}/switchyard/campaign_evidence.json"
-        assert json.loads(files[path]) == source["switchyard/campaign_evidence.json"]
+    assert files["bmr_1/_scaled_evals/benchmark/artifacts/stats.json"] == stats
 
 
 @pytest.mark.parametrize("suffix", ["../escape", "/absolute", "a/../escape", "a//b", "a\\b", "."])
@@ -489,34 +477,6 @@ def test_benchmark_artifacts_share_member_resource_limits(monkeypatch, tmp_path,
         )
 
 
-@pytest.mark.parametrize("present", [False, True])
-@pytest.mark.parametrize("digest_prefix", ["", "sha256:"])
-def test_export_rejects_missing_or_mismatched_campaign_evidence(monkeypatch, tmp_path, present, digest_prefix):
-    key = "benchmark-runs/bmr_1/artifacts/switchyard/routing_stats_final.json"
-    source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {
-        "status": "ready",
-        "routing_stats_object_key": key,
-        "routing_stats_sha256": digest_prefix + "0" * 64,
-    }
-    with pytest.raises(BenchmarkArchiveError, match="missing or changed"):
-        build(
-            monkeypatch,
-            tmp_path,
-            [tar_bytes(source)],
-            benchmark_artifacts={key: b"changed"} if present else {},
-        )
-
-
-def test_export_marks_unavailable_campaign_evidence_partial(monkeypatch, tmp_path):
-    source = harbor_files()
-    source["switchyard/campaign_evidence.json"] = {"status": "unavailable"}
-    files = build(monkeypatch, tmp_path, [tar_bytes(source)])
-    manifest = json.loads(files["bmr_1/scaled-evals-benchmark-archive.json"])
-    assert manifest["partial"] is True
-    assert manifest["unavailable_benchmark_evidence"] == [{"evaluation_id": "ev_1", "kind": "switchyard_campaign"}]
-
-
 def test_mounted_openapi_includes_benchmark_archive_contract():
     schema = app.openapi()
     operations = schema["paths"]["/v1/benchmark-runs/{run_id}/archive"]
@@ -544,10 +504,6 @@ def test_idle_dispatcher_processes_benchmark_archive_queue(monkeypatch, status):
     for method in (
         # Drained first now that Platform Jobs is the default execution path.
         "claim_next_execution_cleanup",
-        "claim_next_switchyard_teardown",
-        "claim_next_switchyard_campaign_cleanup",
-        "claim_next_switchyard_campaign_finalization",
-        "claim_next_switchyard_campaign_deletion",
         "claim_next",
         "claim_next_evidence",
         "claim_next_archive",
@@ -588,8 +544,7 @@ def test_archive_heartbeat_distinguishes_transient_errors_from_lost_ownership(mo
     def connect():
         yield MagicMock()
 
-    def build_archive(job, *, check_claim, evidence_checks):
-        assert evidence_checks == (check_campaign_evidence,)
+    def build_archive(job, *, check_claim):
         check_claim()
         return {"object_key": "archive", "size_bytes": 123}
 

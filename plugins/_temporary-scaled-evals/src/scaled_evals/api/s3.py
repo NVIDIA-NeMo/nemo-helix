@@ -1028,18 +1028,6 @@ def build_evaluation_archive(evaluation_id: str) -> dict[str, Any]:
     }
 
 
-def upload_context_archive(archive_path: Path, object_key: str) -> None:
-    """Upload a local build-context archive to the object store.
-
-    Server-side put (e.g. staging a Switchyard context so Cloud Build can
-    consume it as a GCS ``storageSource``), so it targets the internal endpoint.
-    """
-    if _using_gcs():
-        _gcs_upload_file(archive_path, object_key)
-        return
-    _client(settings.s3_endpoint).upload_file(str(archive_path), _bucket(), object_key)
-
-
 def download_object(object_key: str, dest_path: str) -> None:
     """Download an object to a local file, using the internal endpoint.
 

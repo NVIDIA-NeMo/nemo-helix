@@ -307,3 +307,27 @@ def test_immediate_submission_is_best_effort(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=True))
     submitter_module.submit_evaluation_now("eval_1")
     sdk.assert_called_once()
+
+
+def test_controller_tears_down_orphaned_executions(monkeypatch: pytest.MonkeyPatch) -> None:
+    cleanup = {"id": 7, "evaluation_id": "eval_1", "execution_number": 2, "runtime": "sandbox_k8s"}
+    claims = iter([cleanup, None])
+    monkeypatch.setattr(controller_module, "pooled_connection", lambda *a, **k: nullcontext(MagicMock()))
+    monkeypatch.setattr(
+        controller_module,
+        "ExecutionCleanupRepository",
+        lambda _conn: SimpleNamespace(claim_one=lambda **_kwargs: next(claims)),
+    )
+    teardown = MagicMock()
+    monkeypatch.setattr(controller_module, "teardown_orphaned_execution", teardown)
+    monkeypatch.setattr(settings, "platform_evaluation_jobs_enabled", True)
+    controller = ScaledEvalsJobsController()
+
+    assert "cleanup_executions" in dict(controller._phases())
+    assert controller._cleanup_execution() is True
+    assert controller._cleanup_execution() is False
+    teardown.assert_called_once_with(
+        cleanup,
+        worker_id=controller._worker_id,
+        connect=controller_module.pooled_connection,
+    )
