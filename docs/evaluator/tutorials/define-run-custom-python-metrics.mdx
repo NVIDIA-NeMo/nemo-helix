@@ -391,7 +391,7 @@ Pass `CloudpickleMetricBundlePackager()` to `client.evaluator.submit(...)` so th
 
 <Note>
 
-Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x`.
+Submit from a Python 3.13 environment. A bundle created on another minor version fails when the job hydrates it, with `cloudpickle metric payload was created with Python 3.12.x, but this runtime is Python 3.13.x; recreate the metric bundle with the runtime Python version.`
 
 </Note>
 
