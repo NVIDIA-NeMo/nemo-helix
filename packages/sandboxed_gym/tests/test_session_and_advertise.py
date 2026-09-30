@@ -260,3 +260,36 @@ def test_a_broker_that_fails_to_shut_down_does_not_hide_why_startup_failed(monke
     # The loop thread is released before the broker is asked to stop, so a broker that raises
     # cannot strand it.
     assert closed == [True]
+
+
+@pytest.mark.parametrize(
+    ("sandbox_timeouts", "expected_pull_s", "expected_health_s"),
+    [
+        ({"ready_timeout_s": 900, "bootstrap_timeout_s": 240}, 900, 240),
+        ({"ready_timeout_s": 900}, 900, 900),
+    ],
+)
+def test_the_bootstrap_timeout_bounds_the_health_wait_and_not_the_image_pull(
+    monkeypatch, sandbox_timeouts, expected_pull_s, expected_health_s
+):
+    """A Gym-startup budget must not also cap how long the pod may take to pull its image."""
+    host = GymHostHandle(host_id="h1", health_url="http://host/health", rollout_url="http://host/rollouts/run")
+    seen: dict[str, float] = {}
+
+    class HostProvider:
+        async def create_host(self, spec):
+            seen["pull"] = spec.ready_timeout_s
+            return host
+
+        async def wait_ready(self, handle, timeout_s):
+            seen["health"] = timeout_s
+
+        async def destroy_host(self, handle):
+            return None
+
+    monkeypatch.setattr(orchestrator_module, "get_host_provider", lambda name, options: HostProvider())
+    cfg = _minimal_cfg().model_copy(update={"sandbox": _minimal_cfg().sandbox.model_copy(update=sandbox_timeouts)})
+
+    SandboxedGymOrchestrator().start(cfg, broker=_fake_broker()).shutdown()
+
+    assert seen == {"pull": expected_pull_s, "health": expected_health_s}
