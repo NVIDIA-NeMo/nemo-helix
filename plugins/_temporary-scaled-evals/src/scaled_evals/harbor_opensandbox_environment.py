@@ -43,8 +43,11 @@ from nhx_sandbox.opensandbox_policy import (
 
 from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME
 
+# Sandbox metadata label marking which NeMo component manages the sandbox.
 MANAGED_BY_METADATA_KEY = "nemo-managed-by"
+# Value of MANAGED_BY_METADATA_KEY on every sandbox this environment creates.
 MANAGED_BY_METADATA_VALUE = "scaled-evals"
+# Sandbox metadata label shared by every sandbox one create call made, including Harbor's retries.
 CREATE_ATTEMPT_METADATA_KEY = "nemo-scaled-evals-create-attempt"
 
 
@@ -92,6 +95,7 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
     @property
     @override
     def capabilities(self) -> EnvironmentCapabilities:
+        """Advertise every allowlist form ``egress_policy`` can enforce, so Harbor accepts those tasks."""
         return EnvironmentCapabilities(
             gpus=True,
             disable_internet=True,
@@ -107,6 +111,7 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
 
     @override
     def validate_network_policy_support(self, network_policy: NetworkPolicy | None = None) -> None:
+        """Run Harbor's checks, then reject ``allowlist`` tasks that ask for hosts outside the trusted allowlist."""
         super().validate_network_policy_support(network_policy)
         network_policy = network_policy or self._network_policy
         if network_policy.network_mode != NetworkMode.ALLOWLIST:
@@ -132,11 +137,16 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
 
     @override
     def _build_network_policy(self, sdk: dict[str, Any]) -> Any:
+        """Send the policy fixed for this create call, so the policy verified afterwards is the one sent."""
         expected = self._expected_egress or self.egress_policy()
         return sdk["NetworkPolicy"].model_validate(to_opensandbox_policy(expected))
 
     @override
     async def _create_sandbox(self, sdk: dict[str, Any]) -> Any:
+        """Create the sandbox through Harbor, kill any orphans from the attempt, then verify its egress.
+
+        The sandbox is killed and the trial fails if the applied policy can't be read or doesn't match.
+        """
         # Harbor's _create_sandbox retries transient failures internally. One attempt ID spans all
         # of those retries, so the sweeps below also find sandboxes an earlier retry orphaned.
         attempt_id = uuid4().hex
@@ -223,6 +233,7 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
 
     @override
     def _load_opensandbox(self) -> dict[str, Any]:
+        """Add the SDK classes ``_kill_create_attempt`` needs to the ones Harbor loads."""
         sdk = super()._load_opensandbox()
         from opensandbox.manager import SandboxManager  # ty: ignore[unresolved-import]  # Harbor 0.20 venv only
         from opensandbox.models.sandboxes import SandboxFilter  # ty: ignore[unresolved-import]
@@ -231,4 +242,5 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
 
 
 def _sandbox_id(sandbox: Any) -> str | None:
+    """Return the sandbox's ID from whichever of ``id`` or ``sandbox_id`` the SDK object exposes."""
     return getattr(sandbox, "id", None) or getattr(sandbox, "sandbox_id", None)
