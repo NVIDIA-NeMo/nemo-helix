@@ -172,3 +172,19 @@ class BuilderConfig(NemoConfig):
         if not isinstance(key, ec.EllipticCurvePublicKey | rsa.RSAPublicKey):
             raise ValueError("signing_public_key must be an EC or RSA key, which is what cosign signs with")
         return value
+
+    # --- The failure sweep ---
+
+    sweep_interval_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="How often the failure sweep checks `pending` rows. It only fails rows, so this bounds how long a dead build's rows stay `pending`.",
+    )
+    job_creation_grace_seconds: float = Field(
+        default=300.0,
+        gt=0,
+        description=(
+            "How long a row's job may be missing before the sweep fails the row. Rows are written "
+            "before their job, so a job is briefly missing after every submit."
+        ),
+    )
