@@ -6,7 +6,7 @@ set -euo pipefail
 
 make_python_version="$(sed -n 's/^PYTHON_VERSION[[:space:]]*?=[[:space:]]*\([^[:space:]#]*\).*/\1/p' Makefile)"
 flox_python_version="$(yq -r '.vars.UV_PYTHON' tools/python/.flox/env/manifest.toml)"
-task_image="$(awk '/^variable "NHX_PYTHON_IMAGE"/ { found = 1 } found && /default[[:space:]]*=/ { print; exit } found && /}/ { exit }' docker-bake.hcl)"
+task_image="$(awk '{ sub(/#.*/, "") } /^variable "NHX_PYTHON_IMAGE"/ { found = 1 } found && /default[[:space:]]*=/ { print; exit } found && /}/ { exit }' docker-bake.hcl)"
 task_python_version="$(sed -n 's/.*python:\([0-9]*\.[0-9]*\)[^0-9].*/\1/p' <<<"${task_image}")"
 
 if [[ -z "${make_python_version}" ]]; then
