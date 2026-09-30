@@ -14,7 +14,7 @@ command acted on ``default`` -- potentially the wrong tenant, with no warning.
 from __future__ import annotations
 
 import pytest
-from _insights_cli import (
+from nemo_insights_plugin.testing.cli import (
     RUN_NAME,
     FakeInsightsAPI,
     WireState,

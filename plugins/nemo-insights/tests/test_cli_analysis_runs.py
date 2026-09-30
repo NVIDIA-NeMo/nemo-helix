@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 import typer
-from _insights_cli import (
+from click.testing import Result
+from nemo_insights_plugin.testing.cli import (
     CONFIGURED_DEFAULT,
     CONFIGURED_FAST,
     RUN_NAME,
@@ -21,7 +22,6 @@ from _insights_cli import (
     run_json,
     run_response_json,
 )
-from click.testing import Result
 from typer.testing import CliRunner
 
 runner = CliRunner()

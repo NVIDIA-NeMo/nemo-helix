@@ -9,9 +9,15 @@ import json
 
 import pytest
 import typer
-from _insights_cli import CONFIGURED_DEFAULT, CONFIGURED_FAST, FakeInsightsAPI, config_json, page_json
 from click.testing import Result
 from nemo_insights_plugin import cli
+from nemo_insights_plugin.testing.cli import (
+    CONFIGURED_DEFAULT,
+    CONFIGURED_FAST,
+    FakeInsightsAPI,
+    config_json,
+    page_json,
+)
 from typer.testing import CliRunner
 
 runner = CliRunner()
