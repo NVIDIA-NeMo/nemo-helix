@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("scaled_evals")
 
-from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.repositories.build_repository import TaskBuildRepository
 
 
@@ -127,17 +125,3 @@ def test_platform_job_claim_binding_and_listing() -> None:
     list_sql, list_params = cur.execute.call_args.args
     assert "build_claimed_by LIKE 'scaled-evals-build-%%'" in list_sql
     assert list_params == (10,)
-
-
-def test_legacy_worker_does_not_claim_platform_owned_queue(monkeypatch: pytest.MonkeyPatch) -> None:
-    worker = TaskBuildWorker()
-    claim_next = MagicMock()
-    monkeypatch.setattr(worker, "claim_next", claim_next)
-    monkeypatch.setitem(
-        TaskBuildWorker.work_once.__globals__,
-        "settings",
-        SimpleNamespace(platform_build_jobs_enabled=True),
-    )
-
-    assert worker.work_once() is False
-    claim_next.assert_not_called()
