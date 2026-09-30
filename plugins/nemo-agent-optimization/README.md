@@ -89,17 +89,24 @@ the submit.
 
 ## Discover the installed strategies
 
-`--strategy` takes any name this prints, one per line:
+`--strategy` takes any name this lists, and each row says what that strategy
+optimizes, in the words of the plugin that ships it:
 
 ```bash
 $ nemo agents optimize list-strategies
 Targeting http://localhost:8080
-legacy
+┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name   ┃ Description                                ┃
+┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ legacy │ Hyperparameter and GA prompt optimization. │
+└────────┴────────────────────────────────────────────┘
 ```
 
-Only the names go to stdout (the target line is on stderr), so the output is
-safe to loop over in a shell; when the platform has no strategies, stdout is
-empty and a note goes to stderr.
+Like every `nemo` list command it takes `--output-format` / `-f`, and prints
+JSON when piped, so a script reads the names with
+`nemo agents optimize list-strategies -f json | jq -r '.[].name'`. The target
+line and the note printed when the platform has no strategies go to stderr, so
+piped output stays parseable.
 
 It asks the platform — `GET /apis/agent-optimization/v2/strategies` — because
 the platform is what resolves `--strategy` when the run is submitted. A client

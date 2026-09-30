@@ -7420,7 +7420,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `list-strategies`: List the strategies `--strategy` accepts, one name per line.
+* `list-strategies`: List installed strategies and what each one optimizes.
 * `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
 
 *Jobs:*
@@ -7429,17 +7429,18 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 ##### nemo agents optimize list-strategies
 
-List the strategies `--strategy` accepts, one name per line.
+List installed strategies and what each one optimizes.
 
-Only the platform is asked, because only the platform runs the job: a
-client venv without a strategy plugin still submits to a server that
-has it, and vice versa. Answering from this environment instead would
-describe a different machine, so an unreachable platform is an error
-rather than a cue to guess.
+Every name listed is a valid `--strategy`. Only the platform is asked,
+because only the platform runs the job: a client venv without a strategy
+plugin still submits to a server that has it, and vice versa. Answering
+from this environment instead would describe a different machine, so an
+unreachable platform is an error rather than a cue to guess.
 
-Stdout carries names and nothing else, so `for s in $(nemo agents optimize
-list-strategies)` is safe: an empty platform prints nothing there. The
-target is announced once on stderr by the shared base-URL resolver.
+Output follows every other `nemo` list command: a table on a terminal,
+JSON when piped, so a script reads the names with
+`-f json | jq -r '.[].name'`. The target is announced once on stderr by
+the shared base-URL resolver.
 
 **Usage:**
 
@@ -7450,6 +7451,12 @@ nemo agents optimize list-strategies [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 
 ##### nemo agents optimize prepare-fileset
 
