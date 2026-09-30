@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""In-process native Switchyard bindings keyed by VirtualModel."""
+"""In-process native Switchyard bindings keyed by ``workspace/name``."""
 
 from __future__ import annotations
 
@@ -21,15 +21,15 @@ def clear_all() -> None:
 
 
 def replace_vm_bindings(
-    vm_id: str,
+    vm_key: str,
     bindings: dict[BindingKey, NativeBinding],
 ) -> None:
-    for key in VM_BINDING_KEYS.get(vm_id, []):
+    for key in VM_BINDING_KEYS.get(vm_key, []):
         BINDINGS.pop(key, None)
     BINDINGS.update(bindings)
-    VM_BINDING_KEYS[vm_id] = list(bindings)
+    VM_BINDING_KEYS[vm_key] = list(bindings)
 
 
-def remove_vm_bindings(vm_id: str) -> None:
-    for key in VM_BINDING_KEYS.pop(vm_id, []):
+def remove_vm_bindings(vm_key: str) -> None:
+    for key in VM_BINDING_KEYS.pop(vm_key, []):
         BINDINGS.pop(key, None)

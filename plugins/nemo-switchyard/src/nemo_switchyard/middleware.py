@@ -105,11 +105,11 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
                 )
             bindings[key] = self._build_binding(vm_key, config_type, call.config or {})
 
-        _state.replace_vm_bindings(virtual_model.id, bindings)
+        _state.replace_vm_bindings(vm_key, bindings)
         logger.info("Registered %d native Switchyard bindings for VM %s", len(bindings), vm_key)
 
     async def on_virtual_model_destroyed(self, virtual_model: VirtualModel) -> None:
-        _state.remove_vm_bindings(virtual_model.id)
+        _state.remove_vm_bindings(_vm_key(virtual_model))
 
     def _lookup_binding(
         self,
@@ -128,8 +128,8 @@ class SwitchyardMiddleware(NemoInferenceMiddleware):
                 if call.name == _MIDDLEWARE_NAME and call.config_type == config_type:
                     binding = self._build_binding(vm_key, config_type, call.config or {})
                     _state.BINDINGS[key] = binding
-                    if key not in _state.VM_BINDING_KEYS.setdefault(virtual_model.id, []):
-                        _state.VM_BINDING_KEYS[virtual_model.id].append(key)
+                    if key not in _state.VM_BINDING_KEYS.setdefault(vm_key, []):
+                        _state.VM_BINDING_KEYS[vm_key].append(key)
                     return binding
 
         raise InferenceMiddlewareError(

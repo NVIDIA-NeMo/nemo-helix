@@ -171,11 +171,14 @@ def _random_call() -> MiddlewareCall:
 
 
 def _vm(
-    *, request_calls: list[MiddlewareCall] | None = None, response_calls: list[MiddlewareCall] | None = None
+    *,
+    entity_id: str = "vm-1",
+    request_calls: list[MiddlewareCall] | None = None,
+    response_calls: list[MiddlewareCall] | None = None,
 ) -> VirtualModel:
     return VirtualModel.model_validate(
         {
-            "id": "vm-1",
+            "id": entity_id,
             "workspace": "ws",
             "name": "router",
             "models": [],
@@ -351,7 +354,21 @@ async def test_upsert_replaces_and_destroy_removes_per_vm_binding() -> None:
         await middleware.on_virtual_model_upserted(_vm(request_calls=[_random_call()]))
 
     assert _state.BINDINGS[("ws/router", "random_routing")].algorithm is second
+    assert list(_state.VM_BINDING_KEYS) == ["ws/router"]
     await middleware.on_virtual_model_destroyed(_vm())
+    assert not _state.BINDINGS
+    assert not _state.VM_BINDING_KEYS
+
+
+@pytest.mark.asyncio
+async def test_binding_index_ignores_entity_id() -> None:
+    middleware = SwitchyardMiddleware()
+    with patch("nemo_switchyard.middleware.build_native_algorithm", return_value=FakeAlgorithm()):
+        await middleware.on_virtual_model_upserted(_vm(entity_id="db-id-1", request_calls=[_random_call()]))
+
+    assert "ws/router" in _state.VM_BINDING_KEYS
+    assert "db-id-1" not in _state.VM_BINDING_KEYS
+    await middleware.on_virtual_model_destroyed(_vm(entity_id="db-id-2"))
     assert not _state.BINDINGS
     assert not _state.VM_BINDING_KEYS
 
