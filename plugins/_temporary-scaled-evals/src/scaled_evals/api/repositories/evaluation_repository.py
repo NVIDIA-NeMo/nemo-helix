@@ -93,8 +93,8 @@ _CLAIMABLE_SQL = """
 # replicas contend rather than cooperate. Upgrade path: return several
 # candidates and try each until one update lands.
 # ponytail: admission counts active slots without a lock, so claimants running
-# at the same time can each admit one queued evaluation past a cap. The single
-# controller claims serially, so it holds exactly. Upgrade path: a platform
+# at the same time (the controller and concurrent API create or retry calls)
+# can each admit one queued evaluation past a cap. Upgrade path: a platform
 # core quota on sandboxes, then delete these caps.
 _CLAIM_SQL = f"""
     WITH active_usage AS MATERIALIZED (
@@ -124,6 +124,7 @@ _CLAIM_SQL = f"""
               AND member.benchmark_run_id = e.benchmark_run_id
         ) benchmark_usage ON e.benchmark_run_id IS NOT NULL
         WHERE {_CLAIMABLE_SQL}
+          AND (%s::text IS NULL OR e.id = %s::text)
           AND (
               e.status <> 'queued'
               OR (
@@ -1244,12 +1245,15 @@ class EvaluationRepository:
         worker_id: str,
         cluster_slot_limit: int = 500,
         per_user_slot_limit: int = 50,
+        evaluation_id: str | None = None,
     ) -> dict | None:
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 _CLAIM_SQL,
                 (
                     claim_timeout,
+                    evaluation_id,
+                    evaluation_id,
                     per_user_slot_limit,
                     cluster_slot_limit,
                     per_user_slot_limit,
