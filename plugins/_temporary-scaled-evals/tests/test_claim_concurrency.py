@@ -75,10 +75,11 @@ def test_claims_have_exactly_one_winner_without_row_locks_or_admission() -> None
                 "INSERT INTO evaluations (id, name, task_id, task_revision, status, parallelism)"
                 " VALUES ('e1', 'e1', 't1', 1, 'queued', 1000)"
             )
+            assert EvaluationRepository(conn).claim_next(claim_timeout=60, worker_id="w", evaluation_id="other") is None
 
         won = _loses_to_an_uncommitted_claim(
             dsn,
-            lambda conn: EvaluationRepository(conn).claim_next(claim_timeout=60, worker_id="w"),
+            lambda conn: EvaluationRepository(conn).claim_next(claim_timeout=60, worker_id="w", evaluation_id="e1"),
         )
         assert (won["id"], won["previous_status"], won["status"]) == ("e1", "queued", "provisioning")
 

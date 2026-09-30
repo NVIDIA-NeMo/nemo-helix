@@ -42,14 +42,15 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
     record_evaluation = MagicMock()
     monkeypatch.setattr(controller, "_claim_build", lambda: build)
     monkeypatch.setattr(controller, "_bind_build", bind_build)
+    submitter = controller.submitter
     monkeypatch.setattr(
-        controller,
-        "_claim_evaluation",
-        lambda: {"id": "eval_1", "previous_status": "queued", "status": "provisioning"},
+        submitter,
+        "_claim",
+        lambda _evaluation_id: {"id": "eval_1", "previous_status": "queued", "status": "provisioning"},
     )
     monkeypatch.setattr(
-        controller,
-        "_load_evaluation",
+        submitter,
+        "_load",
         lambda _evaluation_id: {
             "id": "eval_1",
             "status": "provisioning",
@@ -57,7 +58,7 @@ async def test_controller_submits_deterministic_reference_only_jobs(monkeypatch:
             "current_execution": 3,
         },
     )
-    monkeypatch.setattr(controller, "_record_evaluation_job", record_evaluation)
+    monkeypatch.setattr(submitter, "_record", record_evaluation)
     resolved_settings = settings._resolve()
     monkeypatch.setattr(resolved_settings, "platform_jobs_image", "registry.example/scaled-evals@sha256:def")
 
@@ -289,3 +290,20 @@ async def test_controller_drains_a_bounded_batch_per_pass(monkeypatch: pytest.Mo
 
     with pytest.raises(RuntimeError):
         await controller._drain(_poison_pill_row)()
+
+
+def test_immediate_submission_is_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+    import nemo_scaled_evals_plugin.submitter as submitter_module
+
+    sdk = MagicMock(side_effect=RuntimeError("platform unreachable"))
+    monkeypatch.setattr(submitter_module, "get_async_platform_sdk", sdk)
+
+    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=False))
+    submitter_module.submit_evaluation_now("eval_1")
+    sdk.assert_not_called()
+
+    # The committed row is the handoff: a failure here must not fail the API
+    # request, because the controller submits the row on its next pass.
+    monkeypatch.setattr(submitter_module, "settings", SimpleNamespace(platform_evaluation_jobs_enabled=True))
+    submitter_module.submit_evaluation_now("eval_1")
+    sdk.assert_called_once()

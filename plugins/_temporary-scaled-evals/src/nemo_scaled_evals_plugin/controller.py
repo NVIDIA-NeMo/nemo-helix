@@ -21,16 +21,12 @@ from nemo_helix_plugin.entities.base import SyncEntityClient
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk, get_platform_sdk
-from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
-from nemo_scaled_evals_plugin.jobs.naming import (
-    evaluation_execution_job_name,
-    task_image_build_job_name,
-)
-from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec, TaskImageBuildSpec
+from nemo_scaled_evals_plugin.jobs.naming import task_image_build_job_name
+from nemo_scaled_evals_plugin.jobs.specs import TaskImageBuildSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 from nemo_scaled_evals_plugin.projection import EvaluationProjectionWriter
+from nemo_scaled_evals_plugin.submitter import EvaluationSubmitter
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
 from scaled_evals.api.repositories.build_repository import TaskBuildJob, TaskBuildRepository
@@ -64,6 +60,7 @@ class ScaledEvalsJobsController(NemoController):
 
     def __init__(self) -> None:
         self._jobs: AsyncJobsClient | None = None
+        self._submitter: EvaluationSubmitter | None = None
         self._worker_id = f"scaled-evals-jobs:{socket.gethostname()}:{time.time_ns()}"
         self._healthy = True
         self._projection: EvaluationProjectionWriter | None = None
@@ -75,6 +72,12 @@ class ScaledEvalsJobsController(NemoController):
         if self._jobs is None:
             raise RuntimeError("scaled-evals Jobs controller has not started")
         return self._jobs
+
+    @property
+    def submitter(self) -> EvaluationSubmitter:
+        if self._submitter is None:
+            self._submitter = EvaluationSubmitter(self.jobs, self._worker_id)
+        return self._submitter
 
     @property
     def is_healthy(self) -> bool:
@@ -202,7 +205,7 @@ class ScaledEvalsJobsController(NemoController):
             }
         )
         try:
-            await self._create_job(name, TaskImageBuildJob, spec)
+            await self.submitter.create_job(name, TaskImageBuildJob, spec)
         except ConflictError:
             LOG.debug("Platform build job %s already exists", name)
         except Exception as exc:
@@ -211,69 +214,8 @@ class ScaledEvalsJobsController(NemoController):
         return True
 
     async def _submit_one_evaluation(self) -> bool:
-        """Submit one claimed evaluation; return False only when the queue is empty."""
-        row = await asyncio.to_thread(self._claim_evaluation)
-        if row is None:
-            return False
-        evaluation_id = str(row["id"])
-        current = await asyncio.to_thread(self._load_evaluation, evaluation_id)
-        if current is None:
-            return True
-        execution_number = int(current.get("current_execution") or 1)
-        name = evaluation_execution_job_name(evaluation_id, execution_number)
-        spec = EvaluationExecutionSpec(
-            evaluation_id=evaluation_id,
-            execution_number=execution_number,
-            runtime=str(current["runtime"]),
-            deadline_seconds=max(
-                1,
-                int(settings.dispatch_run_poll_interval_seconds * settings.dispatch_run_max_polls),
-            ),
-        )
-        try:
-            platform_job = await self._create_job(name, EvaluationExecutionJob, spec)
-        except ConflictError:
-            platform_job = (await self.jobs.get_job(workspace=settings.platform_jobs_workspace, name=name)).data()
-        except Exception:
-            await asyncio.to_thread(self._retry_evaluation_submission, evaluation_id, execution_number)
-            raise
-        await asyncio.to_thread(
-            self._record_evaluation_job,
-            evaluation_id,
-            execution_number,
-            name,
-            platform_job.id,
-        )
-        return True
-
-    async def _create_job(
-        self,
-        name: str,
-        job_cls: type[TaskImageBuildJob] | type[EvaluationExecutionJob],
-        spec: TaskImageBuildSpec | EvaluationExecutionSpec,
-    ) -> Any:
-        platform_spec = await job_cls.compile(
-            workspace=settings.platform_jobs_workspace,
-            spec=spec,
-            entity_client=object(),
-            job_name=name,
-            async_sdk=None,
-            profile=settings.platform_jobs_profile,
-            options={
-                "scaled_evals": {
-                    "application_image": settings.platform_jobs_image,
-                    "provider": settings.platform_jobs_provider,
-                }
-            },
-        )
-        request = CreateHelixJobRequest(
-            name=name,
-            description=job_cls.description,
-            source=f"scaled-evals.{job_cls.name}",
-            spec=spec.model_dump(mode="json"),
-            platform_spec=platform_spec,
-        )
-        return (await self.jobs.create_job(workspace=settings.platform_jobs_workspace, body=request)).data()
+        """Submit one queued or orphaned evaluation; return False only when none remain."""
+        return await self.submitter.submit()
 
     async def _reconcile_builds(self) -> None:
         for row in await asyncio.to_thread(self._list_builds):
@@ -394,43 +336,6 @@ class ScaledEvalsJobsController(NemoController):
                 attempt=int(row["build_attempts"]),
                 max_attempts=TaskBuildWorker.max_attempts,
                 retry_delay=TaskBuildWorker.retry_delay,
-            )
-
-    def _claim_evaluation(self) -> dict[str, Any] | None:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).claim_next(
-                claim_timeout=TaskBuildWorker.claim_timeout,
-                worker_id=self._worker_id,
-            )
-
-    def _load_evaluation(self, evaluation_id: str) -> dict[str, Any] | None:
-        with pooled_connection() as conn:
-            return EvaluationRepository(conn).load_status_runtime(evaluation_id)
-
-    def _record_evaluation_job(
-        self,
-        evaluation_id: str,
-        execution_number: int,
-        name: str,
-        uid: str,
-    ) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).record_dispatch_job(
-                evaluation_id,
-                execution_number=execution_number,
-                name=name,
-                uid=uid,
-            )
-
-    def _retry_evaluation_submission(self, evaluation_id: str, execution_number: int) -> None:
-        with pooled_connection() as conn:
-            EvaluationRepository(conn).schedule_retry(
-                evaluation_id,
-                execution_number=execution_number,
-                failure_code="HelixJobSubmissionError",
-                failure_category="infrastructure",
-                delay_seconds=_retry_delay_seconds(evaluation_id, execution_number),
-                expected_dispatch_owner=self._worker_id,
             )
 
     def _claim_stale_evaluation(self) -> dict[str, Any] | None:

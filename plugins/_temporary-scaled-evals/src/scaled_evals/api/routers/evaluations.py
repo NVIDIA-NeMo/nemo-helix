@@ -89,6 +89,15 @@ def _evaluation_reads(db: Database) -> Any:
     return evaluation_reader()
 
 
+def _submit_now(evaluation_id: str) -> None:
+    """Start a just-committed evaluation instead of waiting for the controller's next pass."""
+    try:
+        from nemo_scaled_evals_plugin.submitter import submit_evaluation_now  # noqa: PLC0415
+    except ImportError:
+        return
+    submit_evaluation_now(evaluation_id)
+
+
 _EVENT_STREAM_BATCH_SIZE = 100
 _sse_connection_lock = Lock()
 _sse_active_connections = 0
@@ -574,9 +583,10 @@ def create_evaluation(
         owner_id=current.owner_id,
     )
 
-    # Dispatch loads this row on its own connection, so commit before returning —
-    # get_conn otherwise defers COMMIT past the response and the worker sees nothing.
+    # Submission loads this row on its own connection, so commit first —
+    # get_conn otherwise defers COMMIT past the response and the submitter sees nothing.
     db.commit()
+    _submit_now(ev_id)
     return _response(row)
 
 
@@ -829,6 +839,7 @@ def retry_evaluation(evaluation_id: str, db: Db) -> EvaluationResponse:
             )
         raise _http_error(409, "evaluation_not_retryable", "evaluation cannot be retried right now")
     db.commit()
+    _submit_now(evaluation_id)
     return _response(row)
 
 
