@@ -17,10 +17,12 @@ from nhx.core.models.config import ControllerConfig
 from nhx.core.models.controllers.context import ModelContext
 from nhx.core.models.controllers.entity_cache import ModelEntityCache
 from nhx.core.models.controllers.provider_reconciler import (
+    _AUTH_FAILURE_STATUS_PREFIX,
     PROVIDER_ERROR_RETRY_INTERVAL_SECONDS,
     PROVIDER_ERROR_THRESHOLD_SECONDS,
     PROVIDER_LOST_THRESHOLD_SECONDS,
     ArtifactDetails,
+    DiscoveryAuthError,
     DiscoveryNonCompliant,
     DiscoverySuccess,
     DiscoveryTransientError,
@@ -502,8 +504,63 @@ async def test_query_available_models_gateway_404_provider_not_in_cache_is_trans
 
 @pytest.mark.asyncio
 async def test_query_available_models_424_upstream_rejected_is_non_compliant(reconciler, mock_models_sdk):
-    """424 whose detail carries the upstream-rejection marker means the backend rejected
-    GET /v1/models (no such route) — non-compliant."""
+    """424 whose detail carries the upstream-rejection marker AND a 404 upstream-status token
+    means the backend rejected GET /v1/models (no such route) — non-compliant."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424,
+            "Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            "with HTTP status 404. This is a client-side error and will not resolve by retrying. "
+            "[nemo_upstream_status=404]",
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryNonCompliant)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upstream_status", [401, 403])
+async def test_query_available_models_424_upstream_auth_failure_is_auth_error(
+    reconciler, mock_models_sdk, upstream_status
+):
+    """A 424 whose detail carries the upstream-rejection marker AND a 401/403 upstream-status
+    token is an authoritative credential rejection — the new DiscoveryAuthError path, NOT
+    the non-compliant (READY) bucket."""
+    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
+        side_effect=_status_error(
+            424,
+            f"Model provider 'p' at upstream 'https://x' rejected the request for model 'ws/m' "
+            f"with HTTP status {upstream_status}. This is a client-side error and will not resolve "
+            f"by retrying. [nemo_upstream_status={upstream_status}]",
+        )
+    )
+
+    model_provider = ModelProvider(
+        name="test-provider",
+        workspace="test-ns",
+        host_url="https://test-provider.com",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+    )
+    result = await reconciler._discover_models(model_provider)
+
+    assert isinstance(result, DiscoveryAuthError)
+    assert result.status_code == upstream_status
+
+
+@pytest.mark.asyncio
+async def test_query_available_models_424_rejection_without_status_token_is_non_compliant(reconciler, mock_models_sdk):
+    """A rejection-marker 424 with NO machine-readable upstream-status token (e.g. an older IGW
+    that predates the token) must degrade to non-compliant, never mis-route to auth-error."""
     mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock(
         side_effect=_status_error(
             424,
@@ -1651,6 +1708,81 @@ async def test_reconcile_clears_served_models_on_confirmed_non_compliant(reconci
 
 
 @pytest.mark.asyncio
+async def test_reconcile_ready_provider_demoted_to_error_on_auth_failure(reconciler):
+    """A READY provider whose discovery now returns DiscoveryAuthError (authoritative 401/403)
+    must be demoted to ERROR — the READY→ERROR authoritative-failure transition."""
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/model-1", served_model_name="model-1"),
+    ]
+    provider.status = ModelProviderStatus.READY
+
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryAuthError(status_code=401, message="upstream rejected credentials (HTTP 401)"),
+    ):
+        with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
+            await reconciler.reconcile_model_providers([ctx])
+
+    # Authoritative auth failure demotes to ERROR (no entity work on the failure path).
+    mock_ensure.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert "credentials" in call_kwargs["status_message"]
+    # served_models are deliberately NOT touched on an auth failure (config intact, key rejected).
+    assert "served_models" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_reconcile_ready_provider_stays_ready_on_transient_error(reconciler):
+    """Regression guard: a READY provider hitting a genuine transient/network error must NOT be
+    demoted (only authoritative auth failures demote; network blips preserve READY)."""
+    provider = MagicMock()
+    provider.workspace = "test-ns"
+    provider.name = "test-provider"
+    provider.model_deployment_id = None
+    provider.served_models = [
+        ServedModelMapping(model_entity_id="test-ns/model-1", served_model_name="model-1"),
+    ]
+    provider.status = ModelProviderStatus.READY
+
+    ctx = ModelContext(
+        model_provider=provider,
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryTransientError("Network error: connection refused"),
+    ):
+        with patch.object(reconciler, "_ensure_model_entity_for_provider") as mock_ensure:
+            await reconciler.reconcile_model_providers([ctx])
+
+    # A transient error on a READY provider preserves served_models and writes NOTHING.
+    mock_ensure.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_reconcile_prunes_invalid_served_model_entity_ids_before_update_status(reconciler):
     """If a generator emits a malformed model_entity_id, the final gate drops it with a warning.
 
@@ -1753,6 +1885,7 @@ def _make_provider():
         created_at=None,
         updated_at=None,
         served_models=None,
+        status_message=None,
     ):
         now = datetime.now(timezone.utc)
         return ModelProvider(
@@ -1763,6 +1896,7 @@ def _make_provider():
             created_at=created_at or now,
             updated_at=updated_at or now,
             served_models=served_models or [],
+            status_message=status_message if status_message is not None else "",
         )
 
     return _factory
@@ -1940,6 +2074,117 @@ async def test_error_provider_transitions_to_lost(reconciler, _make_provider):
     assert call_kwargs["status"] == "LOST"
     assert "permanently failed" in call_kwargs["status_message"]
     assert ctx.model_provider is updated_provider
+
+
+@pytest.mark.asyncio
+async def test_auth_demoted_provider_not_escalated_to_lost(reconciler, _make_provider):
+    """Regression: a provider demoted to ERROR by an authoritative auth failure must NOT be
+    escalated to LOST even when its created_at is long past the LOST threshold.
+
+    Before the fix, a mature (previously-READY) provider whose key expired would demote
+    READY→ERROR on one cycle, then jump straight to LOST on the next cycle because the LOST
+    gate measured age from created_at (long past for any real provider). LOST is reserved for a
+    provider that never worked; an auth-demoted provider must stay in recoverable ERROR (fixed by
+    rotating the key, which resets it via upsert). The auth marker on status_message is what
+    exempts it from the LOST gate.
+    """
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        # Old enough that the LOST threshold WOULD fire if it weren't auth-demoted.
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now - timedelta(seconds=PROVIDER_ERROR_RETRY_INTERVAL_SECONDS + 5),
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 401)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    # Discovery still fails with the same authoritative auth error on this retry cycle.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryAuthError(status_code=401, message="upstream rejected credentials (HTTP 401)"),
+    ) as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # It must NOT be marked LOST. The retry cooldown had elapsed, so discovery is retried and the
+    # provider is re-written as ERROR (recoverable), never LOST.
+    mock_query.assert_called_once()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert call_kwargs["status"] != "LOST"
+    # The re-written status_message keeps the auth marker so the exemption persists next cycle.
+    assert call_kwargs["status_message"].startswith(_AUTH_FAILURE_STATUS_PREFIX)
+
+
+@pytest.mark.asyncio
+async def test_auth_demoted_provider_survives_transient_blip_not_lost(reconciler, _make_provider):
+    """Regression: a transient discovery failure on an already auth-demoted ERROR provider must
+    PRESERVE the auth marker (never LOST it).
+
+    Sequence guarded: a mature (previously-READY) provider is demoted READY→ERROR by an
+    authoritative 401/403 (status_message stamped with _AUTH_FAILURE_STATUS_PREFIX). On a later
+    retry cycle discovery hits a *transient* error (timeout, not 401/403) rather than the auth
+    error. Before the fix, _on_transient_failure's ERROR branch unconditionally overwrote the
+    status_message with 'Discovery retry failed: …', destroying the auth marker — so on the FOLLOWING
+    cycle _is_auth_demoted returned False and the created-age LOST gate buried the (fixable)
+    provider as LOST. The fix preserves the auth-prefixed status_message for an auth-demoted
+    provider, so its F1 exemption survives transient blips. served_models stay intact.
+    """
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        # Old enough that the created-age LOST gate WOULD fire if the marker were lost.
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now - timedelta(seconds=PROVIDER_ERROR_RETRY_INTERVAL_SECONDS + 5),
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 401)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    # This retry cycle fails TRANSIENTLY (network/timeout), NOT with an auth error.
+    with patch.object(
+        reconciler,
+        "_discover_models",
+        return_value=DiscoveryTransientError(message="timed out reaching GET /v1/models"),
+    ) as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # Discovery was retried (cooldown had elapsed) and the provider re-written as ERROR — crucially
+    # KEEPING the auth marker, so it stays exempt from the LOST gate on the next cycle.
+    mock_query.assert_called_once()
+    reconciler._models_client.update_provider_status.assert_called_once()
+    call_kwargs = _provider_status_call(reconciler._models_client.update_provider_status)
+    assert call_kwargs["status"] == "ERROR"
+    assert call_kwargs["status"] != "LOST"
+    # The auth marker MUST be preserved (not overwritten by the transient 'Discovery retry failed').
+    assert call_kwargs["status_message"].startswith(_AUTH_FAILURE_STATUS_PREFIX)
+
+
+@pytest.mark.asyncio
+async def test_auth_demoted_provider_within_cooldown_is_left_untouched(reconciler, _make_provider):
+    """An auth-demoted ERROR provider still inside its retry cooldown is neither escalated to LOST
+    nor re-probed — it is simply left alone until the cooldown elapses."""
+    now = datetime.now(timezone.utc)
+    provider = _make_provider(
+        status=ModelProviderStatus.ERROR,
+        created_at=now - timedelta(seconds=PROVIDER_LOST_THRESHOLD_SECONDS + 600),
+        updated_at=now,  # just updated → within cooldown
+        status_message=_AUTH_FAILURE_STATUS_PREFIX + "upstream rejected credentials (HTTP 403)",
+    )
+    ctx = ModelContext(model_provider=provider)
+
+    reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(reconciler, "_discover_models") as mock_query:
+        await reconciler.reconcile_model_providers([ctx])
+
+    # Neither LOST nor a re-probe: the cooldown short-circuits after the LOST exemption.
+    mock_query.assert_not_called()
+    reconciler._models_client.update_provider_status.assert_not_called()
 
 
 @pytest.mark.asyncio

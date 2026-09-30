@@ -1604,10 +1604,60 @@ async def test_proxy_request_wraps_certain_errors_in_424(mock_proxy_client, next
     assert f"HTTP status {status_code}" in exc_info.value.detail
     assert "will not resolve by retrying" in exc_info.value.detail
     assert "model not found on backend" in exc_info.value.detail
+    # The 424 detail MUST carry the machine-readable upstream-status token so the Models
+    # reconciler can route 401/403 (auth failure) apart from 404 (non-compliant). This is the
+    # producer side of a cross-service contract; the consumer parses it with a fixed regex.
+    from nhx.core.inference_gateway.api.proxy import _upstream_status_token
+
+    assert _upstream_status_token(status_code) in exc_info.value.detail
     assert exc_info.value.headers is not None
     assert exc_info.value.headers.get("retry-after") == "30"
     assert "content-type" not in exc_info.value.headers
     assert "content-length" not in exc_info.value.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 404])
+async def test_proxy_request_424_upstream_status_token_matches_consumer_contract(
+    mock_proxy_client, next_request_info, status_code
+):
+    """Contract pin: the token IGW emits must parse back to the exact upstream status with the
+    SAME regex the Models reconciler uses (``provider_reconciler._GATEWAY_UPSTREAM_STATUS_RE``).
+
+    The two services live in separate packages and can't import each other, so the token format
+    is only kept in lockstep by tests. Re-declaring the consumer's regex here (kept identical by
+    intent) means a rename/reshaping of the token prefix on EITHER side fails this test instead of
+    silently degrading auth routing to non-compliant (READY) — the exact bug this work fixes.
+    """
+    import re
+
+    import aiohttp
+    from nhx.core.inference_gateway.api.proxy import UpstreamProviderContext
+
+    # This pattern MUST stay byte-for-byte identical to
+    # nhx.core.models.controllers.provider_reconciler._GATEWAY_UPSTREAM_STATUS_RE.
+    consumer_re = re.compile(r"\[nemo_upstream_status=(\d{3})\]")
+
+    mock_response = Mock(spec=aiohttp.ClientResponse)
+    mock_response.status = status_code
+    mock_response.closed = False
+    mock_response.headers = CIMultiDict({"content-type": "application/json"})
+    mock_response.read = AsyncMock(return_value=b"")
+    mock_proxy_client.request = AsyncMock(return_value=mock_response)
+
+    context = UpstreamProviderContext(
+        model_provider_name="my-openai",
+        provider_host_url="https://api.openai.com/v1",
+        model_name="default/gpt-4o",
+        purpose="proxying 'v1/models'",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=context)
+
+    match = consumer_re.search(exc_info.value.detail)
+    assert match is not None, f"consumer regex found no upstream-status token in: {exc_info.value.detail!r}"
+    assert int(match.group(1)) == status_code
 
 
 @pytest.mark.asyncio
