@@ -5,8 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # Compose stack (Phase 1)
 
-The NeMo Helix API serving the scaled-evals plugin, both scaled-evals
-workers, and the substrate they need — Postgres, RustFS, BuildKit, and a
+The NeMo Helix API serving the scaled-evals plugin and the substrate it needs — Postgres, RustFS, BuildKit, and a
 registry. Enough to take a task from `create` to a built, pushed image.
 
 ```bash
@@ -24,9 +23,7 @@ health verdict rather than reading `docker compose ps`.
 
 | Service | Image | Purpose |
 |---|---|---|
-| `api` | built here | `nemo services run --services scaled-evals` on `:8080` |
-| `build-worker` | same image | claims finalize jobs, drives BuildKit, pushes |
-| `dispatch-worker` | same image | claims evaluations (no runtime enabled in Phase 1) |
+| `api` | built here | `nemo services run --services scaled-evals` on `:8080`; its Jobs controller runs builds and evaluations as subprocess Platform Jobs |
 | `postgres` | `postgres:16` | platform database; scaled-evals lives in its `scaled_evals` schema |
 | `rustfs` | `rustfs/rustfs` | S3-compatible object store on `:9000` |
 | `buildkit` | `moby/buildkit` | builds task Dockerfiles; no published port |
@@ -138,9 +135,9 @@ that same `.env`; the notable knobs:
 
 ## Known gaps
 
-- `dispatch_worker`, `gym_dispatch`, and `sandbox_k8s_dispatch` report
-  `skipped: disabled` in `readyz`. The dispatch worker process runs, but no
-  evaluation runtime is enabled in Phase 1, so evaluations do not execute here.
-- Both workers are silent: upstream `queue_worker.py` has no log statements, so
-  a working build produces no output. Confirm progress through task status or
-  the `service_heartbeats` table rather than `docker compose logs`.
+- `gym_dispatch` and `sandbox_k8s_dispatch` report `skipped: disabled` in
+  `readyz`. No evaluation runtime is enabled in Phase 1, so evaluations do not
+  execute here.
+- Builds are quiet: upstream `queue_worker.py` has no log statements, so a
+  working build produces no output. Confirm progress through task status
+  rather than `docker compose logs`.

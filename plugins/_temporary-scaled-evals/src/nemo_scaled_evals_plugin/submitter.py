@@ -157,8 +157,6 @@ def submit_evaluation_now(evaluation_id: str) -> None:
         evaluation_id: the evaluation whose row was just committed.
 
     """
-    if not settings.platform_evaluation_jobs_enabled:
-        return
     try:
         # Runs on the server's event loop, which owns the client's async HTTP transport.
         loop = anyio.from_thread.run_sync(asyncio.get_running_loop)

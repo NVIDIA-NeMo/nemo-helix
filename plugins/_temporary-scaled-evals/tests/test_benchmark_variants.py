@@ -17,7 +17,6 @@ from api_test_fixture import client, v1
 from scaled_evals.api.auth import current_principal
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
-from scaled_evals.dispatch.kubernetes_job import evaluation_job_active_deadline_seconds
 from scaled_evals.dispatch.sandbox_k8s import apply_agent_timeout_floor
 from scaled_evals.dispatch.worker import (
     assert_lifecycle_covers_agent_floor,
@@ -216,17 +215,6 @@ def test_snapshotted_floor_drives_validation_and_job_deadline() -> None:
             ),
             7200,
         )
-
-    # The Job deadline row carries profile ids, not profile config, so the frozen
-    # floor keeps the outer Job alive past the agent budget.
-    assert (
-        evaluation_job_active_deadline_seconds(_snapshot_row(7200), configured_floor=7200, finalization_grace=900)
-        == 8400  # 7200 floor + 300 sandbox grace + 900 finalization
-    )
-    assert (
-        evaluation_job_active_deadline_seconds(_snapshot_row(None), configured_floor=7200, finalization_grace=900)
-        == 7200
-    )
 
 
 def test_benchmark_variant_snapshot_freezes_lineage_and_policy() -> None:
