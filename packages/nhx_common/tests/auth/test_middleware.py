@@ -202,6 +202,53 @@ class TestHealthEndpointsBypass:
         mock_authorize.assert_not_called()
 
 
+class TestAPIDocumentationBypass:
+    """API documentation is public while unsafe methods remain protected."""
+
+    @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
+    def test_documentation_paths_in_public_get_paths(self, path):
+        assert path in PUBLIC_GET_PATHS
+
+    @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
+    @pytest.mark.parametrize("method", ["get", "head"])
+    def test_documentation_bypasses_auth_for_safe_methods(self, auth_config_enabled, path, method):
+        app = FastAPI(docs_url=None, openapi_url=None)
+
+        @app.api_route(path, methods=["GET", "HEAD"])
+        async def documentation_handler():
+            return {"status": "ok"}
+
+        Configuration.set_override(auth_config_enabled)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+
+        client = TestClient(app)
+        with patch("nhx.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            mock_authorize.return_value = MagicMock(allowed=False)
+            response = getattr(client, method)(path)
+
+        assert response.status_code == 200
+        mock_authorize.assert_not_called()
+
+    @pytest.mark.parametrize("path", ["/docs", "/openapi.json"])
+    def test_documentation_unsafe_methods_still_require_auth(self, auth_config_enabled, path):
+        app = FastAPI(docs_url=None, openapi_url=None)
+
+        @app.post(path)
+        async def documentation_handler():
+            return {"status": "ok"}
+
+        Configuration.set_override(auth_config_enabled)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch("nhx.common.auth.client.AuthClient.authorize_request") as mock_authorize:
+            mock_authorize.return_value = MagicMock(allowed=False)
+            response = client.post(path)
+
+        assert response.status_code == 401
+        mock_authorize.assert_awaited_once()
+
+
 class TestStudioPluginBypass:
     """Studio plugin manifest and bundles are public — the SPA fetches the manifest
     anonymously and loads bundles via dynamic import(), which cannot send Authorization."""

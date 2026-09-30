@@ -90,6 +90,19 @@ class TestSyncConstruction:
             client = cf.get_nemo_client(http_client=explicit)
             assert client._http is explicit
 
+    def test_base_url_override_skips_endpoint_routing(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(base_url="http://other-platform:7000")
+
+        assert client.base_url == "http://other-platform:7000"
+        assert not isinstance(client._http._transport, _SyncHelixEndpointRoutingTransport)
+
+    def test_async_base_url_override(self):
+        client = cf.get_async_nemo_client(base_url="http://other-platform:7000")
+        assert client.base_url == "http://other-platform:7000"
+
 
 # ---------------------------------------------------------------------------
 # Async construction
@@ -125,6 +138,22 @@ class TestAsyncConstruction:
 
 
 class TestUrlRouting:
+    def test_base_url_override_is_not_routed_back_to_platform(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NHX_ENTITIES_URL", "http://entities-svc:9999")
+        Configuration.clear_cache()
+
+        captured: list[httpx.Request] = []
+        client = cf.get_nemo_client(
+            as_service="entities",
+            base_url="http://other-platform:7000",
+            http_client=_mock_client(captured),
+        )
+        client.send(_get("/apis/entities/v2/foo"))
+
+        assert str(captured[0].url) == "http://other-platform:7000/apis/entities/v2/foo"
+        assert captured[0].headers["X-NHX-Principal-Id"] == "service:entities"
+
     def test_routes_service_path_to_discovered_origin(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
         monkeypatch.setenv("NHX_ENTITIES_URL", "http://entities-svc:9999")
@@ -359,6 +388,19 @@ class TestTaskClientWorkloadIdentity:
         # No trusted principal headers in workload-identity mode.
         assert "X-NHX-Principal-Id" not in client._default_headers
         assert client._default_headers.get("X-NHX-Internal") == "true"
+
+    def test_base_url_override_keeps_workload_identity_auth(self, monkeypatch, tmp_path, _stub_exchange):
+        token_file = tmp_path / "token"
+        token_file.write_text("subject-token")
+        monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(base_url="http://other-platform:7000")
+
+        assert isinstance(client._auth, _FakeExchangeProvider)
+        assert _stub_exchange["base_url"] == "http://other-platform:7000"
+        assert client.base_url == "http://other-platform:7000"
 
     def test_uds_does_not_bootstrap_workload_identity(self, monkeypatch, tmp_path, _stub_exchange):
         # Matches get_task_sdk exactly: with the WI token file set the task path

@@ -1,25 +1,48 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Immutability helpers for SDK-owned HTTP clients.
+"""Default and immutable httpx clients for typed NeMo Helix clients.
 
-NeMo Helix SDK instances reuse their underlying httpx client when callers
-derive scoped SDKs via ``with_options()`` or pass the SDK into typed plugin
-clients. Those clients must be created with their required transport-level
-configuration and then left alone.
+Typed clients reuse their underlying httpx client when callers derive scoped
+clients via ``with_options()`` / ``from_client()``. Those clients must be
+created with their required transport-level configuration and then left alone.
 
 Caller-specific request configuration, including auth headers, belongs on the
-SDK instance or on a separate explicit client. Mutating an SDK-owned client
-after it has been handed out is a bug because that state can leak into derived
-SDKs or requests. These wrappers make those bugs fail immediately.
+typed client or on a separate explicit httpx client. Mutating a shared httpx
+client after it has been handed out is a bug because that state can leak into
+derived clients or requests. These wrappers make those bugs fail immediately.
 """
 
 from types import MappingProxyType
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import httpx
 from httpx._types import CookieTypes, HeaderTypes
-from nemo_helix import DefaultAsyncHttpxClient, DefaultHttpxClient
+
+DEFAULT_TIMEOUT = httpx.Timeout(timeout=60, connect=5.0)
+DEFAULT_CONNECTION_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
+
+
+def _with_platform_defaults(kwargs: dict[str, Any]) -> dict[str, Any]:
+    kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
+    kwargs.setdefault("limits", DEFAULT_CONNECTION_LIMITS)
+    kwargs.setdefault("follow_redirects", True)
+    return kwargs
+
+
+class DefaultHttpxClient(httpx.Client):
+    """Sync httpx client with the platform default timeout, limits and redirects."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**_with_platform_defaults(kwargs))
+
+
+class DefaultAsyncHttpxClient(httpx.AsyncClient):
+    """Async httpx client with the platform default timeout, limits and redirects."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**_with_platform_defaults(kwargs))
+
 
 _IMMUTABLE_CLIENT_ATTRS = {
     "_base_url",
@@ -45,8 +68,8 @@ _IMMUTABLE_CLIENT_ATTRS = {
 
 def _raise_immutable_client_mutation_error() -> NoReturn:
     raise TypeError(
-        "SDK HTTP clients are immutable. Pass per-SDK options as SDK constructor "
-        "arguments, or pass a separate httpx client configured for that use case."
+        "This HTTP client is immutable. Pass per-client options as typed client "
+        "constructor arguments, or pass a separate httpx client configured for that use case."
     )
 
 
@@ -75,8 +98,8 @@ class _ImmutableHeaders(httpx.Headers):
 
 class _ImmutableCookies(httpx.Cookies):
     def extract_cookies(self, response: httpx.Response) -> None:
-        # httpx normally persists response cookies on the client. SDK clients
-        # should not carry request/session state between derived SDK handles.
+        # httpx normally persists response cookies on the client. Shared clients
+        # should not carry request/session state between derived client handles.
         pass
 
     def set(self, name: str, value: str, domain: str = "", path: str = "/") -> None:
@@ -111,7 +134,7 @@ class ImmutableHttpClientMixin:
     def __setattr__(self, name: str, value: object) -> None:
         if self._immutable_http_client_frozen and name in _IMMUTABLE_CLIENT_ATTRS:
             raise AttributeError(
-                "SDK HTTP clients are immutable. Pass a separate httpx client "
+                "This HTTP client is immutable. Pass a separate httpx client "
                 "when client-level configuration needs to differ."
             )
         super().__setattr__(name, value)
@@ -119,7 +142,7 @@ class ImmutableHttpClientMixin:
     def _freeze_http_client(self) -> None:
         # Assignment blocking is not enough because these attributes are mutable
         # containers. Replace them with immutable versions before sharing the
-        # client through SDK clones or plugin adapters.
+        # client through typed client clones or plugin adapters.
         self._headers = _ImmutableHeaders(self._headers)
         self._cookies = _ImmutableCookies(self._cookies)
         self._event_hooks = MappingProxyType(

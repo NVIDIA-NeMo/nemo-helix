@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""FastAPI exception handlers for SDK and entity client exceptions.
+"""FastAPI exception handlers for typed client and entity client exceptions.
 
-When a service makes an internal SDK call to another service and receives an HTTP error,
-the SDK converts it to a Python exception (BadRequestError, NotFoundError, etc.).
+When a service makes an internal typed-client call to another service and receives
+an HTTP error, the client raises ``NemoHTTPError`` (NotFoundError, ConflictError, etc.).
 These handlers convert those exceptions back to proper HTTP responses.
 
 This also handles entity client exceptions (EntityNotFoundError, EntityConflictError)
-which wrap SDK exceptions with additional context.
+which wrap client exceptions with additional context.
 
 This prevents "Exception in ASGI application" errors for expected HTTP error responses
 from service-to-service calls.
@@ -24,7 +24,6 @@ import logging
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from nemo_helix import APIStatusError
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nhx.common.entities.client import (
     EntityConflictError,
@@ -49,47 +48,12 @@ ENTITY_ERROR_STATUS_CODES: dict[type[EntityStoreError], int] = {
 }
 
 
-async def sdk_status_error_handler(request: Request, exc: APIStatusError) -> JSONResponse:
-    """Convert SDK HTTP exceptions back to HTTP responses.
-
-    This handles cases where an internal service-to-service call returns
-    an HTTP error. The SDK converts these to Python exceptions, but we
-    want to return them as proper HTTP responses to the original caller.
-
-    Args:
-        request: The FastAPI request object
-        exc: The SDK exception (BadRequestError, NotFoundError, etc.)
-
-    Returns:
-        JSONResponse with the same status code and error detail
-    """
-    # Extract the detail from the exception body if available
-    detail: str
-    if exc.body and isinstance(exc.body, dict):
-        detail = exc.body.get("detail", str(exc))
-    else:
-        detail = str(exc)
-
-    logger.debug(
-        "Converting SDK exception to HTTP response: %s %s -> %d",
-        _scrub_crlf(request.method),
-        _scrub_crlf(request.url.path),
-        exc.status_code,
-    )
-
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": detail},
-    )
-
-
 async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSONResponse:
     """Convert NemoClient HTTP exceptions back to HTTP responses.
 
     The typed ``NemoClient`` raises ``NemoHTTPError`` (and subclasses) on
     non-2xx service-to-service responses; convert them to proper HTTP
-    responses the same way :func:`sdk_status_error_handler` does for the
-    Stainless SDK.
+    responses with the same status code and detail.
     """
     logger.debug(
         "Converting NemoClient exception to HTTP response: %s %s -> %d",
@@ -138,10 +102,10 @@ async def entity_store_error_handler(request: Request, exc: EntityStoreError) ->
 
 
 def register_sdk_exception_handlers(app: FastAPI) -> None:
-    """Register SDK and entity client exception handlers on a FastAPI app.
+    """Register typed client and entity client exception handlers on a FastAPI app.
 
     This registers handlers for:
-    - APIStatusError: Base class for SDK HTTP errors (BadRequestError, NotFoundError, etc.)
+    - NemoHTTPError: Base class for typed client HTTP errors (NotFoundError, ConflictError, etc.)
     - EntityStoreError: Base class for entity client errors (EntityNotFoundError, etc.)
 
     Args:
@@ -150,13 +114,11 @@ def register_sdk_exception_handlers(app: FastAPI) -> None:
     # Handlers are annotated with the specific exception subtype they handle;
     # Starlette's stub types the callback against the base ``Exception``, so ty
     # flags the narrower signature. The handlers are correct at runtime.
-    app.add_exception_handler(APIStatusError, sdk_status_error_handler)  # ty: ignore[invalid-argument-type]
     app.add_exception_handler(NemoHTTPError, nemo_client_error_handler)  # ty: ignore[invalid-argument-type]
     app.add_exception_handler(EntityStoreError, entity_store_error_handler)  # ty: ignore[invalid-argument-type]
 
 
 __all__ = [
-    "sdk_status_error_handler",
     "nemo_client_error_handler",
     "entity_store_error_handler",
     "register_sdk_exception_handlers",

@@ -8,8 +8,9 @@ from typing import cast
 import httpx
 import pytest
 import respx
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.common.config import Configuration, HelixConfig
 from nhx.common.jobs.constants import TASK_CONFIG_ENVVAR
 from nhx.hello_world.tasks.workload_workspace_get.run import run as task_run
@@ -46,51 +47,44 @@ class _StubWorkspaces:
 
 
 @pytest.fixture
-def stub_client_from_platform(monkeypatch) -> _StubWorkspaces:
-    """Replace client_from_platform in run.py so the task talks to an in-memory stub."""
+def stub_workspaces_client(monkeypatch) -> _StubWorkspaces:
+    """Replace WorkspacesClient.from_client so the task talks to an in-memory stub."""
     stub = _StubWorkspaces()
-
-    def _fake_client_from_platform(platform, client_cls):
-        return stub
-
-    monkeypatch.setattr(
-        "nhx.hello_world.tasks.workload_workspace_get.run.client_from_platform",
-        _fake_client_from_platform,
-    )
+    monkeypatch.setattr(WorkspacesClient, "from_client", classmethod(lambda cls, client: stub))
     return stub
 
 
-def test_workload_workspace_get_uses_task_sdk_factory(stub_client_from_platform, monkeypatch):
-    sdk_factory_calls: list[str] = []
+def test_workload_workspace_get_uses_task_client_factory(stub_workspaces_client, monkeypatch):
+    client_factory_calls: list[str] = []
 
-    def get_task_sdk(*, as_service: str) -> None:
-        sdk_factory_calls.append(as_service)
+    def get_task_nemo_client(service_name: str) -> None:
+        client_factory_calls.append(service_name)
         return None
 
     monkeypatch.setenv(TASK_CONFIG_ENVVAR, '{"workspace":"workload-read-target"}')
-    monkeypatch.setattr("nhx.hello_world.tasks.workload_workspace_get.run.get_task_sdk", get_task_sdk)
+    monkeypatch.setattr("nhx.hello_world.tasks.workload_workspace_get.run.get_task_nemo_client", get_task_nemo_client)
 
     exit_code = task_run()
 
     assert exit_code == 0
-    assert sdk_factory_calls == ["jobs"]
-    assert stub_client_from_platform.requested == ["workload-read-target"]
+    assert client_factory_calls == ["jobs"]
+    assert stub_workspaces_client.requested == ["workload-read-target"]
 
 
-def test_workload_workspace_get_uses_injected_sdk_without_workload_token(stub_client_from_platform, monkeypatch):
+def test_workload_workspace_get_uses_injected_client_without_workload_token(stub_workspaces_client, monkeypatch):
     monkeypatch.setenv(TASK_CONFIG_ENVVAR, '{"workspace":"workload-read-target"}')
     monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN", raising=False)
     monkeypatch.delenv("NEMO_WORKLOAD_TOKEN_FILE", raising=False)
 
-    exit_code = task_run(sdk=cast(NeMoHelix, object()))
+    exit_code = task_run(client=cast(NemoClient, object()))
 
     assert exit_code == 0
-    assert stub_client_from_platform.requested == ["workload-read-target"]
+    assert stub_workspaces_client.requested == ["workload-read-target"]
 
 
 @respx.mock
-def test_workload_workspace_get_uses_task_sdk_without_workload_token(monkeypatch, tmp_path, platform_base_url):
+def test_workload_workspace_get_uses_task_client_without_workload_token(monkeypatch, tmp_path, platform_base_url):
     config_file = tmp_path / "config.yaml"
     config_file.write_text("{}\n", encoding="utf-8")
 
