@@ -213,8 +213,10 @@ def build_gym_agent_eval_spec() -> dict[str, Any]:
         "target": {
             "kind": "gym",
             "environment": "default/my-gym-environment",
-            "agent": "simple_agent",
-            "agent_config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            "source": {
+                "component": "simple_agent",
+                "config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            },
             "resources_server": "custom_greeting",
             "num_repeats": 1,
             "concurrency": 1,

@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
@@ -302,7 +303,9 @@ def _publish(client: _FakeClient | None, *, required: bool = True, agent_name: s
         (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
         (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
-            GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+            GymRunnerTarget(
+                source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+            ),
             ("simple_agent", None),
         ),
         (FabricRunnerTarget(source=FabricConfigSource(config={}, model="p/m")), (None, "p/m")),
@@ -355,7 +358,9 @@ def test_agent_name_derived_from_agent_target_needs_no_override() -> None:
 
 def test_agent_name_derived_from_gym_target_needs_no_override() -> None:
     spec = _input_spec(
-        GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
+        GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="conf/agent.yaml"), resources_server="mcqa"
+        ),
         PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-1")),
     )
     assert spec.publication is not None

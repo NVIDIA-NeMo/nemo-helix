@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from nemo_evaluator.jobs.agent_spec import (
     AgentRunnerTarget,
+    GymAgentSource,
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
@@ -164,10 +165,11 @@ def _gym_target(runner: GymAgentTaskRunner, placement: GymPlacement) -> GymRunne
     raised from the transport, naming neither the runner nor the field. Checking here turns that
     into the refusal this module promises.
     """
+    config = runner.config
     target = GymRunnerTarget(
-        **runner.config.model_dump(),
+        **config.model_dump(exclude={"agent", "agent_config"}),
+        source=GymAgentSource(component=config.agent, config=config.agent_config, instance=placement.agent_ref_name),
         environment=placement.environment,
-        agent_ref_name=placement.agent_ref_name,
     )
     try:
         target.model_dump(mode="json")

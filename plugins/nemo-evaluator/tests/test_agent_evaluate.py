@@ -36,6 +36,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
@@ -283,8 +284,9 @@ async def test_arbitrary_inputs_round_trip_from_input_spec_to_runtime_task() -> 
             )
         ],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -354,7 +356,9 @@ def _run_sandboxed_gym_job(ctx: JobContext, mocker: MockerFixture) -> Path:
     )
     spec = AgentEvalSpec(
         tasks=[task],
-        target=GymRunnerTarget(agent="simple_agent", agent_config="simple_agent.yaml", resources_server="mcqa"),
+        target=GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="simple_agent.yaml"), resources_server="mcqa"
+        ),
     )
     AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
     return ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
@@ -658,8 +662,9 @@ def test_resolve_target_resolves_none_to_no_target(tmp_path: Path) -> None:
 def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="mcqa",
         num_repeats=2,
         concurrency=4,
@@ -686,8 +691,7 @@ def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) ->
 def test_colocated_gym_checks_injected_secret_before_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="a.yaml",
+        source=GymAgentSource(component="simple_agent", config="a.yaml"),
         resources_server="mcqa",
         env_secrets={"OPENAI_API_KEY": SecretRef("ws/openai")},
     )
@@ -715,8 +719,9 @@ def test_resolve_target_passes_job_storage_to_sandboxed_gym(
 ) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="custom",
         environment=FilesetRef(root="dev/custom-environment"),
     )
@@ -737,8 +742,9 @@ def test_resolve_target_rejects_unsandboxed_custom_environment(
 ) -> None:
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="custom",
         environment=FilesetRef(root="dev/custom-environment"),
     )
@@ -756,10 +762,12 @@ def test_resolve_target_rejects_unsandboxed_agent_ref_name(
     # would be dropped and the run would route to `agent` -- a plausible score for a different agent.
     ctx = _job_context(tmp_path)
     gym_target = GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent",
+            config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            instance="mcqa_simple_agent",
+        ),
         resources_server="mcqa",
-        agent_ref_name="mcqa_simple_agent",
     )
     monkeypatch.delenv(GYM_SANDBOX_PLAN_ENVVAR, raising=False)
 
@@ -1253,8 +1261,9 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
         ),
         (
             GymRunnerTarget(
-                agent="simple_agent",
-                agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+                source=GymAgentSource(
+                    component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+                ),
                 resources_server="mcqa",
             ),
             "gym",
@@ -1326,8 +1335,9 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -1348,8 +1358,9 @@ async def test_compile_gym_target_honors_configured_image_override(mocker: Mocke
 def _gym_environment_target() -> GymRunnerTarget:
     return GymRunnerTarget(
         environment=FilesetRef(root="dev/custom-gym"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
@@ -1429,8 +1440,9 @@ async def test_compile_sandboxed_gym_uses_cpu_tasks_and_ignores_colocated_image_
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     )
@@ -1656,8 +1668,9 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="custom-gym"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
@@ -1722,8 +1735,9 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="dev/not-an-environment"),
-        agent="custom_agent",
-        agent_config="responses_api_agents/custom_agent/configs/custom_agent.yaml",
+        source=GymAgentSource(
+            component="custom_agent", config="responses_api_agents/custom_agent/configs/custom_agent.yaml"
+        ),
         resources_server="custom_resources",
     )
 
@@ -2014,7 +2028,9 @@ async def test_compile_rejects_sandbox_plan_secret_name_from_all_sources(source:
     if source == "gym":
         _patch_execution_profiles(mocker, [])
         target = GymRunnerTarget(
-            agent="simple_agent", agent_config="a.yaml", resources_server="mcqa", env_secrets={name: SecretRef("ws/x")}
+            source=GymAgentSource(component="simple_agent", config="a.yaml"),
+            resources_server="mcqa",
+            env_secrets={name: SecretRef("ws/x")},
         )
     elif source == "harbor":
         target = HarborRunnerTarget(env_secrets={name: SecretRef("ws/x")})
@@ -2035,8 +2051,7 @@ def test_sandbox_plan_secret_name_is_rejected_before_plan_is_appended() -> None:
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="a.yaml",
+            source=GymAgentSource(component="simple_agent", config="a.yaml"),
             resources_server="mcqa",
             env_secrets={GYM_SANDBOX_PLAN_ENVVAR: SecretRef("ws/x")},
         ),
@@ -2058,8 +2073,9 @@ def test_sandbox_plan_secret_name_is_rejected_before_plan_is_appended() -> None:
         _runner_target("openai/gpt-5.4"),
         HarborRunnerTarget(),
         GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
         ),
     ],
@@ -2337,8 +2353,9 @@ async def test_compile_resolves_gym_runner_env_secrets(mocker: MockerFixture) ->
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="mcqa",
             env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"},
             env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
@@ -2403,7 +2420,9 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
                 metadata=[MetadataItem(key="gym_row_extras", value={})],
             )
         ],
-        target=GymRunnerTarget(agent="simple_agent", agent_config="config.yaml", resources_server="mcqa"),
+        target=GymRunnerTarget(
+            source=GymAgentSource(component="simple_agent", config="config.yaml"), resources_server="mcqa"
+        ),
     )
     if valid:
         await AgentEvalJob.to_spec(
