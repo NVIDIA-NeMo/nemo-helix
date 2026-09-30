@@ -16,7 +16,7 @@ const SCALAR_VALUE = { anyOf: [{ type: 'string' }, { type: 'number' }] };
 const SAMPLER_PARAMS_SCHEMA = {
   description:
     'Sampler parameters. Must match sampler_type; required fields are listed per variant.',
-  oneOf: [
+  anyOf: [
     {
       description: 'sampler_type "category"',
       type: 'object',
@@ -85,6 +85,40 @@ const SAMPLER_PARAMS_SCHEMA = {
       additionalProperties: false,
     },
     {
+      description: 'sampler_type "bernoulli_mixture"',
+      type: 'object',
+      required: ['p', 'dist_name', 'dist_params'],
+      properties: {
+        p: { type: 'number' },
+        dist_name: { type: 'string' },
+        dist_params: { type: 'object', additionalProperties: true },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "scipy"',
+      type: 'object',
+      required: ['dist_name', 'dist_params'],
+      properties: {
+        dist_name: { type: 'string' },
+        dist_params: { type: 'object', additionalProperties: true },
+        decimal_places: { type: 'integer' },
+      },
+      additionalProperties: false,
+    },
+    {
+      description: 'sampler_type "timedelta"',
+      type: 'object',
+      required: ['dt_min', 'dt_max', 'reference_column_name'],
+      properties: {
+        dt_min: { type: 'integer' },
+        dt_max: { type: 'integer' },
+        reference_column_name: { type: 'string' },
+        unit: { type: 'string', enum: ['D', 'h', 'm', 's'] },
+      },
+      additionalProperties: false,
+    },
+    {
       description: 'sampler_type "datetime"',
       type: 'object',
       required: ['start', 'end'],
@@ -112,6 +146,9 @@ const SAMPLER_PARAMS_SCHEMA = {
         locale: { type: 'string' },
         sex: { type: 'string', enum: ['Male', 'Female'] },
         age_range: { type: 'array', items: { type: 'integer' } },
+        city: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] },
+        select_field_values: { type: 'object', additionalProperties: true },
+        with_synthetic_personas: { type: 'boolean' },
       },
       additionalProperties: false,
     },
