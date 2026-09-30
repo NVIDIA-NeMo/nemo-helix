@@ -193,13 +193,14 @@ class GreetResponse(BaseModel):
 class GreetFunction(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "greet"                        # suffix ONLY — NOT "my-plugin.greet"
     description: ClassVar[str] = "Say hello to a name."
+    generate_legacy_verbs: ClassVar[bool] = False         # required for new functions; see below
     spec_schema: ClassVar[type[BaseModel]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")
 ```
 
-Entry-point key uses dot: `"my-plugin.greet"` under the `nemo.functions` group. The platform auto-generates `nemo my-plugin greet run / submit` (two verbs — no `explain`). Mount the HTTP route inside your `NemoService` with `add_function_routes(GreetFunction, authz=AuthzScope("my-plugin"), permission_description="Invoke the greet function")` from `nemo_helix_plugin.functions.routes` — the `authz=` kwarg is required, or the route is unruled and fails the OPA bundle build. Streaming functions return an `AsyncIterator` (one NDJSON frame per line); non-streaming ones return a value. `run` **must be `async def`** — sync work goes through `await asyncio.to_thread(...)`. See the `plugin-function` skill for the full pattern.
+Entry-point key uses dot: `"my-plugin.greet"` under the `nemo.functions` group. With `generate_legacy_verbs = False`, the platform auto-generates `nemo my-plugin greet`, which submits to the plugin service (no `explain`). Leaving the default `True` generates a deprecated `run` / `submit` group whose `run` verb executes locally, in-process — don't do that for new functions. Mount the HTTP route inside your `NemoService` with `add_function_routes(GreetFunction, authz=AuthzScope("my-plugin"), permission_description="Invoke the greet function")` from `nemo_helix_plugin.functions.routes` — the `authz=` kwarg is required, or the route is unruled and fails the OPA bundle build. Streaming functions return an `AsyncIterator` (one NDJSON frame per line); non-streaming ones return a value. `run` **must be `async def`** — sync work goes through `await asyncio.to_thread(...)`. See the `plugin-function` skill for the full pattern.
 
 **Add a controller:**
 
