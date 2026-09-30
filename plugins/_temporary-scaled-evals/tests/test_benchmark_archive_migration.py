@@ -21,6 +21,7 @@ from psycopg.rows import dict_row
 from psycopg.sql import SQL, Identifier
 from scaled_evals.api.repositories.base_repository import Conflict
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
+from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
 from test_migrations import TEST_DSN_ENV, _dsn_for
 
 
@@ -79,9 +80,13 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
             # A boot replay preserves durable queued work.
             migrations.apply_sql(dsn, schema="scaled_evals")
             assert _archive(repo)["generation"] == queued["generation"]
-            claim = repo.claim(claim_timeout=30)
+            assert [row["attempts"] for row in repo.list_claimable(claim_timeout=30, limit=5)] == [0]
+            # A Job claims only the run it was submitted for.
+            assert repo.claim(claim_timeout=30, run_id="bmr_other") is None
+            claim = repo.claim(claim_timeout=30, run_id="bmr_1")
             assert claim is not None and claim["status"] == "building"
             assert repo.claim(claim_timeout=30) is None
+            assert repo.list_claimable(claim_timeout=30, limit=5) == []
             assert repo.heartbeat("bmr_1", claim["claim_token"])
             stale = {**claim, "claim_token": "stale"}
             assert not repo.heartbeat("bmr_1", "stale")
@@ -110,6 +115,12 @@ def test_archive_upgrade_replay_and_queue(tmp_path: Path, monkeypatch: pytest.Mo
             with pytest.raises(Conflict, match="members_changed"):
                 repo.finish(claim, object_key="changed", size_bytes=1)
             assert _archive(repo)["object_key"] is None
+            conn.execute("UPDATE evaluations SET evidence_status = 'building', archive_status = 'building'")
+            evaluations = EvaluationRepository(conn)
+            for claim_next in (evaluations.claim_next_evidence, evaluations.claim_next_archive):
+                assert claim_next(claim_timeout=30, worker_id="w", evaluation_id="ev_other") is None
+                claimed = claim_next(claim_timeout=30, worker_id="w", evaluation_id="ev_1")
+                assert claimed is not None and claimed["id"] == "ev_1"
     finally:
         with psycopg.connect(admin_dsn, autocommit=True) as admin:
             admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(scratch)))
