@@ -28,16 +28,24 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any
 
+# Sandbox metadata label naming the scaled-evals deployment that created the sandbox.
 DEPLOYMENT_METADATA_KEY = "nemo-scaled-evals-deployment"
+# Sandbox metadata label naming the evaluation that created the sandbox.
 EVALUATION_METADATA_KEY = "nemo-scaled-evals-evaluation"
+# Sandbox metadata label naming the benchmark run, when the evaluation belongs to one.
 BENCHMARK_RUN_METADATA_KEY = "nemo-scaled-evals-benchmark-run"
+# Labels every cleanup selector must set, so it can never match beyond one evaluation of one deployment.
 REQUIRED_SELECTOR_KEYS = (DEPLOYMENT_METADATA_KEY, EVALUATION_METADATA_KEY)
+# Per-trial record NemoOpenSandboxEnvironment writes after a sandbox's policy passes verification.
 APPLIED_EGRESS_FILENAME = "nemo-applied-egress.json"
+# OpenSandbox states in which a sandbox no longer needs killing.
 _TERMINAL_STATES = frozenset({"Terminated", "Failed"})
+# Platform-style environment names accepted as fallbacks for the names the OpenSandbox SDK reads.
 _ENV_ALIASES = {"OPEN_SANDBOX_DOMAIN": "OPENSANDBOX_DOMAIN", "OPEN_SANDBOX_API_KEY": "OPENSANDBOX_API_KEY"}
 
 
 def ownership_selector(*, deployment_id: str, evaluation_id: str) -> dict[str, str]:
+    """Return the labels that select every sandbox one evaluation of one deployment created."""
     return {DEPLOYMENT_METADATA_KEY: deployment_id, EVALUATION_METADATA_KEY: evaluation_id}
 
 
@@ -61,6 +69,7 @@ def connection_env(source: Mapping[str, str] | None = None) -> dict[str, str]:
 
 
 async def _manager(env: Mapping[str, str], protocol: str) -> Any:
+    """Open an OpenSandbox ``SandboxManager``; the SDK is imported here because only Harbor's venv has it."""
     from opensandbox.config import ConnectionConfig  # ty: ignore[unresolved-import]  # Harbor 0.20 venv only
     from opensandbox.manager import SandboxManager  # ty: ignore[unresolved-import]
 
@@ -75,6 +84,7 @@ async def _manager(env: Mapping[str, str], protocol: str) -> Any:
 
 
 async def _live(manager: Any, selector: Mapping[str, str]) -> list[str]:
+    """Return the IDs of sandboxes matching ``selector`` that are not yet terminal, across all pages."""
     from opensandbox.models.sandboxes import SandboxFilter  # ty: ignore[unresolved-import]
 
     live: list[str] = []
@@ -98,7 +108,12 @@ async def destroy_owned_sandboxes(
     timeout_s: float = 120.0,
     poll_s: float = 5.0,
 ) -> dict[str, list[str]]:
-    """Kill every live sandbox matching ``selector`` and wait for them to go away."""
+    """Kill every live sandbox matching ``selector`` and wait for them to go away.
+
+    Returns:
+        ``killed`` and ``failed`` (one ``"<id>: <error>"`` entry per failed kill) across all passes, and
+        ``remaining``: the sandboxes still live when ``timeout_s`` ran out, empty on success.
+    """
     validate_selector(selector)
     manager = await _manager(env, protocol)
     killed: list[str] = []
@@ -125,6 +140,7 @@ async def destroy_owned_sandboxes(
 
 
 def _parse_selector(values: Sequence[str]) -> dict[str, str]:
+    """Parse repeated ``--selector key=value`` arguments into one mapping."""
     selector: dict[str, str] = {}
     for value in values:
         key, sep, item = value.partition("=")
@@ -135,6 +151,7 @@ def _parse_selector(values: Sequence[str]) -> dict[str, str]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run one cleanup and print its JSON report; exit 0 when clean, 1 when sandboxes remain, 2 on error."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selector", action="append", default=[], help="metadata key=value (repeatable)")
     parser.add_argument("--protocol", choices=("http", "https"), required=True)
