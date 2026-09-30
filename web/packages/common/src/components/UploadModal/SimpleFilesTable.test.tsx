@@ -422,6 +422,43 @@ describe('SimpleFilesTable', () => {
 
       expect(fileInput).toHaveAttribute('type', 'file');
     });
+
+    it('file input does NOT have an id attribute (ref-based approach, no htmlFor)', () => {
+      render(<SimpleFilesTable />, {
+        wrapper: createWrapper({ files: mockNewFiles }),
+      });
+
+      const fileInput = screen.getByLabelText('Upload more files', {
+        selector: 'input',
+      });
+
+      // The old implementation used id="upload-more-files"; the new approach uses a ref
+      // and an aria-label, so no id should be present.
+      expect(fileInput).not.toHaveAttribute('id');
+    });
+
+    it('file input has tabIndex={-1} to keep it out of the tab order', () => {
+      render(<SimpleFilesTable />, {
+        wrapper: createWrapper({ files: mockNewFiles }),
+      });
+
+      const fileInput = screen.getByLabelText('Upload more files', {
+        selector: 'input',
+      });
+
+      expect(fileInput).toHaveAttribute('tabindex', '-1');
+    });
+
+    it('"Upload More Files" button is a native button (not a label element)', () => {
+      render(<SimpleFilesTable />, {
+        wrapper: createWrapper({ files: mockNewFiles }),
+      });
+
+      const button = screen.getByText('Upload More Files');
+      // The button is now a KUI <Button kind="tertiary">, not a <label> element
+      expect(button.closest('button')).not.toBeNull();
+      expect(button.closest('label')).toBeNull();
+    });
   });
 
   describe('single-select (allowMultipleFileSelection=false, default)', () => {
