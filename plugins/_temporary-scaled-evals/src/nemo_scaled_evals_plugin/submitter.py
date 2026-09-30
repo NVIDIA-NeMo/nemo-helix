@@ -13,17 +13,20 @@ from typing import Any
 import anyio.from_thread
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.entities.base import EntityConflictError, SyncEntityClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import evaluation_execution_job_name
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
+from nemo_scaled_evals_plugin.projection import jsonable, platform_entities
 from pydantic import BaseModel
 from scaled_evals.api.build.queue_worker import TaskBuildWorker
 from scaled_evals.api.db import pooled_connection
-from scaled_evals.api.repositories.evaluation_repository import EvaluationRepository
+from scaled_evals.api.repositories.evaluation_repository import DISPATCH_STATE_COLUMNS, EvaluationRepository
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch.worker import _retry_delay_seconds
 
@@ -33,9 +36,11 @@ LOG = logging.getLogger(__name__)
 class EvaluationSubmitter:
     """Claim an evaluation, create its deterministic Platform Job, and record it."""
 
-    def __init__(self, jobs: AsyncJobsClient, worker_id: str) -> None:
+    def __init__(self, jobs: AsyncJobsClient, worker_id: str, entities: SyncEntityClient | None = None) -> None:
         self.jobs = jobs
         self.worker_id = worker_id
+        # Without it the Job loads its inputs from Postgres, as before.
+        self.entities = entities
 
     async def submit(self, evaluation_id: str | None = None) -> bool:
         """Submit the given evaluation, or the next claimable one.
@@ -64,8 +69,12 @@ class EvaluationSubmitter:
                 1,
                 int(settings.dispatch_run_poll_interval_seconds * settings.dispatch_run_max_polls),
             ),
+            inputs_workspace=settings.entity_store_workspace if self.entities is not None else None,
+            project_evaluation=self.entities is not None and settings.entity_store_projection_enabled,
         )
         try:
+            if self.entities is not None:
+                await asyncio.to_thread(self._write_inputs, claimed_id, execution_number, name)
             platform_job = await self.create_job(name, EvaluationExecutionJob, spec)
         except ConflictError:
             platform_job = (await self.jobs.get_job(workspace=settings.platform_jobs_workspace, name=name)).data()
@@ -116,6 +125,29 @@ class EvaluationSubmitter:
         with pooled_connection() as conn:
             return EvaluationRepository(conn).load_status_runtime(evaluation_id)
 
+    def _write_inputs(self, evaluation_id: str, execution_number: int, name: str) -> None:
+        """Store the execution's immutable launch inputs where its Job reads them."""
+        if self.entities is None:
+            return
+        with pooled_connection() as conn:
+            row = EvaluationRepository(conn).load_for_dispatch(evaluation_id)
+        if row is None:
+            raise RuntimeError(f"evaluation not found: {evaluation_id}")
+        inputs = {key: value for key, value in row.items() if key not in DISPATCH_STATE_COLUMNS}
+        try:
+            self.entities.create(
+                ScaledEvaluationExecution(
+                    name=name,
+                    workspace=settings.entity_store_workspace,
+                    evaluation_id=evaluation_id,
+                    execution_number=execution_number,
+                    inputs=jsonable(inputs),
+                )
+            )
+        except EntityConflictError:
+            # An earlier submission attempt wrote it; inputs never change within an execution.
+            pass
+
     def _record(self, evaluation_id: str, execution_number: int, name: str, uid: str) -> None:
         with pooled_connection() as conn:
             EvaluationRepository(conn).record_dispatch_job(
@@ -149,7 +181,7 @@ def submit_evaluation_now(evaluation_id: str) -> None:
     """
     try:
         jobs = client_from_platform(get_async_platform_sdk(as_service="scaled-evals", internal=True), AsyncJobsClient)
-        submitter = EvaluationSubmitter(jobs, f"scaled-evals-api:{socket.gethostname()}")
+        submitter = EvaluationSubmitter(jobs, f"scaled-evals-api:{socket.gethostname()}", platform_entities())
         # Runs on the server's event loop, which owns the SDK's async HTTP client.
         anyio.from_thread.run(submitter.submit, evaluation_id)
     except Exception:
