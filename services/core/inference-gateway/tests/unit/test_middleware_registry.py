@@ -870,7 +870,6 @@ def test_sdk_vm_to_plugin_vm_maps_fields():
 
 
 def test_sdk_vm_to_plugin_vm_carries_entity_id():
-    """Lifecycle hooks receive the entity id, so plugins can tell VirtualModels apart by it."""
     vm = _make_sdk_vm("ws", "my-vm").model_copy(update={"id": "virtual_model-abc123"})
 
     assert _sdk_vm_to_plugin_vm(vm).id == "virtual_model-abc123"
