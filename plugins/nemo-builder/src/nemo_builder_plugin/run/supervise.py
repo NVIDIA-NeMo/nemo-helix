@@ -1,0 +1,365 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``nhx-build supervise`` -- step 2. The trusted control plane for an untrusted pod.
+
+It holds RBAC to create, watch and delete Pods in the build namespace, and **nothing else**: no
+Files client, no registry credential, no signing key. It creates the sandbox, watches it, records
+what happened, and deletes it.
+
+**It mounts no volume at all.** That is not an oversight -- it is why this step cannot read a
+build context even by mistake, and it is enforced by the compiler emitting no storage env var for
+it rather than by anything here. The consequence is that everything this step learns about a
+build, it learns from the pod's *log*, which is also all it is permitted to read.
+
+**One sandbox per group, one kaniko invocation per image inside it, sequential.** The sequencing
+is not a throughput choice: invocations share one container root and measurably cannot overlap.
+Groups are separate pods and could run in parallel, but ``main`` creates, awaits and deletes them
+one after another, so a set of N groups takes N builds' time. Running them concurrently is future
+work; nothing about the pod shape prevents it.
+
+This is the first step binary in this repository to talk to the Kubernetes API. Everything else
+that does lives in the jobs controller, which is why the Role backing it is written narrowly and
+bound to this identity alone.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import shlex
+import time
+from pathlib import PurePosixPath
+
+from kubernetes import client as k8s
+from kubernetes import config as k8s_config
+from kubernetes import watch as k8s_watch
+from nemo_builder_plugin.run.context import job_identity, read_step_config
+from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
+from nemo_helix_plugin.jobs.constants import job_storage_subpath
+from nemo_helix_plugin.log_utils import sanitize_for_log
+
+logger = logging.getLogger(__name__)
+
+#: Where the sandbox sees the job's `WorkLayout`. Only its own parts are mounted -- see
+#: `_volume_mounts` -- and they appear at the same layout paths every other step uses, under
+#: this root. An unusual name on purpose: a Dockerfile that touches this directory in a `RUN`
+#: touches the mounted volume, so it should not be one a Dockerfile would plausibly use.
+SANDBOX_ROOT = PurePosixPath("/nhx-work")
+
+#: The five capabilities kaniko needs out of containerd's default fourteen. Measured by ablation:
+#: dropping all of them fails at `chown /etc/gshadow: operation not permitted`, because extracting
+#: layers that own files across many uids IS the job. Keeping only these drops NET_RAW and MKNOD
+#: -- raw sockets and device nodes, the two most useful to an attacker -- along with seven others.
+KANIKO_CAPABILITIES = ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID"]
+
+#: Printed by the sandbox after each build so this step can attribute a result without reading
+#: the volume the sandbox wrote to.
+RESULT_MARKER = "NHX_IMAGE_RESULT"
+
+#: The executor inside the kaniko `:debug` image. A constant so the script's shell semantics can
+#: be tested by running it against a stand-in, rather than only by reading it.
+KANIKO_EXECUTOR = "/kaniko/executor"
+
+_POD_TIMEOUT_SECONDS = 60 * 60
+
+#: How long the sandbox may live, enforced by the kubelet rather than by this step. The watch
+#: above is this step's own limit; this one outlives it, so a sandbox whose supervisor was killed
+#: -- a cancelled job, an evicted pod -- still ends. A `RUN sleep infinity` followed by a cancel
+#: would otherwise hold the build node's resources until someone noticed.
+_POD_DEADLINE_SECONDS = _POD_TIMEOUT_SECONDS + 5 * 60
+
+
+def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
+    """The shell the sandbox runs: one kaniko invocation per image, in order.
+
+    ``--cleanup`` between invocations is what makes a shared container root safe to reuse.
+    ``--no-push`` is what makes this pod credential-free: it writes an OCI layout to the work
+    volume and the trusted push step publishes it.
+
+    **The set is not aborted on a failure.** Each image gets its own exit line, so one broken
+    Dockerfile in a set of ten does not cost the other nine -- which is also why ``push`` publishes
+    whatever layouts it finds, and each row completes, or fails, on its own.
+
+    That needs nothing more than the absence of ``set -e``, and the marker line must come
+    *immediately* after kaniko so ``$?`` is kaniko's status. An earlier version appended
+    ``|| true`` to each invocation "to keep going" -- after which ``$?`` is the status of
+    ``true``, so every image reported 0 and ``supervise`` logged a failed build as built. Found on
+    the cluster, where a Dockerfile written to fail printed ``NHX_IMAGE_RESULT ... 0``.
+    """
+    view = WorkLayout(SANDBOX_ROOT)
+    lines = ["set -u"]
+    for image in group.images:
+        layout = view.output(image.image)
+        # Empty the image's output first. The directory is a mount point, so its contents go and
+        # it stays. Whatever an earlier attempt left there would otherwise be published if this
+        # build fails before writing its own -- `push` has no way to tell an old layout from a
+        # new one.
+        quoted = shlex.quote(str(layout))
+        lines.append(f"rm -rf {quoted}/* {quoted}/.[!.]* {quoted}/..?*")
+        args = [
+            KANIKO_EXECUTOR,
+            f"--context=dir://{view.context(group.source)}",
+            f"--dockerfile={image.dockerfile}",
+            f"--custom-platform={image.platform}",
+            "--no-push",
+            "--no-push-cache",
+            f"--oci-layout-path={layout}",
+            "--cleanup",
+            "--verbosity=info",
+        ]
+        lines.append(" ".join(shlex.quote(a) for a in args))
+        lines.append(f'echo {RESULT_MARKER} {shlex.quote(image.image)} "$?"')
+    return "\n".join(lines)
+
+
+def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeMount]:
+    """The sandbox's windows onto the work volume, each at the layout path it has everywhere.
+
+    ``sub_path`` is the layout rooted at this job's slice of the volume; ``mount_path`` is the
+    same layout rooted at :data:`SANDBOX_ROOT`. Its own context, read-only -- no other source in
+    the set, and no other job -- and **one output directory per image in this group**, where it
+    writes that image's OCI layout.
+
+    Per image, not the whole output directory. With the whole directory, a later group's ``RUN``
+    -- or code in a base image it pulls -- could rewrite an earlier group's layout, and ``push``
+    would sign it as that image. Images in one group share a context and a caller, and still
+    share a container, so a ``RUN`` in one can reach its siblings' outputs; nothing else can.
+    """
+    volume, view = WorkLayout(PurePosixPath(job_sub_path)), WorkLayout(SANDBOX_ROOT)
+    return [
+        k8s.V1VolumeMount(
+            name="work",
+            sub_path=str(volume.context(group.source)),
+            mount_path=str(view.context(group.source)),
+            read_only=True,
+        ),
+        *(
+            k8s.V1VolumeMount(
+                name="work", sub_path=str(volume.output(image.image)), mount_path=str(view.output(image.image))
+            )
+            for image in group.images
+        ),
+    ]
+
+
+def sandbox_pod_name(workspace: str, job_id: str, index: int) -> str:
+    """Unique per job across workspaces, and a legal pod name however long the job name is.
+
+    Job names are unique only within a workspace, so the job name alone would collide between
+    two tenants building the same set and revision -- and a predictable name is one another
+    tenant can occupy first. The hash makes it the job's; the truncated job name keeps it
+    readable in ``kubectl get pods``.
+    """
+    suffix = hashlib.sha256(f"{workspace}/{job_id}".encode()).hexdigest()[:10]
+    return f"nhx-sbx-{job_id[:36].rstrip('-')}-{suffix}-g{index}"
+
+
+def _pod_manifest(
+    *,
+    name: str,
+    group: SandboxGroup,
+    sandbox: SandboxSpec,
+    pvc: str,
+    job_sub_path: str,
+) -> k8s.V1Pod:
+    """The untrusted pod, composed entirely from operator config.
+
+    Two lines carry most of the security argument and both are one line each:
+    ``automount_service_account_token=False`` removes the control-plane identity, and the absence
+    of any ``env``, ``env_from`` or secret volume removes the credential. Together they make the
+    threat model's "read the credential" and "spend the credential" paths unreachable rather than
+    merely firewalled.
+    """
+    return k8s.V1Pod(
+        metadata=k8s.V1ObjectMeta(
+            name=name,
+            namespace=sandbox.namespace,
+            # What the NetworkPolicy selects on. Without this label the pod is unconstrained.
+            labels={"nhx.nvidia.com/sandbox": "true", "app.kubernetes.io/managed-by": "nemo-builder"},
+        ),
+        spec=k8s.V1PodSpec(
+            restart_policy="Never",
+            active_deadline_seconds=_POD_DEADLINE_SECONDS,
+            automount_service_account_token=False,
+            # Otherwise the kubelet injects `<SERVICE>_SERVICE_HOST`/`_PORT` for every Service in
+            # the namespace -- an environment this pod was meant not to have.
+            enable_service_links=False,
+            node_selector=sandbox.node_selector or None,
+            # Public resolvers, not cluster DNS. Cluster DNS here answers on a link-local address
+            # that the egress policy denies, and re-allowing it reopens the Pod CIDR. A sandbox
+            # needs to resolve pypi.org, not kubernetes.default.svc.
+            dns_policy="None",
+            dns_config=k8s.V1PodDNSConfig(nameservers=list(sandbox.dns_nameservers)),
+            containers=[
+                k8s.V1Container(
+                    name="build",
+                    image=sandbox.image,
+                    command=["/busybox/sh", "-c", _build_script(group, sandbox)],
+                    security_context=k8s.V1SecurityContext(
+                        # Root, but not the stock root -- see KANIKO_CAPABILITIES. Running as
+                        # uid 0 is load-bearing: unpacking layers means owning files across many
+                        # uids.
+                        run_as_user=0,
+                        allow_privilege_escalation=False,
+                        # `baseline`, not a relaxation of it. Earlier designs needed
+                        # seccomp: Unconfined here, and that is exactly what this namespace
+                        # refuses -- see deploy/negative-control.sh.
+                        seccomp_profile=k8s.V1SeccompProfile(type="RuntimeDefault"),
+                        capabilities=k8s.V1Capabilities(drop=["ALL"], add=KANIKO_CAPABILITIES),
+                    ),
+                    # No env, no env_from, no secret volume. There is nothing here to read.
+                    volume_mounts=_volume_mounts(group, job_sub_path),
+                    resources=k8s.V1ResourceRequirements(
+                        requests={"cpu": sandbox.cpu, "memory": sandbox.memory},
+                    ),
+                )
+            ],
+            volumes=[
+                k8s.V1Volume(
+                    name="work",
+                    persistent_volume_claim=k8s.V1PersistentVolumeClaimVolumeSource(claim_name=pvc),
+                )
+            ],
+        ),
+    )
+
+
+def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
+    """Block until the sandbox reaches a terminal phase. Returns that phase."""
+    watcher = k8s_watch.Watch()
+    deadline = time.monotonic() + _POD_TIMEOUT_SECONDS
+    try:
+        for event in watcher.stream(
+            api.list_namespaced_pod,
+            namespace=namespace,
+            field_selector=f"metadata.name={name}",
+            timeout_seconds=_POD_TIMEOUT_SECONDS,
+        ):
+            phase = event["object"].status.phase
+            logger.info("sandbox %s: %s", sanitize_for_log(name), sanitize_for_log(phase))
+            if phase in ("Succeeded", "Failed"):
+                watcher.stop()
+                return phase
+            if time.monotonic() > deadline:
+                break
+    finally:
+        watcher.stop()
+    return "Unknown"
+
+
+def _read_pod_log(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
+    """The sandbox's log, decoded by us rather than by the client library.
+
+    `_preload_content=False` is the whole point. With the default, the generated client tries to
+    deserialize the body into the declared return type -- `str` -- and when the body is not valid
+    UTF-8 it ends up doing the equivalent of `str(some_bytes)`. What comes back is then the
+    **repr** of a bytes object: a string that starts with `b'` and whose newlines are the two
+    characters backslash-n rather than actual newlines.
+
+    That is not a cosmetic difference. `splitlines()` on it returns ONE line, so every per-image
+    result marker becomes invisible, and the observed symptom is every image reporting "no result
+    recorded" while every build in fact succeeded. kaniko's output is ANSI-coloured, so this is
+    the normal case here, not an edge one.
+    """
+    response = api.read_namespaced_pod_log(name=name, namespace=namespace, _preload_content=False)
+    return response.data.decode("utf-8", errors="replace")
+
+
+def _results_from_log(log: str | bytes) -> dict[str, int]:
+    """Per-image exit codes, parsed out of the sandbox's own output.
+
+    Reading the log is how this step learns anything at all, because it mounts no volume. The
+    marker lines are appended by the script it generated, so the format is not a guess.
+
+    **Takes bytes or str deliberately.** `read_namespaced_pod_log` returns BYTES when the log
+    contains non-UTF-8 -- and kaniko's output always does, because it is ANSI-coloured. Comparing
+    a `str` marker against `bytes` lines never matches and never raises, so the observed symptom
+    was every image reporting "no result recorded" while every build had in fact succeeded. Decode
+    first; `errors="replace"` because this is a log, and one bad byte must not lose the verdict
+    for a build that worked.
+    """
+    if isinstance(log, bytes):
+        log = log.decode("utf-8", errors="replace")
+
+    results: dict[str, int] = {}
+    for line in log.splitlines():
+        if not line.startswith(RESULT_MARKER):
+            continue
+        parts = line.split()
+        if len(parts) == 3 and parts[2].isdigit():
+            results[parts[1]] = int(parts[2])
+    return results
+
+
+def _exit_code(*, failures: int, total: int) -> int:
+    """This step's exit code, given how many of the set's images failed to build.
+
+    **Non-zero only when there is nothing left to publish.** The exit code is not a report -- it
+    is a scheduling decision, because the Jobs dispatcher creates the next step only when this one
+    is `COMPLETED`. Any non-zero exit therefore means `push` never runs, for the whole set.
+
+    An earlier version returned 1 whenever *any* image failed. One broken Dockerfile in a set of
+    ten then published zero images, and all ten rows failed -- the opposite of what every
+    docstring in this plugin claimed about partial failure.
+
+    Exiting 0 on a partial failure does not hide it. `push` finds no layout for each failed image,
+    counts it, and exits non-zero itself; that is the last step, so the job still ends in an error
+    state. Exactly the images that were published completed, and the failure sweep fails the rest
+    once the job has ended.
+    """
+    if total and failures >= total:
+        return 1
+    return 0
+
+
+def main() -> int:
+    config = SuperviseStepConfig.model_validate(read_step_config())
+    workspace, job_id = job_identity()
+    job_sub_path = job_storage_subpath(workspace, job_id)
+
+    k8s_config.load_incluster_config()
+    api = k8s.CoreV1Api()
+
+    total = sum(len(group.images) for group in config.groups)
+    failures = 0
+    for index, group in enumerate(config.groups):
+        pod_name = sandbox_pod_name(workspace, job_id, index)
+        manifest = _pod_manifest(
+            name=pod_name,
+            group=group,
+            sandbox=config.sandbox,
+            pvc=config.sandbox.work_pvc,
+            job_sub_path=job_sub_path,
+        )
+
+        logger.info("creating sandbox %s for %d image(s)", sanitize_for_log(pod_name), len(group.images))
+        api.create_namespaced_pod(namespace=config.sandbox.namespace, body=manifest)
+        try:
+            phase = _await_pod(api, name=pod_name, namespace=config.sandbox.namespace)
+            log = _read_pod_log(api, name=pod_name, namespace=config.sandbox.namespace)
+            logger.info("sandbox %s log:\n%s", sanitize_for_log(pod_name), sanitize_for_log(log))
+            results = _results_from_log(log)
+
+            for image in group.images:
+                code = results.get(image.image)
+                if code is None:
+                    logger.error(
+                        "image %s: no result recorded (sandbox phase %s)",
+                        sanitize_for_log(image.image),
+                        sanitize_for_log(phase),
+                    )
+                    failures += 1
+                elif code != 0:
+                    logger.error("image %s: kaniko exited %d", sanitize_for_log(image.image), code)
+                    failures += 1
+                else:
+                    logger.info("image %s: built", sanitize_for_log(image.image))
+        finally:
+            # Deleted by the step that made it, always -- including when the watch timed out or
+            # the log read failed. A leaked sandbox is a pod holding a context mount.
+            api.delete_namespaced_pod(name=pod_name, namespace=config.sandbox.namespace, grace_period_seconds=0)
+
+    if failures:
+        logger.error("%d of %d image(s) failed to build", failures, total)
+    return _exit_code(failures=failures, total=total)

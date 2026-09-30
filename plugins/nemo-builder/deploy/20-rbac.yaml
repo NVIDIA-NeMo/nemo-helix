@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The one privilege in the build namespace, and it is the only RBAC any step holds.
+#
+# `nhx-build-control` -- the `supervise` step -- is the control plane for an untrusted pod. It
+# creates the sandbox, watches it, reads its log, and deletes it. That is all it may do, and this
+# Role is deliberately short: pods in this namespace, and nothing else.
+#
+# It holds no Files client and no registry credential -- but pod creation in this namespace is
+# not a small grant. RBAC cannot say WHICH pods: on its own, `create pods` here admits one that
+# runs as `nhx-build-push` wearing another job's labels, mounts the whole work volume, or drops
+# the sandbox label and with it the NetworkPolicy. 25-sandbox-admission.yaml is what narrows this
+# Role to the sandbox's shape.
+#
+# Nothing narrows its reads and deletes. Anyone who can run a raw Jobs job under the
+# `build-control` profile holds this Role too, and can read the log of any build pod in the
+# namespace -- another tenant's build output among them -- and delete any build pod. Closing that
+# needs Jobs to restrict the profile to the builder, or the builder creating its pods itself.
+#
+# What is NOT here is the point of the design. `nhx-build-push` holds no Role at all: no Secret
+# in this namespace holds a registry credential or a signing key, and the push step gets a token
+# and a signature from the credential broker, for its own job (50-broker.yaml). `nhx-build-fetch`
+# holds none either; it reads Files as the submitter.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-pod-control
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-pod-control
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-pod-control
+subjects:
+  # `nhx-build-control` ONLY. Binding `fetch` or `push` here would hand pod creation to an
+  # identity the broker or Files trusts, which is the confused deputy the step split exists to
+  # remove.
+  - kind: ServiceAccount
+    name: nhx-build-control
+    namespace: nhx-builds

@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# The credential broker's namespace, identity and permissions (run/broker.py).
+# The credential broker's namespace, identity and permissions (run/broker.py). Apply after
+# 00-namespace.yaml: the pod-reading Role lives in the build namespace.
 #
 # The broker holds the registry credential and the signing key, so it lives in a namespace of its
 # own under a ServiceAccount of its own: nothing in `nhx-builds`, where callers' jobs run, can
@@ -10,8 +11,7 @@
 #   create tokenreviews        -- to ask the API server whose token a step presented, and which
 #                                 pod it is bound to;
 #   get pods in nhx-builds     -- to read that pod's labels: which job, workspace and step Jobs
-#                                 created it for. Granted beside the build namespace itself,
-#                                 which this file does not create.
+#                                 created it for.
 #
 # It has no platform identity at all: it reads a job's rows as the submitter, by exchanging the
 # step's own token, or anonymously where platform auth is off.
@@ -61,10 +61,38 @@ subjects:
     name: nhx-build-broker
     namespace: nhx-build-broker
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nhx-build-broker-read-pods
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nhx-build-broker-read-pods
+  namespace: nhx-builds
+  labels:
+    app.kubernetes.io/managed-by: nemo-builder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nhx-build-broker-read-pods
+subjects:
+  - kind: ServiceAccount
+    name: nhx-build-broker
+    namespace: nhx-build-broker
+---
 # Only a job step may reach the broker: ingress only from pods Jobs created in the build
 # namespace. The sandbox, which runs callers' code, must be kept from it from its own side too, by
-# an egress policy that denies every cluster address. Enforced only where the CNI enforces
-# NetworkPolicy.
+# an egress policy that denies every cluster address (30-networkpolicy.yaml). Enforced only where
+# the CNI enforces NetworkPolicy.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
