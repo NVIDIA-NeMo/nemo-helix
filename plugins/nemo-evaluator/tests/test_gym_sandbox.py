@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
     resolve_sandbox_plan,
+    rollout_parallelism,
     serve_config,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
@@ -514,6 +515,33 @@ def test_resource_requests_reach_the_host_when_configured() -> None:
     spec = built_host_spec(capable_plan(sandbox_resources={"cpu": "2", "memory": "8Gi"}))
 
     assert spec.resources == {"cpu": "2", "memory": "8Gi"}
+
+
+@pytest.mark.parametrize(
+    ("concurrency", "expected"),
+    [(1, (1, 1)), (4, (1, 4)), (8, (1, 8)), (9, (2, 4)), (10, (2, 5)), (64, (8, 8)), (100, (13, 7))],
+)
+def test_concurrency_becomes_chunks_whose_product_never_exceeds_it(concurrency: int, expected: tuple[int, int]) -> None:
+    chunk_size, max_in_flight = rollout_parallelism(concurrency)
+
+    assert (chunk_size, max_in_flight) == expected
+    assert max_in_flight <= 8, "every in-flight chunk holds a worker thread"
+    assert concurrency - chunk_size < chunk_size * max_in_flight <= concurrency
+
+
+def test_the_targets_concurrency_sets_the_sessions_chunking() -> None:
+    sandbox = serve_config(target(concurrency=10), capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (2, 5)
+
+
+def test_the_default_concurrency_survives_the_job_spec_round_trip() -> None:
+    """The job reads a target dumped with every default, so the default must map like any value."""
+    round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
+
+    sandbox = serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (1, 4)
 
 
 def test_the_runtime_image_and_job_id_reach_the_host() -> None:

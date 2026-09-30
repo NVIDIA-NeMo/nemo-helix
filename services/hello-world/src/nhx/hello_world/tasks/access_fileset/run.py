@@ -7,12 +7,11 @@ This task is used for E2E testing of auth propagation. It attempts to
 retrieve a fileset and reports whether access was granted or denied.
 """
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.files.client import FilesClient
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.jobs.config import get_task_config
-from nhx.common.sdk_factory import get_platform_sdk
 from pydantic import BaseModel
 
 
@@ -23,12 +22,12 @@ class AccessFilesetConfig(BaseModel):
     fileset: str
 
 
-def run(*, sdk: NeMoHelix | None = None) -> int:
+def run(*, client: NemoClient | None = None) -> int:
     """Attempt to access a fileset in the specified workspace.
 
     Args:
-        sdk: Optional SDK instance for dependency injection (for testing).
-            If None, uses get_platform_sdk().
+        client: Optional platform client for dependency injection (for testing).
+            If None, uses get_nemo_client().
 
     Returns:
         Exit code:
@@ -37,11 +36,11 @@ def run(*, sdk: NeMoHelix | None = None) -> int:
     """
     try:
         config = get_task_config(AccessFilesetConfig)
-        sdk = sdk or get_platform_sdk()
+        client = client or get_nemo_client()
 
         print(f"Attempting to access fileset '{config.fileset}' in workspace '{config.workspace}'")
 
-        files = client_from_platform(sdk, FilesClient)
+        files = FilesClient.from_client(client)
         fileset = files.get_fileset(workspace=config.workspace, name=config.fileset).data()
 
         print(f"Successfully accessed fileset: {fileset.name}")

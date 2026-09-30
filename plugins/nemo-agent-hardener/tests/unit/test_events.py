@@ -112,7 +112,7 @@ def test_get_events_falls_back_to_fileset_when_local_missing(tmp_path: Path) -> 
     with (
         patch.object(events, "hub", events.EventHub()),
         patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_platform),
+        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
         patch("nemo_agent_hardener_plugin.api.v2.events.download_fileset", side_effect=fake_download),
     ):
         app = FastAPI()
@@ -137,7 +137,7 @@ def test_get_events_returns_empty_when_no_local_and_no_fileset(tmp_path: Path) -
     with (
         patch.object(events, "hub", events.EventHub()),
         patch("nemo_agent_hardener_plugin.api.v2.events._events_path", return_value=missing_path),
-        patch("nemo_agent_hardener_plugin.api.v2.events._get_sdk", return_value=mock_platform),
+        patch("nemo_agent_hardener_plugin.api.v2.events._get_client", return_value=mock_platform),
     ):
         app = FastAPI()
         app.include_router(events.router, prefix="/v2/workspaces/{workspace}")
