@@ -348,6 +348,7 @@ group "docker-cpu-ci" {
     "docker-cpu",
     "nhx-agents-deepagents-e2e-docker",
     "nhx-tasks-smoke-test",
+    "nhx-tasks-openshell-smoke-test",
     "nhx-gym-tasks-smoke-test",
   ]
 }
@@ -756,7 +757,8 @@ target "nhx-tasks-smoke-test" {
 }
 
 # OpenShell-compatible CPU tasks image: sandbox user,
-# supervisor apt deps, and a baked jobs-launcher. Not in docker-cpu; build with
+# supervisor apt deps, and a baked jobs-launcher. Not in docker-cpu (its smoke
+# test runs in docker-cpu-ci); build with
 # `make docker-load DOCKER_TARGET=nhx-tasks-openshell-docker`.
 target "nhx-tasks-openshell-docker" {
   target     = "openshell"
