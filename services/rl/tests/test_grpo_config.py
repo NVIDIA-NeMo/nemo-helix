@@ -994,14 +994,17 @@ def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
     assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
 
 
-def test_dtensor_v1_omits_model_save_format(
+def test_dtensor_requests_consolidated_safetensors(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """DTensor v2 is the only policy worker, so ``dtensor`` needs the same checkpoint block."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
     compiled = compile_grpo_config(step, job_ctx)
+    checkpoint = compiled["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert "checkpoint" not in compiled["policy"]["dtensor_cfg"]
+    assert checkpoint["model_save_format"] == "safetensors"
+    assert checkpoint["save_consolidated"] == "every"
     assert "model_save_format" not in compiled["checkpointing"]
     assert "save_consolidated" not in compiled["checkpointing"]
     assert "v4_compatible" not in compiled["checkpointing"]

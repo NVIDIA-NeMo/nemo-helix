@@ -624,13 +624,13 @@ def compile_grpo_config(
     # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
     # checkpointing config rejects them. "every" consolidates each save, which is
     # what publication needs: the kept checkpoint is the best one, not always the last.
-    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
-        cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
-            "model_save_format": "safetensors",
-            "save_consolidated": "every",
-            "v4_compatible": customizer_config.model.v4_compatible,
-        }
-        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
+    # Both policy backends use that worker, so both need the block.
+    cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
+        "model_save_format": "safetensors",
+        "save_consolidated": "every",
+        "v4_compatible": customizer_config.model.v4_compatible,
+    }
+    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than
