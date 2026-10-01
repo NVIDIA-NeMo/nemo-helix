@@ -439,6 +439,47 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
                 pass
 
 
+def test_entity_array_prefix_and_object_key_filters(entity_store_client: EntitiesClient, workspace: str):
+    """``$containsPrefix`` anchors at an element's start and ``$hasKey`` treats a dotted key as one key.
+
+    Like ``$elemMatch``, these run on both SQLite and PostgreSQL in CI; under ``$not`` a row without
+    the field must still match on both.
+    """
+    prefix = _unique_name("prefix-key")
+    rows = {
+        f"{prefix}-pins": {"tasks": ["ws/task_a#d1"], "tags": {"v1.2": 1}},
+        f"{prefix}-near": {"tasks": ["other-ws/task_a#d1", "ws/taskXa#d1"], "tags": {"v1": 1}},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        has_task_a = {"data.tasks": {"$containsPrefix": "ws/task_a#"}}
+        assert names_matching(has_task_a) == {f"{prefix}-pins"}
+        assert names_matching({"$not": has_task_a}) == {f"{prefix}-near", f"{prefix}-none"}
+        assert names_matching({"data.tags": {"$hasKey": "v1.2"}}) == {f"{prefix}-pins"}
+        assert names_matching({"data.tags": {"$hasKey": "v1"}}) == {f"{prefix}-near"}
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
 def test_entity_rename(entity_store_client: EntitiesClient, workspace: str):
     """Test renaming an entity via update.
 

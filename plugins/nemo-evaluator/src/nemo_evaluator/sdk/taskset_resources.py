@@ -15,7 +15,13 @@ from collections.abc import Mapping
 from typing import overload
 
 from nemo_evaluator.api.schemas import Revision, Taskset, TasksetInput
-from nemo_evaluator.sdk.query_params import list_filter_params, list_params, project_params, revision_selector
+from nemo_evaluator.sdk.query_params import (
+    like_filter,
+    list_filter_params,
+    list_params,
+    project_params,
+    revision_selector,
+)
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.evaluator.types import CreateTasksetRequest, ReplaceTasksetRequest
 from nemo_helix_plugin.filter_ops import ElemMatchScalar
@@ -145,15 +151,26 @@ class EvaluatorTasksetsResource:
         page: int = 1,
         page_size: int = 100,
         sort: str | None = None,
+        description_contains: str | None = None,
+        task: str | None = None,
+        tag: str | None = None,
         metadata: Mapping[str, ElemMatchScalar] | None = None,
     ) -> Page[Taskset]:
-        """List stored tasksets in a workspace, optionally filtered by metadata.
+        """List stored tasksets in a workspace, optionally filtered.
 
-        ``metadata`` matches tasksets that carry every given key with the given value.
+        ``task`` matches tasksets containing that task (``workspace/name`` at any revision, or
+        ``workspace/name#<digest>``); ``tag`` matches a revision tag; ``description_contains`` is a
+        case-insensitive substring match; ``metadata`` matches tasksets carrying every given key
+        with the given value.
         """
         response = self._client.list_tasksets(
             workspace=workspace,
-            query_params={**list_params(page, page_size, sort), **list_filter_params(metadata=metadata)},
+            query_params={
+                **list_params(page, page_size, sort),
+                **list_filter_params(
+                    description=like_filter(description_contains), tasks=task, tags=tag, metadata=metadata
+                ),
+            },
         )
         page_result = response.page()
         return Page[Taskset].model_validate(
@@ -293,15 +310,26 @@ class AsyncEvaluatorTasksetsResource:
         page: int = 1,
         page_size: int = 100,
         sort: str | None = None,
+        description_contains: str | None = None,
+        task: str | None = None,
+        tag: str | None = None,
         metadata: Mapping[str, ElemMatchScalar] | None = None,
     ) -> Page[Taskset]:
-        """List stored tasksets in a workspace, optionally filtered by metadata.
+        """List stored tasksets in a workspace, optionally filtered.
 
-        ``metadata`` matches tasksets that carry every given key with the given value.
+        ``task`` matches tasksets containing that task (``workspace/name`` at any revision, or
+        ``workspace/name#<digest>``); ``tag`` matches a revision tag; ``description_contains`` is a
+        case-insensitive substring match; ``metadata`` matches tasksets carrying every given key
+        with the given value.
         """
         response = await self._client.list_tasksets(
             workspace=workspace,
-            query_params={**list_params(page, page_size, sort), **list_filter_params(metadata=metadata)},
+            query_params={
+                **list_params(page, page_size, sort),
+                **list_filter_params(
+                    description=like_filter(description_contains), tasks=task, tags=tag, metadata=metadata
+                ),
+            },
         )
         page_result = response.page()
         return Page[Taskset].model_validate(

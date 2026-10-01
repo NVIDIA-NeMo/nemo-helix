@@ -22,14 +22,18 @@ def list_params(page: int, page_size: int, sort: str | None) -> QueryParams:
     return params
 
 
-def list_filter_params(
-    *, kind: str | None = None, metadata: Mapping[str, ElemMatchScalar] | None = None
-) -> QueryParams:
-    """Return the ``filter`` query param for a task/taskset listing, or nothing when unfiltered."""
-    conditions: dict[str, ElemMatchScalar] = {f"metadata.{key}": value for key, value in (metadata or {}).items()}
-    if kind is not None:
-        conditions["kind"] = kind
-    return {"filter": json.dumps(conditions)} if conditions else {}
+def list_filter_params(*, metadata: Mapping[str, ElemMatchScalar] | None = None, **conditions: object) -> QueryParams:
+    """Return the ``filter`` query param for a task/taskset listing, or nothing when unfiltered.
+
+    ``conditions`` are filter fields; ``None`` values are left out.
+    """
+    filters: dict[str, object] = {f"metadata.{key}": value for key, value in (metadata or {}).items()}
+    filters.update({field: value for field, value in conditions.items() if value is not None})
+    return {"filter": json.dumps(filters)} if filters else {}
+
+
+def like_filter(text: str | None) -> dict[str, str] | None:
+    return None if text is None else {"$like": text}
 
 
 def project_params(project: str | None) -> QueryParams | None:

@@ -343,3 +343,36 @@ class TestElemMatch:
     def test_rejects_criteria_that_are_not_a_non_empty_scalar_map(self, criteria):
         with pytest.raises(ValueError, match=r"\$elemMatch"):
             evaluate(cmp(FilterOperator.ELEM_MATCH, "data.meta", criteria), Entity(data={"meta": self.META}))
+
+
+class TestContainsPrefix:
+    def test_matches_an_element_starting_with_the_prefix(self):
+        op = cmp(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-a#")
+        assert evaluate(op, Entity(data={"members": ["ws/task-a#d1"]})) is True
+
+    def test_prefix_is_anchored_at_the_element_start(self):
+        op = cmp(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-a#")
+        assert evaluate(op, Entity(data={"members": ["other-ws/task-a#d1"]})) is False
+
+    @pytest.mark.parametrize("members", [None, "ws/task-a#d1", [{"ref": "ws/task-a#d1"}]])
+    def test_non_array_or_non_string_elements_do_not_match(self, members):
+        op = cmp(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-a#")
+        assert evaluate(op, Entity(data={"members": members})) is False
+
+
+class TestHasKey:
+    def test_matches_a_key_with_dots_as_one_key(self):
+        op = cmp(FilterOperator.HAS_KEY, "data.tags", "v1.2")
+        assert evaluate(op, Entity(data={"tags": {"v1.2": 1}})) is True
+        assert evaluate(op, Entity(data={"tags": {"v1": {"2": 1}}})) is False
+
+    @pytest.mark.parametrize("tags", [None, {"stable": None}, ["stable"]])
+    def test_absent_null_or_non_object_does_not_match(self, tags):
+        assert evaluate(cmp(FilterOperator.HAS_KEY, "data.tags", "stable"), Entity(data={"tags": tags})) is False
+
+
+@pytest.mark.parametrize("operator", [FilterOperator.CONTAINS_PREFIX, FilterOperator.HAS_KEY])
+@pytest.mark.parametrize("value", ["", 3, None, 'has"quote'])
+def test_string_operators_reject_non_string_or_quoted_operands(operator, value):
+    with pytest.raises(ValueError, match="non-empty string"):
+        evaluate(cmp(operator, "data.x", value), Entity(data={"x": []}))

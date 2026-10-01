@@ -412,3 +412,16 @@ async def test_async_list_sends_kind_and_metadata_filter() -> None:
     await resource.list(kind="evaluator", metadata={"suite": "smoke"})
 
     assert json.loads(recorder.requests[0].url.params["filter"]) == {"kind": "evaluator", "metadata.suite": "smoke"}
+
+
+def test_sync_list_sends_harbor_id_intent_metric_and_tag_filters() -> None:
+    resource, recorder = _sync_resource(_page([]))
+
+    resource.list(native_task_id="hello-world", intent_contains="math", metric="default/judge", tag="v1.2")
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {
+        "native_task_id": "hello-world",
+        "intent": {"$like": "math"},
+        "metrics": "default/judge",
+        "tags": "v1.2",
+    }
