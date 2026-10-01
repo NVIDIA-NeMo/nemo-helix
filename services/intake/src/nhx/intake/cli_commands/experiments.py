@@ -8,31 +8,32 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, cast
 
 import typer
-from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
-from nemo_helix_ext.cli.core.code_generator import handle_code_generation
-from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_ext.cli.core.errors import handle_errors
-from nemo_helix_ext.cli.core.formatters import (
-    Column,
-    check_output_columns_with_format,
-    format_output,
-    validate_stream_output_format,
-)
-from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_helix_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
-from nemo_helix_ext.cli.core.stdin_utils import (
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_input import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_helix_ext.cli.core.types import (
+from nemo_helix_plugin.cli_kwargs import build_kwargs, merge_filter_dict
+from nemo_helix_plugin.cli_options import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
     NoTruncateOption,
     OutputColumnsOption,
     StreamOutputOption,
 )
+from nemo_helix_plugin.cli_output import (
+    Column,
+    check_output_columns_with_format,
+    format_output,
+    validate_stream_output_format,
+)
+from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_helix_plugin.cli_state import cli_state
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.intake.types import (
     ExperimentCreateRequest,
@@ -179,7 +180,7 @@ def create_experiments(
         body=body,
         exist_ok=resolved_exist_ok or None,
     )
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_experiment", kwargs, resolved_output_format, state):
@@ -205,7 +206,7 @@ def delete_experiments(
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
     """Delete Experiment"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     state.typed_client(IntakeClient).delete_experiment(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
@@ -255,7 +256,7 @@ def list_experiments(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Experiments"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -319,7 +320,7 @@ def retrieve_experiments(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Experiment"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(name=name, workspace=workspace)
@@ -442,7 +443,7 @@ def update_experiments(
     )
     kwargs = build_kwargs(name=path_name, workspace=input_payload.get("workspace"), body=body)
 
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "update_experiment", kwargs, resolved_output_format, state):
