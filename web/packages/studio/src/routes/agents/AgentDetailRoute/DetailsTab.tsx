@@ -9,7 +9,6 @@ import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
-import { AnalysisConfigPanel } from '@studio/routes/agents/AgentDetailRoute/analysis/AnalysisConfigPanel';
 import { ConfigValue } from '@studio/routes/agents/AgentDetailRoute/ConfigValue';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
@@ -73,11 +72,6 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
 
       <SourcePanel workspace={workspace} agentName={agent?.name ?? agentName} />
 
-      <AnalysisConfigPanel
-        workspace={agent?.workspace ?? workspace}
-        agent={agent?.name ?? agentName}
-      />
-
       {workflow && (
         <DetailPanel title="Workflow">
           <ConfigEntries data={workflow} />
@@ -97,7 +91,7 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
       )}
 
       {extraEntries.length > 0 && (
-        <DetailPanel title="Additional configuration">
+        <DetailPanel title="Additional configuration" defaultCollapsed>
           <Stack gap="2">
             {extraEntries.map(([key, value]) => (
               <ConfigValue key={key} label={key} value={value} />
