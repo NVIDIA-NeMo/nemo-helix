@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  getAgentsListRoute,
   getEvaluationBenchmarkDetailsRoute,
   getEvaluationBenchmarkListRoute,
   getEvaluationMetricDetailsRoute,
@@ -95,6 +96,20 @@ describe('getWorkspaceInferenceProvidersRoute', () => {
   it('appends create=true and preset query params when a preset is provided', () => {
     expect(getWorkspaceInferenceProvidersRoute(workspace, { preset: 'build' })).toBe(
       '/workspaces/test-workspace/inference-providers?create=true&preset=build'
+    );
+  });
+});
+
+describe('getAgentsListRoute', () => {
+  const workspace = 'test-workspace';
+
+  it('returns base agents list path when no options are given', () => {
+    expect(getAgentsListRoute(workspace)).toBe('/workspaces/test-workspace/agents');
+  });
+
+  it('appends create=true when the register dialog should open', () => {
+    expect(getAgentsListRoute(workspace, { register: true })).toBe(
+      '/workspaces/test-workspace/agents?create=true'
     );
   });
 });

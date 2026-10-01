@@ -65,6 +65,15 @@ describe('QuickstartSection', () => {
     expect(screen.getByText('Observability')).toBeInTheDocument();
   });
 
+  it('links Upload an Agent straight to the register agent dialog', () => {
+    renderQuickstartSection();
+
+    expect(screen.getByRole('link', { name: 'Upload an Agent' })).toHaveAttribute(
+      'href',
+      '/workspaces/my-workspace/agents?create=true'
+    );
+  });
+
   it('hides a single action whose backing feature flag is disabled, keeping the panel', () => {
     renderQuickstartSection({ optimizerEnabled: false });
 

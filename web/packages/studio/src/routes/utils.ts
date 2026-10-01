@@ -650,8 +650,9 @@ export const getModelChatRoute = (model: NamedEntityRef) => {
   return generatePath(ROUTES.models.modelChat, { modelNamespace, modelName });
 };
 
-export const getAgentsListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.agentsList, { workspace });
+export const getAgentsListRoute = (workspace: string, options?: { register?: boolean }) => {
+  const base = generatePath(ROUTES.workspace.agentsList, { workspace });
+  return options?.register ? `${base}?create=true` : base;
 };
 
 export const getAssistantChatRoute = (workspace: string) => {

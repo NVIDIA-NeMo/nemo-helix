@@ -15,9 +15,10 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { CloneAgentModal } from '@studio/routes/agents/AgentsListRoute/CloneAgentModal';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
-import { getAgentDetailRoute } from '@studio/routes/utils';
+import { getAgentDetailRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { CircleAlert } from 'lucide-react';
-import { type FC, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router';
 
 export const AgentsListRoute: FC = () => {
   const pluginsLoaded = usePluginsLoaded();
@@ -25,9 +26,20 @@ export const AgentsListRoute: FC = () => {
   const agentsInstalled = usePluginInstalled('agents');
   const workspace = useWorkspaceFromPath();
   const openRow = useRowNavigation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Read the deep-link param once on mount (e.g. from the dashboard Quickstart)
+  const openRegisterOnMount = useRef(searchParams.get('create') === 'true');
   const [createDeploymentAgent, setCreateDeploymentAgent] = useState<string | null>(null);
-  const [isNewAgentOpen, setNewAgentOpen] = useState(false);
+  const [isNewAgentOpen, setNewAgentOpen] = useState(openRegisterOnMount.current);
   const [cloneSource, setCloneSource] = useState<AgentTableRow | null>(null);
+
+  // Clean up the URL param after consuming it
+  useEffect(() => {
+    if (openRegisterOnMount.current) {
+      navigate(getAgentsListRoute(workspace), { replace: true });
+    }
+  }, [navigate, workspace]);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Agents' }],
