@@ -335,6 +335,12 @@ export const handlers = [
   http.options(`${PLATFORM_BASE_URL}/v1/jobs`, () => new HttpResponse(null, { status: 200 })),
 
   // Jobs V2 (Platform)
+  http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`, () =>
+    HttpResponse.json([
+      { provider: 'cpu', profile: 'default', backend: 'docker' },
+      { provider: 'subprocess', profile: 'default', backend: 'subprocess' },
+    ])
+  ),
   http.get<never, never, HelixJobResponsesPage>(
     `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`,
     () => {

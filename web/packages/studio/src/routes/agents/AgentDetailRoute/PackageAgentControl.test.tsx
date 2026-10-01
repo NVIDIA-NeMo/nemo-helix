@@ -13,6 +13,7 @@ const workspace = workspace1.workspace;
 const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
+const profilesUrl = `${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`;
 
 const renderControl = (props?: {
   canPackage?: boolean;
@@ -325,5 +326,47 @@ describe('PackageAgentControl', () => {
 
     expect(onImageAvailable).not.toHaveBeenCalled();
     expect(screen.getByText(/rebuild to pick up newer changes/)).toBeInTheDocument();
+  });
+
+  describe('without a subprocess execution profile', () => {
+    beforeEach(() => {
+      server.use(
+        http.get(profilesUrl, () =>
+          HttpResponse.json([{ provider: 'cpu', profile: 'default', backend: 'kubernetes_job' }])
+        )
+      );
+    });
+
+    it('disables the build and shows the local build commands', async () => {
+      await openControl();
+      const dialog = screen.getByRole('dialog');
+
+      expect(await within(dialog).findByText(/can't build images/)).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+      expect(
+        within(dialog).getByText(/nemo agents deploy --agent my-agent --mode k8s/)
+      ).toBeInTheDocument();
+      expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
+    });
+
+    it('keeps the Platform-managed message for agents that cannot be packaged', async () => {
+      await openControl({ canPackage: false });
+
+      expect(
+        await screen.findByText(/Packaging is available for Platform-managed agents/)
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/can't build images/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('allows the build when the execution profiles cannot be read', async () => {
+    server.use(http.get(profilesUrl, () => HttpResponse.json({}, { status: 403 })));
+    await openControl();
+    const dialog = screen.getByRole('dialog');
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeEnabled()
+    );
+    expect(within(dialog).queryByText(/can't build images/)).not.toBeInTheDocument();
   });
 });

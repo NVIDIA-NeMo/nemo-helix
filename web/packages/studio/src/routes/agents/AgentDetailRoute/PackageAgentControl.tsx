@@ -19,6 +19,7 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import { useCanBuildAgentImages } from '@studio/api/agents/useCanBuildAgentImages';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { JOBS_ENABLED } from '@studio/constants/environment';
@@ -26,6 +27,12 @@ import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
+
+const localBuildCommands = (agentName: string) =>
+  [
+    'nemo agents package --agent agent.yaml --publish --registry <registry>',
+    `nemo agents deploy --agent ${agentName} --mode k8s --image <pushed image>`,
+  ].join('\n');
 
 interface PackageAgentControlProps {
   workspace: string;
@@ -81,6 +88,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
+  const platformCannotBuild = useCanBuildAgentImages() === false;
 
   useEffect(() => {
     // Only a build watched on this page load. A restored tag can be months old
@@ -133,7 +141,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         submitButtonText={hasImage ? 'Rebuild' : 'Build image'}
         cancelButtonText="Close"
         loading={isSubmitting}
-        submitDisabled={!canPackage || isRunning}
+        submitDisabled={!canPackage || isRunning || platformCannotBuild}
         onClose={() => setIsOpen(false)}
         onSubmit={(e) => {
           e.preventDefault();
@@ -151,6 +159,27 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
             Packaging is available for Platform-managed agents. Build a NAT workflow image with{' '}
             <code>nemo agents package</code>.
           </Text>
+        ) : null}
+
+        {canPackage && platformCannotBuild ? (
+          <Stack gap="density-sm">
+            <Text className="text-secondary" kind="body/regular/sm">
+              This platform can&apos;t build images: packaging runs Docker on the platform host,
+              which this deployment doesn&apos;t provide. Build and push the image from your
+              machine, then deploy it:
+            </Text>
+            <CodeSnippetRoot>
+              <CodeSnippetActions>
+                <CopyButton
+                  text={localBuildCommands(agentName)}
+                  color="neutral"
+                  kind="tertiary"
+                  size="tiny"
+                />
+              </CodeSnippetActions>
+              <CodeSnippetCode value={localBuildCommands(agentName)} />
+            </CodeSnippetRoot>
+          </Stack>
         ) : null}
 
         {submitError ? (
@@ -264,7 +293,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         {/* Stays mounted once an image exists: the registry is remembered and a
             Rebuild pushes there again, so hiding it would push somewhere the
             user cannot see. */}
-        {canPackage && !isBusy ? (
+        {canPackage && !isBusy && !platformCannotBuild ? (
           <Accordion
             className="[&>div]:border-b-0"
             value={pushOptionsOpen}
