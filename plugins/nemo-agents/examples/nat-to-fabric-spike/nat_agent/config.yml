@@ -1,0 +1,100 @@
+# NAT (NVIDIA NeMo Agent Toolkit) source agent for the NAT-to-Fabric transpile spike.
+#
+# Topology (deliberately non-trivial):
+#
+#   reasoning_agent (workflow entry)
+#     └─ augmented_fn -> research_orchestrator (react_agent)
+#          ├─ math_agent  (tool_calling_agent) -> mcp_math  (streamable-http, ${ENV} url)
+#          ├─ time_agent  (tool_calling_agent) -> mcp_time  (stdio) + current_timezone (builtin)
+#          ├─ jira_agent  (tool_calling_agent) -> mcp_jira  (streamable-http, OAuth2 auth)
+#          └─ code_generation (builtin)
+#
+# This exercises: a reasoning wrapper, an orchestrator, three sub-agents used as
+# tools, two builtin tools, and three MCP servers across all three auth cases
+# (none, env-var url, OAuth2). The OAuth2 case is the one Fabric's Deep Agents
+# adapter cannot carry today, so the transpiler flags it instead of dropping it.
+
+llms:
+  orchestrator_llm:
+    _type: nim
+    model_name: nvidia/llama-3.3-nemotron-super-49b-v1
+    thinking: true
+    temperature: 0.0
+    max_tokens: 2000
+  worker_llm:
+    _type: nim
+    model_name: nvidia/nemotron-3-nano-30b-a3b
+    temperature: 0.0
+    max_tokens: 1024
+
+function_groups:
+  mcp_time:
+    _type: mcp_client
+    server:
+      transport: stdio
+      command: python
+      args: ["-m", "mcp_server_time", "--local-timezone=America/Los_Angeles"]
+
+  mcp_math:
+    _type: mcp_client
+    server:
+      transport: streamable-http
+      url: ${MATH_MCP_URL}
+    include:
+      - calculator__add
+      - calculator__subtract
+      - calculator__multiply
+      - calculator__divide
+
+  mcp_jira:
+    _type: mcp_client
+    server:
+      transport: streamable-http
+      url: ${CORPORATE_MCP_JIRA_URL}
+      auth_provider: mcp_oauth2_jira
+
+authentication:
+  mcp_oauth2_jira:
+    _type: mcp_oauth2
+    server_url: ${CORPORATE_MCP_JIRA_URL}
+    redirect_uri: ${NAT_REDIRECT_URI:-http://localhost:8000/auth/redirect}
+
+functions:
+  current_timezone:
+    _type: current_timezone
+
+  code_generation:
+    _type: code_generation
+    programming_language: Python
+    description: "Generate Python code for a task. Use this for any code-writing request."
+    llm_name: worker_llm
+
+  math_agent:
+    _type: tool_calling_agent
+    tool_names: [mcp_math]
+    llm_name: worker_llm
+    description: "Handles arithmetic and calculation requests."
+
+  time_agent:
+    _type: tool_calling_agent
+    tool_names: [mcp_time, current_timezone]
+    llm_name: worker_llm
+    description: "Answers date and time questions. Resolve the timezone before asking for the time."
+
+  jira_agent:
+    _type: tool_calling_agent
+    tool_names: [mcp_jira]
+    llm_name: worker_llm
+    description: "Looks up and summarizes Jira issues."
+
+  research_orchestrator:
+    _type: react_agent
+    tool_names: [math_agent, time_agent, jira_agent, code_generation]
+    llm_name: orchestrator_llm
+    verbose: true
+
+workflow:
+  _type: reasoning_agent
+  llm_name: orchestrator_llm
+  augmented_fn: research_orchestrator
+  verbose: true
