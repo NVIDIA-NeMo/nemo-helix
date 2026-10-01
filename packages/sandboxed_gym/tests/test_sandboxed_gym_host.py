@@ -349,6 +349,23 @@ def test_sandbox_runtime_defaults_respect_an_explicit_uv_pip_set_python():
     assert apply_sandbox_runtime_defaults({"uv_pip_set_python": False})["uv_pip_set_python"] is False
 
 
+def test_sandbox_runtime_defaults_reuse_the_image_prebuilt_venvs():
+    """Reinstalling into a prebuilt venv reaches for the package index, which sandbox egress denies.
+
+    The failure is every Gym server dying with "Process `mcqa` finished unexpectedly!" and no reason.
+    The key is ``nemo_gym.global_config.SKIP_VENV_IF_PRESENT_KEY_NAME``; Gym is not importable here.
+    """
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({})["skip_venv_if_present"] is True
+
+
+def test_sandbox_runtime_defaults_respect_an_explicit_skip_venv_if_present():
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({"skip_venv_if_present": False})["skip_venv_if_present"] is False
+
+
 def test_gym_host_spec_defers_to_the_image_entrypoint_when_omitted():
     # The orchestrator cannot name a path inside the host image: resolving one from its own
     # installation would describe its own container. With no entrypoint configured the image
