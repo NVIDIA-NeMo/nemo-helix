@@ -221,10 +221,26 @@ legacy` (or another installed strategy), staging remote bundles first with
 - **Hermes trials can omit the `relay_atif` evidence descriptor.** Agent-eval
   trials run through the NeMo Fabric Hermes adapter sometimes return without the
   raw `relay_atif` descriptor, even though the ATIF trajectory was written.
-  Scores, token measurements, and the `trace` descriptor are unaffected. Read the
-  trajectory through the `trace:atif` descriptor instead, which points at the
-  same file. This will be fixed in a later release that moves to NeMo Fabric
-  0.4.
+  Scores, token measurements, and the `trace` descriptor are unaffected. This
+  will be fixed in a later release that moves to NeMo Fabric 0.4.
+
+  As a workaround, read the trajectory through the `trace:atif` descriptor,
+  which points at the same file:
+
+  ```python
+  from pathlib import Path
+
+  from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
+  from nemo_evaluator_sdk.values.atif import Trajectory
+  from nemo_evaluator_sdk.values.evidence import read_atif
+
+
+  def trial_trajectory(trial: AgentEvalTrial) -> Trajectory | None:
+      assert trial.evidence is not None
+      atif = trial.evidence.descriptors["trace:atif"]  # instead of "relay_atif"
+      assert atif.ref is not None
+      return read_atif(Path(atif.ref))
+  ```
 
 ## Links
 
