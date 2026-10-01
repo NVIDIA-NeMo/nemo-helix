@@ -47,6 +47,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalTaskInput,
     AgentTarget,
+    HarborBuiltinAgentSource,
     HarborRunnerTarget,
     ModelTarget,
 )
@@ -433,7 +434,7 @@ def _harbor_eval_input_spec() -> dict:
                 inputs=TaskInputs(instruction="Reply with DONE."),
             )
         ],
-        target=HarborRunnerTarget(agent_name="oracle"),
+        target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
     ).model_dump(mode="json")
 
 

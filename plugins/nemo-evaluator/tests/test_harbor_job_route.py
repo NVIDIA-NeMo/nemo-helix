@@ -114,7 +114,7 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
         "/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs",
         json={
             "profile": "harbor-test",
-            "spec": {"tasks": public_tasks, "target": {"kind": "harbor", "agent_name": "oracle"}},
+            "spec": {"tasks": public_tasks, "target": {"kind": "harbor", "source": {"name": "oracle"}}},
         },
     )
     if invalid:

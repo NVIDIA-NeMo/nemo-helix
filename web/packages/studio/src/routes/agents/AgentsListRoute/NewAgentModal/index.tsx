@@ -350,9 +350,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         open={open}
         onClose={resetAndClose}
         className="w-[800px] max-w-[90vw]"
-        title="Instrument an agent with NeMo Helix"
-        instruction="Integrated agents allow users to evaluate, optimize, and deploy agents."
-        submitButtonText={replaceOrphan ? 'Replace and create' : 'Create'}
+        title="Register an agent with NeMo Helix"
+        submitButtonText={replaceOrphan ? 'Replace and register' : 'Register'}
         onSubmit={(event) => {
           // The traced-agent choice is not part of the upload form, so it submits on its own
           // rather than through a resolver that would reject the empty name field.
@@ -378,10 +377,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         }
       >
         <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
-          <TabsList aria-label="Ways to instrument an agent">
-            <TabsTrigger value="upload">Upload agent</TabsTrigger>
-            <TabsTrigger value="github">GitHub repository</TabsTrigger>
-            <TabsTrigger value="imported-traces">Create from traces</TabsTrigger>
+          <TabsList aria-label="Ways to register an agent">
+            <TabsTrigger value="upload">Register with code upload</TabsTrigger>
+            <TabsTrigger value="github">Register from GitHub</TabsTrigger>
+            <TabsTrigger value="imported-traces">Register from traces</TabsTrigger>
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
 

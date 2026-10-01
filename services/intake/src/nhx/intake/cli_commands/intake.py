@@ -8,35 +8,36 @@ from __future__ import annotations
 from typing import Annotated, Literal, cast
 
 import typer
-from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
-from nemo_helix_ext.cli.core.code_generator import handle_code_generation
-from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_ext.cli.core.errors import handle_errors
-from nemo_helix_ext.cli.core.formatters import (
-    Column,
-    check_output_columns_with_format,
-    format_output,
-    validate_stream_output_format,
-)
-from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_helix_ext.cli.core.pagination import (
-    PaginationType,
-    collect_offset_pages,
-    warn_if_more_pages,
-)
-from nemo_helix_ext.cli.core.stdin_utils import (
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_input import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_helix_ext.cli.core.types import (
+from nemo_helix_plugin.cli_kwargs import build_kwargs, merge_filter_dict
+from nemo_helix_plugin.cli_options import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
     NoTruncateOption,
     OutputColumnsOption,
     StreamOutputOption,
 )
+from nemo_helix_plugin.cli_output import (
+    Column,
+    check_output_columns_with_format,
+    format_output,
+    validate_stream_output_format,
+)
+from nemo_helix_plugin.cli_pagination import (
+    PaginationType,
+    collect_offset_pages,
+    warn_if_more_pages,
+)
+from nemo_helix_plugin.cli_state import CLIState, cli_state
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.intake.client import IntakeClient
 from nemo_helix_plugin.intake.types import (
     ANNOTATION_INPUT_ADAPTER,
@@ -115,7 +116,7 @@ def _resolve_columns(columns: str | None) -> str | list[Column] | None:
     return columns
 
 
-def _format_entity(state: CLIContext, result: object, resolved_output_format: str) -> None:
+def _format_entity(state: CLIState, result: object, resolved_output_format: str) -> None:
     format_output(
         result,
         is_list=False,
@@ -176,7 +177,7 @@ def get_metrics_traces(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Trace Metrics"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     query_params = cast(
@@ -257,7 +258,7 @@ def list_traces(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Traces"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -319,7 +320,7 @@ def retrieve_traces(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Trace"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     query_params = cast(RetrieveTraceQueryParams | None, list_query_params(mode=mode))
@@ -400,7 +401,7 @@ def list_spans(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Spans"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -467,7 +468,7 @@ def retrieve_spans(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Span"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(span_id=span_id, workspace=workspace)
@@ -542,7 +543,7 @@ def list_groups(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Span Groups"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -611,7 +612,7 @@ def list_span_evaluator_results(
     stream: StreamOutputOption = False,
 ) -> None:
     """List Evaluator Results For Span"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -720,7 +721,7 @@ def create_annotations(
     # --exist-ok has nothing to resolve against and is accepted without effect.
     body = ANNOTATION_INPUT_ADAPTER.validate_python(without_keys(input_payload, {"workspace", "exist_ok"}))
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_annotation", kwargs, resolved_output_format, state):
@@ -739,7 +740,7 @@ def delete_annotations(
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
     """Delete Annotation"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     state.typed_client(IntakeClient).delete_annotation(annotation_id=annotation_id, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
@@ -784,7 +785,7 @@ def list_annotations(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Annotations"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -840,7 +841,7 @@ def retrieve_annotations(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Annotation"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(annotation_id=annotation_id, workspace=workspace)
@@ -964,7 +965,7 @@ def create_evaluator_results(
         command_name="intake evaluator-results create",
     )
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_evaluator_result", kwargs, resolved_output_format, state):
@@ -1012,7 +1013,7 @@ def list_evaluator_results(
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
 ) -> None:
     """List Evaluator Results"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -1069,7 +1070,7 @@ def retrieve_evaluator_results(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Evaluator Result"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(evaluator_result_id=evaluator_result_id, workspace=workspace)
@@ -1097,7 +1098,7 @@ def retrieve_sessions(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get Session"""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(id=id, workspace=workspace)
@@ -1206,7 +1207,7 @@ def create_atif(
         AtifCreateRequest, input_payload, exclude={"workspace"}, command_name="intake ingest atif create"
     )
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_atif", kwargs, resolved_output_format, state):
@@ -1335,7 +1336,7 @@ def create_chat_completions(
         command_name="intake ingest chat-completions create",
     )
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_chat_completion", kwargs, resolved_output_format, state):
@@ -1406,7 +1407,7 @@ def create_spans(
         DirectSpansIngestRequest, input_payload, exclude={"workspace"}, command_name="intake ingest spans create"
     )
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(IntakeClient, "create_spans", kwargs, resolved_output_format, state):

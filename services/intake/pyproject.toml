@@ -30,12 +30,6 @@ dependencies = [
 ]
 version = "0.0.0"
 
-[project.optional-dependencies]
-# The `nemo intake` / `nemo experiments` command groups live in this package but
-# build on the CLI framework in nemo-helix-ext. The server image does not
-# install them; the nemo-helix wrapper (which always carries the CLI) does.
-cli = ["nemo-helix-ext"]
-
 [project.scripts]
 intake-server = "nhx.intake.main:run_standalone"
 
@@ -47,6 +41,8 @@ experiments = "nhx.intake.cli:ExperimentsCLI"
 # Intake has no separate task containers - all deps are in main dependencies
 
 dev = [
+    # The CLI tests drive the command groups through the real `nemo` CLI state.
+    "nemo-helix-ext",
     "nhx-testing",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.21.0, <2.0.0",

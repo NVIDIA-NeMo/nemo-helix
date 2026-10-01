@@ -522,7 +522,7 @@ cat > harbor-eval.json <<'JSON'
   "tasks": "default/suite",
   "target": {
     "kind": "harbor",
-    "agent_name": "oracle",
+    "source": {"name": "oracle"},
     "reward_key": "reward"
   }
 }
@@ -586,6 +586,10 @@ completed
   as well for a loose local source tree. Overrides `agent_name`. Platform-submitted jobs do not
   currently accept `agent_dir`; see [Standalone and submitted custom agents](#standalone-and-submitted-custom-agents).
 - **`agent_model_name`** — the model slug handed to the agent.
+
+  On the platform's `HarborRunnerTarget` these three are one field, `source`, so a spec names exactly
+  one agent: `{"name": "oracle", "model_name": ...}` for a built-in agent or
+  `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own.
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
@@ -631,7 +635,7 @@ The shared agent fields map onto Harbor's `AgentConfig`, which Harbor's agent fa
 the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `AgentConfig` field:
 
 ```text
-HarborRunnerTarget / HarborRuntimeConfig
+HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three agent lines)
         │
         ├─ agent_import_path   → Harbor AgentConfig.import_path
         ├─ agent_model_name    → Harbor AgentConfig.model_name
@@ -679,7 +683,7 @@ source directory:
 {
   "target": {
     "kind": "harbor",
-    "agent_import_path": "nemo_fabric.integrations.harbor:FabricAgent",
+    "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
       "fabric_package": "nemo-fabric[codex]==0.3.0"
@@ -698,12 +702,11 @@ inside each task container, so neither an `agent_import_path` nor wrapper-source
 For a direct plugin job target:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
 from nemo_evaluator_sdk import SecretRef
 
 target = HarborRunnerTarget(
-    agent_name="codex",
-    agent_model_name="gpt-5.6-luna",
+    source=HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna"),
     agent_kwargs={"version": "0.153.0"},
     env_secrets={
         "OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key"),
