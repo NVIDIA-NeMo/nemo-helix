@@ -30,6 +30,7 @@ from typing import Any
 
 from sandboxed_gym.environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
+    AdapterWheelsV1Package,
     EnvironmentPackage,
     EnvironmentPackageError,
     WheelsV1Package,
@@ -479,15 +480,15 @@ def _load_runtime_environment_package(
 def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_path: str) -> None:
     """Install a wheels-v1 environment's vendored dependencies, with no package-index access.
 
-    Other package formats are a no-op. When the validated package is ``wheels-v1``, every wheel
-    under its wheelhouse is installed into the writable work mount, so nothing is fetched from a
-    package index during this installation.
+    Other package formats are a no-op. When the validated package is ``wheels-v1`` or
+    ``adapter-wheels-v1``, every wheel under its wheelhouse is installed into the writable work
+    mount, so nothing is fetched from a package index during this installation.
 
     The wheels are installed into the writable work directory instead of an existing virtualenv.
     ``PYTHONPATH`` exposes them to Gym's child processes, while ``sys.path`` exposes them to the
     already-running host process.
     """
-    if not isinstance(package, WheelsV1Package):
+    if not isinstance(package, (WheelsV1Package, AdapterWheelsV1Package)):
         return
 
     wheels_dir = str(package.wheelhouse_path)
