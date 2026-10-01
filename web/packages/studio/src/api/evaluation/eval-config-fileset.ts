@@ -40,7 +40,7 @@ export const SAMPLE_EVAL_YAML = `# react-eval.yml — bundled sample seeded by t
 llms:
   llm:
     _type: openai
-    model_name: nvidia-nemotron-3-nano-30b-a3b
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
     temperature: 0.0
     max_tokens: 1024
 

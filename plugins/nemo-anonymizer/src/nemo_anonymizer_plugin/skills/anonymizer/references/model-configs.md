@@ -59,7 +59,7 @@ Only emit a section if you actually want to override its defaults — overrides 
 model_configs:
   - {alias: gliner-pii-detector, provider: nvidia-build, model: nvidia/gliner-pii}
   - {alias: gpt-oss-120b, provider: nvidia-build, model: openai/gpt-oss-120b}
-  - {alias: nemotron-30b-thinking, provider: nvidia-build, model: nvidia/nemotron-3-nano-30b-a3b}
+  - {alias: nemotron-30b-thinking, provider: nvidia-build, model: nvidia/nemotron-3.5-lightning-30b-a3b}
 ```
 
 `Redact`/`Annotate`/`Hash` don't require a replacement model, but the default detection selection references the detection aliases above. `Substitute` and `rewrite` can use the same pool unless the user wants to pin different aliases through `selected_models`.
