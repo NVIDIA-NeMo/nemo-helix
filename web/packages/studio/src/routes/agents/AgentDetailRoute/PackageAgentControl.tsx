@@ -20,7 +20,13 @@ import {
   TextInput,
 } from '@nvidia/foundations-react-core';
 import { useCanBuildAgentImages } from '@studio/api/agents/useCanBuildAgentImages';
-import { useImageDeploymentModes } from '@studio/api/agents/useImageDeploymentModes';
+import {
+  DEPLOYMENT_MODE_LABELS,
+  type DeploymentMode,
+  enabledImageModes,
+  IMAGE_DEPLOYMENT_MODES,
+  useDeploymentModes,
+} from '@studio/api/agents/useDeploymentModes';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { JOBS_ENABLED } from '@studio/constants/environment';
@@ -29,11 +35,16 @@ import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
-const localBuildCommands = (agentName: string, mode: string) =>
+const localBuildCommands = (agentName: string, mode: DeploymentMode) =>
   [
-    'nemo agents package --agent agent.yaml --publish --registry <registry>',
-    `nemo agents deploy --agent ${agentName} --mode ${mode} --image <pushed image>`,
+    mode === 'k8s'
+      ? 'nemo agents package --agent agent.yaml --publish --registry REGISTRY'
+      : 'nemo agents package --agent agent.yaml',
+    `nemo agents deploy --agent ${agentName} --mode ${mode} --image IMAGE`,
   ].join('\n');
+
+const modeLabels = (modes: readonly DeploymentMode[]) =>
+  modes.map((mode) => DEPLOYMENT_MODE_LABELS[mode]).join(' or ');
 
 interface PackageAgentControlProps {
   workspace: string;
@@ -89,8 +100,10 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
-  const platformCannotBuild = useCanBuildAgentImages() === false;
-  const imageModes = useImageDeploymentModes(workspace);
+  const platformCannotBuild = useCanBuildAgentImages() === 'unsupported';
+  const deploymentModes = useDeploymentModes(workspace);
+  const imageModes = enabledImageModes(deploymentModes);
+  const noImageMode = imageModes.length === 0;
 
   useEffect(() => {
     // Only a build watched on this page load. A restored tag can be months old
@@ -101,9 +114,12 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     }
   }, [isComplete, image, isRestored, onImageAvailable]);
 
-  if (imageModes?.length === 0) return null;
-
-  const fallbackCommands = localBuildCommands(agentName, imageModes?.[0] ?? 'k8s');
+  const showLocalBuild =
+    canPackage && platformCannotBuild && !noImageMode && deploymentModes.status !== 'loading';
+  const localCommands = localBuildCommands(
+    agentName,
+    deploymentModes.status === 'ready' ? imageModes[0] : 'k8s'
+  );
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
@@ -143,11 +159,13 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
       <FormModal
         open={isOpen}
         title="Container image"
-        instruction="Build an image for this agent to deploy it with Docker or Kubernetes."
+        instruction={`Build an image for this agent to deploy it with ${modeLabels(
+          noImageMode ? IMAGE_DEPLOYMENT_MODES : imageModes
+        )}.`}
         submitButtonText={hasImage ? 'Rebuild' : 'Build image'}
         cancelButtonText="Close"
         loading={isSubmitting}
-        submitDisabled={!canPackage || isRunning || platformCannotBuild}
+        submitDisabled={!canPackage || isRunning || platformCannotBuild || noImageMode}
         onClose={() => setIsOpen(false)}
         onSubmit={(e) => {
           e.preventDefault();
@@ -167,18 +185,26 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           </Text>
         ) : null}
 
-        {canPackage && platformCannotBuild ? (
+        {canPackage && noImageMode ? (
+          <Text className="text-secondary" kind="body/regular/sm">
+            This platform has no Docker or Kubernetes deployment mode enabled, so an image built
+            here couldn&apos;t be deployed. Ask your platform admin to configure a Docker or
+            Kubernetes executor.
+          </Text>
+        ) : null}
+
+        {showLocalBuild ? (
           <Stack gap="density-sm">
             <Text className="text-secondary" kind="body/regular/sm">
-              This platform can&apos;t build images: packaging runs Docker on the platform host,
-              which this deployment doesn&apos;t provide. Build and push the image from your
-              machine, then deploy it:
+              This platform can&apos;t build images: builds run on the platform host under a
+              subprocess job profile, and this platform doesn&apos;t register one. Build the image
+              on your machine, then deploy it, replacing REGISTRY and IMAGE:
             </Text>
             <CodeSnippetRoot>
               <CodeSnippetActions>
-                <CopyButton text={fallbackCommands} color="neutral" kind="tertiary" size="tiny" />
+                <CopyButton text={localCommands} color="neutral" kind="tertiary" size="tiny" />
               </CodeSnippetActions>
-              <CodeSnippetCode value={fallbackCommands} language="bash" />
+              <CodeSnippetCode value={localCommands} language="bash" />
             </CodeSnippetRoot>
           </Stack>
         ) : null}
@@ -294,7 +320,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         {/* Stays mounted once an image exists: the registry is remembered and a
             Rebuild pushes there again, so hiding it would push somewhere the
             user cannot see. */}
-        {canPackage && !isBusy && !platformCannotBuild ? (
+        {canPackage && !isBusy && !platformCannotBuild && !noImageMode ? (
           <Accordion
             className="[&>div]:border-b-0"
             value={pushOptionsOpen}

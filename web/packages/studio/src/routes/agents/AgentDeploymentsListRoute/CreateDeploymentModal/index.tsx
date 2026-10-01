@@ -14,6 +14,14 @@ import {
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Accordion, Stack } from '@nvidia/foundations-react-core';
+import {
+  DEPLOYMENT_MODE_LABELS,
+  type DeploymentMode,
+  type DeploymentModes,
+  enabledImageModes,
+  IMAGE_DEPLOYMENT_MODES,
+  useDeploymentModes,
+} from '@studio/api/agents/useDeploymentModes';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
@@ -31,10 +39,21 @@ const deploymentFormSchema = z.object({
 
 type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 
-const makeDefaultValues = (agent?: string, image?: string): DeploymentFormData => ({
+const DEPLOYMENT_MODE_ORDER: readonly DeploymentMode[] = ['subprocess', ...IMAGE_DEPLOYMENT_MODES];
+
+const defaultModeFor = (image: string | undefined, modes: DeploymentModes): DeploymentMode => {
+  const imageMode = enabledImageModes(modes)[0];
+  return image && AGENT_CONTAINER_DEPLOYMENTS_ENABLED && imageMode ? imageMode : 'subprocess';
+};
+
+const makeDefaultValues = (
+  agent: string | undefined,
+  image: string | undefined,
+  modes: DeploymentModes
+): DeploymentFormData => ({
   name: '',
   agent: agent ?? '',
-  deploymentMode: image && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? 'docker' : 'subprocess',
+  deploymentMode: defaultModeFor(image, modes),
   image: image ?? '',
 });
 
@@ -56,6 +75,12 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const deploymentModes = useDeploymentModes(workspace, { enabled: open });
+  const availableModes =
+    deploymentModes.status === 'ready'
+      ? DEPLOYMENT_MODE_ORDER.filter((mode) => deploymentModes.enabled.includes(mode))
+      : DEPLOYMENT_MODE_ORDER;
+  const hasImageMode = enabledImageModes(deploymentModes).length > 0;
 
   const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
     workspace,
@@ -101,14 +126,22 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     reset: resetForm,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(deploymentFormSchema),
-    defaultValues: makeDefaultValues(agentProp, initialImage),
+    defaultValues: makeDefaultValues(agentProp, initialImage, deploymentModes),
     disabled: isPending,
     mode: 'onChange',
   });
   const deploymentMode = watch('deploymentMode');
+
+  // The modes can arrive after the dialog opens; a default they rule out would be rejected on submit.
+  useEffect(() => {
+    if (deploymentModes.status === 'ready' && !deploymentModes.enabled.includes(deploymentMode)) {
+      setValue('deploymentMode', defaultModeFor(initialImage, deploymentModes));
+    }
+  }, [deploymentModes, deploymentMode, initialImage, setValue]);
 
   // Opened when a packaged tag is prefilled, so it is not hidden behind a
   // disclosure the user never opened.
@@ -121,15 +154,15 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   const wasOpen = useRef(open);
   useEffect(() => {
     if (open && !wasOpen.current) {
-      resetForm(makeDefaultValues(agentProp, initialImage));
+      resetForm(makeDefaultValues(agentProp, initialImage, deploymentModes));
       setAdvancedOpen(initialImage ? 'advanced' : undefined);
     }
     wasOpen.current = open;
-  }, [open, agentProp, initialImage, resetForm]);
+  }, [open, agentProp, initialImage, resetForm, deploymentModes]);
 
   const reset = () => {
     resetMutation();
-    resetForm(makeDefaultValues(agentProp, initialImage));
+    resetForm(makeDefaultValues(agentProp, initialImage, deploymentModes));
   };
 
   const resetAndClose = () => {
@@ -173,7 +206,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
             are the container path, so they sit behind a disclosure rather than in front
             of everyone — and the whole section is absent when the platform refuses
             container deployments, since there would be nothing advanced to choose. */}
-        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && (
+        {AGENT_CONTAINER_DEPLOYMENTS_ENABLED && hasImageMode && (
           <Accordion
             className="[&>div]:border-b-0"
             value={advancedOpen}
@@ -187,11 +220,10 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                   <Stack gap="density-lg" className="pt-density-md">
                     <ControlledSelect
                       useControllerProps={{ control, name: 'deploymentMode' }}
-                      items={[
-                        { value: 'subprocess', children: 'Subprocess' },
-                        { value: 'docker', children: 'Docker' },
-                        { value: 'k8s', children: 'Kubernetes' },
-                      ]}
+                      items={availableModes.map((mode) => ({
+                        value: mode,
+                        children: DEPLOYMENT_MODE_LABELS[mode],
+                      }))}
                       formFieldProps={{
                         slotLabel: 'Runtime',
                         slotInfo:

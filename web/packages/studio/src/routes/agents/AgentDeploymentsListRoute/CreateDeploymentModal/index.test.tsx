@@ -56,6 +56,19 @@ const captureCreate = (): { body?: CapturedDeployment } => {
 
 const PACKAGED_IMAGE = 'nemo-agents/default/my-agent:1.0';
 
+const mockEnabledModes = (...enabled: string[]) =>
+  server.use(
+    http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`, () =>
+      HttpResponse.json({
+        data: ['subprocess', 'docker', 'k8s'].map((mode) => ({
+          mode,
+          enabled: enabled.includes(mode),
+          requires_image: mode !== 'subprocess',
+        })),
+      })
+    )
+  );
+
 /** Drives `open` and `initialImage` the way the agent detail route does. */
 const Harness: FC<{ startImage?: string }> = ({ startImage }) => {
   const [open, setOpen] = useState(true);
@@ -251,5 +264,47 @@ describe('CreateDeploymentModal', () => {
 
     await waitFor(() => expect(captured.body?.deployment_mode).toBe('docker'));
     expect(captured.body?.image).toBeUndefined();
+  });
+
+  describe('on a platform that only deploys to Kubernetes', () => {
+    beforeEach(() => mockEnabledModes('subprocess', 'k8s'));
+
+    it('deploys a packaged image to Kubernetes', async () => {
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderModal(PACKAGED_IMAGE);
+
+      const dialog = await getDeploymentDialog();
+      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
+      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
+      await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+      await waitFor(() =>
+        expect(captured.body).toEqual({ agent, deployment_mode: 'k8s', image: PACKAGED_IMAGE })
+      );
+    });
+
+    it('offers only the runtimes the platform can run', async () => {
+      const user = userEvent.setup();
+      renderModal(PACKAGED_IMAGE);
+
+      const dialog = await getDeploymentDialog();
+      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
+      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
+      await user.click(runtime);
+
+      const options = await screen.findAllByRole('option');
+      expect(options.map((option) => option.textContent)).toEqual(['Subprocess', 'Kubernetes']);
+    });
+  });
+
+  it('drops the container options when the platform only runs subprocesses', async () => {
+    mockEnabledModes('subprocess');
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    await waitFor(() =>
+      expect(within(dialog).queryByText(/Show Advanced/)).not.toBeInTheDocument()
+    );
   });
 });

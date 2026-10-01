@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ImageBuildSupport } from '@studio/api/agents/useCanBuildAgentImages';
+import type { DeploymentModes } from '@studio/api/agents/useDeploymentModes';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
@@ -13,21 +15,24 @@ const workspace = workspace1.workspace;
 const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
-const profilesUrl = `${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`;
-const modesUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
+const platform = vi.hoisted(() => ({
+  buildSupport: 'supported' as ImageBuildSupport,
+  modes: { status: 'ready', enabled: ['subprocess', 'docker'] } as DeploymentModes,
+}));
 
-const mockEnabledModes = (...enabled: string[]) =>
-  server.use(
-    http.get(modesUrl, () =>
-      HttpResponse.json({
-        data: ['subprocess', 'docker', 'k8s'].map((mode) => ({
-          mode,
-          enabled: mode === 'subprocess' || enabled.includes(mode),
-          requires_image: mode !== 'subprocess',
-        })),
-      })
-    )
-  );
+vi.mock('@studio/api/agents/useCanBuildAgentImages', () => ({
+  useCanBuildAgentImages: () => platform.buildSupport,
+}));
+
+vi.mock('@studio/api/agents/useDeploymentModes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/api/agents/useDeploymentModes')>()),
+  useDeploymentModes: () => platform.modes,
+}));
+
+beforeEach(() => {
+  platform.buildSupport = 'supported';
+  platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+});
 
 const renderControl = (props?: {
   canPackage?: boolean;
@@ -342,34 +347,51 @@ describe('PackageAgentControl', () => {
     expect(screen.getByText(/rebuild to pick up newer changes/)).toBeInTheDocument();
   });
 
-  describe('without a subprocess execution profile', () => {
+  describe('when the platform cannot build images', () => {
     beforeEach(() => {
-      server.use(
-        http.get(profilesUrl, () =>
-          HttpResponse.json([{ provider: 'cpu', profile: 'default', backend: 'kubernetes_job' }])
-        )
-      );
+      platform.buildSupport = 'unsupported';
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
     });
 
-    it('disables the build and shows the local build commands', async () => {
-      mockEnabledModes('k8s');
+    it('disables the build and shows paste-safe local commands', async () => {
       await openControl();
       const dialog = screen.getByRole('dialog');
 
-      expect(await within(dialog).findByText(/can't build images/)).toBeInTheDocument();
+      expect(within(dialog).getByText(/can't build images/)).toBeInTheDocument();
       expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
-      await waitFor(() =>
-        expect(dialog).toHaveTextContent(/nemo agents deploy --agent my-agent --mode k8s/)
-      );
       expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(dialog).toHaveTextContent(
+          /--publish --registry REGISTRY.*--agent my-agent --mode k8s --image IMAGE/
+        )
+      );
+      expect(dialog).not.toHaveTextContent(/[<>]/);
     });
 
-    it('suggests the container mode the platform can deploy', async () => {
-      mockEnabledModes('docker');
+    it('skips publishing for a Docker deployment', async () => {
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+      await openControl();
+      const dialog = screen.getByRole('dialog');
+
+      await waitFor(() => expect(dialog).toHaveTextContent(/--mode docker --image IMAGE/));
+      expect(dialog).not.toHaveTextContent(/--publish/);
+    });
+
+    it('waits for the deployment modes before suggesting a mode', async () => {
+      platform.modes = { status: 'loading' };
+      await openControl();
+      const dialog = screen.getByRole('dialog');
+
+      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+      expect(dialog).not.toHaveTextContent(/nemo agents deploy/);
+    });
+
+    it('suggests Kubernetes when the deployment modes cannot be read', async () => {
+      platform.modes = { status: 'unknown' };
       await openControl();
 
       await waitFor(() =>
-        expect(screen.getByRole('dialog')).toHaveTextContent(/--mode docker --image/)
+        expect(screen.getByRole('dialog')).toHaveTextContent(/--mode k8s --image IMAGE/)
       );
     });
 
@@ -377,29 +399,34 @@ describe('PackageAgentControl', () => {
       await openControl({ canPackage: false });
 
       expect(
-        await screen.findByText(/Packaging is available for Platform-managed agents/)
+        screen.getByText(/Packaging is available for Platform-managed agents/)
       ).toBeInTheDocument();
       expect(screen.queryByText(/can't build images/)).not.toBeInTheDocument();
     });
   });
 
-  it('hides the control when no container deployment mode is enabled', async () => {
-    mockEnabledModes();
-    renderControl();
-
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Build image' })).not.toBeInTheDocument()
-    );
-  });
-
-  it('allows the build when the execution profiles cannot be read', async () => {
-    server.use(http.get(profilesUrl, () => HttpResponse.json({}, { status: 403 })));
+  it('explains instead of hiding when no container deployment mode is enabled', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess'] };
     await openControl();
     const dialog = screen.getByRole('dialog');
 
-    await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeEnabled()
-    );
+    expect(within(dialog).getByText(/no Docker or Kubernetes deployment mode/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+  });
+
+  it('names only the deployable modes', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
+    await openControl();
+
+    expect(screen.getByText(/to deploy it with Kubernetes\./)).toBeInTheDocument();
+  });
+
+  it('allows the build when the execution profiles cannot be read', async () => {
+    platform.buildSupport = 'unknown';
+    await openControl();
+    const dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeEnabled();
     expect(within(dialog).queryByText(/can't build images/)).not.toBeInTheDocument();
   });
 });
