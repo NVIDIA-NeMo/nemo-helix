@@ -62,7 +62,10 @@ from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 class Evaluator:
-    """Sync SDK namespace mounted as ``client.evaluator``."""
+    """Sync evaluator plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evaluator`` is the typed evaluator service client.
+    """
 
     def __init__(self, client: EvaluatorClient) -> None:
         """Store the typed evaluator client used for evaluator plugin HTTP calls."""
@@ -253,7 +256,10 @@ class Evaluator:
 
 
 class AsyncEvaluator:
-    """Async SDK namespace mounted as ``client.evaluator``."""
+    """Async evaluator plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evaluator`` is the typed evaluator service client.
+    """
 
     def __init__(self, client: AsyncEvaluatorClient) -> None:
         """Store the typed async evaluator client used for evaluator plugin HTTP calls."""

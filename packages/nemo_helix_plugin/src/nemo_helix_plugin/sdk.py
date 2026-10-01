@@ -19,11 +19,15 @@ AsyncResourceT = TypeVar("AsyncResourceT")
 
 @dataclass(frozen=True, slots=True)
 class NemoPluginSDKResources(Generic[SyncHelixT, SyncResourceT, AsyncHelixT, AsyncResourceT]):
-    """Container for plugin SDK resources mounted on typed platform clients.
+    """Factories that build a plugin's SDK resource from a typed platform client.
 
     ``sync_resource`` receives the owning :class:`NemoClient`; ``async_resource``
     receives the owning :class:`AsyncNemoClient`. ``nemo.sdk`` entry points expose
-    these factories so ``client.<plugin>`` resolves the plugin's resource namespace.
+    these factories so ``client.<plugin>`` resolves the plugin's resource namespace,
+    except where ``<plugin>`` is already a typed service-client property of the
+    client (``agents``, ``auditor``, ``evaluator``, ``data_designer``,
+    ``agent_hardener``). Build those resources explicitly, e.g.
+    ``AuditorPluginResource(client)``.
     """
 
     sync_resource: Callable[[SyncHelixT], SyncResourceT] | None = None
