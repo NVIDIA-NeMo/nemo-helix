@@ -16,7 +16,6 @@ from aiohttp import ClientSession
 from fastapi import HTTPException, Request
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from jinja2 import Environment as JinjaEnvironment
 from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
@@ -48,6 +47,7 @@ from nhx.core.inference_gateway.api.middleware_registry import (
     execute_response_middleware,
 )
 from nhx.core.inference_gateway.api.mock_provider import handle_mock_request, is_mock_provider
+from nhx.core.inference_gateway.api.provider_request import render_auth_header
 from nhx.core.inference_gateway.api.typed_request import build_inference_request
 from pydantic import BaseModel
 
@@ -167,32 +167,6 @@ class NextRequestInfo:
 
     query_params: dict[str, str]
     """Query parameters to include in the request"""
-
-
-_DEFAULT_AUTH_HEADER_FORMAT = "Authorization: Bearer {{ auth_secret }}"
-# Renders HTTP header values, not HTML. Autoescape would corrupt secrets
-# containing characters like `&`, `<`, `>`, or quotes.
-_JINJA_ENV = JinjaEnvironment(autoescape=False)  # noqa: S701  # nosec B701
-
-
-def render_auth_header(secret_value: str, auth_header_format: str | None) -> tuple[str, str]:
-    """Render an auth header name and value from a Jinja2 format template.
-
-    The template must contain exactly one variable named ``auth_secret``, which is
-    substituted with *secret_value* at render time.  If *auth_header_format* is
-    ``None``, the default ``"Authorization: Bearer {{ auth_secret }}"`` is used.
-
-    Args:
-        secret_value: The raw API key / secret to inject into the template.
-        auth_header_format: Jinja2 template string, e.g. ``"X-Api-Key: {{ auth_secret }}"``.
-
-    Returns:
-        ``(header_name, header_value)`` tuple ready to set on the outgoing request.
-    """
-    template_str = auth_header_format or _DEFAULT_AUTH_HEADER_FORMAT
-    rendered = _JINJA_ENV.from_string(template_str).render(auth_secret=secret_value)
-    header_name, _, header_value = rendered.partition(": ")
-    return header_name, header_value
 
 
 async def build_next_request(

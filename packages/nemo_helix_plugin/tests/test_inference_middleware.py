@@ -193,6 +193,10 @@ class TestNemoInferenceMiddlewareContract:
         )
         assert target.model_provider_gateway_url == "http://igw/provider/ws/nim/-/v1"
         assert target.served_model_name == "meta/llama-3.1-70b-instruct"
+        assert target.default_extra_body == {}
+        assert target.required_extra_body == {}
+        assert target.outbound_headers == {}
+        assert target.missing_secret_name is None
 
     def test_openai_compatible_inference_target_is_dataclass(self):
         assert dataclasses.is_dataclass(OpenAICompatibleInferenceTarget)

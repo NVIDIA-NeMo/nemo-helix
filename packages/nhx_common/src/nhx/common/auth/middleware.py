@@ -202,6 +202,8 @@ HEALTH_ENDPOINTS = {
 # GET requests to these paths bypass authentication (e.g. / -> /studio redirect).
 PUBLIC_GET_PATHS = {
     "/",
+    "/docs",  # Interactive API documentation
+    "/openapi.json",  # OpenAPI schema consumed by the documentation UI and client generators
     "/apis/plugins",  # Studio plugin manifest — fetched by the SPA before login completes
 }
 
