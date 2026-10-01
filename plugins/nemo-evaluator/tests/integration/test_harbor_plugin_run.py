@@ -8,7 +8,7 @@ This drives ``AgentEvalJob.run(...)`` against a *real* HarborRunnerTarget using 
 ``JobContext`` and sync typed client. The Harbor runner resolves to a native
 ``HarborAgentTaskRunner``, Harbor runs the bundled hello-world task in Docker, and the verifier
 reward is scored (by a cloudpickle-bundled ``HarborRewardMetric``) and persisted into the run bundle.
-It is the plugin analog of the SDK's ``test_harbor_runtime_e2e.py``.
+It is the plugin analog of the SDK's ``tests/e2e/test_harbor_runtime.py``.
 
 Needs the ``harbor`` extra (Python >=3.12; ``pip install nemo-evaluator-sdk[harbor]``) and a working
 Docker daemon; ``importorskip('harbor')`` + a Docker check skip it otherwise (so it's inert on the
@@ -33,7 +33,7 @@ from nemo_evaluator.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_
 from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, HarborRunnerTarget
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRewardMetric, discover_harbor_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRewardMetric, discover_harbor_tasks
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths

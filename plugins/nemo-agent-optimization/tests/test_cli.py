@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -14,7 +15,11 @@ import pytest
 import typer
 from nemo_agent_optimization_plugin import cli as cli_module
 from nemo_agent_optimization_plugin.cli import AgentOptimizeCLI
-from nemo_agent_optimization_plugin.schemas.strategies import STRATEGIES_PATH, OptimizationStrategyList
+from nemo_agent_optimization_plugin.schemas.strategies import (
+    STRATEGIES_PATH,
+    OptimizationStrategy,
+    OptimizationStrategyList,
+)
 from nemo_agents_plugin import cli_context
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoTransportError
 from typer.main import get_command
@@ -118,31 +123,67 @@ def test_a_contribution_that_fails_to_register_does_not_take_the_group_down(
     assert "'broken' failed to register" in caplog.text
 
 
-def _remote(monkeypatch: pytest.MonkeyPatch, names: list[str] | Exception) -> None:
+def _remote(monkeypatch: pytest.MonkeyPatch, strategies: list[dict[str, str]] | Exception) -> None:
     """Stand in for the platform's `GET /strategies`, or make reaching it fail."""
 
-    def _fake(base_url: str | None) -> tuple[list[str], str]:
-        if isinstance(names, Exception):
-            raise names
-        return names, "http://platform"
+    def _fake() -> tuple[list[OptimizationStrategy], str]:
+        if isinstance(strategies, Exception):
+            raise strategies
+        return [OptimizationStrategy.model_validate(s) for s in strategies], "http://platform"
 
-    monkeypatch.setattr(cli_module, "_remote_strategy_names", _fake)
+    monkeypatch.setattr(cli_module, "_remote_strategies", _fake)
 
 
-def _stdout(result: Any) -> list[str]:
-    """Only the names: the source note is deliberately on stderr."""
-    return result.stdout.split()
+_STRATEGIES = [
+    {"name": "legacy", "description": "Numeric HPO."},
+    {"name": "acme", "description": "Prompt rewriting."},
+]
 
 
 def test_list_strategies_reports_the_platforms_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """The platform runs the job, so it is the only authority on what `--strategy` takes."""
     install(monkeypatch)
-    _remote(monkeypatch, ["legacy", "acme"])
+    _remote(monkeypatch, _STRATEGIES)
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == _STRATEGIES
+
+
+def test_list_strategies_table_shows_each_description(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch)
+    _remote(monkeypatch, _STRATEGIES)
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "table"])
+
+    assert result.exit_code == 0, result.output
+    assert "Description" in result.stdout
+    assert "Numeric HPO." in result.stdout
+    assert "Prompt rewriting." in result.stdout
+
+
+def test_piped_list_strategies_is_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Like every `nemo` list command: CliRunner is not a TTY, so no flag means JSON."""
+    install(monkeypatch)
+    _remote(monkeypatch, _STRATEGIES)
 
     result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
 
     assert result.exit_code == 0, result.output
-    assert _stdout(result) == ["legacy", "acme"]
+    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy", "acme"]
+
+
+def test_list_strategies_code_prints_the_client_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch)
+    _remote(monkeypatch, AssertionError("-f code must not call the platform"))
+    state = SimpleNamespace(get_base_url=lambda default=None: "http://platform", get_workspace=lambda: "default")
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "code"], obj=state)
+
+    assert result.exit_code == 0, result.output
+    assert "AgentOptimizationClient" in result.stdout
+    assert "list_strategies()" in result.stdout
 
 
 def test_an_unreachable_platform_is_an_error_not_a_local_listing(
@@ -168,16 +209,8 @@ def test_list_strategies_trusts_an_empty_answer_from_the_platform(monkeypatch: p
 
     assert result.exit_code == 0, result.output
     assert "No optimization strategies are installed on http://platform." in result.stderr
-
-
-def test_an_empty_listing_leaves_stdout_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stdout is one name per line and nothing else, so a shell loop over it is safe."""
-    install(monkeypatch)
-    _remote(monkeypatch, [])
-
-    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies"])
-
-    assert result.stdout == ""
+    # The note stays on stderr, so piped output is still a parseable (empty) list.
+    assert json.loads(result.stdout) == []
 
 
 def test_a_rejected_request_is_reported_and_exits_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,17 +247,53 @@ def test_the_listing_builds_a_client_for_the_resolved_target(monkeypatch: pytest
             return SimpleNamespace(data=lambda: OptimizationStrategyList.model_validate(_LISTING))
 
     monkeypatch.setattr(cli_module, "AgentOptimizationClient", _StubClient)
-    monkeypatch.setattr(cli_context, "resolve_base_url", lambda _base_url: "http://platform")
+    monkeypatch.setattr(cli_context, "resolve_base_url", lambda: "http://platform")
     monkeypatch.setattr(cli_context, "resolve_context_headers", lambda: {"Authorization": "Bearer token"})
 
-    names, target = cli_module._remote_strategy_names(None)
+    strategies, target = cli_module._remote_strategies()
 
-    assert names == ["legacy"]
+    assert [s.name for s in strategies] == ["legacy"]
     assert target == "http://platform"
     assert captured["base_url"] == "http://platform"
     assert captured["default_headers"] == {"Authorization": "Bearer token"}
     # The client is used as a context manager, so its connection pool is released.
     assert captured["closed"] is True
+
+
+def test_under_nemo_the_listing_uses_the_cli_shared_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared client carries the global base URL and the context's auth; the CLI owns its lifetime."""
+    install(monkeypatch)
+    requested: list[type] = []
+
+    class _Shared:
+        def list_strategies(self) -> Any:
+            return SimpleNamespace(data=lambda: OptimizationStrategyList.model_validate(_LISTING))
+
+    class _State:
+        def get_base_url(self, default: str | None = None) -> str | None:
+            return "http://shared-platform"
+
+        def typed_client(self, client_cls: type, timeout: float = 60.0) -> Any:
+            requested.append(client_cls)
+            return _Shared()
+
+        def get_no_truncate(self, override: bool | None = None) -> bool:
+            return bool(override)
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "-f", "json"], obj=_State())
+
+    assert result.exit_code == 0, result.output
+    assert [s["name"] for s in json.loads(result.stdout)] == ["legacy"]
+    assert requested == [cli_module.AgentOptimizationClient]
+    assert "Targeting http://shared-platform" in result.stderr
+
+
+def test_list_strategies_has_no_base_url_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch)
+
+    result = CliRunner().invoke(AgentOptimizeCLI().get_cli(), ["list-strategies", "--base-url", "http://x"])
+
+    assert result.exit_code == 2
 
 
 def test_the_cli_name_matches_its_entry_point_key() -> None:

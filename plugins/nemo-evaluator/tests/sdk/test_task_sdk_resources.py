@@ -320,7 +320,7 @@ async def test_preparation_dispatch_and_registration_errors(tmp_path, monkeypatc
     from unittest.mock import AsyncMock, Mock
 
     from nemo_evaluator.sdk.task_preparation import TaskPublicationError
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
     from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 
     prepared = _task_input()

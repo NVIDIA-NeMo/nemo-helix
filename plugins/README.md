@@ -30,9 +30,13 @@ Reference plugins such as `plugins/example-plugin/` are not installed by default
 
 ### Switchyard middleware
 
-`plugins/nemo-switchyard/` is an inference middleware plugin. It registers the `nemo-switchyard` middleware entry point, which can be referenced from a VirtualModel's `request_middleware` or `response_middleware`.
+`plugins/nemo-switchyard/` is an inference middleware plugin. Its distribution
+name is `nemo-switchyard-plugin`, while the `nemo-switchyard` middleware entry
+point remains the name used by VirtualModels.
 
-The middleware is installed by default through the root workspace's `enabled-plugins` group. The plugin vendors the required subset of the Switchyard library under `plugins/nemo-switchyard/vendor/switchyard/`, so no separate checkout, `SWITCHYARD_PATH`, or PyPI-shadow workaround is needed.
+The middleware is installed by default through the root workspace's
+`enabled-plugins` group and depends on `nemo-switchyard==0.3.0` for the native
+Python bindings.
 
 ```bash
 uv sync
@@ -45,8 +49,12 @@ With the platform running, use `nemo-switchyard` in VirtualModel middleware conf
 ```json
 {
   "name": "nemo-switchyard",
-  "config_type": "translate",
-  "config": {"target_format": "auto", "enable_stats": false}
+  "config_type": "random_routing",
+  "config": {
+    "strong": {"model": "workspace/model-a"},
+    "weak": {"model": "workspace/model-b"},
+    "strong_probability": 0.5
+  }
 }
 ```
 
@@ -68,7 +76,7 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-scaled-evals/` | `nemo-scaled-evals-plugin` (Phase 1 ephemeral; install `-e`) |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
 | `nemo-insights/` | `nemo-insights-plugin` |
-| `nemo-switchyard/` | `nemo-switchyard` |
+| `nemo-switchyard/` | `nemo-switchyard-plugin` |
 
 Example:
 
@@ -150,11 +158,11 @@ Minimum CLI implementation:
 ```python
 # src/nhx/my_plugin/cli.py
 import typer
-from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 class MyCLI(NemoCLI):
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="My plugin commands.")
+        app = create_typer_app(help="My plugin commands.")
 
         @app.command()
         def run(model: str) -> None:
@@ -163,3 +171,8 @@ class MyCLI(NemoCLI):
 
         return app
 ```
+
+For commands that call the platform, take the typed client from `cli_state(ctx)` and use the shared
+options and output helpers in `nemo_helix_plugin` (`--workspace`, `--output-format`, `-f code`); see
+`plugins/example-plugin/src/nemo_example_plugin/cli.py`. Never add a per-command `--base-url`: the
+platform comes from the global `nemo --base-url` / `--context`.

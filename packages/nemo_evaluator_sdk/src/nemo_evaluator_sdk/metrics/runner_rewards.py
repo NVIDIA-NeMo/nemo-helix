@@ -8,7 +8,7 @@ These live here rather than beside their runners because a built-in metric subcl
 runtime is on the optimizer's light import path — see
 ``test_agent_eval_import_does_not_pull_the_execution_stack`` — so defining them there would make
 every consumer of that module pay for machinery these metrics do not use. The runner modules
-re-export them lazily, so ``from ...harbor_runtime import HarborRewardMetric`` still works.
+re-export them lazily, so ``from ...harbor.runtime import HarborRewardMetric`` still works.
 """
 
 from collections.abc import Mapping

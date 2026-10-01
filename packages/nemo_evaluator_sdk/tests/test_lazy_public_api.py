@@ -38,7 +38,7 @@ _VENDORED_MIRROR = "nemo_helix.beta.evaluator"
 # have already pulled the execution stack into sys.modules, so an in-process check proves nothing.
 _IMPORT_SURFACE_PROBE = """
 import json, sys
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 assert HarborAgentTaskRunner is not None
 print(json.dumps(sorted(sys.modules)))
 """
@@ -126,7 +126,7 @@ def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
 
 
 def test_harbor_adapter_invocation_without_extra_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import build_trials_from_job_dir
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import build_trials_from_job_dir
 
     _block_harbor_import(monkeypatch)
     with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
@@ -140,11 +140,11 @@ def test_harbor_execution_without_extra_has_actionable_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, _build_native_job
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, _build_native_job
 
     _block_harbor_import(monkeypatch)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
-    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None)
+    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
 
     async def invoke_run_job() -> None:
         await run_job()

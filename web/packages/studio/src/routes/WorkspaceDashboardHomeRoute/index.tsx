@@ -3,12 +3,15 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
-import { PageHeader, Stack } from '@nvidia/foundations-react-core';
+import { Banner, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
+import { TriangleAlert } from 'lucide-react';
 import { useRef, type FC } from 'react';
+
+const SANDBOX_WORKSPACE = 'sample';
 
 export const WorkspaceDashboardHomeRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -20,6 +23,11 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
 
   return (
     <GradientBackground>
+      {workspace === SANDBOX_WORKSPACE && (
+        <Banner kind="global" status="warning" slotIcon={<TriangleAlert role="img" aria-hidden />}>
+          Sample Sandbox. This sandbox can be reset at any time with nemo CLI.
+        </Banner>
+      )}
       <AccessibleTitle title="Dashboard">
         <Stack gap="density-3xl" padding="density-2xl" className="relative">
           <PageHeader slotHeading="Dashboard" />

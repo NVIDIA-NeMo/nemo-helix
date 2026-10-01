@@ -6,13 +6,13 @@ name: inference
 description: >
   End-to-end reference for inference on the NeMo Helix — registering LLM
   backends as ModelProviders, wiring them to VirtualModels with Switchyard
-  middleware (random routing, translate) and `nemo-guardrails`
-  content-safety rails, and hitting them via the nemo CLI. Use when the task
+  middleware (random routing, stage routing, capability classification) and
+  `nemo-guardrails` content-safety rails, and hitting them via the nemo CLI. Use
+  when the task
   involves registering inference providers, discovering served models,
   creating VirtualModels, configuring switchyard middleware, layering
-  guardrails alongside translate (correct middleware ordering for
-  OpenAI/Anthropic cross-format setups), making inference calls through IGW,
-  or debugging routing and translation failures locally. For platform startup,
+  guardrails alongside routing, making OpenAI Chat Completions calls through
+  IGW, or debugging routing failures locally. For platform startup,
   Switchyard install, and DB-reset prerequisites, see the setup playbook
   (`SETUP.md` at the repo root).
 preconditions:
@@ -76,6 +76,21 @@ printf '%s' "$INFERENCE_NVIDIA_API_KEY" | nemo secrets create nvidia-inference-k
 For platform startup (`nemo services run`), Switchyard install, and state reset, see the setup playbook (`SETUP.md` at the repo root).
 
 ---
+
+## Upgrading legacy Switchyard VirtualModels
+
+Native Switchyard routing is request-only and supports the OpenAI Chat
+Completions shape. Before upgrading the plugin, update or recreate affected
+VirtualModels:
+
+1. Remove `nemo-switchyard` from `response_middleware`.
+2. Remove middleware calls with `config_type: translate`.
+3. Confirm clients and routed backends use OpenAI Chat Completions.
+4. Configure `random_routing`, `stage_router`, or capability-mode
+   `llm_classifier` in `request_middleware`.
+
+Make these VirtualModel changes together with the plugin upgrade; legacy
+translation and response-middleware configurations are rejected.
 
 ## CLI gotchas (real failures observed)
 
@@ -191,9 +206,9 @@ Entity ID normalization: slashes/dots → dashes, workspace prefix added.
 the VM name. The VM name is resolved via the URL path
 (`gateway model post v1/chat/completions <vm-name>`), not the body.
 
-Exception: VMs that **rewrite** `body["model"]` (random_routing,
-`ModelFormatLookupProcessor` in translate) — here the initial body model can be
-the VM name since the rewrite resolves it to the real entity.
+Exception: VMs with Switchyard routing middleware rewrite `body["model"]`, so
+the initial body model can be the VM name. The selected route resolves it to a
+real backend entity.
 
 For VMs without a rewriting middleware: always send the real auto-discovered
 entity in the body.
@@ -271,40 +286,46 @@ nemo inference virtual-models create vm-random-strong --workspace my-workspace \
   }}]'
 ```
 
-### Random routing — cross format (chain routing + translate)
+### Stage routing
 
-`random_routing` picks the backend; `translate` rewrites the request format.
-Order matters: routing first, translate second. Use `response_middleware` too
-for full round-trip translation back to the client's format.
+`stage_router` chooses between capable and efficient OpenAI Chat models.
 
 ```bash
-nemo inference virtual-models create vm-random-cross --workspace my-workspace \
+nemo inference virtual-models create vm-stage-router --workspace my-workspace \
   --models '[
-    {"model":"my-workspace/aws-anthropic-claude-opus-4-5","backend_format":"ANTHROPIC_MESSAGES"},
-    {"model":"my-workspace/nvidia-nvidia-nemotron-nano-31b-v3","backend_format":"OPENAI_CHAT"}
+    {"model":"my-workspace/nvidia-mistralai-mixtral-8x22b-instruct-v01","backend_format":"OPENAI_CHAT"},
+    {"model":"my-workspace/nvidia-qwen-qwen3-32b","backend_format":"OPENAI_CHAT"}
   ]' \
-  --request-middleware '[
-    {"name":"nemo-switchyard","config_type":"random_routing","config":{
-      "strong":{"model":"my-workspace/aws-anthropic-claude-opus-4-5"},
-      "weak":{"model":"my-workspace/nvidia-nvidia-nemotron-nano-31b-v3"},
-      "strong_probability":0.5,
-      "enable_stats":false
-    }},
-    {"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"auto","enable_stats":false}}
-  ]' \
-  --response-middleware '[{"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"auto","enable_stats":false}}]'
+  --request-middleware '[{"name":"nemo-switchyard","config_type":"stage_router","config":{
+    "picker":"efficient_first",
+    "confidence_threshold":0.5,
+    "models":{
+      "capable":["my-workspace/nvidia-mistralai-mixtral-8x22b-instruct-v01"],
+      "efficient":["my-workspace/nvidia-qwen-qwen3-32b"]
+    }
+  }}]'
 ```
 
-### Translate — cross format, full round-trip ✓
+### LLM capability classifier
 
-Client sends OpenAI shape, backend is Anthropic, response comes back as OpenAI.
-**Must list translate in BOTH `request_middleware` and `response_middleware`.**
+`llm_classifier` calls a judge model during routing and supports capability mode
+only.
 
 ```bash
-nemo inference virtual-models create vm-translate-cross --workspace my-workspace \
-  --models '[{"model":"my-workspace/aws-anthropic-claude-opus-4-5","backend_format":"ANTHROPIC_MESSAGES"}]' \
-  --request-middleware '[{"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"anthropic","enable_stats":false}}]' \
-  --response-middleware '[{"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"anthropic","enable_stats":false}}]'
+nemo inference virtual-models create vm-classifier --workspace my-workspace \
+  --models '[
+    {"model":"my-workspace/nvidia-mistralai-mixtral-8x22b-instruct-v01","backend_format":"OPENAI_CHAT"},
+    {"model":"my-workspace/nvidia-qwen-qwen3-32b","backend_format":"OPENAI_CHAT"}
+  ]' \
+  --request-middleware '[{"name":"nemo-switchyard","config_type":"llm_classifier","config":{
+    "mode":"capability",
+    "base_threshold":0.5,
+    "models":{
+      "judge":["my-workspace/nvidia-qwen-qwen3-32b"],
+      "capable":["my-workspace/nvidia-mistralai-mixtral-8x22b-instruct-v01"],
+      "efficient":["my-workspace/nvidia-qwen-qwen3-32b"]
+    }
+  }}]'
 ```
 
 ### Guardrails — adding content safety to a VirtualModel
@@ -344,42 +365,6 @@ The guardrails plugin doesn't route — the VirtualModel's `--models` array
 decides the upstream backend. Inline configs (no stored entity) are also
 supported via `"config":{...}` instead of `"config_id"`.
 
-#### Guardrails + Switchyard `translate` — ordering matters
-
-The `nemo-guardrails` plugin only understands **OpenAI chat completions**
-shape. When the backend is in a different format (e.g. `ANTHROPIC_MESSAGES`)
-and a `translate` middleware is also in the chain, guardrails must see the
-OpenAI form on both sides:
-
-- **Request stack:** `guardrails` BEFORE `translate`. Guardrails inspects the
-  OpenAI request from the client, then translate rewrites it to the backend
-  format.
-- **Response stack:** `guardrails` AFTER `translate`. Translate converts the
-  backend response back to OpenAI first, then guardrails runs output rails on
-  the OpenAI shape.
-- **Inference calls:** keep the request body in OpenAI shape regardless of
-  the backend's `backend_format`. The translate middleware handles the
-  conversion to/from backend format; sending Anthropic-shaped bodies bypasses
-  guardrails' input rails because the plugin can't parse them.
-
-```bash
-nemo inference virtual-models create vm-guarded-translate --workspace my-workspace \
-  --models '[{"model":"my-workspace/aws-anthropic-claude-opus-4-5","backend_format":"ANTHROPIC_MESSAGES"}]' \
-  --request-middleware '[
-    {"name":"nemo-guardrails","config_type":"guardrail_config","config_id":"my-workspace/content-safety"},
-    {"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"anthropic","enable_stats":false}}
-  ]' \
-  --response-middleware '[
-    {"name":"nemo-switchyard","config_type":"translate","config":{"target_format":"anthropic","enable_stats":false}},
-    {"name":"nemo-guardrails","config_type":"guardrail_config","config_id":"my-workspace/content-safety"}
-  ]'
-```
-
-Same principle applies when `random_routing` mixes OpenAI and Anthropic
-backends behind one VirtualModel: put `guardrails` first in the request chain
-(before any routing/translate decisions), and put `guardrails` last in the
-response chain (after translate has normalized everything back to OpenAI).
-
 If a rails config declares a task LLM via `models[]` (e.g. `content_safety`,
 `topic_control`), the task LLM must itself be addressable as OpenAI chat
 completions — point `models[].model` at an OpenAI-format entity ID, not at an
@@ -404,9 +389,9 @@ parsing-pitfalls subsection below for why `jq` is the wrong tool here:
 
 ```bash
 for i in $(seq 1 10); do
-  nemo inference gateway model post v1/chat/completions vm-random-cross \
+  nemo inference gateway model post v1/chat/completions vm-random-strong \
     --workspace my-workspace \
-    --body '{"model":"my-workspace/vm-random-cross","messages":[{"role":"user","content":"hi"}],"max_tokens":400}' \
+    --body '{"model":"my-workspace/vm-random-strong","messages":[{"role":"user","content":"hi"}],"max_tokens":400}' \
     | python3 -c 'import json,sys; d=json.loads(sys.stdin.read(), strict=False); print(d.get("model"))'
 done
 ```
@@ -434,7 +419,7 @@ technically invalid JSON. Python's `json.loads` rejects it by default but can
 be configured with `strict=False` to accept it. **`jq` does not** — it bails
 out with:
 
-```
+```text
 jq: parse error: Invalid string: control characters from U+0000 through
 U+001F must be escaped at line N, column M
 ```
@@ -459,45 +444,24 @@ tool.
 
 ---
 
-## Verifying routing decisions (DEBUG logs)
-
-Start with `LOG_LEVEL=DEBUG`. Filter service output:
-
-```bash
-grep -E "RandomRoutingRequestProcessor|picked tier|FormatTranslate|StampOriginalFormat" \
-  <service-output-file>
-```
-
-Expected output:
-```
-debug RandomRoutingRequestProcessor: picked tier=strong model=my-workspace/aws-anthropic-claude-opus-4-5
-debug RandomRoutingRequestProcessor: picked tier=weak   model=my-workspace/nvidia-nvidia-nemotron-nano-31b-v3
-```
-
-`tier=` and `model=` in DEBUG logs match `response.model` returned to the client.
-
----
-
 ## Failure cases
 
-### ❌ Translate in `request_middleware` only — response shape mismatch
+### ❌ Unsupported API path
 
-The most common mistake. Request translates fine, backend call succeeds, but the
-client receives the backend's **native** response shape instead of OpenAI:
+Switchyard native routing supports `/v1/chat/completions` only. Requests to
+other paths fail closed. Use OpenAI Chat Completions request and response
+shapes for every routed backend.
 
-| Field | ✓ translate in both | ✗ request only |
-|---|---|---|
-| `id` prefix | `chatcmpl-` (OpenAI) | `msg_` (Anthropic) |
-| Shape | `choices[0].message.content` | `content[0].text` |
-| Extra keys | — | `type`, `stop_reason`, `stop_sequence` |
+### ❌ Response middleware registration
 
-Fix: always add `response_middleware` with the same translate config.
+Switchyard is request middleware only. Putting `nemo-switchyard` in
+`response_middleware` is rejected during VirtualModel initialization.
 
-### ❌ Path mismatch without translate → 502
+### ❌ Unsupported algorithm or classifier mode
 
-Sending `/v1/messages` traffic to a VM backed by an OpenAI-format model with no
-translate fails because IGW forwards the inbound path unchanged. Switchyard's
-`PathUpdateProcessor` only rewrites `request.path` when translate is configured.
+The native host supports `random_routing`, `stage_router`, and
+`llm_classifier` in capability mode. Other config types and classifier modes
+are rejected when the middleware is initialized.
 
 ### ❌ Reconciler-induced 404
 
@@ -506,25 +470,6 @@ VM works briefly then returns "Model entity not found". The reconciler overwrote
 in VM `--models` (they survive reconciler cycles) instead of manually-registered
 aliases.
 
-### ❌ NVIDIA hub silently accepts format mismatches
-
-OpenAI body at `/v1/chat/completions` routed to an Anthropic backend **without**
-translate does not fail at the upstream — NVIDIA hub accepts OpenAI-shaped bodies
-for Anthropic models and returns the Anthropic-native response. The visible
-failure is the response shape mismatch above (case 1), not a 4xx/5xx.
-
-### ❌ Guardrails after translate (request) or before translate (response)
-
-`nemo-guardrails` parses **OpenAI** chat shape only. With an Anthropic backend
-and `request_middleware=[translate, guardrails]`, guardrails sees the
-already-translated Anthropic body and either skips its rails or errors on the
-unexpected shape. Symmetrically, `response_middleware=[guardrails, translate]`
-runs guardrails against the raw Anthropic response. Fix: keep guardrails on the
-OpenAI side of translate in both chains — `request=[guardrails, translate]`,
-`response=[translate, guardrails]`. Same applies to clients sending
-Anthropic-shaped request bodies: input rails won't fire. Send OpenAI shape and
-let translate do the conversion.
-
 ---
 
 ## Troubleshooting
@@ -532,12 +477,12 @@ let translate do the conversion.
 **DB disk I/O error on startup** — use the `nemo-teardown` skill's **stop +
 wipe data** flow, then rerun setup. Do not delete live platform data directly.
 
-**`nemo-switchyard` fails to load at startup** — `switchyard.lib` not importable.
-Run `uv sync` from the repo root with default groups enabled to install the
-plugin and its vendored `switchyard` library
-(`plugins/nemo-switchyard/vendor/switchyard/`), then restart services.
+**`nemo-switchyard` fails to load at startup** — `switchyard_rust` is not
+importable. Run `uv sync` from the repo root with default groups enabled to
+install `nemo-switchyard==0.3.0`, then restart services.
 
 **401 from Anthropic** — missing or wrong `--auth-header-format`. Verify:
+
 ```bash
 nemo inference providers get anthropic --workspace my-workspace --output-format json \
   | jq '.auth_header_format'
@@ -545,6 +490,7 @@ nemo inference providers get anthropic --workspace my-workspace --output-format 
 
 **No served models after provider creation** — wait ~10s for the first reconciler
 cycle, then check:
+
 ```bash
 nemo inference providers get nvidia-inference --workspace my-workspace \
   --output-format json | jq '.served_models | length'
@@ -558,11 +504,10 @@ nemo inference providers get nvidia-inference --workspace my-workspace \
 # Delete only the VirtualModels created by the examples in this skill.
 created_vms=(
   vm-random-strong
-  vm-random-cross
-  vm-translate-cross
+  vm-stage-router
+  vm-classifier
   vm-guarded
   vm-guarded-full
-  vm-guarded-translate
 )
 
 printf 'Delete example resources in my-workspace (VirtualModels: %s; provider: nvidia-inference; secret: nvidia-inference-key; workspace: my-workspace)? Type DELETE to continue: ' "${created_vms[*]}"

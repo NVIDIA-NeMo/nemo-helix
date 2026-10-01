@@ -16,8 +16,7 @@ from nemo_data_designer_plugin.jobs.retrieval_common import (
 )
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
@@ -116,14 +115,14 @@ class RetrievalPrepareJob(NemoJob):
             )
         return HelixJobSpec(steps=steps)
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         step = RetrievalPrepareStepConfig.model_validate(config)
         if step.phase == "mine":
             raise RuntimeError("Mining runs as nhx.automodel.tasks.retrieval_mine, not this module")
         return _run_convert(step.job_config, work_dir(ctx, "stage1_data_prep"), ctx, sdk)
 
 
-def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoHelix) -> Path:
+def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NemoClient) -> Path:
     hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
         return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
@@ -136,7 +135,7 @@ def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoHelix) ->
     return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
 
 
-def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoHelix) -> dict:
+def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NemoClient) -> dict:
     if job.train_input_file:
         train_file = _materialize_input(
             job.train_input_file,

@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup, WorkspaceJobCleanupError
 from nhx.core.entities.entities import Workspace, WorkspaceDeletionStage
 
@@ -55,7 +59,7 @@ def _make_job_status(status: str) -> MagicMock:
 def _make_jobs_client(jobs: list | None = None) -> MagicMock:
     """Build a mock typed AsyncJobsClient.
 
-    Production routes jobs calls through ``client_from_platform(sdk, AsyncJobsClient)``
+    Production routes jobs calls through ``AsyncJobsClient.from_client(client)``
     and iterates ``(await jobs_client.list_jobs(...)).items()``. So ``list_jobs`` is an
     ``AsyncMock`` returning a paginated response whose ``.items()`` yields an async
     iterator over the jobs.
@@ -76,7 +80,7 @@ def _make_models_client(
     """Build a mock typed AsyncModelsClient.
 
     Production routes deployment, model, and adapter cleanup through
-    ``client_from_platform(sdk, AsyncModelsClient)``.
+    ``AsyncModelsClient.from_client(client)``.
     """
     models_client = MagicMock()
     models_client.list_deployments = AsyncMock(return_value=_MockAsyncPaginatedResponse(deployments or []))
@@ -88,44 +92,33 @@ def _make_models_client(
     return models_client
 
 
-_CLIENT_FROM_PLATFORM_PATCH = "nhx.core.entities.controllers.workspace_cleanup.client_from_platform"
-
-
 def _patch_jobs_client(jobs_client: MagicMock):
-    """Patch ``client_from_platform`` to dispatch by requested client class.
+    """Patch the typed ``from_client`` classmethods so each client class resolves to its mock.
 
     Returns *jobs_client* for ``AsyncJobsClient`` and safe empty mocks for the
-    deployment/fileset clients. Dispatching by class (rather than returning
-    *jobs_client* for every ``client_from_platform`` call) keeps ``_async_step``
-    tests correct even when ``_cleanup_jobs`` succeeds and execution proceeds to
+    deployment/fileset clients, which keeps ``_async_step`` tests correct even
+    when ``_cleanup_jobs`` succeeds and execution proceeds to
     ``_cleanup_deployments`` and ``_cleanup_filesets``.
     """
     return _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([]))
 
 
+@contextmanager
 def _patch_clients(jobs_client: MagicMock, files_client: MagicMock, models_client: MagicMock | None = None):
-    """Patch ``client_from_platform`` to dispatch by requested client class.
+    """Patch the typed ``from_client`` classmethods so each client class resolves to its mock.
 
     ``_async_step`` cleans up jobs, deployments, models/adapters, and filesets,
-    so it calls ``client_from_platform`` for ``AsyncJobsClient``,
-    ``AsyncModelsClient``, and ``AsyncFilesClient`` — return the matching mock.
+    so it derives ``AsyncJobsClient``, ``AsyncModelsClient``, and
+    ``AsyncFilesClient`` from the platform client; return the matching mock.
     """
-    from nemo_helix_plugin.files.client import AsyncFilesClient
-    from nemo_helix_plugin.jobs.client import AsyncJobsClient
-    from nemo_helix_plugin.models.client import AsyncModelsClient
-
     models = models_client if models_client is not None else _make_models_client([])
 
-    def _dispatch(_sdk, client_cls):
-        if client_cls is AsyncFilesClient:
-            return files_client
-        if client_cls is AsyncJobsClient:
-            return jobs_client
-        if client_cls is AsyncModelsClient:
-            return models
-        raise AssertionError(f"unexpected client class: {client_cls!r}")
-
-    return patch(_CLIENT_FROM_PLATFORM_PATCH, side_effect=_dispatch)
+    with (
+        patch.object(AsyncFilesClient, "from_client", return_value=files_client),
+        patch.object(AsyncJobsClient, "from_client", return_value=jobs_client),
+        patch.object(AsyncModelsClient, "from_client", return_value=models),
+    ):
+        yield
 
 
 def _make_job(name: str, status: str = "completed") -> MagicMock:
@@ -137,20 +130,17 @@ def _make_job(name: str, status: str = "completed") -> MagicMock:
 
 def _make_controller(
     workspace_repo: AsyncMock | None = None,
-    nhx_sdk: MagicMock | None = None,
+    client: MagicMock | None = None,
 ) -> WorkspaceCleanup:
     if workspace_repo is None:
         workspace_repo = AsyncMock()
-    if nhx_sdk is None:
-        nhx_sdk = MagicMock()
+    if client is None:
+        client = MagicMock()
 
     return WorkspaceCleanup(
-        nhx_sdk=nhx_sdk,
+        client=client,
         workspace_repository=workspace_repo,
     )
-
-
-_FILES_CLIENT_PATCH = "nhx.core.entities.controllers.workspace_cleanup.client_from_platform"
 
 
 class TestWorkspaceCleanupStep:
@@ -161,7 +151,7 @@ class TestWorkspaceCleanupStep:
         stop.set()
         repo = AsyncMock()
         controller = WorkspaceCleanup(
-            nhx_sdk=MagicMock(),
+            client=MagicMock(),
             workspace_repository=repo,
             stop_signal=stop,
         )
@@ -175,7 +165,7 @@ class TestWorkspaceCleanupStep:
         repo = AsyncMock()
         repo.list_workspaces.return_value = ([], None)
         controller = WorkspaceCleanup(
-            nhx_sdk=MagicMock(),
+            client=MagicMock(),
             workspace_repository=repo,
             loop=loop,
         )
@@ -224,7 +214,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         sdk = MagicMock()
         mock_files = _make_mock_files_client([])
-        controller = _make_controller(workspace_repo=repo, nhx_sdk=sdk)
+        controller = _make_controller(workspace_repo=repo, client=sdk)
 
         with _patch_clients(_make_jobs_client([]), mock_files, _make_models_client([])):
             await controller._async_step()
@@ -438,7 +428,7 @@ class TestWorkspaceCleanupDeployments:
 
         models_client = _make_models_client([deployment])
         controller = _make_controller()
-        with patch(_CLIENT_FROM_PLATFORM_PATCH, return_value=models_client):
+        with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
             await controller._cleanup_deployments(workspace)
 
         models_client.delete_deployment.assert_awaited_once_with(
@@ -458,7 +448,7 @@ class TestWorkspaceCleanupDeployments:
         models_client.delete_deployment = AsyncMock(side_effect=[Exception("fail"), None])
 
         controller = _make_controller()
-        with patch(_CLIENT_FROM_PLATFORM_PATCH, return_value=models_client):
+        with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
             await controller._cleanup_deployments(workspace)
 
         assert models_client.delete_deployment.await_count == 2
@@ -478,7 +468,7 @@ class TestWorkspaceCleanupModelsAndAdapters:
         models_client.delete_model = AsyncMock(side_effect=lambda **_: call_order.append("model"))
         controller = _make_controller()
 
-        with patch(_CLIENT_FROM_PLATFORM_PATCH, return_value=models_client):
+        with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
             await controller._cleanup_models_and_adapters(workspace)
 
         assert call_order == ["adapter", "model"]
@@ -510,7 +500,7 @@ class TestWorkspaceCleanupModelsAndAdapters:
         models_client.delete_model = AsyncMock(side_effect=[Exception("fail"), None])
         controller = _make_controller()
 
-        with patch(_CLIENT_FROM_PLATFORM_PATCH, return_value=models_client):
+        with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
             await controller._cleanup_models_and_adapters(workspace)
 
         assert models_client.delete_adapter.await_count == 2
@@ -524,7 +514,7 @@ class TestWorkspaceCleanupModelsAndAdapters:
         controller = _make_controller()
 
         with pytest.raises(Exception, match="unavailable"):
-            with patch(_CLIENT_FROM_PLATFORM_PATCH, return_value=models_client):
+            with patch.object(AsyncModelsClient, "from_client", return_value=models_client):
                 await controller._cleanup_models_and_adapters(workspace)
 
 
@@ -538,7 +528,7 @@ class TestWorkspaceCleanupFilesets:
         mock_files = _make_mock_files_client([fileset])
         controller = _make_controller()
 
-        with patch(_FILES_CLIENT_PATCH, return_value=mock_files):
+        with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
             await controller._cleanup_filesets(workspace)
 
         mock_files.delete_fileset.assert_awaited_once_with(
@@ -558,7 +548,7 @@ class TestWorkspaceCleanupFilesets:
         mock_files.delete_fileset = AsyncMock(side_effect=[Exception("fail"), None])
         controller = _make_controller()
 
-        with patch(_FILES_CLIENT_PATCH, return_value=mock_files):
+        with patch.object(AsyncFilesClient, "from_client", return_value=mock_files):
             await controller._cleanup_filesets(workspace)
 
         assert mock_files.delete_fileset.await_count == 2

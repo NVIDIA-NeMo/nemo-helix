@@ -3,6 +3,7 @@
 
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import { DEFAULT_BUILD_MODEL_NAME } from '@studio/constants/constants';
 import { resolveDefaultGuardrailModel } from '@studio/routes/guardrails/defaultModel';
 
 const model = (name: string, providers: string[] = ['default/nim']): ModelEntity =>
@@ -21,12 +22,19 @@ describe('resolveDefaultGuardrailModel', () => {
     expect(resolveDefaultGuardrailModel(groups(model('llama', [])))).toBeNull();
   });
 
+  it('prefers the default build model over an alphabetically earlier one', () => {
+    const result = resolveDefaultGuardrailModel(
+      groups(model('adept-fuyu-8b'), model(DEFAULT_BUILD_MODEL_NAME))
+    );
+    expect(result).toBe(`default/${DEFAULT_BUILD_MODEL_NAME}`);
+  });
+
   it('prefers the requested model by bare name', () => {
     const result = resolveDefaultGuardrailModel(
-      groups(model('other'), model('nemotron-3.5-lightning-30b-a3b')),
-      'nvidia/nemotron-3.5-lightning-30b-a3b'
+      groups(model('other'), model('meta-llama-3-2-1b-instruct')),
+      'other-workspace/meta-llama-3-2-1b-instruct'
     );
-    expect(result).toBe('default/nemotron-3.5-lightning-30b-a3b');
+    expect(result).toBe('default/meta-llama-3-2-1b-instruct');
   });
 
   it('falls back to the first usable model', () => {

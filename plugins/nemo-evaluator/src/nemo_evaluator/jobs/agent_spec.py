@@ -26,6 +26,7 @@ from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinit
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
@@ -111,7 +112,8 @@ class HarborRunnerTarget(BaseModel):
     injected from the job's storage at run time; only the harness-selection and run knobs live here.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Validation error text never echoes inputs, so a rejected credential isn't printed back.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["harbor"] = "harbor"
     agent_name: str | None = Field(
@@ -135,7 +137,14 @@ class HarborRunnerTarget(BaseModel):
         description="Environment variables for the Harbor agent, sourced from the secrets service, as "
         "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
         "environment at compile time, and Harbor receives a `${ENV_NAME}` template it expands when the agent "
-        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`.",
+        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`. "
+        "A bare ref resolves in the job's workspace.",
+    )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Non-secret environment variables for the Harbor agent, as literal values that travel in the "
+        "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, PASSWORD, "
+        "CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
@@ -152,6 +161,11 @@ class HarborRunnerTarget(BaseModel):
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> Self:
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        return self
+
+    @model_validator(mode="after")
+    def _env_vars_are_harbor_safe(self) -> Self:
+        validate_harbor_env(self.env_vars, self.env_secrets)
         return self
 
 
@@ -226,11 +240,17 @@ class GymRunnerTarget(BaseModel):
         ge=1,
         description="Concurrent rollouts for `gym eval run`.",
     )
-    startup_timeout_s: float = Field(default=240.0, gt=0, description="Max wait for `gym env start` readiness.")
+    startup_timeout_s: float = Field(
+        default=240.0,
+        gt=0,
+        description="Max wait for the Gym servers to report ready: `gym env start` colocated, the host's "
+        "bootstrap when sandboxed. Excludes pulling a sandboxed host's image.",
+    )
     collection_timeout_s: float | None = Field(
         default=None,
         gt=0,
-        description="Max wait for `gym eval run` collection; None = unbounded.",
+        description="Max wait for rollout collection, measured from when it starts; exceeding it fails the "
+        "run. None = unbounded, though a sandboxed host still stops at the end of its lifetime.",
     )
     shutdown_grace_s: float = Field(
         default=30.0,
@@ -426,8 +446,11 @@ class _AgentEvalSpecCommon(BaseModel):
     # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
     # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
     # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
+    # ``hide_input_in_errors`` keeps a nested target's rejected credential out of the error text; pydantic
+    # has no per-field option, so every field's error loses its ``input_value``.
     model_config = ConfigDict(
         extra="forbid",
+        hide_input_in_errors=True,
         json_schema_extra={
             "oneOf": [
                 {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},

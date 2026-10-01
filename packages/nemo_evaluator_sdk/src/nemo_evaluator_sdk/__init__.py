@@ -5,7 +5,7 @@
 
 The public surface resolves lazily (PEP 562). Importing this package must not drag in the
 execution/backend or metric stack: importing any submodule runs this module first, so eager
-re-exports made ``import nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime`` — all the
+re-exports made ``import nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime`` — all the
 optimizer needs — cost ~1400 modules (openai, sacrebleu, zstandard, ...) instead of ~485, and
 turned every one of those transitive packages into an evaluation-time failure mode for the
 SDK-backed evaluator.

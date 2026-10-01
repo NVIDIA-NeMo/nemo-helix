@@ -206,10 +206,10 @@ The platform calls `get_cli()` once at startup and mounts the result as `nemo <n
 ### Organizing commands
 
 ```python
-from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.cli import create_typer_app
 
 def get_cli(self) -> typer.Typer:
-    app = typer.Typer(help=self.description, no_args_is_help=True)
+    app = create_typer_app(help=self.description)
 
     @app.command(rich_help_panel="Local (no platform required)")
     def invoke(config_file: str = typer.Argument(...)) -> None:
@@ -225,13 +225,17 @@ def get_cli(self) -> typer.Typer:
 ### Nested command groups
 
 ```python
-def get_cli(self) -> typer.Typer:
-    app = typer.Typer(name="agents", help=self.description, no_args_is_help=True)
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
-    deps_app = typer.Typer(name="deployments", help="Manage deployments.", no_args_is_help=True)
+def get_cli(self) -> typer.Typer:
+    app = create_typer_app(name="agents", help=self.description)
+
+    deps_app = create_typer_app(name="deployments", help="Manage deployments.")
 
     @deps_app.command()
-    def list(typer_ctx: typer.Context, workspace: str | None = typer.Option(None)) -> None:
+    def list(typer_ctx: typer.Context, workspace: WorkspaceOption = None) -> None:
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         ...
 
@@ -246,8 +250,18 @@ flag, so the command silently discards the workspace the user selected with
 ``nemo config use-context`` (or ``$NHX_WORKSPACE``) and writes to the wrong
 workspace. The generated commands already do this for you.
 
-### Environment-based defaults
+### Platform access and output
+
+Do not declare a `--base-url` (or read `NHX_BASE_URL`) in a command. Take the typed client from the
+CLI state, which carries the platform from `nemo --base-url` / `nemo --context` and the active context's
+auth:
 
 ```python
-base_url: str = typer.Option("http://localhost:8080", envvar="NHX_BASE_URL")
+from nemo_helix_plugin.cli_state import cli_state
+
+client = cli_state(typer_ctx).typed_client(MyPluginClient)
 ```
+
+`list` and `get` commands take the shared `ListOutputFormatOption` / `EntityOutputFormatOption` and print
+with `nemo_helix_plugin.cli_output.format_output`; see the `nhx-cli` skill and
+`plugins/example-plugin/src/nemo_example_plugin/cli.py` for the full pattern.

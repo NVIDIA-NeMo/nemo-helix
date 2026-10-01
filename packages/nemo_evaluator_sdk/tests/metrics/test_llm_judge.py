@@ -32,6 +32,7 @@ from nemo_evaluator_sdk.structured_output import InferenceStructuredOutput, Stru
 from nemo_evaluator_sdk.values.common import SecretRef, SupportedJobTypes
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 from nemo_evaluator_sdk.values.params import InferenceParams, RunConfig
+from nemo_evaluator_sdk.values.protocol import validate_metric_result
 from nemo_evaluator_sdk.values.scores import (
     JSONScoreParser,
     RangeScore,
@@ -526,6 +527,85 @@ class TestLLMJudgeMetric:
         result = await compute_scores(metric, {"prompt": "hello"}, {"output_text": "world"})
 
         assert [(output.name, output.value) for output in result.outputs] == [("length", 0), ("length.label", "short")]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("parser", "judge_text"),
+        [
+            (None, "The answer is short."),
+            (None, '{"verdict": "short"}'),
+            (None, '["short"]'),
+            (None, '{"length": ["short"]}'),
+            (None, '{"length": {"label": "short"}}'),
+            (RegexScoreParser(pattern=r"LENGTH: (\w+)"), "The answer is short."),
+        ],
+        ids=[
+            "json-not-json",
+            "json-missing-key",
+            "json-not-object",
+            "json-list-value",
+            "json-object-value",
+            "regex-no-match",
+        ],
+    )
+    async def test_unparseable_rubric_judgment_returns_the_nan_result(
+        self, mocker: MockerFixture, parser: RegexScoreParser | None, judge_text: str
+    ):
+        """A judge reply that does not parse yields NaN and an empty label, the same shape as ``_nan_result``.
+
+        Without the label, scoring rejects the row with "Missing required metric outputs: ['length.label']"
+        instead of recording it as an ordinary NaN score.
+        """
+        metric = LLMJudgeMetric(model=_make_model(), scores=[_new_rubric_score(parser)])
+        metric.set_inference_fn(mocker.AsyncMock(return_value={"choices": [{"message": {"content": judge_text}}]}))
+
+        result = validate_metric_result(
+            await compute_scores(metric, {"prompt": "hello"}, {"output_text": "world"}), metric.output_spec()
+        )
+
+        expected = metric._nan_result()
+        assert [output.name for output in result.outputs] == [output.name for output in expected.outputs]
+        assert math.isnan(result.outputs[0].value)
+        assert result.outputs[1] == expected.outputs[1] == MetricOutput(name="length.label", value="")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "judge_text",
+        ['{"truthfulness": [1]}', '{"truthfulness": {"value": 1}}', '{"truthfulness": "1"}'],
+        ids=["list-value", "object-value", "string-value"],
+    )
+    async def test_non_numeric_range_judgment_returns_the_nan_result(self, mocker: MockerFixture, judge_text: str):
+        """A range score whose JSON value is not a number yields NaN rather than failing the row."""
+        metric = LLMJudgeMetric(model=_make_model(), scores=[_new_range_score(None)])
+        metric.set_inference_fn(mocker.AsyncMock(return_value={"choices": [{"message": {"content": judge_text}}]}))
+
+        result = validate_metric_result(
+            await compute_scores(metric, {"prompt": "hello"}, {"output_text": "world"}), metric.output_spec()
+        )
+
+        assert [output.name for output in result.outputs] == ["truthfulness"]
+        assert math.isnan(result.outputs[0].value)
+
+    @pytest.mark.asyncio
+    async def test_partially_parsed_judgment_emits_every_declared_output(self, mocker: MockerFixture):
+        """Only the scores the judge omitted are NaN; rubric scores keep a label output and range scores never get one."""
+        tone = RubricScore(name="tone", rubric=[Rubric(label="polite", value=1), Rubric(label="rude", value=0)])
+        metric = LLMJudgeMetric(model=_make_model(), scores=[_new_rubric_score(None), tone, _new_range_score(None)])
+        metric.set_inference_fn(
+            mocker.AsyncMock(return_value={"choices": [{"message": {"content": '{"length": "medium"}'}}]})
+        )
+
+        result = validate_metric_result(
+            await compute_scores(metric, {"prompt": "hello"}, {"output_text": "world"}), metric.output_spec()
+        )
+
+        outputs = {output.name: output.value for output in result.outputs}
+        assert list(outputs) == ["length", "length.label", "tone", "tone.label", "truthfulness"]
+        assert outputs["length"] == 1
+        assert outputs["length.label"] == "medium"
+        assert math.isnan(outputs["tone"])
+        assert outputs["tone.label"] == ""
+        assert math.isnan(outputs["truthfulness"])
 
     def test_unique_scores_allows_empty_scores_for_constructed_model(self):
         metric = LLMJudgeMetric.model_construct(model=_make_model(), scores=[], _fields_set={"model", "scores"})

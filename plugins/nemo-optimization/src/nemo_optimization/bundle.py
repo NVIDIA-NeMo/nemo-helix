@@ -133,11 +133,13 @@ def _optimizer_problems(config: Mapping[str, Any], *, agent: str | None) -> Iter
     if "optimizable_params" in optimizer:
         yield LEGACY_SEARCH_SPACE_ERROR
         return
-    enabled = [
-        name
-        for name in ("numeric", "prompt")
-        if isinstance(optimizer.get(name), Mapping) and optimizer[name].get("enabled")
-    ]
+    enabled: list[str] = []
+    for name in ("numeric", "prompt"):
+        phase_enabled, problem = _phase_enabled(optimizer, name)
+        if problem is not None:
+            yield problem
+        elif phase_enabled:
+            enabled.append(name)
     if not enabled:
         yield "no optimizer is enabled; set optimizer.numeric.enabled or optimizer.prompt.enabled"
     if "numeric" in enabled and not optimizer.get("search_space"):
@@ -166,6 +168,18 @@ def _optimizer_problems(config: Mapping[str, Any], *, agent: str | None) -> Iter
             )
         except SearchSpaceError as exc:
             yield str(exc)
+
+
+def _phase_enabled(optimizer: Mapping[str, Any], name: str) -> tuple[bool, str | None]:
+    if name not in optimizer:
+        return False, None
+    section = optimizer[name]
+    if not isinstance(section, Mapping):
+        return False, f"optimizer.{name} must be a mapping"
+    enabled = section.get("enabled")
+    if not isinstance(enabled, bool):
+        return False, f"optimizer.{name}.enabled must be a boolean"
+    return enabled, None
 
 
 def _path_problems(source: Path, config: Mapping[str, Any]) -> Iterator[str]:

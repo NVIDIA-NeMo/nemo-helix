@@ -27,7 +27,7 @@ The SDK owns the Harbor plumbing. Apart from imports, running a whole dataset is
 two lines — build a config, make one call:
 
 ```python
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborRuntimeConfig, run_harbor_eval,
 )
 
@@ -64,7 +64,7 @@ each `[task] name`).
 
 ## Under the hood
 
-The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor_runtime.py):
+The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor/runtime.py):
 
 - `HarborRuntimeConfig` — declarative config (agent, attempts, concurrency,
   timeouts, artifacts) mapped onto Harbor's `JobConfig` lazily.
@@ -111,10 +111,10 @@ export NVIDIA_API_KEY=...   # https://build.nvidia.com
 uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fabric_deepagents_example
 ```
 
-The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent:NemoFabricAgent`, a subclass
+The agent is `nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent`, a subclass
 of `FabricAgent`, Fabric's custom Harbor agent, that runs the complete Fabric config passed as
 `agent_kwargs["fabric_config"]`: harness, model, endpoint, and the credential's variable name all come
-from it. The key reaches the container through `agent_env_from_host`, so the job directory's
+from it. The key reaches the container through `env_secrets`, so the job directory's
 `config.json` records `${NVIDIA_API_KEY}` rather than the value. See
 [Run a NeMo Fabric Agent inside Harbor](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/harbor-fabric-agent)
 for the platform job form.
@@ -132,7 +132,7 @@ uv run python -m packages.nemo_evaluator_sdk.examples.harbor.fabric_agent.run_fa
 ```
 
 The only difference is the agent:
-`nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent:FabricInstalledAgent`, which is
+`nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent`, which is
 built on Harbor's `BaseInstalledAgent` and provisions curl, `uv`, and a uv-managed CPython before
 installing Fabric. Pass `--dataset-dir` to point it at your own Harbor task. The image does need to be
 glibc-based: `nemo-fabric-runtime` ships no musllinux wheels, so Alpine tasks fail at `uv pip install`.
@@ -187,7 +187,7 @@ this optional path. Then opt into Harbor's auth-file transport for a standalone 
 CODEX_FORCE_AUTH_JSON=1 uv run python your_harbor_run.py
 ```
 
-Set that flag in the host environment only; do not include it in `agent_env_from_host`.
+Set that flag in the host environment only; do not include it in `env_secrets` or `env_vars`.
 
 Configure that run with `agent_name="codex"`, an explicit `agent_model_name`, and optionally
 `agent_kwargs={"version": "0.153.0"}`. The adapter installs that Codex CLI version inside each task
@@ -196,13 +196,13 @@ container. A platform-submitted job cannot see the submitter's `~/.codex/auth.js
 
 ## End-to-end test
 
-[`tests/agent_eval/test_harbor_runtime_e2e.py`](../../tests/agent_eval/test_harbor_runtime_e2e.py)
+[`tests/e2e/test_harbor_runtime.py`](../../tests/e2e/test_harbor_runtime.py)
 calls `run_harbor_eval` over the hello-world dataset and asserts the SDK scores it
 as `reward == 1.0`. It is marked `e2e`/`slow` and skips automatically when
 `harbor` or Docker is unavailable:
 
 ```bash
-uv run --frozen pytest packages/nemo_evaluator_sdk/tests/agent_eval/test_harbor_runtime_e2e.py -v
+uv run --frozen pytest packages/nemo_evaluator_sdk/tests/e2e/test_harbor_runtime.py -v
 ```
 
 Harbor bind-mounts the container's `/logs` back to the job directory to collect

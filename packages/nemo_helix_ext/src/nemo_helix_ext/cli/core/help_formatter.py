@@ -16,19 +16,24 @@ from __future__ import annotations
 import shutil
 import sys
 import time
-from contextvars import ContextVar
-from functools import wraps
 from io import StringIO
-from typing import Any, Callable, Mapping, ParamSpec, Sequence, TypeVar
+from typing import Any, Callable, Mapping, Sequence
 
 import click
 from click import Command
+
+# The warnings helpers are shared with plugin commands; re-exported for core commands.
+from nemo_helix_plugin.cli import HELP_OPTION_NAMES as HELP_OPTION_NAMES  # re-exported for core commands
+from nemo_helix_plugin.cli import context_settings_with_help
+from nemo_helix_plugin.cli import create_typer_app as plugin_create_typer_app
+from nemo_helix_plugin.cli_warnings import add_warning as add_warning
+from nemo_helix_plugin.cli_warnings import collect_warnings as collect_warnings
+from nemo_helix_plugin.cli_warnings import print_warnings as print_warnings
 from rich.console import Console
 from typer import Typer
 from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 _REQUIRED_SUFFIX = " (required)"  # embedded by the generator in required body-param help text
-HELP_OPTION_NAMES = ("--help", "-h")
 
 
 def _strip_required_suffix(help_text: str) -> tuple[str, bool]:
@@ -145,9 +150,7 @@ def _get_terminal_width() -> int:
 
 def _context_settings_with_help(context_settings: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return context_settings with help_option_names defaulting to --help/-h."""
-    settings = dict(context_settings or {})
-    settings.setdefault("help_option_names", list(HELP_OPTION_NAMES))
-    return settings
+    return context_settings_with_help(context_settings)
 
 
 def _option_display_names(
@@ -802,134 +805,14 @@ def _write_with_formatting(formatter: click.HelpFormatter, text: str) -> None:
 
 
 def create_typer_app(**kwargs) -> Typer:
-    """Create a Typer app with NeMo Helix-style formatting.
+    """Create a core command group: the plugin defaults plus NeMo Helix-style formatting.
 
-    This is a convenience wrapper around typer.Typer() that automatically
-    applies NeMo Helix-style formatting to all commands and enables -h for help.
-
-    Args:
-        **kwargs: Arguments to pass to typer.Typer()
-
-    Returns:
-        A typer.Typer instance configured with NeMo Helix formatting
+    :func:`nemo_helix_plugin.cli.create_typer_app` owns the defaults shared
+    with plugin groups (help on a bare group, ``-h``, no shell completion);
+    core groups also render with :class:`NhxGroup` directly.
     """
-    import typer
-
     kwargs.setdefault("cls", NhxGroup)
-    kwargs.setdefault("no_args_is_help", True)
-    # Shell completion is owned by the root ``nemo`` app; command groups (including
-    # plugin-hosted roots mounted by the lazy loader) must not advertise it again.
-    kwargs.setdefault("add_completion", False)
-    kwargs["context_settings"] = _context_settings_with_help(kwargs.get("context_settings"))
-    return typer.Typer(**kwargs)
-
-
-def print_warnings(warnings: list[str | None] | None = None) -> None:
-    """
-    Print warnings as a bullet list to stderr.
-
-    Args:
-        warnings: List of warning messages to display (None values are filtered out)
-    """
-    if not warnings:
-        return
-
-    # Filter out None values
-    warnings = [w for w in warnings if w]
-    if not warnings:
-        return
-
-    error_console = Console(stderr=True)
-    error_console.print()
-    error_console.print("[bold yellow]Warnings:[/]")
-    for warning in warnings:
-        error_console.print(f"  • {warning}", style="yellow")
-
-
-_warnings_context: ContextVar[list[str | None]] = ContextVar("warnings")
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
-
-def collect_warnings(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    """
-    Decorator that collects warnings and prints them at the end.
-
-    Usage:
-        @collect_warnings
-        def my_command():
-            add_warning("some warning")
-            # ... warnings are automatically printed when the function returns
-    """
-
-    @wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        warnings: list[str | None] = []
-        token = _warnings_context.set(warnings)
-        try:
-            return func(*args, **kwargs)
-        finally:
-            agent_hints = _get_agent_hints(args, kwargs)
-            _warnings_context.reset(token)
-            print_warnings(warnings)
-            _print_agent_hints(agent_hints)
-
-    return wrapper
-
-
-def _get_agent_hints(args: tuple, kwargs: dict) -> list[str]:
-    """Get agent hints if agent mode is active, extracting ctx from command args."""
-    import typer as _typer
-
-    ctx = None
-    for arg in args:
-        if isinstance(arg, _typer.Context):
-            ctx = arg
-            break
-    if ctx is None:
-        ctx = kwargs.get("ctx")
-    if ctx is not None and hasattr(ctx, "obj") and getattr(ctx.obj, "agent_mode", False):
-        from nemo_helix_ext.cli.core.agent_helpers import get_agent_helpers
-
-        command_path = ctx.command_path
-        parts = command_path.split(None, 1)
-        command_path = parts[1] if len(parts) > 1 else ""
-        return get_agent_helpers(command_path)
-    return []
-
-
-def _print_agent_hints(hints: list[str]) -> None:
-    """Print agent hints to stderr under their own heading."""
-    if not hints:
-        return
-    error_console = Console(stderr=True)
-    error_console.print()
-    error_console.print("[bold bright_green]AGENT HINTS:[/]")
-    for hint in hints:
-        error_console.print(f"  {hint}")
-
-
-def add_warning(warning: str | list[str | None] | None) -> None:
-    """
-    Add one or more warnings to the current warnings collection.
-
-    Must be called within a function decorated with `@collect_warnings`.
-    If called outside such a function, the warning(s) are silently ignored.
-
-    Args:
-        warning: A single warning message, a list of warning messages, or None.
-                 None values are allowed and filtered later when printing.
-    """
-    try:
-        warnings = _warnings_context.get()
-        if isinstance(warning, list):
-            warnings.extend(warning)
-        else:
-            warnings.append(warning)
-    except LookupError:
-        # Not inside a collect_warnings context, ignore
-        pass
+    return plugin_create_typer_app(**kwargs)
 
 
 def _maybe_format_agent_helpers(ctx: click.Context, formatter: click.HelpFormatter) -> None:

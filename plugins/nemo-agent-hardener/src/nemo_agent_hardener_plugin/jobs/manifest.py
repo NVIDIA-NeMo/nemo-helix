@@ -244,7 +244,7 @@ def _materialize_legacy_agent_manifest(
     logger.info("manifest %s predates frozen targets; re-resolving and storing a bundle", manifest_id)
     resolved = resolve_agent_to_manifest(
         agent_ref,
-        sdk=sdk,
+        client=sdk,
         base_url=base_url(),
         default_workspace=ctx.workspace,
         manifest_dir=manifest_dir,

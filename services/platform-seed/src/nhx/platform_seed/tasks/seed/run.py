@@ -8,16 +8,15 @@ import logging
 import sys
 from dataclasses import dataclass, field
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.discovery import discover_seed_jobs
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.entities import EntityClient
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.common.service.api.health import async_wait_for_dependencies
 from nhx.platform_seed.config import HelixSeedConfig
 
@@ -59,9 +58,9 @@ async def seed_auth(entity_client: EntityClient, config: HelixSeedConfig) -> Non
     logger.info("Auth role bindings seeded")
 
 
-async def seed_model_provider(sdk: AsyncNeMoHelix) -> None:
+async def seed_model_provider(client: AsyncNemoClient) -> None:
     """Seed the default nvidia-build model provider. Idempotent."""
-    models = client_from_platform(sdk, AsyncModelsClient)
+    models = AsyncModelsClient.from_client(client)
     try:
         await models.create_provider(
             workspace="system",
@@ -77,7 +76,7 @@ async def seed_model_provider(sdk: AsyncNeMoHelix) -> None:
 
 
 async def run_plugin_seed_jobs(
-    sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     entity_client: EntityClient,
     config: HelixSeedConfig,
     result: HelixSeedResult,
@@ -99,7 +98,7 @@ async def run_plugin_seed_jobs(
             continue
         try:
             job = seed_cls()
-            job.sdk = sdk
+            job.sdk = client
             job.entities_client = entity_client
             await job.run()
             result.plugin_results[name] = True
@@ -113,7 +112,7 @@ async def run_plugin_seed_jobs(
 
 async def run_platform_seed(
     entity_client: EntityClient,
-    sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     config: HelixSeedConfig,
 ) -> HelixSeedResult:
     """
@@ -125,7 +124,7 @@ async def run_platform_seed(
 
     Args:
         entity_client: Entity client for creating/updating entities.
-        sdk: Async NeMo Helix SDK (for files API and internal calls).
+        client: Async platform client (for files API and internal calls).
         config: Seed configuration (enabled flags, paths, etc.).
 
     Returns:
@@ -157,14 +156,14 @@ async def run_platform_seed(
 
     if config.model_provider_enabled:
         try:
-            await seed_model_provider(sdk)
+            await seed_model_provider(client)
             result.models_ok = True
         except Exception as e:
             msg = f"Models seed failed: {e}"
             logger.exception(msg)
             result.errors.append(msg)
 
-    await run_plugin_seed_jobs(sdk, entity_client, config, result)
+    await run_plugin_seed_jobs(client, entity_client, config, result)
 
     return result
 
@@ -202,13 +201,13 @@ async def run_platform_seed_from_startup() -> bool:
             logger.error("One or more dependencies did not become ready in time")
             return False
 
-    sdk = get_async_platform_sdk(as_service="platform-seed", internal=True)
-    entity_client = EntityClient(client_from_platform(sdk, AsyncEntitiesClient))
+    client = get_async_nemo_client(as_service="platform-seed", internal=True)
+    entity_client = EntityClient(AsyncEntitiesClient.from_client(client))
 
     try:
-        result = await run_platform_seed(entity_client, sdk, config)
+        result = await run_platform_seed(entity_client, client, config)
     finally:
-        await sdk.close()
+        await client.close()
 
     if result.errors:
         for err in result.errors:

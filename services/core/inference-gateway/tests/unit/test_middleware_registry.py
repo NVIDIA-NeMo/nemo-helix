@@ -76,6 +76,7 @@ def _make_sdk_call(
 
 def _make_mock_plugin() -> NemoInferenceMiddleware:
     plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.supports_middleware_phase.return_value = True
     plugin.on_startup = AsyncMock()
     plugin.on_shutdown = AsyncMock()
     plugin.on_virtual_model_upserted = AsyncMock()
@@ -91,6 +92,11 @@ def _make_model_provider_info(workspace: str, name: str, host_url: str = "http:/
     provider.name = name
     provider.host_url = host_url
     provider.api_key_secret_name = None
+    provider.auth_header_format = None
+    provider.default_extra_body = {}
+    provider.required_extra_body = {}
+    provider.default_extra_headers = {}
+    provider.required_extra_headers = {}
     return ModelProviderInfo(model_provider=provider)
 
 
@@ -187,6 +193,13 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         model_cache = ModelCache()
         virtual_model_cache = VirtualModelCache()
         provider_info = _make_model_provider_info("ws", "nim-provider", host_url="http://nim.svc:8080")
+        provider_info.model_provider.api_key_secret_name = "nim-secret"
+        provider_info.model_provider.auth_header_format = "X-Api-Key: {{ auth_secret }}"
+        provider_info.model_provider.default_extra_body = {"temperature": 0.2}
+        provider_info.model_provider.required_extra_body = {"stream": False}
+        provider_info.model_provider.default_extra_headers = {"X-Default": "yes"}
+        provider_info.model_provider.required_extra_headers = {"X-Required": "yes"}
+        provider_info.secret_value = "secret-value"
         entity_info = ModelEntityInfo(workspace="ws", name="llama", backend_format=BackendFormat.ANTHROPIC_MESSAGES)
         entity_info.model_providers.append(("llama-v1", provider_info))
         model_cache.model_entity_info_map[("ws", "llama")] = entity_info
@@ -196,7 +209,40 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         target = accessor.get_inference_url_and_model("ws/llama")
         assert target.model_provider_gateway_url == "http://nim.svc:8080/v1"
         assert target.served_model_name == "llama-v1"
+        assert target.default_extra_body == {"temperature": 0.2}
+        assert target.required_extra_body == {"stream": False}
+        assert target.outbound_headers == {
+            "X-Api-Key": "secret-value",
+            "X-Default": "yes",
+            "X-Required": "yes",
+        }
+        assert target.missing_secret_name is None
         assert accessor.get_backend_format("ws/smart-router", "ws/llama") is BackendFormat.ANTHROPIC_MESSAGES
+
+    def test_get_inference_url_and_model_merges_headers_case_insensitively(self):
+        model_cache = ModelCache()
+        provider_info = _make_model_provider_info("ws", "nim-provider")
+        provider_info.model_provider.default_extra_headers = {
+            "x-shared": "default",
+            "X-Default": "yes",
+        }
+        provider_info.model_provider.required_extra_headers = {
+            "X-Shared": "required",
+            "X-Required": "yes",
+        }
+        entity_info = ModelEntityInfo(workspace="ws", name="llama")
+        entity_info.model_providers.append(("llama-v1", provider_info))
+        model_cache.model_entity_info_map[("ws", "llama")] = entity_info
+
+        target = self._make_accessor(model_cache=model_cache).get_inference_url_and_model("ws/llama")
+        normalized = {key.lower(): value for key, value in target.outbound_headers.items()}
+
+        assert normalized == {
+            "x-default": "yes",
+            "x-required": "yes",
+            "x-shared": "required",
+        }
+        assert len(target.outbound_headers) == 3
 
     def test_get_backend_format_uses_virtual_model_override(self):
         model_cache = ModelCache()
@@ -433,6 +479,20 @@ class TestResolveConfigsForVirtualModel:
 
         assert ("ws", "vm") not in registry.request_middleware_calls
         assert ("ws", "vm") in registry.broken_vms
+
+    @pytest.mark.asyncio
+    async def test_unsupported_response_phase_marks_vm_broken(self):
+        plugin = _make_mock_plugin()
+        plugin.supports_middleware_phase.side_effect = lambda phase: phase == "request"
+        registry = MiddlewareRegistry(plugins={"request-only": plugin})
+
+        call = _make_sdk_call("request-only", config={})
+        vm = _make_sdk_vm("ws", "vm", response_middleware=[call])
+        await registry.resolve_configs_for_virtual_model(vm, prefetch=PrefetchResult())
+
+        assert ("ws", "vm") not in registry.response_middleware_calls
+        assert ("ws", "vm") in registry.broken_vms
+        plugin.validate_middleware_config.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_post_response_failure_does_not_mark_vm_broken(self):

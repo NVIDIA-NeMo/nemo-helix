@@ -109,10 +109,10 @@ repos:
         files: '^(Makefile|pyproject\.toml|\.github/workflows/.*\.ya?ml|tools/python/\.flox/env/manifest\.toml)$'
         pass_filenames: false
       - id: python-version-consistency
-        name: Check Make and Flox Python versions
+        name: Check Make, Flox, and task image Python versions
         entry: flox -q activate --dir . -- ./tools/lint/check-python-version.sh
         language: system
-        files: '^(Makefile|tools/python/\.flox/env/manifest\.toml)$'
+        files: '^(Makefile|docker-bake\.hcl|tools/python/\.flox/env/manifest\.toml)$'
         pass_filenames: false
       - id: node-version-consistency
         name: Check Node.js and pnpm versions

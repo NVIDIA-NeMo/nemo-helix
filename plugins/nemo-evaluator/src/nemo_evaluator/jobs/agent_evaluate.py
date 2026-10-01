@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,10 +76,10 @@ from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig, validate_gym_task_row
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -276,15 +277,28 @@ async def prepare_gym_submission(
     return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
 
 
-def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
-    """The ``env_secrets`` names to forward to the Harbor agent, after checking the service resolved them."""
-    missing = sorted(name for name in target.env_secrets if name not in os.environ)
-    if missing:
-        raise ValueError(
-            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Harbor "
-            "agent cannot be given them."
+class JobEnvSecretResolver:
+    """Name the env var holding each Harbor ``env_secrets`` entry inside a platform job.
+
+    The service injected every secret into this process's environment under its ``env_secrets`` key at
+    compile time, so the key *is* the source variable. No other variable is consulted.
+    """
+
+    def __init__(self, *, workspace: str) -> None:
+        self._workspace = workspace
+
+    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
+        """``env_name`` when the service injected a non-empty value under it, else ``None``."""
+        return env_name if os.environ.get(env_name) else None
+
+    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
+        """Point at the secret in its workspace: the ref's own, or the job's for a bare ref."""
+        workspace, sep, name = secret_ref.root.rpartition("/")
+        workspace = workspace if sep else self._workspace
+        return (
+            f"secret {secret_ref.root!r} was not injected into this job's environment. Check the secret exists "
+            f"in workspace {workspace!r}: nemo secrets get {name} --workspace {workspace}"
         )
-    return list(target.env_secrets)
 
 
 class _AgentEvalJobBase(NemoJob):
@@ -587,14 +601,16 @@ class _AgentEvalJobBase(NemoJob):
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
                     agent_kwargs=target.agent_kwargs,
-                    agent_env_from_host=_harbor_agent_env_from_host(target),
+                    env_secrets=target.env_secrets,
+                    env_vars=target.env_vars,
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,
                     artifacts=target.artifacts,
                     trace_dir=target.trace_dir,
                     reward_key=target.reward_key,
-                )
+                ),
+                secret_resolver=JobEnvSecretResolver(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None
         return None, None, None
@@ -645,12 +661,16 @@ class _AgentEvalJobBase(NemoJob):
             for task in get_adapter(kind, prepare_ctx.adapters).prepare(group, prepare_ctx)
         ]
         target, prompt_template, params = self._resolve_target(spec.target, ctx)
+        bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
+        if bundle_dir.exists():
+            shutil.rmtree(bundle_dir)
         run_config = AgentEvalRunConfig(
             params=params,
             prompt_template=prompt_template,
             parallelism=spec.max_concurrent_tasks,
             labels=spec.labels,
             fail_fast=spec.fail_fast,
+            work_dir=bundle_dir,
         )
         evaluator = self._build_evaluator(platform_client, spec.target)
         include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)

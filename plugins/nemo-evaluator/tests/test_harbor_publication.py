@@ -189,7 +189,7 @@ def _resource(monkeypatch, files_client):
 
 @pytest.mark.parametrize("instruction", ["", " \n", "<!-- SPDX-License-Identifier: Apache-2.0 -->\n"])
 def test_prepare_rejects_blank_instruction(root, files, monkeypatch, instruction):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     task = discover_harbor_tasks(root)[0]
     (root / "instruction.md").write_text(instruction)  # Edited after discovery; publication recaptures.
@@ -201,7 +201,7 @@ def test_prepare_rejects_blank_instruction(root, files, monkeypatch, instruction
 
 @pytest.mark.parametrize("name", ["foo#rev", "foo/bar", "", "a" * 256])
 def test_source_write_invalid_name_before_upload(root, files, monkeypatch, name):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     client, objects = files
     with pytest.raises(ValueError):
@@ -210,7 +210,7 @@ def test_source_write_invalid_name_before_upload(root, files, monkeypatch, name)
 
 
 def test_prepare_preserves_instruction_and_default_storage(root, files, monkeypatch):
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     prompt = "<!-- SPDX-License-Identifier: Apache-2.0 -->\n Do it \n"
     (root / "instruction.md").write_text(prompt)
@@ -223,7 +223,7 @@ def test_prepare_preserves_instruction_and_default_storage(root, files, monkeypa
 
 def test_failed_task_write_preserves_prepared_input(root, files, monkeypatch):
     from nemo_evaluator.sdk.task_preparation import TaskPublicationError
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
     from nemo_helix_plugin.client.errors import NemoHTTPError
 
     client, objects = files
@@ -298,7 +298,7 @@ async def test_source_write_creates_fileset_and_preserves_prepared_retry(
 ):
     from nemo_evaluator.sdk.task_preparation import TaskPublicationError
     from nemo_evaluator.sdk.task_resources import AsyncEvaluatorTasksResource
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
     from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient
 
     client, objects = async_files if asynchronous else files
@@ -378,7 +378,7 @@ async def test_async_archive_cancellation_does_not_cleanup_live_work(root, monke
 @pytest.mark.parametrize("field", ["id", "intent", "inputs", "reference", "file"])
 def test_discovered_source_drift_rejected_before_writes(root, files, field):
     from nemo_evaluator.sdk.task_preparation import prepare_task
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     task = discover_harbor_tasks(root)[0]
     if field == "file":
@@ -394,7 +394,7 @@ def test_discovered_source_drift_rejected_before_writes(root, files, field):
 
 def test_discovered_task_publishes_current_payload(root, files):
     from nemo_evaluator.sdk.task_preparation import prepare_task
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
 
     task = discover_harbor_tasks(root)[0]
     (root / "tests/test.sh").write_text("echo current")
@@ -409,7 +409,7 @@ def test_discovered_task_publishes_current_payload(root, files):
 @pytest.mark.parametrize("asynchronous", [False, True])
 async def test_discovered_views_with_runner_selected_reward(root, files, async_files, asynchronous):
     from nemo_evaluator.sdk.task_preparation import prepare_task, prepare_task_async
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import discover_harbor_tasks
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import discover_harbor_tasks
     from nemo_evaluator_sdk.agent_eval.tasks import SemanticReducer, SemanticView, ViewSignal
 
     task = discover_harbor_tasks(root)[0]

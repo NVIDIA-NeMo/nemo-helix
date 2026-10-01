@@ -14,7 +14,7 @@ from nemo_evaluator.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evaluator.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, run_blocking_archive_operation
 from nemo_evaluator.harbor.archive_io import download_verified, download_verified_async
 from nemo_evaluator.harbor.tasks import StoredHarborTask
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import NativeTask, private_directory, remove_owned_tree
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import NativeTask, private_directory, remove_owned_tree
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 

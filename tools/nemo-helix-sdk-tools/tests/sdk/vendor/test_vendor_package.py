@@ -158,9 +158,8 @@ nhx-safe-synthesizer = { source = "../../services/safe-synthesizer/src/nhx/safe_
 nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
 nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor" }
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator" }
-nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard" }
+nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", deps_group = "nemo-switchyard" }
 nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
-switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchyard", module = "switchyard" }
 """
     )
     (wrapper_path / "pyproject.toml").write_text(tomlkit.dumps(wrapper_doc), encoding="utf-8")
@@ -286,14 +285,12 @@ def test_normalize_static_force_include_spacing(tmp_path: Path) -> None:
     assert "\n\n[tool.hatch.build.targets.wheel.force-include]" in pyproject_path.read_text(encoding="utf-8")
 
 
-def test_process_bundle_packages_keeps_bundled_dependency_names_without_inheriting_metadata_by_default(
+def test_process_bundle_packages_keeps_external_dependency_names_without_inheriting_metadata_by_default(
     tmp_path: Path, monkeypatch
 ) -> None:
     wrapper_path = tmp_path / "packages/nemo_helix"
     plugin_path = tmp_path / "plugins/nemo-switchyard"
-    switchyard_path = plugin_path / "vendor/switchyard"
     (plugin_path / "src/nemo_switchyard").mkdir(parents=True)
-    (switchyard_path / "switchyard").mkdir(parents=True)
     wrapper_path.mkdir(parents=True)
 
     (tmp_path / "pyproject.toml").write_text(
@@ -313,16 +310,15 @@ name = "nemo-helix"
 [project.entry-points]
 
 [tool.bundle-package]
-nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard" }
-switchyard = { source = "../../plugins/nemo-switchyard/vendor/switchyard/switchyard", module = "switchyard" }
+nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", deps_group = "nemo-switchyard" }
 """.lstrip(),
         encoding="utf-8",
     )
     (plugin_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-switchyard"
-dependencies = ["nemo-helix", "switchyard", "httpx>=0.28"]
+name = "nemo-switchyard-plugin"
+dependencies = ["nemo-helix", "nemo-switchyard==0.3.0", "httpx>=0.28"]
 
 [project.scripts]
 switchyard-cli = "nemo_switchyard.cli:main"
@@ -336,15 +332,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 """.lstrip(),
         encoding="utf-8",
     )
-    (switchyard_path / "pyproject.toml").write_text(
-        """
-[project]
-name = "switchyard"
-dependencies = ["openai>=2"]
-""".lstrip(),
-        encoding="utf-8",
-    )
-
     monkeypatch.setattr(vendor_package, "NHX_ROOT_PATH", tmp_path)
     vendor_package._process_bundle_packages()
 
@@ -352,10 +339,9 @@ dependencies = ["openai>=2"]
     optional = wrapper_updated["project"]["optional-dependencies"]
 
     assert list(optional["nemo-switchyard"]) == [
-        "switchyard",
+        "nemo-switchyard==0.3.0",
         "httpx>=0.28",
     ]
-    assert list(optional["switchyard"]) == ["openai>=2"]
     assert "aiohttp" not in optional
     assert "test" not in optional
     assert "scripts" not in wrapper_updated["project"]
@@ -693,14 +679,14 @@ manual = ["keep-me"]
 nemo-switchyard-aiohttp = ["stale-dependency"]
 
 [tool.bundle-package]
-nemo-switchyard = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", optional-dependencies-prefix = "nemo-switchyard-", inherit = { "entry-points" = ["nemo.*"], "optional-dependencies" = ["aio*"], scripts = ["switchyard-*"] } }
+nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", optional-dependencies-prefix = "nemo-switchyard-", inherit = { "entry-points" = ["nemo.*"], "optional-dependencies" = ["aio*"], scripts = ["switchyard-*"] }, deps_group = "nemo-switchyard" }
 """.lstrip(),
         encoding="utf-8",
     )
     (plugin_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-switchyard"
+name = "nemo-switchyard-plugin"
 dependencies = ["httpx>=0.28"]
 
 [project.scripts]

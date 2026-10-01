@@ -17,7 +17,7 @@ from typing import Any, BinaryIO, cast
 import anyio
 from anyio.lowlevel import RunVar
 from anyio.to_thread import run_sync
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import (
     CHUNK_BYTES,
     MAX_CONFIG_BYTES,
     MAX_ENTRIES,

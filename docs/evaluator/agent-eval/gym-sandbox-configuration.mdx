@@ -143,6 +143,18 @@ target:
 Do not use `env_vars` for API keys, tokens, passwords, or other secrets. Evaluator rejects
 credential-shaped `env_vars` for sandboxed jobs because environment code can read them.
 
+## Timeouts
+
+The job's own `startup_timeout_s` and `collection_timeout_s` apply to sandboxed runs too:
+
+- `startup_timeout_s` (default 240s) bounds how long the Gym host may take to report ready once its
+  sandbox is running. Pulling the `nhx-gym-host` image is not counted against it.
+- `collection_timeout_s` bounds the whole collection, from the first rollout request to the last,
+  however many requests the rollouts are split across. When it is exceeded, the job fails with a
+  `collection_timeout_s` error and the Gym host is destroyed.
+- `collection_timeout_s: null` (the default) sets no collection deadline. The Gym host still stops
+  when its sandbox lifetime ends, four hours after creation.
+
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.

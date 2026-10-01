@@ -10,6 +10,7 @@ cannot ride into user-supplied environment code.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +19,16 @@ from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
 from nemo_evaluator.jobs.gym_sandbox import (
+    CollectionTimeoutError,
     SandboxPlan,
     SandboxUnavailableError,
+    collect_within,
     credential_shaped_env_vars,
     gym_global_config,
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
     resolve_sandbox_plan,
+    rollout_parallelism,
     serve_config,
 )
 from nemo_helix_plugin.jobs.execution_profiles import (
@@ -514,6 +518,91 @@ def test_resource_requests_reach_the_host_when_configured() -> None:
     spec = built_host_spec(capable_plan(sandbox_resources={"cpu": "2", "memory": "8Gi"}))
 
     assert spec.resources == {"cpu": "2", "memory": "8Gi"}
+
+
+@pytest.mark.parametrize(
+    ("concurrency", "expected"),
+    [(1, (1, 1)), (4, (1, 4)), (8, (1, 8)), (9, (2, 4)), (10, (2, 5)), (64, (8, 8)), (100, (13, 7))],
+)
+def test_concurrency_becomes_chunks_whose_product_never_exceeds_it(concurrency: int, expected: tuple[int, int]) -> None:
+    chunk_size, max_in_flight = rollout_parallelism(concurrency)
+
+    assert (chunk_size, max_in_flight) == expected
+    assert max_in_flight <= 8, "every in-flight chunk holds a worker thread"
+    assert concurrency - chunk_size < chunk_size * max_in_flight <= concurrency
+
+
+def test_the_targets_concurrency_sets_the_sessions_chunking() -> None:
+    sandbox = serve_config(target(concurrency=10), capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (2, 5)
+
+
+def test_the_default_concurrency_survives_the_job_spec_round_trip() -> None:
+    """The job reads a target dumped with every default, so the default must map like any value."""
+    round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
+
+    sandbox = serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (1, 4)
+
+
+def test_startup_timeout_bounds_the_hosts_bootstrap() -> None:
+    from sandboxed_gym import SandboxedGymServeConfig
+
+    payload = serve_config(target(startup_timeout_s=45), capable_plan(), job_id="job-1")
+
+    assert SandboxedGymServeConfig.model_validate(payload).sandbox.bootstrap_timeout_s == 45
+
+
+def test_the_default_startup_timeout_survives_the_job_spec_round_trip() -> None:
+    round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
+
+    assert serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]["bootstrap_timeout_s"] == 240
+
+
+def test_a_finite_collection_timeout_caps_the_hosts_per_chunk_deadline() -> None:
+    """The host gives up on a chunk just after the job does, so the run fails as a collection timeout."""
+    spec = built_host_spec(capable_plan(), target(collection_timeout_s=2))
+
+    deadline_s = float(spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"])
+    assert 2 < deadline_s <= 60, "past the job's own deadline, so that one fires first, but no further"
+
+
+def test_an_unbounded_collection_is_bounded_only_by_the_hosts_lifetime() -> None:
+    """None must not quietly become the host's 30-minute per-request default."""
+    spec = built_host_spec(capable_plan(), target(collection_timeout_s=None))
+
+    assert spec.ttl_s is not None
+    assert float(spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"]) == spec.ttl_s
+
+
+async def test_collection_that_outruns_its_timeout_fails_as_a_timeout_naming_the_budget() -> None:
+    async def never_finishes(examples: list[dict[str, Any]]) -> list[Any]:
+        await asyncio.sleep(60)
+        return examples
+
+    with pytest.raises(CollectionTimeoutError, match=r"collection_timeout_s=0\.05s"):
+        await collect_within(never_finishes, [{"id": 0}], timeout_s=0.05)
+
+
+async def test_collection_within_its_timeout_returns_the_results() -> None:
+    async def quick(examples: list[dict[str, Any]]) -> list[Any]:
+        return examples
+
+    assert await collect_within(quick, [{"id": 0}], timeout_s=5) == [{"id": 0}]
+    assert await collect_within(quick, [{"id": 0}], timeout_s=None) == [{"id": 0}]
+
+
+async def test_a_timeout_raised_by_the_collector_itself_is_not_reported_as_the_budget() -> None:
+    """Only the job's own deadline may claim `collection_timeout_s`; anything else keeps its identity."""
+
+    async def times_out_on_its_own(examples: list[dict[str, Any]]) -> list[Any]:
+        raise TimeoutError("host socket timed out")
+
+    with pytest.raises(TimeoutError, match="host socket timed out") as caught:
+        await collect_within(times_out_on_its_own, [{"id": 0}], timeout_s=60)
+    assert not isinstance(caught.value, CollectionTimeoutError)
 
 
 def test_the_runtime_image_and_job_id_reach_the_host() -> None:

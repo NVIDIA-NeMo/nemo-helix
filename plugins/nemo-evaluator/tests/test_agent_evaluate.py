@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
+    JobEnvSecretResolver,
     _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
@@ -56,7 +57,14 @@ from nemo_evaluator.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
+    MODEL_CALLS_RESULT_KEY,
+    SandboxedGymAgentTaskRunner,
+    SandboxedGymRuntimeConfig,
+)
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTarget,
@@ -286,6 +294,84 @@ def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, m
     assert result["artifact"]["name"] == DEFAULT_RESULT_NAME
 
 
+def _run_sandboxed_gym_job(ctx: JobContext, mocker: MockerFixture) -> Path:
+    """Run a one-task sandboxed Gym job with the host call faked; return the downloaded artifact."""
+
+    async def host(_runner: SandboxedGymAgentTaskRunner, examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                NG_TASK_INDEX: example[NG_TASK_INDEX],
+                NG_ROLLOUT_INDEX: example[NG_ROLLOUT_INDEX],
+                "reward": 1.0,
+                MODEL_CALLS_RESULT_KEY: [{"model_call_id": "c0", "started_at": 1788534870.5}],
+            }
+            for example in examples
+        ]
+
+    mocker.patch.object(SandboxedGymAgentTaskRunner, "_collect", autospec=True, side_effect=host)
+    runner = SandboxedGymAgentTaskRunner(config=SandboxedGymRuntimeConfig(rollout_url="http://gym-host.example/run"))
+    mocker.patch.object(AgentEvalJob, "_resolve_target", return_value=(runner, None, None))
+    task = ResolvedTask(
+        id="task-1",
+        spec=ResolvedEvaluatorTaskDefinition(
+            kind="evaluator",
+            intent="Answer the question.",
+            inputs=_task_inputs(gym_row={"input": "What is 2+2?"}),
+            metrics=[_inline_metric()],
+        ),
+        metadata=[MetadataItem(key="gym_row_extras", value={})],
+    )
+    spec = AgentEvalSpec(
+        tasks=[task],
+        target=GymRunnerTarget(agent="simple_agent", agent_config="simple_agent.yaml", resources_server="mcqa"),
+    )
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+    return ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+
+
+def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bundle(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """Gym rollouts and model-call captures must ship in the artifact with bundle-relative refs.
+
+    Anywhere else, they die with the Job's container and the trials reference paths nobody can open.
+    """
+    downloaded = _run_sandboxed_gym_job(_job_context(tmp_path), mocker)
+
+    [trial] = [json.loads(line) for line in (downloaded / "trials.jsonl").read_text(encoding="utf-8").splitlines()]
+    refs = {
+        name: descriptor["ref"]
+        for name, descriptor in trial["evidence"]["descriptors"].items()
+        if descriptor.get("ref")
+    }
+    assert set(refs) == {"rollouts", "ng_trajectory"}
+    for ref in refs.values():
+        assert not Path(ref).is_absolute()
+        assert (downloaded / ref).is_file()
+    capture = (downloaded / refs["ng_trajectory"]).read_text(encoding="utf-8")
+    assert json.loads(capture)["model_call_id"] == "c0"
+
+
+def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
+    """A retried job (Volcano ``maxRetry``) reuses the failed attempt's persistent storage; leftover Gym output
+    must not block or leak.
+
+    Gym refuses to collect into a directory that holds rollouts, and leftover files would upload with
+    the new attempt's artifact.
+    """
+    ctx = _job_context(tmp_path)
+    leftover = ctx.storage.persistent / AGENT_BUNDLE_DIR
+    (leftover / "gym_run" / "model_calls").mkdir(parents=True)
+    (leftover / "gym_run" / "rollouts.jsonl").write_text('{"reward": 0.0}\n', encoding="utf-8")
+    (leftover / "gym_run" / "model_calls" / "stale.capture.jsonl").write_text("{}\n", encoding="utf-8")
+
+    downloaded = _run_sandboxed_gym_job(ctx, mocker)
+
+    assert not (downloaded / "gym_run" / "model_calls" / "stale.capture.jsonl").exists()
+    rollouts = [json.loads(line) for line in (downloaded / "gym_run" / "rollouts.jsonl").read_text().splitlines()]
+    assert [rollout["reward"] for rollout in rollouts] == [1.0]
+
+
 def test_agent_eval_job_survives_result_persistence_failure(tmp_path: Path, mocker: MockerFixture) -> None:
     # The queryable result record is a best-effort convenience index; the authoritative output (bundle
     # + summary artifacts) is already saved. A persistence failure must not fail a successful eval.
@@ -371,6 +457,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         agent_model_name="openai/gpt-5.4",
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+        env_vars={"FABRIC_LOG": "debug"},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -387,8 +474,13 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         "fabric_adapter_id": "nvidia.fabric.codex",
         "fabric_harness_settings": {"max_turns": 3},
     }
-    # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
-    assert target._config.agent_env_from_host == ["OPENAI_API_KEY"]
+    assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")}
+    assert target._config.env_vars == {"FABRIC_LOG": "debug"}
+    # The service injected the secret under its key, so Harbor gets a `${OPENAI_API_KEY}` template.
+    assert isinstance(target._secret_resolver, JobEnvSecretResolver)
+    assert harbor_env_templates(target._config.env_secrets, target._secret_resolver) == {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+    }
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -527,16 +619,38 @@ def test_harbor_runner_target_is_accepted() -> None:
     assert isinstance(spec.target, HarborRunnerTarget)
 
 
-def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(("ref", "workspace"), [("my-workspace/openai-key", "my-workspace"), ("openai-key", "dev")])
+def test_harbor_env_secret_missing_from_job_environment_names_the_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str, workspace: str
 ) -> None:
-    """An unresolved `env_secrets` entry fails by name here, not inside a Docker trial as a bare auth error."""
+    """An unresolved `env_secrets` entry fails by name before Docker starts, not inside a trial as an auth error.
+
+    The runner raises when it builds the templates, at the start of each execution; target resolution
+    no longer checks. A bare ref points at the job's workspace.
+    """
     ctx = _job_context(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")})
+    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root=ref)})
+    runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
+    assert isinstance(runner, HarborAgentTaskRunner) and runner._config is not None
 
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        AgentEvalJob._resolve_target(harbor_target, ctx)
+    with pytest.raises(ValueError) as excinfo:
+        harbor_env_templates(runner._config.env_secrets, runner._secret_resolver)
+    assert str(excinfo.value) == (
+        f"env_secrets['OPENAI_API_KEY'] -> secret {ref!r} was not injected into this job's environment. "
+        f"Check the secret exists in workspace {workspace!r}: nemo secrets get openai-key --workspace {workspace}"
+    )
+
+
+def test_job_env_secret_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    ref = SecretRef(root="my-workspace/openai-key")
+    resolver = JobEnvSecretResolver(workspace="dev")
+    monkeypatch.setenv("MY_WORKSPACE_OPENAI_KEY", "never-read")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("LLM_API_KEY", "injected")
+
+    assert resolver.find_env_name(ref, "OPENAI_API_KEY") is None, "an empty value counts as missing"
+    assert resolver.find_env_name(ref, "LLM_API_KEY") == "LLM_API_KEY"
 
 
 def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:

@@ -393,7 +393,9 @@ today only because of the current pins, not by nature.
   a branch. The base clones RL at that ref. A branch ref would let the source move
   underneath the cache, silently invalidating the heavy compile layer on every
   rebuild and breaking `uv sync --frozen` whenever the pinned commit's lock drifted.
-  Bump the SHA deliberately, in lockstep with the lock.
+  Bump the SHA deliberately, in lockstep with the lock. `docker-bake.hcl` holds the
+  only copy of the pin: a direct `docker build` must pass `--build-arg NEMO_RL_REF=<sha>`
+  and fails without it.
 - **NeMo-Gym is not cloned separately.** RL pins Gym as a git submodule and declares
   it a uv **workspace member**, alongside the Automodel and Megatron-Bridge (+ nested
   Megatron-LM) submodules. The base's git `ADD` recurses submodules, so Gym rides in

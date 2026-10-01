@@ -1431,44 +1431,34 @@ def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
     assert "accurate" in judge_output["reasoning"].lower()
 
 
-def test_fixture_isolation(mock_provider_test_clients: ClientContext):
-    """Test that mock_provider_test_clients fixture properly isolates test state.
+def test_fixture_isolation():
+    """Each test context starts from an empty gateway cache and an empty entity store.
 
-    Each test using mock_provider_test_clients gets a fresh context. Providers added in
-    one test won't be visible in another test.
+    The contexts are opened one after the other. One opened *inside* another shares the
+    process-global entities engine, and its gateway would see the outer provider after its
+    first cache refresh.
     """
-    # Add a provider in this test
-    provider = add_mock_provider(
-        mock_provider_test_clients.client,
-        workspace=DEFAULT_WORKSPACE,
-        name="isolated-provider",  # Becomes "igw-mock-isolated-provider"
-        mock_response_body={"context": 1},
-    )
-
-    # Verify it works in this context
-    response = (
-        _gateway(mock_provider_test_clients)
-        .provider_post(
-            trailing_uri="v1/test",
-            name=provider.name,
+    with create_test_client(InferenceGatewayService, ModelsService, client_type=ClientContext) as first:
+        provider = add_mock_provider(
+            first.client,
             workspace=DEFAULT_WORKSPACE,
-            body=JsonBody({}),
+            name="isolated-provider",  # Becomes "igw-mock-isolated-provider"
+            mock_response_body={"context": 1},
         )
-        .data()
-    )
-    assert response == {"context": 1}
+        response = (
+            _gateway(first)
+            .provider_post(trailing_uri="v1/test", name=provider.name, workspace=DEFAULT_WORKSPACE, body=JsonBody({}))
+            .data()
+        )
+        assert response == {"context": 1}
 
-    # Create a new context (simulating another test)
-    with create_test_client(
-        InferenceGatewayService,
-        ModelsService,
-        client_type=ClientContext,
-    ) as new_ctx:
-        # Provider should not exist in the new context
+    with create_test_client(InferenceGatewayService, ModelsService, client_type=ClientContext) as second:
         with pytest.raises(NotFoundError) as exc_info:
-            _gateway(new_ctx).provider_get(
-                trailing_uri="v1/health/ready",
-                name=provider.name,
-                workspace=DEFAULT_WORKSPACE,
+            _gateway(second).provider_get(
+                trailing_uri="v1/health/ready", name=provider.name, workspace=DEFAULT_WORKSPACE
             ).data()
         assert exc_info.value.status_code == 404
+        # The store too, not only the cache: the cache is empty until the gateway's first refresh either way.
+        models = ModelsClient(base_url="http://testserver", http_client=second.test_client)
+        with pytest.raises(NotFoundError):
+            models.get_provider(workspace=DEFAULT_WORKSPACE, name=provider.name).data()

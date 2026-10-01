@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: plugin-function
-description: Creates in-process NemoFunction surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the two CLI verbs (run / submit), or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, two verbs, run, submit, streaming, NDJSON, FunctionContext.
+description: Creates in-process NemoFunction surfaces for NeMo Helix plugins. Use when adding a function, declaring spec_schema, mounting function routes with add_function_routes, understanding the generated CLI command, or streaming NDJSON frames. Trigger keywords - function, NemoFunction, spec_schema, add_function_routes, nemo_helix_plugin.functions, generate_legacy_verbs, submit, streaming, NDJSON, FunctionContext.
 ---
 
 # Plugin Functions (NemoFunction)
@@ -11,20 +11,20 @@ description: Creates in-process NemoFunction surfaces for NeMo Helix plugins. Us
 A `NemoFunction` is the third primitive on a plugin, alongside `NemoResource` and `NemoJob`. It's an in-process request handler — no scheduler, no backend dispatch — that the platform exposes as both a CLI subcommand and an HTTP route automatically.
 
 ```text
-nemo <plugin> <fn> run    [--spec '{...}' | --spec-file FILE] [--workspace W] [<spec-flag>...]
-nemo <plugin> <fn> submit [--spec '{...}' | --spec-file FILE] \
-                          [--workspace W] [--request-id ID] [<spec-flag>...]
+nemo <plugin> <fn> [--spec '{...}' | --spec-file FILE] [--workspace W] [--request-id ID] [<spec-flag>...]
 ```
 
-`run` is local (in-process); `submit` POSTs to the plugin service's auto-derived route on the platform
-selected by the global `nemo --base-url` / `nemo --context` flags and the active CLI context. Two verbs only — no `explain`. A function's only schema is `spec_schema`, and `--help` is the introspection surface.
+The command POSTs to the plugin service's auto-derived route on the platform selected by the global
+`nemo --base-url` / `nemo --context` flags and the active CLI context. There is no `explain` — a function's only schema is `spec_schema`, and `--help` is the introspection surface.
+
+Always set `generate_legacy_verbs = False`. The default `True` generates a deprecated `<fn> run` / `<fn> submit` group whose `run` verb executes the function locally, in-process; that local execution mode is deprecated and new functions must not use it.
 
 ## CLI introspection — auto-generated per-field flags
 
 Every scalar leaf in `spec_schema` becomes a Typer flag automatically. Nested submodels recurse with dotted paths (`--target.url`, `--target.timeout-seconds`). For a function with `spec_schema = GreetSpec(name: str)`:
 
 ```text
-$ nemo my-plugin greet run --help
+$ nemo my-plugin greet --help
 ...
 Function Spec:
   --name <NAME>  Name to greet.
@@ -32,7 +32,10 @@ Function Spec:
 Spec Source:
   --spec <SPEC>            Spec as a JSON string. [default: {}]
   --spec-file <SPEC_FILE>  Path to a YAML or JSON spec file (used as base; per-flag values override).
-  --workspace <WORKSPACE>  Workspace identity passed to the function as ctx.workspace. [default: default]
+
+Submission:
+  -w, --workspace <WORKSPACE>  Workspace path segment used in the submit URL.
+  --request-id <REQUEST_ID>    Set the X-Request-ID header (echoed back in ctx.request_id).
 ...
 Function Spec flags are generated from the GreetSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 ```
@@ -55,13 +58,14 @@ class GreetResponse(BaseModel):
 class GreetFunction(NemoFunction[GreetSpec]):
     name:        ClassVar[str] = "greet"
     description: ClassVar[str] = "Say hello to a name."
+    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")
 ```
 
-Required: `name`, `spec_schema`, `async def run()`. Optional: `description`, `endpoint`.
+Required: `name`, `spec_schema`, `async def run()`, and `generate_legacy_verbs = False`. Optional: `description`, `endpoint`.
 
 ## Method colours — `run` is **always** `async def`
 
@@ -195,7 +199,7 @@ Only `{name}` is substituted; the workspace placeholder stays as a live FastAPI 
 
 ## DI by signature
 
-`run` accepts framework-managed dependencies as keyword-only parameters. The route adapter and the local CLI both resolve them by parameter name:
+`run` accepts framework-managed dependencies as keyword-only parameters. The route adapter resolves them by parameter name:
 
 ```python
 from nemo_helix_plugin.function import NemoFunction
@@ -221,7 +225,7 @@ class WhoamiFunction(NemoFunction[GreetSpec]):
 
 | Parameter | Source | Notes |
 |---|---|---|
-| `ctx: FunctionContext` | route adapter / CLI | `workspace` from URL or `--workspace`, `request_id` from `X-Request-ID` |
+| `ctx: FunctionContext` | route adapter | `workspace` from the URL (set by the CLI's `--workspace`), `request_id` from `X-Request-ID` |
 | `async_sdk` | route adapter only (today) | Plugin services need `app.dependency_overrides[get_sdk_client]` to inject a real handle |
 | `sdk` | declared but currently bound to `None` | Sync placeholder lands with the SDK-builder follow-up |
 
@@ -292,6 +296,6 @@ add_function_routes(CountFunction, heartbeat_interval_seconds=0, authz=AuthzScop
 - **`authz=` is required**: pass your plugin's `AuthzScope` to `add_function_routes`, or the route is unruled and the OPA bundle build fails closed under `hard_fail`. See the `plugin-authz` skill.
 - **Streaming is detected from the return type, not declared**: An `async def` with `yield` is an async generator — the route emits NDJSON. An `async def` with `return` is a coroutine — the route emits JSON. Don't add a class-level streaming flag.
 - **`endpoint` is the trailing segment**: Setting `endpoint = "/{name}/v1"` mounts under the workspace prefix; you can't relocate the function to a different plugin's URL namespace.
-- **Reserved CLI flag**: `submit --workspace` controls the URL path segment — don't put a `workspace` field in your spec model with conflicting semantics.
+- **Reserved CLI flag**: `--workspace` controls the URL path segment — don't put a `workspace` field in your spec model with conflicting semantics.
 
 For the architectural framing alongside `NemoResource` and `NemoJob`, see the shared resources/jobs/functions design note.

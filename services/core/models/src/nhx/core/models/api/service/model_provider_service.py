@@ -234,6 +234,19 @@ class ModelProviderService:
             status_message = "Model provider created"
 
         if existing_entity:
+            # If the credential or endpoint changed, the previously-computed status no longer
+            # describes the new (key, host_url) pair — a rotated key or a re-pointed host must
+            # be re-evaluated by the reconciler from scratch. Reset to CREATED and IGNORE any
+            # incoming status (Studio's edit modal re-sends the old status verbatim, which would
+            # otherwise re-assert a stale READY on a provider whose key was just rotated).
+            connection_changed = (
+                existing_entity.api_key_secret_name != request.api_key_secret_name
+                or existing_entity.host_url != request.host_url
+            )
+            if connection_changed:
+                status = ModelProviderStatus.CREATED
+                status_message = "Model provider connection changed; re-evaluating"
+
             existing_entity.project = request.project
             existing_entity.description = request.description
             existing_entity.host_url = request.host_url
