@@ -13,6 +13,9 @@ from typing import Any
 
 import pytest
 import yaml
+
+pytest.importorskip("scaled_evals")
+
 from scaled_evals import harbor_opensandbox_cleanup as cleanup
 from scaled_evals.api.framework_versions import resolve_framework_runner
 from scaled_evals.api.settings import settings
