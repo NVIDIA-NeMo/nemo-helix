@@ -44,9 +44,9 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
-from nemo_deployments_plugin.auth_proxy import auth_proxy_port
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import (
     ConfigFile,
     Container,
@@ -61,11 +61,8 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
     WorkloadIdentitySpec,
 )
-from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
-from nemo_helix_plugin.auth.workload_identity import (
-    get_workload_identity_token_audience,
-    is_workload_identity_token_exchange_enabled,
-)
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_identity import get_workload_identity_token_audience
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
@@ -691,32 +688,24 @@ class DeploymentsRunnerBackend(RunnerBackend):
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
 
-        # When platform auth is enabled, the agent carries no platform credential,
-        # so route its inference calls through a loopback auth-proxy sidecar (the
-        # deployments plugin compiles the sidecar from the auth_proxy flags). The
-        # agent targets the sidecar on localhost; the sidecar forwards to the
-        # platform with a service-principal identity header.
-        #
-        # The sidecar also delegates to the deployment's creator via on-behalf-of
-        # (when known) so the running agent's platform access is scoped to what the
-        # creator can reach — the workspace(s) they have access to — rather than the
-        # agents service principal's full (ServiceSystem) reach.
-        auth_proxy_identity: str | None = None
-        auth_proxy_on_behalf_of: str | None = None
+        # The deployments plugin owns auth-proxy/workload-identity mode selection;
+        # the agent backend only applies the resulting plan to URL rewriting and
+        # DeploymentConfig generation.
+        auth_plan = plan_deployment_auth(
+            service_identity=_AUTH_PROXY_IDENTITY,
+            on_behalf_of=created_by or None,
+            auth_context=auth_context,
+            workload_name=name,
+            workload_label="Agent deployment",
+        )
+        if auth_plan.error is not None:
+            logger.error("Refusing to deploy agent %r: %s", name, auth_plan.error)
+            return DeploymentInfo(name=name, status="failed", error=auth_plan.error)
+        if auth_plan.warning is not None:
+            logger.warning(auth_plan.warning)
+
         is_fabric = _is_fabric_agent_config(config)
-        if platform_auth_enabled():
-            auth_proxy_identity = _AUTH_PROXY_IDENTITY
-            auth_proxy_on_behalf_of = created_by or None
-            if not auth_proxy_on_behalf_of:
-                logger.warning(
-                    "Deployment %r has no creator principal; the agent will run as the "
-                    "unscoped %s service principal without on-behalf-of delegation.",
-                    name,
-                    _AUTH_PROXY_IDENTITY,
-                )
-            rewrite_target = f"http://127.0.0.1:{auth_proxy_port()}"
-        else:
-            rewrite_target = gateway
+        rewrite_target = auth_plan.auth_proxy_base_url or gateway
 
         if is_fabric:
             # Wire the trajectory export before the rebase below, so the
@@ -774,13 +763,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 mode=deployment_mode,
                 plugin_wheels_init_image=self._config.plugin_wheels_init_image,
                 labels=deployment_labels,
-                auth_proxy_identity=auth_proxy_identity,
-                auth_proxy_on_behalf_of=auth_proxy_on_behalf_of,
+                auth_proxy_identity=auth_plan.auth_proxy_identity,
+                auth_proxy_on_behalf_of=auth_plan.auth_proxy_on_behalf_of,
                 config_files=staged_config_files,
                 resources=resources,
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
-                workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
+                workload_identity_enabled=auth_plan.workload_identity_enabled,
             )
         except ReservedSecretEnvVarError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)

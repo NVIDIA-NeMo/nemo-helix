@@ -70,6 +70,7 @@ test_runtimes:
       - workload_token_exchange
       - platform_access_keys
       - workspace_rbac
+      - interactive_email_alias
       - workload_job
       - managed_workload_job_obo
       - workload_deployment
@@ -87,6 +88,7 @@ test_runtimes:
       - workload_token_exchange
       - platform_access_keys
       - workspace_rbac
+      - interactive_email_alias
       - workload_job
       - managed_workload_job_obo
       - workload_deployment

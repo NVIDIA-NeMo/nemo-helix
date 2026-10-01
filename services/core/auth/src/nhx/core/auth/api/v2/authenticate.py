@@ -340,6 +340,8 @@ async def _ext_authz_bearer_token(
         workload_token_exchange_service,
         access_key_registry,
     )
+    if get_auth_config().oidc.workload_token_exchange_enabled:
+        return Response(status_code=status.HTTP_200_OK)
     return Response(status_code=status.HTTP_200_OK, headers=resolved.principal_headers())
 
 

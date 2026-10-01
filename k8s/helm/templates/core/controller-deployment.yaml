@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 {{- if .Values.core.enabled }}
 {{- $imagePullSecrets := include "nemo-common.imagepullsecrets" . }}
+{{- $platformConfig := include "nemo-helix.calculatedConfig" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,7 +64,7 @@ spec:
             - name: NHX_CONFIG_FILE_PATH
               value: /etc/nhx/config.yaml
             - name: NHX_BASE_URL
-              value: {{ include "nemo-helix.internalBaseUrl" . | quote }}
+              value: {{ dig "platform" "base_url" (include "nemo-helix.internalBaseUrl" .) $platformConfig | quote }}
             # In-cluster API Service DNS. Deployed agents use this as their inference
             # endpoint, since NHX_BASE_URL may not be reachable from an agent pod.
             - name: NHX_INTERNAL_BASE_URL
@@ -126,10 +127,16 @@ spec:
             - name: config
               mountPath:  /etc/nhx/config.yaml
               subPath: config.yaml
+            {{- with .Values.core.controller.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "nemo-helix.platform-configmap" . }}
+        {{- with .Values.core.controller.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.core.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

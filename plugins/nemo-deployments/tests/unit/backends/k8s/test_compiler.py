@@ -766,7 +766,7 @@ def test_compile_workload_rejects_mismatched_workload_identity_token_audience() 
         )
 
 
-def test_compile_workload_does_not_mount_workload_identity_on_auth_proxy() -> None:
+def test_compile_workload_mounts_workload_identity_on_auth_proxy() -> None:
     config = sample_always_config().model_copy(
         update={
             "auth_proxy_sidecar": True,
@@ -789,5 +789,9 @@ def test_compile_workload_does_not_mount_workload_identity_on_auth_proxy() -> No
     auth_proxy = next(item for item in pod_spec["init_containers"] if item["name"] == "auth-proxy")
     auth_proxy_env = {item["name"]: item["value"] for item in auth_proxy.get("env", [])}
     assert auth_proxy_env["XDG_STATE_HOME"] == "/tmp"
-    assert all(env["name"] != WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR for env in auth_proxy.get("env", []))
-    assert all(mount["name"] != WORKLOAD_IDENTITY_VOLUME_NAME for mount in auth_proxy.get("volumeMounts", []))
+    assert auth_proxy_env[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    workload_identity_mount = next(
+        mount for mount in auth_proxy.get("volumeMounts", []) if mount["name"] == WORKLOAD_IDENTITY_VOLUME_NAME
+    )
+    assert workload_identity_mount["mountPath"] == WORKLOAD_IDENTITY_VOLUME_PATH
+    assert workload_identity_mount["readOnly"] is True
