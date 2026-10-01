@@ -50,6 +50,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
     name = "synth"  # keeps the hand-written `nemo agent-hardener synth-benign` command unshadowed (cf. war-game/run)
     description = "Synthesize a saved manifest's benign request suite and cache it on the manifest."
     container = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel] | None] = SynthBenignSpec
 
     @classmethod
