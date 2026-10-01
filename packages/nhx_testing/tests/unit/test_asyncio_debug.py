@@ -26,7 +26,7 @@ async def _swallow_cancellation(started: asyncio.Event) -> None:
     started.set()
     while True:
         try:
-            await asyncio.sleep(3600)
+            await asyncio.Event().wait()
         except asyncio.CancelledError:
             continue
 
@@ -59,7 +59,7 @@ def test_dump_event_loop_tasks_reports_tasks_on_another_threads_loop():
 
     async def _main() -> None:
         ready.set()
-        await asyncio.sleep(3600)
+        await asyncio.Event().wait()
 
     def _run() -> None:
         try:
@@ -95,9 +95,23 @@ def test_bounded_teardown_names_task_that_ignores_cancellation():
     assert "_swallow_cancellation" in str(exc_info.value)
 
 
+def test_bounded_teardown_attaches_stuck_tasks_to_an_error_already_raised():
+    async def _main() -> None:
+        started = asyncio.Event()
+        asyncio.get_running_loop().create_task(_swallow_cancellation(started), name="stubborn")
+        await started.wait()
+
+    with pytest.raises(ValueError, match="test failed") as exc_info:
+        with bounded_event_loop_teardown(timeout=0.2):
+            asyncio.run(_main())
+            raise ValueError("test failed")
+
+    assert any("'stubborn'" in note for note in exc_info.value.__notes__)
+
+
 def test_bounded_teardown_is_silent_when_tasks_cancel_cleanly():
     async def _main() -> None:
-        asyncio.get_running_loop().create_task(asyncio.sleep(3600))
+        asyncio.get_running_loop().create_task(asyncio.Event().wait())
         await asyncio.sleep(0)
 
     with bounded_event_loop_teardown(timeout=5):

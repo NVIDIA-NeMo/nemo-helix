@@ -120,12 +120,21 @@ def bounded_event_loop_teardown(timeout: float = DEFAULT_TEARDOWN_TIMEOUT_SECOND
     setattr(asyncio.runners, "_cancel_all_tasks", _make_bounded_cancel_all_tasks(timeout, stragglers, lock))
     try:
         yield
+    except BaseException as exc:
+        # Something else already failed; keep the task stacks rather than masking that error.
+        if stragglers:
+            exc.add_note(_describe_stragglers(stragglers, timeout))
+        raise
     finally:
         setattr(asyncio.runners, "_cancel_all_tasks", original)
     if stragglers:
-        details = "\n\n".join(stragglers)
-        raise AsyncioTeardownError(
-            f"{len(stragglers)} asyncio task(s) ignored cancellation for {timeout:g}s while the event loop "
-            f"was closing. A background task likely swallows CancelledError or awaits something that never "
-            f"completes:\n\n{details}"
-        )
+        raise AsyncioTeardownError(_describe_stragglers(stragglers, timeout))
+
+
+def _describe_stragglers(stragglers: list[str], timeout: float) -> str:
+    details = "\n\n".join(stragglers)
+    return (
+        f"{len(stragglers)} asyncio task(s) ignored cancellation for {timeout:g}s while the event loop "
+        f"was closing. A background task likely swallows CancelledError or awaits something that never "
+        f"completes:\n\n{details}"
+    )
