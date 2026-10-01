@@ -19,7 +19,13 @@ from typing import Any, overload
 from nemo_evaluator.api.fields import TaskRef
 from nemo_evaluator.api.schemas import Revision, Task, TaskInput
 from nemo_evaluator.entities import MAX_NAME_LENGTH, NAME_PATTERN
-from nemo_evaluator.sdk.query_params import list_filter_params, list_params, project_params, revision_selector
+from nemo_evaluator.sdk.query_params import (
+    like_filter,
+    list_filter_params,
+    list_params,
+    project_params,
+    revision_selector,
+)
 from nemo_evaluator.sdk.task_preparation import TaskPublicationError, prepare_task, prepare_task_async
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
@@ -293,15 +299,31 @@ class EvaluatorTasksResource:
         page_size: int = 100,
         sort: str | None = None,
         kind: str | None = None,
+        native_task_id: str | None = None,
+        intent_contains: str | None = None,
+        metric: str | None = None,
+        tag: str | None = None,
         metadata: Mapping[str, ElemMatchScalar] | None = None,
     ) -> Page[Task]:
-        """List stored tasks in a workspace, optionally filtered by kind and metadata.
+        """List stored tasks in a workspace, optionally filtered.
 
-        ``metadata`` matches tasks that carry every given key with the given value.
+        ``metric`` and ``tag`` match tasks that use that metric ref or carry that revision tag;
+        ``intent_contains`` is a case-insensitive substring match; ``metadata`` matches tasks carrying
+        every given key with the given value.
         """
         response = self._client.list_tasks(
             workspace=workspace,
-            query_params={**list_params(page, page_size, sort), **list_filter_params(kind=kind, metadata=metadata)},
+            query_params={
+                **list_params(page, page_size, sort),
+                **list_filter_params(
+                    kind=kind,
+                    native_task_id=native_task_id,
+                    intent=like_filter(intent_contains),
+                    metrics=metric,
+                    tags=tag,
+                    metadata=metadata,
+                ),
+            },
         )
         page_result = response.page()
         return Page[Task].model_validate(
@@ -580,15 +602,31 @@ class AsyncEvaluatorTasksResource:
         page_size: int = 100,
         sort: str | None = None,
         kind: str | None = None,
+        native_task_id: str | None = None,
+        intent_contains: str | None = None,
+        metric: str | None = None,
+        tag: str | None = None,
         metadata: Mapping[str, ElemMatchScalar] | None = None,
     ) -> Page[Task]:
-        """List stored tasks in a workspace, optionally filtered by kind and metadata.
+        """List stored tasks in a workspace, optionally filtered.
 
-        ``metadata`` matches tasks that carry every given key with the given value.
+        ``metric`` and ``tag`` match tasks that use that metric ref or carry that revision tag;
+        ``intent_contains`` is a case-insensitive substring match; ``metadata`` matches tasks carrying
+        every given key with the given value.
         """
         response = await self._client.list_tasks(
             workspace=workspace,
-            query_params={**list_params(page, page_size, sort), **list_filter_params(kind=kind, metadata=metadata)},
+            query_params={
+                **list_params(page, page_size, sort),
+                **list_filter_params(
+                    kind=kind,
+                    native_task_id=native_task_id,
+                    intent=like_filter(intent_contains),
+                    metrics=metric,
+                    tags=tag,
+                    metadata=metadata,
+                ),
+            },
         )
         page_result = response.page()
         return Page[Task].model_validate(

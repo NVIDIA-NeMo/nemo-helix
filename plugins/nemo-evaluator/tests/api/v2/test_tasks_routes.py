@@ -37,7 +37,7 @@ class _FakeMetricService:
         return MetricRef(f"{workspace}/derived.{metric.payload.digest}")
 
     async def get_metric(self, workspace: str, name: str) -> object | None:
-        return object() if (workspace, name) == ("default", "stored-metric") else None
+        return object() if workspace == "default" and name in {"stored-metric", "other-metric"} else None
 
 
 @pytest.fixture(autouse=True)
@@ -364,7 +364,11 @@ def _with_metadata(body: dict, **metadata: object) -> dict:
 
 @pytest.fixture
 def filterable(client: TestClient) -> TestClient:
-    client.post(f"{_BASE}/alice-smoke", json=_with_metadata(_body(), owner="alice", suite="smoke", level=1))
+    alice = _with_metadata(
+        _body(intent="Score the arithmetic answer.", tags=["v1.2"]), owner="alice", suite="smoke", level=1
+    )
+    alice["spec"]["metrics"] = ["default/stored-metric", "default/other-metric"]
+    client.post(f"{_BASE}/alice-smoke", json=alice)
     client.post(f"{_BASE}/bob-smoke", json=_with_metadata(_body(), owner="bob", suite="smoke", level=2))
     client.post(f"{_BASE}/untagged", json=_body())
     client.post(
@@ -414,6 +418,28 @@ def test_list_filters_by_kind_and_metadata(filterable: TestClient, params: dict[
     assert _names(filterable, params) == expected
 
 
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[intent][$like]": "arithmetic"}, {"alice-smoke"}),
+        ({"filter[native_task_id]": "fixture"}, {"alice-harbor"}),
+        ({"filter[metrics]": "default/other-metric"}, {"alice-smoke"}),
+        ({"filter[metrics]": "other-metric"}, {"alice-smoke"}),
+        ({"filter[metrics]": "default/stored-metric"}, {"alice-smoke", "bob-smoke", "untagged"}),
+        ({"filter[metrics]": "elsewhere/other-metric"}, set()),
+        ({"filter[tags]": "v1.2"}, {"alice-smoke"}),
+        ({"filter[tags]": "v1"}, set()),
+        ({"filter[tags]": "latest"}, {"alice-smoke", "bob-smoke", "untagged", "alice-harbor"}),
+        ({"filter[tags][$in]": "v1.2,nope"}, {"alice-smoke"}),
+    ],
+)
+def test_list_filters_by_intent_harbor_id_metric_and_tag(
+    filterable: TestClient, params: dict[str, str], expected: set[str]
+) -> None:
+    """A bare metric ref takes the path workspace, and a dotted tag is one tag, not a ``v1`` prefix."""
+    assert _names(filterable, params) == expected
+
+
 def test_metadata_filter_matches_key_and_value_on_the_same_annotation(filterable: TestClient) -> None:
     """``alice-smoke`` has owner=alice and suite=smoke; neither annotation is ``suite=alice``."""
     assert _names(filterable, {"filter[metadata.suite]": "alice"}) == set()
@@ -430,6 +456,10 @@ def test_metadata_filter_matches_key_and_value_on_the_same_annotation(filterable
         {"filter[metadata.]": "alice"},
         {"filter": '{"metadata.owner": {"nested": "object"}}'},
         {"filter[spec.kind]": "harbor"},
+        {"filter[metrics][$like]": "metric"},
+        {"filter[tags][$like]": "v1"},
+        {"filter": '{"tags": 3}'},
+        {"filter[tasks]": "default/task-a"},
     ],
 )
 def test_list_rejects_unsupported_metadata_and_field_filters(client: TestClient, params: dict[str, str]) -> None:

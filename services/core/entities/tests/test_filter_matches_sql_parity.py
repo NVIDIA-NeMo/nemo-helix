@@ -53,6 +53,8 @@ SEED = [
             "k": None,
             "tags": ["red", "blue"],
             "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
+            "members": ["ws/task_a#d1", "ws/task-b#d2"],
+            "tag_map": {"latest": 2, "v1.2": 1},
         },
     ),
     dict(
@@ -64,6 +66,10 @@ SEED = [
             "flag": False,
             "tags": ["red"],
             "meta": [{"key": "owner", "value": "bob"}, {"key": "level", "value": 3}],
+            # Near misses for "ws/task_a#": a longer workspace, "ws/taskXa" if "_" were a LIKE wildcard,
+            # and the prefix after an escaped quote inside an element.
+            "members": ["other-ws/task_a#d1", "ws/taskXa#d1", 'x"ws/task_a#d1'],
+            "tag_map": {"latest": 1, "v1": 1},
         },
     ),
     # "redish" is a deliberate prefix near-miss for "red" — quote-delimited matching must exclude it.
@@ -77,6 +83,8 @@ SEED = [
             "k": "v",
             "tags": ["green", "redish"],
             "meta": [{"key": "owner", "value": None}, {"key": "team", "value": "alice"}],
+            "members": ["ws/task_a#d9"],
+            "tag_map": {},
         },
     ),
     # "meta" as a bare object, not an array: its members must not be treated as elements.
@@ -156,6 +164,14 @@ CASES = [
     ("elem_match_across_elements", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team", "value": "alice"})),
     ("elem_match_absent_field", C(FilterOperator.ELEM_MATCH, "data.nope", {"key": "owner"})),
     ("not_elem_match", NOT(C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"}))),
+    ("contains_prefix_any_revision", C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#")),
+    ("contains_prefix_exact_member", C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-b#d2")),
+    ("contains_prefix_absent_field", C(FilterOperator.CONTAINS_PREFIX, "data.nope", "ws/")),
+    ("not_contains_prefix", NOT(C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#"))),
+    ("has_key_dotted", C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2")),
+    ("has_key_prefix_of_dotted", C(FilterOperator.HAS_KEY, "data.tag_map", "v1")),
+    ("has_key_common", C(FilterOperator.HAS_KEY, "data.tag_map", "latest")),
+    ("has_key_absent_field", C(FilterOperator.HAS_KEY, "data.nope", "latest")),
     ("gt_data_score", C(FilterOperator.GT, "data.score", 9)),
     ("gte_data_score", C(FilterOperator.GTE, "data.score", 10)),
     ("lt_data_score", C(FilterOperator.LT, "data.score", 10)),
@@ -204,6 +220,29 @@ def test_elem_match_requires_one_element_to_satisfy_every_criterion(db, criteria
     assert {r.id for r in db.execute(select(FakeEntity).where(condition)).scalars().all()} == expected_ids
 
 
-def test_elem_match_rejects_unknown_dialect():
+@pytest.mark.parametrize(
+    "op",
+    [
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}),
+        C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/"),
+    ],
+)
+def test_element_operators_reject_unknown_dialect(op):
     with pytest.raises(ValueError, match="dialect"):
-        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}).apply(SQLAlchemyFilterRepository(FakeEntity))
+        op.apply(SQLAlchemyFilterRepository(FakeEntity))
+
+
+@pytest.mark.parametrize(
+    "op,expected_ids",
+    [
+        (C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task_a#"), {1, 3}),
+        (C(FilterOperator.CONTAINS_PREFIX, "data.members", "ws/task-b#d2"), {1}),
+        (C(FilterOperator.HAS_KEY, "data.tag_map", "v1.2"), {1}),
+        (C(FilterOperator.HAS_KEY, "data.tag_map", "v1"), {2}),
+        (C(FilterOperator.HAS_KEY, "data.tag_map", "latest"), {1, 2}),
+    ],
+)
+def test_contains_prefix_and_has_key_select_expected_rows(db, op, expected_ids):
+    """Prefixes stay quote-anchored with ``_`` literal, and a dotted key is one key, not a path."""
+    condition = op.apply(SQLAlchemyFilterRepository(FakeEntity, dialect_name="sqlite"))
+    assert {r.id for r in db.execute(select(FakeEntity).where(condition)).scalars().all()} == expected_ids

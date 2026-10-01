@@ -137,6 +137,16 @@ class InMemoryFilterRepository(FilterRepository):
             for element in field_value
         )
 
+    def contains_prefix(self, field: str, prefix: str) -> bool:
+        field_value = self._value(field)
+        if not isinstance(field_value, (list, tuple)):
+            return False
+        return any(isinstance(element, str) and element.startswith(prefix) for element in field_value)
+
+    def has_key(self, field: str, key: str) -> bool:
+        field_value = self._value(field)
+        return isinstance(field_value, dict) and field_value.get(key) is not None
+
     def and_op(self, operations: List[Any]) -> bool:
         return all(operations)
 

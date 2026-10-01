@@ -238,3 +238,15 @@ async def test_async_list_sends_metadata_as_a_json_filter() -> None:
     await resource.list(metadata={"level": 2})
 
     assert json.loads(recorder.requests[0].url.params["filter"]) == {"metadata.level": 2}
+
+
+async def test_async_list_sends_member_tag_and_description_filters() -> None:
+    resource, recorder = _async_resource(_page([]))
+
+    await resource.list(task="default/task-a", tag="stable", description_contains="nightly")
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {
+        "tasks": "default/task-a",
+        "tags": "stable",
+        "description": {"$like": "nightly"},
+    }

@@ -10,7 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from nemo_evaluator.api.dependencies import get_taskset_service
-from nemo_evaluator.api.schemas import Revision, Taskset, TasksetFilter, TasksetInput, TasksetSort
+from nemo_evaluator.api.schemas import Revision, Taskset, TasksetFilter, TasksetInput, TasksetSort, qualify_ref_filters
 from nemo_evaluator.api.service.taskset_service import (
     DuplicateTaskRefError,
     TaskRefNotFoundError,
@@ -71,13 +71,14 @@ async def list_tasksets(
     """List stored tasksets for a specific workspace."""
     # Discard any workspace override in the filter — always scope to the path workspace.
     parsed_filter.remove("workspace")
+    filter_operation = qualify_ref_filters(parsed_filter.operation, workspace)
     try:
         return await service.list_tasksets(
             workspace=workspace,
             page=page,
             page_size=page_size,
             sort=sort,
-            filter_operation=parsed_filter.operation,
+            filter_operation=filter_operation,
         )
     except Exception:
         logger.exception(f"Failed to list tasksets for workspace {sanitize_for_log(workspace)}")

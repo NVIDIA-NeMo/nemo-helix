@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchScalar
-from nhx.common.api.filter import FilterOperation, FilterRepository
+from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
 from sqlalchemy import (
     JSON,
     ColumnElement,
@@ -19,6 +19,7 @@ from sqlalchemy import (
     false,
     func,
     literal,
+    literal_column,
     not_,
     or_,
     select,
@@ -108,6 +109,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
             return datetime.fromisoformat(value).replace(tzinfo=None)
 
         return value
+
+    @staticmethod
+    def _escape_like(text: str) -> str:
+        for ch in ("\\", "%", "_"):
+            text = text.replace(ch, f"\\{ch}")
+        return text
 
     def _cast_json_to_raw_text(self, column: Any) -> Any:
         """Cast a JSON column element to its raw serialized text, quotes and all.
@@ -228,24 +235,43 @@ class SQLAlchemyFilterRepository(FilterRepository):
         column, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$contains requires a JSON array field, got non-JSON field '{field}'")
-        needle = str(value)
-        for ch in ("\\", "%", "_"):
-            needle = needle.replace(ch, f"\\{ch}")
-        return self._cast_json_to_raw_text(column).like(f'%"{needle}"%', escape="\\")
+        return self._cast_json_to_raw_text(column).like(f'%"{self._escape_like(str(value))}"%', escape="\\")
+
+    def contains_prefix(self, field: str, prefix: str) -> Any:
+        array, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$containsPrefix requires a JSON array field, got non-JSON field '{field}'")
+        elements = self._array_elements(array, FilterOperator.CONTAINS_PREFIX)
+        pattern = f"{self._escape_like(prefix)}%"
+        if self._dialect_name == "sqlite":
+            match = and_(elements.c.type == "text", elements.c.value.like(pattern, escape="\\"))
+        else:
+            text = elements.c.value.op("#>>")(literal_column("'{}'::text[]"))
+            match = and_(func.json_typeof(elements.c.value) == "string", text.like(pattern, escape="\\"))
+        return select(literal(1)).select_from(elements).where(match).exists()
+
+    def has_key(self, field: str, key: str) -> Any:
+        column, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$hasKey requires a JSON object field, got non-JSON field '{field}'")
+        return not_(self._json_eq(column[key], None))
+
+    def _array_elements(self, array: Any, operator: FilterOperator) -> Any:
+        """The elements of the JSON array ``array`` as a table with a ``value`` column (and ``type`` on SQLite)."""
+        # A non-array must expand to nothing: PostgreSQL raises on it, SQLite would iterate an object's members.
+        if self._dialect_name == "sqlite":
+            only_array = case((func.json_type(array) == "array", array))
+            return func.json_each(only_array).table_valued("value", "type")
+        if self._dialect_name == "postgresql":
+            only_array = case((func.json_typeof(array) == "array", array))
+            return func.json_array_elements(only_array).table_valued("value")
+        raise ValueError(f"{operator.value} is not supported for database dialect {self._dialect_name!r}")
 
     def elem_match(self, field: str, criteria: Dict[str, ElemMatchScalar]) -> Any:
         array, is_json = self._get_column(field)
         if not is_json:
             raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
-        # A non-array must expand to nothing: PostgreSQL raises on it, SQLite would iterate an object's members.
-        if self._dialect_name == "sqlite":
-            only_array = case((func.json_type(array) == "array", array))
-            elements = func.json_each(only_array).table_valued("value")
-        elif self._dialect_name == "postgresql":
-            only_array = case((func.json_typeof(array) == "array", array))
-            elements = func.json_array_elements(only_array).table_valued("value")
-        else:
-            raise ValueError(f"$elemMatch is not supported for database dialect {self._dialect_name!r}")
+        elements = self._array_elements(array, FilterOperator.ELEM_MATCH)
         element = type_coerce(elements.c.value, JSON)
         matches = [self._json_eq(element[key], value) for key, value in criteria.items()]
         return select(literal(1)).select_from(elements).where(*matches).exists()

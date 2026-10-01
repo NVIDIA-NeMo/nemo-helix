@@ -6427,6 +6427,11 @@ components:
             - type: number
             - type: boolean
           type: object
+        tags:
+          description: 'Filter by revision tag: matches records carrying the tag,
+            e.g. `stable`. Supports `$eq` and `$in`.'
+          title: Tags
+          type: string
         workspace:
           description: Filter by workspace.
           title: Workspace
@@ -6438,6 +6443,20 @@ components:
         kind:
           description: Filter by task kind (the runner that executes it), e.g. `harbor`.
           title: Kind
+          type: string
+        intent:
+          description: Filter by an evaluator task's intent, e.g. `$like` for text
+            search.
+          title: Intent
+          type: string
+        native_task_id:
+          description: Filter by a Harbor task's native task id.
+          title: Native Task Id
+          type: string
+        metrics:
+          description: 'Filter by metric: matches tasks that use the metric `workspace/name`.
+            Supports `$eq` and `$in`.'
+          title: Metrics
           type: string
         created_at:
           allOf:
@@ -6663,6 +6682,11 @@ components:
             - type: number
             - type: boolean
           type: object
+        tags:
+          description: 'Filter by revision tag: matches records carrying the tag,
+            e.g. `stable`. Supports `$eq` and `$in`.'
+          title: Tags
+          type: string
         workspace:
           description: Filter by workspace.
           title: Workspace
@@ -6670,6 +6694,16 @@ components:
         name:
           description: Filter by name.
           title: Name
+          type: string
+        description:
+          description: Filter by description, e.g. `$like` for text search.
+          title: Description
+          type: string
+        tasks:
+          description: 'Filter by member task: `workspace/name` matches it at any
+            revision, `workspace/name#<digest>` at that pinned revision. Supports
+            `$eq` and `$in`.'
+          title: Tasks
           type: string
         created_at:
           allOf:

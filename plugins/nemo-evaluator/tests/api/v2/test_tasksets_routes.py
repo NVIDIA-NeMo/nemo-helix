@@ -282,3 +282,38 @@ def test_list_filters_by_metadata(client: TestClient, params: dict[str, str], ex
 def test_list_rejects_a_kind_filter(client: TestClient) -> None:
     """Tasksets have no kind; only tasks do."""
     assert client.get(_BASE, params={"filter[kind]": "harbor"}).status_code == 400
+
+
+def _member_digest(ref: str) -> str:
+    return hashlib.sha256(ref.encode()).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[tasks]": "task-a"}, {"both"}),
+        ({"filter[tasks]": "default/task-b"}, {"both", "only-b"}),
+        ({"filter[tasks]": f"default/task-a#{_member_digest('default/task-a')}"}, {"both"}),
+        ({"filter[tasks]": f"default/task-a#{'0' * 64}"}, set()),
+        ({"filter[tasks]": "elsewhere/task-a"}, set()),
+        ({"filter[tasks][$in]": "task-a,task-b"}, {"both", "only-b"}),
+        ({"filter[tags]": "v1.2"}, {"only-b"}),
+        ({"filter[description][$like]": "regression"}, {"only-b"}),
+    ],
+)
+def test_list_filters_by_member_tag_and_description(
+    client: TestClient, params: dict[str, str], expected: set[str]
+) -> None:
+    """A bare member ref matches any pinned revision of that task in the path workspace."""
+    client.post(f"{_BASE}/both", json=_body(members=["task-a", "task-b"]))
+    client.post(f"{_BASE}/only-b", json=_body(description="Nightly regression set.", members=["task-b"], tags=["v1.2"]))
+
+    response = client.get(_BASE, params=params)
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == expected
+
+
+def test_list_rejects_a_member_filter_pinned_by_tag(client: TestClient) -> None:
+    """Stored members are pinned by digest, so a ``#tag`` member filter could never match."""
+    assert client.get(_BASE, params={"filter[tasks]": "default/task-a#latest"}).status_code == 400

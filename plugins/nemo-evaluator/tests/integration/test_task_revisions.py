@@ -362,15 +362,17 @@ def test_harbor_config_changes_do_not_cut_a_revision(subprocess_platform: str) -
 
 
 @pytest.mark.timeout(300)
-def test_list_filters_tasks_and_tasksets_by_kind_and_metadata(subprocess_platform: str) -> None:
-    """Metadata and kind filters resolve against the real entity store, not just the in-memory fake."""
+def test_list_filters_tasks_and_tasksets(subprocess_platform: str) -> None:
+    """The listing filters resolve against the real entity store, not just the in-memory fake."""
     client = _client(subprocess_platform)
     owner = _unique("owner")
     mine, other, taskset = _unique("task"), _unique("task"), _unique("taskset")
     try:
         client.tasks.create(
             mine,
-            task=_task_input().model_copy(update={"metadata": [MetadataItem(key="owner", value=owner)]}),
+            task=_task_input(f"Grade {owner} answers.", tags=[f"{owner}.v1"]).model_copy(
+                update={"metadata": [MetadataItem(key="owner", value=owner)]}
+            ),
             workspace=WORKSPACE,
         )
         client.tasks.create(
@@ -380,7 +382,11 @@ def test_list_filters_tasks_and_tasksets_by_kind_and_metadata(subprocess_platfor
         )
         client.tasksets.create(
             taskset,
-            taskset=TasksetInput(tasks=[TaskRef(mine)], metadata=[MetadataItem(key="owner", value=owner)]),
+            taskset=TasksetInput(
+                description=f"Suite for {owner}.",
+                tasks=[TaskRef(mine)],
+                metadata=[MetadataItem(key="owner", value=owner)],
+            ),
             workspace=WORKSPACE,
         )
 
@@ -390,6 +396,11 @@ def test_list_filters_tasks_and_tasksets_by_kind_and_metadata(subprocess_platfor
         ] == [mine]
         assert client.tasks.list(workspace=WORKSPACE, kind="harbor", metadata={"owner": owner}).data == []
         assert [t.name for t in client.tasksets.list(workspace=WORKSPACE, metadata={"owner": owner}).data] == [taskset]
+        assert [t.name for t in client.tasks.list(workspace=WORKSPACE, tag=f"{owner}.v1").data] == [mine]
+        assert [t.name for t in client.tasks.list(workspace=WORKSPACE, intent_contains=owner).data] == [mine]
+        assert [t.name for t in client.tasksets.list(workspace=WORKSPACE, task=mine).data] == [taskset]
+        assert client.tasksets.list(workspace=WORKSPACE, task=other).data == []
+        assert [t.name for t in client.tasksets.list(workspace=WORKSPACE, description_contains=owner).data] == [taskset]
     finally:
         client.tasksets.delete(taskset, workspace=WORKSPACE)
         client.tasks.delete(mine, workspace=WORKSPACE)
