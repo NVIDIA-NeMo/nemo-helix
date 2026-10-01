@@ -48,10 +48,10 @@ export const DetailPanel: FC<DetailPanelProps> = ({
 
   if (defaultCollapsed) {
     return (
-      <AccordionRoot collapsible className={PANEL_CLASS}>
+      <AccordionRoot collapsible className={`${PANEL_CLASS} overflow-hidden`}>
         <AccordionItem value={title} className="border-b-0">
           <AccordionTrigger className="px-4 py-3.5">{header}</AccordionTrigger>
-          <AccordionContent>{body}</AccordionContent>
+          <AccordionContent className="p-0">{body}</AccordionContent>
         </AccordionItem>
       </AccordionRoot>
     );
