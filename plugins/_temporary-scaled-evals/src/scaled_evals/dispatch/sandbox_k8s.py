@@ -1586,19 +1586,23 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
-def _kubeconfig_flag(recorded_path: object) -> list[str]:
-    """Return the ``--kubeconfig`` flag for a cleanup, or nothing if it cannot apply.
+def _kubectl_target_flags(recorded_path: object, context: object) -> list[str]:
+    """Return the ``--kubeconfig`` and ``--context`` flags for a cleanup.
 
-    The recorded path is captured when the sandbox launches. Under Platform Jobs
-    that happens inside a Job pod whose ``$HOME`` differs from the dispatch
-    worker that later drains the cleanup, so the path can name a file that only
-    ever existed on another pod's filesystem. Passing it anyway fails every
-    kubectl call and wedges the evaluation. Falling back to no flag lets kubectl
-    resolve through the cleanup process's own ``KUBECONFIG``.
+    Both are captured when the sandbox launches. Under Platform Jobs that
+    happens inside a Job pod, and the controller that later cleans up runs in
+    another pod, so the path can name a file that only ever existed on the
+    Job pod's filesystem. The context is defined by that file, so it is dropped
+    with it; otherwise kubectl fails every call on an unknown context and the
+    evaluation wedges. With neither flag, kubectl resolves through the cleanup
+    process's own ``KUBECONFIG`` or its in-cluster service account.
     """
-    if recorded_path and Path(str(recorded_path)).exists():
-        return ["--kubeconfig", str(recorded_path)]
-    return []
+    if not recorded_path or not Path(str(recorded_path)).exists():
+        return []
+    flags = ["--kubeconfig", str(recorded_path)]
+    if context:
+        flags.extend(["--context", str(context)])
+    return flags
 
 
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
@@ -1632,9 +1636,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    base.extend(_kubeconfig_flag(kubeconfig_path))
-    if context:
-        base.extend(["--context", str(context)])
+    base.extend(_kubectl_target_flags(kubeconfig_path, context))
     if cleanup_metadata.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", namespace])
@@ -1811,9 +1813,7 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    base.extend(_kubeconfig_flag(cleanup.get("kubeconfig_path")))
-    if cleanup.get("context"):
-        base.extend(["--context", str(cleanup["context"])])
+    base.extend(_kubectl_target_flags(cleanup.get("kubeconfig_path"), cleanup.get("context")))
     if cleanup.get("verify_ssl") is False:
         base.append("--insecure-skip-tls-verify=true")
     base.extend(["-n", str(cleanup.get("namespace") or "default")])
