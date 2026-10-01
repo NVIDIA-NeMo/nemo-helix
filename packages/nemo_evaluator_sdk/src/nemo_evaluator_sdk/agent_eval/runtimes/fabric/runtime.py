@@ -64,7 +64,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     SkillProvenance,
     SkillSet,
     install_skills,
+    relocate_skills_into_workspace,
     resolve_skill_mode,
+    workspace_rooted_skills,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
@@ -419,6 +421,16 @@ class FabricAgentRuntime:
             for skill_path in skill_paths:
                 task_config.add_skill_path(skill_path)
 
+            # A workspace-rooted harness (DeepAgents) reads skills only from inside its workspace, and
+            # from a directory of bundles: copy the config's bundles in and hand it that directory.
+            if workspace_rooted_skills(self._adapter_id()):
+                run.relocated_skills = await asyncio.to_thread(
+                    relocate_skills_into_workspace,
+                    task_config,
+                    base_dir=self._base_dir,
+                    workspace_dir=workspace_dir,
+                )
+
             result = await asyncio.wait_for(
                 # ``Fabric.run`` folds the per-invocation input + request id into a ``RunRequest``.
                 client.run(
@@ -454,6 +466,8 @@ class FabricAgentRuntime:
         if skill_mode == SKILL_MODE_CODEX_SKILLS_DIR:
             for provenance in run.skill_provenances:
                 await asyncio.to_thread(_remove_injected_bundle, run.workspace_dir, provenance["location"])
+        for location in run.relocated_skills:
+            await asyncio.to_thread(_remove_injected_bundle, run.workspace_dir, location)
         skill_metadata = self._skill_metadata(run.skill_provenances)
         atif_path = _atif_path(run)
         measurements = _atif_measurements(atif_path)
