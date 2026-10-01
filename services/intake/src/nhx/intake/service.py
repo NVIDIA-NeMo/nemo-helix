@@ -68,6 +68,12 @@ class _LocalClickHouseProvisioner(BackgroundWorker):
                 if await self._wait_for_retry():
                     return
                 continue
+            except Exception as exc:
+                logger.exception("Local ClickHouse reconcile failed")
+                self._service._readiness_message = str(exc) or CLICKHOUSE_UNAVAILABLE_MESSAGE
+                if await self._wait_for_retry():
+                    return
+                continue
             if self._stopping.is_set():
                 await self._stop_unadopted_container()
                 return
@@ -233,7 +239,10 @@ class IntakeService(Service[IntakeConfig]):
         reconciler = self._reconciler
         self._reconciler = None
         if reconciler is not None:
-            await reconciler.stop()
+            try:
+                await reconciler.stop()
+            except Exception:
+                logger.exception("Local ClickHouse reconciler failed during shutdown")
         # Stop the denormalizer first: its final flush still needs the ClickHouse client below.
         if self.denormalizer is not None:
             await self.denormalizer.stop()

@@ -200,6 +200,55 @@ def test_local_clickhouse_retry_adopts_ephemeral_url(monkeypatch: pytest.MonkeyP
     stop.assert_awaited_once_with(data_dir=intake_config.clickhouse_config.data_dir)
 
 
+def test_unexpected_reconcile_error_retries_and_shutdown_continues(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NHX_INTAKE_CLICKHOUSE_URL", raising=False)
+    _disable_reconcile_backoff(monkeypatch)
+    failed = asyncio.Event()
+    release = asyncio.Event()
+    calls = {"n": 0}
+
+    async def reconcile(*_args: object, **_kwargs: object) -> str:
+        calls["n"] += 1
+        if not failed.is_set():
+            failed.set()
+            raise RuntimeError("disk full")
+        await release.wait()
+        return _RECONCILED_URL
+
+    stop = AsyncMock(return_value=True)
+    fetch_scalar = AsyncMock()
+    check_data_directory = AsyncMock()
+    parent_shutdown = AsyncMock()
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    monkeypatch.setattr("nhx.intake.service.stop_local_clickhouse", stop)
+    monkeypatch.setattr("nhx.intake.service.check_local_clickhouse_data_directory", check_data_directory)
+    monkeypatch.setattr("nhx.intake.service.ClickHouseExecutor.fetch_scalar", fetch_scalar)
+    monkeypatch.setattr("nhx.intake.service.Service.on_shutdown", parent_shutdown)
+    service = IntakeService().with_config(IntakeConfig(clickhouse_config=ClickHouseConfig()))
+
+    async def failing_stop() -> None:
+        raise RuntimeError("worker failed")
+
+    async def start_probe_and_stop() -> None:
+        await service.on_startup()
+        try:
+            await failed.wait()
+            await _wait_for_readiness_message(service, "disk full")
+            assert service.readiness_message == "disk full"
+            release.set()
+            await _wait_for_clickhouse_url(service, _RECONCILED_URL)
+            assert await service.is_ready() is True
+        finally:
+            reconciler = service._reconciler
+            assert reconciler is not None
+            monkeypatch.setattr(reconciler, "stop", failing_stop)
+            await service.on_shutdown()
+
+    asyncio.run(start_probe_and_stop())
+    assert calls["n"] == 2
+    parent_shutdown.assert_awaited_once()
+
+
 def test_shutdown_during_inflight_reconcile_does_not_adopt_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NHX_INTAKE_CLICKHOUSE_URL", raising=False)
     _disable_reconcile_backoff(monkeypatch)
