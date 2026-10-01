@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 from typing import ClassVar
 
 from nemo_helix_plugin.config import NemoConfig, nhx_user_data_dir
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ControllerConfig(BaseModel):
@@ -142,6 +143,35 @@ class AgentsConfig(NemoConfig):
             "deployments-plugin backend regardless of this setting."
         ),
     )
+    subprocess_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether new subprocess-mode deployments are allowed. Turn off to require docker or k8s, "
+            "for example on a cluster where agents shouldn't share the controller pod. Existing "
+            "subprocess deployments keep running."
+        ),
+    )
+    subprocess_host: str = Field(
+        default="127.0.0.1",
+        description=(
+            "Address subprocess-mode agents bind to and are reached at. Loopback works when the "
+            "API and controllers share a host. When they run apart, as in the Helm chart, set this "
+            "to an address the API can reach, such as the controller pod's IP."
+        ),
+    )
+
+    @field_validator("subprocess_host")
+    @classmethod
+    def _require_routable_subprocess_host(cls, value: str) -> str:
+        # Agents are reached at this address, so a wildcard bind would advertise an unusable endpoint.
+        try:
+            unspecified = ipaddress.ip_address(value).is_unspecified
+        except ValueError:
+            unspecified = False
+        if unspecified:
+            raise ValueError(f"subprocess_host must be a reachable address, not {value!r}")
+        return value
+
     deployments: DeploymentsRunnerConfig = Field(
         default_factory=DeploymentsRunnerConfig,
         description="Container-mode (docker/k8s) settings for the deployments-plugin runner.",

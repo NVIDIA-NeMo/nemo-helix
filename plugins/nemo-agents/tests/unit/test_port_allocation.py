@@ -120,7 +120,7 @@ def test_allocate_port_reuses_freed_port_via_wrap() -> None:
     backend = _backend(start=49152, end=49153)
     call_count = 0
 
-    def free_except_first(port: int) -> bool:
+    def free_except_first(port: int, host: str) -> bool:
         nonlocal call_count
         call_count += 1
         # First call probes 49152 (occupied), second probes 49153 (free).

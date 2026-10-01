@@ -102,6 +102,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if not .Values.agents.subprocessDeployments.enabled }}
+            - name: NEMO_AGENTS_SUBPROCESS_ENABLED
+              value: "false"
+            {{- end }}
+            {{- if .Values.core.controller.subprocessAgentsOnPodIP }}
+            - name: NEMO_AGENTS_SUBPROCESS_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- end }}
             {{ include "nemo-helix.env" . | nindent 12 | trim }}
             {{ include "nemo-helix.controller.env" . | nindent 12 | trim }}
           ports:

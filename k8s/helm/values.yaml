@@ -140,6 +140,12 @@ multinodeNetworking:
 
 # -- NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test.
 # @default -- This object has the following default values. The top-level switch is disabled by default so chart upgrades do not change cluster connectivity unless explicitly enabled.
+# -- Agents plugin settings that the API and controller pods both need.
+agents:
+  subprocessDeployments:
+    # -- Allow new subprocess-mode agent deployments. Set false to require docker or k8s, for example so agents don't share the controller pod. Existing subprocess deployments keep running.
+    enabled: true
+
 networkPolicies:
   # -- Create NetworkPolicy resources for enabled subpolicies.
   enabled: false
@@ -177,6 +183,14 @@ networkPolicies:
     sameReleasePods:
       # -- Enable ingress from same-release pods.
       enabled: true
+    # -- Allow the Platform API pods to reach subprocess-mode agents on the controller pods. Only applies with core.controller.subprocessAgentsOnPodIP.
+    subprocessAgents:
+      # -- Enable ingress from the Platform API pods to the agent port range.
+      enabled: true
+      # -- First agent port. Must match the agents plugin's controller.port_range_start.
+      portRangeStart: 49152
+      # -- Last agent port. Must match the agents plugin's controller.port_range_end.
+      portRangeEnd: 65535
     # -- Extra NetworkPolicy ingress rules appended to the core controller policy, for cluster-specific monitoring or debugging pods.
     extraIngress: []
 
@@ -1028,6 +1042,8 @@ core:
     controllers: []
     # -- Additional arguments to pass to the Core Controller service
     extraArgs: []
+    # -- Run subprocess-mode agents on the controller pod's IP, so the Platform API pods can proxy to them. Set false to keep them on loopback, which only works if the API runs in the controller pod.
+    subprocessAgentsOnPodIP: true
 
     # -- Service configuration for the controller service. This only configures a headless service for DNS resolution.
     # @default -- This object has the following default values for the service configuration.

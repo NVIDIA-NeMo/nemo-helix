@@ -27,10 +27,11 @@ class RunnerBackendRegistry:
         from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend
 
         self._config = config
-        self._in_memory: RunnerBackend = InMemoryRunnerBackend(config.controller)
+        self._in_memory: RunnerBackend = InMemoryRunnerBackend(config.controller, host=config.subprocess_host)
         self._deployments: RunnerBackend | None = None
         logger.info(
-            "Runner backend: InMemoryRunnerBackend (port range start=%d)",
+            "Runner backend: InMemoryRunnerBackend (host=%s, port range start=%d)",
+            config.subprocess_host,
             config.controller.port_range_start,
         )
 

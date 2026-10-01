@@ -26,7 +26,7 @@ from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, reso
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
+from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
@@ -113,7 +113,7 @@ async def create_deployment(
 
     # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
     try:
-        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get(), body.deployment_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -223,23 +223,23 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
 )
 async def list_deployment_modes(workspace: str) -> DeploymentModeList:
     """List every deployment mode and whether this platform can run it."""
-    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get()))
 
 
-def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
-    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
+def _all_mode_availability(agents_config: AgentsConfig) -> list[DeploymentModeAvailability]:
+    return [_mode_availability(agents_config, mode) for mode in get_args(DeploymentMode)]
 
 
-def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+def _mode_availability(agents_config: AgentsConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
     try:
-        require_deployment_mode_available(runner_config, mode)
+        require_deployment_mode_available(agents_config, mode)
         enabled = True
     except ValueError:
         enabled = False
     return DeploymentModeAvailability(
         mode=mode,
         enabled=enabled,
-        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
+        requires_image=is_container_deployment_mode(mode) and not agents_config.deployments.default_image,
     )
 
 
