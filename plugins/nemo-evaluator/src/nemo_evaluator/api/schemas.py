@@ -120,6 +120,7 @@ _METADATA_PREFIX = f"{_METADATA_FIELD}."
 
 #: Stored ref arrays a filter matches by ``workspace/name``; unqualified filter refs take the route's workspace.
 _REF_ARRAY_FIELDS = frozenset({"data.spec.metrics", "data.tasks"})
+_REF_MATCH_OPERATORS = frozenset({FilterOperator.CONTAINS, FilterOperator.CONTAINS_PREFIX})
 
 
 def _one_or_any(op: ComparisonOperation, match: Callable[[object], FilterOperation]) -> FilterOperation:
@@ -193,6 +194,7 @@ def qualify_ref_filters(operation: FilterOperation | None, workspace: str) -> Fi
     if isinstance(operation, ComparisonOperation):
         if (
             operation.field in _REF_ARRAY_FIELDS
+            and operation.operator in _REF_MATCH_OPERATORS
             and isinstance(operation.value, str)
             and "/" not in operation.value.split(REF_FRAGMENT_SEPARATOR, 1)[0]
         ):

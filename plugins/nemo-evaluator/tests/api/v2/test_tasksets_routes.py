@@ -317,3 +317,13 @@ def test_list_filters_by_member_tag_and_description(
 def test_list_rejects_a_member_filter_pinned_by_tag(client: TestClient) -> None:
     """Stored members are pinned by digest, so a ``#tag`` member filter could never match."""
     assert client.get(_BASE, params={"filter[tasks]": "default/task-a#latest"}).status_code == 400
+
+
+def test_raw_data_filters_on_members_are_not_rewritten(client: TestClient) -> None:
+    """Only the translated member match takes the path workspace; a raw ``data.tasks`` filter is passed as given."""
+    client.post(f"{_BASE}/only-b", json=_body(members=["task-b"]))
+
+    response = client.get(_BASE, params={"filter[data.tasks][$like]": "b#"})
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == {"only-b"}
