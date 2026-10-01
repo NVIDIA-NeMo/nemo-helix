@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="manage-storage-pvc"></a>
 
-The NeMo Helix uses persistent volume claims (PVCs) for jobs and files storage that can be mounted on multiple pods and nodes in read-write mode. This access mode is called ReadWriteMany (RWX) in Kubernetes. Using a ReadWriteMany-capable StorageClass is required for both jobs and files storage.
+NeMo Helix uses persistent volume claims (PVCs) for jobs and files storage that can be mounted on multiple pods and nodes in read-write mode. This access mode is called ReadWriteMany (RWX) in Kubernetes. Using a ReadWriteMany-capable StorageClass is required for both jobs and files storage.
 
 NVIDIA NIM microservices also scale, upgrade, and deploy more smoothly with an RWX-backed storage class.
 
