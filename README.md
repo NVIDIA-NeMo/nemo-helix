@@ -15,12 +15,12 @@
 NeMo Helix is an open source platform for improving and hardening production agents. Observe what your agent does, diagnose where it fails, run the experiments that fix it, and verify the result before it ships.
 
 <p align="center">
-  <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="100%">
+  <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="80%">
 </p>
 
 ## How Helix relates to the NeMo libraries
 
-Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Helix does the work between them: as plugins they share one object model, one job runner, and one set of credentials, so chaining them stops being an integration project.
+Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Getting them to work together is normally your problem: separate APIs, separet credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read. 
 
 - **Capabilities as plugins.** NeMo RL, AutoModel, and Unsloth for fine-tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety. Data Designer and Safe Synthesizer for synthetic data.
 - **One interface, every capability.** A CLI, a Python SDK, and a REST API across every plugin, instead of a different client per library.
@@ -39,8 +39,6 @@ nemo setup
 
 ### Capabilities
 
-Capabilities ship as plugins. The first-party set covers five domains, and third-party plugins use the same extension model.
-
 | Domain | What it covers | Components |
 |---|---|---|
 | **Data** | Generate the training and evaluation data you do not have, and keep sensitive data out of it | Data Designer, Safe Synthesizer, Anonymizer, Curator |
@@ -51,10 +49,9 @@ Capabilities ship as plugins. The first-party set covers five domains, and third
 
 ### Built-in agents
 
-Three agents work the loop with you rather than waiting for you to drive it.
+Two agents work the loop with you rather than waiting for you to drive it.
 
 - **Analyst.** Reads production traces and surfaces where and why the agent is failing.
-- **Experimenter.** Proposes and runs optimization experiments against those findings.
 - **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
 
 ### Surfaces
