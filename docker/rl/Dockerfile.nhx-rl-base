@@ -185,7 +185,8 @@ ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 #
 # Then drop ray's vendored aiohttp and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
-RUN <<"EOF" bash -exu
+RUN <<"EOF" bash -eu
+set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -225,7 +226,8 @@ EOF
 # opensandbox is the Gym client. OpenTelemetry pins: opentelemetry-overrides.txt.
 # Gym is --no-deps here; worker venvs get nemo_gym from the extra.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
-    <<"EOF" bash -exu
+    <<"EOF" bash -eu
+set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -284,7 +286,8 @@ EOF
 # prefetch does not compile the nine CUDA extensions; each venv is then synced
 # and the wheels are installed.
 RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
-    <<"EOF" bash -exu
+    <<"EOF" bash -eu
+set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -342,7 +345,8 @@ ARG TARGETARCH
 # mlflow-skinny, sqlparse, hydra-core, and OpenTelemetry afterwards, then drop
 # mlflow, pynvml, and mooncake.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
-    <<"EOF" bash -exu
+    <<"EOF" bash -eu
+set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
@@ -396,6 +400,7 @@ find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -type d \
        -o -path '*/site-packages/mooncake_transfer_engine_cuda13-*.dist-info' \
        -o -path '*/site-packages/mooncake_transfer_engine_cuda13.libs' \) \
     -prune -exec rm -rf {} + || true
+set +x
 for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     if ! compgen -G "${d}wandb-*.dist-info" >/dev/null \
         && ! compgen -G "${d}mlflow-*.dist-info" >/dev/null \
@@ -414,6 +419,7 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     find "${UV_CACHE_DIR}/wheels-v6" -type l -lname "*$(basename "${d}")*" -delete
     rm -rf "${d}"
 done
+set -x
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs
 EOF
 
@@ -432,7 +438,7 @@ ARG RUNTIME_GID=1000
 # Megatron-Bridge's build env pins setuptools<80, which the project override
 # cannot reach. Drop unreferenced setuptools archives (CVE in vendored jaraco).
 # The mcore venv's locked setuptools is referenced, so it stays.
-RUN <<"EOF" bash -exu
+RUN <<"EOF" bash -eu
 for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
     ls "${d}"setuptools-*.dist-info >/dev/null 2>&1 || continue
     find /opt/nemo_rl_venv /opt/ray_venvs /opt/gym_venvs -lname "*$(basename "${d}")*" -print -quit 2>/dev/null | grep -q . && continue
@@ -473,7 +479,8 @@ RUN chown root:${RUNTIME_GID} /opt/ray_venvs /opt/gym_venvs && \
 # NeMo-RL patches vllm in place and writes a per-venv py_executable. The shared
 # symlink is read-only and would be one copy for every venv. cp -rL makes each
 # venv's copy private.
-RUN <<"EOF" bash -exu
+RUN <<"EOF" bash -eu
+set -x
 for sp in /opt/ray_venvs/*/lib/python*/site-packages; do
     [ -d "${sp}/vllm" ] || continue
     cp -rL --preserve=mode,timestamps "${sp}/vllm" "${sp}/.vllm.private"
