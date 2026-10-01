@@ -120,9 +120,9 @@ The platform is a long-running server. Coding agents often run shell commands in
 python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(1); print('LISTEN_OK')" 2>&1 | tail -1
 ```
 
-Port 0 can never be taken, so anything other than `LISTEN_OK` (typically `PermissionError: [Errno 1] Operation not permitted`) means this shell may not host the platform. If `nemo services run` already failed with `Not permitted to listen on ...`, the CLI ran this check for you.
+Port 0 can never be taken, so `PermissionError: [Errno 1] Operation not permitted` means this shell may not host the platform. `LISTEN_OK` means it can. Any other output (for example, `python3` not found) is inconclusive; resolve it before deciding. If `nemo services run` already failed with `Not permitted to listen on ...`, the CLI ran this check for you.
 
-When the probe fails, or the user wants the platform to outlive this session, **stop and ask the user** how the platform should be hosted. Do not retry on other ports, do not hunt for a process holding the port, and do not bypass the sandbox on your own. Learn enough about the environment to make the options concrete (OS, whether this is a laptop or a shared server, whether Docker is available, whether a platform already runs elsewhere), then offer:
+When the probe confirms a denial, or the user wants the platform to outlive this session, **stop and ask the user** how the platform should be hosted. Do not retry on other ports, do not hunt for a process holding the port, and do not bypass the sandbox on your own. Learn enough about the environment to make the options concrete (OS, whether this is a laptop or a shared server, whether Docker is available, whether a platform already runs elsewhere), then offer:
 
 - **The user starts it in their own terminal.** They run `nemo setup` (first time) or `nemo services start` (later) outside the agent. Continue once `curl -sf http://localhost:8080/health/ready` answers from your shell.
 - **You run it outside the sandbox for this session.** Only if your harness supports it and the user explicitly approves. The server stops when the session ends.

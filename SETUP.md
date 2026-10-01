@@ -28,7 +28,7 @@ If nothing is running, confirm this shell may host a server before you start one
 python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(1); print('LISTEN_OK')" 2>&1 | tail -1
 ```
 
-Anything other than `LISTEN_OK` means `nemo services run` will fail with `Not permitted to listen on ...` on every port. Stop and ask the user how to host the platform (their own terminal, an approved run outside the sandbox, a `systemd --user` unit or launchd agent, a container, or an existing platform via `NHX_BASE_URL`). The `nemo-skill-selection` skill's "Starting the platform from a sandboxed agent" section has the full guidance.
+`LISTEN_OK` means this shell can host the platform. `PermissionError: [Errno 1] Operation not permitted` means `nemo services run` will fail with `Not permitted to listen on ...` on every port. Any other output (for example, `python3` not found) is inconclusive; resolve it before deciding. On a confirmed denial, stop and ask the user how to host the platform (their own terminal, an approved run outside the sandbox, a `systemd --user` unit or launchd agent, a container, or an existing platform via `NHX_BASE_URL`). The `nemo-skill-selection` skill's "Starting the platform from a sandboxed agent" section has the full guidance.
 
 Alternatively, probe the API with `nemo workspaces list` — a workspaces table back means the platform is up. **Don't `curl /v1/workspaces`** to check; that path returns 404 even when the platform is healthy.
 
