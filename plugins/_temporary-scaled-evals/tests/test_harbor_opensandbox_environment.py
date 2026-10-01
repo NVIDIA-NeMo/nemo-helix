@@ -16,6 +16,7 @@ import pytest
 
 pytest.importorskip("harbor.environments.opensandbox")
 pytest.importorskip("nhx_sandbox")
+pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 
 import harbor.environments.opensandbox as harbor_opensandbox
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy

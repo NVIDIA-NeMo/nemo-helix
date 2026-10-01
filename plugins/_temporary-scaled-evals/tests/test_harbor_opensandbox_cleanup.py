@@ -8,7 +8,11 @@ import json
 from collections.abc import Mapping
 
 import pytest
-from scaled_evals import harbor_opensandbox_cleanup as cleanup
+
+try:
+    from scaled_evals import harbor_opensandbox_cleanup as cleanup
+except ImportError as exc:
+    pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 
 def test_cleanup_selector_requires_deployment_and_evaluation(capsys: pytest.CaptureFixture[str]) -> None:
