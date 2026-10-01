@@ -200,6 +200,39 @@ class TestNemoClientAuth:
         assert client._auth is None
         resolve_provider.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_to_async_keeps_env_bootstrap_off_for_an_injected_transport(self, monkeypatch, tmp_path):
+        subject_token_file = tmp_path / "workload-token"
+        subject_token_file.write_text("subject-token\n", encoding="utf-8")
+        monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
+
+        with (
+            httpx.Client() as injected,
+            patch("nemo_helix_plugin.client.oidc_factory.resolve_workload_exchange_provider") as resolve_provider,
+        ):
+            client = NemoClient(base_url="https://nemo.example.com", http_client=injected)
+            async with client.to_async() as async_client:
+                assert async_client._auth is None
+
+        resolve_provider.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_to_async_of_a_derived_client_follows_the_source_env_bootstrap(self, monkeypatch, tmp_path):
+        subject_token_file = tmp_path / "workload-token"
+        subject_token_file.write_text("subject-token\n", encoding="utf-8")
+        provider = object()
+        monkeypatch.delenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, raising=False)
+
+        with NemoClient(base_url="https://nemo.example.com") as source:
+            derived = NemoClient.from_client(source)
+            monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(subject_token_file))
+            with patch(
+                "nemo_helix_plugin.client.oidc_factory.resolve_workload_exchange_provider",
+                return_value=provider,
+            ):
+                async with derived.to_async() as async_client:
+                    assert async_client._auth is provider
+
 
 # ---------------------------------------------------------------------------
 # AsyncNemoClient auth parameter

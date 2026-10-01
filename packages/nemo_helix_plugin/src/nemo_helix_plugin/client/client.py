@@ -720,6 +720,9 @@ class NemoClient(BaseNemoClient[httpx.Client]):
     """Sync HTTP client for NeMo Helix APIs."""
 
     _auth: TokenProvider | None
+    # Whether construction could fall back to env workload-identity auth;
+    # carried to :meth:`to_async` so the async twin makes the same call.
+    _allow_env_bootstrap: bool
 
     def __init__(
         self,
@@ -742,11 +745,12 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         defers to the transport's timeout, giving one we build ourselves
         :data:`DEFAULT_TIMEOUT`; ``httpx.Timeout(None)`` waits indefinitely.
         """
+        self._allow_env_bootstrap = http_client is None
         auth = _resolve_implicit_workload_auth(
             base_url=base_url,
             auth=auth,
             default_headers=default_headers,
-            allow_env_bootstrap=http_client is None,
+            allow_env_bootstrap=self._allow_env_bootstrap,
         )
         super().__init__(
             base_url=base_url,
@@ -768,7 +772,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
     @classmethod
     def from_client(cls, client: NemoClient) -> Self:
         """Create an instance of this subclass sharing the transport of *client*."""
-        return cls(
+        derived = cls(
             base_url=client.base_url,
             workspace=client.workspace,
             auth=client._auth,
@@ -779,6 +783,8 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             owns_http_client=False,
             url_resolver=client._url_resolver,
         )
+        derived._allow_env_bootstrap = client._allow_env_bootstrap
+        return derived
 
     def to_async(self) -> AsyncNemoClient:
         """Return an :class:`AsyncNemoClient` with this client's configuration.
@@ -787,6 +793,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
         (or use it as an async context manager) when done. A custom ``http_client``
         on this client (ASGI, Unix socket) is not carried over; build the async
         twin yourself when the base URL is not reachable over the network.
+        Env workload-identity auth is only resolved when this client allowed it.
         """
         return AsyncNemoClient(
             base_url=self.base_url,
@@ -796,6 +803,7 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             timeout=self._timeout,
             retry=self._retry,
             url_resolver=self._url_resolver,
+            _allow_env_bootstrap=self._allow_env_bootstrap,
         )
 
     def close(self) -> None:
@@ -1065,13 +1073,18 @@ class AsyncNemoClient(BaseNemoClient[httpx.AsyncClient]):
         http_client: httpx.AsyncClient | None = None,
         owns_http_client: bool | None = None,
         url_resolver: Callable[[str], str | httpx.URL] | None = None,
+        _allow_env_bootstrap: bool | None = None,
     ) -> None:
-        """Create a client. See :meth:`NemoClient.__init__` for *timeout*."""
+        """Create a client. See :meth:`NemoClient.__init__` for *timeout*.
+
+        Env workload-identity auth is resolved only when no *http_client* is
+        injected; ``_allow_env_bootstrap`` overrides that for :meth:`NemoClient.to_async`.
+        """
         auth = _resolve_implicit_workload_auth(
             base_url=base_url,
             auth=auth,
             default_headers=default_headers,
-            allow_env_bootstrap=http_client is None,
+            allow_env_bootstrap=http_client is None if _allow_env_bootstrap is None else _allow_env_bootstrap,
         )
         super().__init__(
             base_url=base_url,
