@@ -124,7 +124,7 @@ const renderModal = () =>
   });
 
 const openUploadTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Upload agent' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register with code upload' }));
   await screen.findByTestId('agent-directory-input');
 };
 
@@ -133,7 +133,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 };
 
 const openGitHubTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'GitHub repository' }));
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
   await within(dialog).findByRole('textbox', { name: 'Repository' });
 };
 
@@ -150,7 +150,9 @@ const looseFile = (name: string, contents: string): File =>
   new File([contents], name, { type: 'text/plain' });
 
 const submit = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(within(dialog).getByRole('button', { name: /^(Create|Replace and create)$/ }));
+  await user.click(
+    within(dialog).getByRole('button', { name: /^(Register|Replace and register)$/ })
+  );
 };
 
 describe('NewAgentModal coding agent prompt tab', () => {
@@ -184,7 +186,7 @@ describe('NewAgentModal coding agent prompt tab', () => {
     await waitFor(() =>
       expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument()
     );
-    expect(within(dialog).queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Register' })).not.toBeInTheDocument();
   });
 
   it('leaves an upload failure behind when the user switches back to the prompt', async () => {
@@ -214,7 +216,7 @@ describe('NewAgentModal upload tab', () => {
     renderModal();
     const dialog = await screen.findByRole('dialog');
 
-    expect(within(dialog).getByRole('tab', { name: 'Upload agent' })).toHaveAttribute(
+    expect(within(dialog).getByRole('tab', { name: 'Register with code upload' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -287,7 +289,7 @@ describe('NewAgentModal upload tab', () => {
     await submit(dialog, user);
 
     expect(await within(dialog).findByText(/already owns the fileset/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeInTheDocument();
     expect(created).toHaveLength(0);
   });
 
@@ -304,7 +306,7 @@ describe('NewAgentModal upload tab', () => {
     await submit(dialog, user);
     expect(await within(dialog).findByText(/no agent owns it/)).toBeInTheDocument();
 
-    const replace = await within(dialog).findByRole('button', { name: 'Replace and create' });
+    const replace = await within(dialog).findByRole('button', { name: 'Replace and register' });
     await user.click(replace);
 
     await waitFor(() => expect(created).toHaveLength(1));
@@ -319,7 +321,7 @@ describe('NewAgentModal upload tab', () => {
     pickDirectory(dialog, [makeFile('calc-agent/mcps/calculator.py', 'print(1)\n')]);
 
     expect(await within(dialog).findByText(/No agent\.yaml/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('ignores a slower selection that a newer one replaced', async () => {
@@ -355,17 +357,17 @@ describe('NewAgentModal upload tab', () => {
     await openUploadTab(dialog);
     pickDirectory(dialog);
     await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled();
 
     pickDirectory(dialog, [gate.file]);
 
     await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled()
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled()
     );
 
     gate.release();
     await waitFor(() => expect(within(dialog).getByDisplayValue('slow')).toBeInTheDocument());
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled();
   });
 
   it('clears the previous failure when a new directory is picked', async () => {
@@ -414,7 +416,7 @@ describe('NewAgentModal oversized pick', () => {
     });
 
     expect(await within(dialog).findByText(/880,000 files/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 });
 
@@ -437,12 +439,12 @@ describe('NewAgentModal GitHub import', () => {
     await openGitHubTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() =>
-      expect(within(dialog).getByRole('button', { name: 'Create' })).toBeEnabled()
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
     );
 
     await openUploadTab(dialog);
 
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('backs the spec fileset with the repository instead of uploading files', async () => {
@@ -514,7 +516,7 @@ describe('NewAgentModal GitHub import', () => {
     await user.tab();
 
     expect(await within(dialog).findByText(/is not a GitHub repository/)).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
   it('rolls the fileset back when the repository has no agent.yaml', async () => {
@@ -616,7 +618,7 @@ describe('NewAgentModal imported traces tab', () => {
   };
 
   const openTracesTab = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
-    await user.click(within(dialog).getByRole('tab', { name: 'Create from traces' }));
+    await user.click(within(dialog).getByRole('tab', { name: 'Register from traces' }));
   };
 
   it('offers each distinct agent seen in the traces', async () => {
@@ -715,11 +717,11 @@ describe('NewAgentModal imported traces tab', () => {
     const dialog = await screen.findByRole('dialog');
     await openTracesTab(dialog, user);
 
-    expect(within(dialog).getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
 
     await user.click(await within(dialog).findByRole('combobox', { name: /imported traces/i }));
     await user.click(await screen.findByRole('option', { name: 'billing-agent' }));
-    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Register' }));
 
     await waitFor(() => expect(created).toHaveLength(1));
     // Telemetry carries no config, and the platform defaults an empty one.

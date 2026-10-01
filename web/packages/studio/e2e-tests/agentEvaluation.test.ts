@@ -21,7 +21,7 @@ import path from 'path';
 const WORKSPACE = 'default';
 
 /** The Fabric (`nemo-agents-spec-v1`) Email Security Triage example, uploaded through the
- *  New Agent flow exactly as a user would point the directory picker at it. Lives outside
+ *  Register Agent flow exactly as a user would point the directory picker at it. Lives outside
  *  this package, so it is resolved from the repo root rather than from `MOCKS_DIR`. */
 const REPO_ROOT = path.resolve(PROJECT_ROOT, '../../..');
 const AGENT_DIR = path.join(
@@ -155,11 +155,11 @@ test.describe('Agent Evaluation', () => {
       await page.goto(`workspaces/${WORKSPACE}/agents`);
       await waitForLongOperation(page);
 
-      await page.getByRole('button', { name: 'New Agent' }).click();
-      const modal = page.getByRole('dialog', { name: 'Instrument an agent with NeMo Helix' });
+      await page.getByRole('button', { name: 'Register Agent' }).click();
+      const modal = page.getByRole('dialog', { name: 'Register an agent with NeMo Helix' });
       await expect(modal).toBeVisible();
 
-      await modal.getByRole('tab', { name: 'Upload agent' }).click();
+      await modal.getByRole('tab', { name: 'Register with code upload' }).click();
       // A webkitdirectory input takes a directory path; the browser hands over every
       // descendant, and the modal filters __pycache__ and friends out client-side.
       await modal.getByTestId('agent-directory-input').setInputFiles(AGENT_DIR);
@@ -167,7 +167,7 @@ test.describe('Agent Evaluation', () => {
 
       // The picker seeds a name from the config; this run needs a unique one.
       await modal.getByRole('textbox', { name: 'Name' }).fill(agentName);
-      await modal.getByRole('button', { name: 'Create', exact: true }).click();
+      await modal.getByRole('button', { name: 'Register', exact: true }).click();
     });
 
     await test.step('Land on the new agent with nothing deployed', async () => {
