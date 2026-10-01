@@ -421,8 +421,13 @@ def _serialize_message_contents(request: dict) -> None:
         message["content"] = json.dumps(content, default=str)
 
 
+_CHAT_CONTENT_PART_TYPES = frozenset({"text", "image_url", "input_audio", "file", "video_url", "audio_url"})
+
+
 def _is_content_parts(value: Any) -> bool:
-    return isinstance(value, list) and all(isinstance(part, dict) and "type" in part for part in value)
+    return isinstance(value, list) and all(
+        isinstance(part, dict) and part.get("type") in _CHAT_CONTENT_PART_TYPES for part in value
+    )
 
 
 def _score_outputs(score: Score, value: float, label: str) -> list[MetricOutput]:

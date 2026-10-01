@@ -1314,6 +1314,18 @@ class TestGenerateStructuredOutput:
 
         assert request["messages"][-1]["content"] == parts
 
+    def test_render_request_serializes_record_lists_with_type_keys(self):
+        events = [{"type": "search_result", "text": "Paris is the capital"}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.events }}"}]},
+        )
+
+        request = metric._render_request({"events": events}, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == events
+
     def test_render_request_sends_string_prompt_as_chat_with_response_format(self):
         metric = LLMJudgeMetric(
             model=_make_model(),
