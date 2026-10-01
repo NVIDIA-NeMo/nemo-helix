@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import logging
 import os
@@ -19,6 +20,7 @@ from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.cli.docker_preflight import require_docker_for_default_local
 from nemo_helix_ext.local.install import services_extra_install_command
 from nemo_helix_ext.local.process import (
+    _SIGKILL_WAIT_TIMEOUT,
     ForegroundInstanceError,
     InstanceAlreadyRunningError,
     InstanceDescriptor,
@@ -230,6 +232,10 @@ def _release_stuck_instance(
     stop_instance(scope, base_dir=base_dir, timeout=_DEFAULT_STOP_TIMEOUT, force=True)
     if not launcher_exited and group is not None and _process_still_alive(proc, scope, base_dir):
         _signal_saved_process_group(*group)
+        # SIGKILL returns before the launcher has been reaped. Wait before deciding
+        # whether to tell the user the process is still running.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=_SIGKILL_WAIT_TIMEOUT)
     if _process_still_alive(proc, scope, base_dir):
         typer.echo(
             f"Service process is still running (pid {proc.pid}).\n"

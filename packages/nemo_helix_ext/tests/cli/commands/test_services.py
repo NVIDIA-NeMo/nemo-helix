@@ -315,6 +315,8 @@ def test_start_reports_failure(base_dir: Path):
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
+        patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
+        patch(f"{_PROCESS_MODULE}.os.killpg"),
     ):
         result = runner.invoke(
             app,
@@ -398,6 +400,7 @@ def test_start_stops_child_when_ready_times_out(base_dir: Path):
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-stop"])
@@ -424,6 +427,7 @@ def test_start_reports_child_still_running_when_stop_fails(base_dir: Path):
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
         patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
         patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-stuck"])
@@ -449,6 +453,7 @@ def test_start_does_not_signal_a_reused_pid_when_group_lookup_fails(base_dir: Pa
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])),
         patch(f"{_CLI_MODULE}.os.getpgid", side_effect=ProcessLookupError),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-missing-pid"])
@@ -481,6 +486,7 @@ def test_start_signals_group_when_launcher_exits_but_lock_remains(base_dir: Path
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop),
         patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
         patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-orphan-lock"])
@@ -517,6 +523,7 @@ def test_start_releases_lock_when_launcher_exits_early(base_dir: Path):
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
         patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
         patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg", side_effect=_killpg) as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-lock"])
@@ -543,6 +550,7 @@ def test_start_signals_group_when_launcher_exits_before_lock(base_dir: Path):
         patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
         patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
         patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-nolock"])
@@ -572,6 +580,7 @@ def test_start_stops_scope_when_lock_appears_after_early_exit_signal(base_dir: P
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
         patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
         patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
         patch(f"{_PROCESS_MODULE}.os.killpg"),
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-late-lock"])
@@ -915,6 +924,8 @@ class TestServicesRestart:
             patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
             patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
             patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False) as mock_wait,
+            patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
+            patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
             patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
         ):
             result = runner.invoke(app, ["services", "restart", "--instance", scope])

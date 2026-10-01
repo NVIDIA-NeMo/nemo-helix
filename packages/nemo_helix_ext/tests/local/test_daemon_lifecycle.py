@@ -717,7 +717,16 @@ os._exit(0)
         assert result.stopped_pids == []
         assert not process.is_instance_alive(scope, base_dir=state_dir)
         assert process.read_descriptor(scope, base_dir=state_dir) is None
-        assert not psutil.pid_exists(child_pid)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                if psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail(f"child {child_pid} still running")
     finally:
         if child_pid and psutil.pid_exists(child_pid):
             os.kill(child_pid, 9)

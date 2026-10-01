@@ -464,10 +464,11 @@ def _process_group_id(pid: int) -> int | None:
 
 
 def _signal_saved_process_group(pgid: int, leader_create_time: float) -> None:
-    """SIGTERM then SIGKILL a group recorded while its leader was alive.
+    """SIGTERM a group recorded while its leader was alive, then SIGKILL if it remains.
 
     If *pgid* now belongs to a different process, do nothing. A dead leader
-    does not retire the group while a descendant remains.
+    does not retire the group while a descendant remains. SIGKILL follows only
+    after the group is still present at the end of the shutdown grace period.
     """
     try:
         leader = psutil.Process(pgid)
@@ -477,13 +478,24 @@ def _signal_saved_process_group(pgid: int, leader_create_time: float) -> None:
         return
     if leader is not None and abs(leader.create_time() - leader_create_time) >= 2.0:
         return
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+
+    def _send(sig: int) -> bool:
         try:
             os.killpg(pgid, sig)
         except ProcessLookupError:
-            return
+            return False
         except OSError:
             logger.debug("Failed to signal process group %s with signal %s", pgid, sig, exc_info=True)
+        return True
+
+    if not _send(signal.SIGTERM):
+        return
+    deadline = time.monotonic() + _SIGKILL_WAIT_TIMEOUT
+    while time.monotonic() < deadline:
+        if not _send(0):
+            return
+        _pause(_SIGTERM_POLL_INTERVAL)
+    _send(signal.SIGKILL)
 
 
 # ---------------------------------------------------------------------------
