@@ -10,9 +10,12 @@ Models-specific ergonomics that used to live on the vendored Stainless
 
 - OpenAI inference-gateway route builders (``get_openai_route_base_url`` and
   friends) -- pure string builders, safe from sync or async code, and
+- OpenAI SDK clients bound to that route (``get_openai_client`` /
+  ``get_async_openai_client``), authenticated with this client's token provider,
 - deployment/provider status polling (``wait_for_deployment_status`` /
   ``wait_for_provider_status``) driven by the client's own ``get_deployment`` /
-  ``get_provider`` methods.
+  ``get_provider`` methods, and
+- inference-gateway readiness polling (``wait_for_gateway``).
 
 Usage::
 
@@ -30,12 +33,16 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Protocol
 
+import openai
+from nemo_helix_plugin.client.auth import resolve_token_async
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.method import method
+from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayClient, InferenceGatewayClient
 from nemo_helix_plugin.models import endpoints
 from nemo_helix_plugin.models.refs import (
     ResolvedModelReference,
@@ -49,6 +56,11 @@ from nemo_helix_plugin.models.refs import (
 from nemo_helix_plugin.models.types import ModelDeployment, ModelEntity, ModelProvider
 
 _INFERENCE_GATEWAY_PREFIX = "/apis/inference-gateway/v2/workspaces"
+# Sent as the OpenAI API key when the platform client has no token provider; the
+# gateway authenticates platform callers, never with an OpenAI key.
+_UNUSED_OPENAI_API_KEY = "not-used"
+# Gateway answers that mean "not routable yet" rather than a hard failure.
+_TRANSIENT_GATEWAY_STATUS_CODES = frozenset({502, 503, 504})
 
 
 # The OpenAI-route builders only read a couple of attributes, so they accept any
@@ -289,6 +301,52 @@ class ModelsClient(_ModelsMethods, _ModelsUrlMixin, NemoClient):
         provider = self.get_provider(name=name, workspace=workspace).data()
         return self.get_provider_route_openai_url(provider)
 
+    def get_openai_client(self, *, workspace: str | None = None) -> openai.OpenAI:
+        """OpenAI client for the inference gateway's OpenAI route in *workspace*.
+
+        Requests carry this client's default headers and a bearer token from its
+        token provider, resolved per request so refreshing tokens stay current.
+        """
+        auth = self._auth
+        return openai.OpenAI(
+            base_url=self.get_openai_route_base_url(workspace=workspace),
+            api_key=auth.get_access_token if auth is not None else _UNUSED_OPENAI_API_KEY,
+            default_headers=self.default_headers or None,
+        )
+
+    def wait_for_gateway(
+        self,
+        provider_name: str,
+        *,
+        workspace: str | None = None,
+        timeout: float = 60,
+        poll_interval: float = 1.0,
+    ) -> bool:
+        """Poll the inference gateway until it can route to *provider_name*.
+
+        A deployment or provider can report READY before the gateway has refreshed
+        its routing cache; call this before the first inference request. Returns
+        False on timeout or a non-transient gateway error.
+        """
+        gateway = InferenceGatewayClient.from_client(self)
+        start = time.monotonic()
+        print(f"Waiting for gateway to route to '{provider_name}'...")
+        while time.monotonic() - start < timeout:
+            try:
+                gateway.provider_ready(name=provider_name, workspace=workspace)
+            except (NotFoundError, NemoTransportError):
+                pass
+            except NemoHTTPError as exc:
+                if exc.status_code not in _TRANSIENT_GATEWAY_STATUS_CODES:
+                    print(f"Gateway readiness failed: {exc}\n")
+                    return False
+            else:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}] Gateway is ready!\n")
+                return True
+            time.sleep(poll_interval)
+        print(f"Gateway timeout after {int(time.monotonic() - start)}s\n")
+        return False
+
     def wait_for_deployment_status(
         self,
         deployment_name: str,
@@ -410,6 +468,55 @@ class AsyncModelsClient(_ModelsMethods, _ModelsUrlMixin, AsyncNemoClient):
         workspace, name = _split_provider_id(deployment)
         provider = (await self.get_provider(name=name, workspace=workspace)).data()
         return self.get_provider_route_openai_url(provider)
+
+    def get_async_openai_client(self, *, workspace: str | None = None) -> openai.AsyncOpenAI:
+        """Async OpenAI client for the inference gateway's OpenAI route in *workspace*.
+
+        Requests carry this client's default headers and a bearer token from its
+        token provider, resolved per request so refreshing tokens stay current.
+        """
+        auth = self._auth
+        if auth is None:
+            api_key: str | Callable[[], Awaitable[str]] = _UNUSED_OPENAI_API_KEY
+        else:
+            token_provider = auth
+
+            async def api_key() -> str:
+                return await resolve_token_async(token_provider)
+
+        return openai.AsyncOpenAI(
+            base_url=self.get_openai_route_base_url(workspace=workspace),
+            api_key=api_key,
+            default_headers=self.default_headers or None,
+        )
+
+    async def wait_for_gateway(
+        self,
+        provider_name: str,
+        *,
+        workspace: str | None = None,
+        timeout: float = 60,
+        poll_interval: float = 1.0,
+    ) -> bool:
+        """Async twin of :meth:`ModelsClient.wait_for_gateway`."""
+        gateway = AsyncInferenceGatewayClient.from_client(self)
+        start = time.monotonic()
+        print(f"Waiting for gateway to route to '{provider_name}'...")
+        while time.monotonic() - start < timeout:
+            try:
+                await gateway.provider_ready(name=provider_name, workspace=workspace)
+            except (NotFoundError, NemoTransportError):
+                pass
+            except NemoHTTPError as exc:
+                if exc.status_code not in _TRANSIENT_GATEWAY_STATUS_CODES:
+                    print(f"Gateway readiness failed: {exc}\n")
+                    return False
+            else:
+                print(f"  [{datetime.now().strftime('%H:%M:%S')}] Gateway is ready!\n")
+                return True
+            await asyncio.sleep(poll_interval)
+        print(f"Gateway timeout after {int(time.monotonic() - start)}s\n")
+        return False
 
     async def wait_for_deployment_status(
         self,
