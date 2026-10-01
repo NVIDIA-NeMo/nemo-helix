@@ -15,14 +15,15 @@ import {
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Accordion, Stack } from '@nvidia/foundations-react-core';
 import {
-  DEPLOYMENT_MODE_LABELS,
   type DeploymentMode,
+  DeploymentModeAvailabilityMode,
   type DeploymentModes,
   enabledImageModes,
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
@@ -33,7 +34,7 @@ import { z } from 'zod';
 const deploymentFormSchema = z.object({
   name: z.literal('').or(entityNameSchema('Deployment name')).optional(),
   agent: z.string().min(1, 'Agent is required'),
-  deploymentMode: z.enum(['subprocess', 'docker', 'k8s']),
+  deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode),
   image: z.string().optional(),
 });
 
@@ -75,7 +76,14 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const deploymentModes = useDeploymentModes(workspace, { enabled: open });
+  const deploymentModes = useDeploymentModes(workspace, {
+    enabled: open && AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
+  });
+  // An image's runtime depends on the modes, so deploying it waits for them; a failed read falls back to all modes.
+  const awaitingModesForImage =
+    Boolean(initialImage) &&
+    AGENT_CONTAINER_DEPLOYMENTS_ENABLED &&
+    deploymentModes.status === 'loading';
   const availableModes =
     deploymentModes.status === 'ready'
       ? DEPLOYMENT_MODE_ORDER.filter((mode) => deploymentModes.enabled.includes(mode))
@@ -190,6 +198,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
+      submitDisabled={awaitingModesForImage}
       errorText={errorMessage}
     >
       <Stack gap="density-xl">
@@ -222,7 +231,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                       useControllerProps={{ control, name: 'deploymentMode' }}
                       items={availableModes.map((mode) => ({
                         value: mode,
-                        children: DEPLOYMENT_MODE_LABELS[mode],
+                        children: deploymentModeLabel(mode),
                       }))}
                       formFieldProps={{
                         slotLabel: 'Runtime',

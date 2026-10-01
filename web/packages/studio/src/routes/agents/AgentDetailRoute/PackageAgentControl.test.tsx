@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ImageBuildSupport } from '@studio/api/agents/useCanBuildAgentImages';
 import type { DeploymentModes } from '@studio/api/agents/useDeploymentModes';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -16,12 +15,12 @@ const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
 const platform = vi.hoisted(() => ({
-  buildSupport: 'supported' as ImageBuildSupport,
+  buildsUnsupported: false,
   modes: { status: 'ready', enabled: ['subprocess', 'docker'] } as DeploymentModes,
 }));
 
-vi.mock('@studio/api/agents/useCanBuildAgentImages', () => ({
-  useCanBuildAgentImages: () => platform.buildSupport,
+vi.mock('@studio/api/agents/useImageBuildsUnsupported', () => ({
+  useImageBuildsUnsupported: () => platform.buildsUnsupported,
 }));
 
 vi.mock('@studio/api/agents/useDeploymentModes', async (importOriginal) => ({
@@ -30,7 +29,7 @@ vi.mock('@studio/api/agents/useDeploymentModes', async (importOriginal) => ({
 }));
 
 beforeEach(() => {
-  platform.buildSupport = 'supported';
+  platform.buildsUnsupported = false;
   platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
 });
 
@@ -349,50 +348,59 @@ describe('PackageAgentControl', () => {
 
   describe('when the platform cannot build images', () => {
     beforeEach(() => {
-      platform.buildSupport = 'unsupported';
+      platform.buildsUnsupported = true;
       platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
     });
 
-    it('disables the build and shows paste-safe local commands', async () => {
+    const commandSnippets = async () => {
+      const dialog = screen.getByRole('dialog');
+      await waitFor(() => expect(dialog).toHaveTextContent(/nemo agents deploy/));
+      return within(dialog)
+        .getAllByRole('code')
+        .map((code) => code.textContent);
+    };
+
+    it('disables the build and shows build and deploy as separate steps', async () => {
       await openControl();
       const dialog = screen.getByRole('dialog');
 
       expect(within(dialog).getByText(/can't build images/)).toBeInTheDocument();
       expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
       expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
-      await waitFor(() =>
-        expect(dialog).toHaveTextContent(
-          /--publish --registry REGISTRY.*--agent my-agent --mode k8s --image IMAGE/
-        )
-      );
+      expect(await commandSnippets()).toEqual([
+        'nemo agents package --agent agent.yaml --publish --registry REGISTRY',
+        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode k8s --image IMAGE`,
+      ]);
+      expect(dialog).toHaveTextContent(/replacing REGISTRY with your registry/);
       expect(dialog).not.toHaveTextContent(/[<>]/);
     });
 
-    it('skips publishing for a Docker deployment', async () => {
+    it('skips publishing and the registry for a Docker deployment', async () => {
       platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
       await openControl();
-      const dialog = screen.getByRole('dialog');
 
-      await waitFor(() => expect(dialog).toHaveTextContent(/--mode docker --image IMAGE/));
-      expect(dialog).not.toHaveTextContent(/--publish/);
+      expect(await commandSnippets()).toEqual([
+        'nemo agents package --agent agent.yaml',
+        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode docker --image IMAGE`,
+      ]);
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/REGISTRY/);
     });
 
-    it('waits for the deployment modes before suggesting a mode', async () => {
+    it('waits for the deployment modes before showing commands', async () => {
       platform.modes = { status: 'loading' };
       await openControl();
       const dialog = screen.getByRole('dialog');
 
       expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
-      expect(dialog).not.toHaveTextContent(/nemo agents deploy/);
+      expect(dialog).not.toHaveTextContent(/nemo agents/);
     });
 
-    it('suggests Kubernetes when the deployment modes cannot be read', async () => {
+    it('leaves the mode to the user when the deployment modes cannot be read', async () => {
       platform.modes = { status: 'unknown' };
       await openControl();
 
-      await waitFor(() =>
-        expect(screen.getByRole('dialog')).toHaveTextContent(/--mode k8s --image IMAGE/)
-      );
+      expect((await commandSnippets())[1]).toMatch(/--mode MODE --image IMAGE$/);
+      expect(screen.getByRole('dialog')).toHaveTextContent(/and MODE with docker or k8s/);
     });
 
     it('keeps the Platform-managed message for agents that cannot be packaged', async () => {
@@ -414,19 +422,19 @@ describe('PackageAgentControl', () => {
     expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
   });
 
+  it('does not hand an image to a deployment the platform cannot run', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess'] };
+    mockRestoredJob('completed');
+    await openControl({ onImageBuilt: vi.fn() });
+
+    await screen.findByText('nemo-agents/default/my-agent:1.0');
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+  });
+
   it('names only the deployable modes', async () => {
     platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
     await openControl();
 
     expect(screen.getByText(/to deploy it with Kubernetes\./)).toBeInTheDocument();
-  });
-
-  it('allows the build when the execution profiles cannot be read', async () => {
-    platform.buildSupport = 'unknown';
-    await openControl();
-    const dialog = screen.getByRole('dialog');
-
-    expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeEnabled();
-    expect(within(dialog).queryByText(/can't build images/)).not.toBeInTheDocument();
   });
 });

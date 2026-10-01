@@ -1,27 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useAgentsListDeploymentModes } from '@nemo/sdk/generated/agents/agent-deployments';
 import { enabledImageModes, useDeploymentModes } from '@studio/api/agents/useDeploymentModes';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { DEPLOYMENT_MODES_URL as modesUrl } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
+import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-
-const modesUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
-
-const mockEnabledModes = (...enabled: string[]) =>
-  server.use(
-    http.get(modesUrl, () =>
-      HttpResponse.json({
-        data: ['subprocess', 'docker', 'k8s'].map((mode) => ({
-          mode,
-          enabled: enabled.includes(mode),
-          requires_image: mode !== 'subprocess',
-        })),
-      })
-    )
-  );
 
 describe('useDeploymentModes', () => {
   it('lists the enabled modes once they arrive', async () => {
@@ -43,6 +30,26 @@ describe('useDeploymentModes', () => {
     });
 
     await waitFor(() => expect(result.current).toEqual({ status: 'unknown' }));
+  });
+
+  it('keeps the last good modes when a refetch fails', async () => {
+    mockEnabledModes('subprocess', 'k8s');
+    const { result } = renderHook(
+      () => ({
+        modes: useDeploymentModes('default'),
+        query: useAgentsListDeploymentModes('default'),
+      }),
+      { wrapper: TestProviders }
+    );
+    await waitFor(() => expect(result.current.modes.status).toBe('ready'));
+
+    server.use(http.get(modesUrl, () => HttpResponse.json({}, { status: 403 })));
+    await act(async () => {
+      await result.current.query.refetch();
+    });
+
+    await waitFor(() => expect(result.current.query.isError).toBe(true));
+    expect(result.current.modes).toEqual({ status: 'ready', enabled: ['subprocess', 'k8s'] });
   });
 });
 

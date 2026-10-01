@@ -8,6 +8,7 @@ import {
 } from '@nemo/sdk/generated/agents/schema/DeploymentModeAvailabilityMode';
 import { useMemo } from 'react';
 
+export { DeploymentModeAvailabilityMode };
 export type { DeploymentMode };
 
 // Preference order when a built image is handed to a deployment.
@@ -15,12 +16,6 @@ export const IMAGE_DEPLOYMENT_MODES: readonly DeploymentMode[] = [
   DeploymentModeAvailabilityMode.docker,
   DeploymentModeAvailabilityMode.k8s,
 ];
-
-export const DEPLOYMENT_MODE_LABELS: Record<DeploymentMode, string> = {
-  subprocess: 'Subprocess',
-  docker: 'Docker',
-  k8s: 'Kubernetes',
-};
 
 export type DeploymentModes =
   | { status: 'loading' }
@@ -33,12 +28,13 @@ export const useDeploymentModes = (
 ): DeploymentModes => {
   const { data, isError } = useAgentsListDeploymentModes(workspace, { query: { enabled } });
   return useMemo<DeploymentModes>(() => {
-    if (isError) return { status: 'unknown' };
-    if (!data) return { status: 'loading' };
-    return {
-      status: 'ready',
-      enabled: data.data.filter((mode) => mode.enabled).map((mode) => mode.mode),
-    };
+    if (data) {
+      return {
+        status: 'ready',
+        enabled: data.data.filter((mode) => mode.enabled).map((mode) => mode.mode),
+      };
+    }
+    return isError ? { status: 'unknown' } : { status: 'loading' };
   }, [data, isError]);
 };
 

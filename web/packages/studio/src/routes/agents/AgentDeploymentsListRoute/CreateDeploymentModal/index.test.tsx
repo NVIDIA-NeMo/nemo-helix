@@ -8,8 +8,13 @@ vi.hoisted(() => {
 import { getAgentsListDeploymentsQueryKey } from '@nemo/sdk/generated/agents/agent-deployments';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import {
+  DEPLOYMENT_MODES_URL,
+  deploymentModesResponse,
+} from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -55,19 +60,6 @@ const captureCreate = (): { body?: CapturedDeployment } => {
 };
 
 const PACKAGED_IMAGE = 'nemo-agents/default/my-agent:1.0';
-
-const mockEnabledModes = (...enabled: string[]) =>
-  server.use(
-    http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`, () =>
-      HttpResponse.json({
-        data: ['subprocess', 'docker', 'k8s'].map((mode) => ({
-          mode,
-          enabled: enabled.includes(mode),
-          requires_image: mode !== 'subprocess',
-        })),
-      })
-    )
-  );
 
 /** Drives `open` and `initialImage` the way the agent detail route does. */
 const Harness: FC<{ startImage?: string }> = ({ startImage }) => {
@@ -296,6 +288,30 @@ describe('CreateDeploymentModal', () => {
       const options = await screen.findAllByRole('option');
       expect(options.map((option) => option.textContent)).toEqual(['Subprocess', 'Kubernetes']);
     });
+  });
+
+  it('holds a packaged image until the runtimes are known', async () => {
+    let releaseModes = () => {};
+    const modesReleased = new Promise<void>((resolve) => {
+      releaseModes = resolve;
+    });
+    server.use(
+      http.get(DEPLOYMENT_MODES_URL, async () => {
+        await modesReleased;
+        return HttpResponse.json(deploymentModesResponse(['subprocess', 'k8s']));
+      })
+    );
+    renderModal(PACKAGED_IMAGE);
+
+    const dialog = await getDeploymentDialog();
+    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
+    expect(deploy).toBeDisabled();
+
+    releaseModes();
+    await waitFor(() => expect(deploy).toBeEnabled());
+    expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Kubernetes'
+    );
   });
 
   it('drops the container options when the platform only runs subprocesses', async () => {

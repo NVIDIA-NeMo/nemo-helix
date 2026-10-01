@@ -19,32 +19,61 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
-import { useCanBuildAgentImages } from '@studio/api/agents/useCanBuildAgentImages';
 import {
-  DEPLOYMENT_MODE_LABELS,
   type DeploymentMode,
   enabledImageModes,
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { JOBS_ENABLED } from '@studio/constants/environment';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
-const localBuildCommands = (agentName: string, mode: DeploymentMode) =>
-  [
-    mode === 'k8s'
-      ? 'nemo agents package --agent agent.yaml --publish --registry REGISTRY'
-      : 'nemo agents package --agent agent.yaml',
-    `nemo agents deploy --agent ${agentName} --mode ${mode} --image IMAGE`,
-  ].join('\n');
-
 const modeLabels = (modes: readonly DeploymentMode[]) =>
-  modes.map((mode) => DEPLOYMENT_MODE_LABELS[mode]).join(' or ');
+  modes.map(deploymentModeLabel).join(' or ');
+
+const CommandSnippet: FC<{ command: string }> = ({ command }) => (
+  <CodeSnippetRoot>
+    <CodeSnippetActions>
+      <CopyButton text={command} color="neutral" kind="tertiary" size="tiny" />
+    </CodeSnippetActions>
+    <CodeSnippetCode value={command} language="bash" />
+  </CodeSnippetRoot>
+);
+
+// `mode` is undefined when the platform's modes couldn't be read.
+const LocalBuildSteps: FC<{ workspace: string; agentName: string; mode?: DeploymentMode }> = ({
+  workspace,
+  agentName,
+  mode,
+}) => {
+  const publishes = mode !== 'docker';
+  return (
+    <Stack gap="density-sm">
+      <Text className="text-secondary" kind="body/regular/sm">
+        This platform can&apos;t build images: builds run on the platform host under a subprocess
+        job profile, and this platform doesn&apos;t register one. Build the image yourself, from the
+        agent&apos;s directory{publishes ? ', replacing REGISTRY with your registry' : ''}:
+      </Text>
+      <CommandSnippet
+        command={`nemo agents package --agent agent.yaml${publishes ? ' --publish --registry REGISTRY' : ''}`}
+      />
+      <Text className="text-secondary" kind="body/regular/sm">
+        Then deploy it, replacing IMAGE with the tag the build printed
+        {mode ? '' : ' and MODE with docker or k8s'}:
+      </Text>
+      <CommandSnippet
+        command={`nemo agents deploy --agent ${agentName} --workspace ${workspace} --mode ${mode ?? 'MODE'} --image IMAGE`}
+      />
+    </Stack>
+  );
+};
 
 interface PackageAgentControlProps {
   workspace: string;
@@ -100,10 +129,12 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
-  const platformCannotBuild = useCanBuildAgentImages() === 'unsupported';
+  const platformCannotBuild = useImageBuildsUnsupported();
   const deploymentModes = useDeploymentModes(workspace);
   const imageModes = enabledImageModes(deploymentModes);
   const noImageMode = imageModes.length === 0;
+  const knownDeployMode: DeploymentMode | undefined =
+    deploymentModes.status === 'ready' ? imageModes.at(0) : undefined;
 
   useEffect(() => {
     // Only a build watched on this page load. A restored tag can be months old
@@ -116,10 +147,6 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
   const showLocalBuild =
     canPackage && platformCannotBuild && !noImageMode && deploymentModes.status !== 'loading';
-  const localCommands = localBuildCommands(
-    agentName,
-    deploymentModes.status === 'ready' ? imageModes[0] : 'k8s'
-  );
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
@@ -194,19 +221,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         ) : null}
 
         {showLocalBuild ? (
-          <Stack gap="density-sm">
-            <Text className="text-secondary" kind="body/regular/sm">
-              This platform can&apos;t build images: builds run on the platform host under a
-              subprocess job profile, and this platform doesn&apos;t register one. Build the image
-              on your machine, then deploy it, replacing REGISTRY and IMAGE:
-            </Text>
-            <CodeSnippetRoot>
-              <CodeSnippetActions>
-                <CopyButton text={localCommands} color="neutral" kind="tertiary" size="tiny" />
-              </CodeSnippetActions>
-              <CodeSnippetCode value={localCommands} language="bash" />
-            </CodeSnippetRoot>
-          </Stack>
+          <LocalBuildSteps workspace={workspace} agentName={agentName} mode={knownDeployMode} />
         ) : null}
 
         {submitError ? (
@@ -350,17 +365,19 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {hasImage && image && onImageBuilt ? (
           <Flex gap="density-sm" align="center">
-            <Button
-              kind="primary"
-              size="small"
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                onImageBuilt(image);
-              }}
-            >
-              Deploy
-            </Button>
+            {noImageMode ? null : (
+              <Button
+                kind="primary"
+                size="small"
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onImageBuilt(image);
+                }}
+              >
+                Deploy
+              </Button>
+            )}
             {viewJobButton}
           </Flex>
         ) : null}
