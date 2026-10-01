@@ -244,12 +244,14 @@ When your dataset uses the same set of tools across all examples, include the sh
 ```python
 import os
 from nemo_automodel_plugin.schema import AutomodelJobInput
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+customization = Customization.from_client(client)
 
 # Create an Automodel job (include tools in each JSONL training example)
 spec = AutomodelJobInput(
@@ -261,7 +263,7 @@ spec = AutomodelJobInput(
     optimizer={"learning_rate": 1e-4},
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     name="my-tool-calling-job",
     workspace="default",
     spec=spec,

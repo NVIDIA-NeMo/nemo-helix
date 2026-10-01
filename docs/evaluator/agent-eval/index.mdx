@@ -21,7 +21,7 @@ got there*. Each task carries its own metrics, so a single suite can grade heter
 that do not require running nemo-helix.
 - Use the Evaluator plugin's `uv run nemo evaluator agent-evaluate` job for durable runs with inline
 tasks or stored tasksets. For a `GymAgentTaskRunner` that you have already validated locally,
-`client.evaluator.submit(tasks=TasksetRef(...), target=runner)` provides a high-level submission
+`evaluator.submit(tasks=TasksetRef(...), target=runner)` provides a high-level submission
 path; build other runner targets in an agent-evaluate spec.
 
 </Note>

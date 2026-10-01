@@ -136,7 +136,7 @@ Gym is **not** a dependency of this SDK — it imports Ray at module load, which
 by constraint. Install it into its own environment and put its `bin` on `PATH`.
 
 It can also be submitted as a platform job from the live runner object, via
-`client.evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
+`evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
 
 Platform job specifications use `GymRunnerTarget`. A submission builds one from two places, split by
 what the setting is *about*:
@@ -149,7 +149,7 @@ what the setting is *about*:
   sandboxed host routes rollouts to).
 
 ```python
-client.evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
+evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
 ```
 
 The overloads accept a `GymPlacement` only with a `GymAgentTaskRunner`, so a placement cannot be
