@@ -334,6 +334,16 @@ export const handlers = [
   }),
   http.options(`${PLATFORM_BASE_URL}/v1/jobs`, () => new HttpResponse(null, { status: 200 })),
 
+  http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`, () =>
+    HttpResponse.json({
+      data: [
+        { mode: 'subprocess', enabled: true, requires_image: false },
+        { mode: 'docker', enabled: true, requires_image: true },
+        { mode: 'k8s', enabled: false, requires_image: true },
+      ],
+    })
+  ),
+
   // Jobs V2 (Platform)
   http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`, () =>
     HttpResponse.json([

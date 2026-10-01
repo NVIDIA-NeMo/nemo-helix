@@ -20,6 +20,7 @@ import {
   TextInput,
 } from '@nvidia/foundations-react-core';
 import { useCanBuildAgentImages } from '@studio/api/agents/useCanBuildAgentImages';
+import { useImageDeploymentModes } from '@studio/api/agents/useImageDeploymentModes';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { JOBS_ENABLED } from '@studio/constants/environment';
@@ -28,10 +29,10 @@ import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
-const localBuildCommands = (agentName: string) =>
+const localBuildCommands = (agentName: string, mode: string) =>
   [
     'nemo agents package --agent agent.yaml --publish --registry <registry>',
-    `nemo agents deploy --agent ${agentName} --mode k8s --image <pushed image>`,
+    `nemo agents deploy --agent ${agentName} --mode ${mode} --image <pushed image>`,
   ].join('\n');
 
 interface PackageAgentControlProps {
@@ -89,6 +90,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     published,
   } = usePackageAgent({ workspace, agentName });
   const platformCannotBuild = useCanBuildAgentImages() === false;
+  const imageModes = useImageDeploymentModes(workspace);
 
   useEffect(() => {
     // Only a build watched on this page load. A restored tag can be months old
@@ -98,6 +100,10 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
       onImageAvailable?.(image);
     }
   }, [isComplete, image, isRestored, onImageAvailable]);
+
+  if (imageModes?.length === 0) return null;
+
+  const fallbackCommands = localBuildCommands(agentName, imageModes?.[0] ?? 'k8s');
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
@@ -170,14 +176,9 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
             </Text>
             <CodeSnippetRoot>
               <CodeSnippetActions>
-                <CopyButton
-                  text={localBuildCommands(agentName)}
-                  color="neutral"
-                  kind="tertiary"
-                  size="tiny"
-                />
+                <CopyButton text={fallbackCommands} color="neutral" kind="tertiary" size="tiny" />
               </CodeSnippetActions>
-              <CodeSnippetCode value={localBuildCommands(agentName)} />
+              <CodeSnippetCode value={fallbackCommands} language="bash" />
             </CodeSnippetRoot>
           </Stack>
         ) : null}

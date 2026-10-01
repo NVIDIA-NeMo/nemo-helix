@@ -14,6 +14,20 @@ const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
 const profilesUrl = `${PLATFORM_BASE_URL}/apis/jobs/v2/execution-profiles`;
+const modesUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
+
+const mockEnabledModes = (...enabled: string[]) =>
+  server.use(
+    http.get(modesUrl, () =>
+      HttpResponse.json({
+        data: ['subprocess', 'docker', 'k8s'].map((mode) => ({
+          mode,
+          enabled: mode === 'subprocess' || enabled.includes(mode),
+          requires_image: mode !== 'subprocess',
+        })),
+      })
+    )
+  );
 
 const renderControl = (props?: {
   canPackage?: boolean;
@@ -338,15 +352,25 @@ describe('PackageAgentControl', () => {
     });
 
     it('disables the build and shows the local build commands', async () => {
+      mockEnabledModes('k8s');
       await openControl();
       const dialog = screen.getByRole('dialog');
 
       expect(await within(dialog).findByText(/can't build images/)).toBeInTheDocument();
       expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
-      expect(
-        within(dialog).getByText(/nemo agents deploy --agent my-agent --mode k8s/)
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(dialog).toHaveTextContent(/nemo agents deploy --agent my-agent --mode k8s/)
+      );
       expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
+    });
+
+    it('suggests the container mode the platform can deploy', async () => {
+      mockEnabledModes('docker');
+      await openControl();
+
+      await waitFor(() =>
+        expect(screen.getByRole('dialog')).toHaveTextContent(/--mode docker --image/)
+      );
     });
 
     it('keeps the Platform-managed message for agents that cannot be packaged', async () => {
@@ -357,6 +381,15 @@ describe('PackageAgentControl', () => {
       ).toBeInTheDocument();
       expect(screen.queryByText(/can't build images/)).not.toBeInTheDocument();
     });
+  });
+
+  it('hides the control when no container deployment mode is enabled', async () => {
+    mockEnabledModes();
+    renderControl();
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Build image' })).not.toBeInTheDocument()
+    );
   });
 
   it('allows the build when the execution profiles cannot be read', async () => {
