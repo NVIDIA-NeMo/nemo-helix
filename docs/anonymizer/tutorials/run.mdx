@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="anonymizer-tutorials-run"></a>
 
-This tutorial walks through the `anonymizer.run` job: defining a run spec, executing it locally or on the NeMo Helix Jobs worker, and loading the parquet artifacts it produces.
+This tutorial walks through the `anonymizer.run` job: defining a run spec, executing it locally or on NeMo Helix Jobs worker, and loading the parquet artifacts it produces.
 
 For detection, rewrite, and replacement strategy details, see the [open-source library documentation](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs).
 
@@ -90,7 +90,7 @@ spec_path.write_text(yaml.safe_dump(request.model_dump(mode="json", exclude_none
 
 ## Step 3: Run the Job
 
-Choose one execution path. Option A runs in the local CLI process. Option B submits the same request to the NeMo Helix Jobs worker.
+Choose one execution path. Option A runs in the local CLI process. Option B submits the same request to NeMo Helix Jobs worker.
 
 ### Option A: Run Locally
 
@@ -116,7 +116,7 @@ Use that path in the next step.
 
 ### Option B: Submit to the Jobs Worker
 
-To execute the same spec on the NeMo Helix Jobs worker instead of in the CLI process, use `run submit`:
+To execute the same spec on NeMo Helix Jobs worker instead of in the CLI process, use `run submit`:
 
 ```bash
 nemo anonymizer run submit \

@@ -6,7 +6,7 @@ title: "Get started with an example agent"
 description: "Run the optimization loop from end to end on τ-Bench"
 ---
 
-This provides a guide for how you can quickly load agent traces into your NeMo Helix, run the analyst agent to discover issues with that agent, and launch an experimentalist to fix those issues. This is meant as an example to show how the whole platform works. You can also jump straight to setting up your agent with NeMo Helix.
+This provides a guide for how you can quickly load agent traces into your NeMo Helix deployment deployment, run the analyst agent to discover issues with that agent, and launch an experimentalist to fix those issues. This is meant as an example to show how the whole platform works. You can also jump straight to setting up your agent with NeMo Helix.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ Experimentalist; their provider credentials stay in Platform Secrets.
 
 To use an external ClickHouse instead, set `NMP_INTAKE_CLICKHOUSE_URL` before running setup.
 
-You should now be able to navigate to `http://localhost:8080` and see the NeMo Helix web UI.
+You should now be able to navigate to `http://localhost:8080` and see NeMo Helix web UI.
 
 ## 3. Prepare τ-Bench and run the airline agent
 
@@ -211,7 +211,7 @@ review the code change that was evaluated.
 
 Use this alternative if you do not want to create or push to a repository. It
 changes only a private sandbox clone and never creates a PR/MR. The sandbox
-uses `host.docker.internal` to reach the NeMo Helix services running on the
+uses `host.docker.internal` to reach NeMo Helix services running on the
 host:
 
 ```bash

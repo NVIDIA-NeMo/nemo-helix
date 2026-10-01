@@ -10,7 +10,7 @@ GRPO (Group Relative Policy Optimization) trains a model against a **reward envi
 
 That last part is why GRPO behaves differently from every other customization method here: the learning signal is the *spread* of rewards inside a group. If every response to a prompt earns the same score, that prompt contributes nothing.
 
-GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
+GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix deployment configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
 
 ## What you need
 

@@ -18,12 +18,12 @@ Customization jobs are submitted to one of two backends. Choose the backend that
 
 Before you can create a customization job, make sure that you have:
 
-- Obtained the base URL of your NeMo Helix.
+- Obtained the base URL of your NeMo Helix deployment deployment.
 - Created a [FileSet and Model Entity](/documentation/customizer-reference/manage-model-entities/overview) for your base model.
 - [Uploaded a dataset](/documentation/get-started/core-concepts/manage-files) as a FileSet.
 - Determined the [training configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration) you want to use for the customization job.
 - Verified that the platform has sufficient storage for the job. Budget against the downloaded base checkpoint size: Full SFT jobs require approximately 3× in free disk space, and LoRA jobs require approximately 1.5×. See [ft-tut-understand-models](/documentation/customizer-reference/tutorials/understanding-models-and-training) for details. Include any retained deployment copies separately.
-- Set the `NMP_BASE_URL` environment variable to your NeMo Helix endpoint.
+- Set the `NMP_BASE_URL` environment variable to your NeMo Helix deployment deployment endpoint.
 
 ```bash
 export NMP_BASE_URL="https://your-nemo-platform-url"
