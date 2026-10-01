@@ -222,3 +222,19 @@ async def test_async_list_revisions_parses_the_page() -> None:
     page = await resource.list_revisions("ts-1")
 
     assert [r.revision for r in page.data] == [1]
+
+
+def test_sync_list_sends_metadata_as_a_json_filter() -> None:
+    resource, recorder = _sync_resource(_page([]))
+
+    resource.list(metadata={"owner": "alice"})
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {"metadata.owner": "alice"}
+
+
+async def test_async_list_sends_metadata_as_a_json_filter() -> None:
+    resource, recorder = _async_resource(_page([]))
+
+    await resource.list(metadata={"level": 2})
+
+    assert json.loads(recorder.requests[0].url.params["filter"]) == {"metadata.level": 2}

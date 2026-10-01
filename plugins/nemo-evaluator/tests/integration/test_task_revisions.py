@@ -29,6 +29,7 @@ import pytest
 from nemo_evaluator.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
+    MetadataItem,
     TaskInput,
     TaskInputs,
     TaskRef,
@@ -358,3 +359,38 @@ def test_harbor_config_changes_do_not_cut_a_revision(subprocess_platform: str) -
         assert moved.revision == 2, "a tree change must publish"
     finally:
         client.tasks.delete(name, workspace=WORKSPACE)
+
+
+@pytest.mark.timeout(300)
+def test_list_filters_tasks_and_tasksets_by_kind_and_metadata(subprocess_platform: str) -> None:
+    """Metadata and kind filters resolve against the real entity store, not just the in-memory fake."""
+    client = _client(subprocess_platform)
+    owner = _unique("owner")
+    mine, other, taskset = _unique("task"), _unique("task"), _unique("taskset")
+    try:
+        client.tasks.create(
+            mine,
+            task=_task_input().model_copy(update={"metadata": [MetadataItem(key="owner", value=owner)]}),
+            workspace=WORKSPACE,
+        )
+        client.tasks.create(
+            other,
+            task=_task_input().model_copy(update={"metadata": [MetadataItem(key="suite", value=owner)]}),
+            workspace=WORKSPACE,
+        )
+        client.tasksets.create(
+            taskset,
+            taskset=TasksetInput(tasks=[TaskRef(mine)], metadata=[MetadataItem(key="owner", value=owner)]),
+            workspace=WORKSPACE,
+        )
+
+        assert [t.name for t in client.tasks.list(workspace=WORKSPACE, metadata={"owner": owner}).data] == [mine]
+        assert [
+            t.name for t in client.tasks.list(workspace=WORKSPACE, kind="evaluator", metadata={"owner": owner}).data
+        ] == [mine]
+        assert client.tasks.list(workspace=WORKSPACE, kind="harbor", metadata={"owner": owner}).data == []
+        assert [t.name for t in client.tasksets.list(workspace=WORKSPACE, metadata={"owner": owner}).data] == [taskset]
+    finally:
+        client.tasksets.delete(taskset, workspace=WORKSPACE)
+        client.tasks.delete(mine, workspace=WORKSPACE)
+        client.tasks.delete(other, workspace=WORKSPACE)

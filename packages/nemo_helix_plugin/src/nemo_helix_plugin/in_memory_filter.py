@@ -12,7 +12,7 @@ import operator
 from datetime import datetime
 from typing import Any, Callable, Dict, List
 
-from nemo_helix_plugin.filter_ops import FilterOperator, FilterRepository
+from nemo_helix_plugin.filter_ops import ElemMatchScalar, FilterOperator, FilterRepository
 
 # Sentinel distinguishing "field/key is absent" from an explicit None value.
 _MISSING = object()
@@ -127,6 +127,15 @@ class InMemoryFilterRepository(FilterRepository):
         if field_value is _MISSING or not isinstance(field_value, (list, tuple)):
             return False
         return value in field_value
+
+    def elem_match(self, field: str, criteria: Dict[str, ElemMatchScalar]) -> bool:
+        field_value = self._value(field)
+        if not isinstance(field_value, (list, tuple)):
+            return False
+        return any(
+            isinstance(element, dict) and all(element.get(key) == value for key, value in criteria.items())
+            for element in field_value
+        )
 
     def and_op(self, operations: List[Any]) -> bool:
         return all(operations)

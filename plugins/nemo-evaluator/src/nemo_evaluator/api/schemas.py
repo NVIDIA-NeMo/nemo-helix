@@ -70,8 +70,9 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 )
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
+from nemo_helix_plugin.filter_ops import ElemMatchScalar, validate_elem_match_criteria
 from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
@@ -109,6 +110,72 @@ class DataFilter(Filter):
             return op
 
         return _walk(operation)
+
+
+_METADATA_FIELD = "metadata"
+_METADATA_PREFIX = f"{_METADATA_FIELD}."
+
+
+def _metadata_pair_match(key: str, value: object) -> ComparisonOperation:
+    if not key:
+        raise ValueError("metadata filters need a key, e.g. 'metadata.<key>'")
+    criteria = validate_elem_match_criteria({"key": key, "value": value})
+    return ComparisonOperation(operator=FilterOperator.ELEM_MATCH, field=f"data.{_METADATA_FIELD}", value=criteria)
+
+
+def _operator_operands(value: object) -> list[tuple[str, object]]:
+    if isinstance(value, dict) and value and all(str(key).startswith("$") for key in value):
+        return list(value.items())
+    return [(FilterOperator.EQ.value, value)]
+
+
+def _translate_metadata_comparison(op: ComparisonOperation) -> FilterOperation:
+    if op.field == _METADATA_FIELD:
+        if op.operator != FilterOperator.EQ or not isinstance(op.value, dict) or not op.value:
+            raise ValueError("'metadata' filters take key/value pairs, e.g. 'metadata.<key>' or 'metadata[<key>]'")
+        pairs: list[FilterOperation] = [
+            _translate_metadata_comparison(
+                ComparisonOperation(operator=FilterOperator(operator), field=f"{_METADATA_PREFIX}{key}", value=operand)
+            )
+            for key, value in op.value.items()
+            for operator, operand in _operator_operands(value)
+        ]
+        return pairs[0] if len(pairs) == 1 else LogicalOperation(operator=FilterOperator.AND, operations=pairs)
+    key = op.field.removeprefix(_METADATA_PREFIX)
+    if op.operator == FilterOperator.EQ:
+        return _metadata_pair_match(key, op.value)
+    if op.operator == FilterOperator.IN and isinstance(op.value, list) and op.value:
+        return LogicalOperation(
+            operator=FilterOperator.OR, operations=[_metadata_pair_match(key, value) for value in op.value]
+        )
+    raise ValueError(f"'{op.field}' supports only $eq and a non-empty $in")
+
+
+class MetadataFilter(DataFilter):
+    """A ``DataFilter`` that also matches the record's ``metadata`` key/value annotations."""
+
+    metadata: dict[str, ElemMatchScalar] | None = Field(
+        None,
+        description="Filter by metadata annotations: `metadata.<key>` (or `metadata[<key>]`) matches records "
+        "whose metadata has that key with that value. Supports `$eq` and `$in`.",
+    )
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        return {_METADATA_FIELD: f"data.{_METADATA_FIELD}"}
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        def _walk(op: FilterOperation) -> FilterOperation:
+            if isinstance(op, ComparisonOperation) and (
+                op.field == _METADATA_FIELD or op.field.startswith(_METADATA_PREFIX)
+            ):
+                return _translate_metadata_comparison(op)
+            if isinstance(op, LogicalOperation):
+                return op.model_copy(update={"operations": [_walk(child) for child in op.operations]})
+            return op
+
+        return super().translate_operation(_walk(operation))
 
 
 class Metric(BaseModel):
@@ -280,13 +347,18 @@ class TaskSort(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
-class TaskFilter(Filter):
-    """Filter for task queries (top-level entity columns only; custom-field filtering is a follow-up)."""
+class TaskFilter(MetadataFilter):
+    """Filter for task queries."""
 
     workspace: str | None = Field(None, description="Filter by workspace.")
     name: str | None = Field(None, description="Filter by name.")
+    kind: str | None = Field(None, description="Filter by task kind (the runner that executes it), e.g. `harbor`.")
     created_at: DatetimeFilter | None = Field(None, description="Filter by creation date.")
     updated_at: DatetimeFilter | None = Field(None, description="Filter by update date.")
+
+    @classmethod
+    def _get_entity_field_map(cls) -> dict[str, str]:
+        return {**super()._get_entity_field_map(), "kind": "data.spec.kind"}
 
 
 class Taskset(BaseModel):
@@ -390,8 +462,8 @@ class TasksetSort(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
-class TasksetFilter(Filter):
-    """Filter for taskset queries (top-level entity columns only; custom-field filtering is a follow-up)."""
+class TasksetFilter(MetadataFilter):
+    """Filter for taskset queries."""
 
     workspace: str | None = Field(None, description="Filter by workspace.")
     name: str | None = Field(None, description="Filter by name.")

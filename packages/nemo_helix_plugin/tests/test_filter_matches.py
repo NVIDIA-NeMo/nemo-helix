@@ -318,3 +318,28 @@ class TestNativeSemanticsEdgeCases:
         )
         with pytest.raises(ValueError, match="Unknown logical operator"):
             evaluate(op, Entity(name="x"))
+
+
+class TestElemMatch:
+    META = [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}]
+
+    def test_matches_when_one_element_satisfies_every_criterion(self):
+        op = cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"})
+        assert evaluate(op, Entity(data={"meta": self.META})) is True
+
+    def test_criteria_split_across_elements_do_not_match(self):
+        op = cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team", "value": "alice"})
+        assert evaluate(op, Entity(data={"meta": self.META})) is False
+
+    @pytest.mark.parametrize("meta", [None, {"key": "owner", "value": "alice"}, ["owner", "alice"]])
+    def test_non_array_or_non_object_elements_do_not_match(self, meta):
+        op = cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"})
+        assert evaluate(op, Entity(data={"meta": meta})) is False
+
+    def test_absent_field_does_not_match(self):
+        assert evaluate(cmp(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}), Entity()) is False
+
+    @pytest.mark.parametrize("criteria", [{}, [], "owner", {"key": {"nested": 1}}, {"key": ["a"]}, {"": "x"}])
+    def test_rejects_criteria_that_are_not_a_non_empty_scalar_map(self, criteria):
+        with pytest.raises(ValueError, match=r"\$elemMatch"):
+            evaluate(cmp(FilterOperator.ELEM_MATCH, "data.meta", criteria), Entity(data={"meta": self.META}))

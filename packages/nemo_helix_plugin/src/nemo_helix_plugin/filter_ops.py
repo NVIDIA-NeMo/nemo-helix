@@ -13,6 +13,21 @@ from typing import Any, Dict, List
 
 from pydantic import BaseModel
 
+#: A value an ``$elemMatch`` criterion can compare against.
+ElemMatchScalar = str | int | float | bool | None
+
+
+def validate_elem_match_criteria(value: Any) -> Dict[str, ElemMatchScalar]:
+    """Return ``value`` as ``$elemMatch`` criteria, or raise ``ValueError`` if it isn't a non-empty scalar map."""
+    if not isinstance(value, dict) or not value:
+        raise ValueError("$elemMatch requires a non-empty object of element field -> value")
+    for key, criterion in value.items():
+        if not isinstance(key, str) or not key:
+            raise ValueError("$elemMatch element field names must be non-empty strings")
+        if criterion is not None and not isinstance(criterion, (str, int, float, bool)):
+            raise ValueError(f"$elemMatch value for '{key}' must be a string, number, boolean, or null")
+    return value
+
 
 class FilterOperator(str, Enum):
     """Filter operator."""
@@ -27,6 +42,7 @@ class FilterOperator(str, Enum):
     IN = "$in"
     NIN = "$nin"
     CONTAINS = "$contains"
+    ELEM_MATCH = "$elemMatch"
 
     # Logical operators
     OR = "$or"
@@ -79,6 +95,13 @@ class FilterRepository(ABC):
         array-valued fields may leave it unimplemented.
         """
         raise NotImplementedError("$contains not supported by this repository")
+
+    def elem_match(self, field: str, criteria: Dict[str, ElemMatchScalar]) -> Any:
+        """Match rows where some object in the array at ``field`` has every ``criteria`` key ``$eq`` its value.
+
+        Optional — repositories that don't support arrays of objects may leave it unimplemented.
+        """
+        raise NotImplementedError("$elemMatch not supported by this repository")
 
     @abstractmethod
     def and_op(self, operations: List[Any]) -> Any:
@@ -144,6 +167,8 @@ class ComparisonOperation(FilterOperation):
             return repository.nin(self.field, self.value)
         elif self.operator == FilterOperator.CONTAINS:
             return repository.contains(self.field, self.value)
+        elif self.operator == FilterOperator.ELEM_MATCH:
+            return repository.elem_match(self.field, validate_elem_match_criteria(self.value))
         elif self.operator == FilterOperator.EXISTS:
             raise NotImplementedError(
                 "$exists requires a relationship-aware repository (use the entities service parser)"

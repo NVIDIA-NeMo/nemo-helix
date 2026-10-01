@@ -43,11 +43,54 @@ class FakeEntity(Base):
 # plain-column NULL (name on row 5) and an explicit/absent ``k`` for $eq-None
 # coverage are the only nullable bits, and $eq agrees with SQL on both.
 SEED = [
-    dict(id=1, name="llama", data={"score": 5, "tier": "free", "flag": True, "k": None, "tags": ["red", "blue"]}),
-    dict(id=2, name="Llama-2", data={"score": 9, "tier": "pro", "flag": False, "tags": ["red"]}),
+    dict(
+        id=1,
+        name="llama",
+        data={
+            "score": 5,
+            "tier": "free",
+            "flag": True,
+            "k": None,
+            "tags": ["red", "blue"],
+            "meta": [{"key": "owner", "value": "alice"}, {"key": "team", "value": "eval"}],
+        },
+    ),
+    dict(
+        id=2,
+        name="Llama-2",
+        data={
+            "score": 9,
+            "tier": "pro",
+            "flag": False,
+            "tags": ["red"],
+            "meta": [{"key": "owner", "value": "bob"}, {"key": "level", "value": 3}],
+        },
+    ),
     # "redish" is a deliberate prefix near-miss for "red" — quote-delimited matching must exclude it.
-    dict(id=3, name="zephyr", data={"score": 10, "tier": "pro", "flag": True, "k": "v", "tags": ["green", "redish"]}),
-    dict(id=4, name="mistral", data={"score": 100, "tier": "enterprise", "flag": False, "tags": []}),
+    dict(
+        id=3,
+        name="zephyr",
+        data={
+            "score": 10,
+            "tier": "pro",
+            "flag": True,
+            "k": "v",
+            "tags": ["green", "redish"],
+            "meta": [{"key": "owner", "value": None}, {"key": "team", "value": "alice"}],
+        },
+    ),
+    # "meta" as a bare object, not an array: its members must not be treated as elements.
+    dict(
+        id=4,
+        name="mistral",
+        data={
+            "score": 100,
+            "tier": "enterprise",
+            "flag": False,
+            "tags": [],
+            "meta": {"key": "owner", "value": "alice"},
+        },
+    ),
     dict(id=5, name=None, data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"]}),
 ]
 
@@ -105,6 +148,14 @@ CASES = [
         "and_contains_tags",
         AND(C(FilterOperator.CONTAINS, "data.tags", "blue"), C(FilterOperator.EQ, "data.tier", "free")),
     ),
+    ("elem_match_pair", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"})),
+    ("elem_match_single_field", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team"})),
+    ("elem_match_int_value", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "level", "value": 3})),
+    ("elem_match_null_value", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": None})),
+    # Row 1 has owner=alice and team=eval on different elements; neither element satisfies both.
+    ("elem_match_across_elements", C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "team", "value": "alice"})),
+    ("elem_match_absent_field", C(FilterOperator.ELEM_MATCH, "data.nope", {"key": "owner"})),
+    ("not_elem_match", NOT(C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner", "value": "alice"}))),
     ("gt_data_score", C(FilterOperator.GT, "data.score", 9)),
     ("gte_data_score", C(FilterOperator.GTE, "data.score", 10)),
     ("lt_data_score", C(FilterOperator.LT, "data.score", 10)),
@@ -126,10 +177,33 @@ CASES = [
 
 @pytest.mark.parametrize("label,op", CASES, ids=[c[0] for c in CASES])
 def test_matches_matches_sql(db, label, op):
-    condition = op.apply(SQLAlchemyFilterRepository(FakeEntity))
+    condition = op.apply(SQLAlchemyFilterRepository(FakeEntity, dialect_name="sqlite"))
     sql_ids = {r.id for r in db.execute(select(FakeEntity).where(condition)).scalars().all()}
 
     all_rows = db.execute(select(FakeEntity)).scalars().all()
     py_ids = {r.id for r in all_rows if op.apply(InMemoryFilterRepository(r))}
 
     assert py_ids == sql_ids, f"{label}: in-memory={sorted(py_ids)} != SQL={sorted(sql_ids)}"
+
+
+@pytest.mark.parametrize(
+    "criteria,expected_ids",
+    [
+        ({"key": "owner", "value": "alice"}, {1}),
+        ({"key": "team"}, {1, 3}),
+        ({"key": "level", "value": 3}, {2}),
+        ({"key": "owner", "value": None}, {3}),
+        ({"key": "team", "value": "alice"}, {3}),
+    ],
+)
+def test_elem_match_requires_one_element_to_satisfy_every_criterion(db, criteria, expected_ids):
+    """Each criterion must hold on the same element, and a non-array field (row 4) never matches."""
+    condition = C(FilterOperator.ELEM_MATCH, "data.meta", criteria).apply(
+        SQLAlchemyFilterRepository(FakeEntity, dialect_name="sqlite")
+    )
+    assert {r.id for r in db.execute(select(FakeEntity).where(condition)).scalars().all()} == expected_ids
+
+
+def test_elem_match_rejects_unknown_dialect():
+    with pytest.raises(ValueError, match="dialect"):
+        C(FilterOperator.ELEM_MATCH, "data.meta", {"key": "owner"}).apply(SQLAlchemyFilterRepository(FakeEntity))

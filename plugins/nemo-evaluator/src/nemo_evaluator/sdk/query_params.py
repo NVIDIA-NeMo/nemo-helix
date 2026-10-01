@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import TypeAlias
+
+from nemo_helix_plugin.filter_ops import ElemMatchScalar
 
 QueryParams: TypeAlias = dict[str, str | int | bool | None]
 
@@ -16,6 +20,16 @@ def list_params(page: int, page_size: int, sort: str | None) -> QueryParams:
     if sort is not None:
         params["sort"] = sort
     return params
+
+
+def list_filter_params(
+    *, kind: str | None = None, metadata: Mapping[str, ElemMatchScalar] | None = None
+) -> QueryParams:
+    """Return the ``filter`` query param for a task/taskset listing, or nothing when unfiltered."""
+    conditions: dict[str, ElemMatchScalar] = {f"metadata.{key}": value for key, value in (metadata or {}).items()}
+    if kind is not None:
+        conditions["kind"] = kind
+    return {"filter": json.dumps(conditions)} if conditions else {}
 
 
 def project_params(project: str | None) -> QueryParams | None:

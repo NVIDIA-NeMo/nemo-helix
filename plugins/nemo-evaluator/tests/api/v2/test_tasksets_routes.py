@@ -253,3 +253,32 @@ def test_cannot_move_latest_by_hand(client: TestClient) -> None:
 
 def test_list_revisions_missing_taskset_returns_404(client: TestClient) -> None:
     assert client.get(f"{_BASE}/nope/revisions").status_code == 404
+
+
+def _with_metadata(body: dict, **metadata: object) -> dict:
+    return {**body, "metadata": [{"key": key, "value": value} for key, value in metadata.items()]}
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[metadata.owner]": "alice"}, {"alice-smoke"}),
+        ({"filter[metadata][suite]": "smoke"}, {"alice-smoke", "bob-smoke"}),
+        ({"filter[metadata.owner][$in]": "alice,bob"}, {"alice-smoke", "bob-smoke"}),
+        ({"filter[metadata.suite]": "alice"}, set()),
+    ],
+)
+def test_list_filters_by_metadata(client: TestClient, params: dict[str, str], expected: set[str]) -> None:
+    client.post(f"{_BASE}/alice-smoke", json=_with_metadata(_body(), owner="alice", suite="smoke"))
+    client.post(f"{_BASE}/bob-smoke", json=_with_metadata(_body(), owner="bob", suite="smoke"))
+    client.post(f"{_BASE}/untagged", json=_body())
+
+    response = client.get(_BASE, params=params)
+
+    assert response.status_code == 200, response.text
+    assert {taskset["name"] for taskset in response.json()["data"]} == expected
+
+
+def test_list_rejects_a_kind_filter(client: TestClient) -> None:
+    """Tasksets have no kind; only tasks do."""
+    assert client.get(_BASE, params={"filter[kind]": "harbor"}).status_code == 400
