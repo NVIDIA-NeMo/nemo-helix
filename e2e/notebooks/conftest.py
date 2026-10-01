@@ -40,7 +40,6 @@ from collections.abc import Generator, Iterator
 from pathlib import Path
 
 import pytest
-from nhx.testing.e2e import E2EBackend
 from nhx.testing.notebooks import cleanup_temp_venv_and_kernel, create_temp_venv_with_kernel
 
 logger = logging.getLogger(__name__)
@@ -142,7 +141,7 @@ def guardrails_tutorial_assets() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="session")
-def nhx_base_url(backend: E2EBackend | None, cluster_url: str | None) -> Iterator[str]:
+def nhx_base_url(request: pytest.FixtureRequest, cluster_url: str | None) -> Iterator[str]:
     """Derive the NHX base URL and set it as an environment variable.
 
     Notebooks read NHX_BASE_URL from the environment at runtime,
@@ -150,10 +149,9 @@ def nhx_base_url(backend: E2EBackend | None, cluster_url: str | None) -> Iterato
     """
     if cluster_url:
         url = cluster_url
-    elif backend is not None:
-        url = getattr(backend, "base_url")
     else:
-        raise RuntimeError("No backend available and no --cluster-url provided")
+        sdk = request.getfixturevalue("sdk")
+        url = str(sdk.base_url)
 
     old = os.environ.get("NHX_BASE_URL")
     os.environ["NHX_BASE_URL"] = url
