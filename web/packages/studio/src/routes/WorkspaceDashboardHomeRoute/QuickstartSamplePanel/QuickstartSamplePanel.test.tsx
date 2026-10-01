@@ -277,16 +277,51 @@ describe('QuickstartSamplePanel', () => {
       renderPanel({ defaultView: 'cli' });
       await waitForAllSnippets();
 
-      expect(stepAt(2)).toHaveTextContent('nemo evaluator evaluate --spec-file');
+      expect(within(stepAt(2)).getByTestId('nv-code-snippet-code').textContent).toBe(
+        ['nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace '${WS}'`].join(
+          ' \\\n  '
+        )
+      );
       expect(stepAt(2)).not.toHaveTextContent('evaluate submit');
+    });
+
+    it('optimizes with the same run-strategy study Studio submits', async () => {
+      renderPanel({ defaultView: 'cli' });
+      await waitForAllSnippets();
+
+      // `optimize` alone is a command group, and `optimize-skills` jobs never reach the
+      // Optimizations tab that "View results" opens. Exact text, so the one-flag-per-line
+      // `\` continuations are checked too — a stray character after one breaks the paste.
+      expect(within(stepAt(3)).getByTestId('nv-code-snippet-code').textContent).toBe(
+        [
+          [
+            'nemo agents optimize prepare-fileset',
+            "--source '<bundle-dir>'",
+            "--optimize-config 'optimize.yaml'",
+            `--fileset '${AGENT_NAME}-optimize'`,
+            `--agent '${AGENT_NAME}'`,
+            `--workspace '${WS}'`,
+          ].join(' \\\n  '),
+          [
+            'nemo agents optimize run-strategy',
+            '--strategy legacy',
+            `--agent '${AGENT_NAME}'`,
+            `--optimize-config-fileset '${WS}/${AGENT_NAME}-optimize'`,
+            "--optimize-config 'optimize.yaml'",
+            `--workspace '${WS}'`,
+          ].join(' \\\n  '),
+        ].join('\n\n')
+      );
     });
 
     it('shows both commands for a step that needs two', async () => {
       renderPanel({ defaultView: 'cli' });
       await waitForAllSnippets();
 
-      expect(stepAt(1)).toHaveTextContent('nemo intake traces list');
-      expect(stepAt(1)).toHaveTextContent('nemo intake traces get');
+      // Separated by a blank line, so the two read as separate commands.
+      expect(within(stepAt(1)).getByTestId('nv-code-snippet-code').textContent).toBe(
+        `nemo intake traces list --workspace '${WS}'\n\nnemo intake traces get '<TRACE_ID>' --workspace '${WS}'`
+      );
     });
 
     it('prefixes every command with a shell prompt', async () => {

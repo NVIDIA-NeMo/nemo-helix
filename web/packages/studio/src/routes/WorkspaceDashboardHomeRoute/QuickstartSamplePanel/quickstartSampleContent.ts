@@ -56,6 +56,10 @@ export interface QuickstartSampleStep {
  */
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+/** One `--key value` per line, joined with `\` continuations so long commands stay readable. */
+const continued = (command: string, ...args: string[]): string =>
+  [command, ...args].join(' \\\n  ');
+
 /**
  * A step whose destination is not registered is dropped outright rather than rendered as a
  * dead link. Both views drop together: the two carry the same steps in the same order, and a
@@ -92,6 +96,9 @@ export const buildQuickstartSampleSteps = ({
   const deployment = agent.deploymentName
     ? shellQuote(agent.deploymentName)
     : "'<agent-deployment>'";
+  const agentName = shellQuote(agent.name);
+  const optimizeFilesetName = `${agent.name}-optimize`;
+  const optimizeFileset = shellQuote(optimizeFilesetName);
 
   return [
     {
@@ -113,7 +120,12 @@ export const buildQuickstartSampleSteps = ({
         commands: [
           // Single quotes, not double: interactive zsh (the macOS default) and bash 3.2 read
           // `!"` as history expansion, so a double-quoted "Hello agent!" never runs on paste.
-          `nemo agents chat --agent-deployment ${deployment} --input 'Hello agent!' --workspace ${ws}`,
+          continued(
+            'nemo agents chat',
+            `--agent-deployment ${deployment}`,
+            "--input 'Hello agent!'",
+            `--workspace ${ws}`
+          ),
         ],
       },
     },
@@ -157,7 +169,9 @@ export const buildQuickstartSampleSteps = ({
         description: 'Run your own evaluation or view results from a sample evaluation run.',
         // There is no `submit` subcommand; nemo-evaluator has a regression test
         // asserting that form never ships again. Matches EntityEmptyState/registry.ts.
-        commands: [`nemo evaluator evaluate --spec-file '<spec>.json' --workspace ${ws}`],
+        commands: [
+          continued('nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
+        ],
       },
     },
     ...(agentOptimizationsEnabled
@@ -179,11 +193,26 @@ export const buildQuickstartSampleSteps = ({
             cli: {
               title: 'Optimize',
               description: 'Run your own optimization or view the sample study.',
-              // Drives a coding-agent loop on the user's checkout, so `--agent` and
-              // `--evals` are required local paths — but the run is still a platform
-              // submission, so it is scoped by `--workspace` like the rest.
+              // `run-strategy` with `legacy` is what Studio's Optimize submits, so a CLI study
+              // lands on the same Optimizations tab. The sample ships no optimize bundle, so
+              // staging one stays a placeholder; `run-strategy` reads it from the fileset.
               commands: [
-                `nemo agents optimize-skills --agent '<agent-dir>' --evals '<evals-dir>' --workspace ${ws}`,
+                continued(
+                  'nemo agents optimize prepare-fileset',
+                  "--source '<bundle-dir>'",
+                  "--optimize-config 'optimize.yaml'",
+                  `--fileset ${optimizeFileset}`,
+                  `--agent ${agentName}`,
+                  `--workspace ${ws}`
+                ),
+                continued(
+                  'nemo agents optimize run-strategy',
+                  '--strategy legacy',
+                  `--agent ${agentName}`,
+                  `--optimize-config-fileset ${shellQuote(`${workspace}/${optimizeFilesetName}`)}`,
+                  "--optimize-config 'optimize.yaml'",
+                  `--workspace ${ws}`
+                ),
               ],
             },
           },

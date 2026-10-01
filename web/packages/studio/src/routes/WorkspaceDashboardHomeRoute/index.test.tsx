@@ -207,8 +207,13 @@ describe('WorkspaceDashboardHomeRoute', () => {
 
       // Code snippets load asynchronously; the first one is step 1's chat command.
       const [chatCommand] = await screen.findAllByTestId('nv-code-snippet-code');
-      expect(chatCommand).toHaveTextContent(
-        `--agent-deployment '${SAMPLE_AGENT_NAME}-9f2a1c00' --input 'Hello agent!' --workspace '${SAMPLE_WORKSPACE}'`
+      expect(chatCommand.textContent).toBe(
+        [
+          'nemo agents chat',
+          `--agent-deployment '${SAMPLE_AGENT_NAME}-9f2a1c00'`,
+          "--input 'Hello agent!'",
+          `--workspace '${SAMPLE_WORKSPACE}'`,
+        ].join(' \\\n  ')
       );
     });
 
