@@ -1289,6 +1289,59 @@ class TestGenerateStructuredOutput:
         assert request["extra_body"]["nvext"]["max_thinking_tokens"] == 256
         assert "guided_json" in request["extra_body"]["nvext"]
 
+    def test_render_request_offline_default_serializes_item_as_json_content(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            job_type=SupportedJobTypes.OFFLINE,
+        )
+        metric.apply_evaluation_job_params(RunConfig())
+        item = {"question": "Capital of France?", "output": "Paris"}
+
+        request = metric._render_request(item, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == item
+
+    def test_render_request_keeps_content_parts_lists(self):
+        parts = [{"type": "text", "text": "Rate this answer."}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.parts }}"}]},
+        )
+
+        request = metric._render_request({"parts": parts}, {})
+
+        assert request["messages"][-1]["content"] == parts
+
+    def test_render_request_sends_string_prompt_as_chat_with_response_format(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "prompt" not in request
+        assert request["messages"][-1] == {"role": "user", "content": "Rate this answer: Paris"}
+        assert "response_format" in request
+
+    def test_render_request_keeps_string_prompt_when_structured_output_unsupported(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(StructuredOutputMode.UNSUPPORTED)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+
 
 # =============================================================================
 # Hooks
