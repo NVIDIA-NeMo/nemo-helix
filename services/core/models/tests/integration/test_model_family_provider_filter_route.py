@@ -13,6 +13,25 @@ def _uid(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def _spec_with_family(family: str) -> dict:
+    return {
+        "context_size": 4096,
+        "is_chat": True,
+        "checkpoint_model_name": "meta-llama/Llama-3.2-1b-instruct",
+        "family": family,
+        "num_layers": 32,
+        "hidden_size": 4096,
+        "num_attention_heads": 32,
+        "num_kv_heads": 32,
+        "ffn_hidden_size": 16384,
+        "vocab_size": 32000,
+        "tied_embeddings": True,
+        "gated_mlp": True,
+        "base_num_parameters": 7000000000,
+        "precision": "fp16",
+    }
+
+
 def _create_model(
     test_clients: ClientContext,
     name: str,
@@ -21,7 +40,7 @@ def _create_model(
 ) -> None:
     body: dict = {"name": name}
     if family is not None:
-        body["spec"] = {"family": family}
+        body["spec"] = _spec_with_family(family)
     if model_providers is not None:
         body["model_providers"] = model_providers
     response = test_clients.test_client.post(MODELS_PATH, json=body)
