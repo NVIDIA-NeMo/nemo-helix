@@ -266,17 +266,21 @@ export const ControlledSearchableSelect = ({
   }, [loadMoreItems, showLoadMoreFooter]);
 
   useEffect(() => {
-    if (!selectOpen) {
-      setLocalSearch('');
-      setDebouncedSearch('');
-      return;
-    }
+    if (!selectOpen) return;
     const timeoutId = setTimeout(() => searchInputRef.current?.focus(), 0);
     return () => clearTimeout(timeoutId);
   }, [selectOpen]);
 
-  const handleSelectOpenChange = (isOpen: boolean) => {
+  const updateSelectOpen = (isOpen: boolean) => {
     setSelectOpen(isOpen);
+    if (!isOpen) {
+      setLocalSearch('');
+      setDebouncedSearch('');
+    }
+  };
+
+  const handleSelectOpenChange = (isOpen: boolean) => {
+    updateSelectOpen(isOpen);
     onOpenChange?.(isOpen);
   };
 
@@ -471,7 +475,7 @@ export const ControlledSearchableSelect = ({
             {listFooter ? (
               <Block className="shrink-0 border-t-1 border-t-base p-0 w-full">
                 {listFooter({
-                  close: () => setSelectOpen(false),
+                  close: () => updateSelectOpen(false),
                 })}
               </Block>
             ) : null}

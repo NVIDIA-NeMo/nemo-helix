@@ -233,7 +233,7 @@ describe('ModelDropdown', () => {
       renderOpen({ groups: withAdapters });
       const sub = (await screen.findAllByTestId('nv-dropdown-sub'))[0];
 
-      fireEvent.pointerEnter(sub);
+      fireEvent.pointerEnter(within(sub).getByTestId('model-dropdown-item-with-adapters'));
 
       expect(await screen.findByTestId('model-dropdown-adapter-option')).toBeInTheDocument();
 
@@ -250,7 +250,7 @@ describe('ModelDropdown', () => {
       });
       const sub = (await screen.findAllByTestId('nv-dropdown-sub'))[0];
 
-      fireEvent.pointerEnter(sub);
+      fireEvent.pointerEnter(within(sub).getByTestId('model-dropdown-item-with-adapters'));
 
       const adapterRow = await screen.findByTestId('model-dropdown-adapter-option');
       expect(within(adapterRow).getByTestId('model-dropdown-selected-check')).toBeInTheDocument();
