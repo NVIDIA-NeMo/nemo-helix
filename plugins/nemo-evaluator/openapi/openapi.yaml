@@ -4225,11 +4225,15 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Startup Timeout S
-          description: Max wait for `gym env start` readiness.
+          description: 'Max wait for the Gym servers to report ready: `gym env start`
+            colocated, the host''s bootstrap when sandboxed. Excludes pulling a sandboxed
+            host''s image.'
           default: 240.0
         collection_timeout_s:
           title: Collection Timeout S
-          description: Max wait for `gym eval run` collection; None = unbounded.
+          description: Max wait for rollout collection, measured from when it starts;
+            exceeding it fails the run. None = unbounded, though a sandboxed host
+            still stops at the end of its lifetime.
           type: number
           exclusiveMinimum: 0.0
         shutdown_grace_s:

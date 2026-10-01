@@ -702,7 +702,8 @@ class SandboxedGymOrchestrator:
             host: GymHostHandle | None = None
             try:
                 host = async_runner.run(host_provider.create_host(host_spec))
-                async_runner.run(host_provider.wait_ready(host, cfg.sandbox.ready_timeout_s))
+                bootstrap_timeout_s = cfg.sandbox.bootstrap_timeout_s or cfg.sandbox.ready_timeout_s
+                async_runner.run(host_provider.wait_ready(host, bootstrap_timeout_s))
             except Exception:
                 if host is not None:
                     try:
