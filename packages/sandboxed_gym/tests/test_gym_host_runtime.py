@@ -1764,6 +1764,8 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
 
     The caller is left polling an address that never answers, and reports a readiness timeout.
     """
+    import urllib.request
+
     monkeypatch.setattr(runtime, "_READY", False)
     monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
     monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
@@ -1773,14 +1775,50 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
         raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
 
     monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
-    served = []
-    monkeypatch.setattr(
-        runtime, "ThreadingHTTPServer", lambda *a, **k: SimpleNamespace(serve_forever=lambda: served.append(True))
-    )
+    # Port 0 asks the kernel for a free port. main() otherwise binds 8080 and
+    # serve_forever never returns, so the test process stays on that socket.
+    monkeypatch.setenv("NHX_RUNTIME_HTTP_PORT", "0")
+    servers: list[runtime._Server] = []
+    real_serve = runtime._Server.serve_forever
+
+    def _serve_on_a_background_thread(self, poll_interval: float = 0.5) -> None:
+        servers.append(self)
+        threading.Thread(
+            target=real_serve,
+            args=(self,),
+            kwargs={"poll_interval": poll_interval},
+            daemon=True,
+        ).start()
+
+    monkeypatch.setattr(runtime._Server, "serve_forever", _serve_on_a_background_thread)
 
     runtime.main()
 
-    assert served == [True]
+    assert servers, "main() did not start the server"
+    server = servers[0]
+    port = server.server_address[1]
+    try:
+        deadline = time.time() + 5
+        body = None
+        last_error: Exception | None = None
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode())
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+                last_error = exc
+                time.sleep(0.05)
+        else:
+            raise AssertionError(f"server on port {port} never answered /health: {last_error}")
+        assert body is not None
+        assert body["status"] == "failed"
+        assert "rejected the configured credential" in body["error"]["message"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
     assert runtime._READY is False
     assert runtime._BOOTSTRAP_ERROR is not None
     assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]

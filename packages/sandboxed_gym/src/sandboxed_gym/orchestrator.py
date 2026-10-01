@@ -6,18 +6,23 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
 import concurrent.futures
 import http.client
 import json
 import logging
+import os
+import signal
 import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Mapping
+from types import FrameType
 from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse
 
+import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import (
@@ -29,7 +34,6 @@ from sandboxed_gym.host.models import (
     build_bootstrap_env,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
-from sandboxed_gym.job_reaper import install_job_sandbox_reaper
 from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
@@ -41,6 +45,17 @@ from sandboxed_gym.serve_config import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+#: Signals a container runtime sends before SIGKILL. SIGKILL and node loss cannot be caught and
+#: stay the sandbox ttl_s's problem.
+TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+# Registered shutdown hooks for this process.
+_TERMINATION_SHUTDOWNS: list[Callable[[], None]] = []
+
+#: Job ids this process has already armed. A second call must not replace the
+#: signal handler the first one installed.
+_INSTALLED: set[str] = set()
 
 T = TypeVar("T")
 
@@ -616,6 +631,83 @@ class EpisodeBroker(Protocol):
     def start(self) -> BrokerEndpoint: ...
 
     def shutdown(self) -> None: ...
+
+
+def install_termination_cleanup(shutdown: Callable[[], None]) -> None:
+    """Run ``shutdown`` when this process exits without it having been called.
+
+    A process that owns a sandbox is the only thing that can name it. Ray tears an actor's worker
+    down without running user teardown, so a job that is cancelled, evicted or preempted otherwise
+    leaves its sandbox running until ttl_s. ``shutdown`` must tolerate being called twice: an
+    ordinary exit runs it directly and then again from ``atexit``.
+
+    For a process the caller owns -- an actor, a CLI. Not for a library embedded in someone else's
+    host, whose signal handling is not ours to replace.
+
+    Each call adds a hook. The signal handler runs every hook registered so far, so arming
+    the job reaper and then the session teardown does not leave the reaper installed only
+    on ``atexit``.
+    """
+    _TERMINATION_SHUTDOWNS.append(shutdown)
+    atexit.register(shutdown)
+
+    def _terminate(signum: int, _frame: FrameType | None) -> None:
+        # Restored before the cleanup runs, not after: a second signal arriving mid-shutdown then
+        # takes the default action and terminates, rather than re-entering this handler on top of
+        # an in-flight destroy. Two SIGTERMs mean the sender wants the process gone.
+        signal.signal(signum, signal.SIG_DFL)
+        LOGGER.warning("received signal %s; destroying sandboxed Gym host before exit", signum)
+        error: BaseException | None = None
+        for hook in list(_TERMINATION_SHUTDOWNS):
+            try:
+                hook()
+            except BaseException as exc:
+                # Keep going so one failed teardown cannot spare a sandbox another hook owns.
+                # The first error is re-raised after the rest have run.
+                if error is None:
+                    error = exc
+        try:
+            if error is not None:
+                raise error
+        finally:
+            # Re-raised even if cleanup failed, so the exit status still reports the signal --
+            # swallowing it would make a cancelled job look like a clean stop.
+            os.kill(os.getpid(), signum)
+
+    for signum in TERMINATION_SIGNALS:
+        try:
+            signal.signal(signum, _terminate)
+        except ValueError:
+            # Only the main thread may install handlers, and Ray does not promise to call an
+            # actor method there. atexit still covers the ordinary exit.
+            LOGGER.debug("cannot install a %s handler off the main thread", signum)
+
+
+def install_job_sandbox_reaper(
+    job_id: str,
+    *,
+    host_provider: str = "opensandbox",
+    host_provider_options: Mapping[str, Any] | None = None,
+) -> None:
+    """Arm an ``atexit`` and termination-signal hook that reaps this job's sandboxes.
+
+    Call it from the process the container runtime will signal, before the first
+    sandbox is created. A later call for the same job id does nothing: replacing
+    the signal handler would drop the hook the first call installed.
+    """
+    if not job_id:
+        raise ValueError("sandbox reaper requires a job id")
+    if job_id in _INSTALLED:
+        return
+    _INSTALLED.add(job_id)
+    options = dict(host_provider_options or {})
+    install_termination_cleanup(
+        lambda: job_reaper.reap_job_sandboxes(
+            job_id,
+            host_provider=host_provider,
+            host_provider_options=options,
+        )
+    )
 
 
 class SandboxedGymOrchestrator:

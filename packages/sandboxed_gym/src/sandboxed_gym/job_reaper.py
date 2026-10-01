@@ -5,8 +5,8 @@
 
 The actor that created a sandbox cannot be relied on to destroy it. Ray kills that
 worker on cancel without running its teardown, and a failure in the actor leaves the
-BatchSandbox until ``ttl_s``. The process that calls :func:`install_job_sandbox_reaper`
-is the one the container runtime signals, so the sweep still runs.
+BatchSandbox until ``ttl_s``. The orchestrator arms the sweep on the process the
+container runtime signals, so this module only knows how to destroy the sandboxes.
 """
 
 from __future__ import annotations
@@ -17,13 +17,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from sandboxed_gym.host.provider import get_host_provider
-from sandboxed_gym.termination import install_termination_cleanup
 
 LOGGER = logging.getLogger(__name__)
-
-#: Job ids this process has already armed. A second call must not replace the
-#: signal handler the first one installed.
-_INSTALLED: set[str] = set()
 
 
 def reap_job_sandboxes(
@@ -52,30 +47,3 @@ def reap_job_sandboxes(
             ", ".join(removed),
         )
     return removed
-
-
-def install_job_sandbox_reaper(
-    job_id: str,
-    *,
-    host_provider: str = "opensandbox",
-    host_provider_options: Mapping[str, Any] | None = None,
-) -> None:
-    """Arm an ``atexit`` and termination-signal hook that reaps this job's sandboxes.
-
-    Call it from the process the container runtime will signal, before the first
-    sandbox is created. A later call for the same job id does nothing: replacing
-    the signal handler would drop the hook the first call installed.
-    """
-    if not job_id:
-        raise ValueError("sandbox reaper requires a job id")
-    if job_id in _INSTALLED:
-        return
-    _INSTALLED.add(job_id)
-    options = dict(host_provider_options or {})
-    install_termination_cleanup(
-        lambda: reap_job_sandboxes(
-            job_id,
-            host_provider=host_provider,
-            host_provider_options=options,
-        )
-    )

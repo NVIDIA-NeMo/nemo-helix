@@ -16,10 +16,14 @@ import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint, EpisodeBrokerConfig
 from sandboxed_gym.host.models import GymHostHandle
-from sandboxed_gym.job_reaper import _INSTALLED
-from sandboxed_gym.orchestrator import SandboxedGymOrchestrator, SandboxedGymSession
+from sandboxed_gym.orchestrator import (
+    _INSTALLED,
+    _TERMINATION_SHUTDOWNS,
+    TERMINATION_SIGNALS,
+    SandboxedGymOrchestrator,
+    SandboxedGymSession,
+)
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
-from sandboxed_gym.termination import _TERMINATION_SHUTDOWNS, TERMINATION_SIGNALS
 
 
 @pytest.fixture(autouse=True)

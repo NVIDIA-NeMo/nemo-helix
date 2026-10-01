@@ -14,7 +14,7 @@ import signal
 from collections.abc import Callable
 
 import pytest
-from sandboxed_gym.termination import (
+from sandboxed_gym.orchestrator import (
     _TERMINATION_SHUTDOWNS,
     TERMINATION_SIGNALS,
     install_termination_cleanup,

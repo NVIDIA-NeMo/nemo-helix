@@ -16,8 +16,13 @@ from collections.abc import Callable, Mapping
 
 import pytest
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
-from sandboxed_gym.job_reaper import _INSTALLED, install_job_sandbox_reaper, reap_job_sandboxes
-from sandboxed_gym.termination import _TERMINATION_SHUTDOWNS, TERMINATION_SIGNALS
+from sandboxed_gym.job_reaper import reap_job_sandboxes
+from sandboxed_gym.orchestrator import (
+    _INSTALLED,
+    _TERMINATION_SHUTDOWNS,
+    TERMINATION_SIGNALS,
+    install_job_sandbox_reaper,
+)
 
 
 @pytest.fixture(autouse=True)

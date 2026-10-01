@@ -9,10 +9,13 @@ from typing import Any
 
 import ray
 
-from sandboxed_gym.job_reaper import install_job_sandbox_reaper
-from sandboxed_gym.orchestrator import SandboxedGymOrchestrator, SandboxedGymSession
+from sandboxed_gym.orchestrator import (
+    SandboxedGymOrchestrator,
+    SandboxedGymSession,
+    install_job_sandbox_reaper,
+    install_termination_cleanup,
+)
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
-from sandboxed_gym.termination import install_termination_cleanup
 
 GYM_ACTOR_FQN = "sandboxed_gym.ray.gym_actor.SandboxedGymActor"
 
