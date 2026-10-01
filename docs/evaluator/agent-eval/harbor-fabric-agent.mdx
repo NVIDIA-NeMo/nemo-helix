@@ -317,8 +317,9 @@ environment marker. Installing the agent into
 each task container takes minutes the first time, so raise `agent_setup_timeout_multiplier` as the
 example does — Harbor's default is tuned for prebuilt agents. The persisted job spec
 shows the filled-in target with `source.agent` qualified; the job never looks the agent up.
-If the agent's config refers to skills or prompts by relative path, its Ethos FileSet is staged into the
-job and uploaded into every task container as the Fabric config bundle.
+If the agent's config refers to skills or prompts by relative path, a snapshot of its Ethos FileSet taken
+at submit (a job-owned `agent-files-<id>` FileSet, deleted when the run completes) is staged into the job
+and uploaded into every task container as the Fabric config bundle.
 
 `source.environment` takes the same spec a deployment does — redirect the agent's declared MCP servers to
 mocks, add process env, bind secrets by reference — with one Harbor-specific caveat: fulfilment URLs
