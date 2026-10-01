@@ -82,6 +82,13 @@ if ! kubectl get secret scaled-evals-credential-encryption -n "$NS" >/dev/null 2
       'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 fi
 
+if ! kubectl get secret scaled-evals-platform-secrets-key -n "$NS" >/dev/null 2>&1; then
+  echo "==> generating platform secrets encryption key"
+  kubectl create secret generic scaled-evals-platform-secrets-key -n "$NS" \
+    --from-literal=key="$(python3 -c \
+      'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')"
+fi
+
 if ! kubectl get secret scaled-evals-postgres -n "$NS" >/dev/null 2>&1; then
   echo "==> generating postgres password"
   kubectl create secret generic scaled-evals-postgres -n "$NS" \
