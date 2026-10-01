@@ -26,7 +26,7 @@ AttackIntensity = Literal["light", "standard", "thorough"]
 
 ATTACK_DEFAULT_MODEL = "aws/anthropic/claude-opus-4-5"
 ATTACK_DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1/"
-ANALYSIS_DEFAULT_MODEL = "nvidia/nvidia/Nemotron-3-Nano-30B-A3B"
+ANALYSIS_DEFAULT_MODEL = "nvidia/nvidia/nemotron-3.5-lightning-30b-a3b"
 ANALYSIS_DEFAULT_BASE_URL = "https://inference-api.nvidia.com/v1"
 
 
