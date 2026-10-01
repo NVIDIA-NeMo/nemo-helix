@@ -273,7 +273,11 @@ Substitute `<hf-repo>`, `<hf-dataset>`, `<model-entity>`, `<weights-fileset>`, `
 **Setup**
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080   # user override only
+# `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
+# or an explicit NHX_BASE_URL. Do NOT export a localhost fallback — it would override a
+# configured remote. Leave NHX_BASE_URL unset to use your saved context; set it
+# explicitly (export NHX_BASE_URL=http://127.0.0.1:8080) only to force a local platform
+# for this shell when you have no local config context.
 cd /path/to/nemo-helix
 nemo auth status   # skip login if auth disabled; if enabled + unsigned JWT allowed → login --unsigned-token --email admin@example.com
 nemo jobs list-execution-profiles -f json   # platform GPU profiles → automodel; set training.execution_profile if needed

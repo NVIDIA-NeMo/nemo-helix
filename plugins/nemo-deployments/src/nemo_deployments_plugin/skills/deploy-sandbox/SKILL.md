@@ -111,7 +111,11 @@ Commands below assume `nemo` and `openshell` are on your PATH. In a repo checkou
    Start (or restart) it as:
 
    ```bash
-   export NHX_BASE_URL=http://localhost:8080
+   # Intentional local override: this block starts the platform locally via
+   # `nemo services run`, so localhost is the deliberate target for this dev
+   # workflow. If you already have a remote configured, run this only when you
+   # actually want the local sandbox platform.
+   export NHX_BASE_URL=http://localhost:8080   # nhx-base-url-allow: local sandbox dev workflow starts the platform here
    nemo services run --host 0.0.0.0 --port 8080 \
      --config packages/nhx_platform/config/local.yaml
    curl -sf http://localhost:8080/health/ready      # {"status":"ready"}
