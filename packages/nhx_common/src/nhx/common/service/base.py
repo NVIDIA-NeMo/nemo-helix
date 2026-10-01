@@ -603,6 +603,15 @@ class Service(ABC, Generic[TConfig]):
     # Startup and readiness
     # =========================================================================
 
+    @property
+    def readiness_message(self) -> str:
+        """Operator-facing reason this service is not ready.
+
+        Empty when the service has no additional guidance. Platform ``/status`` copies this onto
+        ``services.not_ready[].message``.
+        """
+        return ""
+
     async def is_ready(self) -> bool:
         """Check if the service is currently ready to serve traffic.
 
@@ -643,7 +652,7 @@ class Service(ABC, Generic[TConfig]):
         import time
 
         from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
-        from nhx.common.service.api.health import service_ready_state_from_status
+        from nhx.common.service.api.health import not_ready_message_from_status, service_ready_state_from_status
 
         endpoint = resolve_service_endpoint(service_name, self.platform_config)
         status_url = f"{endpoint.connect_base_url.rstrip('/')}/status"
@@ -653,6 +662,7 @@ class Service(ABC, Generic[TConfig]):
         logger.debug("Waiting for service to be ready", extra={"service": service_name, "url": status_url})
 
         start_time = time.time()
+        last_message = ""
         try:
             while (time.time() - start_time) < timeout:
                 try:
@@ -668,6 +678,8 @@ class Service(ABC, Generic[TConfig]):
                             return True
                         # ``False`` means the service is explicitly not_ready; keep polling.
                         # ``None`` means the status payload shape was unusable; retry.
+                        if ready is False:
+                            last_message = not_ready_message_from_status(data, service_name)
                 except httpx.RequestError:
                     pass
                 await asyncio.sleep(poll_interval)
@@ -675,7 +687,10 @@ class Service(ABC, Generic[TConfig]):
             if own_client:
                 await client.aclose()
 
-        logger.warning("Timeout waiting for service to be ready", extra={"service": service_name, "timeout": timeout})
+        logger.warning(
+            "Timeout waiting for service to be ready",
+            extra={"service": service_name, "timeout": timeout, "readiness_message": last_message},
+        )
         return False
 
     async def _wait_for_dependencies(self, timeout: float = 120.0) -> bool:

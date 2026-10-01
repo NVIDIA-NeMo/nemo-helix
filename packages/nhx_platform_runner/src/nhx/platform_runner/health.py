@@ -56,7 +56,7 @@ async def _get_service_status_breakdown(services: list[Service]) -> tuple[list[s
         if await service.is_ready():
             ready.append(service.name)
         else:
-            not_ready.append({"name": service.name})
+            not_ready.append({"name": service.name, "message": service.readiness_message})
     return ready, not_ready
 
 
