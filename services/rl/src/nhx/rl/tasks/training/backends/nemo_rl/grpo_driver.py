@@ -145,48 +145,49 @@ def main() -> None:
 
     init_ray()
 
-    (
-        policy,
-        policy_generation,
-        nemo_gym,
-        cluster,
-        dataloader,
-        val_dataloader,
-        loss_fn,
-        logger_inst,
-        checkpointer,
-        grpo_state,
-        master_config,
-        _teacher_worker_groups,
-        _alias_to_group_alias,
-    ) = setup(config, tokenizer, train_dataset, val_dataset)
-
-    task_to_env = {"nemo_gym": nemo_gym}
-    val_task_to_env = task_to_env
-
-    job_ctx = NHXJobContext.from_env()
-    print(f"Job context loaded (job_id={job_ctx.job_id})")
-    if job_ctx.jobs_url:
-        customizer_logger = NemoRLLogger.for_schedule(
-            job_ctx=job_ctx,
-            max_steps=config.grpo.max_num_steps,
-            num_epochs=config.grpo.max_num_epochs,
-            val_period=config.grpo.val_period,
-            # Extra (undeclared) GRPOConfig fields that grpo_config.py puts there. Read with
-            # getattr: a config compiled elsewhere omits them, and pydantic raises
-            # AttributeError for a missing extra. None takes for_schedule's fallbacks.
-            steps_per_epoch=getattr(config.grpo, "steps_per_epoch", None),
-            time_series_metrics=getattr(config.grpo, "progress_time_series_metrics", None),
-            min_report_interval_seconds=getattr(config.grpo, "progress_min_report_interval_seconds", None),
-            default_time_series_metrics=GRPO_DEFAULT_TIME_SERIES_METRICS,
-            run_facts=_run_facts(config),
-        )
-        if hasattr(logger_inst, "loggers"):
-            logger_inst.loggers.append(customizer_logger)
-
-    logger_inst.log_hyperparams(config.model_dump())
-
+    task_to_env = None
     try:
+        (
+            policy,
+            policy_generation,
+            nemo_gym,
+            cluster,
+            dataloader,
+            val_dataloader,
+            loss_fn,
+            logger_inst,
+            checkpointer,
+            grpo_state,
+            master_config,
+            _teacher_worker_groups,
+            _alias_to_group_alias,
+        ) = setup(config, tokenizer, train_dataset, val_dataset)
+
+        task_to_env = {"nemo_gym": nemo_gym}
+        val_task_to_env = task_to_env
+
+        job_ctx = NHXJobContext.from_env()
+        print(f"Job context loaded (job_id={job_ctx.job_id})")
+        if job_ctx.jobs_url:
+            customizer_logger = NemoRLLogger.for_schedule(
+                job_ctx=job_ctx,
+                max_steps=config.grpo.max_num_steps,
+                num_epochs=config.grpo.max_num_epochs,
+                val_period=config.grpo.val_period,
+                # Extra (undeclared) GRPOConfig fields that grpo_config.py puts there. Read with
+                # getattr: a config compiled elsewhere omits them, and pydantic raises
+                # AttributeError for a missing extra. None takes for_schedule's fallbacks.
+                steps_per_epoch=getattr(config.grpo, "steps_per_epoch", None),
+                time_series_metrics=getattr(config.grpo, "progress_time_series_metrics", None),
+                min_report_interval_seconds=getattr(config.grpo, "progress_min_report_interval_seconds", None),
+                default_time_series_metrics=GRPO_DEFAULT_TIME_SERIES_METRICS,
+                run_facts=_run_facts(config),
+            )
+            if hasattr(logger_inst, "loggers"):
+                logger_inst.loggers.append(customizer_logger)
+
+        logger_inst.log_hyperparams(config.model_dump())
+
         grpo_train(
             policy,
             policy_generation,
@@ -202,10 +203,11 @@ def main() -> None:
             master_config,
         )
     finally:
-        # Covers a failure between setup() and grpo_train. grpo_train shuts the
-        # same set down itself; this call accepts a shard set and waits long
-        # enough for OpenSandbox destroy_host.
-        shutdown_environments(task_to_env, timeout=300)
+        # grpo_train shuts the same set down on the way out, including a
+        # max-steps stop. NemoGymShardSet.shutdown ignores the second call.
+        # This one covers a failure after setup() returns and before grpo_train.
+        if task_to_env is not None:
+            shutdown_environments(task_to_env, timeout=300)
 
     if config.checkpointing["enabled"] and checkpointer.get_best_checkpoint_path() is None:
         if config.grpo.use_dynamic_sampling:
