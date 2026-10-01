@@ -10,22 +10,21 @@
 [![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-helix&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-helix)
 
-## Make the agents you ship faster, more accurate, and safer.
-
+## Make the agents you ship faster, more accurate, and safer
 NeMo Helix is an open source platform for improving and hardening production agents. Observe what your agent does, diagnose where it fails, run the experiments that fix it, and verify the result before it ships.
 
 <p align="center">
-  <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="80%">
+  <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="75%">
 </p>
 
 ## How Helix relates to the NeMo libraries
 
-Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Getting them to work together is normally your problem: separate APIs, separet credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read. 
+Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Getting them to work together is normally your problem: separate APIs, separate credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read. 
 
 - **Capabilities as plugins.** NeMo RL, AutoModel, and Unsloth for fine-tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety. Data Designer and Safe Synthesizer for synthetic data.
 - **One interface, every capability.** A CLI, a Python SDK, and a REST API across every plugin, instead of a different client per library.
 - **Agent-first.** You do not need to know which NeMo tool to use. Skills drive your coding agent through the job.
-- **Human accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
+- **Human-accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
 - **Runs where you do.** Laptop for a prototype, Kubernetes for production, on-prem or air-gapped when that is the requirement.
 - **Swappable infrastructure.** Agent execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
 - **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
@@ -79,7 +78,7 @@ Helix is organized around the loop that turns a working prototype into an agent 
 |---|---|---|
 | **Observe** | Ingest traces from the running agent. Inspect sessions, tool calls, cost, and latency. Scan traces for PII and leaked credentials. | NeMo Relay, NeMo Fabric, trace ingestion, Anonymizer |
 | **Diagnose** | Find where the agent fails and why. Cluster failures, compare against the incumbent, decide which lever is worth pulling. | Analyst agent, Experiments |
-| **Experiment** | Generate the data you lack, fine-tune a smaller or open model, tune prompts and hyperparameters, or route by task complexity. | Data Designer, Safe Synthesizer, Customizer, NeMo RL, AutoModel, Unsloth, Optuna, Switchyard, Experimenter agent |
+| **Experiment** | Generate the data you lack, fine-tune a smaller or open model, tune prompts and hyperparameters, or route by task complexity. | Data Designer, Safe Synthesizer, NeMo RL, AutoModel, Unsloth, Optuna, Switchyard |
 | **Evaluate** | Score candidates on your benchmarks. Compare accuracy, cost, and latency against the baseline you are trying to beat. | NeMo Gym, Harbor, Evaluator metrics, Eval Author agent |
 | **Verify** | Red-team the candidate, enforce input and output policy, and promote only what passes. | garak, Guardrails, OpenShell |
 
