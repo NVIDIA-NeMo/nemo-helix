@@ -497,7 +497,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
         "run",
         "--no-project",
         "--python",
-        convert_mod.TARGET_PYTHON_VERSION,
+        convert_mod._sdist_build_python(),
         "--with",
         "pip",
         "python",
@@ -652,6 +652,27 @@ def test_nemo_rl_root_derives_gym_root_and_image_pins(tmp_path: Path) -> None:
     )
     assert gym_root == rl / "3rdparty/Gym-workspace/Gym"
     assert (ray_version, openai_version) == ("2.56.1", "2.6.1")
+
+
+def test_nemo_gym_dependency_wins_when_the_lock_has_two_openai_versions(tmp_path: Path) -> None:
+    """sglang pins a second openai. Gym's per-server venvs use the nemo-gym edge."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL", openai="2.6.1")
+    (rl / "uv.lock").write_text(
+        '[[package]]\nname = "ray"\nversion = "2.56.1"\n\n'
+        '[[package]]\nname = "openai"\nversion = "2.6.1"\n\n'
+        '[[package]]\nname = "openai"\nversion = "2.44.0"\n\n'
+        '[[package]]\nname = "nemo-gym"\nsource = { editable = "." }\n'
+        'dependencies = [{ name = "openai", version = "2.44.0" }]\n',
+        encoding="utf-8",
+    )
+    _, _, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        )
+    )
+    assert openai_version == "2.44.0"
 
 
 def test_explicit_versions_win_over_the_lock(tmp_path: Path) -> None:

@@ -48,7 +48,8 @@ TARGET_WHEEL_PLATFORMS = (
     "manylinux2014_x86_64",
 )
 TARGET_UV_PLATFORM = "x86_64-unknown-linux-gnu"
-TARGET_PYTHON_VERSION = "3.13"  # Gym venv Python in the training image
+# Gym 0.7 requires Python>=3.13.14.
+TARGET_PYTHON_VERSION = "3.13.14"
 _TARGET_PLATFORM_TAG_RE = re.compile(r"^(any|linux_x86_64|manylinux[0-9_.]*_x86_64)$")
 
 # Gym rebuilds each per-server venv from empty and installs the agent before the environment,
@@ -170,16 +171,28 @@ def _run_pip_download(
     _run_build_step(cmd)
 
 
+def _sdist_build_python() -> str:
+    """Major.minor interpreter for building pure-Python sdists on this host.
+
+    Marker resolution uses ``TARGET_PYTHON_VERSION`` so Gym's ``>=3.13.14``
+    floor is satisfied. uv 0.10.10 cannot download 3.13.14 or 3.13.15, and
+    these sdists are pure Python, so the installed 3.13 emits a compatible wheel.
+    """
+    major, minor, *_rest = TARGET_PYTHON_VERSION.split(".")
+    return f"{major}.{minor}"
+
+
 def _build_downloaded_sdists(wheels_dir: Path) -> None:
-    """Build source artifacts with the training image's Python while the host has egress."""
+    """Build source artifacts while the host has egress."""
     sdists = sorted(path for path in wheels_dir.iterdir() if path.is_file() and path.suffix != ".whl")
+    build_python = _sdist_build_python()
     for sdist in sdists:
         cmd = [
             "uv",
             "run",
             "--no-project",
             "--python",
-            TARGET_PYTHON_VERSION,
+            build_python,
             "--with",
             "pip",
             "python",
@@ -217,7 +230,9 @@ def _tag_targets_training_image(interpreter: str, abi: str, platform: str) -> bo
     if not _TARGET_PLATFORM_TAG_RE.fullmatch(platform):
         return False
 
-    target_major, target_minor = (int(part) for part in TARGET_PYTHON_VERSION.split(".", 1))
+    # Wheel tags are cp313, not cp31314. The patch level is only for uv's marker check.
+    version_parts = TARGET_PYTHON_VERSION.split(".")
+    target_major, target_minor = int(version_parts[0]), int(version_parts[1])
     target = f"{target_major}{target_minor}"
     if abi == "none":
         return interpreter in {f"cp{target}", f"py{target}", f"py{target_major}"}
@@ -259,6 +274,17 @@ def _lock_pin(nemo_rl_root: Path, distribution: str) -> str | None:
     if not lock.is_file():
         raise ValueError(f"{nemo_rl_root} has no uv.lock; expected a NeMo-RL checkout")
     packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
+    # uv.lock can carry more than one openai (sglang pins another). The version on
+    # the nemo-gym package is the one Gym stamps into every per-server venv.
+    nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
+    if nemo_gym is not None:
+        pinned = {
+            dep["version"]
+            for dep in nemo_gym.get("dependencies", [])
+            if dep.get("name") == distribution and "version" in dep
+        }
+        if len(pinned) == 1:
+            return pinned.pop()
     versions = {pkg["version"] for pkg in packages if pkg.get("name") == distribution and "version" in pkg}
     if len(versions) != 1:
         return None

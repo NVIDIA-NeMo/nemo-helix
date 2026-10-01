@@ -252,54 +252,27 @@ uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps \
 chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
 EOF
 
-# After the sync, so a source-only bump reuses that layer.
-# Exclude submodule .git dirs here; a later rm would still leave them in this layer.
-COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
-
-# Pin verifiers to the offline adapter wheel (0.1.14), and write python-<Actor>
-# wrappers to the build-owned venv bin instead of /usr/local/bin.
-RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
-    git -C /opt/nemo-rl apply --verbose \
-    /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
-
-# Editable root only. Dependencies were installed by the sync above.
-RUN <<"EOF" bash -eu
-umask 022
-stamp=$(chmod-newer-than.sh mark)
-uv pip install --python /opt/nemo_rl_venv/bin/python --no-deps -e /opt/nemo-rl
-chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/nemo-rl
-EOF
-
 # ---- Per-worker venvs under /opt/ray_venvs ----
-# Filters are substrings of actor FQNs (extras from actor_environments.py).
-# Six filters build seven venvs; vllm.vllm_worker matches the sync and async workers:
+# Extras match actor_environments.py. Seven venvs, named by actor FQN the way
+# prefetch_venvs.py names them. This layer does not run that script: importing
+# it needs the rest of the tree, and the full source COPY is below so a
+# source-only bump reuses these syncs.
 #   DTensorPolicyWorkerV2 -> automodel
 #   MegatronPolicyWorker  -> mcore + nemo_gym (not the quant worker)
-#   vllm_worker           -> vllm + nemo_gym
+#   VllmGenerationWorker, VllmAsyncGenerationWorker -> vllm + nemo_gym
 #   SyncRolloutActor      -> vllm
 #   NemoGym, SandboxedGymActor -> nemo_gym
-# SandboxEpisodeBrokerActor is not a filter. It has no ACTOR_ENVIRONMENTS entry, and
+# SandboxEpisodeBrokerActor is absent. It has no ACTOR_ENVIRONMENTS entry, and
 # nemo-sandboxed-gym cannot read that registry, so the broker inherits the
 # SandboxedGymActor venv from the actor that creates it.
-# A bare "vllm" would also match modelopt's quant worker. UV_NO_SYNC=1 so
-# prefetch does not compile the nine CUDA extensions; each venv is then synced
-# and the wheels are installed.
+# --no-install-project: the lock and the resolver inputs copied above are
+# enough. The editable root install follows the source COPY.
 RUN --mount=from=rl-cuda-ext-wheel,source=/wheels,target=/mnt/wheels,readonly \
     <<"EOF" bash -eu
 set -x
 umask 022
 export UV_LINK_MODE=symlink
 stamp=$(chmod-newer-than.sh mark)
-NRL_PREFETCH_SKIP_INITIAL_SYNC=1 UV_NO_SYNC=1 \
-uv run nemo_rl/utils/prefetch_venvs.py \
-    dtensor_policy_worker_v2.DTensorPolicyWorkerV2 \
-    megatron_policy_worker.MegatronPolicyWorker \
-    vllm.vllm_worker \
-    sync_rollout_actor.SyncRolloutActor \
-    nemo_gym.NemoGym \
-    nemo_gym_actor.SandboxedGymActor
-
 SKIP=(
     --no-install-package causal-conv1d
     --no-install-package mamba-ssm
@@ -311,11 +284,30 @@ SKIP=(
     --no-install-package flash-attn
     --no-install-package transformer-engine-torch
 )
+# Same wrapper prefetch_venvs.py writes, into the driver bin (on PATH) rather
+# than /usr/local/bin, which the build user cannot write.
+write_wrapper() {
+    local venv="$1"
+    local class_name="${venv##*.}"
+    local wrapper="/opt/nemo_rl_venv/bin/python-${class_name}"
+    if [[ -e "${wrapper}" ]]; then
+        printf 'wrapper %s already exists\n' "${wrapper}" >&2
+        exit 1
+    fi
+    cat > "${wrapper}" <<WRAP
+#!/bin/bash
+VENV_PATH="${venv}"
+export VIRTUAL_ENV="\$VENV_PATH"
+export PATH="\$VENV_PATH/bin:\$PATH"
+exec "\$VENV_PATH/bin/python" "\$@"
+WRAP
+    chmod 755 "${wrapper}"
+}
 sync_venv() {
     local venv="$1"
     shift
-    env -u UV_NO_SYNC UV_PROJECT_ENVIRONMENT="${venv}" \
-        uv sync ${UV_SYNC_MODE} --inexact --directory /opt/nemo-rl "$@" "${SKIP[@]}"
+    UV_PROJECT_ENVIRONMENT="${venv}" \
+        uv sync ${UV_SYNC_MODE} --inexact --no-install-project --directory /opt/nemo-rl "$@" "${SKIP[@]}"
     if [[ " $* " == *" --extra nemo_gym "* ]]; then
         uv pip install --directory /tmp --python "${venv}/bin/python" \
             "nemo-sandboxed-gym[server,opensandbox,ray]==0.1.0a1" \
@@ -323,6 +315,7 @@ sync_venv() {
     fi
     # --python selects the venv. --directory keeps uv from reading the git pins in pyproject.toml.
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
+    write_wrapper "${venv}"
 }
 sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2 --extra automodel
 sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker --extra mcore --extra nemo_gym
@@ -332,6 +325,28 @@ sync_venv /opt/ray_venvs/nemo_rl.experience.sync_rollout_actor.SyncRolloutActor 
 sync_venv /opt/ray_venvs/nemo_rl.environments.nemo_gym.NemoGym --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor --extra nemo_gym
 chmod-newer-than.sh "${stamp}" /opt/ray_venvs /opt/nemo_rl_venv
+EOF
+
+# After the worker syncs, so a source-only bump reuses that layer.
+# Exclude submodule .git dirs here; a later rm would still leave them in this layer.
+COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
+
+# Pin verifiers to the offline adapter wheel (0.1.14). The wrapper-dir patch
+# stays so a later run of prefetch_venvs.py writes into the driver bin; this
+# image already wrote those wrappers above.
+RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
+    git -C /opt/nemo-rl apply --verbose \
+    /tmp/patches/nemo-rl-verifiers-pin.patch \
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
+
+# Editable root only. Dependencies were installed by the syncs above.
+RUN <<"EOF" bash -eu
+umask 022
+stamp=$(chmod-newer-than.sh mark)
+for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python; do
+    uv pip install --python "${py}" --no-deps -e /opt/nemo-rl
+done
+chmod-newer-than.sh "${stamp}" /opt/nemo_rl_venv /opt/ray_venvs /opt/nemo-rl
 EOF
 
 # ---- Per-environment Gym venvs, separate from /opt/ray_venvs. Off unless listed. ----

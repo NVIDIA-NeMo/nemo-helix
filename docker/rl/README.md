@@ -446,7 +446,7 @@ whenever the *dependency graph* hasn't changed:
   members, `research/`, and the top-level `nemo_rl` package stub) are copied **before**
   the heavy `uv sync`. A source-only RL bump (Python changed, deps unchanged) is then a
   cache hit on the compile layer; only the cheap editable-install step below re-runs.
-- The **full RL source** and the editable root install come **after** the sync.
+- The **full RL source** and the editable root install come **after** the cache-warming sync and the per-worker venv syncs.
 - The SHA pin keeps the resolver-input layer deterministic, so a warm builder reuses
   the whole compile across rebuilds. A brand-new builder has a cold cache and
   recompiles from scratch.
@@ -462,9 +462,11 @@ The warmup `uv sync --extra …` calls populate the **uv cache at `/opt/uv_cache
 ships inside the image** — it has to, because the prefetched venvs symlink into it (see
 "Link mode" below). Do not confuse it with the `--mount=type=cache` the training image
 uses for its editable install, which is build-only and never enters the image. The venvs
-training actually runs in are the per-worker ones under `/opt/ray_venvs`, so the base runs
-`nemo_rl/utils/prefetch_venvs.py` after the source copy to bake them in — the same
-approach NeMo-RL's own release stage uses.
+training actually runs in are the per-worker ones under `/opt/ray_venvs`. The base creates
+those venvs from the actor list below, before the full source copy, and writes the same
+`python-<Class>` wrappers `prefetch_venvs.py` would. The script itself is not imported
+here: that import pulls in the rest of the tree and would bust this layer on every
+source change.
 
 Prefetched (the filters match **actor FQNs**, not extra names):
 
@@ -489,8 +491,8 @@ broker runs in the `SandboxedGymActor` venv of the actor that creates it.
 (`test_prefetched_venvs_match_expected_set`), so a filter that drifts fails the build rather
 than silently shipping an image whose workers rebuild their venv on the node at job start.
 
-One venv is built **per registered actor, not per extra** — `prefetch_venvs.py` passes the actor
-FQN as the venv name — so `NemoGym` and `SandboxedGymActor` each get a directory even though both
+One venv is built **per registered actor, not per extra** — the directory name is the actor
+FQN, as `prefetch_venvs.py` would name it — so `NemoGym` and `SandboxedGymActor` each get a directory even though both
 use `nemo_gym`. `opensandbox` / `tenacity` come in through the extra itself, since RL declares
 `nemo_gym = ["nemo_gym[sandbox]"]`. The worker sync then installs
 `nemo-sandboxed-gym[server,opensandbox,ray]` into each `nemo_gym` venv.

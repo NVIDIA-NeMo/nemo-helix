@@ -312,3 +312,14 @@ class OpenSandboxGymHostProvider:
             await provider.close(resource_handle)
         except Exception:
             LOGGER.exception("Failed to destroy job host %s", handle.host_id)
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Destroy every OpenSandbox resource labeled with this job id.
+
+        That includes the Gym host and any episode sandbox this job created. Handles
+        this process still holds are not required: listing is by the job-id metadata.
+        """
+        if not job_id:
+            raise ValueError("sandbox cleanup requires a job id")
+        driver = self.provider_class(connection=self._connection)
+        return await driver.destroy_sandboxes_matching({JOB_ID_METADATA_KEY: job_id})

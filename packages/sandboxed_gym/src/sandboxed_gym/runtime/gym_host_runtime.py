@@ -263,7 +263,13 @@ def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(
-            {"model": model_name, "messages": [{"role": "user", "content": "ok"}], "max_tokens": 1}
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "temperature": 1.0,
+                "top_p": 1.0,
+            }
         ).encode(),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
