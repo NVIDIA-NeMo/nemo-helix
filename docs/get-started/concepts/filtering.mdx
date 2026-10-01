@@ -136,9 +136,34 @@ client.files.filesets.list(filter={"purpose": {"$eq": "dataset"}})
 | `$gte` | Greater than or equal | `{"created_at": {"$gte": "2025-01-01"}}` |
 | `$in` | Value in set | `{"status": {"$in": ["active", "pending"]}}` |
 | `$nin` | Value not in set | `{"status": {"$nin": ["deleted"]}}` |
+| `$contains` | Array has the element | `{"data.tags": {"$contains": "red"}}` |
+| `$containsPrefix` | Array has a string element starting with the value | `{"data.tasks": {"$containsPrefix": "default/task-a#"}}` |
+| `$elemMatch` | Array has an object matching every key | `{"data.metadata": {"$elemMatch": {"key": "suite", "value": "geography"}}}` |
+| `$hasKey` | Object has the key with a non-null value | `{"data.tags": {"$hasKey": "v1.2"}}` |
 | `$and` | Logical AND | `{"$and": [{"name": "a"}, {"status": "active"}]}` |
 | `$or` | Logical OR | `{"$or": [{"name": "a"}, {"name": "b"}]}` |
 | `$not` | Logical NOT | `{"$not": {"status": "draft"}}` |
+
+### Array and object operators
+
+`$contains`, `$containsPrefix`, `$elemMatch`, and `$hasKey` operate on JSON array or object
+fields, such as an entity's `data.*` fields. They have no text-syntax form, and in bracket notation
+the `$` is required: `?filter[data.tags][$hasKey]=v1.2`.
+
+- `$elemMatch` needs **one** element to satisfy every key. Against
+  `[{"key": "suite", "value": "math"}, {"key": "owner", "value": "geography"}]`,
+  `{"$elemMatch": {"key": "suite", "value": "geography"}}` does not match, because no single
+  element has both. Each key compares the same way `$eq` does; values must be strings, numbers,
+  booleans, or `null`.
+- `$containsPrefix` matches from the start of an element, so `default/task-a#` does not match
+  `other/default/task-a#…`.
+- `$hasKey` treats the whole value as one key, so `v1.2` is not read as a `v1` → `2` path.
+- For `$containsPrefix`, `$elemMatch`, and `$hasKey`, a missing field, or one that is not an array
+  or object, never matches. Under `$not`, it always matches.
+
+Services often wrap these in named filters that are easier to use. For example, the Evaluator's
+`filter[metadata.suite]=geography` becomes the `$elemMatch` above. See
+[Filter tasks and tasksets](/documentation/evaluate-models/manage-tasks-tasksets#filter-tasks-and-tasksets).
 
 ## Nested fields
 
