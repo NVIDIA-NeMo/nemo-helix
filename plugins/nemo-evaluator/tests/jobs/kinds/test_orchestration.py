@@ -67,14 +67,14 @@ async def test_injected_registry_dispatches_submission_and_validates_before_work
         pass
 
     TestJob.adapters = adapters
-    async with AsyncNemoClient(base_url="http://unused.test") as sdk:
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
         spec = await TestJob.to_spec(
             AgentEvalInputSpec(
                 tasks=[AgentEvalTaskInput(id=name, intent=name) for name in ("second", "first")], trials=[]
             ),
             workspace="default",
             entity_client=None,
-            async_sdk=sdk,
+            async_sdk=async_client,
             is_local=True,
         )
     assert isinstance(spec, AgentEvalSpec)

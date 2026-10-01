@@ -31,8 +31,8 @@ async def test_harbor_adapter_snapshot_and_offline_preparation(entity_store, tmp
     )
     await entity_store.create(task)
     revision, _, _ = await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
-    async with AsyncNemoClient(base_url="http://unused.test") as sdk:
-        ctx = SubmitContext("default", entity_store, sdk, KIND_ADAPTERS)
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
+        ctx = SubmitContext("default", entity_store, async_client, KIND_ADAPTERS)
         loaded = await load_tasks([TaskRef("other/stored")], ctx)
         definition = await HarborTaskAdapter().resolve(loaded[0], ctx)
         assert definition.provenance.entity_name == "other/stored"

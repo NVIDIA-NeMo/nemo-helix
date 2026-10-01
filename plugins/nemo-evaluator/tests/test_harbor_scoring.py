@@ -247,7 +247,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
         return Model(name="judge", url="https://example.test/v1/chat/completions")
 
     monkeypatch.setattr(HelixMetricModelResolver, "resolve_model", resolve)
-    async with AsyncNemoClient(base_url="http://platform.test", workspace="default") as async_sdk:
+    async with AsyncNemoClient(base_url="http://platform.test", workspace="default") as async_client:
         spec = await AgentEvalJob.to_spec(
             AgentEvalInputSpec(
                 tasks=[TaskRef(f"default/task#{revision.content_hash}")],
@@ -265,7 +265,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
             ),
             workspace="default",
             entity_client=entity_store,
-            async_sdk=async_sdk,
+            async_sdk=async_client,
             is_local=False,
         )
     assert calls == ["default/judge"]
