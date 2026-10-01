@@ -13,12 +13,11 @@ import {
   useAgentsCreateDeployment,
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
-import { Accordion, Stack } from '@nvidia/foundations-react-core';
+import { Accordion, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   type DeploymentMode,
   DeploymentModeAvailabilityMode,
   type DeploymentModes,
-  enabledImageModes,
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
@@ -40,11 +39,19 @@ const deploymentFormSchema = z.object({
 
 type DeploymentFormData = z.infer<typeof deploymentFormSchema>;
 
-const DEPLOYMENT_MODE_ORDER: readonly DeploymentMode[] = ['subprocess', ...IMAGE_DEPLOYMENT_MODES];
+const OFFERED_MODES: readonly DeploymentMode[] = AGENT_CONTAINER_DEPLOYMENTS_ENABLED
+  ? ['subprocess', ...IMAGE_DEPLOYMENT_MODES]
+  : ['subprocess'];
+
+const deployableModes = (modes: DeploymentModes): readonly DeploymentMode[] =>
+  modes.status === 'ready'
+    ? OFFERED_MODES.filter((mode) => modes.enabled.includes(mode))
+    : OFFERED_MODES;
 
 const defaultModeFor = (image: string | undefined, modes: DeploymentModes): DeploymentMode => {
-  const imageMode = enabledImageModes(modes)[0];
-  return image && AGENT_CONTAINER_DEPLOYMENTS_ENABLED && imageMode ? imageMode : 'subprocess';
+  const deployable = deployableModes(modes);
+  const imageMode = deployable.find((mode) => mode !== 'subprocess');
+  return (image && imageMode) || deployable.at(0) || 'subprocess';
 };
 
 const makeDefaultValues = (
@@ -76,19 +83,17 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const deploymentModes = useDeploymentModes(workspace, {
-    enabled: open && AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
-  });
+  const deploymentModes = useDeploymentModes(workspace, { enabled: open });
   // An image's runtime depends on the modes, so deploying it waits for them; a failed read falls back to all modes.
   const awaitingModesForImage =
     Boolean(initialImage) &&
     AGENT_CONTAINER_DEPLOYMENTS_ENABLED &&
     deploymentModes.status === 'loading';
-  const availableModes =
-    deploymentModes.status === 'ready'
-      ? DEPLOYMENT_MODE_ORDER.filter((mode) => deploymentModes.enabled.includes(mode))
-      : DEPLOYMENT_MODE_ORDER;
-  const hasImageMode = enabledImageModes(deploymentModes).length > 0;
+  const availableModes = deployableModes(deploymentModes);
+  const noDeployableMode = availableModes.length === 0;
+  const hasImageMode = availableModes.some((mode) => mode !== 'subprocess');
+  const subprocessUnavailable =
+    deploymentModes.status === 'ready' && !availableModes.includes('subprocess');
 
   const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
     workspace,
@@ -146,7 +151,10 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
 
   // The modes can arrive after the dialog opens; a default they rule out would be rejected on submit.
   useEffect(() => {
-    if (deploymentModes.status === 'ready' && !deploymentModes.enabled.includes(deploymentMode)) {
+    if (
+      deploymentModes.status === 'ready' &&
+      !deployableModes(deploymentModes).includes(deploymentMode)
+    ) {
       setValue('deploymentMode', defaultModeFor(initialImage, deploymentModes));
     }
   }, [deploymentModes, deploymentMode, initialImage, setValue]);
@@ -156,6 +164,11 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   const [advancedOpen, setAdvancedOpen] = useState<string | undefined>(
     initialImage ? 'advanced' : undefined
   );
+
+  // Without subprocess the runtime is a container one, so it shouldn't stay hidden.
+  useEffect(() => {
+    if (subprocessUnavailable) setAdvancedOpen('advanced');
+  }, [subprocessUnavailable]);
 
   // Seeded on the open transition only. A packaging job can finish while this
   // dialog is open, and reseeding then would wipe what the user has typed.
@@ -198,10 +211,16 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
-      submitDisabled={awaitingModesForImage}
+      submitDisabled={awaitingModesForImage || noDeployableMode}
       errorText={errorMessage}
     >
       <Stack gap="density-xl">
+        {noDeployableMode ? (
+          <Text className="text-secondary" kind="body/regular/sm">
+            This platform has no deployment mode enabled for agents. Ask your platform admin to
+            allow subprocess deployments or configure a Docker or Kubernetes executor.
+          </Text>
+        ) : null}
         <ControlledTextInput
           useControllerProps={{ control, name: 'name' }}
           name="name"

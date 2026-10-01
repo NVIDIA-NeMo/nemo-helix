@@ -323,4 +323,46 @@ describe('CreateDeploymentModal', () => {
       expect(within(dialog).queryByText(/Show Advanced/)).not.toBeInTheDocument()
     );
   });
+
+  describe('when the platform turns subprocess off', () => {
+    beforeEach(() => mockEnabledModes('k8s'));
+
+    it('defaults to a container runtime and shows it', async () => {
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderModal();
+
+      const dialog = await getDeploymentDialog();
+      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
+      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
+      expect(runtime).toBeVisible();
+      await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+      await waitFor(() => expect(captured.body).toEqual({ agent, deployment_mode: 'k8s' }));
+    });
+
+    it('does not offer subprocess', async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      const dialog = await getDeploymentDialog();
+      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
+      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
+      await user.click(runtime);
+
+      const options = await screen.findAllByRole('option');
+      expect(options.map((option) => option.textContent)).toEqual(['Kubernetes']);
+    });
+  });
+
+  it('explains and blocks deploying when no runtime is enabled', async () => {
+    mockEnabledModes();
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    expect(
+      await within(dialog).findByText(/no deployment mode enabled for agents/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
+  });
 });
