@@ -18,10 +18,6 @@
     #   nemo-auditor-plugin
     #   nemo-helix
     #   nemohelix
--e ./packages/models ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemohelix
-    #   nhx-platform
 -e ./packages/nemo_evaluator_sdk ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-evaluator-plugin
@@ -155,7 +151,6 @@
 -e ./plugins/nemo-unsloth ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./sdk/python/nemo-helix ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
-    #   models
     #   nemo-deployments-plugin
     #   nemo-helix
     #   nemo-helix-ext
@@ -2381,7 +2376,6 @@ openai==2.53.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     #   instructor
     #   langchain-openai
     #   litellm
-    #   models
     #   nemo-evaluator-sdk
     #   nemo-helix
     #   nemo-helix-plugin

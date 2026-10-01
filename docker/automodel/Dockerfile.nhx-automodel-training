@@ -36,7 +36,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --overrides /app/docker/automodel/no_override_requirements.txt \
     -e /app/sdk/python/nemo-helix \
     -e /app/packages/filesets \
-    -e /app/packages/models \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nhx_common \
     -e /app/packages/nhx_customization_common \

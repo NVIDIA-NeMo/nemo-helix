@@ -14,10 +14,6 @@ Models-specific ergonomics that used to live on the vendored Stainless
   ``wait_for_provider_status``) driven by the client's own ``get_deployment`` /
   ``get_provider`` methods.
 
-The inference-gateway *readiness* probe (``wait_for_gateway``) lives one layer
-up in ``packages/models`` because it targets the separate inference-gateway
-service, not Models -- see that module and AIRCORE notes.
-
 Usage::
 
     from nemo_helix_plugin.models.client import ModelsClient
@@ -57,7 +53,7 @@ _INFERENCE_GATEWAY_PREFIX = "/apis/inference-gateway/v2/workspaces"
 
 # The OpenAI-route builders only read a couple of attributes, so they accept any
 # object exposing them -- the plugin ``ModelProvider`` / ``ModelEntity`` models,
-# or the Stainless SDK equivalents that ``packages/models`` passes through.
+# or the generated SDK equivalents.
 # Structural typing keeps the plugin free of a dependency on the generated SDK
 # types while still accepting them.
 
