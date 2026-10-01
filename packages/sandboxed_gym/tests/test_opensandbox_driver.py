@@ -232,6 +232,47 @@ async def test_destroy_sandboxes_matching_lists_every_page_and_kills_each(
     assert manager.closed is True
 
 
+@requires_opensandbox
+async def test_destroy_sandboxes_matching_keeps_going_when_one_kill_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One sandbox the control plane already dropped must not spare the rest."""
+    from types import SimpleNamespace
+
+    SandboxManager = getattr(importlib.import_module("opensandbox.manager"), "SandboxManager")
+
+    manager = SimpleNamespace(killed=[])
+
+    async def list_sandbox_infos(sandbox_filter: object) -> object:
+        return SimpleNamespace(
+            sandbox_infos=[SimpleNamespace(id="gone"), SimpleNamespace(id="live")],
+            pagination=SimpleNamespace(has_next_page=False),
+        )
+
+    async def kill_sandbox(sandbox_id: str) -> None:
+        if sandbox_id == "gone":
+            raise RuntimeError("already terminated")
+        manager.killed.append(sandbox_id)
+
+    async def close() -> None:
+        return None
+
+    manager.list_sandbox_infos = list_sandbox_infos
+    manager.kill_sandbox = kill_sandbox
+    manager.close = close
+
+    async def create_manager(*, connection_config: object) -> object:
+        return manager
+
+    monkeypatch.setattr(SandboxManager, "create", create_manager)
+
+    removed = await OpenSandboxDriver().destroy_sandboxes_matching({"nemo-rl-job-id": "rl-1"})
+
+    assert manager.killed == ["live"]
+    assert removed == ("live",)
+
+
+@requires_opensandbox
 async def test_destroy_sandboxes_matching_refuses_an_empty_selector() -> None:
     with pytest.raises(ValueError, match="at least one metadata selector"):
         await OpenSandboxDriver().destroy_sandboxes_matching({})

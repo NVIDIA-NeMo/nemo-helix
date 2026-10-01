@@ -334,10 +334,17 @@ class OpenSandboxDriver:
                     break
                 page += 1
 
+            killed: list[str] = []
             for sandbox_id in sandbox_ids:
-                await manager.kill_sandbox(sandbox_id)
+                try:
+                    await manager.kill_sandbox(sandbox_id)
+                except Exception:
+                    # One sandbox the control plane already dropped must not spare the rest.
+                    LOGGER.exception("failed to destroy sandbox %s", sandbox_id)
+                    continue
+                killed.append(sandbox_id)
 
-            return tuple(sandbox_ids)
+            return tuple(killed)
         finally:
             await manager.close()
 

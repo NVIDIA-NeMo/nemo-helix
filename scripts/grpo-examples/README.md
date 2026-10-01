@@ -28,18 +28,19 @@ A GRPO job needs three things that no deployment creates for you — a model ent
 ```bash
 uv run scripts/grpo-examples/gym_to_env_package.py \
   --gym-root ~/workspace/Gym \
+  --nemo-rl-root ~/workspace/RL \
   --server resources_servers/math_with_judge \
   --format wheels-v1 --arch x86_64 \
-  --expect-nemo-gym-version <v> --ray-version <v> --openai-version <v> \
   --out-dir /tmp/mwj-env
 ```
 
-`wheels-v1` requires those three versions, because Gym pins every per-server virtualenv to the
-training image's `nemo-gym`, `ray` and `openai`. A closure built against different ones is
-ignored and resolved from an index instead. All three come from a NeMo-RL checkout at the commit
-`NEMO_RL_REF` pins in `docker-bake.hcl` -- the training image is built from it, so no access to
-the image is needed: `nemo-gym` from the Gym submodule, `ray`/`openai` from NeMo-RL's `uv.lock`.
-Not from Gym's own lock, which pins different versions.
+`wheels-v1` vendors the versions the training image runs. Gym pins every per-server virtualenv
+to that `nemo-gym`, `ray` and `openai`, and a closure built against different ones is ignored
+and resolved from an index instead. `--nemo-rl-root` is the NeMo-RL checkout at the commit
+`NEMO_RL_REF` pins; the caller fetches it. `ray` comes from its `uv.lock`, and `openai` from
+the version the `nemo-gym` package in that lock selects (the lock also carries a second openai
+for other extras). `nemo-gym` comes from `--gym-root`'s `package_info.py`, which must be the
+Gym commit that checkout records.
 
 The same script emits `native-v1` — one flag, not a second script:
 
@@ -56,7 +57,7 @@ The two differ in exactly two ways, both handled for you:
 | | `wheels-v1` | `native-v1` |
 |---|---|---|
 | `wheels/` | full closure vendored | absent — resolved from a package index at job start |
-| `policy_model.yaml` | `configs/` | `responses_api_models/vllm_model/configs/` (the format requires a Gym server prefix) |
+| `policy_model.yaml` | `configs/` | beside the packaged server's `configs/` (the format requires a Gym server prefix) |
 | Cluster egress at job start | not needed | **required** (`NHX_RL_SANDBOX_ALLOW_INTERNET`) |
 
 `--arch` is ignored for `native-v1`, since it vendors nothing.
@@ -68,7 +69,7 @@ The two differ in exactly two ways, both handled for you:
 | `--format` | `wheels-v1` vendors the closure and needs no egress at job start; `native-v1` ships no wheels and resolves from an index, so the cluster must allow internet |
 | `--arch` | `x86_64` or `aarch64` — the training images ship for both, so match the nodes: `kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'` |
 | `--config` | Repeatable. Defaults to `<implementation>.yaml`; other configs in the directory usually pair the server with an agent this package does not carry |
-| `--expect-nemo-gym-version` | Fail unless the checkout builds this exact version. Gym pins each per-server venv to the image's `nemo-gym` version, so a mismatch is silently resolved from PyPI instead |
+| `--nemo-rl-root` | Required for `wheels-v1`. NeMo-RL checkout at the `NEMO_RL_REF` commit. Its `[tool.uv]` limits the wheelhouse, and its `uv.lock` supplies ray and openai |
 
 It copies the server tree (dropping `data/`, `tests/` and any `.jsonl`), strips inline
 `datasets:` blocks pointing at in-tree files, writes `policy_model.yaml` where the format

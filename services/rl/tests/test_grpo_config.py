@@ -348,9 +348,13 @@ def test_compiled_config_has_master_config_required_fields(
 
     # None is meaningful, not absent: generation/__init__.py fills stop_token_ids
     # with [tokenizer.eos_token_id] when it is None.
-    for field in ("top_k", "stop_token_ids", "stop_strings"):
+    for field in ("top_k", "val_top_k", "stop_token_ids", "stop_strings"):
         assert field in policy["generation"], f"policy.generation.{field} missing"
         assert policy["generation"][field] is None
+    # Exemplar YAMLs interpolate these from the train sampling params. They are
+    # required, and validation must sample the same way training does.
+    assert policy["generation"]["val_temperature"] == policy["generation"]["temperature"]
+    assert policy["generation"]["val_top_p"] == policy["generation"]["top_p"]
 
     assert policy["make_sequence_length_divisible_by"] == step.parallelism.tensor_parallel_size
 
@@ -618,6 +622,11 @@ def test_generation_sampling_comes_from_the_grpo_hyperparameters(
     assert generation["top_k"] == 20
     # Neutral value, not a knob: the job schema exposes no top_p.
     assert generation["top_p"] == 1.0
+    # Validation uses the same profile. A val_* that differs is a separate code
+    # path, and NeMo-Gym rejects a val_top_k that is not also the train top_k.
+    assert generation["val_temperature"] == 0.7
+    assert generation["val_top_p"] == 1.0
+    assert generation["val_top_k"] == 20
 
 
 def test_generation_samples_the_full_distribution_by_default(
@@ -791,6 +800,8 @@ def test_sandbox_resources_reach_the_sandbox_when_the_operator_sets_them(
 
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
     assert sandbox["resources"] == {"cpu": "2", "memory": "8Gi"}
+    # create.resource must match resources.
+    assert sandbox["host_provider_options"]["create"] == {"resource": {"cpu": "2", "memory": "8Gi"}}
 
 
 def test_sandbox_resources_unset_leaves_the_provider_default(
@@ -907,10 +918,13 @@ def test_automodel_all_weights_requests_consolidated_safetensors(
 ) -> None:
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
-    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+    compiled = compile_grpo_config(step, job_ctx)
+    checkpoint = compiled["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert checkpointing["model_save_format"] == "safetensors"
-    assert checkpointing["save_consolidated"] is True
+    assert checkpoint["model_save_format"] == "safetensors"
+    assert checkpoint["save_consolidated"] == "every"
+    assert "model_save_format" not in compiled["checkpointing"]
+    assert "save_consolidated" not in compiled["checkpointing"]
 
 
 def test_v4_compatible_defaults_on_for_consolidated_export(
@@ -920,9 +934,9 @@ def test_v4_compatible_defaults_on_for_consolidated_export(
     vLLM the platform serves the published model with cannot read."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
-    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert checkpointing["v4_compatible"] is True
+    assert checkpoint["v4_compatible"] is True
 
 
 def test_v4_compatible_can_be_turned_off(
@@ -930,9 +944,9 @@ def test_v4_compatible_can_be_turned_off(
 ) -> None:
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, v4_compatible=False)
-    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert checkpointing["v4_compatible"] is False
+    assert checkpoint["v4_compatible"] is False
 
 
 def _write_base_model_config(tmp_path: Path, transformers_version: str | None) -> None:
@@ -980,15 +994,20 @@ def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
     assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
 
 
-def test_dtensor_v1_omits_model_save_format(
+def test_dtensor_requests_consolidated_safetensors(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """DTensor v2 is the only policy worker, so ``dtensor`` needs the same checkpoint block."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
-    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+    compiled = compile_grpo_config(step, job_ctx)
+    checkpoint = compiled["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert "model_save_format" not in checkpointing
-    assert "save_consolidated" not in checkpointing
+    assert checkpoint["model_save_format"] == "safetensors"
+    assert checkpoint["save_consolidated"] == "every"
+    assert "model_save_format" not in compiled["checkpointing"]
+    assert "save_consolidated" not in compiled["checkpointing"]
+    assert "v4_compatible" not in compiled["checkpointing"]
 
 
 def test_automodel_lora_still_requests_consolidated_export(
@@ -1000,10 +1019,10 @@ def test_automodel_lora_still_requests_consolidated_export(
         finetuning_type=FinetuningType.LORA,
         lora=LoRAConfig(rank=8, alpha=16),
     )
-    checkpointing = compile_grpo_config(step, job_ctx)["checkpointing"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
 
-    assert checkpointing["save_consolidated"] is True
-    assert "model_save_format" not in checkpointing
+    assert checkpoint["save_consolidated"] == "every"
+    assert checkpoint["model_save_format"] == "safetensors"
 
 
 def test_expert_parallel_size_reaches_dtensor(

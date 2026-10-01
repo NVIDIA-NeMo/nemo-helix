@@ -270,10 +270,12 @@ _KEY_VALIDATION_ACTIONS: tuple[tuple[str, str], ...] = (
 _MODEL_PROBE_TIMEOUT = 20.0
 _MODEL_PROBE_MAX_ATTEMPTS = 8
 _MODEL_PROBE_BUDGET_SECONDS = 90.0
-# Gateway 404s until the model's VirtualModel exists; retries are shared and capped.
-_MODEL_ROUTE_READY_SECONDS = 10.0
+# Gateway 404s until the model's VirtualModel exists and the gateway cache
+# (3s) picks it up. The models controller ticks every 5s and a busy step can
+# take longer, so a 10s window expires in the same second the route appears.
+_MODEL_ROUTE_READY_SECONDS = 30.0
 _MODEL_ROUTE_RETRY_INTERVAL = 1.0
-_MODEL_ROUTE_MAX_RETRIES = 10
+_MODEL_ROUTE_MAX_RETRIES = 30
 
 _MODEL_DISCOVERY_ROUND_SECONDS = 30
 _MODEL_DISCOVERY_MAX_ROUNDS = 2
