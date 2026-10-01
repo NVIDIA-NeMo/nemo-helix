@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Nemo Helix
+# NeMo Helix
 
 ![NEMO Helix](docs/assets/nemo-wordmark.svg)
 
@@ -12,26 +12,67 @@
 
 ## Make the agents you ship faster, more accurate, and safer.
 
-**NeMo Helix** is an open source platform for improving and hardening production agents. 
-Observe what your agent does, diagnose where it fails, run the experiments that fix it, and verify the result before it ships.
+NeMo Helix is an open source platform for improving and hardening production agents. Observe what your agent does, diagnose where it fails, run the experiments that fix it, and verify the result before it ships.
+
+<p align="center">
+  <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="100%">
+</p>
 
 ## How Helix relates to the NeMo libraries
 
-<p align="center">
-  <img src="docs/assets/nemo-helix-architecture.png"
-       alt="The NeMo libraries and NeMo Helix. Helix runs the libraries as plugins and adds surfaces, connectivity, and shared foundations."
-       width="820">
-</p>
+Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Helix does the work between them: as plugins they share one object model, one job runner, and one set of credentials, so chaining them stops being an integration project.
 
-Helix composes a curated set of NeMo and third-party libraries. Each does one job well. Getting them to work together is normally your problem: separate APIs, separate credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read.
-
-- **Capabilities as plugins.** Data Designer, Anonymizer, and Safe Synthesizer for synthetic data. NeMo RL, AutoModel, and Unsloth for fine-tuning. Optuna for prompt and hyperparameter tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety.
+- **Capabilities as plugins.** NeMo RL, AutoModel, and Unsloth for fine-tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety. Data Designer and Safe Synthesizer for synthetic data.
 - **One interface, every capability.** A CLI, a Python SDK, and a REST API across every plugin, instead of a different client per library.
-- **Agent-first.** Skills teach your coding agent which NeMo tool to use and when, so you do not have to know.
-- **Human-accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
+- **Agent-first.** You do not need to know which NeMo tool to use. Skills drive your coding agent through the job.
+- **Human accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
 - **Runs where you do.** Laptop for a prototype, Kubernetes for production, on-prem or air-gapped when that is the requirement.
-- **Swappable infrastructure.** Execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
+- **Swappable infrastructure.** Agent execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
 - **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
+
+```bash
+uv tool install "nemo-helix[all]"
+nemo setup
+```
+
+## What is in the box
+
+### Capabilities
+
+Capabilities ship as plugins. The first-party set covers five domains, and third-party plugins use the same extension model.
+
+| Domain | What it covers | Components |
+|---|---|---|
+| **Data** | Generate the training and evaluation data you do not have, and keep sensitive data out of it | Data Designer, Safe Synthesizer, Anonymizer, Curator |
+| **Optimization** | Make the agent cheaper, faster, or more accurate | Post-training plugin (SFT, DPO, LoRA, distillation, embeddings), AutoModel, NeMo RL, Unsloth, Optuna, Switchyard routing, prompt and skill tuning |
+| **Evaluation** | Score candidates against your benchmarks before you ship them | NeMo Gym environments, Harbor eval suites, LLM-as-judge, deterministic, agentic, and RAG metrics, experiments |
+| **Safety** | Catch unsafe behavior before and during production | Guardrails (content safety, jailbreak detection, PII redaction), garak red-teaming, OpenShell sandboxing |
+| **Connectivity & Observability** | Connect agents to Helix and see what they actually do in production | NeMo Fabric (specialized agents, formerly NAT), NeMo Relay (black-box and general-purpose harnesses), trace ingestion, session and cost inspection |
+
+### Built-in agents
+
+Three agents work the loop with you rather than waiting for you to drive it.
+
+- **Analyst.** Reads production traces and surfaces where and why the agent is failing.
+- **Experimenter.** Proposes and runs optimization experiments against those findings.
+- **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
+
+### Surfaces
+
+Every capability is reachable from every surface. Pick the one that fits the moment.
+
+| Surface | Use it for |
+|---|---|
+| **NeMo CLI** | The primary interface. Every service under one command, one config, one context. |
+| **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
+| **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
+| **NeMo Studio** | Optional web UI for chat, job monitoring, evaluation results, traces, experiments, and governance review. |
+
+### Foundations
+
+Shared services every capability builds on: object and data storage, trace ingestion, model registry, experiments, jobs and session management, inference gateway, authentication and authorization, and secrets management. Workspaces and projects scope every artifact, so what your team produces can be shared, referenced, and governed instead of copied between laptops.
+
+**These are defaults, not lock-in.** Each foundation is an interface with a working implementation attached, so `nemo setup` gets you running in minutes. When you move to your own environment, swap them: point storage at your object store, the database at your managed Postgres and ClickHouse, identity at your IdP over OIDC, and inference at any OpenAI-compatible gateway.
 
 ## The optimization loop
 
@@ -45,28 +86,27 @@ Helix is organized around the loop that turns a working prototype into an agent 
 | **Evaluate** | Score candidates on your benchmarks. Compare accuracy, cost, and latency against the baseline you are trying to beat. | NeMo Gym, Harbor, Evaluator metrics, Eval Author agent |
 | **Verify** | Red-team the candidate, enforce input and output policy, and promote only what passes. | garak, Guardrails, OpenShell |
 
-## Built-in agents
-
-Three agents work the loop with you rather than waiting for you to drive it.
-
-- **Analyst.** Reads production traces and surfaces where and why the agent is failing.
-- **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
-
-## Surfaces
-
-Every capability is reachable from every surface. Pick the one that fits the moment.
-
-| Surface | Use it for |
-|---|---|
-| **NeMo CLI** | The primary interface. Every service under one command, one config, one context. |
-| **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
-| **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
-| **NeMo Studio** | Optional web UI for chat, job monitoring, evaluation results, traces, experiments, and governance review. |
 
 ## When to use Helix vs standalone libraries
 | Consider Helix if **any** of these is true | Consider the libraries if **each** of these is true |
 |---|---|
 | • Need multiple tools and libraries to work together<br>• Something outside your process needs to call the library: another team, another service, a non-Python client, a web UI<br>• It has to run in k8s, multi-tenant, with auth and an audit trail<br>• More than one team or capability needs to point at the same named object<br>• Your differentiation is the agents, not the plumbing | • The language of the library works with your workflow and architecture, for example a Python notebook on your laptop<br>• You do not need to share and persist artifacts such as data, model weights, and secrets in a consistent way<br>• You have opinions about your API conventions and you want to maintain those APIs indefinitely |
+
+## Runs locally, scales to your cluster
+
+The same platform, the same APIs, the same CLI at every size.
+
+| | Local | Kubernetes |
+|---|---|---|
+| **For** | Prototyping, single developer, CI | Teams, production workloads, multinode training |
+| **Install** | `uv tool install`, `nemo setup` | Helm chart |
+| **State** | Embedded Postgres and ClickHouse | External or managed, replicated for HA |
+| **Compute** | Hosted inference providers, no local GPU required | GPU nodes, Volcano for multinode jobs, OpenSandbox for isolated execution |
+| **Access** | Local, single user | OIDC, scoped access keys, role bindings, policy engine, audit trail |
+
+Supported on Linux (Ubuntu 22.04 and 24.04, RHEL 9, Rocky 9, Debian 12) and macOS (Sequoia and Tahoe, CLI and services only, no local GPU workloads). Clusters: minikube, kind, EKS, AKS, GKE, OKE, OpenShift, and on-prem.
+
+You do not have to choose up front. Start on a laptop against a hosted provider and move to a cluster when the workload justifies it.
 
 ## Get Started
 
@@ -193,6 +233,16 @@ nemo setup --install-skills --skills-path ~/.my-agent/skills
 Interactive `nemo setup` can create a `sample` workspace with a Fabric-based
 email security agent and evaluation artifacts. Open the Studio link printed at
 the end of setup to explore them.
+
+## Build on Helix
+
+If you are building an internal agent stack or a customer-facing optimization product, Helix is meant to be the layer you build on, not the product you ship.
+
+- Every capability is a REST API under `/apis/{service}/v2/workspaces/{workspace}/...`, with OpenAPI specs in [`openapi/`](openapi).
+- Multi-tenancy is native: workspaces, projects, entity references, and per-workspace scoping across every service.
+- Access control supports OIDC (Azure AD / Entra ID, generic OIDC), scoped access keys, role bindings, and a policy engine, including plugin-level authorization.
+- The plugin model is the one the first-party capabilities use, so your own services become first-class in the CLI, the SDK, and Studio. Start from [`plugins/example-plugin`](plugins/example-plugin).
+- Apache 2.0. Fork it, extend it, ship it inside your product.
 
 ## Documentation
 
