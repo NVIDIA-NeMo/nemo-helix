@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Route an optimization request to one registered backend."""
+"""Compose registered numeric and prompt optimization backends."""
 
 from __future__ import annotations
 
@@ -73,39 +73,46 @@ def _run_phases(payload: dict[str, Any], *, ctx: JobContext, sdk: SyncHelixClien
     experiment_id = resolve_experiment_id(payload, generate_id=generate_optimize_id)
     output_dir = ctx.storage.persistent / "results" / RESULT_NAME
 
-    request = OptimizationPhaseRequest(copy.deepcopy(payload), plan.phase, experiment_id)
-    try:
-        plan.backend.validate_phase(request, ctx=ctx, sdk=sdk)
-    except OptimizerConfigError as exc:
-        result = OptimizationPhaseResult(
-            phase=plan.phase,
-            backend=plan.backend_name,
-            status=OptimizationPhaseStatus.FAILED,
-            optimized_payload=copy.deepcopy(payload),
-            summary={
-                "experiment_id": experiment_id,
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-                "executed_trials": 0,
-            },
+    preflight_failure = _preflight(plan, payload=payload, experiment_id=experiment_id, ctx=ctx, sdk=sdk)
+    if preflight_failure is not None:
+        _write_artifacts(output_dir, experiment_id, preflight_failure, planned=len(plan))
+        return _result(preflight_failure, experiment_id=experiment_id, output_dir=output_dir, ctx=ctx)
+
+    results: list[OptimizationPhaseResult] = []
+    current_payload = copy.deepcopy(payload)
+    offset = 0
+    for index, item in enumerate(plan):
+        result = item.backend.run_phase(
+            OptimizationPhaseRequest(
+                payload=current_payload,
+                phase=item.phase,
+                experiment_id=experiment_id,
+                trial_number_offset=offset,
+            ),
+            ctx=ctx,
+            sdk=sdk,
         )
-    else:
-        result = plan.backend.run_phase(request, ctx=ctx, sdk=sdk)
-        if result.phase is not plan.phase:
+        if result.phase is not item.phase:
             raise OptimizeRouterError(
-                f"Optimization backend {plan.backend_name!r} returned phase {result.phase.value!r} "
-                f"for a {plan.phase.value!r} request."
+                f"Optimization backend {item.backend_name!r} returned phase {result.phase.value!r} "
+                f"for a {item.phase.value!r} request."
             )
-        if result.backend != plan.backend_name:
+        if result.backend != item.backend_name:
             raise OptimizeRouterError(
-                f"Optimization backend {plan.backend_name!r} returned mismatched backend name {result.backend!r}."
+                f"Optimization backend {item.backend_name!r} returned mismatched backend name {result.backend!r}."
             )
+        results.append(result)
+        offset += result.trial_count
+        current_payload = copy.deepcopy(result.optimized_payload)
+        if result.status is not OptimizationPhaseStatus.COMPLETED:
+            results.extend(_skipped(plan[index + 1 :], current_payload, offset, result.phase))
+            break
 
-    _write_artifacts(output_dir, experiment_id, result)
-    return _result(result, experiment_id=experiment_id, output_dir=output_dir, ctx=ctx)
+    _write_artifacts(output_dir, experiment_id, results, planned=len(plan))
+    return _result(results, experiment_id=experiment_id, output_dir=output_dir, ctx=ctx)
 
 
-def _phase_plan(payload: dict[str, Any]) -> _PhasePlan:
+def _phase_plan(payload: dict[str, Any]) -> list[_PhasePlan]:
     optimizer = payload.get("optimizer")
     if not isinstance(optimizer, Mapping):
         raise OptimizeRouterError("optimizer section must be a mapping.")
@@ -120,13 +127,11 @@ def _phase_plan(payload: dict[str, Any]) -> _PhasePlan:
             continue
         backend_name = _backend_name(section, default_backend)
         plan.append(_PhasePlan(phase, backend_name, _require_backend(backend_name, phase)))
-    if not plan:
-        raise OptimizeRouterError(
-            "No Tune backend selected. Set optimizer.numeric.enabled: true or optimizer.prompt.enabled: true."
-        )
-    if len(plan) > 1:
-        raise OptimizeRouterError("Only one optimization phase may be enabled per request.")
-    return plan[0]
+    if plan:
+        return plan
+    raise OptimizeRouterError(
+        "No Tune backend selected. Set optimizer.numeric.enabled: true or optimizer.prompt.enabled: true."
+    )
 
 
 def _phase_section(optimizer: Mapping[str, Any], name: str) -> dict[str, Any] | None:
@@ -157,50 +162,133 @@ def _require_backend(name: str, phase: OptimizationPhase) -> OptimizationBackend
         raise OptimizeRouterError(str(exc)) from exc
 
 
+def _preflight(
+    plan: list[_PhasePlan],
+    *,
+    payload: dict[str, Any],
+    experiment_id: str,
+    ctx: JobContext,
+    sdk: SyncHelixClient | None,
+) -> list[OptimizationPhaseResult] | None:
+    for index, item in enumerate(plan):
+        try:
+            item.backend.validate_phase(
+                OptimizationPhaseRequest(copy.deepcopy(payload), item.phase, experiment_id),
+                ctx=ctx,
+                sdk=sdk,
+            )
+        except OptimizerConfigError as exc:
+            failure = OptimizationPhaseResult(
+                phase=item.phase,
+                backend=item.backend_name,
+                status=OptimizationPhaseStatus.FAILED,
+                optimized_payload=copy.deepcopy(payload),
+                summary={
+                    "experiment_id": experiment_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "executed_trials": 0,
+                },
+            )
+            return [
+                *_skipped(plan[:index], payload, 0, item.phase),
+                failure,
+                *_skipped(plan[index + 1 :], payload, 0, item.phase),
+            ]
+    return None
+
+
+def _skipped(
+    plan: list[_PhasePlan],
+    payload: dict[str, Any],
+    offset: int,
+    failed_phase: OptimizationPhase,
+) -> list[OptimizationPhaseResult]:
+    return [
+        OptimizationPhaseResult(
+            phase=item.phase,
+            backend=item.backend_name,
+            status=OptimizationPhaseStatus.SKIPPED,
+            optimized_payload=copy.deepcopy(payload),
+            summary={"reason": f"Skipped because the {failed_phase.value!r} phase failed."},
+            trial_number_offset=offset,
+        )
+        for item in plan
+    ]
+
+
 def _write_artifacts(
     output_dir: Path,
     experiment_id: str,
-    result: OptimizationPhaseResult,
+    results: list[OptimizationPhaseResult],
+    *,
+    planned: int,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    status = _overall_status(results)
     summary = {
-        "status": result.status.value,
-        "backend": result.backend,
-        "phase": result.phase.value,
+        "status": status.value,
+        "backend": "orchestrator" if planned > 1 else results[0].backend,
+        "phase": "multi" if planned > 1 else results[0].phase.value,
         "experiment_id": experiment_id,
-        "trial_number_range": result.trial_number_range,
-        "phases": [_phase_summary(result)],
+        "trial_number_range": _trial_range(results),
+        "phases": [_phase_summary(result) for result in results],
     }
     _write_json(output_dir / "optimization_summary.json", summary)
-    _write_json(output_dir / "phase_results.json", [_phase_detail(result)])
+    _write_json(output_dir / "phase_results.json", [_phase_detail(result) for result in results])
 
-    suffix = "failure" if result.status is OptimizationPhaseStatus.FAILED else "summary"
-    name = "study_summary.json" if result.phase is OptimizationPhase.NUMERIC and suffix == "summary" else None
-    name = name or f"{result.phase.value}_phase_{suffix}.json"
-    _write_json(
-        output_dir / name,
-        {
-            "status": result.status.value,
-            "backend": result.backend,
-            "phase": result.phase.value,
-            **dict(result.summary),
-        },
+    for result in results:
+        if result.status is OptimizationPhaseStatus.SKIPPED:
+            continue
+        suffix = "failure" if result.status is OptimizationPhaseStatus.FAILED else "summary"
+        name = "study_summary.json" if result.phase is OptimizationPhase.NUMERIC and suffix == "summary" else None
+        name = name or f"{result.phase.value}_phase_{suffix}.json"
+        _write_json(
+            output_dir / name,
+            {
+                "status": result.status.value,
+                "backend": result.backend,
+                "phase": result.phase.value,
+                **dict(result.summary),
+            },
+        )
+
+    numeric = next(
+        (
+            result
+            for result in results
+            if result.phase is OptimizationPhase.NUMERIC and result.status is OptimizationPhaseStatus.COMPLETED
+        ),
+        None,
     )
+    if numeric is not None and planned > 1:
+        _write_payload(output_dir / "intermediate_numeric_payload.json", numeric.optimized_payload)
+        _write_config(output_dir / "intermediate_numeric_config.yml", numeric.optimized_payload)
 
-    if result.status is OptimizationPhaseStatus.COMPLETED:
-        _write_payload(output_dir / "final_optimized_payload.json", result.optimized_payload)
-        _write_config(output_dir / "final_optimized_config.yml", result.optimized_payload)
+    if status is OptimizationPhaseStatus.COMPLETED and len(results) == planned:
+        _write_payload(output_dir / "final_optimized_payload.json", results[-1].optimized_payload)
+        _write_config(output_dir / "final_optimized_config.yml", results[-1].optimized_payload)
 
 
 def _result(
-    result: OptimizationPhaseResult,
+    results: list[OptimizationPhaseResult],
     *,
     experiment_id: str,
     output_dir: Path,
     ctx: JobContext,
 ) -> dict[str, Any]:
     ref = ctx.results.save(RESULT_NAME, output_dir).model_dump(mode="json")
-    return {**result.to_result_dict(), "experiment_id": experiment_id, "result": ref}
+    if len(results) == 1:
+        return {**results[0].to_result_dict(), "experiment_id": experiment_id, "result": ref}
+    return {
+        "status": _overall_status(results).value,
+        "backend": "orchestrator",
+        "phase": "multi",
+        "experiment_id": experiment_id,
+        "trial_number_range": _trial_range(results),
+        "phases": [_phase_summary(result) for result in results],
+        "result": ref,
+    }
 
 
 def _phase_summary(result: OptimizationPhaseResult) -> dict[str, Any]:
@@ -215,6 +303,20 @@ def _phase_summary(result: OptimizationPhaseResult) -> dict[str, Any]:
 
 def _phase_detail(result: OptimizationPhaseResult) -> dict[str, Any]:
     return {**_phase_summary(result), "artifacts": copy.deepcopy(dict(result.artifacts))}
+
+
+def _overall_status(results: list[OptimizationPhaseResult]) -> OptimizationPhaseStatus:
+    return (
+        OptimizationPhaseStatus.COMPLETED
+        if results and all(result.status is OptimizationPhaseStatus.COMPLETED for result in results)
+        else OptimizationPhaseStatus.FAILED
+    )
+
+
+def _trial_range(results: list[OptimizationPhaseResult]) -> dict[str, int]:
+    start = results[0].trial_number_offset if results else 0
+    count = sum(result.trial_count for result in results)
+    return {"start": start, "end_exclusive": start + count, "count": count}
 
 
 def _write_json(path: Path, value: object) -> None:
