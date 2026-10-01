@@ -113,7 +113,7 @@ resolve the same interpreter as their parent.
 - **Per node, not per worker.** Eight GPU workers on one node share one venv on that node's
   disk; `venvs.py` uses a `STARTED_ENV_BUILDER` lock so it is built once, not eight times.
 - **Different workers can have different GPU requirements.** DPO's worker launches with the
-  `fsdp` venv (no `deep_ep`); GRPO's generation worker with the 
+  `fsdp` venv (no `deep_ep`); GRPO's generation worker with the
   `vllm` venv (`deep_ep`, Hopper-only) — in the same image.
 - `NEMO_RL_PY_EXECUTABLES_SYSTEM=1` collapses every actor into the base venv. We do **not**
   set it.
@@ -269,18 +269,17 @@ IMAGE (built once)                                RUNTIME
   (each `uv sync --extra` is pruned by             (math / code / VLM environments)
    the next; extras never persist here)
 
-/opt/ray_venvs/<actor-fqn>   per-ACTOR venvs, prefetched at build (nine)
-  ├─ …DTensorPolicyWorker       [fsdp]      ────> policy training      (DPO)
+/opt/ray_venvs/<actor-fqn>   per-ACTOR venvs, prefetched at build (seven)
   ├─ …DTensorPolicyWorkerV2     [automodel] ────> policy training      (GRPO, DTensor V2)
-  ├─ …MegatronPolicyWorker      [mcore]     ────> policy training      (GRPO, Megatron;
+  ├─ …MegatronPolicyWorker      [mcore+gym] ────> policy training      (GRPO, Megatron;
   │                                                also hosts Megatron-native generation)
-  ├─ …VllmGenerationWorker      [vllm]      ────> generation           (GRPO, sync)
-  ├─ …VllmAsyncGenerationWorker [vllm]      ────> generation           (GRPO, async — Gym
+  ├─ …VllmGenerationWorker      [vllm+gym]  ────> generation           (GRPO, sync)
+  ├─ …VllmAsyncGenerationWorker [vllm+gym]  ────> generation           (GRPO, async — Gym
   │                                                forces async rollouts)
   ├─ …SyncRolloutActor          [vllm]      ────> rollout driver       (GRPO, sync path)
   ├─ …NemoGym                   [nemo_gym]  ────> Gym actor            (mode A, colocated)
-  ├─ …SandboxedGymActor         [nemo_gym]  ────> Gym proxy actor      (mode B, sandboxed)
-  └─ …SandboxEpisodeBrokerActor [nemo_gym]  ────> per-episode sandbox broker (mode B)
+  └─ …SandboxedGymActor         [nemo_gym]  ────> Gym proxy actor      (mode B, sandboxed)
+       SandboxEpisodeBrokerActor inherits this venv. It has no registry entry.
 
 /opt/gym_venvs/<env>         per-ENVIRONMENT venvs — empty in the shipped image
   ├─ built-in Gym envs   ── created at RUNTIME (prefetch off; opt in via
@@ -293,6 +292,7 @@ IMAGE (built once)                                RUNTIME
 ```text
 driver (base venv)
   └─ Policy ─ DTensorPolicyWorker ×N   →  /opt/ray_venvs/…DTensorPolicyWorker   [fsdp]
+                this venv is not prefetched; it builds on the node if DPO is selected
                 └─ reference model lives INSIDE these same workers
                    (init_reference_model=True — no extra worker, no extra venv)
 ```
@@ -308,9 +308,8 @@ driver (base venv)
   │                                            └─ deep_ep / deep_gemm  → Hopper+ only
   ├─ Rollout     ─ SyncRolloutActor        →  /opt/ray_venvs/…SyncRolloutActor     [vllm]
   └─ Env         ─ mode A: NemoGym         →  /opt/ray_venvs/…NemoGym          [nemo_gym]
-                   mode B: SandboxedGymActor + SandboxEpisodeBrokerActor
-                                           →  /opt/ray_venvs/…SandboxedGymActor [nemo_gym]
-                                              /opt/ray_venvs/…BrokerActor       [nemo_gym]
+                   mode B: SandboxedGymActor →  /opt/ray_venvs/…SandboxedGymActor [nemo_gym]
+                        SandboxEpisodeBrokerActor inherits that venv; it is not prefetched
                      └─ Gym stack + user FileSet run in an isolated OpenSandbox pod
                      └─ per-environment venv →  /opt/gym_venvs/<env>
                           ├─ shipped env  → built on first use (prefetch off by default)
@@ -447,7 +446,7 @@ whenever the *dependency graph* hasn't changed:
   members, `research/`, and the top-level `nemo_rl` package stub) are copied **before**
   the heavy `uv sync`. A source-only RL bump (Python changed, deps unchanged) is then a
   cache hit on the compile layer; only the cheap editable-install step below re-runs.
-- The **full RL source** and the editable root install come **after** the sync.
+- The **full RL source** and the editable root install come **after** the cache-warming sync and the per-worker venv syncs.
 - The SHA pin keeps the resolver-input layer deterministic, so a warm builder reuses
   the whole compile across rebuilds. A brand-new builder has a cold cache and
   recompiles from scratch.
@@ -463,44 +462,48 @@ The warmup `uv sync --extra …` calls populate the **uv cache at `/opt/uv_cache
 ships inside the image** — it has to, because the prefetched venvs symlink into it (see
 "Link mode" below). Do not confuse it with the `--mount=type=cache` the training image
 uses for its editable install, which is build-only and never enters the image. The venvs
-training actually runs in are the per-worker ones under `/opt/ray_venvs`, so the base runs
-`nemo_rl/utils/prefetch_venvs.py` after the source copy to bake them in — the same
-approach NeMo-RL's own release stage uses.
+training actually runs in are the per-worker ones under `/opt/ray_venvs`. The base creates
+those venvs from the actor list below, before the full source copy, and writes the same
+`python-<Class>` wrappers `prefetch_venvs.py` would. The script itself is not imported
+here: that import pulls in the rest of the tree and would bust this layer on every
+source change.
 
 Prefetched (the filters match **actor FQNs**, not extra names):
 
 | Filter | Extra | Needed by |
 |---|---|---|
-| `dtensor_policy_worker.DTensorPolicyWorker` | `fsdp` | DPO policy training |
-| `dtensor_policy_worker_v2.DTensorPolicyWorkerV2` | `automodel` | GRPO policy training — selected by `policy.dtensor_cfg._v2: true`; the only LoRA-capable DTensor worker. The V1 filter does not match it (`dtensor_policy_worker_v2.`) |
-| `megatron_policy_worker.MegatronPolicyWorker` | `mcore` | GRPO policy training on Megatron — selected by `policy.megatron_cfg.enabled: true`; also hosts Megatron-native generation in-process. Does not match modelopt's `megatron_quant_policy_worker.MegatronQuantPolicyWorker` |
-| `vllm.vllm_worker` | `vllm` | GRPO generation — matches **both** `VllmGenerationWorker` and `VllmAsyncGenerationWorker` (NeMo-Gym forces async rollouts, so both are on the path) |
-| `sync_rollout_actor.SyncRolloutActor` | `vllm` | GRPO rollout driver (future, sync path) |
+| `dtensor_policy_worker_v2.DTensorPolicyWorkerV2` | `automodel` | GRPO policy training — selected by `policy.dtensor_cfg._v2: true`; the only LoRA-capable DTensor worker |
+| `megatron_policy_worker.MegatronPolicyWorker` | `mcore` + `nemo_gym` | GRPO policy training on Megatron — selected by `policy.megatron_cfg.enabled: true`; also hosts Megatron-native generation in-process. Does not match modelopt's `megatron_quant_policy_worker.MegatronQuantPolicyWorker` |
+| `vllm.vllm_worker` | `vllm` + `nemo_gym` | GRPO generation — matches **both** `VllmGenerationWorker` and `VllmAsyncGenerationWorker` (NeMo-Gym forces async rollouts, so both are on the path) |
+| `sync_rollout_actor.SyncRolloutActor` | `vllm` | GRPO rollout driver (sync path) |
 | `nemo_gym.NemoGym` | `nemo_gym` | Gym environment actor (mode A, colocated) |
-| `nemo_gym_actor.SandboxedGymActor` | `nemo_gym` | Sandboxed Gym (mode B) — the trusted proxy actor in the training pod |
-| `broker_actor.SandboxEpisodeBrokerActor` | `nemo_gym` | Trusted episode broker — creates per-episode sandboxes so the job sandbox never holds the OpenSandbox credential |
+| `nemo_gym_actor.SandboxedGymActor` | `nemo_gym` | Sandboxed Gym (mode B) — the trusted proxy actor in the training pod. `SandboxEpisodeBrokerActor` inherits this venv |
 
-Filters are **substring matches on actor FQNs**, so eight filters yield nine venvs
+Filters are **substring matches on actor FQNs**, so six filters yield seven venvs
 (`vllm.vllm_worker` matches the sync and async workers alike). They are deliberately specific —
 a bare `vllm` would also match `nemo_rl.modelopt`'s `vllm_quant_worker` and pull in the
 modelopt+vllm combination, and a bare `megatron` would pull in `MegatronValueWorker` and
-modelopt's `MegatronQuantPolicyWorker`.
+modelopt's `MegatronQuantPolicyWorker`. `SandboxEpisodeBrokerActor` is intentionally absent:
+it has no `ACTOR_ENVIRONMENTS` entry, and nemo-sandboxed-gym cannot read that registry, so the
+broker runs in the `SandboxedGymActor` venv of the actor that creates it.
 
 `tests/smoke_gpu/test_rl_training.py` asserts this set exactly
 (`test_prefetched_venvs_match_expected_set`), so a filter that drifts fails the build rather
 than silently shipping an image whose workers rebuild their venv on the node at job start.
 
-One venv is built **per actor, not per extra** — `prefetch_venvs.py` passes the actor FQN as
-the venv name — so the three `nemo_gym`-extra actors above each get their own directory and
-each needs its own filter. `opensandbox` / `tenacity` come in through the extra itself, since
-RL declares `nemo_gym = ["nemo_gym[sandbox]"]`.
+One venv is built **per registered actor, not per extra** — the directory name is the actor
+FQN, as `prefetch_venvs.py` would name it — so `NemoGym` and `SandboxedGymActor` each get a directory even though both
+use `nemo_gym`. `opensandbox` / `tenacity` come in through the extra itself, since RL declares
+`nemo_gym = ["nemo_gym[sandbox]"]`. The worker sync then installs
+`nemo-sandboxed-gym[server,opensandbox,ray]` into each `nemo_gym` venv.
 
 Without this, each venv is built **on the node at first run**, re-resolving and
 recompiling `deep_ep` / `mamba-ssm` / `causal-conv1d` against a cold uv cache on every
 job. Not prefetched (they build on the node if a config selects them): `sglang`, `trtllm`,
-modelopt-quant workers, `DTensorValueWorkerV2` / `MegatronValueWorker` (GRPO is critic-free,
-so there is no value model), and the async-GRPO actors (`AsyncTrajectoryCollector`,
-`ReplayBuffer`).
+`DTensorPolicyWorker` (`fsdp`, DPO), modelopt-quant workers, `DTensorValueWorkerV2` /
+`MegatronValueWorker` (GRPO is critic-free, so there is no value model), and the async-GRPO
+actors (`AsyncTrajectoryCollector`, `ReplayBuffer`). The episode broker is not in that list
+either: it inherits `SandboxedGymActor`'s venv instead of building one.
 
 ### Link mode: why the uv cache ships inside the image
 
