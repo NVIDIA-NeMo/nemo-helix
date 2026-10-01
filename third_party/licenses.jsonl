@@ -243,6 +243,7 @@
 {"name": "nemo-fabric-adapters-common", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-deepagents", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-hermes", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-collector", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-runtime", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay-cli-bin", "license": "APACHE-2.0", "compatible": true}

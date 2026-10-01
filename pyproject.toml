@@ -328,6 +328,7 @@ constraint-dependencies = [
   "nemo-fabric-adapters-common==0.4.0rc1",
   "nemo-fabric-adapters-deepagents==0.4.0rc1",
   "nemo-fabric-adapters-hermes==0.4.0rc1",
+  "nemo-fabric-collector==0.4.0rc1",
   "nemo-fabric-runtime==0.4.0rc1",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
@@ -347,9 +348,6 @@ constraint-dependencies = [
 ]
 
 override-dependencies = [
-  # RC integration pins supersede the retired generated SDK's 0.3 constraints.
-  "nemo-fabric==0.4.0rc1",
-  "nemo-relay==0.9.3",
   # unsloth requires a later version but will never be used on macos. mostly useful for dev
   "datasets>=3.3.1, <=4.3.0",
   "jsonpath-ng>=1.6.1",

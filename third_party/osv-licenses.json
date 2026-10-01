@@ -3259,6 +3259,16 @@
         },
         {
           "package": {
+            "name": "nemo-fabric-collector",
+            "version": "0.4.0rc1",
+            "ecosystem": "PyPI"
+          },
+          "licenses": [
+            "Apache-2.0"
+          ]
+        },
+        {
+          "package": {
             "name": "nemo-fabric-runtime",
             "version": "0.4.0rc1",
             "ecosystem": "PyPI"
@@ -5327,6 +5337,77 @@
               }
             },
             {
+              "modified": "2026-10-01T00:00:04Z",
+              "published": "2026-09-30T23:53:17Z",
+              "schema_version": "1.9.0",
+              "id": "GHSA-gvp8-978c-rx2q",
+              "aliases": [
+                "CVE-2026-103001"
+              ],
+              "summary": "PyJWT.decode() reintroduces options-dict mutation, enabling silent claim-verification bypass on dict reuse",
+              "details": "### Summary\n\n`PyJWT.decode()`/`decode_complete()` mutates a caller-supplied `options` dict in place whenever `verify_signature` is falsy, adding `verify_exp`/`verify_nbf`/`verify_iat`/`verify_aud`/`verify_iss`/`verify_sub`/`verify_jti` keys directly onto that object. If application code reuses the same `options` dict across calls (a config object, a module-level constant, a wrapper's `self.options`), a later call that explicitly sets `verify_signature=True` for a full, normal verification silently inherits the leftover `verify_exp=False` etc. from an earlier `verify_signature=False` call on the same object -- and accepts an expired, wrong-audience, wrong-issuer, or wrong-subject token as valid with no exception. Signature verification itself is unaffected; this is specifically a claims-check bypass.\n\nThis is a regression of an already-fixed, closed issue: originally reported in #679 (2021), fixed in #743 (2022, via a shallow copy of `options`), and silently reintroduced by #1045 (merged 2025-03-05, a typing/logic refactor that dropped the 2022 shallow-copy line). It has been present since #1045 merged, so it likely shipped in several releases already in the wild.\n\n### Details\n\nFile: `jwt/api_jwt.py`, `PyJWT._merge_options()` (called from `decode_complete()`, which backs both `jwt.decode()` and `jwt.decode_complete()`):\n\n```python\ndef _merge_options(self, options=None):\n    if options is None:\n        return self.options\n    if not options.get(\"verify_signature\", True):\n        options[\"verify_exp\"] = options.get(\"verify_exp\", False)\n        options[\"verify_nbf\"] = options.get(\"verify_nbf\", False)\n        # ...5 more, same pattern -- all written directly onto the caller's dict\n    return {**self.options, **options}\n```\n\nNo `dict(options)` copy occurs before these writes, unlike the pre-2025-03-05 code (see #743's fix, `options = dict(options or {})`). Confirmed via `gh api repos/jpadilla/pyjwt/commits/29fbfc36` that #1045's diff removes that line. Confirmed still present on current `main` via a live fetch of `jwt/api_jwt.py`.\n\n### PoC\n\nTwo scripts, each run twice (separate processes), identical output both times (except Python object `id()`), saved locally and available on request:\n\n```python\nimport jwt, time\n\nINSECURE_OPTIONS = {\"verify_signature\": False}\n\nsecret = \"s3cr3t\"\nexpired_token = jwt.encode(\n    {\"exp\": int(time.time()) - 3600, \"data\": \"x\"}, secret, algorithm=\"HS256\"\n)\n\njwt.decode(expired_token, options=INSECURE_OPTIONS)\nprint(INSECURE_OPTIONS)\n# The dict has been silently mutated with 7 new keys, including verify_exp: False.\n\nINSECURE_OPTIONS[\"verify_signature\"] = True\nresult = jwt.decode(expired_token, secret, algorithms=[\"HS256\"], options=INSECURE_OPTIONS)\nprint(result)\n# No exception raised. Expected: jwt.ExpiredSignatureError, since verify_signature=True\n# was explicitly requested on this call.\n```\n\nReproduced deterministically across 2 independent process runs.\n\n### Impact\n\nPreconditions: the calling application must reuse a mutable `options` dict object across two or more `decode()`/`decode_complete()` calls with different intent (e.g. one \"insecure peek\" call followed by a \"fully verified\" call on the same dict, config object, or instance attribute). This is a real, plausible pattern but not universal; it does not affect code that constructs a fresh `options` dict per call.\n\nWhen triggered: a signed-but-expired (or wrong-aud/iss/sub/jti) token is silently accepted as fully verified, with no warning or exception. This is an authentication/claims-verification bypass, not a signature-verification bypass.\n\nScope: regression present since PR #1045 (merged 2025-03-05), affecting every PyJWT release since then up to and including the current 2.13.0.\n\nSuggested fix: restore a shallow copy inside `_merge_options()` itself (rather than relying on a caller-side copy), so every caller of `_merge_options` is covered:\n\n```python\ndef _merge_options(self, options=None):\n    if options is None:\n        return self.options\n    options = dict(options)  # never mutate the caller's dict\n    if not options.get(\"verify_signature\", True):\n        options.setdefault(\"verify_exp\", False)\n        options.setdefault(\"verify_nbf\", False)\n        options.setdefault(\"verify_iat\", False)\n        options.setdefault(\"verify_aud\", False)\n        options.setdefault(\"verify_iss\", False)\n        options.setdefault(\"verify_sub\", False)\n        options.setdefault(\"verify_jti\", False)\n    return {**self.options, **options}\n```\n\nFound via a property-based audit (copy/clone independence across widely-used Python libraries); both repro scripts were written and independently re-run before this report.\n\n## Maintainer update \u2014 2026-09-08\n\nWe reproduced the reported behavior on PyJWT 2.13.0 at source SHA `7144e4534c34810f4525dc4578a32addd8212cff`. A caller-supplied mutable `options` mapping was modified when `verify_signature` was false; reusing that mapping after re-enabling signature verification could leave registered-claim checks disabled. This is a conditional claim-verification bypass, not a signature-forgery issue.\n\nA narrow fix has been prepared: PyJWT now copies the options mapping before applying defaults. Regression coverage includes `decode()`, `decode_complete()`, constructor input preservation, mutable-mapping compatibility, and reuse of an options mapping across verification modes. The focused tests pass, the full suite passes with 369 tests and 4 intentional cryptography-environment skips, and lint/format/type checks pass.\n\nThe advisory remains in triage while the fix goes through release planning. The independently verified range in this investigation is 2.13.0; reports of earlier affected versions should include the exact version and reproduction details.",
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:H/A:N"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "pyjwt",
+                    "purl": "pkg:pypi/pyjwt"
+                  },
+                  "ranges": [
+                    {
+                      "type": "ECOSYSTEM",
+                      "events": [
+                        {
+                          "introduced": "2.11.0"
+                        },
+                        {
+                          "last_affected": "2.13.0"
+                        }
+                      ]
+                    }
+                  ],
+                  "versions": [
+                    "2.11.0",
+                    "2.12.0",
+                    "2.12.1",
+                    "2.13.0"
+                  ],
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-gvp8-978c-rx2q/GHSA-gvp8-978c-rx2q.json"
+                  }
+                }
+              ],
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/jpadilla/pyjwt/security/advisories/GHSA-gvp8-978c-rx2q"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/jpadilla/pyjwt/commit/0c87c8c8b1a74cac99ad8115f3050efcb7fbed35"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/jpadilla/pyjwt"
+                }
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-471"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-30T23:53:17Z",
+                "nvd_published_at": null,
+                "severity": "MODERATE"
+              }
+            },
+            {
               "modified": "2026-09-29T23:30:03Z",
               "published": "2026-09-29T23:17:55Z",
               "schema_version": "1.9.0",
@@ -5971,6 +6052,16 @@
                 "GHSA-ffc3-869f-jxw9"
               ],
               "max_severity": "9.1"
+            },
+            {
+              "ids": [
+                "GHSA-gvp8-978c-rx2q"
+              ],
+              "aliases": [
+                "CVE-2026-103001",
+                "GHSA-gvp8-978c-rx2q"
+              ],
+              "max_severity": "6.5"
             },
             {
               "ids": [
@@ -7370,6 +7461,167 @@
               ]
             },
             {
+              "modified": "2026-10-01T00:00:04Z",
+              "published": "2026-09-30T23:49:25Z",
+              "schema_version": "1.9.0",
+              "id": "GHSA-3hv7-mjh2-fv65",
+              "summary": "Tornado: Unbounded query-string argument count allows event-loop-stalling DoS",
+              "details": "## Summary\n\n`HTTPServerRequest.__init__` in `tornado/httputil.py` parses the URL query string via\n`parse_qs_bytes()` with no field-count limit \u2014 while the sibling POST-body parsing path\n(`parse_body_arguments`) received a `max_num_fields=1000` cap added earlier in this exact\nsame release (v6.5.8, commit `8d6363ed`), explicitly to bound parsing cost for the identical\nunderlying primitive. This leaves the query-string path with the resource-exhaustion exposure\nthe body-path fix was meant to close.\n\n**File**: `tornado/httputil.py`, line 553 (`HTTPServerRequest.__init__`)\n\n### Root Cause\n\n```python\n# tornado/httputil.py:553 (before fix)\nself.arguments = parse_qs_bytes(self.query, keep_blank_values=True)\n```\n\nCompare with the POST-body path fixed one commit earlier in the same release:\n\n```python\n# tornado/httputil.py:1038-1041\nuri_arguments = parse_qs_bytes(\n    body,\n    keep_blank_values=True,\n    max_num_fields=config.urlencoded.max_arguments,  # default 1000\n)\n```\n\nBoth call sites funnel through the same `tornado.escape.parse_qs_bytes` (a thin wrapper over\n`urllib.parse.parse_qs`), which is exactly why `max_num_fields` was added to\n`urllib.parse.parse_qsl` upstream \u2014 to let frameworks bound field count. The fix was applied\nonly to the body path; the query-string path was missed.\n\nThe request line + headers together are capped at `max_header_size` (default 65536 bytes), so\nthis is not literally unbounded, but a single ~64KB request line can carry thousands of short\n`key=value` pairs \u2014 far beyond the 1000-field limit the maintainer judged appropriate for the\nstructurally identical body case.\n\n### Attack Scenario\n\n1. Attacker sends a `GET` request whose query string is packed with thousands of short fields\n   (e.g. `k0=1&k1=1&...&k7799=1`, ~61KB), fitting comfortably under `max_header_size`. No\n   authentication, cookies, or prior state required.\n2. Tornado accepts and parses this with no field-count cap, unlike the equivalent POST-body\n   request (which is correctly rejected with 400 once >1000 fields are present).\n3. Parsing thousands of fields is CPU work performed synchronously inside Tornado's\n   single-threaded `IOLoop`. Several such requests in flight concurrently stall the event\n   loop, delaying processing of *all* other connections on that loop \u2014 not just the\n   attacker's own request.\n\n### Verification (dynamic, local reproduction against v6.5.8)\n\nRan the unmodified v6.5.8 source directly (no external dependencies needed) with a minimal\n`tornado.web.Application` on `127.0.0.1:8888`.\n\n- Identical 7800-field/~61KB payload sent as GET query string \u2192 `200 OK`; sent as POST body\n  (`application/x-www-form-urlencoded`) \u2192 `400 Bad Request` (correctly rejected by the\n  existing `max_num_fields` body-path limit). This confirms the asymmetry directly.\n- Per-request parse cost: baseline (`/?a=1`) averaged 1.86ms; the 7800-field query string\n  averaged 25.1ms (~13x).\n- Event-loop-blocking amplification (raw-socket test, isolating server-side stall from\n  client overhead): with 10 sequential baseline probe requests fired with no load, average\n  latency was 1.47ms (max 5.9ms). With 5 concurrent 61KB/7800-field requests in flight,\n  the same baseline probes averaged 13.0ms (max 118.1ms) \u2014 an **8.9x average slowdown** for\n  unrelated clients, produced by ~305KB of unauthenticated attacker traffic.\n\n### Impact\n\nAll Tornado servers/applications are affected \u2014 this triggers on every request with a query\nstring, independent of application/handler logic. An unauthenticated, unprivileged remote\nattacker can measurably degrade response times for all other clients sharing the same\n`IOLoop`, using a small amount of bandwidth and no special conditions. This is an\navailability/DoS concern; no confidentiality or integrity impact.\n\n### Recommended Fix\n\n```python\n# tornado/httputil.py \u2014 HTTPServerRequest.__init__\nif uri is not None:\n    self.path, sep, self.query = uri.partition(\"?\")\ntry:\n    self.arguments = parse_qs_bytes(\n        self.query,\n        keep_blank_values=True,\n        max_num_fields=_DEFAULT_PARSE_BODY_CONFIG.urlencoded.max_arguments,\n    )\nexcept ValueError as e:\n    raise HTTPInputError(\"Invalid query string: %s\" % e) from e\n```\n\nThis reuses the existing `ParseUrlEncodedConfig.max_arguments` default (1000) via the\nmodule's `_DEFAULT_PARSE_BODY_CONFIG`, matching the POST-body limit and honoring any global\noverride via `set_parse_body_config()`. The `try/except` is necessary because \u2014 unlike\n`parse_body_arguments`, which already wraps its call and converts `ValueError` into a clean\n`HTTPInputError`/400 \u2014 the query-string call site currently has no such handling, so without\nit, a request exceeding the limit would raise an uncaught `ValueError` instead of a clean 400.\n\nVerified: with the fix applied, requests with \u22641000 query-string fields are unaffected;\nrequests with >1000 fields are rejected with `400 Bad Request` (consistent with the POST-body\nbehavior); Tornado's own `httputil_test` and `web_test` suites (256 tests) pass unchanged.",
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "type": "ECOSYSTEM",
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.9"
+                        }
+                      ]
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5.8",
+                    "6.5b1"
+                  ],
+                  "database_specific": {
+                    "last_known_affected_version_range": "<= 6.5.8",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-3hv7-mjh2-fv65/GHSA-3hv7-mjh2-fv65.json"
+                  }
+                }
+              ],
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-3hv7-mjh2-fv65"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3719"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/03945136ea9746eccf61caf88edae39642e59c93"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/8a61dd6005f42733015160f3c23a2bcffe200542"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.9"
+                }
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-770"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-30T23:49:25Z",
+                "nvd_published_at": null,
+                "severity": "MODERATE"
+              }
+            },
+            {
               "modified": "2026-09-16T03:56:01Z",
               "published": "2026-09-01T20:17:38Z",
               "schema_version": "1.9.0",
@@ -7530,6 +7782,337 @@
                 "github_reviewed_at": "2026-09-01T20:17:38Z",
                 "nvd_published_at": null,
                 "severity": "MODERATE"
+              }
+            },
+            {
+              "modified": "2026-10-01T00:00:05Z",
+              "published": "2026-09-30T23:48:55Z",
+              "schema_version": "1.9.0",
+              "id": "GHSA-c2m8-h5v5-343r",
+              "summary": "Tornado: StaticFileHandler follows symlinks outside static root (path traversal)",
+              "details": "### Summary\nStaticFileHandler allows an unauthenticated attacker to read arbitrary files from the server's filesystem by requesting a path that resolves to a symbolic link placed inside the static root directory. Any application that serves user-uploadable content, or whose static directory is populated by a build/deploy pipeline that creates symlinks (e.g. npm link, webpack, Docker volume mounts, CDN sync tools), is affected. An attacker who can trigger the creation of a symlink pointing outside the static root\u2014or exploit one that already exists\u2014can retrieve sensitive files such as /etc/passwd, private keys, configuration files, or application secrets.\n\n\n\n### Details\nThe vulnerability is in tornado.web.StaticFileHandler, specifically in the interaction between two methods in [tornado/web.py](vscode-webview://1grdaaa6v64itrol06qu70pq3d1b9h9im5c3npvvc9snaprc1q9f/tornado/web.py):\n- [get_absolute_path](https://github.com/tornadoweb/tornado/blob/0ca3c5f8279d402b245718d16522bc18a8f5d958/tornado/web.py#L2932) uses `os.path.abspath()` to resolve the requested path:\n- [validate_absolute_path](https://github.com/tornadoweb/tornado/blob/0ca3c5f8279d402b245718d16522bc18a8f5d958/tornado/web.py#L2935) uses the same `os.path.abspath()` on the root, then performs a string prefix check:\n\n`os.path.abspath()` normalises . and .. segments but does not resolve symbolic links. As a result, a path like `/var/www/static/link` passes the `startswith(\"/var/www/static/\")` check regardless of where `link` actually points.\n\nImmediately after, `os.path.exists()` and `os.path.isfile()`  **do follow symlinks**, so the file they ultimately open is the symlink's target. The fix would be to replace os.path.abspath() with os.path.realpath() in both methods, so the resolved real path of the symlink target is validated against the root, not just its string representation inside the static directory.\n\n### PoC\n_Complete instructions, including specific configuration details, to reproduce the vulnerability._\nPrerequisites: Python 3.x, Tornado installed.\n1. Create the environment\n```\nmkdir -p /tmp/static\necho \"DB_PASSWORD=s3cr3t\" > /tmp/secret.conf   \nln -s /tmp/secret.conf /tmp/static/config.conf \n```\n2. Minimal vulnerable server (server.py):\n```\nimport tornado.web, tornado.ioloop\n\napp = tornado.web.Application([\n    (r\"/static/(.*)\", tornado.web.StaticFileHandler, {\"path\": \"/tmp/static\"}),\n])\napp.listen(8888)\ntornado.ioloop.IOLoop.current().start()\n```\n3. Exploit:\n`curl http://localhost:8888/static/config.conf`\n\n### Impact\nAny application using StaticFileHandler is potentially affected if:\n- the static directory contains symlinks pointing outside it (common with build tooling), or\n- the application allows file uploads into the static directory without stripping symlinks.\n\nAn unauthenticated remote attacker can read any file readable by the process user: application secrets, private TLS keys, database credentials, /etc/shadow, SSH keys, or source code (depending on the process's filesystem permissions).",
+              "severity": [
+                {
+                  "type": "CVSS_V4",
+                  "score": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "type": "ECOSYSTEM",
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.9"
+                        }
+                      ]
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5.8",
+                    "6.5b1"
+                  ],
+                  "database_specific": {
+                    "last_known_affected_version_range": "<= 6.5.8",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-c2m8-h5v5-343r/GHSA-c2m8-h5v5-343r.json"
+                  }
+                }
+              ],
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-c2m8-h5v5-343r"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3719"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/437ab5f76565403b3403438d2e555d11f8128d32"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/f9f50b8bab265a2abf9f2415a3d2da6264a5450b"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.9"
+                }
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-59"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-30T23:48:55Z",
+                "nvd_published_at": null,
+                "severity": "HIGH"
+              }
+            },
+            {
+              "modified": "2026-10-01T00:00:05Z",
+              "published": "2026-09-30T23:49:13Z",
+              "schema_version": "1.9.0",
+              "id": "GHSA-chx6-46f5-w4vp",
+              "summary": "tornado: CurlAsyncHTTPClient enforces no response-size limit \u2014 decompression bomb drives unbounded memory accumulation to OOM",
+              "details": "An unbounded memory accumulation (decompression bomb) in `tornado.curl_httpclient.CurlAsyncHTTPClient` \u2014 the client-side sibling gap of CVE-2026-49855 \u2014 verified end-to-end on the 2026-08-15 master snapshot (`6.6.dev1`) and present unchanged in the latest release tag `v6.5.8` and on master (checked 2026-08-17). When a Tornado application configures the curl client (the documented deployment for proxy support / advanced TLS options) and `fetch()`es an attacker-chosen or attacker-compromised URL with default `decompress_response=True`, a malicious server replying `Content-Encoding: gzip` with a ~2.8 MB wire bomb drove the client's RSS from 30,884 kB to **1,032,100 kB (~1008 MB) in 3.18 s** (~350 MB/s, monotonic, no plateau) until the kernel OOM-killed the process (exit 137, cgroup `OOMKilled=true`) \u2014 with the transfer only 67% complete and **no client-side size check ever intervening**: `curl_httpclient.py` contains zero occurrences of `max_body_size`/`MAXFILESIZE`. The identical bomb against the default `SimpleAsyncHTTPClient` fails cleanly at ~65 MB, because every size gate CVE-2026-49855 added (compressed CL, chunked total, cumulative decompressed size \u2014 `http1connection.py:620,676,742`) lives in code the curl client never executes. This is a distinct component from the published advisory (which fixed `_GzipMessageDelegate`/`SimpleAsyncHTTPClient` only) and from the other curl-client advisories (credential handle-reuse GHSA-pw6j-qg29-8w7f, header CRLF GHSA-w235-7p84-xx57); the file's full commit history (latest 2026-06-17) shows no response-size work.\n\n## Details\n\n`tornado/curl_httpclient.py` (line numbers identical on master `6.6.dev1`, `v6.5.8`, and the audited snapshot):\n\n```python\n\"buffer\": BytesIO(),                                  # :202 \u2014 plain BytesIO, no accounting\n...\nelse:\n    write_function = buffer.write                     # :359 \u2014 every decompressed byte lands here\ncurl.setopt(pycurl.WRITEFUNCTION, write_function)     # :360\n...\nif request.decompress_response:                       # default True (HTTPRequest)\n    curl.setopt(pycurl.ENCODING, \"gzip,deflate\")      # :373-374 \u2014 libcurl advertises + auto-decodes\n```\n\nlibcurl decompresses the response **before** invoking `WRITEFUNCTION`, so the callback receives decompressed bytes, which are appended to an unbounded `BytesIO` until the transfer ends or the process dies. The only ceiling is `request_timeout` (default 20 s) \u2014 at zlib's hundreds of MB/s that still permits many GB of accumulation; the PoC raised it to 300 s and the 1 GiB cgroup cap was hit in 3.2 s regardless. There is no `pycurl.MAXFILESIZE`, no `max_buffer_size`/`max_body_size` plumbing (the constructor accepts no body-size option), and `streaming_callback` users fare no better (the callback variant at `:353-356` also performs zero accounting).\n\nContrast \u2014 `SimpleAsyncHTTPClient` path (`tornado/http1connection.py`), all absent from the curl path:\n\n```python\nif cast(int, content_length) > self._max_body_size:        # :620  Content-Length gate\nif total_size > self._max_body_size:                       # :676  chunked total gate\nif self._decompressed_body_size > self._max_body_size:     # :742  CVE-2026-49855 decompressed gate\n```\n\n`SimpleAsyncHTTPClient.initialize()` defaults `max_buffer_size = 104857600` (100 MiB) with `max_body_size` defaulting to it (`simple_httpclient.py:117-121`); `CurlAsyncHTTPClient.initialize()` has no corresponding parameter at all.\n\nAttack chain (attacker = malicious HTTP server; victim = any Tornado app doing `fetch()` on attacker-influenced URLs \u2014 URL fetchers, webhook processors, link previewers, RSS/probe pollers):\n\n1. App configures `AsyncHTTPClient.configure(\"tornado.curl_httpclient.CurlAsyncHTTPClient\")` (documented for proxy support; proxies are only supported with the curl client).\n2. App calls `fetch(\"http://attacker/...\")` with defaults \u2192 request advertises `Accept-Encoding: gzip,deflate`.\n3. Attacker replies `200`, `Content-Encoding: gzip`, `Transfer-Encoding: chunked`, body = a gzip stream of zeros (4,174,525 wire bytes expanding to 4 GiB, 1029:1, sent in 64 KB chunks).\n4. libcurl auto-decodes at ~350 MB/s into `buffer.write` with no size accounting \u2192 process RSS climbs linearly until OOM. The response need not complete: the client died with 2,818,048/4,174,525 wire bytes delivered (67%).\n\nVariant without compression: `decompress_response=False` plus an endless streaming body (no Content-Length, no final chunk) feeds the same unaccounted `buffer.write` \u2014 this client never enforces any cap on any path.\n\n## PoC\n\nVerified end-to-end 2026-08-15 in a single container (cgroup `--memory 1g --memory-swap 1g` so the exhaustion endpoint is safe and fast to observe), two processes over a real TCP socket on `127.0.0.1:8081`: a raw-socket malicious server (`evil_server.py`, builds the 4 GiB-of-zeros gzip bomb once, serves it with chunked framing) and the Tornado victim (`victim_curl.py`, configures `CurlAsyncHTTPClient`, `fetch(..., request_timeout=300)`, samples `/proc/self/status` VmRSS every 0.2 s from a monitor thread so the curve survives the OOM kill).\n\n### Build & run the victim\n\n```bash\ngit clone https://github.com/tornadoweb/tornado\ncd tornado\npip install pycurl\npython evil_server.py &     # 127.0.0.1:8081; prints BOMB_BUILT wire_bytes=... ratio=... EVIL_LISTENING\npython victim_curl.py       # victim: CurlAsyncHTTPClient fetch -> expect linear RSS rise -> OOM\npython victim_simple.py     # control: default SimpleAsyncHTTPClient on the same bomb\n```\n\nVerified environment: debian:bookworm-slim, Python 3.11.2, python3-pycurl 7.45.2 (libcurl 7.88.1, zlib 1.2.13), tornado master snapshot `6.6.dev1` of 2026-08-15 run from the source tree (`sys.path`), container memory capped at 1 GiB. `curl_httpclient.py` verified byte-equivalent (still zero size-limit references) in tag `v6.5.8` and on master as of 2026-08-17.\n\n### Reproduction steps\n\n1. **Precondition \u2014 the documented curl-client deployment fetching a remote URL.** The vulnerability requires the application to use `CurlAsyncHTTPClient` (the standard configuration when proxy support or advanced TLS options are needed) with default `decompress_response=True`, and to fetch a URL whose server the attacker controls or has compromised. `victim_curl.py` implements exactly that (`AsyncHTTPClient.configure(\"tornado.curl_httpclient.CurlAsyncHTTPClient\")` \u2192 `fetch()`), and the server log confirms the ENCODING path engaged \u2014 the victim's request arrived with `User-Agent: Mozilla/5.0 (compatible; pycurl)` and `Accept-Encoding: gzip,deflate`.\n\n2. **Attack:** start `evil_server.py`, wait for `EVIL_LISTENING`, then run `victim_curl.py` (the fetch itself is the attack; no further interaction).\n\n3. **Expected:** `victim_curl_rss.log` shows VmRSS 30,884 \u2192 1,032,100 kB over 3.18 s, rising ~350 MB/s with no plateau; the container kills the victim (`exit 137`, docker `OOMKilled=true`); the server logs `CLIENT_DIED_MID_TRANSFER wire_sent=2818048/4174525` \u2014 the accumulation is bounded only by available memory, never by a client-side check, and the 4 GiB payload was never fully delivered.\n\n4. **Variant:** with `decompress_response=False` and an unterminated chunked body (server keeps sending forever), the same `buffer.write` path accumulates unbounded plain bytes \u2014 no compression needed; `request_timeout` only extends the ceiling.\n\n5. **Control:** `victim_simple.py` fetches the identical bomb with the default `SimpleAsyncHTTPClient` \u2192 clean `FETCH_FAILED: HTTP 599: Connection closed`, RSS peak ~65 MB (24,984 \u2192 66,712 kB), script exit 0 \u2014 the CVE-2026-49855 accounting in `http1connection.py` aborts the transfer, proving the gap is specific to the curl client.\n\n### PoC source\n\nFull PoC source (**victim_curl.py**, stdlib only, no dependencies): [victim_curl.py](https://gist.github.com/afldl/211c0e7af8175c2eabab53ed037c435d) (secret gist, unlisted).\n\n\nThe gist carries `evil_server.py` (bomb server), `victim_curl.py` (victim), `victim_simple.py` (control), and `REPRODUCE.md`.\n\n### Captured output (2026-08-15 run, verbatim excerpts)\n\n```\nevil_server.log:\nBOMB_BUILT wire_bytes=4174525 decompressed_bytes=4294967296 ratio=1029:1\nEVIL_LISTENING 127.0.0.1:8081\nREQUEST_FROM 127.0.0.1:57544 -> GET /bomb HTTP/1.1\nREQUEST_HEADERS:\nGET /bomb HTTP/1.1\nHost: 127.0.0.1:8081\nUser-Agent: Mozilla/5.0 (compatible; pycurl)\nAccept: */*\nAccept-Encoding: gzip,deflate\nWIRE_SENT 65536/4174525\nWIRE_SENT 2162688/4174525\nCLIENT_DIED_MID_TRANSFER wire_sent=2818048/4174525 err=ConnectionResetError(104, 'Connection reset by peer')\n\nvictim_curl_rss.log (VmRSS kB, every 0.2 s):\n0.00  30884\n0.61  231848\n1.41  514720\n2.22  794480\n2.82 1000756\n3.18 1032100        <- last sample before kill\n\ndriver_f1.log:\ntimeout 240 python3 /e2e/F1/victim_curl.py ...  606 Killed\nVICTIM_CURL_EXIT=137         # docker inspect -> OomKilled: true\n\nvictim_simple.log (control, same bomb):\nFETCH_FAILED: HTTP 599: Connection closed\nSCRIPT_FINISHED_NORMALLY     # exit 0, VmRSS peak 66712 kB\n```\n\nHonest framing of the endpoint: the OOM kill at ~1008 MB was forced by the test's 1 GiB cgroup cap as the observation instrument; the \"unbounded\" claim rests on the linear no-plateau RSS curve, death at 67% wire delivery, and the absence of any size accounting in the code path \u2014 with more memory the transfer would have continued to the full 4 GiB payload.\n\n## Impact\n\nDenial of service (memory exhaustion) of any Tornado application that uses the curl HTTP client and fetches attacker-influenced URLs. A single ~4 MB response kills a 1 GiB process in ~3 s; wire cost scales as `available_memory / 1000`. Because the accumulation happens on the shared event loop's client, one malicious response takes down the entire application (all concurrently served users), and a slow endless-body variant drains memory gradually below detection thresholds. The attack requires no privileges, no user interaction, and only that the victim's configured client visits the attacker's origin.\n\n### Suggested fix\n\nEnforce a byte budget in the write path of `CurlAsyncHTTPClient`: wrap the `WRITEFUNCTION` (both the `buffer.write` branch and the `streaming_callback` branch) in a counter that aborts the transfer (`curl.setopt(pycurl.FAILONERROR)`-style cancellation or raising from the callback) once the received total exceeds `max_body_size`, plumbed from `initialize()` with the same 100 MiB default as `SimpleAsyncHTTPClient`. Because libcurl decompresses before the write callback, the counter naturally measures *decompressed* bytes \u2014 the same semantics as the CVE-2026-49855 fix. (`pycurl.MAXFILESIZE` alone is insufficient: it applies to the compressed transfer size.)\n\n### Affected versions\n\n- **<= 6.5.8** (latest tag; the curl client has never had a response-size limit) and master (`6.6.dev1`, verified 2026-08-15/17).\n- 6.5.6's CVE-2026-49855 fix covered `SimpleAsyncHTTPClient`/`http1connection.py` only; `curl_httpclient.py` was not touched.\n\n## Credit\n\nReported by the diff/ambidiff security research effort (afldl).",
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "tornado",
+                    "purl": "pkg:pypi/tornado"
+                  },
+                  "ranges": [
+                    {
+                      "type": "ECOSYSTEM",
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "6.5.9"
+                        }
+                      ]
+                    }
+                  ],
+                  "versions": [
+                    "0.2",
+                    "1.0",
+                    "1.1",
+                    "1.1.1",
+                    "1.2",
+                    "1.2.1",
+                    "2.0",
+                    "2.1",
+                    "2.1.1",
+                    "2.2",
+                    "2.2.1",
+                    "2.3",
+                    "2.4",
+                    "2.4.1",
+                    "3.0",
+                    "3.0.1",
+                    "3.0.2",
+                    "3.1",
+                    "3.1.1",
+                    "3.2",
+                    "3.2.1",
+                    "3.2.2",
+                    "4.0",
+                    "4.0.1",
+                    "4.0.2",
+                    "4.1",
+                    "4.1b2",
+                    "4.2",
+                    "4.2.1",
+                    "4.2b1",
+                    "4.3",
+                    "4.3b1",
+                    "4.3b2",
+                    "4.4",
+                    "4.4.1",
+                    "4.4.2",
+                    "4.4.3",
+                    "4.4b1",
+                    "4.5",
+                    "4.5.1",
+                    "4.5.2",
+                    "4.5.3",
+                    "4.5b1",
+                    "4.5b2",
+                    "5.0",
+                    "5.0.1",
+                    "5.0.2",
+                    "5.0a1",
+                    "5.0b1",
+                    "5.1",
+                    "5.1.1",
+                    "5.1b1",
+                    "6.0",
+                    "6.0.1",
+                    "6.0.2",
+                    "6.0.3",
+                    "6.0.4",
+                    "6.0a1",
+                    "6.0b1",
+                    "6.1",
+                    "6.1b1",
+                    "6.1b2",
+                    "6.2",
+                    "6.2b1",
+                    "6.2b2",
+                    "6.3",
+                    "6.3.1",
+                    "6.3.2",
+                    "6.3.3",
+                    "6.3b1",
+                    "6.4",
+                    "6.4.1",
+                    "6.4.2",
+                    "6.4b1",
+                    "6.5",
+                    "6.5.1",
+                    "6.5.2",
+                    "6.5.3",
+                    "6.5.4",
+                    "6.5.5",
+                    "6.5.6",
+                    "6.5.7",
+                    "6.5.8",
+                    "6.5b1"
+                  ],
+                  "database_specific": {
+                    "last_known_affected_version_range": "<= 6.5.8",
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-chx6-46f5-w4vp/GHSA-chx6-46f5-w4vp.json"
+                  }
+                }
+              ],
+              "references": [
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/security/advisories/GHSA-chx6-46f5-w4vp"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/pull/3719"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/15f056080d8e456f92cca8ad0c33e5a5480414ac"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/6564e0a0922c16f239d3a18adccd04736e380c89"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/aa2eb0d989716ac00fe8d7a9919b81c1eccd6ec4"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/commit/e412435febba4569c552c5c9054f1bf92bd171a9"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/tornadoweb/tornado"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/tornadoweb/tornado/releases/tag/v6.5.9"
+                }
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-400",
+                  "CWE-409"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-30T23:49:13Z",
+                "nvd_published_at": null,
+                "severity": "HIGH"
               }
             },
             {
@@ -7799,6 +8382,15 @@
             },
             {
               "ids": [
+                "GHSA-3hv7-mjh2-fv65"
+              ],
+              "aliases": [
+                "GHSA-3hv7-mjh2-fv65"
+              ],
+              "max_severity": "5.3"
+            },
+            {
+              "ids": [
                 "GHSA-8423-8fgw-73vq"
               ],
               "aliases": [
@@ -7806,6 +8398,24 @@
                 "GHSA-8423-8fgw-73vq"
               ],
               "max_severity": "6.9"
+            },
+            {
+              "ids": [
+                "GHSA-c2m8-h5v5-343r"
+              ],
+              "aliases": [
+                "GHSA-c2m8-h5v5-343r"
+              ],
+              "max_severity": "8.2"
+            },
+            {
+              "ids": [
+                "GHSA-chx6-46f5-w4vp"
+              ],
+              "aliases": [
+                "GHSA-chx6-46f5-w4vp"
+              ],
+              "max_severity": "7.5"
             },
             {
               "ids": [
@@ -8141,6 +8751,140 @@
               ]
             },
             {
+              "modified": "2026-10-01T00:00:04Z",
+              "published": "2026-09-01T15:31:13Z",
+              "schema_version": "1.9.0",
+              "id": "GHSA-x9r9-c232-4q39",
+              "aliases": [
+                "CVE-2026-80047"
+              ],
+              "summary": "Hugging Face Transformers downloads custom generation code before trust consent",
+              "details": "A vulnerability in Hugging Face Transformers (versions 4.49.0, <= 5.8.1) allows remote Python files to be written to local disk without user consent when using GenerativePreTrainedModel.load_custom_generate(). The function fetches and caches a remote module file before performing the required trust_remote_code consent check, inverting the security model enforced by other code-loading paths (such as AutoConfig, AutoModel, and AutoTokenizer). As a result, attacker\u2011controlled Python code from custom_generate/generate.py is copied into the user\u2019s ~/.cache/huggingface/modules directory even if the user declines the trust prompt. Although execution is correctly gated, the file write is not reversible and can persist across sessions. This can lead to persistent, unauthorized files on disk and stale cache collisions where cached attacker code may later be executed during trusted model loads. The issue stems from an unconditional file write in dynamic_module_utils.py prior to any trust verification.",
+              "severity": [
+                {
+                  "type": "CVSS_V3",
+                  "score": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"
+                }
+              ],
+              "affected": [
+                {
+                  "package": {
+                    "ecosystem": "PyPI",
+                    "name": "transformers",
+                    "purl": "pkg:pypi/transformers"
+                  },
+                  "ranges": [
+                    {
+                      "type": "ECOSYSTEM",
+                      "events": [
+                        {
+                          "introduced": "4.49.0"
+                        },
+                        {
+                          "last_affected": "5.8.1"
+                        }
+                      ]
+                    }
+                  ],
+                  "versions": [
+                    "4.49.0",
+                    "4.50.0",
+                    "4.50.1",
+                    "4.50.2",
+                    "4.50.3",
+                    "4.51.0",
+                    "4.51.1",
+                    "4.51.2",
+                    "4.51.3",
+                    "4.52.0",
+                    "4.52.1",
+                    "4.52.2",
+                    "4.52.3",
+                    "4.52.4",
+                    "4.53.0",
+                    "4.53.1",
+                    "4.53.2",
+                    "4.53.3",
+                    "4.54.0",
+                    "4.54.1",
+                    "4.55.0",
+                    "4.55.1",
+                    "4.55.2",
+                    "4.55.3",
+                    "4.55.4",
+                    "4.56.0",
+                    "4.56.1",
+                    "4.56.2",
+                    "4.57.0",
+                    "4.57.1",
+                    "4.57.2",
+                    "4.57.3",
+                    "4.57.4",
+                    "4.57.5",
+                    "4.57.6",
+                    "5.0.0",
+                    "5.0.0rc0",
+                    "5.0.0rc1",
+                    "5.0.0rc2",
+                    "5.0.0rc3",
+                    "5.1.0",
+                    "5.2.0",
+                    "5.3.0",
+                    "5.4.0",
+                    "5.5.0",
+                    "5.5.1",
+                    "5.5.2",
+                    "5.5.3",
+                    "5.5.4",
+                    "5.6.0",
+                    "5.6.1",
+                    "5.6.2",
+                    "5.7.0",
+                    "5.8.0",
+                    "5.8.1"
+                  ],
+                  "database_specific": {
+                    "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2026/09/GHSA-x9r9-c232-4q39/GHSA-x9r9-c232-4q39.json"
+                  }
+                }
+              ],
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-80047"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/pull/48620"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://github.com/huggingface/transformers/commit/cbc1651a032b923da7f4b44b3d0e6f68e6ba6b55"
+                },
+                {
+                  "type": "PACKAGE",
+                  "url": "https://github.com/huggingface/transformers"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://kb.cert.org/vuls/id/456290"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://www.kb.cert.org/vuls/id/456290"
+                }
+              ],
+              "database_specific": {
+                "cwe_ids": [
+                  "CWE-273"
+                ],
+                "github_reviewed": true,
+                "github_reviewed_at": "2026-09-30T23:40:28Z",
+                "nvd_published_at": "2026-09-01T14:17:41Z",
+                "severity": "HIGH"
+              }
+            },
+            {
               "modified": "2026-09-10T12:25:36Z",
               "published": "2026-08-02T18:30:20Z",
               "schema_version": "1.9.0",
@@ -8455,6 +9199,16 @@
                 "PYSEC-2026-3929"
               ],
               "max_severity": "7.1"
+            },
+            {
+              "ids": [
+                "GHSA-x9r9-c232-4q39"
+              ],
+              "aliases": [
+                "CVE-2026-80047",
+                "GHSA-x9r9-c232-4q39"
+              ],
+              "max_severity": "7.8"
             }
           ],
           "licenses": [
@@ -14713,7 +15467,7 @@
     },
     {
       "name": "Apache-2.0",
-      "count": 154
+      "count": 155
     },
     {
       "name": "BSD-3-Clause",

@@ -51,6 +51,7 @@ nemo-fabric-adapters-codex==0.4.0rc1
 nemo-fabric-adapters-common==0.4.0rc1
 nemo-fabric-adapters-deepagents==0.4.0rc1
 nemo-fabric-adapters-hermes==0.4.0rc1
+nemo-fabric-collector==0.4.0rc1
 nemo-fabric-runtime==0.4.0rc1
 nemoguardrails==0.23.0
 nemo-relay==0.9.3
