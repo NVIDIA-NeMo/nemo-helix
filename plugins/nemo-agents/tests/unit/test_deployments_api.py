@@ -477,6 +477,22 @@ class TestCreateDeployment:
 
         assert resp.status_code == 201
 
+    def test_create_rejects_subprocess_when_turned_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _configure_deployments(monkeypatch, executors={})
+        monkeypatch.setattr(AgentsConfig.get(), "subprocess_enabled", False)
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "subprocess"},
+        )
+
+        assert resp.status_code == 400
+        assert "'subprocess' is disabled" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
     def test_create_rejects_image_entrypoint_for_subprocess(self) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
@@ -695,6 +711,15 @@ class TestListDeploymentModes:
             "docker": {"mode": "docker", "enabled": False, "requires_image": True},
             "k8s": {"mode": "k8s", "enabled": False, "requires_image": True},
         }
+
+    def test_subprocess_is_disabled_when_turned_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _configure_deployments(monkeypatch, executors={"cluster": "k8s"}, k8s_executor="cluster")
+        monkeypatch.setattr(AgentsConfig.get(), "subprocess_enabled", False)
+
+        modes = self._modes()
+
+        assert modes["subprocess"]["enabled"] is False
+        assert modes["k8s"]["enabled"] is True
 
     def test_k8s_is_disabled_when_it_would_fall_back_to_a_docker_executor(
         self, monkeypatch: pytest.MonkeyPatch

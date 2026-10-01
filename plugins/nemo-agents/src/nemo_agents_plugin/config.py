@@ -143,6 +143,14 @@ class AgentsConfig(NemoConfig):
             "deployments-plugin backend regardless of this setting."
         ),
     )
+    subprocess_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether new subprocess-mode deployments are allowed. Turn off to require docker or k8s, "
+            "for example on a cluster where agents shouldn't share the controller pod. Existing "
+            "subprocess deployments keep running."
+        ),
+    )
     subprocess_host: str = Field(
         default="127.0.0.1",
         description=(

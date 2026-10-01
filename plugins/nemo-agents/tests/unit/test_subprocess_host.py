@@ -42,6 +42,16 @@ def test_subprocess_host_reads_from_environment(monkeypatch: pytest.MonkeyPatch)
     assert AgentsConfig().subprocess_host == "10.1.2.3"
 
 
+def test_subprocess_deployments_are_enabled_by_default() -> None:
+    assert AgentsConfig().subprocess_enabled is True
+
+
+def test_subprocess_deployments_can_be_turned_off_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEMO_AGENTS_SUBPROCESS_ENABLED", "false")
+
+    assert AgentsConfig().subprocess_enabled is False
+
+
 @pytest.mark.parametrize("host", ["0.0.0.0", "::"])
 def test_subprocess_host_rejects_wildcard_addresses(host: str) -> None:
     with pytest.raises(ValidationError, match="reachable address"):

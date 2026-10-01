@@ -140,6 +140,12 @@ multinodeNetworking:
 
 # -- NetworkPolicy configuration. Enable the top-level switch to render all default policies, then disable individual policies only for cluster-specific exceptions. For a Calico-backed smoke test, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup/helm/network-policy-smoke-test.
 # @default -- This object has the following default values. The top-level switch is disabled by default so chart upgrades do not change cluster connectivity unless explicitly enabled.
+# -- Agents plugin settings that the API and controller pods both need.
+agents:
+  subprocessDeployments:
+    # -- Allow new subprocess-mode agent deployments. Set false to require docker or k8s, for example so agents don't share the controller pod. Existing subprocess deployments keep running.
+    enabled: true
+
 networkPolicies:
   # -- Create NetworkPolicy resources for enabled subpolicies.
   enabled: false

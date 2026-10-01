@@ -140,6 +140,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret | default "ngc-api" }}
                   key: NGC_API_KEY
+            {{- if not .Values.agents.subprocessDeployments.enabled }}
+            - name: NEMO_AGENTS_SUBPROCESS_ENABLED
+              value: "false"
+            {{- end }}
             {{ include "nemo-helix.env" . | nindent 12 | trim }}
             {{ include "nemo-helix.api.env" . | nindent 12 | trim }}
           ports:
