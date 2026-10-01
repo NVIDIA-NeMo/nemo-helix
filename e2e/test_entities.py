@@ -389,6 +389,56 @@ def test_entity_search_filter(entity_store_client: EntitiesClient, workspace: st
                 pass
 
 
+def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace: str):
+    """``$elemMatch`` selects on one element of an object array, on whichever database backs the store.
+
+    The SQL differs per dialect (SQLite ``json_each`` vs PostgreSQL ``json_array_elements``) and the
+    Kubernetes e2e deploys PostgreSQL, so this is the CI check for the PostgreSQL branch. The
+    non-array row matters there: expanding an object raises on PostgreSQL unless it is guarded.
+    """
+    prefix = _unique_name("elem-match")
+    owner = _unique_name("owner")
+    rows = {
+        f"{prefix}-match": {
+            "metadata": [
+                {"key": "owner", "value": owner},
+                {"key": "verified", "value": True},
+            ]
+        },
+        f"{prefix}-split": {"metadata": [{"key": "owner", "value": "someone-else"}, {"key": "suite", "value": owner}]},
+        f"{prefix}-object": {"metadata": {"key": "owner", "value": owner}},
+        f"{prefix}-none": {},
+    }
+
+    def names_matching(condition: dict) -> set[str]:
+        filter_query = json.dumps({"$and": [{"name": {"$like": f"{prefix}%"}}, condition]})
+        response = entity_store_client.list_entities(
+            entity_type=ENTITY_TYPE,
+            workspace=workspace,
+            query_params=ListEntitiesQueryParams(filter=filter_query),
+        )
+        return {entity.name for entity in response.items()}
+
+    try:
+        for name, data in rows.items():
+            entity_store_client.create_entity(
+                entity_type=ENTITY_TYPE, workspace=workspace, body=EntityCreateInput(name=name, data=data)
+            ).data()
+
+        owner_is_mine = {"data.metadata": {"$elemMatch": {"key": "owner", "value": owner}}}
+        assert names_matching(owner_is_mine) == {f"{prefix}-match"}
+        assert names_matching({"$not": owner_is_mine}) == {f"{prefix}-split", f"{prefix}-object", f"{prefix}-none"}
+        assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": True}}}) == {
+            f"{prefix}-match"
+        }
+    finally:
+        for name in rows:
+            try:
+                entity_store_client.delete_entity_by_name(name=name, entity_type=ENTITY_TYPE, workspace=workspace)
+            except Exception:
+                pass
+
+
 def test_entity_rename(entity_store_client: EntitiesClient, workspace: str):
     """Test renaming an entity via update.
 
