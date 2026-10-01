@@ -140,9 +140,9 @@ async def analyze_snapshot(
         compiler = InsightCompilation(llm=model_clients.default)
         async with AsyncExitStack() as stack:
             if relay_scope_name is not None:
-                from nooa.nemo_relay_middleware import nemo_relay_scope
+                from nemo_insights_plugin.analyst.relay_compat import relay_scope
 
-                await stack.enter_async_context(nemo_relay_scope(compiler, relay_scope_name))
+                await stack.enter_async_context(relay_scope(compiler.event_manager, relay_scope_name))
             if event_handler is not None:
                 for event in ("LLMComplete", "PythonOutput"):
                     stack.callback(compiler.event_manager.on(event, event_handler))
