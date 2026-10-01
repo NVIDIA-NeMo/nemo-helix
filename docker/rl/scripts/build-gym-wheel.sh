@@ -42,7 +42,13 @@ fi
 
 # --no-config: uv would otherwise discover the platform workspace's `required-version` pin
 # (docker/rl/pyproject.workspace.toml, uv <0.10) and refuse to run as this image's uv 0.11.
-uv build --no-config --wheel --out-dir "${OUT_DIR}" "${GYM_SRC}"
+build_log=$(mktemp)
+if ! uv build --no-config --wheel --out-dir "${OUT_DIR}" "${GYM_SRC}" >"${build_log}" 2>&1; then
+    cat "${build_log}" >&2
+    rm -f "${build_log}"
+    exit 1
+fi
+rm -f "${build_log}"
 
 # Fail here rather than at spin-up on a GPU node: a wheel at the wrong version, or one missing the
 # package data above, installs cleanly and only misbehaves later.
