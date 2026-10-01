@@ -193,8 +193,8 @@ make run-kube
 The script prints the image tag (e.g. `local-<epoch>`) and an example pytest command. Run e2e tests against the cluster using the same registry and tag:
 
 ```bash
-# Use the NHX_E2E_REGISTRY and NHX_E2E_TAG printed by make run-kube (tag is e.g. local-<epoch>)
-NHX_E2E_REGISTRY=docker.io/my-registry NHX_E2E_TAG=<tag-from-output> uv run pytest e2e --kubernetes --cluster-url=http://localhost:80 -v
+# Substitute the NHX_E2E_REGISTRY and NHX_E2E_TAG printed by make run-kube.
+NHX_E2E_REGISTRY=docker.io/my-registry NHX_E2E_TAG=local-1700000000 uv run pytest e2e --kubernetes --cluster-url=http://localhost:80 -v
 ```
 
 If your ingress is on a different host or port, set `NHX_E2E_CLUSTER_URL` or pass `--cluster-url`. See [CONTRIBUTING.md](../CONTRIBUTING.md) for more on local minikube and `make run-kube`.

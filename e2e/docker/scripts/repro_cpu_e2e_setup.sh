@@ -26,7 +26,7 @@ DO_PULL=1
 TOKEN_FILE="${TOKEN_FILE:-${HOME}/.api_tokens.sh}"
 OUTPUT_DIR=""
 BUILD_ARCH="${BUILD_ARCH:-linux/amd64}"
-BASE_REGISTRY="${BASE_REGISTRY:-ghcr.io/nvidia-nemo/platform-deploy}"
+BASE_REGISTRY="${BASE_REGISTRY:-ghcr.io/nvidia-nemo/nemo-helix}"
 
 usage() {
   cat <<'EOF'
@@ -43,7 +43,7 @@ Options:
   --build-local              Build CPU images locally from the Platform checkout
                              instead of pulling PR images.
   --base-registry REGISTRY   Base image registry for --build-local
-                             (default: ghcr.io/nvidia-nemo/platform-deploy).
+                             (default: ghcr.io/nvidia-nemo/nemo-helix).
   --with-ngc                 Forward NGC_API_KEY into pytest; useful to verify the fix.
   --no-login                 Skip docker login.
   --no-pull                  Skip pre-pulling images.
@@ -222,8 +222,6 @@ run_pytest() {
   echo "=== Running ${name} CPU Docker E2E repro ==="
   echo "Artifacts: ${run_dir}"
 
-  rm -rf "${REPO_ROOT}/docker/logs"
-
   local env_args=(
     "NHX_E2E_REGISTRY=${REGISTRY}"
     "NHX_E2E_TAG=${TAG}"
@@ -231,7 +229,7 @@ run_pytest() {
     "NEMO_JOBS_IMAGE_REGISTRY_USER_NAME=\$oauthtoken"
     "NEMO_JOBS_IMAGE_REGISTRY_PASSWORD=${NVCR_TOKEN}"
     "PYTEST_ADDOPTS=--log-cli-level=INFO --log-file=${run_dir}/pytest-debug.log --log-file-level=DEBUG"
-    "JOB_LOGS_DIR=docker/logs"
+    "JOB_LOGS_DIR=${run_dir}/docker-logs"
   )
 
   local exit_code=0
@@ -248,10 +246,6 @@ run_pytest() {
     exit_code=$?
   fi
   set -e
-
-  if [ -d "${REPO_ROOT}/docker/logs" ]; then
-    cp -a "${REPO_ROOT}/docker/logs" "${run_dir}/docker-logs"
-  fi
 
   echo "${exit_code}" > "${run_dir}/exit-code.txt"
   echo "Exit code for ${name}: ${exit_code}"
