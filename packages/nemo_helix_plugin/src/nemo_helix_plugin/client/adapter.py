@@ -12,11 +12,12 @@ client the caller holds.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, Protocol, TypeVar, cast, overload, runtime_checkable
 
 import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 
 SyncT = TypeVar("SyncT", bound=NemoClient)
 AsyncT = TypeVar("AsyncT", bound=AsyncNemoClient)
@@ -121,13 +122,7 @@ def client_from_platform(
 
     platform_client = cast(_HelixClient, platform)
     headers = _platform_default_headers(platform_client)
-    retry = RetryPolicy(
-        max_retries=platform_client.max_retries,
-        retryable_status_codes=(408, 409, 429),
-        retry_all_server_errors=True,
-        respect_retry_decision_headers=True,
-        respect_retry_after_headers=True,
-    )
+    retry = replace(PLATFORM_DEFAULT_RETRY_POLICY, max_retries=platform_client.max_retries)
     url_resolver = platform_client._prepare_url
 
     # Carry the platform's timeout across as a per-request override. The shared

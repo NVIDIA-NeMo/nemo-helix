@@ -20,6 +20,7 @@ from nemo_helix_ext.local.process import (
 )
 from nemo_helix_ext.local.services import ServiceRunConfig
 from nemo_helix_ext.local.transport import UDS_BASE_URL
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nhx.platform_runner.config import (
     HelixAppConfig,
     default_runtime_root,
@@ -480,8 +481,38 @@ def test_embedded_handle_async_client_uses_asgi_transport() -> None:
         http_client=http_client,
         owns_http_client=True,
         base_url=services.EMBEDDED_BASE_URL,
+        retry=PLATFORM_DEFAULT_RETRY_POLICY,
     )
     assert client is client_value
+
+
+def test_embedded_handle_clients_default_to_the_platform_retry_policy() -> None:
+    handle = services.EmbeddedServiceHandle(app=MagicMock(), runtime=MagicMock())
+
+    client = handle.client()
+    try:
+        assert client.retry == PLATFORM_DEFAULT_RETRY_POLICY
+    finally:
+        client.close()
+
+
+@pytest.mark.asyncio
+async def test_embedded_handle_async_client_defaults_to_the_platform_retry_policy() -> None:
+    handle = services.EmbeddedServiceHandle(app=MagicMock(), runtime=MagicMock())
+
+    async with handle.async_client() as client:
+        assert client.retry == PLATFORM_DEFAULT_RETRY_POLICY
+
+
+def test_embedded_handle_client_keeps_a_caller_retry_policy() -> None:
+    handle = services.EmbeddedServiceHandle(app=MagicMock(), runtime=MagicMock())
+    retry = RetryPolicy(max_retries=0)
+
+    client = handle.client(retry=retry)
+    try:
+        assert client.retry is retry
+    finally:
+        client.close()
 
 
 def test_embedded_handle_leaves_an_injected_transport_to_its_owner() -> None:
@@ -1000,7 +1031,30 @@ def test_daemon_service_handle_tcp_client_uses_tcp_base_url(tmp_path: Path) -> N
     with patch("nemo_helix_ext.local.services.NemoClient") as client_cls:
         handle.client(timeout=12)
 
-    client_cls.assert_called_once_with(timeout=12, base_url="http://localhost:9090")
+    client_cls.assert_called_once_with(
+        timeout=12, base_url="http://localhost:9090", retry=PLATFORM_DEFAULT_RETRY_POLICY
+    )
+
+
+def test_daemon_service_handle_async_client_defaults_to_the_platform_retry_policy(tmp_path: Path) -> None:
+    handle = services.DaemonServiceHandle(
+        scope="dev",
+        transport="tcp",
+        socket_path=None,
+        gateway_base_url=None,
+        host="127.0.0.1",
+        port=9090,
+        pid=123,
+        mode="daemon",
+        log_path=None,
+        state_dir=tmp_path / "state" / "instances" / "dev",
+        runtime_dir=None,
+    )
+
+    with patch("nemo_helix_ext.local.services.AsyncNemoClient") as client_cls:
+        handle.async_client()
+
+    client_cls.assert_called_once_with(base_url="http://127.0.0.1:9090", retry=PLATFORM_DEFAULT_RETRY_POLICY)
 
 
 def test_daemon_service_handle_uds_client_requires_socket_path(tmp_path: Path) -> None:

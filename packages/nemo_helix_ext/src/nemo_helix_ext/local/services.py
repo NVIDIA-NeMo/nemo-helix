@@ -34,6 +34,7 @@ from nemo_helix_ext.local.transport import (
     wait_for_status_async,
 )
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nhx.platform_runner.config import (
     DEFAULT_SCOPE,
     DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
@@ -102,6 +103,13 @@ def _own_transport(kwargs: dict[str, Any], build: Callable[[], Any]) -> None:
     if "http_client" not in kwargs:
         kwargs["http_client"] = build()
         kwargs.setdefault("owns_http_client", True)
+
+
+def _client_kwargs(kwargs: dict[str, Any], base_url: str) -> dict[str, Any]:
+    """Fill in the handle's base URL and the platform retry policy unless the caller set them."""
+    kwargs.setdefault("base_url", base_url)
+    kwargs.setdefault("retry", PLATFORM_DEFAULT_RETRY_POLICY)
+    return kwargs
 
 
 class ServiceMode(StrEnum):
@@ -364,8 +372,7 @@ class DaemonServiceHandle:
             if socket_path is None:
                 raise ServicesError("UDS service handle is missing socket_path")
             _own_transport(kwargs, lambda: build_sync_http_client(socket_path))
-        kwargs.setdefault("base_url", self.base_url)
-        return NemoClient(**kwargs)
+        return NemoClient(**_client_kwargs(kwargs, self.base_url))
 
     def async_client(self, **kwargs: Any) -> AsyncNemoClient:
         if self.transport == "uds":
@@ -373,8 +380,7 @@ class DaemonServiceHandle:
             if socket_path is None:
                 raise ServicesError("UDS service handle is missing socket_path")
             _own_transport(kwargs, lambda: build_async_http_client(socket_path))
-        kwargs.setdefault("base_url", self.base_url)
-        return AsyncNemoClient(**kwargs)
+        return AsyncNemoClient(**_client_kwargs(kwargs, self.base_url))
 
 
 @dataclass(frozen=True)
@@ -393,13 +399,11 @@ class EmbeddedServiceHandle:
 
     def client(self, **kwargs: Any) -> NemoClient:
         _own_transport(kwargs, lambda: build_sync_asgi_http_client(self.app))
-        kwargs.setdefault("base_url", EMBEDDED_BASE_URL)
-        return NemoClient(**kwargs)
+        return NemoClient(**_client_kwargs(kwargs, EMBEDDED_BASE_URL))
 
     def async_client(self, **kwargs: Any) -> AsyncNemoClient:
         _own_transport(kwargs, lambda: build_async_asgi_http_client(self.app))
-        kwargs.setdefault("base_url", EMBEDDED_BASE_URL)
-        return AsyncNemoClient(**kwargs)
+        return AsyncNemoClient(**_client_kwargs(kwargs, EMBEDDED_BASE_URL))
 
     def start_services(self, service_names: Sequence[str]) -> StartServicesResult:
         raise ServicesError("Staged service start is not implemented for embedded mode yet")

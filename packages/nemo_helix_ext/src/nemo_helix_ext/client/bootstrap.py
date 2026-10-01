@@ -62,7 +62,7 @@ import httpx
 from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 
 from nemo_helix_ext.auth.helpers import NHXOIDCConfig, build_effective_scope, discover_nhx_config
 from nemo_helix_ext.auth.token_provider import (
@@ -611,15 +611,7 @@ def resolve_bootstrap(
 # Typed client construction
 # ---------------------------------------------------------------------------
 
-# Matches the retry behaviour the generated SDK applied by default, so the CLI
-# keeps the same resilience against transient gateway errors.
-DEFAULT_RETRY_POLICY = RetryPolicy(
-    max_retries=2,
-    retryable_status_codes=(408, 409, 429),
-    retry_all_server_errors=True,
-    respect_retry_decision_headers=True,
-    respect_retry_after_headers=True,
-)
+DEFAULT_RETRY_POLICY = PLATFORM_DEFAULT_RETRY_POLICY
 
 
 # Connect phase cap for CLI clients. A blackholed endpoint fails in seconds
