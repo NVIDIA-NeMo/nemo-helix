@@ -39,7 +39,7 @@ Register an entity backed by a fileset. A model that Inference Gateway discovere
 
 ### Training Options
 
-- **Full weights (`all_weights`)**: 1x 80GB GPU (recommended for the Nemotron recipe)
+- **Full weights (`all_weights`)**: 4x 80GB GPU, tensor parallel size 1 (validated NVDocs recipe)
 - **LoRA (merged)**: 1x 80GB GPU, tensor parallel size 1
 
 <Note>
@@ -56,25 +56,34 @@ Retriever NIM 2.2.0 serves a full checkpoint, not a standalone adapter, so `trai
 
 ### Hyperparameter and Data Recommendations
 
-These values match the Nemotron embed recipe. Automodel fills comparable defaults for any field left unset, so set them explicitly when a run has to reproduce the recipe exactly.
+These values are the configuration validated on the frozen 20,909-query NVDocs `eval_beir` split.
 
 | Parameter | API Field Name | Recommended Value |
 | --- | --- | --- |
-| Learning rate | `optimizer.learning_rate` | `1e-5` (sweep `5e-6` / `2e-5`) |
-| Warmup | `optimizer.warmup_steps` | `5` |
+| Learning rate | `optimizer.learning_rate` | `2.5e-5` |
+| Min learning rate | `optimizer.min_learning_rate` | `1.25e-5` |
+| Warmup | `optimizer.warmup_steps` | `432` |
+| Decay | `optimizer.lr_decay_style` | `cosine` |
 | Weight decay | `optimizer.weight_decay` | `0.01` |
-| Epochs | `schedule.epochs` | `1` to start, raised while `retrieve-eval` metrics keep improving; the published NVDocs reference run used `3` |
+| Epochs | `schedule.epochs` | `3` |
 | Global batch | `batch.global_batch_size` | `128` |
-| Micro batch | `batch.micro_batch_size` | `4` |
+| Micro batch | `batch.micro_batch_size` | `8` |
+| Distributed in-batch negatives | `training.retrieval.do_distributed_inbatch_negative` | `false` |
+| GPUs | `parallelism.num_gpus_per_node` | `4`, tensor parallel `1` |
+| Validation | `schedule.validation_split` / `val_check_interval` / `checkpoint_selection` | `0.01` / `0.25` / `both` |
 | Sequence length | `training.max_seq_length` / `training.retrieval.query_max_length` and `passage_max_length` | `512` |
+| Attention | `training.attn_implementation` | `flash_attention_2` |
+| Precision | `training.precision` | `bf16` |
 | Passages | `training.retrieval.train_n_passages` | `5` (1 positive + 4 hard negatives) |
+
+On that split, the untuned base scores nDCG@10 0.5671, Recall@10 0.6375, and Recall@100 0.8238. The recipe above scores nDCG@10 0.6318, Recall@10 0.7124, and Recall@100 0.8958 (uplift +0.0647 / +11.4% nDCG@10, +0.0748 / +11.7% Recall@10, +0.0720 / +8.7% Recall@100). Validation loss was lowest at the final step, so the best and last checkpoints match. MAP@10 moves from 0.4787 to 0.5413.
 
 Validation data is optional. Automodel first looks in the `dataset.training`
 fileset for files named `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl`. If
 none exists, `schedule.validation_split` deterministically holds out part of
-the discovered training rows; the default is `0.1` (10%). This split drives
-validation loss and checkpoint selection. It is separate from the frozen
-`eval_beir` split used by `retrieve-eval` to compare retrieval quality.
+the discovered training rows. This split drives validation loss and checkpoint
+selection. It is separate from the frozen `eval_beir` split used by
+`retrieve-eval` to compare retrieval quality.
 
 Score the fine-tuned model and the base model on the same frozen `eval_beir` split. Regenerating the split between runs makes the difference reflect data variance as much as model quality.
 

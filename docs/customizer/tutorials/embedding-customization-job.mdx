@@ -38,7 +38,7 @@ Stage 1 writes contrastive rows as JSONL:
 - A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`. See the [Quickstart](/documentation/get-started).
 - The Python SDK: `pip install "nemo-helix[all]"`, or `make bootstrap` from the repo root.
 - An NGC API key for the `nvcr.io` NIM images.
-- GPU capacity: 80 GB for training, about 40 GB for mining and evaluation. Serving the base and tuned NIMs side by side takes two GPUs.
+- GPU capacity: 4× 80 GB for the validated training job, about 40 GB for mining and evaluation. Serving the base and tuned NIMs side by side takes two GPUs.
 - A fileset-backed encoder entity, created in the next section. Models that Inference Gateway discovers from a running endpoint have `fileset: null` and can be neither trained nor used as the mining encoder.
 
 ## 1. Initialize the SDK
@@ -307,18 +307,22 @@ print("dataset.training and retrieve-eval dataset:", TRAINING_REF)
 
 `model` and `dataset.training` are independent inputs. The entity supplies the encoder weights; the fileset supplies the contrastive rows, with `training.jsonl` at its root. To train on an existing triplet dataset instead, build that fileset in [Train on SPECTER or triplet JSONL](/documentation/customizer-reference/tutorials/embedding-triplet-dataset) and point `dataset.training` at it — SPECTER carries no `eval_beir`, so keep the NVDocs artifacts fileset for Stage 4.
 
-The NVDocs artifacts fileset has no validation JSONL. `schedule.validation_split: 0.1` therefore creates a deterministic 10% holdout from `training.jsonl`; that holdout produces validation loss and selects the best checkpoint. It does not modify or replace the frozen `eval_beir/` data used in Stage 4. Validation data is optional: when a `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` file is present in the training fileset, Automodel uses it instead of creating the holdout.
+The NVDocs artifacts fileset has no validation JSONL. `schedule.validation_split: 0.01` therefore creates a deterministic 1% holdout from `training.jsonl`; that holdout produces validation loss and selects the best checkpoint. It does not modify or replace the frozen `eval_beir/` data used in Stage 4. Validation data is optional: when a `val*.jsonl`, `validation*.jsonl`, or `dev*.jsonl` file is present in the training fileset, Automodel uses it instead of creating the holdout.
 
-These values match the Nemotron embed recipe apart from epochs. This job trains a single pass, the platform default and the cheapest run that still produces a usable checkpoint. The reference scores under [Interpreting results](#interpreting-results) come from a three-epoch run, so expect a single epoch to land below them. Raise `schedule.epochs` once you have a baseline and Stage 4 metrics are still climbing.
+These values are the configuration validated on the frozen 20,909-query NVDocs split. The scores under [Interpreting results](#interpreting-results) are from this job.
 
 | Knob | Value |
 | --- | --- |
 | `training.recipe` | `bi_encoder` |
 | `training.finetuning_type` | `all_weights`, or `lora_merged` to merge adapters back into the checkpoint |
 | `training.retrieval.export.primary` | `hf` |
+| `training.retrieval.do_distributed_inbatch_negative` | `false` |
 | Sequence length | 512, the same at mine, train, and eval time |
-| LR / warmup / GBS / MBS | `1e-5` / `5` / `128` / `4` |
-| Epochs | `1` to start; the reference run below used `3` |
+| LR / min LR / warmup | `2.5e-5` / `1.25e-5` / `432` |
+| GBS / MBS | `128` / `8` |
+| Epochs | `3` |
+| GPUs | `4`, tensor parallel `1` |
+| Validation | `validation_split: 0.01`, `val_check_interval: 0.25`, `checkpoint_selection: both` |
 
 `export.primary: hf` writes the Hugging Face checkpoint to the fileset root, where Retriever NIM 2.2.0 looks for it, and keeps ONNX under `alternates/onnx`. Unmerged `lora` is rejected for `bi_encoder`, since an embedding NIM serves a full checkpoint and cannot load a standalone adapter.
 
@@ -332,18 +336,22 @@ nemo customization automodel.jobs submit --workspace default --name embed-nvdocs
     "training_type": "sft",
     "recipe": "bi_encoder",
     "finetuning_type": "all_weights",
+    "execution_profile": "gpu",
     "max_seq_length": 512,
+    "precision": "bf16",
+    "attn_implementation": "flash_attention_2",
     "retrieval": {
       "query_max_length": 512,
       "passage_max_length": 512,
       "train_n_passages": 5,
+      "do_distributed_inbatch_negative": false,
       "export": {"primary": "hf"}
     }
   },
-  "schedule": {"epochs": 1, "validation_split": 0.1},
-  "batch": {"global_batch_size": 128, "micro_batch_size": 4},
-  "optimizer": {"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
-  "parallelism": {"num_gpus_per_node": 1},
+  "schedule": {"epochs": 3, "seed": 42, "validation_split": 0.01, "val_check_interval": 0.25, "checkpoint_selection": "both"},
+  "batch": {"global_batch_size": 128, "micro_batch_size": 8},
+  "optimizer": {"learning_rate": 2.5e-5, "min_learning_rate": 1.25e-5, "warmup_steps": 432, "weight_decay": 0.01, "lr_decay_style": "cosine"},
+  "parallelism": {"num_gpus_per_node": 4, "tensor_parallel_size": 1},
   "output": {"name": "nemotron-3-embed-1b-tuned"}
 }'
 
@@ -366,18 +374,34 @@ spec = AutomodelJobInput(
         "training_type": "sft",
         "recipe": "bi_encoder",
         "finetuning_type": "all_weights",
+        "execution_profile": "gpu",
         "max_seq_length": 512,
+        "precision": "bf16",
+        "attn_implementation": "flash_attention_2",
         "retrieval": {
             "query_max_length": 512,
             "passage_max_length": 512,
             "train_n_passages": 5,
+            "do_distributed_inbatch_negative": False,
             "export": {"primary": "hf"},
         },
     },
-    schedule={"epochs": 1, "validation_split": 0.1},
-    batch={"global_batch_size": 128, "micro_batch_size": 4},
-    optimizer={"learning_rate": 1e-5, "warmup_steps": 5, "weight_decay": 0.01},
-    parallelism={"num_gpus_per_node": 1},
+    schedule={
+        "epochs": 3,
+        "seed": 42,
+        "validation_split": 0.01,
+        "val_check_interval": 0.25,
+        "checkpoint_selection": "both",
+    },
+    batch={"global_batch_size": 128, "micro_batch_size": 8},
+    optimizer={
+        "learning_rate": 2.5e-5,
+        "min_learning_rate": 1.25e-5,
+        "warmup_steps": 432,
+        "weight_decay": 0.01,
+        "lr_decay_style": "cosine",
+    },
+    parallelism={"num_gpus_per_node": 4, "tensor_parallel_size": 1},
     output={"name": OUTPUT_NAME},
 )
 
@@ -401,11 +425,11 @@ if status.status != "completed":
 
 ### Interpreting contrastive loss
 
-The automatic 10% holdout above supplies the validation loss for this NVDocs job. A healthy run drops sharply over the first 20–30% of training, then flattens toward a stable floor with validation loss tracking close behind. Validation loss rising while training loss falls is overfitting: cut epochs. Spikes or NaN mean the learning rate is too high. A curve that never moves points at the learning rate being too low or at the data itself.
+The automatic 1% holdout above supplies the validation loss for this NVDocs job. A healthy run drops sharply over the first 20–30% of training, then flattens toward a stable floor with validation loss tracking close behind. Validation loss rising while training loss falls is overfitting: cut epochs. Spikes or NaN mean the learning rate is too high. A curve that never moves points at the learning rate being too low or at the data itself.
 
 There is no target loss value, since the absolute number depends on batch size, negative count, and temperature. Loss is also not retrieval accuracy: it can keep improving while nDCG stagnates when the mined negatives are too easy. Stage 4 metrics are the ground truth.
 
-When iterating, sweep the learning rate at `5e-6`, `1e-5`, and `2e-5` with everything else fixed. If the best result lands on an endpoint, extend one step further in that direction.
+On this split, peak learning rate `2.5e-5` with floor `1.25e-5` beat `1e-5` and `2e-5` with the batch size above held fixed. If a new corpus lands on an endpoint of a small sweep, extend one step further in that direction.
 
 ## 5. Stage 3: deploy Retriever NIM 2.2.0
 
@@ -584,25 +608,25 @@ These are reference scores for a tuned Nemotron 3 Embed 1B on a 20,909-query NVD
 
 ```
 Base: Nemotron 3 Embed 1B (untuned)
-- nDCG@10: 0.5677
-- Recall@10: 0.6382
-- Recall@100: 0.8251
-- MAP@10: 0.4791
+- nDCG@10: 0.5671
+- Recall@10: 0.6375
+- Recall@100: 0.8238
+- MAP@10: 0.4787
 
-Target: 3 epochs, all_weights, in-batch negatives, global batch 256, micro batch 8, learning rate 2e-5
-- nDCG@10: 0.6198
-- Recall@10: 0.7058
-- Recall@100: 0.8955
-- MAP@10: 0.5284
+Target: 3 epochs, all_weights, distributed in-batch negatives off, 4 GPUs, global batch 128, micro batch 8, learning rate 2.5e-5, min learning rate 1.25e-5, warmup 432
+- nDCG@10: 0.6318
+- Recall@10: 0.7124
+- Recall@100: 0.8958
+- MAP@10: 0.5413
 
 Uplift
-- nDCG@10: +0.0521 (+9.2%)
-- Recall@10: +0.0675 (+10.6%)
-- Recall@100: +0.0704 (+8.5%)
-- MAP@10: +0.0493 (+10.3%)
+- nDCG@10: +0.0647 (+11.4%)
+- Recall@10: +0.0748 (+11.7%)
+- Recall@100: +0.0720 (+8.7%)
+- MAP@10: +0.0627 (+13.1%)
 ```
 
-That configuration is a ceiling rather than the output of the single-epoch job above: three epochs at twice the batch size and twice the learning rate, scored on the best validation checkpoint. Separate runs on this corpus put the third epoch at roughly +0.3 nDCG@10 points over the second, so most of the gain arrives in the first passes.
+These scores are from the job above on that frozen split. Validation loss was lowest at the final step, so the best and last checkpoints match.
 
 ## Hyperparameters
 
@@ -610,12 +634,16 @@ Learning rate is the most sensitive parameter, followed by epochs, warmup, and b
 
 | Parameter | API field | Value |
 | --- | --- | --- |
-| Learning rate | `optimizer.learning_rate` | `1e-5`, swept at half and double |
-| Warmup | `optimizer.warmup_steps` | `5`, or 5–10% of total steps |
+| Learning rate | `optimizer.learning_rate` | `2.5e-5` |
+| Min learning rate | `optimizer.min_learning_rate` | `1.25e-5` |
+| Warmup | `optimizer.warmup_steps` | `432` |
+| Decay | `optimizer.lr_decay_style` | `cosine` |
 | Weight decay | `optimizer.weight_decay` | `0.01` |
-| Epochs | `schedule.epochs` | `1` to start, raised while eval metrics keep improving; the reference run used `3` |
+| Epochs | `schedule.epochs` | `3` |
 | Global batch | `batch.global_batch_size` | `128` |
-| Micro batch | `batch.micro_batch_size` | `4` |
+| Micro batch | `batch.micro_batch_size` | `8` |
+| Distributed in-batch negatives | `training.retrieval.do_distributed_inbatch_negative` | `false` |
+| GPUs | `parallelism.num_gpus_per_node` | `4`, tensor parallel `1` |
 | Sequence length | `training.max_seq_length`, `training.retrieval.query_max_length`, `training.retrieval.passage_max_length` | `512` |
 | Passages per query | `training.retrieval.train_n_passages` | `5`, one positive and four mined negatives |
 
