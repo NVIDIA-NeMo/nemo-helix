@@ -15449,6 +15449,3624 @@
           ],
           "licenses": [
             "UNKNOWN"
+          ],
+          "vulnerabilities": [
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4864.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "goos": [
+                          "linux"
+                        ],
+                        "path": "internal/syscall/unix",
+                        "symbols": [
+                          "Fchmodat"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32282",
+                "CVE-2026-32282"
+              ],
+              "credits": [
+                {
+                  "name": "Uuganbayar Lkhamsuren (https://github.com/uug4na)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4864"
+              },
+              "details": "On Linux, if the target of Root.Chmod is replaced with a symlink while the chmod operation is in progress, Chmod can operate on the target of the symlink, even when the target lies outside the root.\n\nThe Linux fchmodat syscall silently ignores the AT_SYMLINK_NOFOLLOW flag, which Root.Chmod uses to avoid symlink traversal. Root.Chmod checks its target before acting and returns an error if the target is a symlink lying outside the root, so the impact is limited to cases where the target is replaced with a symlink between the check and operation.",
+              "id": "GO-2026-4864",
+              "modified": "2026-09-29T10:56:43.071592964Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/763761"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78293"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:10704",
+                "RHSA-2026:11507",
+                "RHSA-2026:11514",
+                "RHSA-2026:11704",
+                "RHSA-2026:11711",
+                "RHSA-2026:11712",
+                "RHSA-2026:11863",
+                "RHSA-2026:14200",
+                "RHSA-2026:15980",
+                "RHSA-2026:16021",
+                "RHSA-2026:16024",
+                "RHSA-2026:16101",
+                "RHSA-2026:16875",
+                "RHSA-2026:17075",
+                "RHSA-2026:17084",
+                "RHSA-2026:18027",
+                "RHSA-2026:18032",
+                "RHSA-2026:19132",
+                "RHSA-2026:19133",
+                "RHSA-2026:19134",
+                "RHSA-2026:19135",
+                "RHSA-2026:19136",
+                "RHSA-2026:19144",
+                "RHSA-2026:19156",
+                "RHSA-2026:19350",
+                "RHSA-2026:19351",
+                "RHSA-2026:19352",
+                "RHSA-2026:19353",
+                "RHSA-2026:19369",
+                "RHSA-2026:19450",
+                "RHSA-2026:19550",
+                "RHSA-2026:19714",
+                "RHSA-2026:19715",
+                "RHSA-2026:19719",
+                "RHSA-2026:19720",
+                "RHSA-2026:19721",
+                "RHSA-2026:19722",
+                "RHSA-2026:19750",
+                "RHSA-2026:19839",
+                "RHSA-2026:20556",
+                "RHSA-2026:22141",
+                "RHSA-2026:22326",
+                "RHSA-2026:22450",
+                "RHSA-2026:22709",
+                "RHSA-2026:22713",
+                "RHSA-2026:22714",
+                "RHSA-2026:22937",
+                "RHSA-2026:23228",
+                "RHSA-2026:24337",
+                "RHSA-2026:24716",
+                "RHSA-2026:24761",
+                "RHSA-2026:24762",
+                "RHSA-2026:25999",
+                "RHSA-2026:27076",
+                "RHSA-2026:27732",
+                "RHSA-2026:28038",
+                "RHSA-2026:28046",
+                "RHSA-2026:28047",
+                "RHSA-2026:28385",
+                "RHSA-2026:34365",
+                "RHSA-2026:34366",
+                "RHSA-2026:34368",
+                "RHSA-2026:36796",
+                "RHSA-2026:39810",
+                "RHSA-2026:41019",
+                "RHSA-2026:47712",
+                "RHSA-2026:47714",
+                "RHSA-2026:47716",
+                "RHSA-2026:47719",
+                "RHSA-2026:47721",
+                "RHSA-2026:47722",
+                "RHSA-2026:47910",
+                "RHSA-2026:48036",
+                "RHSA-2026:48790",
+                "RHSA-2026:49509",
+                "RHSA-2026:49600",
+                "RHSA-2026:54191",
+                "RHSA-2026:54757",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319",
+                "RHSA-2026:68504",
+                "RHSA-2026:69235",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805",
+                "RHSA-2026:7291",
+                "RHSA-2026:7385"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "TOCTOU permits root escape on Linux via Root.Chmod in os in internal/syscall/unix"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4865.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "html/template",
+                        "symbols": [
+                          "Error.Error",
+                          "HTMLEscaper",
+                          "JSEscape",
+                          "JSEscapeString",
+                          "JSEscaper",
+                          "ParseFS",
+                          "ParseFiles",
+                          "ParseGlob",
+                          "Template.AddParseTree",
+                          "Template.Clone",
+                          "Template.DefinedTemplates",
+                          "Template.Execute",
+                          "Template.ExecuteTemplate",
+                          "Template.Funcs",
+                          "Template.Parse",
+                          "Template.ParseFS",
+                          "Template.ParseFiles",
+                          "Template.ParseGlob",
+                          "URLQueryEscaper",
+                          "context.String",
+                          "context.mangle",
+                          "escaper.escapeBranch"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32289",
+                "CVE-2026-32289"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4865"
+              },
+              "details": "Context was not properly tracked across template branches for JS template literals, leading to possibly incorrect escaping of content when branches were used. Additionally template actions within JS template literals did not properly track the brace depth, leading to incorrect escaping being applied.\n\nThese issues could cause actions within JS template literals to be incorrectly or improperly escaped, leading to XSS vulnerabilities.",
+              "id": "GO-2026-4865",
+              "modified": "2026-07-10T10:44:23.724783758Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/763762"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78331"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "CGA-w5jp-g3cv-wvfm",
+                "RHSA-2026:19181",
+                "RHSA-2026:7291",
+                "RHSA-2026:7385"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "JsBraceDepth Context Tracking Bugs (XSS) in html/template"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4869.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "archive/tar",
+                        "symbols": [
+                          "Reader.Next",
+                          "Reader.readOldGNUSparseMap",
+                          "readGNUSparseMap1x0"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32288",
+                "CVE-2026-32288"
+              ],
+              "credits": [
+                {
+                  "name": "Colin Walters (walters@verbum.org)"
+                },
+                {
+                  "name": "Uuganbayar Lkhamsuren (https://github.com/uug4na)"
+                },
+                {
+                  "name": "Jakub Ciolek"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4869"
+              },
+              "details": "tar.Reader can allocate an unbounded amount of memory when reading a maliciously-crafted archive containing a large number of sparse regions encoded in the \"old GNU sparse map\" format.",
+              "id": "GO-2026-4869",
+              "modified": "2026-05-15T10:59:23.054049848Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/763766"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78301"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "CGA-6f85-jvrm-qq3w",
+                "RHSA-2026:7291",
+                "RHSA-2026:7385"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Unbounded allocation for old GNU sparse in archive/tar"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4870.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/tls",
+                        "symbols": [
+                          "Conn.Handshake",
+                          "Conn.HandshakeContext",
+                          "Conn.Read",
+                          "Conn.Write",
+                          "Conn.handleKeyUpdate",
+                          "Dial",
+                          "DialWithDialer",
+                          "Dialer.Dial",
+                          "Dialer.DialContext",
+                          "QUICConn.HandleData",
+                          "QUICConn.Start",
+                          "clientHandshakeStateTLS13.establishHandshakeKeys",
+                          "clientHandshakeStateTLS13.readServerFinished",
+                          "serverHandshakeStateTLS13.readClientFinished",
+                          "serverHandshakeStateTLS13.sendServerParameters"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32283",
+                "CVE-2026-32283"
+              ],
+              "credits": [
+                {
+                  "name": "Jakub Ciolek - https://ciolek.dev/"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4870"
+              },
+              "details": "If one side of the TLS connection sends multiple key update messages post-handshake in a single record, the connection can deadlock, causing uncontrolled consumption of resources. This can lead to a denial of service.\n\nThis only affects TLS 1.3.",
+              "id": "GO-2026-4870",
+              "modified": "2026-09-29T10:56:42.953142554Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/763767"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78334"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:10704",
+                "RHSA-2026:11507",
+                "RHSA-2026:11514",
+                "RHSA-2026:11704",
+                "RHSA-2026:11711",
+                "RHSA-2026:11712",
+                "RHSA-2026:11863",
+                "RHSA-2026:11881",
+                "RHSA-2026:14200",
+                "RHSA-2026:15980",
+                "RHSA-2026:16021",
+                "RHSA-2026:16024",
+                "RHSA-2026:16101",
+                "RHSA-2026:16102",
+                "RHSA-2026:16875",
+                "RHSA-2026:17075",
+                "RHSA-2026:17084",
+                "RHSA-2026:17287",
+                "RHSA-2026:18027",
+                "RHSA-2026:18032",
+                "RHSA-2026:19126",
+                "RHSA-2026:19132",
+                "RHSA-2026:19133",
+                "RHSA-2026:19134",
+                "RHSA-2026:19135",
+                "RHSA-2026:19136",
+                "RHSA-2026:19137",
+                "RHSA-2026:19139",
+                "RHSA-2026:19144",
+                "RHSA-2026:19156",
+                "RHSA-2026:19350",
+                "RHSA-2026:19351",
+                "RHSA-2026:19352",
+                "RHSA-2026:19353",
+                "RHSA-2026:19369",
+                "RHSA-2026:19450",
+                "RHSA-2026:19550",
+                "RHSA-2026:19634",
+                "RHSA-2026:19714",
+                "RHSA-2026:19715",
+                "RHSA-2026:19719",
+                "RHSA-2026:19720",
+                "RHSA-2026:19721",
+                "RHSA-2026:19722",
+                "RHSA-2026:19750",
+                "RHSA-2026:19839",
+                "RHSA-2026:20556",
+                "RHSA-2026:20569",
+                "RHSA-2026:20570",
+                "RHSA-2026:20571",
+                "RHSA-2026:20607",
+                "RHSA-2026:20608",
+                "RHSA-2026:20609",
+                "RHSA-2026:22450",
+                "RHSA-2026:22709",
+                "RHSA-2026:22713",
+                "RHSA-2026:22714",
+                "RHSA-2026:22937",
+                "RHSA-2026:23102",
+                "RHSA-2026:23103",
+                "RHSA-2026:23228",
+                "RHSA-2026:24337",
+                "RHSA-2026:24470",
+                "RHSA-2026:24761",
+                "RHSA-2026:24762",
+                "RHSA-2026:25248",
+                "RHSA-2026:25250",
+                "RHSA-2026:25251",
+                "RHSA-2026:25252",
+                "RHSA-2026:26447",
+                "RHSA-2026:27076",
+                "RHSA-2026:28038",
+                "RHSA-2026:28047",
+                "RHSA-2026:28074",
+                "RHSA-2026:29035",
+                "RHSA-2026:29195",
+                "RHSA-2026:29455",
+                "RHSA-2026:29703",
+                "RHSA-2026:33722",
+                "RHSA-2026:34192",
+                "RHSA-2026:34196",
+                "RHSA-2026:34197",
+                "RHSA-2026:34365",
+                "RHSA-2026:36796",
+                "RHSA-2026:39810",
+                "RHSA-2026:41019",
+                "RHSA-2026:47712",
+                "RHSA-2026:47714",
+                "RHSA-2026:47716",
+                "RHSA-2026:47719",
+                "RHSA-2026:47721",
+                "RHSA-2026:47722",
+                "RHSA-2026:47910",
+                "RHSA-2026:48036",
+                "RHSA-2026:48790",
+                "RHSA-2026:49509",
+                "RHSA-2026:49600",
+                "RHSA-2026:49944",
+                "RHSA-2026:51288",
+                "RHSA-2026:54191",
+                "RHSA-2026:54757",
+                "RHSA-2026:56910",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319",
+                "RHSA-2026:68504",
+                "RHSA-2026:69235",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805",
+                "RHSA-2026:7291",
+                "RHSA-2026:7385"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Unauthenticated TLS 1.3 KeyUpdate record can cause persistent connection retention and DoS in crypto/tls"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4918.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/net/http2",
+                        "symbols": [
+                          "Transport.NewClientConn",
+                          "Transport.RoundTrip",
+                          "Transport.RoundTripOpt",
+                          "clientConnPool.GetClientConn",
+                          "clientConnReadLoop.processSettingsNoWrite",
+                          "noDialClientConnPool.GetClientConn",
+                          "noDialH2RoundTripper.NewClientConn",
+                          "noDialH2RoundTripper.RoundTrip",
+                          "unencryptedTransport.RoundTrip"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/net",
+                    "purl": "pkg:golang/golang.org/x/net"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.53.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4918.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/http",
+                        "symbols": [
+                          "Client.CloseIdleConnections",
+                          "Client.Do",
+                          "Client.Get",
+                          "Client.Head",
+                          "Client.Post",
+                          "Client.PostForm",
+                          "ClientConn.Close",
+                          "ClientConn.RoundTrip",
+                          "Get",
+                          "Head",
+                          "Post",
+                          "PostForm",
+                          "Transport.CloseIdleConnections",
+                          "Transport.NewClientConn",
+                          "Transport.RoundTrip",
+                          "http1ClientConn.Close",
+                          "http1ClientConn.RoundTrip",
+                          "http2Transport.NewClientConn",
+                          "http2Transport.RoundTrip",
+                          "http2Transport.RoundTripOpt",
+                          "http2clientConnPool.GetClientConn",
+                          "http2clientConnReadLoop.processSettingsNoWrite",
+                          "http2noDialClientConnPool.GetClientConn",
+                          "http2noDialH2RoundTripper.NewClientConn",
+                          "http2noDialH2RoundTripper.RoundTrip",
+                          "http2unencryptedTransport.RoundTrip"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-33814",
+                "CVE-2026-33814"
+              ],
+              "credits": [
+                {
+                  "name": "Marwan Atia (marwansamir688@gmail.com)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4918"
+              },
+              "details": "When processing HTTP/2 SETTINGS frames, transport will enter an infinite loop of writing CONTINUATION frames if it receives a SETTINGS_MAX_FRAME_SIZE with a value of 0.",
+              "id": "GO-2026-4918",
+              "modified": "2026-09-16T10:41:36.686823140Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/761581"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/761640"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78476"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57649",
+                "RHSA-2026:57845",
+                "RHSA-2026:60668",
+                "RHSA-2026:61253",
+                "RHSA-2026:63091",
+                "RHSA-2026:63636",
+                "RHSA-2026:63637",
+                "RHSA-2026:63639",
+                "RHSA-2026:66350"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Infinite loop in HTTP/2 transport when given bad SETTINGS_MAX_FRAME_SIZE in net/http/internal/http2 in golang.org/x/net"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4946.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/x509",
+                        "symbols": [
+                          "Certificate.Verify",
+                          "policiesValid"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32281",
+                "CVE-2026-32281"
+              ],
+              "credits": [
+                {
+                  "name": "Jakub Ciolek - https://ciolek.dev"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4946"
+              },
+              "details": "Validating certificate chains which use policies is unexpectedly inefficient when certificates in the chain contain a very large number of policy mappings, possibly causing denial of service.\n\nThis only affects validation of otherwise trusted certificate chains, issued by a root CA in the VerifyOptions.Roots CertPool, or in the system certificate pool.",
+              "id": "GO-2026-4946",
+              "modified": "2026-09-29T10:56:43.010349464Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/758061"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78281"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:16021",
+                "RHSA-2026:16024",
+                "RHSA-2026:16101",
+                "RHSA-2026:17287",
+                "RHSA-2026:18027",
+                "RHSA-2026:18032",
+                "RHSA-2026:19135",
+                "RHSA-2026:19353",
+                "RHSA-2026:19450",
+                "RHSA-2026:19719",
+                "RHSA-2026:19720",
+                "RHSA-2026:19721",
+                "RHSA-2026:19839",
+                "RHSA-2026:20556",
+                "RHSA-2026:20569",
+                "RHSA-2026:20570",
+                "RHSA-2026:20571",
+                "RHSA-2026:20607",
+                "RHSA-2026:20608",
+                "RHSA-2026:20609",
+                "RHSA-2026:22141",
+                "RHSA-2026:22309",
+                "RHSA-2026:22713",
+                "RHSA-2026:23102",
+                "RHSA-2026:23103",
+                "RHSA-2026:24337",
+                "RHSA-2026:24470",
+                "RHSA-2026:24716",
+                "RHSA-2026:25248",
+                "RHSA-2026:25250",
+                "RHSA-2026:25251",
+                "RHSA-2026:25252",
+                "RHSA-2026:26054",
+                "RHSA-2026:26447",
+                "RHSA-2026:27076",
+                "RHSA-2026:27711",
+                "RHSA-2026:27740",
+                "RHSA-2026:28074",
+                "RHSA-2026:29035",
+                "RHSA-2026:29195",
+                "RHSA-2026:29455",
+                "RHSA-2026:29702",
+                "RHSA-2026:29703",
+                "RHSA-2026:33722",
+                "RHSA-2026:34192",
+                "RHSA-2026:34196",
+                "RHSA-2026:34197",
+                "RHSA-2026:34365",
+                "RHSA-2026:36796",
+                "RHSA-2026:39810",
+                "RHSA-2026:41019",
+                "RHSA-2026:42078",
+                "RHSA-2026:42079",
+                "RHSA-2026:47712",
+                "RHSA-2026:47714",
+                "RHSA-2026:47716",
+                "RHSA-2026:47719",
+                "RHSA-2026:47721",
+                "RHSA-2026:47722",
+                "RHSA-2026:47910",
+                "RHSA-2026:48036",
+                "RHSA-2026:49509",
+                "RHSA-2026:49526",
+                "RHSA-2026:49600",
+                "RHSA-2026:49838",
+                "RHSA-2026:49944",
+                "RHSA-2026:51288",
+                "RHSA-2026:54757",
+                "RHSA-2026:61906",
+                "RHSA-2026:61907",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:67148",
+                "RHSA-2026:67149",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319",
+                "RHSA-2026:68504",
+                "RHSA-2026:69235",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805",
+                "RHSA-2026:7291",
+                "RHSA-2026:7385"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Inefficient policy validation in crypto/x509"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4947.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/x509",
+                        "symbols": [
+                          "Certificate.Verify",
+                          "Certificate.buildChains"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.9"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-32280",
+                "CVE-2026-32280"
+              ],
+              "credits": [
+                {
+                  "name": "Jakub Ciolek - https://ciolek.dev"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4947"
+              },
+              "details": "During chain building, the amount of work that is done is not correctly limited when a large number of intermediate certificates are passed in VerifyOptions.Intermediates, which can lead to a denial of service. This affects both direct users of crypto/x509 and users of crypto/tls.",
+              "id": "GO-2026-4947",
+              "modified": "2026-09-29T10:56:43.241865278Z",
+              "published": "2026-04-07T22:53:49Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/758320"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78282"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/0uYbvbPZRWU"
+                }
+              ],
+              "related": [
+                "RHSA-2026:10217",
+                "RHSA-2026:10219",
+                "RHSA-2026:10704",
+                "RHSA-2026:11507",
+                "RHSA-2026:11514",
+                "RHSA-2026:14200",
+                "RHSA-2026:15980",
+                "RHSA-2026:16021",
+                "RHSA-2026:16024",
+                "RHSA-2026:16101",
+                "RHSA-2026:16875",
+                "RHSA-2026:17084",
+                "RHSA-2026:17287",
+                "RHSA-2026:18027",
+                "RHSA-2026:18032",
+                "RHSA-2026:19133",
+                "RHSA-2026:19135",
+                "RHSA-2026:19144",
+                "RHSA-2026:19350",
+                "RHSA-2026:19353",
+                "RHSA-2026:19450",
+                "RHSA-2026:19550",
+                "RHSA-2026:19634",
+                "RHSA-2026:19714",
+                "RHSA-2026:19715",
+                "RHSA-2026:19719",
+                "RHSA-2026:19720",
+                "RHSA-2026:19721",
+                "RHSA-2026:19722",
+                "RHSA-2026:19750",
+                "RHSA-2026:19839",
+                "RHSA-2026:20556",
+                "RHSA-2026:20569",
+                "RHSA-2026:20570",
+                "RHSA-2026:20571",
+                "RHSA-2026:20607",
+                "RHSA-2026:20608",
+                "RHSA-2026:20609",
+                "RHSA-2026:21655",
+                "RHSA-2026:22130",
+                "RHSA-2026:22141",
+                "RHSA-2026:22309",
+                "RHSA-2026:22709",
+                "RHSA-2026:22713",
+                "RHSA-2026:23102",
+                "RHSA-2026:23103",
+                "RHSA-2026:23244",
+                "RHSA-2026:24337",
+                "RHSA-2026:24470",
+                "RHSA-2026:24716",
+                "RHSA-2026:24761",
+                "RHSA-2026:24762",
+                "RHSA-2026:25180",
+                "RHSA-2026:25248",
+                "RHSA-2026:25250",
+                "RHSA-2026:25251",
+                "RHSA-2026:25252",
+                "RHSA-2026:25253",
+                "RHSA-2026:26447",
+                "RHSA-2026:27076",
+                "RHSA-2026:28038",
+                "RHSA-2026:28047",
+                "RHSA-2026:28074",
+                "RHSA-2026:28886",
+                "RHSA-2026:28961",
+                "RHSA-2026:29035",
+                "RHSA-2026:29195",
+                "RHSA-2026:29455",
+                "RHSA-2026:29702",
+                "RHSA-2026:29703",
+                "RHSA-2026:33722",
+                "RHSA-2026:34097",
+                "RHSA-2026:34192",
+                "RHSA-2026:34196",
+                "RHSA-2026:34197",
+                "RHSA-2026:34365",
+                "RHSA-2026:36796",
+                "RHSA-2026:39810",
+                "RHSA-2026:41019",
+                "RHSA-2026:47712",
+                "RHSA-2026:47714",
+                "RHSA-2026:47716",
+                "RHSA-2026:47719",
+                "RHSA-2026:47721",
+                "RHSA-2026:47722",
+                "RHSA-2026:47910",
+                "RHSA-2026:48036",
+                "RHSA-2026:48790",
+                "RHSA-2026:49509",
+                "RHSA-2026:49526",
+                "RHSA-2026:49600",
+                "RHSA-2026:49838",
+                "RHSA-2026:49944",
+                "RHSA-2026:51288",
+                "RHSA-2026:54191",
+                "RHSA-2026:54757",
+                "RHSA-2026:56785",
+                "RHSA-2026:56852",
+                "RHSA-2026:56910",
+                "RHSA-2026:57482",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61906",
+                "RHSA-2026:61907",
+                "RHSA-2026:65534",
+                "RHSA-2026:65838",
+                "RHSA-2026:65886",
+                "RHSA-2026:66401",
+                "RHSA-2026:67319",
+                "RHSA-2026:68504",
+                "RHSA-2026:69235",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Unexpected work during chain building in crypto/x509"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4970.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "os",
+                        "symbols": [
+                          "OpenInRoot",
+                          "Root.Create",
+                          "Root.Open",
+                          "Root.OpenFile",
+                          "Root.OpenRoot",
+                          "Root.ReadFile",
+                          "Root.WriteFile",
+                          "openRootInRoot",
+                          "rootFS.Open",
+                          "rootFS.ReadDir",
+                          "rootFS.ReadFile",
+                          "rootOpenFileNolog"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.12"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.5"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39822",
+                "CVE-2026-39822"
+              ],
+              "credits": [
+                {
+                  "name": "Mundur (https://github.com/M0nd0R)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4970"
+              },
+              "details": "On Unix systems, opening a file in an os.Root improperly follows symlinks to locations outside of the Root when the final path component of the a path is a symbolic link and the path ends in /.\n\nFor example, 'root.Open(\"symlink/\")' will open \"symlink\" even when \"symlink\" is a symbolic link pointing outside of the root.",
+              "id": "GO-2026-4970",
+              "modified": "2026-09-16T10:41:36.578014904Z",
+              "published": "2026-07-07T21:34:47Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79005"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/OrmQE_Yp5Sc"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/797880"
+                }
+              ],
+              "related": [
+                "RHSA-2026:36477",
+                "RHSA-2026:36510",
+                "RHSA-2026:37435",
+                "RHSA-2026:37436",
+                "RHSA-2026:38493",
+                "RHSA-2026:38494",
+                "RHSA-2026:38495",
+                "RHSA-2026:38878",
+                "RHSA-2026:38995",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57361",
+                "RHSA-2026:57649",
+                "RHSA-2026:61253",
+                "RHSA-2026:66350",
+                "RHSA-2026:66375"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Root escape via symlink plus trailing slash in os"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4971.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net",
+                        "symbols": [
+                          "Dial",
+                          "DialTimeout",
+                          "Dialer.Dial",
+                          "Dialer.DialContext",
+                          "Listen",
+                          "ListenConfig.Listen",
+                          "ListenConfig.ListenPacket",
+                          "ListenPacket",
+                          "LookupAddr",
+                          "LookupCNAME",
+                          "LookupHost",
+                          "LookupIP",
+                          "LookupMX",
+                          "LookupNS",
+                          "LookupPort",
+                          "LookupSRV",
+                          "LookupTXT",
+                          "ResolveIPAddr",
+                          "ResolveTCPAddr",
+                          "ResolveUDPAddr",
+                          "Resolver.LookupAddr",
+                          "Resolver.LookupCNAME",
+                          "Resolver.LookupHost",
+                          "Resolver.LookupIP",
+                          "Resolver.LookupIPAddr",
+                          "Resolver.LookupMX",
+                          "Resolver.LookupNS",
+                          "Resolver.LookupNetIP",
+                          "Resolver.LookupPort",
+                          "Resolver.LookupSRV",
+                          "Resolver.LookupTXT",
+                          "Resolver.lookupAddr",
+                          "Resolver.lookupMX",
+                          "Resolver.lookupNS",
+                          "Resolver.lookupPort",
+                          "Resolver.lookupSRV",
+                          "Resolver.lookupTXT"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39836",
+                "CVE-2026-39836"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4971"
+              },
+              "details": "The Dial and LookupPort functions panic on Windows when provided with an input containing a NUL (0).",
+              "id": "GO-2026-4971",
+              "modified": "2026-08-26T10:42:13.474920113Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79006"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/775320"
+                }
+              ],
+              "related": [
+                "CGA-g4vf-wmcj-mwwf",
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Panic in Dial and LookupPort when handling NUL byte on Windows in net"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4976.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/http/httputil",
+                        "symbols": [
+                          "ReverseProxy.ServeHTTP",
+                          "cleanQueryParams"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39825",
+                "CVE-2026-39825"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4976"
+              },
+              "details": "ReverseProxy can forward queries containing parameters not visible to Rewrite functions.\n\nWhen used with a Rewrite function, or a Director function which parses query parameters, ReverseProxy sanitizes the forwarded request to remove query parameters which are not parsed by url.ParseQuery. ReverseProxy does not take ParseQuery's limit on the total number of query parameters (controlled by GODEBUG=urlmaxqueryparams=N) into account. This can permit ReverseProxy to forward a request containing a query parameter that is not visible to the Rewrite function.\n\nFor example, the query \"a1=x&a2=x&...&a10000=x&hidden=y\" can forward the parameter \"hidden=y\" while hiding it from the proxy's Rewrite function.",
+              "id": "GO-2026-4976",
+              "modified": "2026-08-31T10:25:58.969613045Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/770541"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78948"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "CGA-hgj8-xv45-c75x",
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "ReverseProxy forwards queries with more than urlmaxqueryparams parameters in net/http/httputil"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4977.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/mail",
+                        "symbols": [
+                          "AddressParser.Parse",
+                          "AddressParser.ParseList",
+                          "Header.AddressList",
+                          "ParseAddress",
+                          "ParseAddressList",
+                          "addrParser.consumePhrase"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-42499",
+                "CVE-2026-42499"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4977"
+              },
+              "details": "Pathological inputs could cause DoS through consumePhrase when parsing an email address according to RFC 5322.",
+              "id": "GO-2026-4977",
+              "modified": "2026-09-24T10:41:42.457153787Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78987"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/771520"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "RHSA-2026:17713",
+                "RHSA-2026:17714",
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:51112",
+                "RHSA-2026:54552",
+                "RHSA-2026:56785",
+                "RHSA-2026:56852",
+                "RHSA-2026:56910",
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:57845",
+                "RHSA-2026:57914",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:63636",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65534",
+                "RHSA-2026:65838",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66327",
+                "RHSA-2026:67148",
+                "RHSA-2026:67517",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:70201"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Quadratic string concatenation in consumePhrase in net/mail"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4980.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "html/template",
+                        "symbols": [
+                          "Template.Execute",
+                          "Template.ExecuteTemplate",
+                          "isJSType"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39826",
+                "CVE-2026-39826"
+              ],
+              "credits": [
+                {
+                  "name": "Mundur (https://github.com/M0nd0R)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4980"
+              },
+              "details": "If a trusted template author were to write a <script> tag containing an empty 'type' attribute or a 'type' attribute with an ASCII whitespace, the execution of the template would incorrectly escape any data passed into the <script> block.",
+              "id": "GO-2026-4980",
+              "modified": "2026-08-31T10:25:58.429372080Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78981"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/771180"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "CGA-4mcr-6mw7-3w72",
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Escaper bypass leads to XSS in html/template"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4981.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net",
+                        "symbols": [
+                          "LookupCNAME",
+                          "Resolver.LookupCNAME",
+                          "cgoResSearch"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-33811",
+                "CVE-2026-33811"
+              ],
+              "credits": [
+                {
+                  "name": "hamayanhamayan"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4981"
+              },
+              "details": "When using LookupCNAME with the cgo DNS resolver, a very long CNAME response can trigger a double-free of C memory and a crash.",
+              "id": "GO-2026-4981",
+              "modified": "2026-09-29T10:56:43.305065682Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78803"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/767860"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:34357",
+                "RHSA-2026:34359",
+                "RHSA-2026:35832",
+                "RHSA-2026:36617",
+                "RHSA-2026:36776",
+                "RHSA-2026:36796",
+                "RHSA-2026:38504",
+                "RHSA-2026:39266",
+                "RHSA-2026:39272",
+                "RHSA-2026:39319",
+                "RHSA-2026:39573",
+                "RHSA-2026:39810",
+                "RHSA-2026:41019",
+                "RHSA-2026:42078",
+                "RHSA-2026:42079",
+                "RHSA-2026:42082",
+                "RHSA-2026:42150",
+                "RHSA-2026:42151",
+                "RHSA-2026:42240",
+                "RHSA-2026:42946",
+                "RHSA-2026:49702",
+                "RHSA-2026:49703",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:51187",
+                "RHSA-2026:53412",
+                "RHSA-2026:53413",
+                "RHSA-2026:53415",
+                "RHSA-2026:54168",
+                "RHSA-2026:54191",
+                "RHSA-2026:54552",
+                "RHSA-2026:54757",
+                "RHSA-2026:56785",
+                "RHSA-2026:56852",
+                "RHSA-2026:56910",
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:61313",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:67149",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319",
+                "RHSA-2026:68534",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Crash when handling long CNAME response in net"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4982.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "html/template",
+                        "symbols": [
+                          "Template.Execute",
+                          "Template.ExecuteTemplate",
+                          "tMetaContent"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39823",
+                "CVE-2026-39823"
+              ],
+              "credits": [
+                {
+                  "name": "Samy Ghannad"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4982"
+              },
+              "details": "CVE-2026-27142 fixed a vulnerability in which URLs were not correctly escaped inside of a <meta> tag's <content> attribute. If the URL content were to insert ASCII whitespaces around the '=' rune inside of the <content> attribute, the escaper would fail to similarly escape it, leading to XSS.",
+              "id": "GO-2026-4982",
+              "modified": "2026-08-31T10:25:58.456781741Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78913"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/769920"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "CGA-x3r8-cgg4-9q3g",
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Bypass of meta content URL escaping causes XSS in html/template"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-4986.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/mail",
+                        "symbols": [
+                          "AddressParser.Parse",
+                          "AddressParser.ParseList",
+                          "Header.AddressList",
+                          "Header.Date",
+                          "ParseAddress",
+                          "ParseAddressList",
+                          "ParseDate",
+                          "addrParser.consumeComment"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.10"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-39820",
+                "CVE-2026-39820"
+              ],
+              "credits": [
+                {
+                  "name": "thatnealpatel"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-4986"
+              },
+              "details": "Well-crafted inputs reaching ParseAddress, ParseAddressList, and ParseDate were able to trigger excessive CPU exhaustion and memory allocations.",
+              "id": "GO-2026-4986",
+              "modified": "2026-09-24T10:41:42.580314663Z",
+              "published": "2026-05-07T19:21:40Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78566"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/759940"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/qcCIEXso47M"
+                }
+              ],
+              "related": [
+                "RHSA-2026:22112",
+                "RHSA-2026:22120",
+                "RHSA-2026:22121",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:51112",
+                "RHSA-2026:54552",
+                "RHSA-2026:54883",
+                "RHSA-2026:56852",
+                "RHSA-2026:57401",
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:57845",
+                "RHSA-2026:57914",
+                "RHSA-2026:59830",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65534",
+                "RHSA-2026:65838",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:67517",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Quadratic string concatentation in consumeComment in net/mail"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5026.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/http",
+                        "symbols": [
+                          "Client.CloseIdleConnections",
+                          "Client.Do",
+                          "Client.Get",
+                          "Client.Head",
+                          "Client.Post",
+                          "Client.PostForm",
+                          "ClientConn.Close",
+                          "ClientConn.RoundTrip",
+                          "Get",
+                          "Head",
+                          "Post",
+                          "PostForm",
+                          "Transport.CloseIdleConnections",
+                          "Transport.NewClientConn",
+                          "Transport.RoundTrip",
+                          "http1ClientConn.Close",
+                          "http1ClientConn.RoundTrip",
+                          "http2ClientConn.RoundTrip",
+                          "http2RoundTripper.RoundTrip",
+                          "idnaASCII"
+                        ]
+                      },
+                      {
+                        "path": "net/http/internal/http2",
+                        "symbols": [
+                          "Transport.AddConn",
+                          "Transport.RoundTrip",
+                          "Transport.RoundTripOpt",
+                          "authorityAddr"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                },
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5026.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "golang.org/x/net/idna",
+                        "symbols": [
+                          "Profile.ToASCII",
+                          "Profile.ToUnicode",
+                          "Profile.process",
+                          "ToASCII",
+                          "ToUnicode"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "golang.org/x/net",
+                    "purl": "pkg:golang/golang.org/x/net"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "0.55.0"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "CVE-2026-39821"
+              ],
+              "credits": [
+                {
+                  "name": "KC1zs4 (https://github.com/KC1zs4)"
+                },
+                {
+                  "name": "Longwei Wang (https://github.com/gn00295120)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5026"
+              },
+              "details": "The ToASCII and ToUnicode functions incorrectly accept Punycode-encoded labels that decode to an ASCII-only label. For example, ToUnicode(\"xn--example-.com\") incorrectly returns the name \"example.com\" rather than an error.\n\nThis behavior can lead to privilege escalation in programs using the idna package. For example, a program which performs privilege checks on the ASCII hostname may reject \"example.com\" but permit \"xn--example-.com\". If that program subsequently converts the ASCII hostname to Unicode, it will inadvertently permits access to the Unicode name \"example.com\".",
+              "id": "GO-2026-5026",
+              "modified": "2026-09-29T10:56:43.041153988Z",
+              "published": "2026-05-22T02:46:43Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/767220"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/78760"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/iI-mYSI0lu8"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:30853",
+                "RHSA-2026:30854",
+                "RHSA-2026:30855",
+                "RHSA-2026:34357",
+                "RHSA-2026:34359",
+                "RHSA-2026:34789",
+                "RHSA-2026:35826",
+                "RHSA-2026:35827",
+                "RHSA-2026:35828",
+                "RHSA-2026:35829",
+                "RHSA-2026:35830",
+                "RHSA-2026:35831",
+                "RHSA-2026:36796",
+                "RHSA-2026:37435",
+                "RHSA-2026:37436",
+                "RHSA-2026:38995",
+                "RHSA-2026:39005",
+                "RHSA-2026:39573",
+                "RHSA-2026:39879",
+                "RHSA-2026:41019",
+                "RHSA-2026:41930",
+                "RHSA-2026:42078",
+                "RHSA-2026:42079",
+                "RHSA-2026:42080",
+                "RHSA-2026:42082",
+                "RHSA-2026:42150",
+                "RHSA-2026:42151",
+                "RHSA-2026:42240",
+                "RHSA-2026:46395",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:51112",
+                "RHSA-2026:51187",
+                "RHSA-2026:52826",
+                "RHSA-2026:53374",
+                "RHSA-2026:53412",
+                "RHSA-2026:53413",
+                "RHSA-2026:53415",
+                "RHSA-2026:54191",
+                "RHSA-2026:54401",
+                "RHSA-2026:54580",
+                "RHSA-2026:54757",
+                "RHSA-2026:56143",
+                "RHSA-2026:56223",
+                "RHSA-2026:57541",
+                "RHSA-2026:57649",
+                "RHSA-2026:57845",
+                "RHSA-2026:59546",
+                "RHSA-2026:59549",
+                "RHSA-2026:59562",
+                "RHSA-2026:60315",
+                "RHSA-2026:60354",
+                "RHSA-2026:61245",
+                "RHSA-2026:61253",
+                "RHSA-2026:63134",
+                "RHSA-2026:65153",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:66016",
+                "RHSA-2026:66350",
+                "RHSA-2026:66432",
+                "RHSA-2026:67149",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67287",
+                "RHSA-2026:67319",
+                "RHSA-2026:67517",
+                "RHSA-2026:68504",
+                "RHSA-2026:68534",
+                "RHSA-2026:69235",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Invoking failure to reject ASCII-only Punycode-encoded labels in golang.org/x/net/idna"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5037.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/x509",
+                        "symbols": [
+                          "Certificate.Verify",
+                          "Certificate.VerifyHostname",
+                          "HostnameError.Error",
+                          "matchHostnames"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.11"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.4"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-27145",
+                "CVE-2026-27145"
+              ],
+              "credits": [
+                {
+                  "name": "Jakub Ciolek - https://ciolek.dev/"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5037"
+              },
+              "details": "(*x509.Certificate).VerifyHostname previously called matchHostnames in a loop over all DNS Subject Alternative Name (SAN) entries. This caused strings.Split(host, \".\") to execute repeatedly on the same input hostname.\n\nWith a large DNS SAN list, verification costs scaled quadratically based on the number of SAN entries multiplied by the hostname's label count. Because x509.Verify validates hostnames before building the certificate chain, this overhead occurred even for untrusted certificates.",
+              "id": "GO-2026-5037",
+              "modified": "2026-09-17T10:41:36.463498335Z",
+              "published": "2026-06-02T21:39:47Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/783621"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79694"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/tKs3rmcBcKw"
+                }
+              ],
+              "related": [
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:29980",
+                "RHSA-2026:29981",
+                "RHSA-2026:34357",
+                "RHSA-2026:34359",
+                "RHSA-2026:35832",
+                "RHSA-2026:36317",
+                "RHSA-2026:38995",
+                "RHSA-2026:39005",
+                "RHSA-2026:39573",
+                "RHSA-2026:39879",
+                "RHSA-2026:41930",
+                "RHSA-2026:42079",
+                "RHSA-2026:42080",
+                "RHSA-2026:42082",
+                "RHSA-2026:42150",
+                "RHSA-2026:42151",
+                "RHSA-2026:42240",
+                "RHSA-2026:42946",
+                "RHSA-2026:46394",
+                "RHSA-2026:46395",
+                "RHSA-2026:49702",
+                "RHSA-2026:49703",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:51187",
+                "RHSA-2026:53374",
+                "RHSA-2026:53412",
+                "RHSA-2026:53413",
+                "RHSA-2026:53415",
+                "RHSA-2026:53416",
+                "RHSA-2026:54168",
+                "RHSA-2026:54401",
+                "RHSA-2026:54757",
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:60315",
+                "RHSA-2026:60354",
+                "RHSA-2026:61253",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Inefficient candidate hostname parsing in crypto/x509"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5038.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "mime",
+                        "symbols": [
+                          "WordDecoder.DecodeHeader"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.11"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.4"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-42504",
+                "CVE-2026-42504"
+              ],
+              "credits": [
+                {
+                  "name": "p4p3r (https://hackerone.com/p4p3r_hak) "
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5038"
+              },
+              "details": "Decoding a maliciously-crafted MIME header containing many invalid encoded-words can consume excessive CPU.",
+              "id": "GO-2026-5038",
+              "modified": "2026-09-29T10:56:43.218943240Z",
+              "published": "2026-06-02T21:39:47Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79217"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/774481"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/tKs3rmcBcKw"
+                }
+              ],
+              "related": [
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:29980",
+                "RHSA-2026:29981",
+                "RHSA-2026:38995",
+                "RHSA-2026:49712",
+                "RHSA-2026:50319",
+                "RHSA-2026:50336",
+                "RHSA-2026:57361",
+                "RHSA-2026:57456",
+                "RHSA-2026:57482",
+                "RHSA-2026:57649",
+                "RHSA-2026:60018",
+                "RHSA-2026:61253",
+                "RHSA-2026:61882",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62631",
+                "RHSA-2026:63022",
+                "RHSA-2026:63091",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65534",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66375",
+                "RHSA-2026:67148",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Quadratic complexity in WordDecoder.DecodeHeader in mime"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5039.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/textproto",
+                        "symbols": [
+                          "Error.Error",
+                          "Reader.ReadCodeLine",
+                          "Reader.ReadMIMEHeader",
+                          "Reader.ReadResponse",
+                          "parseCodeLine",
+                          "readMIMEHeader"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.11"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.4"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-42507",
+                "CVE-2026-42507"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5039"
+              },
+              "details": "When returning errors, functions in the net/textproto package would include its input as part of the error. This might allow an attacker to inject misleading content to errors that are printed or logged.",
+              "id": "GO-2026-5039",
+              "modified": "2026-08-31T10:25:58.939163086Z",
+              "published": "2026-06-02T21:39:47Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79346"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/777060"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/tKs3rmcBcKw"
+                }
+              ],
+              "related": [
+                "CGA-v7pm-5wx9-g4q8",
+                "RHSA-2026:23262",
+                "RHSA-2026:23264",
+                "RHSA-2026:29980",
+                "RHSA-2026:29981",
+                "RHSA-2026:38995",
+                "RHSA-2026:49702",
+                "RHSA-2026:49712",
+                "RHSA-2026:57649",
+                "RHSA-2026:61253"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Arbitrary inputs are included in errors without any escaping in net/textproto"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5856.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/tls",
+                        "symbols": [
+                          "Conn.Handshake",
+                          "Conn.HandshakeContext",
+                          "Conn.Read",
+                          "Conn.Write",
+                          "Dial",
+                          "DialWithDialer",
+                          "Dialer.Dial",
+                          "Dialer.DialContext",
+                          "QUICConn.HandleData",
+                          "QUICConn.SendSessionTicket",
+                          "QUICConn.Start",
+                          "clientHelloMsg.marshalMsg"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.12"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.5"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.2"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-42505",
+                "CVE-2026-42505"
+              ],
+              "credits": [
+                {
+                  "name": "Coia Prant (github.com/rbqvq)"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5856"
+              },
+              "details": "Handshakes which used Encrypted Client Hello could be de-anonymized by a passive network observer due to a disclosure of pre-shared key identities in the unencrypted client hello.",
+              "id": "GO-2026-5856",
+              "modified": "2026-07-31T10:44:49.202644503Z",
+              "published": "2026-07-07T21:34:47Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/775960"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/79282"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/OrmQE_Yp5Sc"
+                }
+              ],
+              "related": [
+                "CGA-c2qp-qchh-369w",
+                "RHSA-2026:36477",
+                "RHSA-2026:36510",
+                "RHSA-2026:37435",
+                "RHSA-2026:37436",
+                "RHSA-2026:38995"
+              ],
+              "schema_version": "1.7.5",
+              "summary": "Invoking Encrypted Client Hello privacy leak in crypto/tls"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-5972.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "encoding/asn1",
+                        "symbols": [
+                          "Unmarshal",
+                          "UnmarshalWithParams",
+                          "parseField",
+                          "parseSequenceOf"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-33818",
+                "CVE-2026-33818"
+              ],
+              "credits": [
+                {
+                  "name": "Marwan Atia (marwansamir688@gmail.com) "
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-5972"
+              },
+              "details": "Enforce a recursion limit in Unmarshal to prevent stack exhaustion when parsing deeply-nested, recursive structures.",
+              "id": "GO-2026-5972",
+              "modified": "2026-09-29T10:56:43.099039813Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80405"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/814980"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:69103",
+                "RHSA-2026:69104",
+                "RHSA-2026:69105",
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308",
+                "RHSA-2026:69961",
+                "RHSA-2026:70103",
+                "RHSA-2026:70201",
+                "RHSA-2026:70391",
+                "RHSA-2026:70640",
+                "RHSA-2026:70641",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Enforce maximum recursion depth in encoding/asn1"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6088.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "encoding/xml",
+                        "symbols": [
+                          "Decoder.Decode",
+                          "Decoder.DecodeElement",
+                          "Decoder.RawToken",
+                          "Decoder.Skip",
+                          "Decoder.Token",
+                          "Decoder.pop",
+                          "Decoder.push",
+                          "Decoder.unmarshal",
+                          "Decoder.unmarshalPath",
+                          "Unmarshal"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56859",
+                "CVE-2026-56859"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6088"
+              },
+              "details": "Previously, DecodeElement would reset the depth counter causing it to never fire; this could lead to stack exhaustion.",
+              "id": "GO-2026-6088",
+              "modified": "2026-09-28T10:56:56.357083177Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80481"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/803320"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:57415",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63163",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66375",
+                "RHSA-2026:67128",
+                "RHSA-2026:67153",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:69099",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308",
+                "RHSA-2026:69961",
+                "RHSA-2026:70103",
+                "RHSA-2026:70201",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:71420",
+                "RHSA-2026:72276"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Add recursion depth guard during decode in encoding/xml"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6089.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/http",
+                        "symbols": [
+                          "ListenAndServe",
+                          "ListenAndServeTLS",
+                          "Serve",
+                          "ServeTLS",
+                          "Server.ListenAndServe",
+                          "Server.ListenAndServeTLS",
+                          "Server.Serve",
+                          "Server.ServeTLS",
+                          "conn.readRequest",
+                          "conn.serve"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56853",
+                "CVE-2026-56853"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6089"
+              },
+              "details": "When a server is configured to support unencrypted HTTP/2, it reads a few bytes from each new connection to see if they contain the HTTP/2 client preface. ReadHeaderTimeout is unexpectedly not being applied when doing this.",
+              "id": "GO-2026-6089",
+              "modified": "2026-09-29T10:56:42.975685124Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80205"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/795540"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67313",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:69235",
+                "RHSA-2026:69961",
+                "RHSA-2026:70103",
+                "RHSA-2026:70201",
+                "RHSA-2026:70391",
+                "RHSA-2026:70640",
+                "RHSA-2026:70641",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Apply ReadHeaderTimeout when doing unencrypted HTTP/2 check in net/http"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6090.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "crypto/tls",
+                        "symbols": [
+                          "Conn.Handshake",
+                          "Conn.HandshakeContext",
+                          "Conn.Read",
+                          "Conn.Write",
+                          "Conn.readRecordOrCCS",
+                          "Dial",
+                          "DialWithDialer",
+                          "Dialer.Dial",
+                          "Dialer.DialContext",
+                          "QUICConn.HandleData",
+                          "QUICConn.Start"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56862",
+                "CVE-2026-56862"
+              ],
+              "credits": [
+                {
+                  "name": "Qi Deng of Aurascape.ai"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6090"
+              },
+              "details": "Handshake messages, such as KeyUpdate, are always considered as state-advancing, regardless of whether a handshake has been completed or not. As a result, a malicious client can keep sending KeyUpdate messages to force the server to keep performing key derivation operations indefinitely.",
+              "id": "GO-2026-6090",
+              "modified": "2026-09-29T10:56:42.884324394Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80528"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/804261"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:68538",
+                "RHSA-2026:69103",
+                "RHSA-2026:69104",
+                "RHSA-2026:69105",
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308",
+                "RHSA-2026:69961",
+                "RHSA-2026:70103",
+                "RHSA-2026:70201",
+                "RHSA-2026:70391",
+                "RHSA-2026:70640",
+                "RHSA-2026:70641",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Limit handshake messages we are willing to accept post-handshake in crypto/tls"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6091.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "html/template",
+                        "symbols": [
+                          "Template.Execute",
+                          "Template.ExecuteTemplate",
+                          "tJS"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56858",
+                "CVE-2026-56858"
+              ],
+              "credits": [
+                {
+                  "name": "Ali Sherif"
+                }
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6091"
+              },
+              "details": "Previously, pathological inputs could close an unescaped '/' early, allowing for attack-controlled data to inject arbitrary content, potentially leading to XSS.",
+              "id": "GO-2026-6091",
+              "modified": "2026-09-25T10:41:52.899286820Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80435"
+                },
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/807100"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62602",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66356",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67313",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:69103",
+                "RHSA-2026:69104",
+                "RHSA-2026:69105",
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69961",
+                "RHSA-2026:70201",
+                "RHSA-2026:70391",
+                "RHSA-2026:70640",
+                "RHSA-2026:70641",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Fix Javascript regexp context tracking in html/template"
+            },
+            {
+              "affected": [
+                {
+                  "database_specific": {
+                    "source": "https://vuln.go.dev/ID/GO-2026-6218.json"
+                  },
+                  "ecosystem_specific": {
+                    "imports": [
+                      {
+                        "path": "net/url",
+                        "symbols": [
+                          "URL.Parse",
+                          "URL.ResolveReference",
+                          "resolvePath"
+                        ]
+                      }
+                    ]
+                  },
+                  "package": {
+                    "ecosystem": "Go",
+                    "name": "stdlib",
+                    "purl": "pkg:golang/stdlib"
+                  },
+                  "ranges": [
+                    {
+                      "events": [
+                        {
+                          "introduced": "0"
+                        },
+                        {
+                          "fixed": "1.25.13"
+                        },
+                        {
+                          "introduced": "1.26.0-0"
+                        },
+                        {
+                          "fixed": "1.26.6"
+                        },
+                        {
+                          "introduced": "1.27.0-0"
+                        },
+                        {
+                          "fixed": "1.27.0-rc.3"
+                        }
+                      ],
+                      "type": "SEMVER"
+                    }
+                  ]
+                }
+              ],
+              "aliases": [
+                "BIT-golang-2026-56860",
+                "CVE-2026-56860"
+              ],
+              "database_specific": {
+                "review_status": "REVIEWED",
+                "url": "https://pkg.go.dev/vuln/GO-2026-6218"
+              },
+              "details": "Previously, resolving relative paths containing parent directory ('..') segments performed string conversions and buffer rewrites on each step, resulting in quadratic time complexity and high memory allocation overhead.\n\nNow, path resolution operates on a byte buffer using index-based backtracking for '..' segments, eliminating the quadratic time complexity and significantly reducing memory allocations.",
+              "id": "GO-2026-6218",
+              "modified": "2026-09-29T10:56:42.916303178Z",
+              "published": "2026-08-13T21:43:54Z",
+              "references": [
+                {
+                  "type": "FIX",
+                  "url": "https://go.dev/cl/803681"
+                },
+                {
+                  "type": "REPORT",
+                  "url": "https://go.dev/issue/80494"
+                },
+                {
+                  "type": "WEB",
+                  "url": "https://groups.google.com/g/golang-announce/c/94pEornpRlI"
+                }
+              ],
+              "related": [
+                "RHSA-2026:54835",
+                "RHSA-2026:54836",
+                "RHSA-2026:60304",
+                "RHSA-2026:60305",
+                "RHSA-2026:60306",
+                "RHSA-2026:61882",
+                "RHSA-2026:62404",
+                "RHSA-2026:62405",
+                "RHSA-2026:62406",
+                "RHSA-2026:62407",
+                "RHSA-2026:62577",
+                "RHSA-2026:62578",
+                "RHSA-2026:62602",
+                "RHSA-2026:62631",
+                "RHSA-2026:62753",
+                "RHSA-2026:62754",
+                "RHSA-2026:62803",
+                "RHSA-2026:63022",
+                "RHSA-2026:63119",
+                "RHSA-2026:63124",
+                "RHSA-2026:63127",
+                "RHSA-2026:63130",
+                "RHSA-2026:63136",
+                "RHSA-2026:63163",
+                "RHSA-2026:63332",
+                "RHSA-2026:64777",
+                "RHSA-2026:64786",
+                "RHSA-2026:64788",
+                "RHSA-2026:64818",
+                "RHSA-2026:65116",
+                "RHSA-2026:65117",
+                "RHSA-2026:65153",
+                "RHSA-2026:65335",
+                "RHSA-2026:65336",
+                "RHSA-2026:65359",
+                "RHSA-2026:65534",
+                "RHSA-2026:65880",
+                "RHSA-2026:65886",
+                "RHSA-2026:65895",
+                "RHSA-2026:65918",
+                "RHSA-2026:66016",
+                "RHSA-2026:66327",
+                "RHSA-2026:66350",
+                "RHSA-2026:66356",
+                "RHSA-2026:66364",
+                "RHSA-2026:66375",
+                "RHSA-2026:66459",
+                "RHSA-2026:67128",
+                "RHSA-2026:67132",
+                "RHSA-2026:67149",
+                "RHSA-2026:67153",
+                "RHSA-2026:67159",
+                "RHSA-2026:67160",
+                "RHSA-2026:67161",
+                "RHSA-2026:67287",
+                "RHSA-2026:67313",
+                "RHSA-2026:67319",
+                "RHSA-2026:67464",
+                "RHSA-2026:67517",
+                "RHSA-2026:67518",
+                "RHSA-2026:67934",
+                "RHSA-2026:67974",
+                "RHSA-2026:67975",
+                "RHSA-2026:68334",
+                "RHSA-2026:68335",
+                "RHSA-2026:68504",
+                "RHSA-2026:68527",
+                "RHSA-2026:68534",
+                "RHSA-2026:69099",
+                "RHSA-2026:69103",
+                "RHSA-2026:69104",
+                "RHSA-2026:69105",
+                "RHSA-2026:69107",
+                "RHSA-2026:69235",
+                "RHSA-2026:69308",
+                "RHSA-2026:69961",
+                "RHSA-2026:70103",
+                "RHSA-2026:70191",
+                "RHSA-2026:70201",
+                "RHSA-2026:70391",
+                "RHSA-2026:70640",
+                "RHSA-2026:70641",
+                "RHSA-2026:71112",
+                "RHSA-2026:71113",
+                "RHSA-2026:71114",
+                "RHSA-2026:71420",
+                "RHSA-2026:71619",
+                "RHSA-2026:72276",
+                "RHSA-2026:72737",
+                "RHSA-2026:72805"
+              ],
+              "schema_version": "1.9.0",
+              "summary": "Avoid quadratic complexity in resolvePath in net/url"
+            }
           ]
         }
       ]

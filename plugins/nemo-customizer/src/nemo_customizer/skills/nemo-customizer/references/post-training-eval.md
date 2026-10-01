@@ -180,7 +180,11 @@ Val loss from training is **not** accuracy — always run a generation eval for 
 From **nemo-helix** git root:
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080   # user platform URL when not localhost
+# eval_helpers.py reads $NHX_BASE_URL when --base-url is omitted and self-defaults to
+# http://127.0.0.1:8080 when it is unset. Do NOT blanket-export localhost — that would
+# override a remote you already configured. For a remote platform, export its URL
+# explicitly (export NHX_BASE_URL=https://…) or pass --base-url; for a local platform
+# with no config, leave it unset and the script defaults to localhost.
 
 # Base vs one adapter (--base-url optional when NHX_BASE_URL is set)
 uv run python plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/eval_helpers.py \

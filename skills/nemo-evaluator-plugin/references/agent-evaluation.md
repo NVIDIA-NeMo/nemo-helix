@@ -100,6 +100,7 @@ from nemo_evaluator.api.schemas import TaskInputs
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalTaskInput,
+    FabricConfigSource,
     FabricRunnerTarget,
 )
 
@@ -113,10 +114,12 @@ spec = AgentEvalInputSpec(
         )
     ],
     target=FabricRunnerTarget(
-        config={
-            "metadata": {"name": "geography-smoke"},
-            "harness": {"adapter_id": "nvidia.fabric.codex"},
-        }
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "geography-smoke"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+            }
+        )
     ),
     max_concurrent_tasks=2,
     fail_fast=False,
@@ -153,18 +156,46 @@ reported score. See
 `AgentTarget` owns its agent request configuration. Runner targets are resolved
 to an `AgentTaskRunner` inside the job runtime.
 
+A Fabric runner target's `source` is either an inline config or a **registered
+agent**; the two shapes share no field. With an agent, the service resolves it
+at submit: it looks the agent up, binds its models to the workspace Inference
+Gateway exactly as a deployment would, merges the optional `environment` spec,
+and translates the platform `agent.yaml` into the target's `resolved_config`,
+kept next to the qualified `agent` ref. The agent runs fresh for every trial;
+an existing deployment is never called.
+
+```python
+from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget
+
+target = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+```
+
+There is no model override — a different model is a different registered
+agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
+same spec `nemo agents deploy` takes): MCP fulfilments redirect servers the agent
+declares (mocks), `env` adds process env, `secrets` binds `{ENV_NAME: ref}` and
+travels as `env_secrets` on the resolved target; a name the submitter's
+`env_secrets` also binds keeps the submitter's ref. Skills and prompts the
+config refers to by relative path are copied at submit into a job-owned
+`agent-files-<id>` FileSet (deleted when the run completes) and staged from that
+copy. Only `nemo-agents-spec-v1` agents resolve; a legacy `nat-workflow-v1`
+agent is rejected at submit. When publishing to Intake,
+`publication.intake.agent_name` defaults to the registered agent's name.
+
 For [Fabric](https://github.com/nvidia/nemo-fabric), pass one complete `agent.yaml` as a JSON-shaped `config`; the
 `harness.adapter_id` selects the harness:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
 target = FabricRunnerTarget(
-    config={
-        "metadata": {"name": "regression-suite"},
-        "harness": {"adapter_id": "nvidia.fabric.codex"},
-    },
-    model="<provider>/<model>",
+    source=FabricConfigSource(
+        config={
+            "metadata": {"name": "regression-suite"},
+            "harness": {"adapter_id": "nvidia.fabric.codex"},
+        },
+        model="<provider>/<model>",
+    )
 )
 ```
 
@@ -372,10 +403,10 @@ result = await AgentEvaluator().run(tasks=tasks, target=runner)
 **Platform SDK:**
 
 ```python
-from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
 
 target = HarborRunnerTarget(
-    agent_name="oracle",
+    source=HarborBuiltinAgentSource(name="oracle"),
     n_attempts=1,
     n_concurrent_trials=2,
     max_retries=0,
@@ -397,8 +428,9 @@ target = HarborRunnerTarget(
   emitted. Missing or Boolean values are omitted with a diagnostic; usable siblings are kept.
 - A secondary reward discovered for one task does not apply to another task.
 
-Use `agent_import_path` for a custom Harbor agent and `agent_model_name` when
-the agent requires a model. Pass the agent's constructor arguments as
+`source` names exactly one agent: `HarborBuiltinAgentSource(name=...)` or
+`HarborImportedAgentSource(import_path=...)` for a custom Harbor agent; both take
+`model_name` when the agent requires a model. Pass the agent's constructor arguments as
 `agent_kwargs` (a JSON mapping, Harbor's `--ak key=value`). Do not put secrets
 in `agent_kwargs`: Harbor persists them unredacted across the job directory and
 needs the real value to run. Credential-shaped plaintext is rejected at submit

@@ -216,6 +216,11 @@ legacy` (or another installed strategy), staging remote bundles first with
   externally managed ClickHouse for production deployments that require high
   availability, backups, or larger scale.
 
+## Known issues
+
+- **Hermes trials can omit the `relay_atif` evidence descriptor.** Use the
+  `trace:atif` descriptor instead; it points at the same ATIF file.
+
 ## Links
 
 - Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)

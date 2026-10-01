@@ -11,7 +11,7 @@ Use dedicated Data Designer jobs to replicate Nemotron embed/rerank Stage 0 (`sd
 Stage 0:
 
 ```bash
-nemo data-designer retrieval-generate --spec '{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3-nano-30b-a3b","qa_generation_model":"nvidia/nemotron-3-nano-30b-a3b","quality_judge_model":"nvidia/nemotron-3-nano-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"}'
+nemo data-designer retrieval-generate --spec '{"corpus":"default/my-docs","provider":"default/nvidia-build","artifact_extraction_model":"nvidia/nemotron-3.5-lightning-30b-a3b","qa_generation_model":"nvidia/nemotron-3.5-lightning-30b-a3b","quality_judge_model":"nvidia/nemotron-3.5-lightning-30b-a3b","embed_model":"nvidia/nemotron-3-embed-1b"}'
 ```
 
 Stage 1 (mine immediately; convert-only `enable_mining: false` is inspect-only):
@@ -30,7 +30,7 @@ nemo data-designer retrieval-prepare --spec '{"sdg_input":"default/retrieval-syn
 
 Model roles resolve through Inference Gateway (`provider` + served model names). Do not set `NVIDIA_API_KEY` on the job.
 
-The Nemotron embed recipe uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for all three chat roles. Examples here use `nvidia/nemotron-3-nano-30b-a3b` only so they can run on a typical already-deployed IGW model. Outside of examples, always use a larger model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Nano in an example is not a recommendation for a real run.
+The Nemotron embed recipe uses [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) for all three chat roles. Examples here use `nvidia/nemotron-3.5-lightning-30b-a3b` only so they can run on a typical already-deployed IGW model. Outside of examples, always use a larger model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Lightning in an example is not a recommendation for a real run.
 
 Stage 0 quality controls are fields on the generate spec:
 `file_extensions` (default `.txt`, `.md`, `.text`, and no extension),

@@ -27,7 +27,7 @@ harnesses:
     kind: hermes
     model:
       provider: nvidia
-      model: nvidia/nvidia/nemotron-3-nano-30b-a3b
+      model: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
       api_key_env: INFERENCE_API_KEY
       base_url: https://inference-api.nvidia.com/v1
       temperature: 0.0

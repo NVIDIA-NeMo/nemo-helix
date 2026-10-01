@@ -39,7 +39,7 @@ uv run nemo inference providers create nvidia-inference --workspace default \
 # 3. Register the example agent. NEMO_DEFAULT_MODEL must be set *now* — it is baked into
 #    the stored config. Use a model entity name from `nemo models list`, not a provider id.
 uv run nemo models list --workspace default | grep nemotron
-export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b   # example — use what you saw
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b   # example — use what you saw
 uv run nemo agents create --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
 
@@ -230,7 +230,7 @@ Register an agent to attack. This example ships with the repo and needs no extra
 # discovered — not a provider model id. Entity names are lowercase-and-hyphens only; a slash gets
 # rejected by the Inference Gateway with "Invalid model".
 uv run nemo models list --workspace default | grep nemotron      # pick one
-export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b  # example — use what you saw
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b  # example — use what you saw
 
 uv run nemo agents create --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
@@ -393,7 +393,7 @@ stripped for you; anything else means the agent needs a real project, so pass `-
 
 **The victim is healthy but every request 422s with `Invalid model`.** The workflow's `model_name`
 isn't a model entity the platform knows. Entity names are lowercase letters, digits and hyphens —
-a provider id like `nvidia/nemotron-3-nano-30b-a3b` is rejected for the slash. Check
+a provider id like `nvidia/nemotron-3.5-lightning-30b-a3b` is rejected for the slash. Check
 `nemo models list --workspace default`, then re-register the agent with that exact name (the value
 is baked in at `agents create` time).
 

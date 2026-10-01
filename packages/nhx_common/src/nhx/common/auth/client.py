@@ -14,7 +14,7 @@ from nhx.common.config import AuthConfig
 from nhx.common.platform_endpoint import parse_platform_endpoint
 from pydantic import BaseModel, Field
 
-from .authz_format import validate_permission_strings, validate_runtime_authorize_scopes
+from .authz_format import validate_permission_strings
 from .exceptions import InvalidPermissionFormatError
 from .models import Principal
 from .token_resolver import ResolvedBearerToken
@@ -163,7 +163,6 @@ class AuthClient(BaseModel):
             AuthorizationResult with allowed=True/False and optional reason
 
         Raises:
-            InvalidScopeFormatError: If a scope string looks like a permission (dot-separated).
             httpx.ConnectError: If PDP cannot be reached
             httpx.TimeoutException: If PDP times out
             httpx.HTTPStatusError: If PDP returns an error response
@@ -175,8 +174,6 @@ class AuthClient(BaseModel):
                 raise HTTPException(status_code=403, detail="Forbidden")
             ```
         """
-        validate_runtime_authorize_scopes(scopes)
-
         if not self.auth_enabled:
             logger.debug("Auth disabled, allowing request %s %s", method, path)
             return AuthorizationResult(allowed=True, reason="auth_disabled")

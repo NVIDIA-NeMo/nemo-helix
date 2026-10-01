@@ -234,7 +234,7 @@ def test_configs_get_not_found_maps_to_remote_error(guardrail_cli) -> None:
 
     assert result.exit_code == 3
     assert "Not found: (404) Guardrail config not found." in result.stderr
-    assert "nemo configs list" in result.stderr
+    assert "nemo guardrail configs list" in " ".join(result.stderr.split())
 
 
 def test_configs_get_code_output(guardrail_cli) -> None:

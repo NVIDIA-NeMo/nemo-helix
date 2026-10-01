@@ -30,7 +30,12 @@ from pathlib import Path
 import pytest
 from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs
 from nemo_evaluator.jobs.agent_evaluate import AGENT_BUNDLE_DIR, DEFAULT_RESULT_NAME, AgentEvalJob
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, AgentEvalTaskInput, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalInputSpec,
+    AgentEvalTaskInput,
+    HarborBuiltinAgentSource,
+    HarborRunnerTarget,
+)
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRewardMetric, discover_harbor_tasks
@@ -84,7 +89,7 @@ def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path,
             "profile": "harbor-test",
             "spec": {
                 "tasks": public_tasks,
-                "target": {"kind": "harbor", "agent_name": "oracle"},
+                "target": {"kind": "harbor", "source": {"name": "oracle"}},
             },
         },
         timeout=60,
@@ -176,7 +181,7 @@ def test_sync_job_runs_a_real_harbor_target(tmp_path: Path) -> None:
             )
             for rt in runtime_tasks
         ],
-        target=HarborRunnerTarget(agent_name="oracle"),
+        target=HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle")),
     )
     ctx = _job_context(tmp_path)
 

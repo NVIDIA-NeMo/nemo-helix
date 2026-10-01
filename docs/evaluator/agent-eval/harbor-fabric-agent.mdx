@@ -250,7 +250,7 @@ Then reference it as `my-workspace/nvidia-api-key`:
 {
   "target": {
     "kind": "harbor",
-    "agent_import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent",
+    "source": {"import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent"},
     "agent_kwargs": {
       "fabric_config": {"metadata": {"name": "hello-world-deepagents"}, "harness": {"...": "..."}, "models": {"...": "..."}},
       "fabric_package": "nemo-fabric[deepagents]==0.3.0",

@@ -64,6 +64,8 @@ export interface StartPageProps {
   onContinue: () => void;
   /** Says what is still missing, next to a disabled Continue. */
   blockedHint?: string;
+  /** Actions on the current selection, rendered at the start of the footer. */
+  slotFooterStart?: ReactNode;
   /** Rendered above the cards, where it stays in view — an error banner, typically. */
   slotBanner?: ReactNode;
 }

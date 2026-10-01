@@ -7420,7 +7420,7 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `list-strategies`: List the strategies `--strategy` accepts, one name per line.
+* `list-strategies`: List installed strategies and what each one optimizes.
 * `prepare-fileset`: Validate a NAT optimize bundle and upload it to a fileset...
 
 *Jobs:*
@@ -7429,17 +7429,18 @@ nemo agents optimize [OPTIONS] COMMAND [ARGS]...
 
 ##### nemo agents optimize list-strategies
 
-List the strategies `--strategy` accepts, one name per line.
+List installed strategies and what each one optimizes.
 
-Only the platform is asked, because only the platform runs the job: a
-client venv without a strategy plugin still submits to a server that
-has it, and vice versa. Answering from this environment instead would
-describe a different machine, so an unreachable platform is an error
-rather than a cue to guess.
+Every name listed is a valid `--strategy`. Only the platform is asked,
+because only the platform runs the job: a client venv without a strategy
+plugin still submits to a server that has it, and vice versa. Answering
+from this environment instead would describe a different machine, so an
+unreachable platform is an error rather than a cue to guess.
 
-Stdout carries names and nothing else, so `for s in $(nemo agents optimize
-list-strategies)` is safe: an empty platform prints nothing there. The
-target is announced once on stderr by the shared base-URL resolver.
+Output follows every other `nemo` list command: a table on a terminal,
+JSON when piped, so a script reads the names with
+`-f json | jq -r '.[].name'`. The target is announced once on stderr by
+the shared base-URL resolver.
 
 **Usage:**
 
@@ -7450,6 +7451,12 @@ nemo agents optimize list-strategies [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
 
 ##### nemo agents optimize prepare-fileset
 
@@ -10240,13 +10247,16 @@ nemo insights analysis enable [OPTIONS]
 
 * `--agent`: Name of the agent to opt in to periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis disable
 
@@ -10262,11 +10272,14 @@ nemo insights analysis disable [OPTIONS]
 
 * `--agent`: Name of the agent to opt out of periodic analysis.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis status
 
@@ -10282,11 +10295,22 @@ nemo insights analysis status [OPTIONS]
 
 * `--agent`: Optional agent name. Omit to list all analysis configs.
 * `--workspace, -w`: Workspace to inspect. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
+* `--page <INTEGER>`: Page number (1-indexed). Ignored with --agent. [default: 1]
+* `--page-size <INTEGER>`: Items per page. Ignored with --agent. [default: 100]
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 #### nemo insights analysis-runs
 
@@ -10325,7 +10349,6 @@ nemo insights analysis-runs create [OPTIONS]
 
 * `--agent`: Name of the agent whose telemetry should be analyzed.
 * `--workspace, -w`: Workspace the agent belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--default-model`: Model Entity ref for analysis work. Default: the configured default model.
 * `--fast-model`: Model Entity ref for context summarization. Default: the configured fast model.
 * `--since`: ISO-8601 lower bound enforced on the analyst's trace/span reads.
@@ -10339,6 +10362,10 @@ nemo insights analysis-runs create [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ##### nemo insights analysis-runs list
 
@@ -10354,7 +10381,6 @@ nemo insights analysis-runs list [OPTIONS]
 
 * `--agent`: Only list runs that analyzed this agent.
 * `--workspace, -w`: Workspace to inspect. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--page <INTEGER>`: Page number (1-indexed). [default: 1]
 * `--page-size <INTEGER>`: Items per page. [default: 20]
 * `--sort`: Sort field; prefix with '-' for descending. [default: -created_at]
@@ -10362,6 +10388,16 @@ nemo insights analysis-runs list [OPTIONS]
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+
+**Pagination Options:**
+
+* `--all-pages`: Fetch all pages
 
 ##### nemo insights analysis-runs get
 
@@ -10383,7 +10419,6 @@ nemo insights analysis-runs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Workspace the run belongs to. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--base-url`: Base URL of the running NHX instance. [default: http://localhost:8080] [env: NHX_BASE_URL=]
 * `--wait`: Poll until the run's backing job reaches a terminal state.
 * `--poll-timeout <FLOAT>`: How long --wait polls before giving up. [default: 900.0]
 * `--poll-interval <FLOAT>`: Seconds between --wait polls. [default: 5.0]
@@ -10391,6 +10426,10 @@ nemo insights analysis-runs get [OPTIONS] NAME
 **Help:**
 
 * `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
 ### nemo safe-synthesizer
 

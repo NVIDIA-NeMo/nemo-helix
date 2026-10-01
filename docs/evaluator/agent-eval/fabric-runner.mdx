@@ -225,24 +225,89 @@ several signals into one reported score.
 
 ## Submit as a platform job
 
-`FabricRunnerTarget` carries the same config into a durable job:
+`FabricRunnerTarget` carries the same config into a durable job. Its `source` says where the agent
+comes from: an inline config, or a registered agent (next section).
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
-target = FabricRunnerTarget(config=config, model="<provider>/<model>", capture_trajectory=True)
+target = FabricRunnerTarget(
+    source=FabricConfigSource(config=config, model="<provider>/<model>"),
+    capture_trajectory=True,
+)
 ```
 
 | Field | Required | Notes |
 |---|---|---|
-| `config` | yes | the same agent config, as a JSON-shaped mapping |
-| `model` | no | a `provider/model` slug applied as the config's default model |
+| `source.config` | yes | the same agent config, as a JSON-shaped mapping |
+| `source.model` | no | a `provider/model` slug applied as the config's default model |
 | `timeout_s` | no | per-task timeout for the Fabric run |
 | `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` the service resolves into the job's environment for the harness to read. For a registered agent, a name the agent also binds keeps the target's ref, with a warning in the service log |
 
 Submit it with `nemo evaluator agent-evaluate`, or as the `target` of an
 `AgentEvalInputSpec`. See
 [Targets and Runners](/documentation/evaluate-models/agent-eval/targets-and-runners).
+
+Specs written before 0.8 put `config` and `model` directly on the target. That shape is still accepted
+with a deprecation warning and will be removed in 0.9; move both under `source`.
+
+### Evaluate an agent registered on the platform
+
+If the agent is already registered with `nemo agents create`, make it the `source`:
+
+```json
+{"kind": "fabric", "source": {"agent": "calculator-agent"}}
+```
+
+At submit time the service looks the agent up, applies the same resolution a deployment gets — its
+models are bound to the workspace's Inference Gateway, so no credential travels in the spec — and
+translates the platform `agent.yaml` into a config like the one above. The persisted job spec carries
+it as `resolved_config`, next to the `source` it came from; the job never looks the agent up. It runs
+the agent fresh for every trial and never calls an existing deployment, so the evaluation is
+independent of what is (or is not) deployed.
+
+| Field | Required | Notes |
+|---|---|---|
+| `source.agent` | yes | `name` in the submission workspace, or `workspace/name` |
+| `source.environment` | no | an environment spec (the same shape `nemo agents deploy` takes) merged onto the agent's config |
+| `timeout_s` | no | per-task timeout for the Fabric run |
+| `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+
+A registered-agent source has no `model`. If the agent's config refers to skills or prompts by relative
+path, submission copies the agent's Ethos FileSet into a job-owned `agent-files-<id>` FileSet and the job
+stages that copy before the run, so a re-registration while the job is queued cannot change the files it
+runs with. The copy is deleted when the run completes; a failed run keeps it for a retry. For the
+DeepAgents harness, which reads files only through its per-trial workspace, each skill bundle is copied
+into the trial workspace under `.agents/skills/<name>/` for the run and removed afterwards.
+
+There is no model override: the model is part of what the agent *is*, so a different model is a
+different registered agent. What an evaluation does get to shape is the **environment** the agent runs
+in. `environment` takes the same spec a deployment does, so you can point the agent's declared MCP
+servers at mocks, add process env, and bind secrets by reference:
+
+```json
+{
+  "kind": "fabric",
+  "source": {
+    "agent": "calculator-agent",
+    "environment": {
+      "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+      "env": {"EVAL_MODE": "mock"},
+      "secrets": {"CALC_TOKEN": "calc-token"}
+    }
+  }
+}
+```
+
+Only servers the agent already declares are fulfilled — an environment can redirect a tool, not hand
+the agent one it never had. Secret values never enter the spec: the refs travel as `env_secrets` on the
+resolved Fabric target and the service injects them into the job's environment.
+
+Only agents with `config_format: nemo-agents-spec-v1` resolve. A legacy `nat-workflow-v1` agent is
+rejected at submit — it describes a NeMo Agent Toolkit workflow, which has no runner here. When the
+job publishes to Intake, the trajectories are recorded under the agent's name unless
+`publication.intake.agent_name` says otherwise.
 
 ## Running in a sandbox
 

@@ -42,6 +42,7 @@ export const StartPage: FC<StartPageProps> = ({
   canContinue,
   onContinue,
   blockedHint,
+  slotFooterStart,
   slotBanner,
 }) => (
   <Stack className="h-full">
@@ -113,21 +114,28 @@ export const StartPage: FC<StartPageProps> = ({
     </Block>
 
     <Flex justify="center" className="shrink-0 border-t border-base bg-surface-base px-10 py-3">
-      <Flex align="center" justify="end" gap="density-2xl" className={CONTENT_WIDTH}>
-        {!canContinue && blockedHint ? (
-          <Text kind="label/regular/md" className="text-secondary">
-            {blockedHint}
-          </Text>
-        ) : null}
-        <LoadingButton
-          color="brand"
-          kind="primary"
-          loading={continueLoading}
-          onClick={onContinue}
-          disabled={!canContinue}
-        >
-          {continueLabel}
-        </LoadingButton>
+      <Flex align="center" justify="between" gap="density-2xl" className={CONTENT_WIDTH}>
+        {/* Not on the card: an interactive card is one click target, not a container. */}
+        <Flex align="center" gap="density-md">
+          {slotFooterStart}
+        </Flex>
+
+        <Flex align="center" gap="density-2xl">
+          {!canContinue && blockedHint ? (
+            <Text kind="label/regular/md" className="text-secondary">
+              {blockedHint}
+            </Text>
+          ) : null}
+          <LoadingButton
+            color="brand"
+            kind="primary"
+            loading={continueLoading}
+            onClick={onContinue}
+            disabled={!canContinue}
+          >
+            {continueLabel}
+          </LoadingButton>
+        </Flex>
       </Flex>
     </Flex>
   </Stack>

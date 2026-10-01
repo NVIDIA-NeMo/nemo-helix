@@ -55,7 +55,11 @@ they pick. Do not dump every path at them.
 ## 1. Pre-flight
 
 ```bash
-export NHX_BASE_URL=http://localhost:8080   # or wherever the platform runs
+# `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
+# or an explicit NHX_BASE_URL. Do NOT export a localhost fallback here — it would
+# override a configured remote. Leave NHX_BASE_URL unset to use your saved context;
+# set it explicitly (export NHX_BASE_URL=http://localhost:8080) only to force a local
+# platform for this shell when you have no local config context.
 nemo agent-hardener doctor
 ```
 

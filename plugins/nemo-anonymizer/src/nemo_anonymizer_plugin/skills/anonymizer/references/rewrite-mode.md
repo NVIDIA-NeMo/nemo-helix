@@ -23,7 +23,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 
 selected_models:
   detection:
