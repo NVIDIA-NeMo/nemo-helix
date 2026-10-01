@@ -1275,6 +1275,29 @@ def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) 
     assert constraint.read_text(encoding="utf-8") == "urllib3>=2.7.0\n"
 
 
+def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> None:
+    """NeMo-RL's setuptools floor must not resolve past the cap Gym installs."""
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.uv]",
+                'override-dependencies = ["setuptools>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]',
+                'constraint-dependencies = ["urllib3>=2.7.0"]',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    overrides, _constraints = rl_dependency_policy(rl)
+
+    assert overrides == ["setuptools<81,>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]
+
+
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
     from nhx.rl.tasks.environment.convert import rl_dependency_policy
 

@@ -67,6 +67,21 @@ constraint-dependencies = ["urllib3>=2.7.0"]
     assert constraints == ["urllib3>=2.7.0"]
 
 
+def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.uv]
+override-dependencies = ["setuptools>=80.10.2"]
+constraint-dependencies = ["urllib3>=2.7.0"]
+""",
+        encoding="utf-8",
+    )
+
+    overrides, _constraints = MODULE.rl_dependency_policy(tmp_path)
+
+    assert overrides == ["setuptools<81,>=80.10.2"]
+
+
 def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[tool.uv]\nmanaged = true\n", encoding="utf-8")
 

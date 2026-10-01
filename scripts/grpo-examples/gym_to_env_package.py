@@ -39,6 +39,7 @@ import tomllib
 from pathlib import Path
 
 import yaml
+from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 
@@ -333,7 +334,24 @@ def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
             f"{pyproject} has no [tool.uv] {', '.join(missing)}. Those tables are what the Gym "
             "host applies during the offline install."
         )
-    return list(uv_config["override-dependencies"]), list(uv_config["constraint-dependencies"])
+    return (
+        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
+        list(uv_config["constraint-dependencies"]),
+    )
+
+
+def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
+    """Intersect a setuptools override with Gym's ``setuptools<81`` server-venv dep."""
+    ceiling = SpecifierSet(f"<{SETUPTOOLS_PKG_RESOURCES_CEILING}")
+    clamped: list[str] = []
+    for item in overrides:
+        requirement = Requirement(item)
+        if canonicalize_name(requirement.name) != "setuptools":
+            clamped.append(item)
+            continue
+        requirement.specifier &= ceiling
+        clamped.append(str(requirement))
+    return clamped
 
 
 def nemo_gym_version_text(text: str) -> str:
