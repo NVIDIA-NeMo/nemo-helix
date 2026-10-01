@@ -1,6 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
+# Nemo Helix
 
 ![NEMO Helix](docs/assets/nemo-wordmark.svg)
 
@@ -34,15 +35,14 @@ Helix composes a curated set of NeMo and third-party libraries. Each does one jo
 - **Swappable infrastructure.** Execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
 - **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
 
-### Built-in agents
+## Built-in agents
 
 Three agents work the loop with you rather than waiting for you to drive it.
 
 - **Analyst.** Reads production traces and surfaces where and why the agent is failing.
-- **Experimenter.** Proposes and runs optimization experiments against those findings.
 - **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
 
-### Surfaces
+## Surfaces
 
 Every capability is reachable from every surface. Pick the one that fits the moment.
 
