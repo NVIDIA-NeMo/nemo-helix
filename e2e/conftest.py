@@ -331,9 +331,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
                 item.add_marker(
                     pytest.mark.skip(reason=f"Test requires feature(s) {required_features}. Run with --feature.")
                 )
-        elif _selected_features and (
-            "sdk" in getattr(item, "fixturenames", []) or "client" in getattr(item, "fixturenames", [])
-        ):
+        elif _selected_features and {"sdk", "client", "nemo_run"} & set(getattr(item, "fixturenames", [])):
             item.add_marker(pytest.mark.skip(reason="Feature-selected runs only include tests with feature markers."))
 
         if config_ref and ("sdk" in getattr(item, "fixturenames", []) or "client" in getattr(item, "fixturenames", [])):

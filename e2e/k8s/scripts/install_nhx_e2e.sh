@@ -5,6 +5,11 @@
 
 set -e
 
+if [ "${BASH_VERSINFO[0]}" -lt 5 ] || { [ "${BASH_VERSINFO[0]}" -eq 5 ] && [ "${BASH_VERSINFO[1]}" -lt 1 ]; }; then
+    echo "install_nhx_e2e.sh requires Bash 5.1 or newer for wait -n -p support" >&2
+    exit 1
+fi
+
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 NAMESPACE="${NAMESPACE:-default}"
@@ -87,8 +92,10 @@ run_helm_with_release_monitor() {
         completed_status="$?"
         set -e
 
-        if [ "${completed_status}" -eq 127 ] && [ -z "${completed_pid}" ]; then
-            break
+        if [ -z "${completed_pid}" ]; then
+            echo "wait -n returned no completed child (status ${completed_status}); stopping Helm install" >&2
+            kill "${helm_pid}" "${monitor_pid}" 2>/dev/null || true
+            return 1
         fi
 
         case "${completed_pid}" in

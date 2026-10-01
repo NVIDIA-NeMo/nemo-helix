@@ -378,7 +378,8 @@ def _assert_materialized_jsonl(path: Path) -> None:
     if not path.exists():
         pytest.fail(f"Data file not found: {path}. Stage assets from S3 first (see e2e/customizer/stage_assets.py).")
 
-    first_line = path.read_text().splitlines()[0] if path.stat().st_size else ""
+    with path.open(encoding="utf-8") as data_file:
+        first_line = data_file.readline().rstrip("\n")
     if first_line.startswith("version https://git-lfs.github.com/spec/v1"):
         pytest.fail(f"{path} is an LFS pointer. Stage assets from S3 instead of using git-tracked payloads.")
 

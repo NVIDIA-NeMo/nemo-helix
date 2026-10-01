@@ -7,6 +7,8 @@ These tests verify the hello-world job API works correctly
 when running against a fully deployed NHX platform.
 """
 
+import uuid
+
 from nemo_helix_plugin.client.client import NemoClient
 from nhx.testing.e2e import wait_for_platform_job
 
@@ -24,7 +26,7 @@ def test_job_lifecycle(client: NemoClient, workspace: str):
     without running actual task code. Task output verification (filesets)
     requires a docker-compose based setup that runs real containers.
     """
-    job_name = "lifecycle-test-job"
+    job_name = f"lifecycle-test-job-{uuid.uuid4().hex[:8]}"
     test_message = "Hello from e2e lifecycle test!"
 
     # Create a job

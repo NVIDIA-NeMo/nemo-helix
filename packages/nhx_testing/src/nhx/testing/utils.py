@@ -372,13 +372,7 @@ def as_user(
         groups=groups or [],
         authz_aliases=[email],
     ).get_headers()
-    if hasattr(client, "with_headers"):
-        return client.with_headers(headers)
-    if hasattr(client, "with_options"):
-        return client.with_options(default_headers=headers)
-    if hasattr(client, "copy"):
-        return client.copy(default_headers=headers)
-    raise TypeError(f"Unsupported client type for as_user: {type(client)!r}")
+    return client.with_headers(headers)
 
 
 def grant_workspace_role(

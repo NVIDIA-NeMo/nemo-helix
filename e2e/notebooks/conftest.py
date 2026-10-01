@@ -111,12 +111,12 @@ def notebook_kernel(request: pytest.FixtureRequest) -> Iterator[str]:
     try:
         yield kernel_name
     finally:
-        cleanup_temp_venv_and_kernel(kernel_name, venv_dir, kernel_spec_dir)
         if old_virtual_env is None:
             os.environ.pop("VIRTUAL_ENV", None)
         else:
             os.environ["VIRTUAL_ENV"] = old_virtual_env
         os.environ["PATH"] = old_path
+        cleanup_temp_venv_and_kernel(kernel_name, venv_dir, kernel_spec_dir)
         logger.info("Cleaned up sandbox kernel %r", kernel_name)
 
 
