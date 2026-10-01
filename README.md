@@ -1,7 +1,6 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Helix
 
 ![NEMO Helix](docs/assets/nemo-wordmark.svg)
 
@@ -10,15 +9,71 @@
 [![Python](https://img.shields.io/badge/python-3.12--3.14-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![Docs](https://img.shields.io/static/v1?label=docs&message=docs.nvidia.com%2Fnemo-helix&color=76B900&style=flat-square&logo=readthedocs&logoColor=white)](https://docs.nvidia.com/nemo-helix)
 
-Make the agents you ship faster, more accurate, and safer.
+## Make the agents you ship faster, more accurate, and safer.
 
-NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and web UI. Hardening, evaluation, and tuning for the agents you put in production.
+**NeMo Helix** is an open source platform for improving and hardening production agents. 
+Observe what your agent does, diagnose where it fails, run the experiments that fix it, and verify the result before it ships.
 
-## Get started
+## How Helix relates to the NeMo libraries
 
-**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required when starting local services.
+<p align="center">
+  <img src="docs/assets/nemo-helix-architecture.png"
+       alt="The NeMo libraries and NeMo Helix. Helix runs the libraries as plugins and adds surfaces, connectivity, and shared foundations."
+       width="820">
+</p>
 
-Quick install from PyPI:
+
+
+Helix composes a curated set of NeMo and third-party libraries. Each does one job well. Getting them to work together is normally your problem: separate APIs, separate credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read.
+
+- **Capabilities as plugins.** Data Designer, Anonymizer, and Safe Synthesizer for synthetic data. NeMo RL, AutoModel, and Unsloth for fine-tuning. Optuna for prompt and hyperparameter tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety.
+- **One interface, every capability.** A CLI, a Python SDK, and a REST API across every plugin, instead of a different client per library.
+- **Agent-first.** Skills teach your coding agent which NeMo tool to use and when, so you do not have to know.
+- **Human-accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
+- **Runs where you do.** Laptop for a prototype, Kubernetes for production, on-prem or air-gapped when that is the requirement.
+- **Swappable infrastructure.** Execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
+- **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
+
+### Built-in agents
+
+Three agents work the loop with you rather than waiting for you to drive it.
+
+- **Analyst.** Reads production traces and surfaces where and why the agent is failing.
+- **Experimenter.** Proposes and runs optimization experiments against those findings.
+- **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
+
+### Surfaces
+
+Every capability is reachable from every surface. Pick the one that fits the moment.
+
+| Surface | Use it for |
+|---|---|
+| **NeMo CLI** | The primary interface. Every service under one command, one config, one context. |
+| **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
+| **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
+| **NeMo Studio** | Optional web UI for chat, job monitoring, evaluation results, traces, experiments, and governance review. |
+
+
+## The optimization loop
+
+Helix is organized around the loop that turns a working prototype into an agent that measurably improves over time. Each stage is usable on its own. Nothing forces you to adopt the whole loop on day one.
+
+| Stage | What happens | What you use |
+|---|---|---|
+| **Observe** | Ingest traces from the running agent. Inspect sessions, tool calls, cost, and latency. Scan traces for PII and leaked credentials. | NeMo Relay, NeMo Fabric, trace ingestion, Anonymizer |
+| **Diagnose** | Find where the agent fails and why. Cluster failures, compare against the incumbent, decide which lever is worth pulling. | Analyst agent, Experiments |
+| **Experiment** | Generate the data you lack, fine-tune a smaller or open model, tune prompts and hyperparameters, or route by task complexity. | Data Designer, Safe Synthesizer, Customizer, NeMo RL, AutoModel, Unsloth, Optuna, Switchyard, Experimenter agent |
+| **Evaluate** | Score candidates on your benchmarks. Compare accuracy, cost, and latency against the baseline you are trying to beat. | NeMo Gym, Harbor, Evaluator metrics, Eval Author agent |
+| **Verify** | Red-team the candidate, enforce input and output policy, and promote only what passes. | garak, Guardrails, OpenShell |
+
+## When to use Helix vs standalone libraries
+| Consider Helix if **any** of these is true | Consider the libraries if **each** of these is true |
+|---|---|
+| • Need multiple tools and libraries to work together<br>• Something outside your process needs to call the library: another team, another service, a non-Python client, a web UI<br>• It has to run in k8s, multi-tenant, with auth and an audit trail<br>• More than one team or capability needs to point at the same named object<br>• Your differentiation is the agents, not the plumbing | • The language of the library works with your workflow and architecture, for example a Python notebook on your laptop<br>• You do not need to share and persist artifacts such as data, model weights, and secrets in a consistent way<br>• You have opinions about your API conventions and you want to maintain those APIs indefinitely |
+
+## Get Started
+
+### Quick install from PyPI:
 
 ```bash
 curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
@@ -30,7 +85,7 @@ nemo setup
 
 `uv tool install` gives you a global `nemo` command in its own isolated environment, with nothing to activate. The `all` extra adds the Helix services, so `nemo services run` works; without it you get the SDK and CLI only. To import the SDK from your own code, `uv pip install "nemo-helix[all]"` into a virtual environment instead.
 
-Source checkout for development:
+### Source checkout for development:
 
 ```bash
 git clone https://github.com/NVIDIA-NeMo/nemo-helix.git
@@ -51,7 +106,7 @@ Review [Telemetry and Privacy](docs/telemetry-and-privacy.mdx) for the omnibus d
 
 See **[SETUP.md](SETUP.md)** for the full source setup playbook (local data dir, DB reset, manual service start, troubleshooting).
 
-Verify:
+**Verify:**
 
 ```bash
 nemo services status
@@ -118,14 +173,6 @@ Things you can ask it to do, once the platform is running:
 - "Show me what's running on the platform."
 - "Shut down NeMo cleanly."
 
-## What's here today
-
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), Auditor (red-teaming via garak), Anonymizer (PII handling for training data).
-- **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. Harbor-backed eval suites for regression testing.
-- **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
-- **Build agents.** NVIDIA NeMo Agent Toolkit (NAT) for LangGraph-based agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
-- **Generate synthetic data.** Generate synthetic data for training or evaluation purposes using Data Designer.
-- **NeMo Studio (alpha).** Installed automatically with the platform. Browser UI for chat, monitoring, and reviewing optimization suggestions. Studio's agent-focused features are still a work in progress; the CLI is the primary surface today.
 
 ## Release notes
 
