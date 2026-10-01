@@ -25,6 +25,8 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricRunnerTarget,
     GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
     ResolvedTask,
@@ -296,8 +298,8 @@ def _publish(client: _FakeClient | None, *, required: bool = True, agent_name: s
     [
         (AgentTarget(agent=NemoAgentToolkitAgent(name="my-agent", url="http://agent")), ("my-agent", None)),
         (ModelTarget(model=Model(name="gpt-4o", url="http://model")), (None, "gpt-4o")),
-        (HarborRunnerTarget(agent_name="oracle", agent_model_name="m"), ("oracle", "m")),
-        (HarborRunnerTarget(agent_name="oracle", agent_import_path="pkg:Agent"), ("pkg:Agent", None)),
+        (HarborRunnerTarget(source=HarborBuiltinAgentSource(name="oracle", model_name="m")), ("oracle", "m")),
+        (HarborRunnerTarget(source=HarborImportedAgentSource(import_path="pkg:Agent")), ("pkg:Agent", None)),
         (
             GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
             ("simple_agent", None),
