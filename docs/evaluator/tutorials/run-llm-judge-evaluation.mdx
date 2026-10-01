@@ -81,7 +81,7 @@ from nemo_platform import ConflictError, NeMoPlatform
 # Workspace for this tutorial.
 WORKSPACE = "llm-as-judge-tutorial"
 
-# Create an SDK instance to interact with the NeMo Helix.
+# Create an SDK instance to interact with NeMo Helix.
 client = NeMoPlatform(
     base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,

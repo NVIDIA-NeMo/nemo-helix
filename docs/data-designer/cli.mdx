@@ -51,13 +51,13 @@ nemo data-designer validate product_reviews.py
   ✅    ✔ Configuration is valid
 ```
 
-Validation covers both the configuration itself and the NeMo Helix resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
+Validation covers both the configuration itself and NeMo Helix resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
 
 A single run reports every problem it detects rather than stopping at the first one:
 
 ```text
   ❌    ✘ The NeMo Helix Data Designer service only supports seed data from
-HuggingFace or the NeMo Helix Files service (FilesetFile, Directory, or
+HuggingFace or NeMo Helix Files service (FilesetFile, Directory, or
 FileContents seed sources referencing fileset paths). Upload your data to the
 Files service, adjust your config, and try again.
   ❌    ✘ Errors in model configs: ["Cannot access provider
