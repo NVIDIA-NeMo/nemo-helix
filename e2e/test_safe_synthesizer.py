@@ -43,6 +43,8 @@ from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 pytestmark = [
     pytest.mark.timeout(600),
     pytest.mark.e2e_config("e2e/configs/local-subprocess.yaml"),
+    pytest.mark.platform("docker", "kubernetes"),
+    pytest.mark.feature("safe-synthesizer"),
 ]
 
 TERMINAL_STATUSES = {"completed", "error", "cancelled"}
@@ -708,6 +710,8 @@ def test_safe_synthesizer_job_create_list_retrieve_cancel_delete(
         assert status == "cancelled"
 
 
+@pytest.mark.platform("kubernetes")
+@pytest.mark.feature("gpu", "safe-synthesizer")
 @pytest.mark.container_only
 @pytest.mark.requires_gpu
 @pytest.mark.slow
@@ -754,6 +758,8 @@ def test_safe_synthesizer_k8s_job_cancel_transitions(
     assert "cancelled" in final_history
 
 
+@pytest.mark.platform("kubernetes")
+@pytest.mark.feature("gpu", "safe-synthesizer")
 @pytest.mark.container_only
 @pytest.mark.requires_gpu
 @pytest.mark.slow
@@ -786,6 +792,8 @@ def test_safe_synthesizer_pii_replacement_job_completes(
     assert summary.get("timing") is not None
 
 
+@pytest.mark.platform("kubernetes")
+@pytest.mark.feature("gpu", "safe-synthesizer")
 @pytest.mark.container_only
 @pytest.mark.requires_gpu
 @pytest.mark.slow
