@@ -174,9 +174,11 @@ There is no model override — a different model is a different registered
 agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
 same spec `nemo agents deploy` takes): MCP fulfilments redirect servers the agent
 declares (mocks), `env` adds process env, `secrets` binds `{ENV_NAME: ref}` and
-travels as `env_secrets` on the resolved target. Skills and prompts the config
-refers to by relative path are staged from the agent's Ethos FileSet before the
-run. Only `nemo-agents-spec-v1` agents resolve; a legacy `nat-workflow-v1`
+travels as `env_secrets` on the resolved target; a name the submitter's
+`env_secrets` also binds keeps the submitter's ref. Skills and prompts the
+config refers to by relative path are copied at submit into a job-owned
+`agent-files-<id>` FileSet (deleted when the run completes) and staged from that
+copy. Only `nemo-agents-spec-v1` agents resolve; a legacy `nat-workflow-v1`
 agent is rejected at submit. When publishing to Intake,
 `publication.intake.agent_name` defaults to the registered agent's name.
 

@@ -5720,6 +5720,14 @@ components:
           description: 'Environment to evaluate the agent in, merged onto its config
             exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
             the agent declares, process env, secret refs, and Fabric environment settings.'
+        files:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'Set at submit, never by the submitter: a job-owned snapshot
+            of the agent''s Ethos FileSet, taken when the agent was resolved so a
+            re-registration while the job is queued cannot change the files it runs
+            with. Present only when the resolved config refers to files by relative
+            path.'
       additionalProperties: false
       type: object
       required:

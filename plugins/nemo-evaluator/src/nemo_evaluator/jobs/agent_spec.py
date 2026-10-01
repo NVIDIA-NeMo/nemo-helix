@@ -13,7 +13,7 @@ each other.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its bundle
@@ -21,7 +21,6 @@ from typing import Annotated, Any, Literal, Self, TypeAlias
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_agents_plugin.entities import ethos_fileset_name
 from nemo_evaluator.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinition
@@ -111,6 +110,12 @@ class RegisteredAgentSource(BaseModel):
         description="Environment to evaluate the agent in, merged onto its config exactly as a deployment "
         "would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret refs, "
         "and Fabric environment settings.",
+    )
+    files: FilesetRef | None = Field(
+        default=None,
+        description="Set at submit, never by the submitter: a job-owned snapshot of the agent's Ethos FileSet, "
+        "taken when the agent was resolved so a re-registration while the job is queued cannot change the "
+        "files it runs with. Present only when the resolved config refers to files by relative path.",
     )
 
 
@@ -483,22 +488,17 @@ def registered_agent_name(target: Target | None) -> str | None:
     return None
 
 
-def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
-    """The Ethos FileSet a resolved registered agent's config needs on disk, if it refers to files at all.
-
-    Only a resolved target qualifies: its ``agent`` is workspace-qualified and ``resolved_config`` is the
-    translated config, so both the FileSet's home and whether relative paths exist are known without a lookup.
-    """
-    source = target.source
-    if not isinstance(source, RegisteredAgentSource) or "/" not in source.agent.root:
-        return None
-    config = target.resolved_config or {}
+def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
+    """Whether a translated Fabric config refers to files by relative path (skills, local adapters)."""
     skills = config.get("skills") or {}
     discovery = config.get("discovery") or {}
-    if not skills.get("paths") and not discovery.get("local_paths"):
-        return None
-    workspace, _, name = source.agent.root.partition("/")
-    return FilesetRef(root=f"{workspace}/{ethos_fileset_name(name)}")
+    return bool(skills.get("paths") or discovery.get("local_paths"))
+
+
+def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
+    """The FileSet a registered agent's files are staged from: the snapshot resolution took, if it took one."""
+    source = target.source
+    return source.files if isinstance(source, RegisteredAgentSource) else None
 
 
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
@@ -719,9 +719,12 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         return self
 
     @model_validator(mode="after")
-    def _reject_resolved_config_on_submit(self) -> Self:
-        if isinstance(self.target, FabricRunnerTarget) and self.target.resolved_config is not None:
-            raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
+    def _reject_resolution_outputs_on_submit(self) -> Self:
+        if isinstance(self.target, FabricRunnerTarget):
+            if self.target.resolved_config is not None:
+                raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
+            if isinstance(self.target.source, RegisteredAgentSource) and self.target.source.files is not None:
+                raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
         return self
 
 

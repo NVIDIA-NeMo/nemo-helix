@@ -22,6 +22,7 @@ from nemo_evaluator.jobs.agent_spec import (
     FabricConfigSource,
     FabricRunnerTarget,
     RegisteredAgentSource,
+    registered_agent_config_needs_files,
     registered_agent_files,
     registered_agent_name,
     target_agent_identity,
@@ -109,6 +110,19 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
     agents.get_agent = AsyncMock(return_value=response)
     files = mocker.Mock()
     files.get_fileset = AsyncMock(return_value=mocker.Mock()) if ethos_fileset else AsyncMock(side_effect=_not_found())
+    files.create_fileset = AsyncMock(return_value=mocker.Mock())
+    files.upload_file = AsyncMock(return_value=mocker.Mock())
+    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+
+    async def fake_download(ref: FilesetRef, destination: str, **_: Any) -> Path:
+        root = Path(destination) / ref.root
+        (root / "skills" / "arithmetic").mkdir(parents=True)
+        (root / "skills" / "arithmetic" / "SKILL.md").write_text("# add\n")
+        return root
+
+    mocker.patch("nemo_evaluator.jobs.agent_files_snapshot._download_fileset_ref", side_effect=fake_download)
+    mocker.patch("nemo_evaluator.jobs.agent_files_snapshot.AsyncFilesetFileSystem")
+    agents.files = files
 
     def by_class(_platform: object, client_cls: type) -> Any:
         return agents if client_cls.__name__ == "AsyncAgentsClient" else files
@@ -161,15 +175,55 @@ async def test_a_qualified_ref_names_the_agents_workspace(mocker: MockerFixture)
     assert "/workspaces/shared/" in resolved.config["models"]["default"]["base_url"]
 
 
-async def test_an_agent_whose_config_refers_to_files_stages_its_ethos_fileset(mocker: MockerFixture) -> None:
+async def test_an_agent_whose_config_refers_to_files_snapshots_its_ethos_fileset(mocker: MockerFixture) -> None:
+    """The job stages a copy taken at submit, not the live `<agent>-ethos` FileSet a re-registration rewrites."""
     config = _calculator_config()
     config["skills"] = {"paths": ["skills/arithmetic"]}
-    _platform(mocker, _agent(config), ethos_fileset=True)
+    files = _platform(mocker, _agent(config), ethos_fileset=True).files
 
     resolved = await _resolve(_by_agent())
 
     assert isinstance(resolved, FabricRunnerTarget)
-    assert registered_agent_files(resolved) == FilesetRef(root="dev/calculator-agent-ethos")
+    snapshot = registered_agent_files(resolved)
+    assert snapshot is not None and snapshot.root.startswith("dev/agent-files-")
+    assert snapshot.root != "dev/calculator-agent-ethos"
+    created = files.create_fileset.await_args.kwargs
+    assert created["workspace"] == "dev" and f"dev/{created['body'].name}" == snapshot.root
+    assert "snapshot of dev/calculator-agent-ethos" in created["body"].description
+    uploaded = files.upload_file.await_args.kwargs
+    assert (uploaded["name"], uploaded["path"], uploaded["content"]) == (
+        created["body"].name,
+        "skills/arithmetic/SKILL.md",
+        b"# add\n",
+    )
+
+
+async def test_a_config_without_relative_paths_takes_no_snapshot(mocker: MockerFixture) -> None:
+    files = _platform(mocker, _agent(), ethos_fileset=True).files
+
+    resolved = await _resolve(_by_agent())
+
+    assert isinstance(resolved, FabricRunnerTarget) and registered_agent_files(resolved) is None
+    files.create_fileset.assert_not_awaited()
+
+
+async def test_a_submission_that_fails_after_resolution_discards_its_snapshot(mocker: MockerFixture) -> None:
+    """No job exists to clean up after a rejected submission, so `to_spec` deletes the copy it just took."""
+    config = _calculator_config()
+    config["skills"] = {"paths": ["skills/arithmetic"]}
+    files = _platform(mocker, _agent(config), ethos_fileset=True).files
+    mocker.patch("nemo_evaluator.jobs.agent_evaluate.validate_scoring", side_effect=ValueError("no scorer"))
+    input_spec = AgentEvalInputSpec.model_validate(
+        {"tasks": [{"id": "t", "intent": "x", "inputs": {}}], "target": {"kind": "fabric", "source": {"agent": "calc"}}}
+    )
+
+    with pytest.raises(ValueError, match="no scorer"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=False
+        )
+
+    deleted = files.delete_fileset.await_args.kwargs
+    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
 
 
 async def test_skills_without_an_ethos_fileset_are_a_submit_error(mocker: MockerFixture) -> None:
@@ -274,6 +328,32 @@ async def test_conflicting_environment_secret_bindings_are_a_submit_error(mocker
         await _resolve(_by_agent(environment=environment))
 
 
+async def test_the_submitters_env_secret_wins_over_the_agents_with_a_warning(
+    mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A name both bind keeps the target's ref: the submitter chose it for this run, and is told it overrode."""
+    environment = EnvironmentSpecInline(secrets={"NVIDIA_API_KEY": "agent-key", "OTHER": "agent-other"})
+    _platform(mocker, _agent())
+    target = _by_agent(environment=environment, env_secrets={"NVIDIA_API_KEY": SecretRef(root="eval-key")})
+
+    with caplog.at_level("WARNING", logger="nemo_evaluator.jobs.agent_evaluate"):
+        resolved = await _resolve(target)
+
+    assert isinstance(resolved, FabricRunnerTarget)
+    assert resolved.env_secrets == {
+        "NVIDIA_API_KEY": SecretRef(root="eval-key"),
+        "OTHER": SecretRef(root="agent-other"),
+    }
+    assert any(
+        "override registered agent dev/calculator-agent's binding of 1 environment" in r.getMessage()
+        for r in caplog.records
+    )
+    assert not any(
+        "eval-key" in r.getMessage() or "agent-key" in r.getMessage() or "NVIDIA_API_KEY" in r.getMessage()
+        for r in caplog.records
+    )
+
+
 # --- Spec boundary -------------------------------------------------------------------------------------
 
 
@@ -307,18 +387,27 @@ def test_resolved_config_is_derived_never_submitted() -> None:
         AgentEvalInputSpec.model_validate({"tasks": [{"id": "t", "intent": "x", "inputs": {}}], "target": submitted})
 
 
-def test_staged_files_are_derived_from_a_resolved_agent_never_named_by_the_submitter() -> None:
-    """Only a qualified ``agent`` plus a config with relative paths yields a FileSet; nothing is settable."""
+def test_staged_files_are_the_snapshot_resolution_took_never_named_by_the_submitter() -> None:
+    """``source.files`` is resolution's output: read by staging, rejected on a submitted spec."""
     with_skills = {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}}
     assert registered_agent_files(FabricRunnerTarget(source=FabricConfigSource(config=with_skills))) is None
-    assert registered_agent_files(_by_agent(AgentRef(root="calc"), resolved_config=with_skills)) is None
-    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config={"harness": {}})) is None
-    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config=with_skills)) == FilesetRef(
-        root="ws/calc-ethos"
+    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config=with_skills)) is None
+    snapshot = FilesetRef(root="ws/agent-files-0123abcd4567")
+    resolved = FabricRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="ws/calc"), files=snapshot), resolved_config=with_skills
     )
-    with_discovery = {"harness": {"adapter_id": "x"}, "discovery": {"local_paths": ["adapters"]}}
-    assert registered_agent_files(_by_agent(AgentRef(root="ws/calc"), resolved_config=with_discovery)) is not None
-    assert "agent_files" not in FabricRunnerTarget.model_fields
+    assert registered_agent_files(resolved) == snapshot
+
+    submitted = {"kind": "fabric", "source": {"agent": "calc", "files": "ws/agent-files-0123abcd4567"}}
+    with pytest.raises(ValidationError, match="`source.files` is set by registered-agent resolution"):
+        AgentEvalInputSpec.model_validate({"tasks": [{"id": "t", "intent": "x", "inputs": {}}], "target": submitted})
+
+
+def test_relative_paths_in_skills_or_discovery_need_files() -> None:
+    assert not registered_agent_config_needs_files({"harness": {}})
+    assert not registered_agent_config_needs_files({"skills": {"paths": []}, "discovery": {}})
+    assert registered_agent_config_needs_files({"skills": {"paths": ["skills/a"]}})
+    assert registered_agent_config_needs_files({"discovery": {"local_paths": ["adapters"]}})
 
 
 @pytest.mark.parametrize("ref", ["", "a/b/c", "/calc", "calc/", "has space", "ws/name#rev"])
@@ -366,7 +455,7 @@ def test_a_resolved_agent_with_files_adds_a_staging_step_before_the_evaluation()
     spec = _spec(_resolved_target_with_files())
     job = compile_agent_eval_job(spec, use_subprocess=True)
     assert [step.name for step in job.steps] == ["stage-environment", "agent-evaluate"]
-    assert job.steps[0].config == {"environment": "dev/calculator-agent-ethos"}
+    assert job.steps[0].config == {"environment": "dev/agent-files-0123abcd4567"}
 
     config_only = _spec(
         {
@@ -381,7 +470,7 @@ def test_a_resolved_agent_with_files_adds_a_staging_step_before_the_evaluation()
 def _resolved_target_with_files() -> dict[str, Any]:
     return {
         "kind": "fabric",
-        "source": {"agent": "dev/calculator-agent"},
+        "source": {"agent": "dev/calculator-agent", "files": "dev/agent-files-0123abcd4567"},
         "resolved_config": {
             "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
             "skills": {"paths": ["skills/a"]},

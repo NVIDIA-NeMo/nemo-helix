@@ -243,7 +243,7 @@ target = FabricRunnerTarget(
 | `source.model` | no | a `provider/model` slug applied as the config's default model |
 | `timeout_s` | no | per-task timeout for the Fabric run |
 | `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
-| `env_secrets` | no | `{ENV_NAME: secret-ref}` the service resolves into the job's environment for the harness to read |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` the service resolves into the job's environment for the harness to read. For a registered agent, a name the agent also binds keeps the target's ref, with a warning in the service log |
 
 Submit it with `nemo evaluator agent-evaluate`, or as the `target` of an
 `AgentEvalInputSpec`. See
@@ -275,7 +275,9 @@ independent of what is (or is not) deployed.
 | `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
 
 A registered-agent source has no `model`. If the agent's config refers to skills or prompts by relative
-path, its Ethos FileSet is staged into the job before the run so those paths resolve.
+path, submission copies the agent's Ethos FileSet into a job-owned `agent-files-<id>` FileSet and the job
+stages that copy before the run, so a re-registration while the job is queued cannot change the files it
+runs with. The copy is deleted when the run completes; a failed run keeps it for a retry.
 
 There is no model override: the model is part of what the agent *is*, so a different model is a
 different registered agent. What an evaluation does get to shape is the **environment** the agent runs

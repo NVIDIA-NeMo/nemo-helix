@@ -43,6 +43,11 @@ from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
 )
+from nemo_evaluator.jobs.agent_files_snapshot import (
+    discard_registered_agent_files,
+    discard_registered_agent_files_sync,
+    snapshot_registered_agent_files,
+)
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -54,6 +59,7 @@ from nemo_evaluator.jobs.agent_spec import (
     RegisteredAgentSource,
     ResolvedTask,
     Target,
+    registered_agent_config_needs_files,
     registered_agent_files,
     validate_task_collection,
 )
@@ -164,6 +170,7 @@ class _ResolvedRegisteredAgent:
     ref: AgentRef
     config: dict[str, Any]
     env_secrets: dict[str, SecretRef]
+    files: FilesetRef | None
 
 
 async def _load_registered_agent(
@@ -210,26 +217,46 @@ async def _load_registered_agent(
             f"registered agent {agent_workspace}/{agent_name} cannot be run through Fabric: {exc}"
         ) from exc
 
-    resolved_agent = _ResolvedRegisteredAgent(
-        ref=AgentRef(root=f"{agent_workspace}/{agent_name}"),
-        config=fabric_config.model_dump(mode="json", exclude_none=True),
-        env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
-    )
-    fileset = registered_agent_files(
-        FabricRunnerTarget(
-            source=RegisteredAgentSource(agent=resolved_agent.ref), resolved_config=resolved_agent.config
-        )
-    )
-    if fileset is not None:
-        files = client_from_platform(async_sdk, AsyncFilesClient)
+    config = fabric_config.model_dump(mode="json", exclude_none=True)
+    files: FilesetRef | None = None
+    if registered_agent_config_needs_files(config):
+        files_client = client_from_platform(async_sdk, AsyncFilesClient)
         try:
-            await files.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
+            await files_client.get_fileset(workspace=agent_workspace, name=ethos_fileset_name(agent_name))
         except NotFoundError:
             raise ValueError(
                 f"registered agent {agent_workspace}/{agent_name} refers to files by relative path but has no "
-                f"Ethos FileSet {fileset.root} to stage them from"
+                f"Ethos FileSet {agent_workspace}/{ethos_fileset_name(agent_name)} to stage them from"
             ) from None
-    return resolved_agent
+        # The Ethos FileSet is rewritten on every re-registration; the job stages a copy taken now.
+        files = await snapshot_registered_agent_files(files_client, workspace=agent_workspace, agent_name=agent_name)
+    return _ResolvedRegisteredAgent(
+        ref=AgentRef(root=f"{agent_workspace}/{agent_name}"),
+        config=config,
+        env_secrets={env_name: SecretRef(root=ref) for env_name, ref in merged.secrets.items()},
+        files=files,
+    )
+
+
+def _merge_env_secrets(
+    target_secrets: Mapping[str, SecretRef], agent_secrets: Mapping[str, SecretRef], *, agent: str
+) -> dict[str, SecretRef]:
+    """The agent's secret refs under the submitter's: a name both bind keeps the target's ref, with a warning.
+
+    The warning carries a count, not the names: anything read out of a secrets mapping, keys included,
+    reads as secret material to a scanner and to anyone grepping logs, and the submitter can diff the two
+    specs themselves.
+    """
+    overridden = sum(
+        1 for env_name, agent_ref in agent_secrets.items() if target_secrets.get(env_name) not in (None, agent_ref)
+    )
+    if overridden:
+        logger.warning(
+            "env_secrets on the target override registered agent %s's binding of %d environment variable(s)",
+            agent,
+            overridden,
+        )
+    return {**agent_secrets, **target_secrets}
 
 
 async def _resolve_registered_agent(
@@ -254,9 +281,9 @@ async def _resolve_registered_agent(
     )
     return target.model_copy(
         update={
-            "source": source.model_copy(update={"agent": agent.ref}),
+            "source": source.model_copy(update={"agent": agent.ref, "files": agent.files}),
             "resolved_config": agent.config,
-            "env_secrets": {**target.env_secrets, **agent.env_secrets},
+            "env_secrets": _merge_env_secrets(target.env_secrets, agent.env_secrets, agent=agent.ref.root),
         }
     )
 
@@ -487,11 +514,21 @@ class _AgentEvalJobBase(NemoJob):
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
         target = await _resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
-        validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
-        if isinstance(target, GymRunnerTarget):
-            target = await prepare_gym_submission(resolved_tasks, target, ctx)
-        validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-        return AgentEvalSpec(tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"}))
+        try:
+            validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
+            if isinstance(target, GymRunnerTarget):
+                target = await prepare_gym_submission(resolved_tasks, target, ctx)
+            validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
+            return AgentEvalSpec(
+                tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
+            )
+        except Exception:
+            # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
+            # to clean the snapshot up, so it goes here.
+            snapshot = registered_agent_files(target) if isinstance(target, FabricRunnerTarget) else None
+            if snapshot is not None:
+                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            raise
 
     @classmethod
     async def compile(
@@ -868,6 +905,12 @@ class _AgentEvalJobBase(NemoJob):
                 intake=intake,
             )
             output["publication"] = outcome.model_dump(exclude_none=True)
+
+        # The run is complete and its bundle durable; the files snapshot taken at submit has served its
+        # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
+        snapshot = registered_agent_files(spec.target) if isinstance(spec.target, FabricRunnerTarget) else None
+        if snapshot is not None:
+            discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
 
