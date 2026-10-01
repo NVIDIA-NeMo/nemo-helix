@@ -2,13 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from collections.abc import Iterator
+from typing import cast
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nhx.common.controller import Loop
 from nhx.common.controller.controller_manager import ControllerManager
 from nhx.common.service import RouterConfig, Service
 from nhx.platform_runner.health import create_platform_health_router
+
+
+class _StatusLoop:
+    def __init__(self, *, healthy: bool) -> None:
+        self.is_healthy = healthy
+        self.unhealthy_reason = None
 
 
 class ProbeService(Service):
@@ -119,3 +127,17 @@ def test_failed_controller_makes_top_level_status_unhealthy() -> None:
         "status": {"models": False},
     }
     assert client.get("/health/ready").status_code == 503
+
+
+def test_status_reports_runner_selector_instead_of_loop_names() -> None:
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("jobs"):
+        manager.register("job_scheduler", cast(Loop, _StatusLoop(healthy=True)))
+        manager.register("job_reconciler", cast(Loop, _StatusLoop(healthy=True)))
+    client = _client_for([ProbeService("entities", ready=True)])
+
+    payload = client.get("/status").json()
+
+    assert payload["status"] == "healthy"
+    assert payload["controllers"] == {"healthy": True, "status": {"jobs": True}}
+    assert client.get("/health/ready").status_code == 200

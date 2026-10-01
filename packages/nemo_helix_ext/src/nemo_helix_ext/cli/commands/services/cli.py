@@ -187,7 +187,10 @@ def run_services(
         str | None,
         typer.Option(
             "--controllers",
-            help="Comma-separated controllers to run, e.g. jobs,models.",
+            help=(
+                "Comma-separated controller names. These match GET /status "
+                "controllers.status keys, for example jobs,models."
+            ),
         ),
     ] = None,
     controller_group: Annotated[
@@ -308,7 +311,10 @@ def start_services(
         str | None,
         typer.Option(
             "--controllers",
-            help="Comma-separated controllers to run, e.g. jobs,models.",
+            help=(
+                "Comma-separated controller names. These match GET /status "
+                "controllers.status keys, for example jobs,models."
+            ),
         ),
     ] = None,
     controller_group: Annotated[
@@ -487,7 +493,10 @@ def restart_services(
         str | None,
         typer.Option(
             "--controllers",
-            help="Comma-separated controllers to run. Overrides previous controller set.",
+            help=(
+                "Comma-separated controller names. These match GET /status "
+                "controllers.status keys, for example jobs,models. Overrides the previous controller set."
+            ),
         ),
     ] = None,
     controller_group: Annotated[
