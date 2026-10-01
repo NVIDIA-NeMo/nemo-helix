@@ -13,14 +13,15 @@ import {
   type UnslothJobInput,
   type IntegrationsSpec,
   type UnslothJobsJobRequest,
+  type CustomizationJobTemplate,
 } from '@nemo/sdk/generated/customizer/schema';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import {
   CustomizationBackend,
-  isAutomodelJob,
-  isRlJob,
+  getCustomizationBackend,
+  toCustomizationBackend,
   isAutomodelSpec,
   isRlSpec,
   isUnslothSpec,
@@ -585,8 +586,22 @@ const stripNulls = <T>(value: T): T => {
   return value;
 };
 
-export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields => {
-  if (isAutomodelJob(job)) {
+/** What the form replays. A saved template carries the same spec under `config`. */
+export interface ReplayableJob {
+  spec: CustomizationJob['spec'];
+  description?: string | null;
+  /**
+   * Which arm to replay into. A job has to be inferred from its spec, but a saved template
+   * persists this — and inference would drop a valid config that omits the optional field
+   * it keys on, e.g. an automodel config with no `parallelism`.
+   */
+  backend?: CustomizationBackend;
+}
+
+export const jobToFormFields = (job: ReplayableJob): CustomizationFormFields => {
+  const backend = job.backend ?? getCustomizationBackend(job.spec);
+
+  if (backend === CustomizationBackend.automodel) {
     const spec = stripNulls(job.spec) as AutomodelJobInput;
     // A job submitted outside Studio can ask to merge either way round. Both merge, and
     // the form only shows `finetuning_type`, so a job carrying `lora.merge` has to come
@@ -603,7 +618,7 @@ export const jobToFormFields = (job: CustomizationJob): CustomizationFormFields 
           : spec,
     };
   }
-  if (isRlJob(job)) {
+  if (backend === CustomizationBackend.rl) {
     const spec = stripNulls(job.spec) as RlJobInput;
     // GRPO-only hyperparameters live in the `grpo` namespace, not on spec.training,
     // so replaying the spec alone would present a cloned GRPO job as a default DPO one.
@@ -701,4 +716,20 @@ export const getInitialFormValuesFromState = (
   }
 
   return undefined;
+};
+
+/**
+ * Null when the template names a backend the form has no arm for: `jobToFormFields` falls
+ * back to a default form, which would present it as the wrong backend rather than refuse it.
+ */
+export const templateToFormFields = (
+  template: Pick<CustomizationJobTemplate, 'backend' | 'config' | 'description'>
+): CustomizationFormFields | null => {
+  const backend = toCustomizationBackend(template.backend);
+  if (!backend) return null;
+  return jobToFormFields({
+    spec: template.config as unknown as CustomizationJob['spec'],
+    description: template.description,
+    backend,
+  });
 };
