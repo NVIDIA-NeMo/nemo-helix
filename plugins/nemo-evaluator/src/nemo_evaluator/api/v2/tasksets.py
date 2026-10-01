@@ -52,7 +52,7 @@ router = APIRouter()
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=TasksetFilter,
-        filter_description="Filter tasksets by workspace, name, created_at, and updated_at.",
+        filter_description="Filter tasksets by name, description, tasks, tags, metadata, created_at, and updated_at.",
     ),
 )
 @scope.read

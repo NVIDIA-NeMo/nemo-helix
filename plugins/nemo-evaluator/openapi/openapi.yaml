@@ -1801,7 +1801,8 @@ paths:
         explode: true
         schema:
           $ref: '#/components/schemas/TaskFilter'
-        description: Filter tasks by workspace, name, created_at, and updated_at.
+        description: Filter tasks by name, kind, intent, native_task_id, metrics,
+          tags, metadata, created_at, and updated_at.
       responses:
         '200':
           description: Return stored tasks for a workspace
@@ -2226,7 +2227,8 @@ paths:
         explode: true
         schema:
           $ref: '#/components/schemas/TasksetFilter'
-        description: Filter tasksets by workspace, name, created_at, and updated_at.
+        description: Filter tasksets by name, description, tasks, tags, metadata,
+          created_at, and updated_at.
       responses:
         '200':
           description: Return stored tasksets for a workspace

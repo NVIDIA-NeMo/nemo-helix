@@ -49,7 +49,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
                 only count children whose `workspace` is in this set. If None, child workspace
                 is unconstrained. An empty set makes relationship EXISTS match nothing.
             dialect_name: Database dialect (``"sqlite"`` or ``"postgresql"``). Required only by
-                operators whose SQL differs per backend (``$elemMatch``).
+                operators whose SQL differs per backend (``$elemMatch``, ``$containsPrefix``).
         """
         self.model = model
         self._relationship_child_workspaces = relationship_child_workspaces
