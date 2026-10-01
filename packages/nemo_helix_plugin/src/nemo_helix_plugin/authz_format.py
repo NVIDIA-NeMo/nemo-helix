@@ -4,9 +4,12 @@
 """Validate NeMo Helix permission vs OAuth scope string formats.
 
 Permissions use dot-separated segments (e.g. ``secrets.read``, ``models.create``).
-Scopes use colon-separated area/action pairs (e.g. ``secrets:read``, ``platform:write``).
+NeMo Helix platform scopes use colon-separated area/action pairs (e.g.
+``secrets:read``, ``platform:write``).
 
-Mixing formats fails silently in policy checks; this module rejects invalid inputs early.
+Mixing formats in authored policy config fails silently in policy checks; this module
+rejects invalid config inputs early. Runtime token scopes are left to the PDP, which
+ignores provider-specific names such as dotted scopes, URNs, and unconfigured families.
 """
 
 from __future__ import annotations
@@ -99,27 +102,6 @@ def validate_nhx_scope_strings_for_config(scopes: list[str], *, context: str) ->
             raise InvalidScopeFormatError(
                 f"Invalid scope {s!r} in {context}: expected 'area:action' with a single colon "
                 f"(e.g. 'jobs:read', 'platform:write')."
-            )
-
-
-def validate_runtime_authorize_scopes(scopes: list[str] | None) -> None:
-    """Validate scopes passed to :meth:`AuthClient.authorize_request`.
-
-    OIDC may send scopes without colons (e.g. ``openid``); those are allowed.
-    Reject values that are valid *permission* ids — the usual mix-up when calling
-    the PDP with token/scopes.
-
-    Raises:
-        InvalidScopeFormatError: If a scope string matches NeMo Helix permission syntax.
-    """
-    if not scopes:
-        return
-
-    for s in scopes:
-        if looks_like_mistaken_permission_for_scope(s):
-            raise InvalidScopeFormatError(
-                f"Invalid scope {s!r}: this value uses permission syntax (dots). "
-                f"Scopes use colons (e.g. 'secrets:read'). Did you pass a permission by mistake?"
             )
 
 
