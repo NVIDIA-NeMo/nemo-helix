@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import uuid
 
 from nhx.testing import ClientContext
@@ -95,6 +96,16 @@ def test_model_providers_filter_does_not_match_provider_name_prefix(test_clients
     _create_model(test_clients, prefixed, model_providers=[longer_provider])
 
     assert _list_names(test_clients, {"filter[model_providers]": provider}) == [exact]
+
+
+def test_model_providers_filter_nested_in_or_is_rejected(test_clients: ClientContext):
+    provider = f"{DEFAULT_WORKSPACE}/{_uid('provider')}"
+    nested = json.dumps({"$or": [{"model_providers": provider}, {"name": _uid("any")}]})
+
+    response = test_clients.test_client.get(MODELS_PATH, params={"filter": nested})
+
+    assert response.status_code == 400, response.text
+    assert "model_providers" in response.text
 
 
 def test_family_and_model_providers_filters_combine(test_clients: ClientContext):
