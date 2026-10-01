@@ -130,12 +130,12 @@ For patch or nonstandard cases, use object form to map a branch to the exact fut
 }
 ```
 
-If a released version needs docs-only fixes that should come from the release branch instead of the immutable tag, use the option-object form with `source: "branch"`. This replaces the tag snapshot for that version while the override is present, and does not mark the version as a preview when the tag already exists:
+If a released version needs docs-only fixes that should come from the release branch instead of the immutable tag, use the option-object form with `source: "branch"`. This replaces the tag snapshot for that version while the override is present, and does not mark the version as a preview when the tag already exists. `tag` may be a string or a list when multiple version snapshots should be sourced from the same branch:
 
 ```json
 {
   "release/0.6": {
-    "tag": "0.6.0",
+    "tag": ["0.6.0", "0.6.1"],
     "source": "branch"
   }
 }

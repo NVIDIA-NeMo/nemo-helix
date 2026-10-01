@@ -187,9 +187,10 @@ function discoverReleaseTags() {
 
 // Optional docs/fern/release-branches.json selects release branches to preview
 // before their tags are cut. Array entries derive release/x.y -> x.y.0; object
-// entries map branch -> tag for patch or nonstandard cases. A real tag wins
-// once it exists unless the entry explicitly says to keep sourcing that version
-// from the branch; see docs/fern/README.md#release-versioning.
+// entries map branch -> tag for patch or nonstandard cases. Option objects may
+// set tag to a list when several version snapshots should come from the same
+// branch. A real tag wins once it exists unless the entry explicitly says to
+// keep sourcing that version from the branch; see docs/fern/README.md#release-versioning.
 function discoverBranchReleases() {
   if (!existsSync(branchConfigPath)) {
     return [];
@@ -198,42 +199,45 @@ function discoverBranchReleases() {
   const releases = [];
 
   for (const [branch, options] of readBranchReleaseEntries()) {
-    const { tag, source } = options;
-    if (!tag) {
+    const { tags, source } = options;
+    if (tags.length === 0) {
       console.log(
         `Skipping release branch "${branch}": branch names must be release/x.y or release/x.y.z unless explicitly mapped`,
       );
       continue;
     }
 
-    const release = parseReleaseTag(tag);
-    if (!release) {
-      console.log(`Skipping release branch "${branch}": "${tag}" is not a stable SemVer tag`);
-      continue;
-    }
+    let ref;
+    for (const tag of tags) {
+      const release = parseReleaseTag(tag);
+      if (!release) {
+        console.log(`Skipping release branch "${branch}": "${tag}" is not a stable SemVer tag`);
+        continue;
+      }
 
-    const tagExists = gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
-    if (tagExists && source !== "branch") {
-      console.log(`Skipping branch ${branch}: tag ${tag} already exists`);
-      continue;
-    }
+      const tagExists = gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
+      if (tagExists && source !== "branch") {
+        console.log(`Skipping branch ${branch}: tag ${tag} already exists`);
+        continue;
+      }
 
-    const ref = resolveBranchRef(branch);
-    if (!ref) {
-      console.log(`Skipping branch ${branch}: branch not found`);
-      continue;
-    }
+      ref ??= resolveBranchRef(branch);
+      if (!ref) {
+        console.log(`Skipping branch ${branch}: branch not found`);
+        break;
+      }
 
-    if (!gitOk(["cat-file", "-e", `${ref}:docs/fern/versions/latest.yml`])) {
-      console.log(`Skipping branch ${branch}: ${ref} does not contain docs/fern/versions/latest.yml`);
-      continue;
-    }
+      if (!gitOk(["cat-file", "-e", `${ref}:docs/fern/versions/latest.yml`])) {
+        console.log(`Skipping branch ${branch}: ${ref} does not contain docs/fern/versions/latest.yml`);
+        break;
+      }
 
-    releases.push({
-      ...release,
-      ref,
-      ...(tagExists ? { overridesTag: true } : { availability: branchReleaseAvailability }),
-    });
+      releases.push({
+        ...release,
+        ref,
+        ...(tagExists ? { overridesTag: true } : { availability: branchReleaseAvailability }),
+      });
+    }
   }
 
   releases.sort(compareReleaseTags);
@@ -249,7 +253,7 @@ function readBranchReleaseEntries() {
         throw new Error(`${branchConfigPath} array entries must be branch names`);
       }
 
-      return [branch, { tag: tagForReleaseBranch(branch) }];
+      return [branch, { tags: normalizeBranchReleaseTags(tagForReleaseBranch(branch)) }];
     });
   }
 
@@ -259,7 +263,7 @@ function readBranchReleaseEntries() {
 
   return Object.entries(config).map(([branch, value]) => {
     if (typeof value === "string") {
-      return [branch, { tag: value }];
+      return [branch, { tags: [value] }];
     }
 
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -267,15 +271,32 @@ function readBranchReleaseEntries() {
     }
 
     const { tag, source } = value;
-    if (typeof tag !== "string") {
-      throw new Error(`${branchConfigPath} option object values must include a string tag`);
+    const tags = normalizeBranchReleaseTags(tag);
+    if (tags.length === 0) {
+      throw new Error(`${branchConfigPath} option object values must include a tag string or tag array`);
     }
     if (source !== undefined && source !== "branch") {
       throw new Error(`${branchConfigPath} option object source must be "branch" when set`);
     }
 
-    return [branch, { tag, source }];
+    return [branch, { tags, source }];
   });
+}
+
+function normalizeBranchReleaseTags(tag) {
+  if (tag === undefined) {
+    return [];
+  }
+
+  if (typeof tag === "string") {
+    return [tag];
+  }
+
+  if (Array.isArray(tag) && tag.every((entry) => typeof entry === "string")) {
+    return tag;
+  }
+
+  throw new Error(`${branchConfigPath} tag must be a string or an array of strings`);
 }
 
 function resolveBranchRef(branch) {
