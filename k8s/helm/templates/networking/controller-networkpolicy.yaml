@@ -19,7 +19,8 @@ spec:
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
-  {{- if or $controller.sameReleasePods.enabled $controller.extraIngress }}
+  {{- $subprocessAgents := and .Values.core.controller.subprocessAgentsOnPodIP $controller.subprocessAgents.enabled }}
+  {{- if or $controller.sameReleasePods.enabled $subprocessAgents $controller.extraIngress }}
   ingress:
     {{- if $controller.sameReleasePods.enabled }}
     - from:
@@ -29,6 +30,17 @@ spec:
       ports:
         - protocol: TCP
           port: {{ default .Values.core.controller.service.port $controller.port }}
+    {{- end }}
+    {{- if $subprocessAgents }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: nhx-api
+              {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ $controller.subprocessAgents.portRangeStart }}
+          endPort: {{ $controller.subprocessAgents.portRangeEnd }}
     {{- end }}
     {{- with $controller.extraIngress }}
     {{- toYaml . | nindent 4 }}

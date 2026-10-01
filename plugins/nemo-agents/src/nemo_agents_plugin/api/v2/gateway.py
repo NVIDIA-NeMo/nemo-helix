@@ -112,8 +112,9 @@ _RESPONSE_HEADERS_TO_STRIP = _HOP_BY_HOP_HEADERS | _PLATFORM_INTERNAL_HEADERS
 # ---------------------------------------------------------------------------
 #
 # STOP-GAP: the shared deployment_routing helpers are the *only* place the agents
-# plugin learns where a deployment lives. For subprocess deployments that is the loopback
-# ``AgentDeployment.endpoint`` the agents plugin bakes in at spawn. For container
+# plugin learns where a deployment lives. For subprocess deployments that is the
+# ``AgentDeployment.endpoint`` the agents plugin bakes in at spawn (loopback, or the
+# controller pod's IP when the API runs elsewhere; see ``subprocess_host``). For container
 # deployments (docker/k8s) the real address (k8s Service DNS, docker host:port)
 # is known only to the deployments plugin and projected onto ``endpoints`` by the
 # agents controller. The rest of the proxy (streaming, SSE, header stripping, the

@@ -603,7 +603,7 @@ class AgentDeploymentController(NemoController):
     async def _check_health(self, dep: AgentDeployment) -> None:
         """starting -> running | failed: single-shot check per reconcile cycle.
 
-        Subprocess mode: loopback ``GET /health``.
+        Subprocess mode: ``GET /health`` on the recorded endpoint.
         Container modes: trust the deployments-plugin projected status (READY → running);
         no agents-side loopback health check.
         """
@@ -675,7 +675,7 @@ class AgentDeploymentController(NemoController):
                 )
             return
 
-        # Subprocess: loopback health check.
+        # Subprocess: health check on the recorded endpoint.
         if info is not None and info.endpoint:
             dep.endpoint = info.endpoint
         healthy = bool(dep.endpoint) and await backend.health_check(dep.endpoint)

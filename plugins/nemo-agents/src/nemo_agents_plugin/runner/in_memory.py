@@ -185,6 +185,8 @@ def _write_yaml_config(path: Path, config: dict[str, Any]) -> Path:
 
 logger = logging.getLogger(__name__)
 
+LOOPBACK_HOST = "127.0.0.1"
+
 
 class InMemoryRunnerBackend(RunnerBackend):
     """Manages agent processes as local subprocesses.
@@ -194,8 +196,9 @@ class InMemoryRunnerBackend(RunnerBackend):
     to avoid blocking the event loop.
     """
 
-    def __init__(self, config: ControllerConfig) -> None:
+    def __init__(self, config: ControllerConfig, *, host: str = LOOPBACK_HOST) -> None:
         self._config = config
+        self._host = host
         self._workspace_root: Path = config.workspace_dir.resolve()
         self._processes: dict[tuple[str, str], subprocess.Popen[bytes]] = {}
         self._deployments: dict[tuple[str, str], DeploymentInfo] = {}
@@ -248,7 +251,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         span = end - start + 1
         for offset in range(span):
             candidate = start + (self._next_port - start + offset) % span
-            if self._is_port_free(candidate):
+            if self._is_port_free(candidate, self._host):
                 self._next_port = candidate + 1 if candidate < end else start
                 return candidate
         raise RuntimeError(
@@ -257,15 +260,20 @@ class InMemoryRunnerBackend(RunnerBackend):
         )
 
     @staticmethod
-    def _is_port_free(port: int) -> bool:
-        """Return ``True`` if nothing is currently bound to *port* on loopback."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    def _is_port_free(port: int, host: str = LOOPBACK_HOST) -> bool:
+        """Return ``True`` if nothing is currently bound to *port* on *host*."""
+        family = socket.AF_INET6 if ":" in host else socket.AF_INET
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                sock.bind(("127.0.0.1", port))
+                sock.bind((host, port))
                 return True
             except OSError:
                 return False
+
+    def _endpoint(self, port: int) -> str:
+        host = f"[{self._host}]" if ":" in self._host else self._host
+        return f"http://{host}:{port}"
 
     async def create_deployment(
         self,
@@ -308,7 +316,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             status="starting",
             port=port,
             pid=proc.pid,
-            endpoint=f"http://127.0.0.1:{port}",
+            endpoint=self._endpoint(port),
             log_path=str(log_path),
         )
         self._processes[key] = proc
@@ -364,7 +372,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             status="starting",
             port=port,
             pid=proc.pid,
-            endpoint=f"http://127.0.0.1:{port}",
+            endpoint=self._endpoint(port),
             log_path=str(log_path),
             staged_spec=staged_spec,
             extra={"base_dir": str(base_dir)},
@@ -515,11 +523,11 @@ class InMemoryRunnerBackend(RunnerBackend):
         log_path: Path,
         port: int,
     ) -> subprocess.Popen[bytes]:
-        """Spawn ``nat start fastapi`` bound to 127.0.0.1 (platform-internal only).
+        """Spawn ``nat start fastapi`` bound to the configured subprocess host.
 
-        ``--host`` is intentionally omitted: processes bind to the default
-        (127.0.0.1) so they are not directly reachable externally.  All
-        traffic reaches them through the agents gateway proxy.
+        That is loopback unless the API runs on another host, in which case it is
+        an address the API can reach (in Kubernetes, the controller pod's IP).
+        Either way, traffic is meant to arrive through the agents gateway proxy.
         """
         # config_path is an absolute path — pass it as-is so nat can find it
         # regardless of the working directory it inherits.
@@ -533,7 +541,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             "--port",
             str(port),
             "--host",
-            "127.0.0.1",
+            self._host,
         ]
         log_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info("Spawning: %s  (log: %s)", " ".join(cmd), log_path)
@@ -553,7 +561,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         port: int,
         credential_env: dict[str, str] | None = None,
     ) -> subprocess.Popen[bytes]:
-        """Spawn the Platform-owned Fabric server on a loopback port."""
+        """Spawn the Platform-owned Fabric server on the configured subprocess host."""
         cmd = [
             sys.executable,
             "-m",
@@ -561,7 +569,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             "--agent-config",
             str(config_path),
             "--host",
-            "127.0.0.1",
+            self._host,
             "--port",
             str(port),
         ]
