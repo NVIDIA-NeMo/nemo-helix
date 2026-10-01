@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -19,13 +20,13 @@ from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskD
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_compiler import _environment
 from nemo_evaluator.jobs.agent_evaluate import (
     AGENT_BUNDLE_DIR,
     DEFAULT_RESULT_NAME,
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
-    JobEnvSecretResolver,
     _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
@@ -52,6 +53,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
+from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.metric_refs import MetricRef
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
@@ -483,7 +485,7 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")}
     assert target._config.env_vars == {"FABRIC_LOG": "debug"}
     # The service injected the secret under its key, so Harbor gets a `${OPENAI_API_KEY}` template.
-    assert isinstance(target._secret_resolver, JobEnvSecretResolver)
+    assert isinstance(target._secret_resolver, JobEnvSecretSource)
     assert harbor_env_templates(target._config.env_secrets, target._secret_resolver) == {
         "OPENAI_API_KEY": "${OPENAI_API_KEY}"
     }
@@ -530,6 +532,7 @@ def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) ->
         concurrency=4,
         reward_key="score",
         hydra_params={"model": {"temperature": 0.7}},
+        env_secrets={"OPENAI_API_KEY": SecretRef("dev/openai-key")},
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(gym_target, ctx)
     assert isinstance(target, GymAgentTaskRunner)
@@ -540,9 +543,25 @@ def test_resolve_target_builds_gym_runtime_from_runner_target(tmp_path: Path) ->
     # Overrides are nested data on both sides of the seam — the spec model and the runtime config
     # must agree on the shape, or the spec validates and the runtime rejects it.
     assert target._config.hydra_params == {"model": {"temperature": 0.7}}
+    assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef("dev/openai-key")}
+    assert isinstance(target._secret_resolver, JobEnvSecretSource)
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_colocated_gym_checks_injected_secret_before_start(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    gym_target = GymRunnerTarget(
+        agent="simple_agent",
+        agent_config="a.yaml",
+        resources_server="mcqa",
+        env_secrets={"OPENAI_API_KEY": SecretRef("ws/openai")},
+    )
+    runner, _, _ = AgentEvalJob._resolve_target(gym_target, _job_context(tmp_path))
+    assert isinstance(runner, GymAgentTaskRunner)
+    with pytest.raises(ValueError, match="nemo secrets get openai --workspace ws"):
+        asyncio.run(runner.run_tasks([]))
 
 
 def _sandbox_plan() -> SandboxPlan:
@@ -646,17 +665,6 @@ def test_harbor_env_secret_missing_from_job_environment_names_the_secret(
         f"env_secrets['OPENAI_API_KEY'] -> secret {ref!r} was not injected into this job's environment. "
         f"Check the secret exists in workspace {workspace!r}: nemo secrets get openai-key --workspace {workspace}"
     )
-
-
-def test_job_env_secret_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    ref = SecretRef(root="my-workspace/openai-key")
-    resolver = JobEnvSecretResolver(workspace="dev")
-    monkeypatch.setenv("MY_WORKSPACE_OPENAI_KEY", "never-read")
-    monkeypatch.setenv("OPENAI_API_KEY", "")
-    monkeypatch.setenv("LLM_API_KEY", "injected")
-
-    assert resolver.find_env_name(ref, "OPENAI_API_KEY") is None, "an empty value counts as missing"
-    assert resolver.find_env_name(ref, "LLM_API_KEY") == "LLM_API_KEY"
 
 
 def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
@@ -1752,6 +1760,42 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         await AgentEvalJob.compile(
             workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
         )
+
+
+@pytest.mark.parametrize("source", ["gym", "harbor", "metric"])
+async def test_compile_rejects_sandbox_plan_secret_name_from_all_sources(source: str, mocker: MockerFixture) -> None:
+    name = GYM_SANDBOX_PLAN_ENVVAR
+    task = _task_spec()
+    if source == "gym":
+        _patch_execution_profiles(mocker, [])
+        target = GymRunnerTarget(
+            agent="simple_agent", agent_config="a.yaml", resources_server="mcqa", env_secrets={name: SecretRef("ws/x")}
+        )
+    elif source == "harbor":
+        target = HarborRunnerTarget(env_secrets={name: SecretRef("ws/x")})
+    else:
+        target = HarborRunnerTarget()
+        metric = task.spec.metrics[0].model_copy(update={"secrets": {name: SecretRef("ws/x")}})
+        task = task.model_copy(update={"spec": task.spec.model_copy(update={"metrics": [metric]})})
+    spec = AgentEvalSpec(tasks=[task], target=target)
+    with pytest.raises(ValueError, match="NEMO_EVALUATOR_GYM_SANDBOX_PLAN.*reserved"):
+        await AgentEvalJob.compile(
+            workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+        )
+
+
+def test_sandbox_plan_secret_name_is_rejected_before_plan_is_appended() -> None:
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=GymRunnerTarget(
+            agent="simple_agent",
+            agent_config="a.yaml",
+            resources_server="mcqa",
+            env_secrets={GYM_SANDBOX_PLAN_ENVVAR: SecretRef("ws/x")},
+        ),
+    )
+    with pytest.raises(ValueError, match="NEMO_EVALUATOR_GYM_SANDBOX_PLAN.*reserved"):
+        _environment(spec, sandbox_plan=_sandbox_plan())
 
 
 # --- sync job entrypoint: the in-process run path, across target types -------

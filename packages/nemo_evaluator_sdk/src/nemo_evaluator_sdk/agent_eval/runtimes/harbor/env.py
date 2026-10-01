@@ -15,6 +15,7 @@ import re
 from collections.abc import Mapping
 
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
+from nemo_evaluator_sdk.agent_eval.runtimes.secrets import env_secret_vars
 from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource
 from nemo_evaluator_sdk.values.common import SecretRef
 
@@ -32,13 +33,7 @@ def harbor_env_templates(env_secrets: Mapping[str, SecretRef], source: EnvSecret
 
     Raises before anything runs when a secret is missing.
     """
-    templates: dict[str, str] = {}
-    for env_name, secret_ref in env_secrets.items():
-        found = source.find_env_name(secret_ref, env_name)
-        if found is None:
-            raise ValueError(f"env_secrets[{env_name!r}] -> {source.missing_secret_message(secret_ref, env_name)}")
-        templates[env_name] = "${" + found + "}"
-    return templates
+    return {name: "${" + var + "}" for name, var in env_secret_vars(env_secrets, source).items()}
 
 
 def validate_harbor_env(env_vars: Mapping[str, str], env_secrets: Mapping[str, object]) -> None:

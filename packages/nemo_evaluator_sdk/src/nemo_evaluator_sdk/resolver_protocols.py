@@ -20,6 +20,10 @@ class SecretResolver(Protocol):
         ...
 
 
+class MissingSecretError(ValueError):
+    """A secret is unavailable in this execution context; the message explains how to supply it."""
+
+
 @runtime_checkable
 class EnvSecretSource(Protocol):
     """Name the environment variable that already holds a secret, without reading its value.
@@ -28,21 +32,20 @@ class EnvSecretSource(Protocol):
     without the value being copied or written to ``os.environ``.
 
     Implemented by :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver` (standalone) and the
-    evaluator plugin's ``JobEnvSecretResolver`` (platform jobs). Used by:
+    evaluator plugin's ``JobEnvSecretSource`` (platform jobs). Used by:
 
     * ``HarborAgentTaskRunner(secret_resolver=...)``: the resolver's type, checked at construction
       (hence ``runtime_checkable``), so a resolver that can't name env vars fails early.
-    * ``harbor_env_templates``: finds each ``env_secrets`` source variable and templates it.
-    * ``resolve_env_secrets`` (Gym's value path): uses ``missing_secret_message`` when a resolver
-      provides it.
+    * ``env_secret_vars`` / ``harbor_env_templates``: name and template each secret source variable.
+    * ``GymAgentTaskRunner`` / ``env_secret_values``: read each named variable for Gym's subprocess.
     """
 
-    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
-        """Name of the non-empty env var holding ``secret_ref`` for the variable ``env_name``, or ``None``."""
-        ...
+    def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+        """Name of the non-empty env var holding ``secret_ref`` for ``env_name``.
 
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
-        """Explain, for this execution context, how to supply ``secret_ref`` when it is missing."""
+        Raises:
+            MissingSecretError: With a context-specific hint for supplying the secret.
+        """
         ...
 
 
