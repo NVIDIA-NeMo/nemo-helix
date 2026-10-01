@@ -83,9 +83,8 @@ class TestValidateRuntimeAuthorizeScopes:
     def test_allows_oidc_style_scopes(self) -> None:
         validate_runtime_authorize_scopes(["openid", "email"])
 
-    def test_rejects_permission_like_values(self) -> None:
-        with pytest.raises(InvalidScopeFormatError, match="permission syntax"):
-            validate_runtime_authorize_scopes(["secrets.read"])
+    def test_allows_dotted_provider_scopes(self) -> None:
+        validate_runtime_authorize_scopes(["secrets.read", "app.default", "licenses.read"])
 
     def test_none_or_empty(self) -> None:
         validate_runtime_authorize_scopes(None)

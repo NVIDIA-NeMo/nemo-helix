@@ -295,7 +295,7 @@ test_list_workspaces_missing_scope if {
             "principal_email": "creator@example.com",
             "method": "GET",
             "path": "/apis/entities/v2/workspaces",
-            "scopes": ["models:read"]  # Wrong scope, needs platform:read
+            "scopes": ["platform:write"]  # Wrong scope, needs platform:read
         }
         with data.authz.roles as workspace_access_test_data.roles
         with data.authz.endpoints as workspace_access_test_data.endpoints
