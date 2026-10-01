@@ -17,9 +17,12 @@ Gym loads them inside the sandbox where the environment is mounted.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import math
 import os
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +35,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile
 from pydantic import BaseModel, ConfigDict, Field
+from sandboxed_gym.host.models import DEFAULT_HOST_TTL_S
 
 #: Env-var names that look like a credential. Used to refuse a sandboxed run that would hand one to
 #: user-supplied environment code through `env_vars`; `env_secrets` is the supported route.
@@ -40,6 +44,11 @@ _CREDENTIAL_PATTERN = re.compile(r"(API_?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDEN
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
 GYM_HOST_IMAGE = "nhx-gym-host"
 _MAX_ROLLOUT_POSTS_IN_FLIGHT = 8
+_HOST_DEADLINE_GRACE_S = 30.0
+
+
+class CollectionTimeoutError(TimeoutError):
+    """Rollout collection outran the target's ``collection_timeout_s``."""
 
 
 class SandboxUnavailableError(RuntimeError):
@@ -374,6 +383,10 @@ def serve_config(
         workspace_sub_path = plan.workspace_sub_path
 
     chunk_size, max_in_flight = rollout_parallelism(target.concurrency)
+    if target.collection_timeout_s is None:
+        chunk_deadline_s = float(DEFAULT_HOST_TTL_S)
+    else:
+        chunk_deadline_s = target.collection_timeout_s + _HOST_DEADLINE_GRACE_S
 
     return {
         "job_id": job_id,
@@ -390,6 +403,8 @@ def serve_config(
             "resources": plan.resources,
             "rollout_chunk_size": chunk_size,
             "rollout_max_in_flight": max_in_flight,
+            "bootstrap_timeout_s": target.startup_timeout_s,
+            "rollout_timeout_s": chunk_deadline_s,
             "host_provider_options": host_provider_options,
             "network_policy": {"egress_allow": _egress_rules(plan)},
         },
@@ -466,8 +481,6 @@ class SessionBackedGymRunner:
         return self._delegate.run_aggregate_scores()
 
     async def run_tasks(self, tasks: Any, config: Any = None) -> Any:
-        import asyncio
-
         from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
             SandboxedGymAgentTaskRunner,
             SandboxedGymRuntimeConfig,
@@ -486,6 +499,8 @@ class SessionBackedGymRunner:
             "rollout_chunk_size": serve.sandbox.rollout_chunk_size,
             "rollout_max_in_flight": serve.sandbox.rollout_max_in_flight,
             "rollout_timeout_s": serve.sandbox.rollout_timeout_s,
+            "startup_timeout_s": serve.sandbox.bootstrap_timeout_s,
+            "collection_timeout_s": self._target.collection_timeout_s,
         }
         orchestrator = SandboxedGymOrchestrator()
         # `start` provisions a host and blocks on its readiness probe, so it runs off the event loop.
@@ -501,11 +516,31 @@ class SessionBackedGymRunner:
                     num_repeats=self._target.num_repeats,
                     reward_key=self._target.reward_key,
                 ),
-                collect=session.arun_rollouts,
+                collect=functools.partial(
+                    collect_within, session.arun_rollouts, timeout_s=self._target.collection_timeout_s
+                ),
             )
             return await self._delegate.run_tasks(tasks, config)
         finally:
             await asyncio.to_thread(session.shutdown)
+
+
+async def collect_within(
+    collect: Callable[[list[dict[str, Any]]], Awaitable[list[Any]]],
+    examples: list[dict[str, Any]],
+    *,
+    timeout_s: float | None,
+) -> list[Any]:
+    """Run ``collect`` under one absolute deadline, or none when ``timeout_s`` is ``None``."""
+    try:
+        async with asyncio.timeout(timeout_s) as deadline:
+            return await collect(examples)
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        raise CollectionTimeoutError(
+            f"sandboxed Gym rollout collection exceeded collection_timeout_s={timeout_s:g}s; collection aborted."
+        ) from exc
 
 
 def sandbox_plan_from_environment() -> SandboxPlan | None:
