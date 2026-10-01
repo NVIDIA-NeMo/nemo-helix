@@ -34,6 +34,7 @@ from nhx.core.inference_gateway.service import InferenceGatewayService
 from nhx.platform_runner.loader import order_services_by_dependencies
 from nhx.platform_runner.server import create_app
 from nhx.testing.access_log import AccessLog, AccessLogMiddleware
+from nhx.testing.asyncio_debug import bounded_event_loop_teardown
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -534,7 +535,7 @@ def create_test_client(
         if all_overrides:
             app.dependency_overrides.update(all_overrides)
 
-        with TestClient(app) as client:
+        with bounded_event_loop_teardown(), TestClient(app) as client:
             # Use max_retries=0 to avoid retry delays on 409 Conflict errors
             sdk_http_client = SDKTestClientAdapter(client)
             sdk = NeMoHelix(
