@@ -817,7 +817,7 @@ def test_download_hub_wheels_vendors_venv_seed_packages(tmp_path: Path, monkeypa
 
     compiled: list[list[str]] = []
 
-    def fake_compile(work_dir, packages, *, extra_index_url=None):
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
         compiled.append(list(packages))
         pinned = Path(work_dir) / "requirements.txt"
         pinned.parent.mkdir(parents=True, exist_ok=True)
@@ -860,7 +860,7 @@ def test_wheels_dir_gets_seed_packages_vendored(tmp_path: Path, monkeypatch) -> 
 
     requested: list[list[str]] = []
 
-    def fake_compile(work_dir, packages, *, extra_index_url=None):
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
         requested.append(list(packages))
         pinned = Path(work_dir) / "requirements.txt"
         pinned.parent.mkdir(parents=True, exist_ok=True)
@@ -899,7 +899,7 @@ def test_wheels_dir_top_up_carries_the_image_pins(tmp_path: Path, monkeypatch) -
 
     requested: list[list[str]] = []
 
-    def fake_compile(work_dir, packages, *, extra_index_url=None):
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
         requested.append(list(packages))
         pinned = Path(work_dir) / "requirements.txt"
         pinned.parent.mkdir(parents=True, exist_ok=True)
@@ -1194,8 +1194,9 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
     uv discovers the nearest pyproject.toml and applies its [tool.uv] policy. This repo's
     override-dependencies exist for its own CVE posture, and an override REPLACES a
     declared requirement rather than narrowing it — `openai>=2.26.0` strips the `<3` upper
-    bound that openai-agents declares. The closure then vendors openai 3.0.0, and the
-    cluster, where no overrides apply, cannot install it.
+    bound that openai-agents declares. ``--no-config`` keeps that policy out of the resolve.
+    The Gym host applies the NeMo-RL checkout's tables instead, and those are passed only
+    when ``--nemo-rl-root`` is set.
     """
     from nhx.rl.tasks.environment import convert as convert_mod
 
@@ -1219,6 +1220,67 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
     )
 
     assert "--no-config" in commands[0]
+    assert "--override" not in commands[0]
+
+
+def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) -> None:
+    """The Gym host installs under the NeMo-RL checkout's uv limits, so the resolve must too."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    (rl / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.uv]",
+                'override-dependencies = ["fastapi[standard]>=0.133.0,<0.137.0"]',
+                'constraint-dependencies = ["urllib3>=2.7.0"]',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        if cmd[:3] == ["uv", "build", "--wheel"]:
+            out = Path(cmd[cmd.index("--out-dir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        elif "compile" in cmd:
+            Path(cmd[cmd.index("--output-file") + 1]).write_text("fastapi==0.136.3\n", encoding="utf-8")
+        else:
+            dest = Path(cmd[cmd.index("--dest") + 1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "fastapi-0.136.3-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    compile_cmd = next(cmd for cmd in commands if "compile" in cmd)
+    assert "--no-config" in compile_cmd
+    override = Path(compile_cmd[compile_cmd.index("--override") + 1])
+    constraint = Path(compile_cmd[compile_cmd.index("--constraint") + 1])
+    assert override.read_text(encoding="utf-8") == "fastapi[standard]>=0.133.0,<0.137.0\n"
+    assert constraint.read_text(encoding="utf-8") == "urllib3>=2.7.0\n"
+
+
+def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text("[project]\nname = 'nemo-rl'\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="override-dependencies"):
+        rl_dependency_policy(rl)
 
 
 def test_build_step_keeps_subprocess_output_off_stdout(capfd) -> None:

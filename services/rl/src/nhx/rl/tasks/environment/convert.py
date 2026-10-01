@@ -109,17 +109,44 @@ def _run_build_step(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, stdout=sys.stderr)
 
 
+def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
+    """Read the uv limits the Gym host applies when it installs the wheelhouse.
+
+    The host starts in the NeMo-RL tree, so ``uv pip install`` honors that checkout's
+    ``[tool.uv]`` override-dependencies and constraint-dependencies. A closure resolved
+    without them installs versions the host then rejects.
+    """
+    pyproject = nemo_rl_root / "pyproject.toml"
+    if not pyproject.is_file():
+        raise ValueError(
+            f"--nemo-rl-root has no pyproject.toml: {nemo_rl_root}. "
+            "Point it at the NeMo-RL checkout NEMO_RL_REF pins. The training image is built "
+            "from that commit, and the Gym host installs this wheelhouse under its uv policy."
+        )
+    uv_config = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {}).get("uv", {})
+    missing = [key for key in ("override-dependencies", "constraint-dependencies") if not uv_config.get(key)]
+    if missing:
+        raise ValueError(
+            f"{pyproject} has no [tool.uv] {', '.join(missing)}. Those tables are what the Gym "
+            "host applies during the offline install."
+        )
+    return list(uv_config["override-dependencies"]), list(uv_config["constraint-dependencies"])
+
+
 def _compile_pinned_requirements(
     work_dir: Path,
     packages: list[str],
     *,
     extra_index_url: str | None = None,
+    nemo_rl_root: Path | None = None,
 ) -> Path:
     """Pin ``packages`` before download so ``pip download --no-deps`` cannot vendor duplicates."""
     work_dir.mkdir(parents=True, exist_ok=True)
     requirements_in = work_dir / "requirements.in"
     requirements_in.write_text("\n".join(packages) + "\n", encoding="utf-8")
     pinned = work_dir / "requirements.txt"
+    # --no-config ignores this repo's [tool.uv]. The Gym host applies the NeMo-RL
+    # checkout's override-dependencies and constraint-dependencies, passed explicitly.
     cmd = [
         "uv",
         "pip",
@@ -128,12 +155,19 @@ def _compile_pinned_requirements(
         "--output-file",
         str(pinned),
         "--no-header",
-        "--no-config",  # ignore this repo's uv overrides; they are not applied on the cluster
+        "--no-config",
         "--python-platform",
         TARGET_UV_PLATFORM,
         "--python-version",
         TARGET_PYTHON_VERSION,
     ]
+    if nemo_rl_root is not None:
+        overrides, constraints = rl_dependency_policy(nemo_rl_root)
+        override = work_dir / "override.txt"
+        constraint = work_dir / "constraint.txt"
+        override.write_text("\n".join(overrides) + "\n", encoding="utf-8")
+        constraint.write_text("\n".join(constraints) + "\n", encoding="utf-8")
+        cmd.extend(["--override", str(override), "--constraint", str(constraint)])
     if extra_index_url:
         cmd.extend(["--extra-index-url", extra_index_url, "--index-strategy", "unsafe-best-match"])
     logger.info("Running: %s", " ".join(cmd))
@@ -379,7 +413,7 @@ def _vendor_missing_agent_wheels(wheels_dir: Path, spec: ConvertEnvironmentSpec,
     # No extra index: these come from PyPI, and uv gives --extra-index-url priority for
     # every package it resolves.
     requirements = _agent_closure_requirements(spec, work_dir=work_dir)
-    pinned = _compile_pinned_requirements(work_dir / "agent", requirements)
+    pinned = _compile_pinned_requirements(work_dir / "agent", requirements, nemo_rl_root=spec.nemo_rl_root)
     _run_pip_download(wheels_dir, requirements_file=pinned)
     # omegaconf's antlr4-python3-runtime publishes no wheel, so the closure is incomplete
     # until the source artifacts are built -- same as the download path.
@@ -418,7 +452,9 @@ def download_hub_wheels(
         *spec.extra_wheels,
         *_agent_closure_requirements(spec, work_dir=work_dir),
     ]
-    pinned = _compile_pinned_requirements(work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
+    pinned = _compile_pinned_requirements(
+        work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX, nemo_rl_root=spec.nemo_rl_root
+    )
     _run_pip_download(wheels_dir, requirements_file=pinned, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _build_downloaded_sdists(wheels_dir)
     downloaded = sorted(wheels_dir.glob("*.whl"))
