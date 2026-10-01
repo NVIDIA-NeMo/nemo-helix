@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { useEvaluatorListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';
@@ -8,14 +9,17 @@ import { useInsightsListInsights } from '@nemo/sdk/generated/insights/insights-i
 import { useListExperiments } from '@nemo/sdk/generated/platform/experiments';
 import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 import { ROUTES } from '@studio/constants/routes';
+import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { WorkspaceDashboardHomeRoute } from '@studio/routes/WorkspaceDashboardHomeRoute';
 import { queryResult } from '@studio/routes/WorkspaceDashboardHomeRoute/testMocks';
 import {
   SAMPLE_AGENT_NAME,
   SAMPLE_WORKSPACE,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
+import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, generatePath, RouterProvider } from 'react-router';
 
@@ -53,7 +57,19 @@ const renderRoute = (workspace = TEST_WORKSPACE) => {
   const dashboardPath = generatePath(ROUTES.workspace.dashboard, { workspace });
 
   const router = createMemoryRouter(
-    [{ path: ROUTES.workspace.dashboard, element: <WorkspaceDashboardHomeRoute /> }],
+    [
+      {
+        path: ROUTES.workspace.dashboard,
+        element: (
+          <>
+            <WorkspaceDashboardHomeRoute />
+            <LocationDisplay />
+          </>
+        ),
+      },
+      // Wherever a dashboard link leads, so a test can see it was followed.
+      { path: '*', element: <LocationDisplay /> },
+    ],
     { initialEntries: [dashboardPath] }
   );
 
@@ -166,6 +182,20 @@ describe('WorkspaceDashboardHomeRoute', () => {
       expect(screen.getByText('Sample email triage agent.')).toBeInTheDocument();
       expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Dismiss Quickstart' })).not.toBeInTheDocument();
+    });
+
+    it('switches to the shared workspace from the footer', async () => {
+      const user = userEvent.setup();
+      renderRoute(SAMPLE_WORKSPACE);
+
+      expect(await screen.findByText('Ready to start with your own assets?')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Switch to Shared Workspace' }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(
+          getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE)
+        )
+      );
     });
 
     it("shows the sample agent's running deployment in the CLI commands", async () => {

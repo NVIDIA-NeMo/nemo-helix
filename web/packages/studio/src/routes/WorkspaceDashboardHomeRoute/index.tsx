@@ -3,10 +3,12 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { GradientBackground } from '@nemo/common/src/components/GradientBackground';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { Banner, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
+import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
@@ -16,11 +18,13 @@ import {
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import { TriangleAlert } from 'lucide-react';
 import { useRef, type FC } from 'react';
+import { useNavigate } from 'react-router';
 
 const SANDBOX_WORKSPACE = 'sample';
 
 export const WorkspaceDashboardHomeRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
+  const navigate = useNavigate();
   const getStartedRef = useRef<HTMLDivElement>(null);
   const isSampleWorkspace = workspace === SAMPLE_WORKSPACE;
   // The panel returns null without an agent or with agents disabled, so gating the fetch on
@@ -56,7 +60,14 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
                     A complete sample workload, already run end to end. Inspect what shipped, or run
                     any step yourself.
                   </Text>
-                  <QuickstartSamplePanel workspace={workspace} agent={sampleAgent} />
+                  <QuickstartSamplePanel
+                    workspace={workspace}
+                    agent={sampleAgent}
+                    // `default` is the workspace every user shares; the sample is a sandbox.
+                    onSwitchWorkspace={() =>
+                      navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE))
+                    }
+                  />
                 </Stack>
               )
             ) : (
