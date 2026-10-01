@@ -134,6 +134,27 @@ class TestHasPermissionsFormatValidation:
         body = mock_post.call_args[1]["json"]["input"]
         assert body["scopes"] == ["openid", "profile.read", "employee.profile.read"]
 
+    @pytest.mark.asyncio
+    async def test_authorize_request_allows_dotted_provider_scopes(self, auth_config, principal):
+        """External IdP scopes may be dotted and should be passed through to the PDP."""
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            out = await auth_client.authorize_request(
+                "GET",
+                "/x",
+                scopes=["secrets.read", "app.default"],
+                http_client=mock_http_client,
+            )
+
+        assert out.allowed is True
+        body = mock_post.call_args[1]["json"]["input"]
+        assert body["scopes"] == ["secrets.read", "app.default"]
+
 
 class TestHasPermissionsPdpPayloadWithDelegation:
     """has_permissions must send the acting user's email/groups (delegate), not the service's."""
