@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from nemo_platform import NeMoPlatform
 from nmp.common.auth.client import AuthClient
-from nmp.common.auth.exceptions import InvalidPermissionFormatError, InvalidScopeFormatError
+from nmp.common.auth.exceptions import InvalidPermissionFormatError
 from nmp.common.auth.models import Principal
 from nmp.common.config import AuthConfig
 from nmp.common.sdk_factory import get_sdk_on_behalf_of
@@ -115,10 +115,25 @@ class TestHasPermissionsFormatValidation:
             await auth_client.has_permissions("ws", ["secrets:read"])
 
     @pytest.mark.asyncio
-    async def test_authorize_request_rejects_permission_like_scopes(self, auth_config, principal):
-        auth_client = AuthClient(principal=principal, config=auth_config)
-        with pytest.raises(InvalidScopeFormatError, match="permission syntax"):
-            await auth_client.authorize_request("GET", "/x", scopes=["secrets.read"])
+    async def test_authorize_request_allows_dotted_provider_scopes(self, auth_config, principal):
+        """External IdP scopes may be dotted and should be passed through to the PDP."""
+        mock_http_client = httpx.AsyncClient()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"result": {"allowed": True}}
+        mock_response.raise_for_status = MagicMock()
+        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = mock_response
+            auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
+            out = await auth_client.authorize_request(
+                "GET",
+                "/x",
+                scopes=["secrets.read", "app.default"],
+                http_client=mock_http_client,
+            )
+
+        assert out.allowed is True
+        body = mock_post.call_args[1]["json"]["input"]
+        assert body["scopes"] == ["secrets.read", "app.default"]
 
 
 class TestHasPermissionsPdpPayloadWithDelegation:
