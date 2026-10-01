@@ -454,7 +454,7 @@ nemo services run [OPTIONS]
 
 * `--services`: Comma-separated services to run, e.g. models,entities,jobs. Defaults to all available services.
 * `--service-group`: Run a predefined service group. Cannot be combined with --services.
-* `--controllers`: Comma-separated controllers to run, e.g. jobs,models.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models.
 * `--controller-group`: Run a predefined controller group. Cannot be combined with --controllers.
 * `--sidecars`: Comma-separated sidecars to run, e.g. adapters,cache.
 * `--config`: Path to a platform configuration YAML file.
@@ -490,7 +490,7 @@ nemo services start [OPTIONS]
 
 * `--services`: Comma-separated services to run, e.g. models,entities,jobs.
 * `--service-group`: Run a predefined service group. Cannot be combined with --services.
-* `--controllers`: Comma-separated controllers to run, e.g. jobs,models.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models.
 * `--controller-group`: Run a predefined controller group. Cannot be combined with --controllers.
 * `--sidecars`: Comma-separated sidecars to run, e.g. adapters,cache.
 * `--config`: Path to a platform configuration YAML file.
@@ -560,7 +560,7 @@ nemo services restart [OPTIONS]
 
 * `--services`: Comma-separated services to run. Overrides previous service set.
 * `--service-group`: Run a predefined service group. Overrides previous setting.
-* `--controllers`: Comma-separated controllers to run. Overrides previous controller set.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models. Overrides the previous controller set.
 * `--controller-group`: Run a predefined controller group. Overrides previous setting.
 * `--sidecars`: Comma-separated sidecars to run. Overrides previous setting.
 * `--config`: Path to a platform configuration YAML file.
