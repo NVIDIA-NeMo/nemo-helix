@@ -519,6 +519,335 @@ def test_stop_instance_releases_lock_held_by_surviving_child(tmp_path: Path) -> 
                 pass
 
 
+def test_stop_instance_keeps_descriptor_when_stale_pid_holds_lock(tmp_path: Path) -> None:
+    """A dead launcher pid must not erase the descriptor while the flock is held.
+
+    ``stop_instance`` treats a mismatched pid as stale and used to delete the
+    descriptor immediately. A descendant that inherited the lock then blocks the
+    next start, and ``stop``/``status`` have no pid left to target.
+    """
+    scope = "stale-pid-lock"
+    state_dir = tmp_path / "state"
+    lock_path = state_dir / "instances" / scope / process.LOCK_FILENAME
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    create_time = psutil.Process(dead.pid).create_time()
+    dead.kill()
+    dead.wait(timeout=3)
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys, time; "
+            "fd = open(sys.argv[1], 'r+'); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); "
+            "print('held', flush=True); "
+            "time.sleep(30)",
+            str(lock_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        process.write_descriptor(
+            process.InstanceDescriptor(
+                pid=dead.pid,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+                transport="tcp",
+                mode="daemon",
+                create_time=create_time,
+            ),
+            base_dir=state_dir,
+        )
+
+        result = process.stop_instance(scope, base_dir=state_dir, timeout=0.2, force=True)
+
+        assert result.stopped_pids == []
+        assert process.is_instance_alive(scope, base_dir=state_dir)
+        kept = process.read_descriptor(scope, base_dir=state_dir)
+        assert kept is not None
+        assert kept.pid == dead.pid
+    finally:
+        holder.kill()
+        holder.wait(timeout=3)
+
+
+def test_stop_instance_drops_descriptor_when_stale_lock_releases(tmp_path: Path) -> None:
+    """A stale pid waits for a dying lock holder instead of reporting it still running."""
+    scope = "stale-pid-releasing"
+    state_dir = tmp_path / "state"
+    lock_path = state_dir / "instances" / scope / process.LOCK_FILENAME
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    create_time = psutil.Process(dead.pid).create_time()
+    dead.kill()
+    dead.wait(timeout=3)
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys, time; "
+            "fd = open(sys.argv[1], 'r+'); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); "
+            "print('held', flush=True); "
+            "time.sleep(0.3)",
+            str(lock_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        process.write_descriptor(
+            process.InstanceDescriptor(
+                pid=dead.pid,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+                transport="tcp",
+                mode="daemon",
+                create_time=create_time,
+            ),
+            base_dir=state_dir,
+        )
+
+        result = process.stop_instance(scope, base_dir=state_dir, timeout=2, force=True)
+
+        assert result.stopped_pids == []
+        assert not process.is_instance_alive(scope, base_dir=state_dir)
+        assert process.read_descriptor(scope, base_dir=state_dir) is None
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+        holder.wait(timeout=3)
+
+
+def test_stop_instance_drops_descriptor_when_stale_pid_has_no_lock(tmp_path: Path) -> None:
+    """A stale pid with a free flock is a dead instance and its descriptor goes."""
+    scope = "stale-pid-free"
+    state_dir = tmp_path / "state"
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    create_time = psutil.Process(dead.pid).create_time()
+    dead.kill()
+    dead.wait(timeout=3)
+
+    process.write_descriptor(
+        process.InstanceDescriptor(
+            pid=dead.pid,
+            config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+            transport="tcp",
+            mode="daemon",
+            create_time=create_time,
+        ),
+        base_dir=state_dir,
+    )
+
+    result = process.stop_instance(scope, base_dir=state_dir, timeout=1, force=True)
+
+    assert result.stopped_pids == []
+    assert not process.is_instance_alive(scope, base_dir=state_dir)
+    assert process.read_descriptor(scope, base_dir=state_dir) is None
+
+
+def test_stop_force_signals_group_after_leader_exits(tmp_path: Path) -> None:
+    """``stop --force`` signals the recorded group when only a descendant holds the lock."""
+    scope = "stale-leader-group"
+    state_dir = tmp_path / "state"
+    lock_path = state_dir / "instances" / scope / process.LOCK_FILENAME
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+
+    leader_code = """
+import os, subprocess, sys
+lock_path = sys.argv[1]
+holder_code = (
+    "import fcntl, sys, time; "
+    "fd = open(sys.argv[1], 'r+'); "
+    "fcntl.flock(fd, fcntl.LOCK_EX); "
+    "print('held', flush=True); "
+    "time.sleep(30)"
+)
+child = subprocess.Popen(
+    [sys.executable, "-c", holder_code, lock_path],
+    stdout=subprocess.PIPE,
+    text=True,
+)
+assert child.stdout is not None
+assert child.stdout.readline().strip() == "held"
+print(f"{os.getpgid(0)} {child.pid}", flush=True)
+os._exit(0)
+"""
+    leader = subprocess.Popen(
+        [sys.executable, "-c", leader_code, str(lock_path)],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    child_pid = 0
+    try:
+        create_time = psutil.Process(leader.pid).create_time()
+        assert leader.stdout is not None
+        pgid_text, child_text = leader.stdout.readline().strip().split()
+        child_pid = int(child_text)
+        leader.wait(timeout=3)
+        assert int(pgid_text) == leader.pid
+        assert not process.validate_pid(leader.pid, create_time)
+
+        process.write_descriptor(
+            process.InstanceDescriptor(
+                pid=leader.pid,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+                transport="tcp",
+                mode="daemon",
+                create_time=create_time,
+                pgid=leader.pid,
+            ),
+            base_dir=state_dir,
+        )
+
+        result = process.stop_instance(scope, base_dir=state_dir, timeout=3, force=False)
+
+        assert result.stopped_pids == []
+        assert not process.is_instance_alive(scope, base_dir=state_dir)
+        assert process.read_descriptor(scope, base_dir=state_dir) is None
+        assert not psutil.pid_exists(child_pid)
+    finally:
+        if child_pid and psutil.pid_exists(child_pid):
+            os.kill(child_pid, 9)
+        if leader.poll() is None:
+            leader.kill()
+            leader.wait(timeout=3)
+
+
+def test_stop_force_does_not_signal_a_reused_group_id(tmp_path: Path) -> None:
+    """A live pid with a different create_time is not the saved process group."""
+    scope = "reused-group-id"
+    state_dir = tmp_path / "state"
+    lock_path = state_dir / "instances" / scope / process.LOCK_FILENAME
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    create_time = psutil.Process(dead.pid).create_time()
+    dead.kill()
+    dead.wait(timeout=3)
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys, time; "
+            "fd = open(sys.argv[1], 'r+'); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); "
+            "print('held', flush=True); "
+            "time.sleep(30)",
+            str(lock_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        process.write_descriptor(
+            process.InstanceDescriptor(
+                pid=dead.pid,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+                transport="tcp",
+                mode="daemon",
+                create_time=create_time,
+                pgid=os.getpid(),
+            ),
+            base_dir=state_dir,
+        )
+
+        result = process.stop_instance(scope, base_dir=state_dir, timeout=0.2, force=True)
+
+        assert result.stopped_pids == []
+        assert process.is_instance_alive(scope, base_dir=state_dir)
+        kept = process.read_descriptor(scope, base_dir=state_dir)
+        assert kept is not None
+        assert kept.pid == dead.pid
+        assert psutil.pid_exists(os.getpid())
+    finally:
+        holder.kill()
+        holder.wait(timeout=3)
+
+
+def test_stop_stale_pid_keeps_replacement_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A descriptor written by a newer start during stop must survive."""
+    scope = "stale-replacement"
+    state_dir = tmp_path / "state"
+    lock_path = state_dir / "instances" / scope / process.LOCK_FILENAME
+    lock_path.parent.mkdir(parents=True)
+    lock_path.touch()
+
+    dead = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    create_time = psutil.Process(dead.pid).create_time()
+    dead.kill()
+    dead.wait(timeout=3)
+
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, sys, time; "
+            "fd = open(sys.argv[1], 'r+'); "
+            "fcntl.flock(fd, fcntl.LOCK_EX); "
+            "print('held', flush=True); "
+            "time.sleep(30)",
+            str(lock_path),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        process.write_descriptor(
+            process.InstanceDescriptor(
+                pid=dead.pid,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+                transport="tcp",
+                mode="daemon",
+                create_time=create_time,
+            ),
+            base_dir=state_dir,
+        )
+        replacement = process.InstanceDescriptor(
+            pid=os.getpid(),
+            config=HelixAppConfig(scope=scope, host="127.0.0.1", port=0, state_root=state_dir),
+            transport="tcp",
+            mode="daemon",
+            create_time=psutil.Process().create_time(),
+        )
+
+        def _release_and_replace(*_args, **_kwargs):
+            holder.kill()
+            holder.wait(timeout=3)
+            process.write_descriptor(replacement, base_dir=state_dir)
+            return True
+
+        monkeypatch.setattr(process, "_wait_until_instance_lock_released", _release_and_replace)
+        result = process.stop_instance(scope, base_dir=state_dir, timeout=1, force=False)
+
+        assert result.stopped_pids == []
+        kept = process.read_descriptor(scope, base_dir=state_dir)
+        assert kept is not None
+        assert kept.pid == os.getpid()
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=3)
+
+
 @pytest.mark.integration
 def test_stop_instance_foreground_mode_requires_force(tmp_path: Path) -> None:
     """Stopping a foreground-mode instance without ``force=True`` should raise

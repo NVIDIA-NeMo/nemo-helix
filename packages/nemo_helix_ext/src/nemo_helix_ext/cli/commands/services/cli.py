@@ -6,12 +6,14 @@ from __future__ import annotations
 import importlib.util
 import logging
 import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, NoReturn
 
 import httpx
+import psutil
 import typer
 from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 from nemo_helix_ext.cli.docker_preflight import require_docker_for_default_local
@@ -23,6 +25,7 @@ from nemo_helix_ext.local.process import (
     InstanceInfo,
     InstanceStillRunningError,
     PortConflict,
+    _signal_saved_process_group,
     acquire_lock,
     check_port_available_for_start,
     compute_scope,
@@ -49,8 +52,16 @@ logger = logging.getLogger(__name__)
 
 services_app = create_typer_app(name="services", help="Run Helix services locally.")
 
-_HEALTH_TIMEOUT_SECONDS = 60
+_HEALTH_TIMEOUT_SECONDS = 240
 _HEALTH_POLL_INTERVAL = 2.0
+_HEALTH_REQUEST_TIMEOUT = 2.0
+# Leave this much of the budget after a poll sleep so the next /status probe
+# still starts before the deadline. The last slice is slept, then probed once,
+# so a platform that becomes ready in that slice is not torn down.
+_HEALTH_TAIL_SLICE = 0.05
+# Post-deadline confirmation. Long enough for a local /status, short enough
+# that a 1s --ready-timeout cannot grow by a full status-request timeout.
+_HEALTH_TAIL_PROBE_TIMEOUT = 0.5
 _DEFAULT_PORT = 8080
 _DEFAULT_STOP_TIMEOUT = 30.0
 
@@ -91,25 +102,67 @@ def _parse_csv_option(value: str | None) -> list[str] | None:
     return [item for item in value.split(",") if item]
 
 
+def _child_exited(proc: subprocess.Popen[bytes] | None) -> bool:
+    """True when a watched launcher has already exited."""
+    return proc is not None and proc.poll() is not None
+
+
+def _status_is_ready(url: str, timeout: float) -> bool:
+    """True when ``/status`` returns HTTP 200 within ``timeout`` seconds."""
+    try:
+        response = httpx.get(url, timeout=timeout)
+    except httpx.RequestError:
+        return False
+    return response.status_code == 200
+
+
 def _wait_for_healthy(
     host: str,
     port: int,
     timeout: float = _HEALTH_TIMEOUT_SECONDS,
     poll_interval: float = _HEALTH_POLL_INTERVAL,
+    proc: subprocess.Popen[bytes] | None = None,
 ) -> bool:
-    """Poll the platform status endpoint until it responds or timeout."""
+    """Poll ``/status`` until HTTP 200, the child exits, or the budget is spent.
+
+    Each status request is capped to the time still left in ``timeout``. Poll
+    sleeps stop short of the deadline so the next request still runs, and the
+    final slice is checked once more before reporting failure.
+    """
     effective_host = "localhost" if host in ("0.0.0.0", "::") else host  # noqa: S104
     url = str(httpx.URL(scheme="http", host=effective_host, port=port, path="/status"))
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            resp = httpx.get(url, timeout=2.0)
-            if resp.status_code == 200:
-                return True
-        except httpx.RequestError:
-            pass
-        time.sleep(poll_interval)
-    return False
+    while True:
+        if _child_exited(proc):
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if _status_is_ready(url, min(_HEALTH_REQUEST_TIMEOUT, remaining)):
+            return True
+        if _child_exited(proc):
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        sleep_for = min(poll_interval, remaining - _HEALTH_TAIL_SLICE)
+        # A gap shorter than the tail slice cannot be split without a float
+        # spin. Spend the rest of the budget, then probe once more.
+        if sleep_for < _HEALTH_TAIL_SLICE:
+            return _ready_in_tail(url, proc, remaining)
+        time.sleep(sleep_for)
+
+
+def _ready_in_tail(url: str, proc: subprocess.Popen[bytes] | None, remaining: float) -> bool:
+    """Use the last slice of the budget, then probe once more.
+
+    The follow-up is long enough for a local ``/status`` and capped so a short
+    ``--ready-timeout`` cannot grow by a full status-request timeout.
+    """
+    time.sleep(remaining)
+    if _child_exited(proc):
+        return False
+    return _status_is_ready(url, _HEALTH_TAIL_PROBE_TIMEOUT)
 
 
 def _warn_bind_all(host: str) -> None:
@@ -132,6 +185,93 @@ def _find_sole_running_scope(base_dir: Path | None) -> str:
     if len(running) == 1:
         return running[0].scope
     return compute_scope(port=_DEFAULT_PORT)
+
+
+def _process_still_alive(proc: subprocess.Popen[bytes], scope: str, base_dir: Path | None) -> bool:
+    """True when the child process or its instance lock is still held."""
+    process_running = proc.poll() is None
+    instance_alive = is_instance_alive(scope, base_dir=base_dir)
+    return process_running or instance_alive
+
+
+def _saved_process_group(proc: subprocess.Popen[bytes]) -> tuple[int, float] | None:
+    """Return the launcher's process group and create time while it still exists.
+
+    Both values are captured together so a later signal can tell this group from
+    a recycled pid. ``ProcessLookupError`` means the pid is already gone.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+        created = psutil.Process(proc.pid).create_time()
+    except (ProcessLookupError, psutil.Error):
+        return None
+    except OSError:
+        logger.debug("Failed to read process group for pid %s", proc.pid, exc_info=True)
+        return None
+    return pgid, created
+
+
+def _release_stuck_instance(
+    proc: subprocess.Popen[bytes],
+    *,
+    scope: str,
+    base_dir: Path | None,
+    group: tuple[int, float] | None,
+    launcher_exited: bool,
+) -> None:
+    """Stop the scope when the launcher or a lock-holding descendant is still around.
+
+    Signal a dead launcher's process group before ``stop_instance``. A stale
+    launcher pid makes that helper skip its child sweep, so the group has to be
+    cleared first or a descendant can keep the flock after the descriptor is gone.
+    """
+    if launcher_exited and group is not None:
+        _signal_saved_process_group(*group)
+    stop_instance(scope, base_dir=base_dir, timeout=_DEFAULT_STOP_TIMEOUT, force=True)
+    if not launcher_exited and group is not None and _process_still_alive(proc, scope, base_dir):
+        _signal_saved_process_group(*group)
+    if _process_still_alive(proc, scope, base_dir):
+        typer.echo(
+            f"Service process is still running (pid {proc.pid}).\n"
+            "Stop it with: nemo services stop --force\n"
+            "Or restart with:    nemo services restart",
+            err=True,
+        )
+    elif not launcher_exited:
+        typer.echo(f"The service process was stopped (pid {proc.pid}).", err=True)
+
+
+def _fail_not_ready(
+    proc: subprocess.Popen[bytes],
+    *,
+    scope: str,
+    base_dir: Path | None,
+    timeout: int,
+    group: tuple[int, float] | None,
+) -> NoReturn:
+    """Report a failed background start and release a leftover instance lock."""
+    exit_code = proc.poll()
+    if exit_code is not None:
+        typer.echo(f"Service process exited early (exit code {exit_code})", err=True)
+    else:
+        typer.echo(f"Platform did not become ready within {timeout}s", err=True)
+    lock_held = exit_code is not None and is_instance_alive(scope, base_dir=base_dir)
+    # The flock may not be visible yet when the launcher has just exited.
+    # Signal the saved group anyway so a descendant cannot lock the scope later.
+    if exit_code is not None and group is not None and not lock_held:
+        _signal_saved_process_group(*group)
+        lock_held = is_instance_alive(scope, base_dir=base_dir)
+    if exit_code is None or lock_held:
+        _release_stuck_instance(
+            proc,
+            scope=scope,
+            base_dir=base_dir,
+            group=group,
+            launcher_exited=exit_code is not None,
+        )
+    log = log_path_for(scope, base_dir=base_dir)
+    typer.echo(f"Check {log} for details.", err=True)
+    raise typer.Exit(1)
 
 
 def _fail_already_running(scope: str, base_dir: Path | None) -> NoReturn:
@@ -345,6 +485,14 @@ def start_services(
             "--instance", help="Instance name. Defaults to a name derived from the working directory and port."
         ),
     ] = None,
+    ready_timeout: Annotated[
+        int,
+        typer.Option(
+            "--ready-timeout",
+            min=1,
+            help="Seconds to wait for platform readiness.",
+        ),
+    ] = _HEALTH_TIMEOUT_SECONDS,
 ) -> None:
     """Start Helix services in the background.
 
@@ -353,6 +501,7 @@ def start_services(
     Examples:
       nemo services start
       nemo services start --services entities,models --port 9090
+      nemo services start --ready-timeout 360
     """
     _require_services_extra()
     if services is not None and service_group is not None:
@@ -387,19 +536,10 @@ def start_services(
 
     typer.echo("Starting Helix services...")
     proc = start_background(platform_config)
+    group = _saved_process_group(proc)
 
-    if not _wait_for_healthy(host, port):
-        exit_code = proc.poll()
-        if exit_code is not None:
-            typer.echo(f"Service process exited early (exit code {exit_code})", err=True)
-        else:
-            typer.echo(
-                f"Platform did not become ready within {_HEALTH_TIMEOUT_SECONDS}s",
-                err=True,
-            )
-        log = log_path_for(scope, base_dir=base_dir)
-        typer.echo(f"Check {log} for details.", err=True)
-        raise typer.Exit(1)
+    if not _wait_for_healthy(host, port, timeout=ready_timeout, proc=proc):
+        _fail_not_ready(proc, scope=scope, base_dir=base_dir, timeout=ready_timeout, group=group)
 
     typer.echo(f"Platform services started (pid {proc.pid}, scope {scope})")
 
@@ -533,6 +673,14 @@ def restart_services(
             "--instance", help="Instance name. Defaults to a name derived from the working directory and port."
         ),
     ] = None,
+    ready_timeout: Annotated[
+        int,
+        typer.Option(
+            "--ready-timeout",
+            min=1,
+            help="Seconds to wait for platform readiness.",
+        ),
+    ] = _HEALTH_TIMEOUT_SECONDS,
 ) -> None:
     """Restart Helix services.
 
@@ -543,6 +691,7 @@ def restart_services(
     Examples:
       nemo services restart
       nemo services restart --services entities,models,agents
+      nemo services restart --ready-timeout 360
     """
     _require_services_extra()
     if services is not None and service_group is not None:
@@ -625,19 +774,10 @@ def restart_services(
 
     typer.echo("Starting Helix services...")
     proc = start_background(platform_config)
+    group = _saved_process_group(proc)
 
-    if not _wait_for_healthy(effective_host, effective_port):
-        exit_code = proc.poll()
-        if exit_code is not None:
-            typer.echo(f"Service process exited early (exit code {exit_code})", err=True)
-        else:
-            typer.echo(
-                f"Platform did not become ready within {_HEALTH_TIMEOUT_SECONDS}s",
-                err=True,
-            )
-        log = log_path_for(scope, base_dir=base_dir)
-        typer.echo(f"Check {log} for details.", err=True)
-        raise typer.Exit(1)
+    if not _wait_for_healthy(effective_host, effective_port, timeout=ready_timeout, proc=proc):
+        _fail_not_ready(proc, scope=scope, base_dir=base_dir, timeout=ready_timeout, group=group)
 
     typer.echo(f"Platform services restarted (pid {proc.pid})")
 
