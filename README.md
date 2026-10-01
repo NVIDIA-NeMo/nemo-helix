@@ -17,14 +17,12 @@ NeMo Helix is an open source platform for improving and hardening production age
   <img src="docs/assets/nemo-helix-architecture.png" alt="NVIDIA Agent Toolkit architecture. NeMo Helix composes NeMo and third-party libraries into an application with connectivity, surfaces, plugins, agents, and foundations." width="75%">
 </p>
 
-## How Helix relates to the NeMo libraries
+## What Helix is and how it relates to NeMo Libraries
 
 Helix composes a curated set of NeMo and third-party libraries. Each library does one job well. Getting them to work together is normally your problem: separate APIs, separate credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read. 
 
-- **Capabilities as plugins.** NeMo RL, AutoModel, and Unsloth for fine-tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety. Data Designer and Safe Synthesizer for synthetic data.
 - **One interface, every capability.** A CLI, a Python SDK, and a REST API across every plugin, instead of a different client per library.
-- **Agent-first.** You do not need to know which NeMo tool to use. Skills drive your coding agent through the job.
-- **Human-accessible.** NeMo Studio ships with Helix, for the calls that are hard to make from a terminal: comparing runs, reading traces, approving changes.
+- **Work through your coding agent or Web UI.** Use skills to drive workflows in natural language, and Studio to inspect traces, compare runs, and review changes.
 - **Runs where you do.** Laptop for a prototype, Kubernetes for production, on-prem or air-gapped when that is the requirement.
 - **Swappable infrastructure.** Agent execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
 - **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
