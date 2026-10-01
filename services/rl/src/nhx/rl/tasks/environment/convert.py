@@ -31,6 +31,7 @@ from nhx.rl.tasks.environment.package import (
 )
 from nhx.rl.tasks.environment.validate import SANDBOX_VENV_DISTRIBUTIONS, validate_dataset_rows
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
@@ -130,7 +131,24 @@ def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
             f"{pyproject} has no [tool.uv] {', '.join(missing)}. Those tables are what the Gym "
             "host applies during the offline install."
         )
-    return list(uv_config["override-dependencies"]), list(uv_config["constraint-dependencies"])
+    return (
+        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
+        list(uv_config["constraint-dependencies"]),
+    )
+
+
+def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
+    """Keep a setuptools override inside the range Gym's server venvs accept."""
+    ceiling = SpecifierSet(f"<{SETUPTOOLS_PKG_RESOURCES_CEILING}")
+    clamped: list[str] = []
+    for item in overrides:
+        requirement = Requirement(item)
+        if canonicalize_name(requirement.name) != "setuptools":
+            clamped.append(item)
+            continue
+        requirement.specifier &= ceiling
+        clamped.append(str(requirement))
+    return clamped
 
 
 def _compile_pinned_requirements(
