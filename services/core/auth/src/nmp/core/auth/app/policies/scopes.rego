@@ -7,7 +7,6 @@ import data.authz.allow
 import data.authz.has_permissions
 import data.authz.has_role
 
-import future.keywords.contains
 import future.keywords.if
 import future.keywords.in
 
@@ -22,8 +21,10 @@ import data.common.req_method_lower
 # Scopes provide coarse-grained authorization at the API level, while
 # permissions provide fine-grained authorization at the resource level.
 #
-# Platform scopes (containing ":") are enforced, while standard OIDC scopes
-# (openid, profile, email, offline_access) are ignored for authorization.
+# Configured NeMo API scope families (`area:action`) are enforced, while
+# OIDC/provider-specific scopes (openid, profile, email, offline_access,
+# dotted scopes, provider URNs, multi-colon provider values, or unconfigured
+# one-colon values such as external:read) are ignored for authorization.
 #
 # IMPORTANT: Optional Scope Mechanism
 # ------------------------------------
@@ -35,11 +36,31 @@ import data.common.req_method_lower
 #
 # Behavior:
 # - If no scopes are provided in the token → scope check passes (relies only on permissions)
-# - If only OIDC scopes are provided → scope check passes (OIDC scopes are ignored)
-# - If platform scopes (containing ":") are provided → they are validated against endpoint requirements
+# - If only external scopes are provided → scope check passes (external scopes are ignored)
+# - If configured NeMo API scope values are provided → they are validated against endpoint requirements
 #
 # This can be made configurable if customers want to enforce strict scope checking by
 # rejecting tokens without platform scopes.
+
+scope_family(scope) := family if {
+	parts := split(scope, ":")
+	count(parts) == 2
+	family := parts[0]
+	family != ""
+	parts[1] != ""
+}
+
+is_platform_scope(scope) if {
+	family := scope_family(scope)
+	configured_scope_family(family)
+}
+
+configured_scope_family(family) if {
+	some endpoint
+	some method
+	some configured_scope in data.authz.endpoints[endpoint][method].scopes
+	family == scope_family(configured_scope)
+}
 
 # Check if scopes are valid for the request (variant 1: no scopes provided)
 # If no scopes provided at all, skip check to allow tokens without scopes (optional scope mechanism)
@@ -54,7 +75,7 @@ scope_check_passed if {
 # If no platform scopes are found, skip check to allow tokens without platform scopes (optional scope mechanism)
 scope_check_passed if {
 	scopes := extract_scopes
-	platform_scopes := [s | s := scopes[_]; contains(s, ":")]
+	platform_scopes := [s | s := scopes[_]; is_platform_scope(s)]
 	count(platform_scopes) == 0
 }
 
@@ -62,7 +83,7 @@ scope_check_passed if {
 # Extract platform scopes and validate them against endpoint requirements
 scope_check_passed if {
 	scopes := extract_scopes
-	platform_scopes := [s | s := scopes[_]; contains(s, ":")]
+	platform_scopes := [s | s := scopes[_]; is_platform_scope(s)]
 	count(platform_scopes) > 0
 	req_has_required_scopes(platform_scopes)
 }
