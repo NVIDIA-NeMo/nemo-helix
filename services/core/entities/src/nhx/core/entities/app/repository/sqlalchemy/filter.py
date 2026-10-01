@@ -4,10 +4,26 @@
 """SQLAlchemy implementation of FilterRepository."""
 
 from datetime import datetime
-from typing import Any, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
+from nemo_helix_plugin.filter_ops import ElemMatchScalar
 from nhx.common.api.filter import FilterOperation, FilterRepository
-from sqlalchemy import JSON, ColumnElement, DateTime, String, and_, cast, false, func, not_, or_, select
+from sqlalchemy import (
+    JSON,
+    ColumnElement,
+    DateTime,
+    String,
+    and_,
+    case,
+    cast,
+    false,
+    func,
+    literal,
+    not_,
+    or_,
+    select,
+    type_coerce,
+)
 from sqlalchemy.orm import aliased
 
 
@@ -18,7 +34,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
     Supports both PostgreSQL (JSONB) and SQLite (JSON) backends.
     """
 
-    def __init__(self, model: Any, relationship_child_workspaces: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        model: Any,
+        relationship_child_workspaces: Optional[Set[str]] = None,
+        dialect_name: Optional[str] = None,
+    ):
         """Initialize repository with SQLAlchemy model class or alias.
 
         Args:
@@ -26,9 +47,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
             relationship_child_workspaces: If set, EXISTS subqueries for parent-child relations
                 only count children whose `workspace` is in this set. If None, child workspace
                 is unconstrained. An empty set makes relationship EXISTS match nothing.
+            dialect_name: Database dialect (``"sqlite"`` or ``"postgresql"``). Required only by
+                operators whose SQL differs per backend (``$elemMatch``).
         """
         self.model = model
         self._relationship_child_workspaces = relationship_child_workspaces
+        self._dialect_name = dialect_name
 
     def _get_json_element(self, column: ColumnElement, path: List[str]) -> ColumnElement:
         """Navigate to a nested JSON element using subscript operators.
@@ -128,26 +152,29 @@ class SQLAlchemyFilterRepository(FilterRepository):
         """Equal comparison."""
         column, is_json = self._get_column(field)
         if is_json:
-            # Handle None/null: match both an explicit JSON null and an absent key. A present-but-null
-            # value extracts to the JSON text token "null"; a missing key extracts to SQL NULL (notably
-            # on PostgreSQL, where `data->'key'` on an absent key is SQL NULL, so casting it would never
-            # equal "null"). Test both so `field == None` catches missing and explicitly-null values.
-            if value is None:
-                return or_(self._cast_json_to_raw_text(column) == "null", column.is_(None))
-            # Handle boolean values specially:
-            # - SQLite stores JSON booleans as integers (0/1), json_extract returns "0" or "1"
-            # - PostgreSQL stores them as "false"/"true"
-            # We check both formats for cross-database compatibility
-            if isinstance(value, bool):
-                sqlite_value = "1" if value else "0"
-                pg_value = "true" if value else "false"
-                return or_(
-                    self._cast_json_to_raw_text(column) == sqlite_value,
-                    self._cast_json_to_raw_text(column) == pg_value,
-                )
-            # For string values, use _cast_json_to_text to handle quoted JSON output
-            return self._cast_json_to_text(column) == str(value)
+            return self._json_eq(column, value)
         return column == value
+
+    def _json_eq(self, element: Any, value: Any) -> Any:
+        # Handle None/null: match both an explicit JSON null and an absent key. A present-but-null
+        # value extracts to the JSON text token "null"; a missing key extracts to SQL NULL (notably
+        # on PostgreSQL, where `data->'key'` on an absent key is SQL NULL, so casting it would never
+        # equal "null"). Test both so `field == None` catches missing and explicitly-null values.
+        if value is None:
+            return or_(self._cast_json_to_raw_text(element) == "null", element.is_(None))
+        # Handle boolean values specially:
+        # - SQLite stores JSON booleans as integers (0/1), json_extract returns "0" or "1"
+        # - PostgreSQL stores them as "false"/"true"
+        # We check both formats for cross-database compatibility
+        if isinstance(value, bool):
+            sqlite_value = "1" if value else "0"
+            pg_value = "true" if value else "false"
+            return or_(
+                self._cast_json_to_raw_text(element) == sqlite_value,
+                self._cast_json_to_raw_text(element) == pg_value,
+            )
+        # For string values, use _cast_json_to_text to handle quoted JSON output
+        return self._cast_json_to_text(element) == str(value)
 
     def like(self, field: str, value: str) -> Any:
         """Like/contains comparison."""
@@ -206,6 +233,23 @@ class SQLAlchemyFilterRepository(FilterRepository):
             needle = needle.replace(ch, f"\\{ch}")
         return self._cast_json_to_raw_text(column).like(f'%"{needle}"%', escape="\\")
 
+    def elem_match(self, field: str, criteria: Dict[str, ElemMatchScalar]) -> Any:
+        array, is_json = self._get_column(field)
+        if not is_json:
+            raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
+        # A non-array must expand to nothing: PostgreSQL raises on it, SQLite would iterate an object's members.
+        if self._dialect_name == "sqlite":
+            only_array = case((func.json_type(array) == "array", array))
+            elements = func.json_each(only_array).table_valued("value")
+        elif self._dialect_name == "postgresql":
+            only_array = case((func.json_typeof(array) == "array", array))
+            elements = func.json_array_elements(only_array).table_valued("value")
+        else:
+            raise ValueError(f"$elemMatch is not supported for database dialect {self._dialect_name!r}")
+        element = type_coerce(elements.c.value, JSON)
+        matches = [self._json_eq(element[key], value) for key, value in criteria.items()]
+        return select(literal(1)).select_from(elements).where(*matches).exists()
+
     def and_op(self, operations: List[Any]) -> Any:
         """Logical AND."""
         return and_(*operations)
@@ -230,6 +274,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
         child_repo = SQLAlchemyFilterRepository(
             child_alias,
             relationship_child_workspaces=self._relationship_child_workspaces,
+            dialect_name=self._dialect_name,
         )
 
         conditions = [child_alias.entity_type == target_entity_type]

@@ -356,3 +356,81 @@ def test_list_includes_harbor_tasks(client: TestClient) -> None:
         "evaluator-task": "evaluator",
         "harbor-task": "harbor",
     }
+
+
+def _with_metadata(body: dict, **metadata: object) -> dict:
+    return {**body, "metadata": [{"key": key, "value": value} for key, value in metadata.items()]}
+
+
+@pytest.fixture
+def filterable(client: TestClient) -> TestClient:
+    client.post(f"{_BASE}/alice-smoke", json=_with_metadata(_body(), owner="alice", suite="smoke", level=1))
+    client.post(f"{_BASE}/bob-smoke", json=_with_metadata(_body(), owner="bob", suite="smoke", level=2))
+    client.post(f"{_BASE}/untagged", json=_body())
+    client.post(
+        f"{_BASE}/alice-harbor",
+        json=_with_metadata(
+            TaskInput(
+                spec=HarborTaskDefinition(
+                    kind="harbor",
+                    native_task_id="fixture",
+                    harbor_hash=HarborTaskHash(digest="b" * 64, harbor_version="0.20.0"),
+                    source=HarborArchiveSource(
+                        fileset_ref="default/harbor#packages/o-n/abc/files",
+                        files_hash="a" * 64,
+                    ),
+                )
+            ).model_dump(mode="json"),
+            owner="alice",
+        ),
+    )
+    return client
+
+
+def _names(client: TestClient, params: dict[str, str]) -> set[str]:
+    response = client.get(_BASE, params=params)
+    assert response.status_code == 200, response.text
+    return {task["name"] for task in response.json()["data"]}
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"filter[kind]": "harbor"}, {"alice-harbor"}),
+        ({"filter[kind]": "evaluator"}, {"alice-smoke", "bob-smoke", "untagged"}),
+        ({"filter[metadata.owner]": "alice"}, {"alice-smoke", "alice-harbor"}),
+        ({"filter[metadata][owner]": "alice"}, {"alice-smoke", "alice-harbor"}),
+        ({"filter[metadata][owner]": "alice", "filter[metadata][suite]": "smoke"}, {"alice-smoke"}),
+        ({"filter[metadata.owner][$in]": "alice,bob"}, {"alice-smoke", "bob-smoke", "alice-harbor"}),
+        ({"filter[metadata][owner][$in]": "alice,bob"}, {"alice-smoke", "bob-smoke", "alice-harbor"}),
+        ({"filter": '{"metadata": {"owner": {"$in": ["bob"]}, "suite": "smoke"}}'}, {"bob-smoke"}),
+        ({"filter[kind]": "evaluator", "filter[metadata.owner]": "alice"}, {"alice-smoke"}),
+        ({"filter": '{"metadata.level": 2}'}, {"bob-smoke"}),
+        ({"filter": '{"$not": {"metadata.owner": "alice"}}'}, {"bob-smoke", "untagged"}),
+        ({"filter[metadata.owner]": "carol"}, set()),
+    ],
+)
+def test_list_filters_by_kind_and_metadata(filterable: TestClient, params: dict[str, str], expected: set[str]) -> None:
+    assert _names(filterable, params) == expected
+
+
+def test_metadata_filter_matches_key_and_value_on_the_same_annotation(filterable: TestClient) -> None:
+    """``alice-smoke`` has owner=alice and suite=smoke; neither annotation is ``suite=alice``."""
+    assert _names(filterable, {"filter[metadata.suite]": "alice"}) == set()
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"filter[metadata.owner][$like]": "ali"},
+        {"filter[metadata][owner][$like]": "ali"},
+        {"filter": '{"metadata": {"owner": {"$bogus": "x"}}}'},
+        {"filter[metadata.owner][$in]": ""},
+        {"filter[metadata]": "alice"},
+        {"filter[metadata.]": "alice"},
+        {"filter": '{"metadata.owner": {"nested": "object"}}'},
+        {"filter[spec.kind]": "harbor"},
+    ],
+)
+def test_list_rejects_unsupported_metadata_and_field_filters(client: TestClient, params: dict[str, str]) -> None:
+    assert client.get(_BASE, params=params).status_code == 400
