@@ -75,6 +75,15 @@ class _FakeConfig:
             self.skill_paths.append(value)
         return self
 
+    def remove_skill_path(self, path: Any) -> _FakeConfig:
+        self.skill_paths = [p for p in self.skill_paths if p != str(path)]
+        return self
+
+    @property
+    def skills(self) -> Any:
+        # Mirrors FabricConfig.skills: None once the last path is removed, else an object with ``paths``.
+        return types.SimpleNamespace(paths=list(self.skill_paths)) if self.skill_paths else None
+
     def enable_relay(
         self,
         *,
@@ -1270,3 +1279,55 @@ async def test_a_failing_trace_fold_costs_the_trace_not_the_batch(
         assert trial.status == "completed"
         assert trial.evidence is not None
         assert EVIDENCE_TRACE not in trial.evidence.descriptors
+
+
+_DEEPAGENTS_CONFIG = {"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}}
+
+
+@pytest.mark.asyncio
+async def test_fabric_runtime_copies_declared_skills_into_the_workspace_for_deepagents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DeepAgents reads skills through a backend rooted at the workspace, from a directory of bundles.
+
+    A config-declared ``skills.paths`` entry (a bundle root relative to ``base_dir``) is therefore copied to
+    ``<workspace>/.agents/skills/<name>/`` for the run, the config handed to Fabric names that directory as
+    its one skills source, and the copy is gone from the workspace evidence afterwards.
+    """
+    base_dir = tmp_path / "agent"
+    _skill_bundle(base_dir, name="arithmetic", body="Reply RESULT=<n>.")
+    seen: dict[str, Any] = {}
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        workspace = Path(agent.environment.workspace)
+        seen["paths"] = list(agent.skill_paths)
+        seen["skill_md"] = (workspace / ".agents" / "skills" / "arithmetic" / "SKILL.md").read_text(encoding="utf-8")
+        return _FakeResult(status="succeeded", output={"response": "RESULT=42"})
+
+    _install_fake_fabric(monkeypatch, handler)
+    config = {**_DEEPAGENTS_CONFIG, "skills": {"paths": ["skills/arithmetic"]}}
+    runtime = fabric_runtime.FabricAgentRuntime(config=config, work_root=tmp_path / "fabric", base_dir=base_dir)
+
+    trial = (await runtime.run_tasks([_TASK]))[0]
+
+    assert trial.status == "completed"
+    assert seen["paths"] == ["/.agents/skills"]
+    assert "RESULT=<n>" in seen["skill_md"]
+    workspace = Path(trial.evidence.descriptors["workspace"].ref)
+    assert not (workspace / ".agents").exists(), "the copied bundle must not read as agent output"
+
+
+@pytest.mark.asyncio
+async def test_fabric_runtime_other_harnesses_keep_their_declared_skill_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    client_cls = _install_fake_fabric(monkeypatch, handler)
+    config = {**_HERMES_CONFIG, "skills": {"paths": ["skills/arithmetic"]}}
+    runtime = fabric_runtime.FabricAgentRuntime(config=config, work_root=tmp_path / "fabric", base_dir=tmp_path)
+
+    await runtime.run_tasks([_TASK])
+
+    assert client_cls.recorded[0]["agent"].skill_paths == ["skills/arithmetic"]
