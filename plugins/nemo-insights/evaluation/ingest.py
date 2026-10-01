@@ -34,19 +34,6 @@ class _PollingClient(Protocol):
     def close(self) -> None: ...
 
 
-class _HelixClient(Protocol):
-    def post(
-        self,
-        path: str,
-        *,
-        cast_to: type[httpx.Response],
-        content: bytes,
-        options: dict[str, Any],
-    ) -> httpx.Response: ...
-
-    def close(self) -> None: ...
-
-
 def mint_agent_id(base: str) -> str:
     """A fresh per-run Intake agent id: ``<base>-<YYYYMMDD-HHMMSS>-<4 hex>``."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
