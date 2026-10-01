@@ -450,6 +450,14 @@ class ModelEntityService:
                 parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=True))
             # If no models have lora and lora_enabled=false, all models qualify — no extra filter.
 
+        model_provider = parsed_filter.remove("model_providers")
+        if model_provider is not None:
+            parsed_filter.and_with(
+                ComparisonOperation(
+                    operator=FilterOperator.CONTAINS, field="data.model_providers", value=model_provider
+                )
+            )
+
         result: ListResponse[Model] = await self.entity_client.list(
             Model,
             workspace=workspace,

@@ -1314,6 +1314,14 @@ class ModelEntityFilter(Filter):
         description="Filter by fileset: true = has a fileset, false = no fileset, "
         "string = match fileset reference in the form {workspace}/{fileset_name}.",
     )
+    family: Annotated[StringFilter | str | None, map_entity_field("data.spec.family")] = Field(
+        default=None,
+        description="Filter by model architecture family (e.g. 'llama', 'mixtral').",
+    )
+    model_providers: Optional[str] = Field(
+        default=None,
+        description="Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.",
+    )
     created_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on creation date.")
     updated_at: Optional[DatetimeFilter] = Field(None, description="Filter entities based on update date.")
 
