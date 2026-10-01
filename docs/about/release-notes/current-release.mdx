@@ -216,6 +216,16 @@ legacy` (or another installed strategy), staging remote bundles first with
   externally managed ClickHouse for production deployments that require high
   availability, backups, or larger scale.
 
+## Known issues
+
+- **Hermes trials can omit the `relay_atif` evidence descriptor.** Agent-eval
+  trials run through the NeMo Fabric Hermes adapter sometimes return without the
+  raw `relay_atif` descriptor, even though the ATIF trajectory was written.
+  Scores, token measurements, and the `trace` descriptor are unaffected. Read the
+  trajectory through the `trace:atif` descriptor instead, which points at the
+  same file. This will be fixed in a later release that moves to NeMo Fabric
+  0.4.
+
 ## Links
 
 - Repository: [https://github.com/NVIDIA-NeMo/nemo-helix](https://github.com/NVIDIA-NeMo/nemo-helix)
