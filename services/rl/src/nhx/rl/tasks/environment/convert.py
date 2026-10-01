@@ -37,7 +37,7 @@ from packaging.version import InvalidVersion, Version
 logger = logging.getLogger(__name__)
 
 PRIME_HUB_SIMPLE_INDEX = "https://hub.primeintellect.ai/primeintellect/simple/"
-DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.1.14"
+DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1"
 
 # Training image is linux/amd64; resolve and download for that, not this host.
 # pip matches --platform tags literally, so several glibc floors are listed.
@@ -243,6 +243,17 @@ def _build_downloaded_sdists(wheels_dir: Path) -> None:
         sdist.unlink()
 
 
+def _drop_image_gym_wheel(wheels_dir: Path) -> None:
+    """Remove the nemo-gym wheel after it has been used to resolve the closure.
+
+    The training image already has Gym, including the patched verifiers pin.
+    Installing this wheel puts that copy first on ``PYTHONPATH``, and Gym then
+    reads the unpatched ``requirements.txt`` shipped inside it.
+    """
+    for wheel in wheels_dir.glob("nemo_gym-*.whl"):
+        wheel.unlink()
+
+
 def _assert_complete_wheel_closure(wheels_dir: Path, requirements_file: Path) -> None:
     """Ensure every pinned distribution has a wheel in the package."""
     required = {
@@ -439,6 +450,7 @@ def download_hub_wheels(
             shutil.copy2(whl, wheels_dir / whl.name)
         _vendor_missing_agent_wheels(wheels_dir, spec, work_dir=work_dir)
         assert_wheels_target_platform(wheels_dir)
+        _drop_image_gym_wheel(wheels_dir)
         return wheels_dir
 
     package_name = hub_id_to_package_name(spec.hub_id)
@@ -464,6 +476,7 @@ def download_hub_wheels(
         )
     _assert_complete_wheel_closure(wheels_dir, pinned)
     assert_wheels_target_platform(wheels_dir)
+    _drop_image_gym_wheel(wheels_dir)
     return wheels_dir
 
 

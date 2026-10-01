@@ -4,4 +4,4 @@ diff --git a/3rdparty/Gym-workspace/Gym/responses_api_agents/verifiers_agent/req
 @@ -1,2 +1,2 @@
  -e nemo-gym[dev] @ ../../
 -verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1
-+verifiers==0.1.14
++verifiers==0.3.1

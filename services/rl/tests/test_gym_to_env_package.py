@@ -18,6 +18,18 @@ def _touch_wheels(directory: Path, *names: str) -> None:
         (directory / name).touch()
 
 
+def test_image_gym_wheel_is_not_shipped(tmp_path: Path) -> None:
+    _touch_wheels(
+        tmp_path,
+        "nemo_gym-0.7.0rc0-py3-none-any.whl",
+        "verifiers-0.3.1-py3-none-any.whl",
+    )
+
+    MODULE.drop_image_gym_wheel(tmp_path)
+
+    assert [path.name for path in tmp_path.iterdir()] == ["verifiers-0.3.1-py3-none-any.whl"]
+
+
 def test_required_wheel_versions_accept_supported_hydra_stack(tmp_path: Path) -> None:
     _touch_wheels(
         tmp_path,

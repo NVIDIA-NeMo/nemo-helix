@@ -739,6 +739,7 @@ def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkey
             dest = Path(cmd[cmd.index("--dest") + 1])
             dest.mkdir(parents=True, exist_ok=True)
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+            (dest / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
     monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
@@ -759,6 +760,8 @@ def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkey
     assert any(ln.startswith("nemo-gym[dev] @ file://") and ln.endswith(".whl") for ln in lines)
     assert "ray[default]==2.56.1" in lines
     assert "openai==2.6.1" in lines
+    shipped = list((tmp_path / "work" / "wheels").glob("*.whl"))
+    assert [path.name for path in shipped] == ["ascii_tree-0.1.5-py3-none-any.whl"]
 
 
 def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> None:

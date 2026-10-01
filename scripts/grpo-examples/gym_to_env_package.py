@@ -277,6 +277,16 @@ def _download_with_sdist_fallback(download_cmd: list[str], wheels: Path, max_bui
         builds += 1
 
 
+def drop_image_gym_wheel(wheels: Path) -> None:
+    """Remove the nemo-gym wheel after the closure has been resolved against it.
+
+    The training image already has Gym. Installing this wheel shadows that tree
+    and its patched verifiers pin.
+    """
+    for wheel in wheels.glob("nemo_gym-*.whl"):
+        wheel.unlink()
+
+
 def validate_required_wheel_versions(wheels: Path) -> None:
     """Reject a wheelhouse whose resolver backtracked to pre-1.3 Hydra."""
     found: dict[str, set] = {name: set() for name in REQUIRED_WHEEL_SPECS}
@@ -400,9 +410,9 @@ def vendor_wheels(
 
     Beyond the server's own requirements the closure needs:
 
-    * ``nemo-gym[dev]`` at the image's version, built from ``gym_root`` so a fork is not
-      replaced by the same-versioned upstream release. The ``dev`` extra is required because
-      the image's own servers depend on it;
+    * ``nemo-gym[dev]`` at the image's version, built from ``gym_root`` so the resolve
+      matches this checkout rather than an index release. The wheel is deleted afterwards:
+      the training image's Gym is the one the sandbox imports;
     * ``ray[default]`` and ``openai`` at the image's versions, which Gym appends to every
       per-server install;
     * ``pip``, installed by ``uv venv --seed`` into each venv before anything else;
@@ -503,6 +513,7 @@ def vendor_wheels(
         _download_with_sdist_fallback(download_cmd, wheels)
 
     validate_required_wheel_versions(wheels)
+    drop_image_gym_wheel(wheels)
     stray = [f.name for f in wheels.iterdir() if f.is_file() and f.suffix != ".whl"]
     if stray:
         raise SystemExit(f"wheels/ must contain only .whl files, got: {stray}")

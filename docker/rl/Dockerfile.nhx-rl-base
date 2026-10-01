@@ -331,7 +331,7 @@ EOF
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
 
-# Pin verifiers to the offline adapter wheel (0.1.14). The wrapper-dir patch
+# Pin verifiers to the package version of the v0.3.1 tag. The wrapper-dir patch
 # stays so a later run of prefetch_venvs.py writes into the driver bin; this
 # image already wrote those wrappers above.
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
