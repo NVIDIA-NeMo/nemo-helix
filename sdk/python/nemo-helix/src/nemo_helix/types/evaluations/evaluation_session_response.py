@@ -15,7 +15,7 @@
 
 # File generated from our OpenAPI spec by Stainless. See CONTRIBUTING.md for details.
 
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 from datetime import datetime
 from typing_extensions import Literal, TypeAlias
 
@@ -24,6 +24,8 @@ from ..._models import BaseModel
 __all__ = ["EvaluationSessionResponse", "SpanStatus"]
 
 SpanStatus: TypeAlias = Literal["success", "error", "cancelled", "unknown"]
+
+SpanStatus = Literal["success", "error", "cancelled", "unknown"] | str
 
 
 class EvaluationSessionResponse(BaseModel):

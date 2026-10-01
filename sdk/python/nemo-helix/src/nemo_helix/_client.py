@@ -25,6 +25,7 @@ from typing_extensions import Self, override
 import httpx
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.jobs.client import JobsClient, AsyncJobsClient
+from nemo_helix_plugin.intake.client import IntakeClient, AsyncIntakeClient
 from nemo_helix_plugin.secrets.compat import SecretsResource, AsyncSecretsResource
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
@@ -303,6 +304,12 @@ class NeMoHelix(SyncAPIClient):
         from .resources.adapters import AdaptersResource
 
         return AdaptersResource(self)
+
+    @cached_property
+    def intake(self) -> IntakeClient:
+        from nemo_helix_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self, IntakeClient)
 
     @cached_property
     def evaluations(self) -> EvaluationsResource:
@@ -673,6 +680,12 @@ class AsyncNeMoHelix(AsyncAPIClient):
         from .resources.adapters import AsyncAdaptersResource
 
         return AsyncAdaptersResource(self)
+
+    @cached_property
+    def intake(self) -> AsyncIntakeClient:
+        from nemo_helix_plugin.client.adapter import client_from_platform
+
+        return client_from_platform(self, AsyncIntakeClient)
 
     @cached_property
     def evaluations(self) -> AsyncEvaluationsResource:
