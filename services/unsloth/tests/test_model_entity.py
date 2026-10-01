@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import re
 import types
 from datetime import datetime
 from pathlib import Path
@@ -260,14 +261,37 @@ class TestSanitizeName:
         assert len(name) <= MAX_RESOURCE_NAME_LEN
         assert name.startswith("sft-cfg-m-d")
 
-    def test_caps_length_below_60_and_strips_trailing_hyphen(self) -> None:
-        from nhx.customization_common.tasks.model_entity.run import sanitize_name
+    def test_caps_length_so_derived_names_fit(self) -> None:
+        """Generated names must stay valid after deployments-plugin suffixes.
 
-        # 59-char limit accounts for the "-v1" the backend appends.
+        ``-weights`` is the longest derived suffix (8). A 59-character name
+        becomes a 67-character volume and fails the 63-character entity rule.
+        """
+        from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+        from nhx.customization_common.tasks.model_entity.run import MAX_RESOURCE_NAME_LEN, sanitize_name
+
         long_name = "a" * 80
         result = sanitize_name("sft-deploy", long_name)
-        assert len(result) <= 59
+        assert len(result) <= MAX_RESOURCE_NAME_LEN
+        assert len(f"{result}-weights") <= NAME_MAX_LENGTH
+        assert len(f"{result}-v1") <= NAME_MAX_LENGTH
+        assert re.fullmatch(NAME_PATTERN, f"{result}-weights")
         assert not result.endswith("-")
+
+    def test_merged_automodel_name_leaves_room_for_weights_volume(self) -> None:
+        """Regression: a merged output plus a named config must not overflow ``-weights``."""
+        from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+        from nhx.customization_common.tasks.model_entity.run import sanitize_name
+
+        name = sanitize_name("sft-deploy", "qa07-automodel-merged-output", "qa07-config-qa0-f8c2b61d")
+        volume = f"{name}-weights"
+        assert len(name) < len(volume) <= NAME_MAX_LENGTH
+        assert name.endswith("qa07-config-qa0-f8c2b61d")
+        assert re.fullmatch(NAME_PATTERN, volume)
+        for suffix in ("-scratch", "-puller", "-server", "-v1"):
+            derived = f"{name}{suffix}"
+            assert len(derived) <= NAME_MAX_LENGTH
+            assert re.fullmatch(NAME_PATTERN, derived)
 
 
 # ---------------------------------------------------------------------------
