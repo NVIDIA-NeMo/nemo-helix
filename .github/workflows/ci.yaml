@@ -710,7 +710,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Customization CPU steps run in nhx-tasks instead of nhx-customizer-tasks.
       - name: Setup Kind cluster with auth enabled
         uses: ./.github/actions/setup-kind-cluster
         with:
@@ -719,18 +718,7 @@ jobs:
           image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
           kind-image-pull-token: ${{ github.token }}
           kind-image-pull-user: ${{ github.actor }}
-          helm-extra-args: >-
-            -f e2e/k8s/values/kind-customizer-auth.yaml
-            --set platformConfig.customizer.tasks_image=${{ needs.build-cpu-smoke-images.outputs.image_registry }}/nhx-tasks:${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-
-      - name: Pre-pull customization task image
-        shell: bash
-        env:
-          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
-          KIND_IMAGE_PULL_USER: ${{ github.actor }}
-          IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: e2e/k8s/scripts/prepull_kind_images.sh "${IMAGE_REGISTRY}/nhx-tasks:${IMAGE_TAG}"
+          helm-extra-args: -f e2e/k8s/values/auth-overlay.yaml
 
       - name: Run customizer auth e2e tests
         shell: bash

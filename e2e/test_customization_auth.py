@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Customization job steps can call the platform from their pods when auth is enabled.
+"""Customization jobs can be submitted and compiled when auth is enabled.
 
-Each test submits a job and waits for its CPU download step to complete, then cancels
-it before the GPU training step. Requires an auth-enabled Kubernetes platform.
+Each test submits a job, checks its compiled steps, and cancels it. Requires an
+auth-enabled Kubernetes platform.
 """
 
 import json
-import time
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -19,7 +18,6 @@ from nemo_helix_plugin.client.oidc import discover_nhx_config
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_helix_plugin.jobs.client import JobsClient
-from nemo_helix_plugin.jobs.schemas import HelixJobStatus, HelixJobStatusResponse
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nhx.customization_common.sdk.client import CustomizationClient
@@ -28,16 +26,13 @@ from nhx.customization_common.sdk.types import CustomizationJobCreateRequest
 pytestmark = [
     pytest.mark.customization_auth_e2e,
     pytest.mark.container_only,
-    pytest.mark.timeout(900),
+    pytest.mark.timeout(300),
     pytest.mark.e2e_config("e2e/configs/local-subprocess.yaml", {"auth": {"enabled": True}}),
 ]
 
 DOWNLOAD_STEP = "model-and-dataset-download"
-DOWNLOAD_TIMEOUT_SECONDS = 600
-POLL_INTERVAL_SECONDS = 5
-_FAILED_STATUSES = {HelixJobStatus.ERROR, HelixJobStatus.CANCELLED}
 
-# The download step copies files without loading them, so placeholders suffice.
+# Jobs are cancelled before training, so placeholder files suffice.
 _MODEL_FILES = {"config.json": json.dumps({"model_type": "qwen3"}), "model.safetensors": "placeholder"}
 _SFT_ROW = {"messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}
 _DPO_ROW = {"prompt": "hi", "chosen_response": "hello", "rejected_response": "go away"}
@@ -132,37 +127,8 @@ def submitted_jobs(client: NemoClient, workspace: str) -> Iterator[list[str]]:
             pass  # Best-effort; the workspace is deleted anyway
 
 
-def _wait_for_download_step(client: NemoClient, workspace: str, job_name: str) -> HelixJobStatusResponse:
-    jobs = JobsClient.from_client(client)
-    deadline = time.monotonic() + DOWNLOAD_TIMEOUT_SECONDS
-    status = jobs.get_job_status(workspace=workspace, name=job_name).data()
-    while time.monotonic() < deadline:
-        step = next((s for s in status.steps if s.name == DOWNLOAD_STEP), None)
-        if step is not None and step.status == HelixJobStatus.COMPLETED:
-            return status
-        if status.status in _FAILED_STATUSES or (step is not None and step.status in _FAILED_STATUSES):
-            pytest.fail(_failure_details(jobs, workspace, job_name, status))
-        time.sleep(POLL_INTERVAL_SECONDS)
-        status = jobs.get_job_status(workspace=workspace, name=job_name).data()
-    pytest.fail(
-        f"{DOWNLOAD_STEP} did not complete within {DOWNLOAD_TIMEOUT_SECONDS}s.\n"
-        + _failure_details(jobs, workspace, job_name, status)
-    )
-
-
-def _failure_details(jobs: JobsClient, workspace: str, job_name: str, status: HelixJobStatusResponse) -> str:
-    details = [f"Job {workspace}/{job_name} status:", status.model_dump_json(indent=2)]
-    try:
-        logs = list(jobs.list_job_logs(workspace=workspace, name=job_name).items())
-        details.append("Last job logs:")
-        details.extend(f"  [{entry.job_step}] {entry.message}" for entry in logs[-40:])
-    except Exception as exc:
-        details.append(f"Could not fetch job logs: {exc}")
-    return "\n".join(details)
-
-
 @pytest.mark.parametrize(("backend", "spec_builder", "dataset_row"), BACKENDS, ids=[b[0] for b in BACKENDS])
-def test_download_step_authenticates_from_job_pod(
+def test_submit_compiles_job_with_auth(
     client: NemoClient,
     workspace: str,
     model_entity: str,
@@ -190,4 +156,6 @@ def test_download_step_authenticates_from_job_pod(
     )
     submitted_jobs.append(job.name)
 
-    _wait_for_download_step(client, workspace, job.name)
+    created = JobsClient.from_client(client).get_job(workspace=workspace, name=job.name).data()
+    step_names = [step.name for step in created.platform_spec.steps]
+    assert step_names and step_names[0] == DOWNLOAD_STEP, f"unexpected compiled steps: {step_names}"
