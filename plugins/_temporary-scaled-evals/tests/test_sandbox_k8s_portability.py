@@ -287,21 +287,27 @@ def test_deployment_owns_baseline_rbac_and_documents_scoped_overrides() -> None:
     assert "ico-path-patch" not in docs
 
 
-def test_cleanup_kubeconfig_flag_falls_back_when_recorded_path_is_absent(tmp_path: Path) -> None:
-    """A cleanup must not replay a kubeconfig path from another pod's filesystem.
+def test_cleanup_kubectl_flags_fall_back_when_recorded_path_is_absent(tmp_path: Path) -> None:
+    """A cleanup must not replay a kubeconfig, or its context, from another pod.
 
-    Under Platform Jobs the path is recorded inside the Job pod (HOME=/tmp) but
-    the cleanup runs in the dispatch worker (HOME=/sa-kube). Passing the stale
-    path made every kubectl call fail and wedged the evaluation in `running`.
+    Under Platform Jobs both are recorded inside the Job pod (HOME=/tmp), but the
+    cleanup runs in the controller's pod. Passing either made every kubectl call
+    fail and wedged the evaluation in `running`.
     """
     present = tmp_path / "config"
     present.write_text("apiVersion: v1\n")
-    assert sandbox_k8s._kubeconfig_flag(present) == ["--kubeconfig", str(present)]
+    assert sandbox_k8s._kubectl_target_flags(present, "incluster") == [
+        "--kubeconfig",
+        str(present),
+        "--context",
+        "incluster",
+    ]
+    assert sandbox_k8s._kubectl_target_flags(present, None) == ["--kubeconfig", str(present)]
 
-    # The Job pod's path, as seen from the worker that drains the cleanup.
-    assert sandbox_k8s._kubeconfig_flag("/tmp/.kube/config") == []
-    assert sandbox_k8s._kubeconfig_flag(None) == []
-    assert sandbox_k8s._kubeconfig_flag("") == []
+    # The Job pod's path and the context it defines, as seen from the controller.
+    assert sandbox_k8s._kubectl_target_flags("/tmp/.kube/config", "incluster") == []
+    assert sandbox_k8s._kubectl_target_flags(None, "incluster") == []
+    assert sandbox_k8s._kubectl_target_flags("", None) == []
 
 
 def test_sandbox_kubectl_base_drops_stale_kubeconfig(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -315,6 +321,7 @@ def test_sandbox_kubectl_base_drops_stale_kubeconfig(monkeypatch: pytest.MonkeyP
                 "selector": "scaled-evals.nvidia.com/evaluation=eval_1",
                 # The Job pod's path, as seen from the worker draining the cleanup.
                 "kubeconfig_path": "/tmp/.kube/config",
+                "context": "incluster",
                 "namespace": "evals",
             }
         },
@@ -322,6 +329,5 @@ def test_sandbox_kubectl_base_drops_stale_kubeconfig(monkeypatch: pytest.MonkeyP
     result = sandbox_k8s._sandbox_kubectl_base(handle)
     assert result is not None
     base, selector = result
-    assert "--kubeconfig" not in base
     assert base == ["/usr/bin/kubectl", "-n", "evals"]
     assert selector == "scaled-evals.nvidia.com/evaluation=eval_1"
