@@ -23,8 +23,6 @@ Observe what your agent does, diagnose where it fails, run the experiments that 
        width="820">
 </p>
 
-
-
 Helix composes a curated set of NeMo and third-party libraries. Each does one job well. Getting them to work together is normally your problem: separate APIs, separate credentials, files you move by hand. As plugins in Helix they share one storage layer, one set of credentials, and one job runner, so what one produces, the next can read.
 
 - **Capabilities as plugins.** Data Designer, Anonymizer, and Safe Synthesizer for synthetic data. NeMo RL, AutoModel, and Unsloth for fine-tuning. Optuna for prompt and hyperparameter tuning. NeMo Gym and Harbor for evaluation. Guardrails and garak for safety.
@@ -34,6 +32,18 @@ Helix composes a curated set of NeMo and third-party libraries. Each does one jo
 - **Runs where you do.** Laptop for a prototype, Kubernetes for production, on-prem or air-gapped when that is the requirement.
 - **Swappable infrastructure.** Execution, sandboxing, storage, secrets, auth, model management, and inference each ship with a default you can replace with your own.
 - **Apache 2.0.** The source is in this repository. No hosted service, no proprietary core.
+
+## The optimization loop
+
+Helix is organized around the loop that turns a working prototype into an agent that measurably improves over time. Each stage is usable on its own. Nothing forces you to adopt the whole loop on day one.
+
+| Stage | What happens | What you use |
+|---|---|---|
+| **Observe** | Ingest traces from the running agent. Inspect sessions, tool calls, cost, and latency. Scan traces for PII and leaked credentials. | NeMo Relay, NeMo Fabric, trace ingestion, Anonymizer |
+| **Diagnose** | Find where the agent fails and why. Cluster failures, compare against the incumbent, decide which lever is worth pulling. | Analyst agent, Experiments |
+| **Experiment** | Generate the data you lack, fine-tune a smaller or open model, tune prompts and hyperparameters, or route by task complexity. | Data Designer, Safe Synthesizer, Customizer, NeMo RL, AutoModel, Unsloth, Optuna, Switchyard, Experimenter agent |
+| **Evaluate** | Score candidates on your benchmarks. Compare accuracy, cost, and latency against the baseline you are trying to beat. | NeMo Gym, Harbor, Evaluator metrics, Eval Author agent |
+| **Verify** | Red-team the candidate, enforce input and output policy, and promote only what passes. | garak, Guardrails, OpenShell |
 
 ## Built-in agents
 
@@ -52,19 +62,6 @@ Every capability is reachable from every surface. Pick the one that fits the mom
 | **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
 | **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
 | **NeMo Studio** | Optional web UI for chat, job monitoring, evaluation results, traces, experiments, and governance review. |
-
-
-## The optimization loop
-
-Helix is organized around the loop that turns a working prototype into an agent that measurably improves over time. Each stage is usable on its own. Nothing forces you to adopt the whole loop on day one.
-
-| Stage | What happens | What you use |
-|---|---|---|
-| **Observe** | Ingest traces from the running agent. Inspect sessions, tool calls, cost, and latency. Scan traces for PII and leaked credentials. | NeMo Relay, NeMo Fabric, trace ingestion, Anonymizer |
-| **Diagnose** | Find where the agent fails and why. Cluster failures, compare against the incumbent, decide which lever is worth pulling. | Analyst agent, Experiments |
-| **Experiment** | Generate the data you lack, fine-tune a smaller or open model, tune prompts and hyperparameters, or route by task complexity. | Data Designer, Safe Synthesizer, Customizer, NeMo RL, AutoModel, Unsloth, Optuna, Switchyard, Experimenter agent |
-| **Evaluate** | Score candidates on your benchmarks. Compare accuracy, cost, and latency against the baseline you are trying to beat. | NeMo Gym, Harbor, Evaluator metrics, Eval Author agent |
-| **Verify** | Red-team the candidate, enforce input and output policy, and promote only what passes. | garak, Guardrails, OpenShell |
 
 ## When to use Helix vs standalone libraries
 | Consider Helix if **any** of these is true | Consider the libraries if **each** of these is true |
