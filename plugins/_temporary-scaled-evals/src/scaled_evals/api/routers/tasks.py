@@ -305,7 +305,10 @@ def finalize_task(
     Reuse image: if the request body sets `image_ref`, the build is skipped and
     the revision is pointed at that already signed image after registry identity
     verification. This is the path for externally produced images or prior
-    builder-service outputs that should not be rebuilt.
+    builder-service outputs that should not be rebuilt. Tasks whose verifier runs
+    in its own sandbox also set `verifier_image_ref` (and optionally
+    `verifier_image_digest`) for the image built from the task's `tests/`; it is
+    verified the same way and stored next to the agent image.
 
     Errors: 404 if the task/revision is missing or soft-deleted;
     409 `not_finalizable` if the latest revision is not in `uploading`;
@@ -319,6 +322,24 @@ def finalize_task(
             "invalid_request",
             "image_digest can only be supplied with image_ref when reusing a signed image",
         )
+
+    # The verifier image (for tasks whose verifier runs in its own sandbox) follows the same
+    # rules as the agent image: a digest needs a ref, and the image must be prebuilt.
+    verifier_image = body.verifier_image_ref if body else None
+    if body and body.verifier_image_digest and verifier_image is None:
+        raise _http_error(
+            422,
+            "invalid_request",
+            "verifier_image_digest can only be supplied with verifier_image_ref",
+        )
+    # Task finalize builds produce only the agent image, so a verifier image must be prebuilt too.
+    if verifier_image is not None and prebuilt_image is None:
+        raise _http_error(
+            422,
+            "invalid_request",
+            "verifier_image_ref can only be supplied with image_ref when reusing a signed image",
+        )
+
     if (
         prebuilt_image is None
         and not settings.image_builder_service_url
@@ -375,6 +396,17 @@ def finalize_task(
         build_payload = {"image_ref": normalized_ref}
         if body.image_digest:
             build_payload["expected_digest"] = body.image_digest
+
+        # Check the verifier image's registry identity the same way, and hand it to the build
+        # job so it is stored on the revision next to the agent image.
+        if verifier_image is not None:
+            try:
+                normalized_verifier_ref = validate_task_image_request(verifier_image, body.verifier_image_digest)
+            except TaskImageIdentityError as exc:
+                raise _http_error(422, "invalid_verifier_image", str(exc)) from exc
+            build_payload["verifier_image_ref"] = normalized_verifier_ref
+            if body.verifier_image_digest:
+                build_payload["verifier_expected_digest"] = body.verifier_image_digest
     elif prebuilt_image is None and settings.image_builder_service_url:
         build_backend = "image_builder_service"
         build_payload = {"context_path": "."}
@@ -400,6 +432,8 @@ def finalize_task(
             exact_revision=body.revision is not None,
             tarball_size_bytes=uploaded_pack.size_bytes,
             tenant_storage_quota_bytes=settings.task_pack_tenant_storage_quota_bytes,
+            verifier_image_ref=verifier_image,
+            verifier_image_digest=(body.verifier_image_digest or None) if verifier_image is not None else None,
         )
         if revision is None:
             raise _http_error(404, "not_found", "task not found")

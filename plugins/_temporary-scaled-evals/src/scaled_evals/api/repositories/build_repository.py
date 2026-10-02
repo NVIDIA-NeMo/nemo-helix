@@ -217,19 +217,30 @@ class TaskBuildRepository:
         worker_id: str,
         image_ref: str,
         image_digest: str,
+        verifier_image_ref: str | None = None,
+        verifier_image_digest: str | None = None,
     ) -> bool:
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE task_revisions
                 SET status = 'ready', image_ref = %s, image_digest = %s,
+                    verifier_image_ref = %s, verifier_image_digest = %s,
                     build_error = NULL, build_completed_at = NOW(),
                     build_claimed_at = NULL, build_claimed_by = NULL,
                     build_next_attempt_at = NULL
                 WHERE task_id = %s AND revision = %s
                   AND status = 'building' AND build_claimed_by = %s
                 """,
-                (image_ref, image_digest, task_id, revision, worker_id),
+                (
+                    image_ref,
+                    image_digest,
+                    verifier_image_ref,
+                    verifier_image_digest,
+                    task_id,
+                    revision,
+                    worker_id,
+                ),
             )
             updated = cur.rowcount == 1
             if updated:

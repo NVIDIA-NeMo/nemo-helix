@@ -1209,6 +1209,64 @@ def test_task_finalize_sends_reuse_image_body(monkeypatch) -> None:
     }
 
 
+def test_task_finalize_sends_verifier_image(monkeypatch) -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(202, json={"id": "task_1", "revision": 1, "status": "building"})
+
+    result = runner_with(monkeypatch, handler).invoke(
+        cli,
+        [
+            "task",
+            "finalize",
+            "task_1",
+            "--image-ref",
+            "registry.example.com/team/task:signed",
+            "--verifier-image-ref",
+            "registry.example.com/team/task-verifier:signed",
+            "--verifier-image-digest",
+            "sha256:" + "b" * 64,
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen["body"] == {
+        "image_ref": "registry.example.com/team/task:signed",
+        "verifier_image_ref": "registry.example.com/team/task-verifier:signed",
+        "verifier_image_digest": "sha256:" + "b" * 64,
+    }
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (
+            ["--image-ref", "registry.example.com/team/task:signed", "--verifier-image-digest", "sha256:" + "b" * 64],
+            "--verifier-image-digest requires --verifier-image-ref",
+        ),
+        (
+            ["--verifier-image-ref", "registry.example.com/team/task-verifier:signed"],
+            "--verifier-image-ref requires --image-ref",
+        ),
+    ],
+)
+def test_task_finalize_rejects_incomplete_verifier_image(monkeypatch, args: list[str], message: str) -> None:
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(500)
+
+    result = runner_with(monkeypatch, handler).invoke(cli, ["task", "finalize", "task_1", *args])
+
+    assert result.exit_code == 1
+    assert message in result.output
+    assert called is False
+
+
 def test_task_finalize_rejects_digest_without_image_ref(monkeypatch) -> None:
     called = False
 

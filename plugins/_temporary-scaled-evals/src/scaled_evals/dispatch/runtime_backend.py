@@ -28,6 +28,14 @@ from scaled_evals.models.resource_usage import ResourceUsageSample
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec, ResultSummary, RuntimeStatus
 
 
+class IncompatibleTaskError(ValueError):
+    """The task, as finalized, can't run on the selected runtime.
+
+    A launch that raises it fails with this class name as its failure code, which is always
+    classified as a task failure, whatever words the message contains.
+    """
+
+
 @runtime_checkable
 class RuntimeBackend(Protocol):
     """Contract every dispatch backend implements.
