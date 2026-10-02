@@ -46,9 +46,41 @@ async def test_counts_filtered_entities_grouped_by_direct_string_data_field(
     assert counts == {'insight-"quoted"\\path': 1, "insight-a": 2, "insight-b": 1}
 
 
-@pytest.mark.parametrize("field", ["name", "data.nested.value", "data.", "data.not-valid"])
+async def test_counts_entities_grouped_by_nested_string_data_field(
+    entity_repo: SQLAlchemyEntityRepository, setup_workspaces
+):
+    entities = (
+        ("llama-a", {"spec": {"family": "llama"}}),
+        ("llama-b", {"spec": {"family": "llama"}}),
+        ("mixtral", {"spec": {"family": "mixtral"}}),
+        ("no-spec", {"description": "none"}),
+        ("empty-spec", {"spec": {}}),
+        ("null-family", {"spec": {"family": None}}),
+        ("numeric-family", {"spec": {"family": 7}}),
+        ("scalar-spec", {"spec": "llama"}),
+    )
+    for name, data in entities:
+        await entity_repo.create_entity(
+            workspace="workspace-1",
+            entity_type="model",
+            name=name,
+            data=data,
+        )
+
+    counts = await entity_repo.count_entities_by(
+        workspace="workspace-1",
+        entity_type="model",
+        group_by="data.spec.family",
+    )
+
+    assert counts == {"llama": 2, "mixtral": 1}
+
+
+@pytest.mark.parametrize(
+    "field", ["name", "data", "data.", "data.not-valid", "data.spec.", "data..family", "data.spec.not-valid"]
+)
 async def test_rejects_unsupported_group_fields(entity_repo: SQLAlchemyEntityRepository, setup_workspaces, field: str):
-    with pytest.raises(ValueError, match="direct string data field"):
+    with pytest.raises(ValueError, match="supported string data field"):
         await entity_repo.count_entities_by(
             workspace="workspace-1",
             entity_type="experiment_group",

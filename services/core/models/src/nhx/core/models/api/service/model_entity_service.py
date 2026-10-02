@@ -25,6 +25,8 @@ from nhx.core.models.schemas import Adapter as AdapterSchema
 from nhx.core.models.schemas import (
     CreateModelEntityRequest,
     ModelEntity,
+    ModelFamily,
+    ModelFamilySort,
     UpdateModelEntityRequest,
 )
 
@@ -345,6 +347,88 @@ class ModelEntityService:
 
         return list(model_ids)
 
+    async def _apply_cross_entity_filters(self, workspace: str, parsed_filter: ParsedFilter) -> bool:
+        """Resolve filters that are not plain fields of the Model entity and merge them into ``parsed_filter``.
+
+        Returns False when the resolved filters can match no model, so callers can skip the query.
+        """
+        # lora_enabled is a cross-entity filter: it is resolved against ModelDeploymentConfig and
+        # merged back into the operation tree.
+        lora_enabled = parsed_filter.remove("lora_enabled")
+
+        # Could be lifted by walking the tree and substituting each occurrence with the resolved condition.
+        if parsed_filter.has("lora_enabled"):
+            raise InvalidFilterError(
+                "lora_enabled is only supported as a top-level equality filter; "
+                "remove it from $or, $not, or nested expressions."
+            )
+
+        if lora_enabled is not None:
+            lora_enabled = str(lora_enabled).lower() in ("true", "1", "yes")
+            all_lora_ids = await self._resolve_lora_filter(workspace)
+            if lora_enabled:
+                if not all_lora_ids:
+                    return False
+                parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=False))
+            elif all_lora_ids:
+                # lora_enabled=false: exclude models with lora.
+                parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=True))
+            # If no models have lora and lora_enabled=false, all models qualify — no extra filter.
+
+        model_provider = parsed_filter.remove("model_providers")
+        if parsed_filter.has("model_providers"):
+            raise InvalidFilterError(
+                "model_providers is only supported as a top-level equality filter; "
+                "remove it from $or, $not, or nested expressions."
+            )
+        if model_provider is not None:
+            parsed_filter.and_with(
+                ComparisonOperation(
+                    operator=FilterOperator.CONTAINS, field="data.model_providers", value=model_provider
+                )
+            )
+
+        return True
+
+    async def list_model_families(
+        self,
+        workspace: str,
+        parsed_filter: ParsedFilter,
+        page: int = 1,
+        page_size: int = 100,
+        sort: ModelFamilySort = ModelFamilySort.NAME_ASC,
+    ) -> Page[ModelFamily]:
+        """List the distinct model families among the models matching the filter, with model counts."""
+        counts: dict[str, int] = {}
+        if await self._apply_cross_entity_filters(workspace, parsed_filter):
+            counts = await self.entity_client.count_by(
+                Model,
+                "spec.family",
+                workspace=workspace,
+                filter_operation=parsed_filter.operation,
+            )
+
+        families = [ModelFamily(name=name, model_count=count) for name, count in counts.items() if name]
+        families.sort(key=lambda family: family.name, reverse=sort == ModelFamilySort.NAME_DESC)
+        if sort in (ModelFamilySort.MODEL_COUNT_ASC, ModelFamilySort.MODEL_COUNT_DESC):
+            families.sort(key=lambda family: family.model_count, reverse=sort == ModelFamilySort.MODEL_COUNT_DESC)
+
+        total = len(families)
+        start = (page - 1) * page_size
+        page_data = families[start : start + page_size]
+        return Page(
+            data=page_data,
+            pagination=PaginationData(
+                page=page,
+                page_size=page_size,
+                current_page_size=len(page_data),
+                total_pages=(total + page_size - 1) // page_size,
+                total_results=total,
+            ),
+            sort=str(sort),
+            filter=None,
+        )
+
     async def create_model_entity(self, request: CreateModelEntityRequest, workspace: str) -> ModelEntity:
         """Create a new model entity."""
         logger.debug(f"Creating model entity: {workspace}/{request.name}")
@@ -415,52 +499,18 @@ class ModelEntityService:
         """List model entities with filtering and pagination."""
         logger.debug(f"Listing model entities: page={page}, page_size={page_size}, sort={sort}")
 
-        # Extract lora_enabled (cross-entity filter — must be resolved against
-        # ModelDeploymentConfig and merged back into the operation tree).
-        lora_enabled = parsed_filter.remove("lora_enabled")
-
-        # Could be lifted by walking the tree and substituting each occurrence with the resolved condition.
-        if parsed_filter.has("lora_enabled"):
-            raise InvalidFilterError(
-                "lora_enabled is only supported as a top-level equality filter; "
-                "remove it from $or, $not, or nested expressions."
-            )
-
-        if lora_enabled is not None:
-            lora_enabled = str(lora_enabled).lower() in ("true", "1", "yes")
-            all_lora_ids = await self._resolve_lora_filter(workspace)
-            if lora_enabled:
-                if not all_lora_ids:
-                    # No models have lora — short-circuit with empty result.
-                    return Page(
-                        data=[],
-                        pagination=PaginationData(
-                            page=page,
-                            page_size=page_size,
-                            current_page_size=0,
-                            total_pages=0,
-                            total_results=0,
-                        ),
-                        sort=sort,
-                        filter=None,
-                    )
-                parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=False))
-            elif all_lora_ids:
-                # lora_enabled=false: exclude models with lora.
-                parsed_filter.and_with(_build_lora_filter_operation(all_lora_ids, lora_exclude=True))
-            # If no models have lora and lora_enabled=false, all models qualify — no extra filter.
-
-        model_provider = parsed_filter.remove("model_providers")
-        if parsed_filter.has("model_providers"):
-            raise InvalidFilterError(
-                "model_providers is only supported as a top-level equality filter; "
-                "remove it from $or, $not, or nested expressions."
-            )
-        if model_provider is not None:
-            parsed_filter.and_with(
-                ComparisonOperation(
-                    operator=FilterOperator.CONTAINS, field="data.model_providers", value=model_provider
-                )
+        if not await self._apply_cross_entity_filters(workspace, parsed_filter):
+            return Page(
+                data=[],
+                pagination=PaginationData(
+                    page=page,
+                    page_size=page_size,
+                    current_page_size=0,
+                    total_pages=0,
+                    total_results=0,
+                ),
+                sort=sort,
+                filter=None,
             )
 
         result: ListResponse[Model] = await self.entity_client.list(

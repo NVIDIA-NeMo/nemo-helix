@@ -122,7 +122,7 @@ class EntityRepositoryInterface(ABC):
         relationship_child_workspaces: set[str] | None = None,
         session: AsyncSession | None = None,
     ) -> dict[str, int]:
-        """Count filtered entities grouped by a direct string data field."""
+        """Count filtered entities grouped by a string data field, optionally nested (``data.spec.family``)."""
         pass
 
     @abstractmethod
