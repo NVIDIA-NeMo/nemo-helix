@@ -9,9 +9,10 @@ The host-mode fakes come from ``test_fabric_runtime`` and the sandbox-mode fake 
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _sandbox_execution
@@ -20,6 +21,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRun
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxHandle
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus
+from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource, MissingSecretError
 from nemo_evaluator_sdk.values.common import SecretRef
 
 from packages.nemo_evaluator_sdk.tests.agent_eval.test_fabric_container_runtime import _FakeProvider
@@ -46,9 +48,166 @@ def test_image_without_a_sandbox_is_rejected() -> None:
         FabricAgentRuntime(_CONFIG, image="doc-tools:1.0")
 
 
-def test_secrets_without_a_sandbox_are_rejected() -> None:
-    with pytest.raises(ValueError, match="sandbox="):
-        FabricAgentRuntime(_CONFIG, secrets={"NVIDIA_API_KEY": SecretRef(root="k")})
+def test_host_accepts_env_secrets_and_records_only_references() -> None:
+    runtime = FabricAgentRuntime(_CONFIG, env_secrets={"NVIDIA_API_KEY": SecretRef("ws/key")})
+    assert runtime.runner_info().config["env_secrets"] == {"NVIDIA_API_KEY": "ws/key"}
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_empty_env_secrets_do_not_require_an_env_source(sandbox: bool) -> None:
+    runtime = FabricAgentRuntime(
+        _CONFIG,
+        sandbox=_FakeProvider() if sandbox else None,
+        secret_resolver=cast(EnvSecretSource, object()),
+    )
+    assert runtime.runner_info().config["env_secrets"] == {}
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_env_secrets_reject_value_only_sources(sandbox: bool) -> None:
+    with pytest.raises(TypeError, match="can't name an env var"):
+        FabricAgentRuntime(
+            _CONFIG,
+            sandbox=_FakeProvider() if sandbox else None,
+            env_secrets={"KEY": SecretRef("ws/key")},
+            secret_resolver=cast(EnvSecretSource, object()),
+        )
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_config_env_cannot_override_a_declared_secret(sandbox: bool) -> None:
+    config = {**_CONFIG, "environment": {"env": {"KEY": "override"}}}
+    with pytest.raises(ValueError, match="KEY"):
+        FabricAgentRuntime(
+            config, sandbox=_FakeProvider() if sandbox else None, env_secrets={"KEY": SecretRef("ws/key")}
+        )
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+@pytest.mark.parametrize("role", ["default", "primary"])
+async def test_model_override_preserves_connection_in_both_modes(
+    sandbox: bool, role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WS_NVIDIA_API_KEY", "first-value")
+    selected = {
+        "provider": "nvidia",
+        "model": "nvidia/old",
+        "api_key_env": "NVIDIA_API_KEY",
+        "base_url": "https://provider.example/v1",
+        "temperature": 0.2,
+        "settings": {"nested": [1]},
+    }
+    config: dict[str, Any] = {**_CONFIG, "models": {role: selected}}
+    original = copy.deepcopy(config)
+    provider = _FakeProvider()
+    client_cls = (
+        None
+        if sandbox
+        else _install_fake_fabric(monkeypatch, lambda agent, kwargs: _FakeResult(status="succeeded", output="ok"))
+    )
+    runtime = FabricAgentRuntime(
+        config,
+        sandbox=provider if sandbox else None,
+        image="img:test" if sandbox else None,
+        model="nvidia/new",
+        env_secrets={"NVIDIA_API_KEY": SecretRef("ws/nvidia-api-key")},
+    )
+    # The runner's snapshot must not share nested caller data.
+    config["models"][role]["base_url"] = "https://changed.example"
+    await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    if sandbox:
+        actual = _seeded_agent(provider)["models"]["default"]
+        assert provider.env == {"NVIDIA_API_KEY": "first-value"}
+    else:
+        assert client_cls is not None
+        actual = client_cls.recorded[0]["agent"].models["default"].to_dict()
+    expected = {
+        **original["models"][role],
+        "model": "nvidia/new",
+        "api_key_env": "NVIDIA_API_KEY" if sandbox else "WS_NVIDIA_API_KEY",
+    }
+    assert actual == expected
+    assert runtime._config == original
+
+
+@pytest.mark.parametrize("failure", ["missing", "unusable"])
+async def test_host_secret_failure_prevents_the_whole_task_batch(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("WS_NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    if failure == "unusable":
+        monkeypatch.setenv("WS_NVIDIA_API_KEY", "present")
+    client_cls = _install_fake_fabric(monkeypatch, lambda agent, kwargs: _FakeResult(status="succeeded", output="ok"))
+    runtime = FabricAgentRuntime(_CONFIG, env_secrets={"NVIDIA_API_KEY": SecretRef("ws/nvidia-api-key")})
+    with pytest.raises(ValueError, match="env_secrets"):
+        await runtime.run_tasks([_TASK, _TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    assert client_cls.recorded == []
+
+
+async def test_reused_host_runner_resolves_each_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = {
+        **_CONFIG,
+        "models": {"default": {"provider": "nvidia", "model": "nvidia/m", "api_key_env": "NVIDIA_API_KEY"}},
+    }
+    seen = []
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        import os
+
+        key = agent.models["default"].extra["api_key_env"]
+        seen.append((key, os.environ[key]))
+        return _FakeResult(status="succeeded", output="ok")
+
+    client_cls = _install_fake_fabric(monkeypatch, handler)
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setenv("WS_NVIDIA_API_KEY", "first")
+    runtime = FabricAgentRuntime(config, env_secrets={"NVIDIA_API_KEY": SecretRef("ws/nvidia-api-key")})
+    await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    monkeypatch.setenv("WS_NVIDIA_API_KEY", "rotated")
+    await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    monkeypatch.delenv("WS_NVIDIA_API_KEY")
+    monkeypatch.setenv("NVIDIA_API_KEY", "bare")
+    await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    monkeypatch.delenv("NVIDIA_API_KEY")
+    with pytest.raises(MissingSecretError):
+        await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    assert seen == [("WS_NVIDIA_API_KEY", "first"), ("WS_NVIDIA_API_KEY", "rotated"), ("NVIDIA_API_KEY", "bare")]
+    assert len(client_cls.recorded) == 3
+
+
+@pytest.mark.parametrize("sandbox", [False, True])
+async def test_provider_change_fails_before_tasks_or_image_build(
+    sandbox: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as runtime_module
+
+    def unexpected_build() -> str:
+        pytest.fail("provider change must fail before image build")
+
+    monkeypatch.setattr(runtime_module, "ensure_fabric_image", unexpected_build)
+    client_cls = _install_fake_fabric(monkeypatch, lambda agent, kwargs: _FakeResult(status="succeeded", output="ok"))
+    config = {**_CONFIG, "models": {"default": {"provider": "nvidia", "model": "old", "api_key_env": "KEY"}}}
+    runtime = FabricAgentRuntime(config, model="openai/new", sandbox=_FakeProvider() if sandbox else None)
+    with pytest.raises(ValueError, match="changes provider"):
+        await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    assert client_cls.recorded == []
+
+
+async def test_missing_sandbox_secret_fails_before_image_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.fabric import runtime as runtime_module
+
+    def unexpected_build() -> str:
+        pytest.fail("missing secret must fail before image build")
+
+    monkeypatch.setattr(runtime_module, "ensure_fabric_image", unexpected_build)
+    monkeypatch.delenv("WS_MISSING", raising=False)
+    monkeypatch.delenv("MISSING", raising=False)
+    provider = _FakeProvider()
+    runtime = FabricAgentRuntime(_CONFIG, sandbox=provider, env_secrets={"KEY": SecretRef("ws/missing")})
+    with pytest.raises(MissingSecretError, match="WS_MISSING"):
+        await runtime.run_tasks([_TASK], AgentEvalRunConfig(work_dir=tmp_path))
+    assert provider.execs == []
 
 
 def test_host_only_settings_are_rejected_in_sandbox_mode() -> None:
