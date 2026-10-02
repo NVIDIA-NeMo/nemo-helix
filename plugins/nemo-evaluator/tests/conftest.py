@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -169,3 +170,18 @@ def entity_store() -> FakeEntityStore:
     module wins and the import fails.
     """
     return FakeEntityStore()
+
+
+@pytest.fixture(autouse=True)
+def _guard_codex_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the Fabric runtime's per-trial Codex homes and base login inside the test's tmp dir.
+
+    A Codex-adapter trial creates a temp Codex home and links the base ``auth.json`` into it; without
+    this, unit tests would do that against the developer's real ``~/.codex``.
+    """
+    # A sibling of the test's tmp_path, so tests that inspect tmp_path don't see these directories.
+    guard = tmp_path_factory.mktemp("codex-home-guard")
+    monkeypatch.setenv("CODEX_HOME", str(guard / "base-codex-home"))
+    temp_root = guard / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))

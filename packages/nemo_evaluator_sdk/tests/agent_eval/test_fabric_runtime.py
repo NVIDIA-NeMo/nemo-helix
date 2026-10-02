@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
+import tempfile
 import types
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -23,10 +25,18 @@ from nemo_evaluator_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_TR
 class _FakeEnvironment:
     """Stand-in for nemo_fabric.EnvironmentConfig (the runtime sets workspace/provider/artifacts)."""
 
-    def __init__(self, *, provider: str = "local", workspace: str | None = None, artifacts: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str = "local",
+        workspace: str | None = None,
+        artifacts: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
         self.provider = provider
         self.workspace = workspace
         self.artifacts = artifacts
+        self.env = dict(env or {})
 
 
 class _FakeRuntimeCfg:
@@ -47,7 +57,8 @@ class _FakeConfig:
     def __init__(self, mapping: dict[str, Any]) -> None:
         self.mapping = mapping
         self.harness = _FakeHarness(mapping.get("harness", {}).get("adapter_id", ""))
-        self.environment: _FakeEnvironment | None = None
+        environment = mapping.get("environment")
+        self.environment: _FakeEnvironment | None = _FakeEnvironment(**environment) if environment else None
         self.runtime = _FakeRuntimeCfg()
         self.models: dict[str, Any] = dict(mapping.get("models", {}))
         self.relay: dict[str, Any] | None = None  # records enable_relay(...)
@@ -1270,3 +1281,139 @@ async def test_a_failing_trace_fold_costs_the_trace_not_the_batch(
         assert trial.status == "completed"
         assert trial.evidence is not None
         assert EVIDENCE_TRACE not in trial.evidence.descriptors
+
+
+def _base_auth() -> Path:
+    """The base login the conftest Codex-home guard points ``CODEX_HOME`` at."""
+    return Path(os.environ["CODEX_HOME"]) / "auth.json"
+
+
+def _codex_home_of(agent: Any) -> Path:
+    env = agent.environment.env
+    assert env["CODEX_SQLITE_HOME"] == env["CODEX_HOME"]
+    return Path(env["CODEX_HOME"])
+
+
+@pytest.mark.asyncio
+async def test_codex_trials_each_run_in_their_own_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base_auth = _base_auth()
+    base_auth.parent.mkdir()
+    base_auth.write_text('{"tokens": {}}', encoding="utf-8")
+    during_run: list[dict[str, Any]] = []
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        home = _codex_home_of(agent)
+        auth = home / "auth.json"
+        during_run.append({"home": home, "is_dir": home.is_dir(), "link": auth.is_symlink() and auth.resolve()})
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    _install_fake_fabric(monkeypatch, handler)
+    work_root = tmp_path / "fabric"
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=work_root)
+    second = AgentEvalTask(id="task/2", intent="Answer.", inputs={"instruction": "Pong?"})
+
+    trials = await runtime.run_tasks([_TASK, second])
+
+    assert [trial.status for trial in trials] == ["completed", "completed"]
+    homes = [entry["home"] for entry in during_run]
+    assert len(set(homes)) == 2
+    for entry in during_run:
+        assert entry["is_dir"]
+        assert entry["link"] == base_auth.resolve()
+        # Outside the persisted evidence, so neither the login nor Codex's own files land in a bundle.
+        assert work_root not in entry["home"].parents
+        assert not entry["home"].exists()
+    assert base_auth.read_text(encoding="utf-8") == '{"tokens": {}}'
+
+
+@pytest.mark.asyncio
+async def test_codex_home_is_removed_when_the_run_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base_auth = _base_auth()
+    base_auth.parent.mkdir()
+    base_auth.write_text("{}", encoding="utf-8")
+    homes: list[Path] = []
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        homes.append(_codex_home_of(agent))
+        raise RuntimeError("adapter lifecycle start failed")
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].status == "failed"
+    assert not homes[0].exists()
+    assert base_auth.exists()
+
+
+@pytest.mark.asyncio
+async def test_codex_home_without_a_base_login_has_no_auth_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contents: list[list[str]] = []
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        contents.append(sorted(path.name for path in _codex_home_of(agent).iterdir()))
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    await runtime.run_tasks([_TASK])
+
+    assert contents == [[]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("config", "expected_env"),
+    [
+        pytest.param(
+            {**_CONFIG, "harness": {"adapter_id": "nvidia.fabric.hermes"}},
+            {},
+            id="non-codex-adapter",
+        ),
+        pytest.param(
+            {**_CONFIG, "environment": {"env": {"CODEX_HOME": "/srv/codex"}}},
+            {"CODEX_HOME": "/srv/codex"},
+            id="caller-set-codex-home",
+        ),
+    ],
+)
+async def test_codex_home_is_left_alone(
+    config: dict[str, Any], expected_env: dict[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client_cls = _install_fake_fabric(
+        monkeypatch, lambda agent, kwargs: _FakeResult(status="succeeded", output={"response": "ok"})
+    )
+    runtime = fabric_runtime.FabricAgentRuntime(config=config, work_root=tmp_path / "fabric")
+
+    await runtime.run_tasks([_TASK])
+
+    assert client_cls.recorded[0]["agent"].environment.env == expected_env
+    assert list(Path(tempfile.gettempdir()).iterdir()) == []
+
+
+def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "codex-home"
+    (home / ".tmp").mkdir(parents=True)
+    real_rmtree = fabric_runtime.shutil.rmtree
+    deletes: list[Path] = []
+
+    def rmtree_then_codex_writes_once(path: Path, ignore_errors: bool = False) -> None:
+        real_rmtree(path, ignore_errors=ignore_errors)
+        deletes.append(path)
+        if len(deletes) == 1:
+            # Codex's plugin sync finishing just after the first delete.
+            (path / ".tmp" / "plugins-clone").mkdir(parents=True)
+
+    monkeypatch.setattr(fabric_runtime.shutil, "rmtree", rmtree_then_codex_writes_once)
+    monkeypatch.setattr(fabric_runtime.time, "sleep", lambda _seconds: None)
+
+    fabric_runtime._remove_codex_home(home)
+
+    assert not home.exists()
+    assert len(deletes) == 2

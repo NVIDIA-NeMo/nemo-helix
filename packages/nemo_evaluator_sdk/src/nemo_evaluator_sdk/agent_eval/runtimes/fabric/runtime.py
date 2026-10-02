@@ -40,7 +40,10 @@ import copy
 import json
 import logging
 import math
+import os
 import shutil
+import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -64,6 +67,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     SkillProvenance,
     SkillSet,
     install_skills,
+    is_codex_adapter,
     resolve_skill_mode,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
@@ -123,6 +127,8 @@ _SKILL_SUBDIR = "skill"
 _SKILL_PROBE_PATH = "nemo-eval-skill-capability-probe"
 _WORKSPACE_EVIDENCE_KEY = "workspace"
 _WORKSPACE_EVIDENCE_KIND = "filesystem"
+# Prefix of the throwaway Codex home each Codex trial runs in (see ``_make_codex_home``).
+_CODEX_HOME_PREFIX = "nemo-eval-codex-home-"
 
 
 class FabricAgentRuntime:
@@ -224,6 +230,17 @@ class FabricAgentRuntime:
         harness = self._config.get("harness")
         adapter_id = harness.get("adapter_id") if isinstance(harness, Mapping) else None
         return str(adapter_id) if adapter_id is not None else ""
+
+    def _isolates_codex_home(self, agent_config: FabricConfig) -> bool:
+        """Whether this trial should run Codex in its own throwaway home (see ``_make_codex_home``).
+
+        Only for the Codex adapter, and not when the supplied config already sets ``CODEX_HOME``:
+        a caller who chose a home keeps it.
+        """
+        if not is_codex_adapter(self._adapter_id()):
+            return False
+        environment = agent_config.environment
+        return environment is None or "CODEX_HOME" not in (environment.env or {})
 
     def _effective_model(self) -> str | None:
         """The model a run will actually use, mirroring :meth:`_compose_config`'s precedence.
@@ -388,6 +405,7 @@ class FabricAgentRuntime:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         run = _common.TaskRun(workspace_dir=workspace_dir, relay_dir=evidence_dir / _RELAY_SUBDIR)
         trace_receiver: OTLPReceiver | None = None
+        codex_home: Path | None = None
         try:
             # Inside the guarded block: a port it cannot bind costs this trial its trace, like any
             # other per-task failure, rather than aborting every task in the gather.
@@ -412,9 +430,17 @@ class FabricAgentRuntime:
                 run.skill_provenances = installation.provenances
                 skill_paths = installation.skill_paths
 
+            if self._isolates_codex_home(agent_config):
+                codex_home = await asyncio.to_thread(_make_codex_home)
+
             # ``add_skill_path`` appends, so config-declared skills survive.
             task_config = self._compose_config(
-                agent_config, evidence_dir, workspace_dir, task=task, trace_receiver=trace_receiver
+                agent_config,
+                evidence_dir,
+                workspace_dir,
+                task=task,
+                trace_receiver=trace_receiver,
+                codex_home=codex_home,
             )
             for skill_path in skill_paths:
                 task_config.add_skill_path(skill_path)
@@ -432,6 +458,8 @@ class FabricAgentRuntime:
         except Exception as exc:  # noqa: BLE001 - a task failure must not abort the whole run
             run.error = exc
         finally:
+            if codex_home is not None:
+                await asyncio.to_thread(_remove_codex_home, codex_home)
             if trace_receiver is not None:
                 # Stopped before the fold, and both before the trial reads the evidence: the
                 # spans arrive on the exporter's own schedule, and a trace folded before the last
@@ -599,6 +627,7 @@ class FabricAgentRuntime:
         workspace_dir: Path,
         task: AgentEvalTask,
         trace_receiver: OTLPReceiver | None = None,
+        codex_home: Path | None = None,
     ) -> FabricConfig:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
@@ -614,6 +643,14 @@ class FabricAgentRuntime:
         environment = cfg.environment or EnvironmentConfig(provider="local")
         environment.provider = environment.provider or "local"
         environment.workspace = str(workspace_dir.resolve())
+        if codex_home is not None:
+            # CODEX_SQLITE_HOME too: an inherited value would otherwise put every trial's state DB back
+            # in one shared place.
+            environment.env = {
+                **(environment.env or {}),
+                "CODEX_HOME": str(codex_home),
+                "CODEX_SQLITE_HOME": str(codex_home),
+            }
         cfg.environment = environment
 
         # Apply the model as the config's default (mirrors nemo_fabric.integrations.harbor).
@@ -665,6 +702,48 @@ class FabricAgentRuntime:
         # vs. skilled); run_tasks always populates it, so the fallback only guards a direct call.
         run_id = config.run_id or _new_run_id()
         return Path(root) / _common.safe_path_name(run_id) / _common.task_subdir_name(index, task.id)
+
+
+def _base_codex_home() -> Path:
+    """The Codex home this process would otherwise use: ``$CODEX_HOME`` when set, else ``~/.codex``."""
+    configured = os.environ.get("CODEX_HOME")
+    return Path(configured).expanduser() if configured else Path.home() / ".codex"
+
+
+def _make_codex_home() -> Path:
+    """Create a throwaway Codex home for one trial that shares only the base login.
+
+    Codex keeps SQLite state, session transcripts, logs and (when enabled) memories in its home.
+    Concurrent trials sharing one home race to create that state on a fresh home (NVBug 6694692)
+    and could read each other's sessions, so each trial gets its own. The base ``auth.json`` is
+    symlinked rather than copied: Codex rewrites it in place on token refresh, so refreshed tokens
+    reach the base login instead of leaving it holding a rotated-out refresh token. The home is
+    created outside the evidence dir and removed after the run, so neither the login nor Codex's
+    logs end up in a persisted bundle.
+    """
+    home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
+    auth = _base_codex_home() / "auth.json"
+    if auth.is_file():
+        (home / "auth.json").symlink_to(auth)
+    return home
+
+
+#: Back-off before each attempt to remove a trial's Codex home (see ``_remove_codex_home``).
+_CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
+
+
+def _remove_codex_home(home: Path) -> None:
+    """Delete a trial's Codex home, removing the ``auth.json`` symlink without following it.
+
+    Codex can still be finishing background work (its plugin sync writes into the home) as the
+    runtime stops, recreating part of the tree right after a delete, so re-check and retry briefly.
+    """
+    for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
+        time.sleep(delay)
+        shutil.rmtree(home, ignore_errors=True)
+        if not home.exists():
+            return
+    logger.warning("Could not fully remove the Codex home %s; Codex was still writing to it.", home)
 
 
 def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:

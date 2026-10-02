@@ -178,9 +178,14 @@ def resolve_skill_mode(*, capability_plan: Mapping[str, object], adapter_id: str
     """
     if native_skills_route(capability_plan):
         return SKILL_MODE_NATIVE
-    if adapter_id.strip().lower() == _CODEX_ADAPTER_ID:
+    if is_codex_adapter(adapter_id):
         return SKILL_MODE_CODEX_SKILLS_DIR
     return None
+
+
+def is_codex_adapter(adapter_id: str) -> bool:
+    """Whether ``adapter_id`` selects the shipped Codex harness adapter."""
+    return adapter_id.strip().lower() == _CODEX_ADAPTER_ID
 
 
 def install_skill(

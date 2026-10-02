@@ -77,10 +77,18 @@ def _task() -> AgentEvalTask:
 
 
 class _FakeEnvironment:
-    def __init__(self, *, provider: str = "local", workspace: str | None = None, artifacts: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str = "local",
+        workspace: str | None = None,
+        artifacts: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
         self.provider = provider
         self.workspace = workspace
         self.artifacts = artifacts
+        self.env = dict(env or {})
 
 
 class _FakeRuntimeCfg:
@@ -274,6 +282,7 @@ requires_live_fabric = pytest.mark.skipif(
 
 
 @requires_live_fabric
+@pytest.mark.real_codex_home
 @pytest.mark.timeout(300)
 def test_fabric_codex_live_eval_captures_atif_trajectory(tmp_path: Path) -> None:
     codex_config = {
