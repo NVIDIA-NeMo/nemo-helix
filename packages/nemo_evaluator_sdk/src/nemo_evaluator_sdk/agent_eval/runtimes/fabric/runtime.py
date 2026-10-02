@@ -127,7 +127,6 @@ _SKILL_SUBDIR = "skill"
 _SKILL_PROBE_PATH = "nemo-eval-skill-capability-probe"
 _WORKSPACE_EVIDENCE_KEY = "workspace"
 _WORKSPACE_EVIDENCE_KIND = "filesystem"
-# Prefix of the throwaway Codex home each Codex trial runs in (see ``_make_codex_home``).
 _CODEX_HOME_PREFIX = "nemo-eval-codex-home-"
 
 
@@ -232,11 +231,6 @@ class FabricAgentRuntime:
         return str(adapter_id) if adapter_id is not None else ""
 
     def _isolates_codex_home(self, agent_config: FabricConfig) -> bool:
-        """Whether this trial should run Codex in its own throwaway home (see ``_make_codex_home``).
-
-        Only for the Codex adapter, and not when the supplied config already sets ``CODEX_HOME``:
-        a caller who chose a home keeps it.
-        """
         if not is_codex_adapter(self._adapter_id()):
             return False
         environment = agent_config.environment
@@ -431,8 +425,7 @@ class FabricAgentRuntime:
                 skill_paths = installation.skill_paths
 
             if self._isolates_codex_home(agent_config):
-                # Synchronous on purpose (a mkdtemp and a symlink): with no await between creating the
-                # home and recording it, a cancelled task can't leave it behind uncleaned.
+                # Not offloaded: an await before ``codex_home`` is set would let a cancellation leak it.
                 codex_home = _make_codex_home()
 
             # ``add_skill_path`` appends, so config-declared skills survive.
@@ -646,8 +639,6 @@ class FabricAgentRuntime:
         environment.provider = environment.provider or "local"
         environment.workspace = str(workspace_dir.resolve())
         if codex_home is not None:
-            # CODEX_SQLITE_HOME too: an inherited value would otherwise put every trial's state DB back
-            # in one shared place.
             environment.env = {
                 **(environment.env or {}),
                 "CODEX_HOME": str(codex_home),
@@ -707,26 +698,11 @@ class FabricAgentRuntime:
 
 
 def _base_codex_home() -> Path:
-    """The Codex home this process would otherwise use: ``$CODEX_HOME`` when set, else ``~/.codex``.
-
-    Absolute, because the trial's ``auth.json`` symlink points here from a temp dir and a relative
-    target would resolve against that dir instead of this process's working directory.
-    """
     configured = os.environ.get("CODEX_HOME")
     return Path(configured).expanduser().absolute() if configured else Path.home() / ".codex"
 
 
 def _make_codex_home() -> Path:
-    """Create a throwaway Codex home for one trial that shares only the base login.
-
-    Codex keeps SQLite state, session transcripts, logs and (when enabled) memories in its home.
-    Concurrent trials sharing one home race to create that state on a fresh home (NVBug 6694692)
-    and could read each other's sessions, so each trial gets its own. The base ``auth.json`` is
-    symlinked rather than copied: Codex rewrites it in place on token refresh, so refreshed tokens
-    reach the base login instead of leaving it holding a rotated-out refresh token. The home is
-    created outside the evidence dir and removed after the run, so neither the login nor Codex's
-    logs end up in a persisted bundle.
-    """
     home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
     try:
         auth = _base_codex_home() / "auth.json"
@@ -738,16 +714,10 @@ def _make_codex_home() -> Path:
     return home
 
 
-#: Back-off before each attempt to remove a trial's Codex home (see ``_remove_codex_home``).
 _CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
 
 
 def _remove_codex_home(home: Path) -> None:
-    """Delete a trial's Codex home, removing the ``auth.json`` symlink without following it.
-
-    Codex can still be finishing background work (its plugin sync writes into the home) as the
-    runtime stops, recreating part of the tree right after a delete, so re-check and retry briefly.
-    """
     for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
         time.sleep(delay)
         shutil.rmtree(home, ignore_errors=True)

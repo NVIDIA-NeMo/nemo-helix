@@ -184,7 +184,6 @@ def resolve_skill_mode(*, capability_plan: Mapping[str, object], adapter_id: str
 
 
 def is_codex_adapter(adapter_id: str) -> bool:
-    """Whether ``adapter_id`` selects the shipped Codex harness adapter."""
     return adapter_id.strip().lower() == _CODEX_ADAPTER_ID
 
 

@@ -1296,6 +1296,12 @@ def _codex_home_of(agent: Any) -> Path:
 
 @pytest.mark.asyncio
 async def test_codex_trials_each_run_in_their_own_codex_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent Codex trials sharing one home race to create Codex's SQLite state on a fresh home
+    (NVBug 6694692), so each gets its own, with CODEX_SQLITE_HOME pinned too so an inherited value
+    can't re-share it. The login is a symlink because Codex refreshes ``auth.json`` in place: a copy
+    would leave the base login holding a rotated-out refresh token. The home sits outside the
+    evidence dir so the login never reaches a persisted bundle.
+    """
     base_auth = _base_auth()
     base_auth.parent.mkdir()
     base_auth.write_text('{"tokens": {}}', encoding="utf-8")
@@ -1320,7 +1326,6 @@ async def test_codex_trials_each_run_in_their_own_codex_home(tmp_path: Path, mon
     for entry in during_run:
         assert entry["is_dir"]
         assert entry["link"] == base_auth.resolve()
-        # Outside the persisted evidence, so neither the login nor Codex's own files land in a bundle.
         assert work_root not in entry["home"].parents
         assert not entry["home"].exists()
     assert base_auth.read_text(encoding="utf-8") == '{"tokens": {}}'
@@ -1407,7 +1412,6 @@ def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
         real_rmtree(path, ignore_errors=ignore_errors)
         deletes.append(path)
         if len(deletes) == 1:
-            # Codex's plugin sync finishing just after the first delete.
             (path / ".tmp" / "plugins-clone").mkdir(parents=True)
 
     monkeypatch.setattr(fabric_runtime.shutil, "rmtree", rmtree_then_codex_writes_once)

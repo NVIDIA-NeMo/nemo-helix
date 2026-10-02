@@ -174,12 +174,11 @@ def entity_store() -> FakeEntityStore:
 
 @pytest.fixture(autouse=True)
 def _guard_codex_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the Fabric runtime's per-trial Codex homes and base login inside the test's tmp dir.
+    """Point ``CODEX_HOME`` and the temp root at a pytest temp dir.
 
-    A Codex-adapter trial creates a temp Codex home and links the base ``auth.json`` into it; without
-    this, unit tests would do that against the developer's real ``~/.codex``.
+    Codex-adapter trials link the base ``auth.json`` into a temp Codex home; without this guard, unit
+    tests would link the developer's real ``~/.codex`` login.
     """
-    # A sibling of the test's tmp_path, so tests that inspect tmp_path don't see these directories.
     guard = tmp_path_factory.mktemp("codex-home-guard")
     monkeypatch.setenv("CODEX_HOME", str(guard / "base-codex-home"))
     temp_root = guard / "tmp"
