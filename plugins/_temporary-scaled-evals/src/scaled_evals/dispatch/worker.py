@@ -88,7 +88,7 @@ from scaled_evals.dispatch.harbor_dataset_images import (
     effective_image_mode,
     prepare_dataset_images,
 )
-from scaled_evals.dispatch.harbor_opensandbox import APPLIED_EGRESS_SUMMARY_FILENAME
+from scaled_evals.dispatch.harbor_opensandbox import APPLIED_EGRESS_SUMMARY_FILENAME, CLEANUP_REPORT_FILENAME
 from scaled_evals.dispatch.registry import get_backend, get_backend_capabilities
 from scaled_evals.dispatch.runtime_backend import (
     LaunchHandle,
@@ -992,6 +992,13 @@ class Dispatcher:
                     except Exception:  # noqa: BLE001 — runs that never started a sandbox have no summary
                         applied_egress = []
                     row["opensandbox_applied_egress"] = applied_egress
+                    try:
+                        cleanup_report = s3.read_json_object(
+                            s3.evaluation_artifact_key(evaluation_id, CLEANUP_REPORT_FILENAME)
+                        )
+                    except Exception:  # noqa: BLE001 — provenance reports a missing record as unrecorded
+                        cleanup_report = {}
+                    row["opensandbox_cleanup"] = cleanup_report
 
             prefix = f"scaled-evals-evidence-{evaluation_id}-"
             with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
@@ -1995,6 +2002,11 @@ class Dispatcher:
                 teardown_note = self._teardown_failed_runtime_warn(backend, handle)
                 if teardown_note is None:
                     self._acknowledge_campaign_cleanup(conn, row)
+                cleanup_report_note = self._upload_cleanup_report_warn(
+                    evaluation_id, str(row["runtime"]), artifact_root
+                )
+                if cleanup_report_note:
+                    detail = f"{detail}; {cleanup_report_note}"
                 if switchyard_note:
                     detail = f"{detail}; {switchyard_note}"
                 if switchyard_manifest_note:
@@ -2188,6 +2200,7 @@ class Dispatcher:
                 backend,
                 handle,
             )
+            cleanup_report_note = self._upload_cleanup_report_warn(evaluation_id, str(row["runtime"]), artifact_root)
             # Result envelope + summary; artifact/intake notes ride in status_detail.
             extra_detail = "; ".join(
                 note
@@ -2199,6 +2212,7 @@ class Dispatcher:
                     intake_note,
                     harbor_viewer_note,
                     cleanup_note,
+                    cleanup_report_note,
                 ]
                 if note
             )
@@ -2647,6 +2661,29 @@ class Dispatcher:
                 if attempt < attempts:
                     self.sleep(float(attempt))
         return detail
+
+    @staticmethod
+    def _upload_cleanup_report_warn(evaluation_id: str, runtime: str, artifact_root: Path) -> str | None:
+        """Upload the ``harbor_opensandbox`` cleanup report when teardown ran after the artifact sync.
+
+        On success and on a failed status read the worker syncs artifacts before tearing down, so the
+        report the terminator writes would otherwise never reach object storage.
+        """
+        if runtime != HARBOR_OPENSANDBOX_RUNTIME:
+            return None
+        path = artifact_root / CLEANUP_REPORT_FILENAME
+        if not path.is_file():
+            return None
+        try:
+            s3.upload_file(
+                path,
+                s3.evaluation_artifact_key(evaluation_id, CLEANUP_REPORT_FILENAME),
+                content_type="application/json",
+            )
+        except Exception as exc:  # noqa: BLE001 — terminal status must still be recorded
+            LOG.warning("cleanup report upload failed for %s: %s", evaluation_id, exc)
+            return f"cleanup report upload failed: {exc}"
+        return None
 
     def _resume_handle(self, row: dict) -> LaunchHandle:
         raw_handle = row.get("backend_handle")

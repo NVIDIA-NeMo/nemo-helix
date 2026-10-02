@@ -291,12 +291,12 @@ def _handle(tmp_path: Path, **ownership_overrides: str) -> LaunchHandle:
     )
 
 
-def _write_applied(tmp_path: Path, trial: str, sha: str) -> None:
+def _write_applied(tmp_path: Path, trial: str, sha: str, *, sandbox_id: str | None = None, role: str = "agent") -> None:
     trial_dir = tmp_path / "harbor" / "jobs" / "ev_os1" / trial
-    trial_dir.mkdir(parents=True)
-    (trial_dir / backend.APPLIED_EGRESS_FILENAME).write_text(
-        json.dumps({"sandbox_id": f"sb-{trial}", "network_mode": "public", "policy_sha256": sha, "policy": {}})
-    )
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    sandbox_id = sandbox_id or f"sb-{trial}"
+    record = {"sandbox_id": sandbox_id, "role": role, "network_mode": "public", "policy_sha256": sha, "policy": {}}
+    (trial_dir / cleanup.applied_egress_filename(sandbox_id)).write_text(json.dumps(record))
 
 
 class _CleanupRecorder:
@@ -325,6 +325,58 @@ def _applied_summary(tmp_path: Path) -> dict[str, Any]:
     return json.loads((tmp_path / "harbor" / "jobs" / "ev_os1" / backend.APPLIED_EGRESS_SUMMARY_FILENAME).read_text())
 
 
+def _cleanup_report(tmp_path: Path) -> dict[str, Any]:
+    return json.loads((tmp_path / "harbor" / "jobs" / "ev_os1" / backend.CLEANUP_REPORT_FILENAME).read_text())
+
+
+def test_terminator_records_a_clean_cleanup(tmp_path: Path) -> None:
+    recorder = _CleanupRecorder(report={"killed": [], "failed": [], "remaining": []})
+
+    _terminator(tmp_path, recorder)(_handle(tmp_path))
+
+    assert _cleanup_report(tmp_path) == {
+        "status": "clean",
+        "exit_code": 0,
+        "killed": [],
+        "failed": [],
+        "remaining": [],
+        "error": None,
+    }
+
+
+def test_terminator_records_a_failed_cleanup_before_raising(tmp_path: Path) -> None:
+    recorder = _CleanupRecorder(returncode=2, report={"error": "ConnectError: refused"})
+
+    with pytest.raises(RuntimeError, match="ConnectError: refused"):
+        _terminator(tmp_path, recorder)(_handle(tmp_path))
+
+    report = _cleanup_report(tmp_path)
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 2
+    assert report["error"] == "ConnectError: refused"
+
+
+def test_worker_uploads_the_cleanup_report_written_after_the_artifact_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scaled_evals.api import s3
+    from scaled_evals.dispatch.worker import Dispatcher
+
+    uploads: list[tuple[Path, str]] = []
+    monkeypatch.setattr(s3, "upload_file", lambda path, key, *, content_type: uploads.append((path, key)) or 1)
+    backend.write_cleanup_report(tmp_path, {"status": "clean"})
+
+    assert Dispatcher._upload_cleanup_report_warn("ev_os1", "harbor_opensandbox", tmp_path) is None
+    assert Dispatcher._upload_cleanup_report_warn("ev_os1", "sandbox_k8s", tmp_path) is None
+    assert Dispatcher._upload_cleanup_report_warn("ev_os1", "harbor_opensandbox", tmp_path / "missing") is None
+    assert uploads == [
+        (
+            tmp_path / backend.CLEANUP_REPORT_FILENAME,
+            s3.evaluation_artifact_key("ev_os1", backend.CLEANUP_REPORT_FILENAME),
+        )
+    ]
+
+
 def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress(tmp_path: Path) -> None:
     _write_applied(tmp_path, "trial-a", "1" * 64)
     _write_applied(tmp_path, "trial-b", "1" * 64)
@@ -341,9 +393,34 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
     ]
     assert env["OPENSANDBOX_API_KEY"] == "k"
     assert _applied_summary(tmp_path)["sandboxes"] == [
-        {"trial": "trial-a", "sandbox_id": "sb-trial-a", "network_mode": "public", "policy_sha256": "1" * 64},
-        {"trial": "trial-b", "sandbox_id": "sb-trial-b", "network_mode": "public", "policy_sha256": "1" * 64},
+        {
+            "trial": "trial-a",
+            "sandbox_id": "sb-trial-a",
+            "role": "agent",
+            "network_mode": "public",
+            "policy_sha256": "1" * 64,
+        },
+        {
+            "trial": "trial-b",
+            "sandbox_id": "sb-trial-b",
+            "role": "agent",
+            "network_mode": "public",
+            "policy_sha256": "1" * 64,
+        },
     ]
+
+
+def test_applied_egress_keeps_both_sandboxes_of_a_separate_verifier_trial(tmp_path: Path) -> None:
+    _write_applied(tmp_path, "trial-a", "1" * 64, sandbox_id="sb-agent", role="agent")
+    _write_applied(tmp_path, "trial-a", "2" * 64, sandbox_id="sb-verifier", role="verifier")
+
+    records = backend.collect_applied_egress(tmp_path / "harbor" / "jobs" / "ev_os1")
+
+    assert sorted((item["sandbox_id"], item["role"], item["policy_sha256"]) for item in records) == [
+        ("sb-agent", "agent", "1" * 64),
+        ("sb-verifier", "verifier", "2" * 64),
+    ]
+    assert {item["trial"] for item in records} == {"trial-a"}
 
 
 def test_terminator_raises_and_still_writes_applied_egress_when_sandboxes_survive(tmp_path: Path) -> None:
@@ -354,6 +431,9 @@ def test_terminator_raises_and_still_writes_applied_egress_when_sandboxes_surviv
         _terminator(tmp_path, recorder)(_handle(tmp_path))
 
     assert [item["trial"] for item in _applied_summary(tmp_path)["sandboxes"]] == ["trial-a"]
+    report = _cleanup_report(tmp_path)
+    assert report["status"] == "failed"
+    assert report["remaining"] == ["sb-9"]
 
 
 @pytest.mark.parametrize(
@@ -371,6 +451,7 @@ def test_terminator_refuses_foreign_or_incomplete_ownership(tmp_path: Path, owne
         _terminator(tmp_path, recorder)(_handle(tmp_path, **ownership))
 
     assert recorder.calls == []
+    assert _cleanup_report(tmp_path)["status"] == "failed"
 
 
 def test_status_reader_writes_applied_egress_when_terminal(tmp_path: Path) -> None:
