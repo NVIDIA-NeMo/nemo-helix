@@ -546,7 +546,7 @@ The image installs only `default_harness`; other entries under `harnesses` are
 configuration alternatives and are not available in the immutable image.
 Claude, Codex, and DeepAgents use their corresponding `nemo-helix` extras.
 Hermes uses the adapter-only Platform extra and installs the pinned Hermes
-source plus matching Fabric adapter in an isolated Python 3.12 environment.
+source plus matching Fabric adapter in an isolated Python 3.14 environment.
 Every image runs as a non-root `agent` user and serves the packaged agent on
 port `8000`.
 

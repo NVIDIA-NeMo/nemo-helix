@@ -578,7 +578,7 @@ class TestRenderFabricDockerfile:
 
         assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
         assert "apt-get install -y --no-install-recommends g++ gcc ca-certificates curl git" in result
-        assert "uv venv --python 3.12 /opt/hermes-venv" in result
+        assert "uv venv --python 3.14 /opt/hermes-venv" in result
         assert 'm.version("nemo-fabric")' in result
         assert '"nemo-fabric[relay]==${FABRIC_VERSION}"' in result
         assert '"nemo-fabric-adapters-hermes==${FABRIC_VERSION}"' in result

@@ -297,10 +297,10 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 {% endif %}
 {% if install_hermes %}
 # Hermes Agent cannot share the Platform environment. Install the pinned source
-# and matching Fabric adapter in Python 3.12, then let Fabric launch that adapter
+# and matching Fabric adapter in Python 3.14, then let Fabric launch that adapter
 # through its isolated interpreter.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
-    uv venv --python 3.12 /opt/hermes-venv && \\
+    uv venv --python 3.14 /opt/hermes-venv && \\
     git init --quiet /opt/hermes-agent && \\
     git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
     git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\

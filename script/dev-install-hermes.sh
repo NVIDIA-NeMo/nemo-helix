@@ -31,7 +31,7 @@ if [[ -z "${fabric_version}" ]]; then
 fi
 
 if [[ ! -x "${HERMES_PY}" ]]; then
-  uv --no-config venv --python 3.12 "${HERMES_VENV}"
+  uv --no-config venv --python 3.14 "${HERMES_VENV}"
 fi
 
 if [[ -e "${HERMES_CHECKOUT}" && ! -d "${HERMES_CHECKOUT}/.git" ]]; then
