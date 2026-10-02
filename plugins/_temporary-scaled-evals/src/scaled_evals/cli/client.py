@@ -19,7 +19,7 @@ from collections.abc import Iterator
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import click
 import httpx
@@ -144,34 +144,56 @@ def request(client: httpx.Client, method: str, path: str, **kwargs: Any) -> dict
     return resp.json() if resp.content else {}
 
 
-def upload_file(client: httpx.Client, upload: dict[str, Any], path: Path) -> None:
-    """Send a local file to a presigned upload target per its ``upload`` block.
+def _files_upload_url(base_url: str, workspace: str, fileset: str, remote_path: str) -> str:
+    """Build the Files-service upload URL for a broker-upload target.
 
-    Honors the server-supplied method/url/headers verbatim. The presigned URL
-    is self-authenticating, so the API bearer token is stripped — sending it to
-    object storage can clash with the URL's signature.
+    Files is a SIBLING service on the shared gateway, reached at
+    ``<gateway>/apis/files/v2/workspaces/{ws}/filesets/{fs}/-/{path}`` — NOT under the
+    scaled-evals service prefix. ``base_url`` is the client's base (``<origin>[/apis/scaled-evals]/v1``);
+    strip the trailing ``/v1`` and any ``/apis/scaled-evals`` service segment to recover the
+    gateway origin, then append the Files path (mirrors how models/deployments resolves
+    ``apis/files/v2/...`` off the platform base).
     """
-    url = upload.get("url")
-    if not url:
-        raise click.ClickException("response has no upload url")
-    _validate_url(str(url), purpose="upload")
+    root = base_url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")]
+    if root.endswith("/apis/scaled-evals"):
+        root = root[: -len("/apis/scaled-evals")]
+    root = root.rstrip("/")
+    quoted_path = "/".join(quote(seg, safe="") for seg in remote_path.split("/"))
+    return (
+        f"{root}/apis/files/v2/workspaces/{quote(workspace, safe='')}"
+        f"/filesets/{quote(fileset, safe='')}/-/{quoted_path}"
+    )
+
+
+def upload_file(client: httpx.Client, upload: dict[str, Any], path: Path) -> None:
+    """Stream a local file to its Files-service upload target (broker-upload model).
+
+    The control plane no longer brokers the bytes or hand out a presigned URL; it
+    returns the Files coordinates (``workspace``/``fileset``/``path``) and the client
+    uploads directly to the Files service's
+    ``PUT /apis/files/v2/workspaces/{workspace}/filesets/{fileset}/-/{path}`` endpoint. Unlike
+    the old presigned URL, that endpoint authenticates via the platform bearer token, so the
+    token is KEPT on this request (not stripped). The file is streamed, never buffered.
+    """
+    workspace = upload.get("workspace")
+    fileset = upload.get("fileset")
+    remote = upload.get("path")
+    if not (workspace and fileset and remote):
+        raise click.ClickException("response upload target is missing workspace/fileset/path")
+    url = _files_upload_url(str(client.base_url), str(workspace), str(fileset), str(remote))
+    _validate_url(url, purpose="upload", allow_local_http=True)
     size_bytes = path.stat().st_size
-    headers = dict(upload.get("headers", {}))
-    if upload.get("mode") == "gcs_resumable":
-        if size_bytes == 0:
-            headers["Content-Range"] = "bytes */0"
-        else:
-            headers["Content-Range"] = f"bytes 0-{size_bytes - 1}/{size_bytes}"
     try:
         with path.open("rb") as source:
             req = client.build_request(
-                upload.get("method", "PUT"),
+                str(upload.get("method", "PUT")),
                 url,
                 content=source,
-                headers=headers,
+                headers={"content-type": "application/octet-stream"},
             )
             req.headers["content-length"] = str(size_bytes)
-            req.headers.pop("authorization", None)
             resp = client.send(req)
     except httpx.HTTPError as exc:
         raise click.ClickException(f"upload to {url} failed: {exc}") from exc
