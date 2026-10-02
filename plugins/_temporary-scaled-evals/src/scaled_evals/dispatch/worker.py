@@ -60,6 +60,7 @@ from psycopg.rows import dict_row
 from scaled_evals.api import s3
 from scaled_evals.api.build.task_image_identity import verify_stored_task_image
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
+from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.repositories.benchmark_run_repository import BenchmarkRunRepository
@@ -87,6 +88,7 @@ from scaled_evals.dispatch.harbor_dataset_images import (
     effective_image_mode,
     prepare_dataset_images,
 )
+from scaled_evals.dispatch.harbor_opensandbox import APPLIED_EGRESS_SUMMARY_FILENAME
 from scaled_evals.dispatch.registry import get_backend, get_backend_capabilities
 from scaled_evals.dispatch.runtime_backend import (
     LaunchHandle,
@@ -158,6 +160,8 @@ _HARBOR_PROFILE_TEMPLATE_KEYS = ("config", "harbor_config", "template", "harbor_
 # sandbox_k8s stops a sandbox after this long when the profile omits lifecycle_timeout.
 _SANDBOX_LIFECYCLE_DEFAULT_SECONDS = 3600.0
 _SANDBOX_K8S_RUNTIME = "sandbox_k8s"
+# Runtimes whose sandboxes the worker tears down after a successful run, not only on failure or cancel.
+_SUCCESS_TEARDOWN_RUNTIMES = frozenset({_SANDBOX_K8S_RUNTIME, "harbor_opensandbox"})
 
 
 def _profile_lifecycle_timeout_seconds(row: Mapping[str, Any]) -> float | None:
@@ -980,6 +984,14 @@ class Dispatcher:
                 except Exception:  # noqa: BLE001 — most runs have no extra-skill artifact
                     skill_materials = []
                 row["extra_skill_materials"] = skill_materials
+                if row.get("runtime") == HARBOR_OPENSANDBOX_RUNTIME:
+                    try:
+                        applied_egress = s3.read_json_object(
+                            s3.evaluation_artifact_key(evaluation_id, APPLIED_EGRESS_SUMMARY_FILENAME)
+                        ).get("sandboxes", [])
+                    except Exception:  # noqa: BLE001 — runs that never started a sandbox have no summary
+                        applied_egress = []
+                    row["opensandbox_applied_egress"] = applied_egress
 
             prefix = f"scaled-evals-evidence-{evaluation_id}-"
             with tempfile.TemporaryDirectory(prefix=prefix) as tmp:
@@ -2617,8 +2629,8 @@ class Dispatcher:
         backend: RuntimeBackend,
         handle: LaunchHandle,
     ) -> str | None:
-        """Best-effort bounded cleanup for completed Kubernetes sandboxes."""
-        if runtime != "sandbox_k8s":
+        """Best-effort bounded cleanup for completed Kubernetes and OpenSandbox sandboxes."""
+        if runtime not in _SUCCESS_TEARDOWN_RUNTIMES:
             return None
         attempts = 3
         for attempt in range(1, attempts + 1):
