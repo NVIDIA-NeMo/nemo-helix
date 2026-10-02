@@ -3,34 +3,18 @@
 
 import { CreateCustomizationStart } from '@studio/components/CreateCustomizationStart';
 import type { StartSelection } from '@studio/components/CreateCustomizationStart/types';
-import { NewCustomizationForm } from '@studio/components/NewCustomizationForm';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { getWorkspaceCustomizationJobListRoute } from '@studio/routes/utils';
 import {
-  getInitialFormValuesFromState,
-  type CustomizationFormFields,
-} from '@studio/util/forms/customization';
-import { useMemo, useState } from 'react';
-import { useLocation, useSearchParams } from 'react-router';
+  getNewCustomizationFormRoute,
+  getWorkspaceCustomizationJobListRoute,
+} from '@studio/routes/utils';
+import { useNavigate } from 'react-router';
 
+/** The "how do you want to start?" page. The form it leads to lives at `/new/scratch`. */
 export const NewCustomizationRoute = () => {
   const workspace = useWorkspaceFromPath();
-  const [searchParams] = useSearchParams();
-  const initialModel = searchParams.get('model') ?? undefined;
-
-  const { state } = useLocation();
-  const stateValues = useMemo(() => getInitialFormValuesFromState(state), [state]);
-
-  /**
-   * What the start page resolved to. `null` means it is still on screen; a value — possibly
-   * the `undefined` of "build from scratch" — means the form has taken over.
-   */
-  const [started, setStarted] = useState<{ values?: CustomizationFormFields } | null>(null);
-
-  // Arriving with a model to customize or a job to clone already answers how to start, so
-  // those entry points go straight to the form rather than asking a question twice.
-  const isDeepLink = stateValues !== undefined || initialModel !== undefined;
+  const navigate = useNavigate();
 
   useBreadcrumbs({
     items: [
@@ -45,18 +29,15 @@ export const NewCustomizationRoute = () => {
   });
 
   const handleContinue = (selection: StartSelection) => {
-    setStarted({ values: selection.optionId === 'scratch' ? undefined : selection.initialValues });
+    // A template's values go as router state rather than in the URL: they are a whole form
+    // payload, and the provisioning behind them has already happened by the time we get here.
+    navigate(
+      getNewCustomizationFormRoute(workspace),
+      selection.optionId === 'template'
+        ? { state: { initialValues: selection.initialValues } }
+        : undefined
+    );
   };
 
-  if (!isDeepLink && started === null) {
-    return <CreateCustomizationStart workspace={workspace} onContinue={handleContinue} />;
-  }
-
-  return (
-    <NewCustomizationForm
-      workspace={workspace}
-      initialModel={initialModel}
-      initialValues={stateValues ?? started?.values}
-    />
-  );
+  return <CreateCustomizationStart workspace={workspace} onContinue={handleContinue} />;
 };
