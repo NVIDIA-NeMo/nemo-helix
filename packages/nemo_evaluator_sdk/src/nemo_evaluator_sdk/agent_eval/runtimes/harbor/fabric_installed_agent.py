@@ -22,7 +22,10 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
 
 It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabric's install/run
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
-required: the harness extra to install cannot be derived from the config.
+required: the harness extra to install cannot be derived from the config. It is split like a shell
+command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
+(``"nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
 yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstalledAgent._exec``
@@ -106,6 +109,14 @@ def _version_string(name: str, value: str | float | int) -> str:
     if not value.strip():
         raise ValueError(f"{name} must not be empty")
     return value
+
+
+def _quoted_requirements(package: str) -> str:
+    """``fabric_package`` split like a shell command line, each requirement re-quoted as one argument."""
+    requirements = shlex.split(package)
+    if not requirements:
+        raise ValueError("fabric_package must name at least one requirement")
+    return " ".join(shlex.quote(requirement) for requirement in requirements)
 
 
 class FabricInstalledAgent(BaseInstalledAgent):
@@ -300,7 +311,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
             'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi; '
             f"uv python install {python_version}; "
             f"uv venv {shlex.quote(self._venv_path)} --python {python_version} --clear; "
-            f"uv pip install --python {shlex.quote(self._venv_python)} {shlex.quote(package)}"
+            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}"
         )
 
     @property

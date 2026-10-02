@@ -4477,9 +4477,15 @@ components:
           anyOf:
           - $ref: '#/components/schemas/HarborBuiltinAgentSource'
           - $ref: '#/components/schemas/HarborImportedAgentSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
-          description: 'The agent Harbor runs in each task container: a built-in agent
-            by `name`, or your own by `import_path`.'
+          description: "The agent Harbor runs in each task container: a built-in agent\
+            \ by `name`, your own by `import_path`, or a registered platform `agent`\
+            \ (with an optional `environment`). A registered agent is resolved at\
+            \ submit into the SDK's installed Fabric agent with the agent's translated\
+            \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
+            \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
+            \ qualified, as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'
@@ -4544,6 +4550,18 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        agent_setup_timeout_multiplier:
+          title: Agent Setup Timeout Multiplier
+          description: Harbor agent-setup timeout multiplier. An agent that installs
+            itself into the task container (a Fabric harness, a registered agent)
+            needs several times Harbor's default, which is tuned for prebuilt agents.
+          type: number
+          exclusiveMinimum: 0.0
+        agent_timeout_multiplier:
+          title: Agent Timeout Multiplier
+          description: Harbor agent-phase timeout multiplier, applied to every trial.
+          type: number
+          exclusiveMinimum: 0.0
       additionalProperties: false
       type: object
       title: HarborRunnerTarget
