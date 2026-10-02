@@ -1417,3 +1417,20 @@ def test_codex_home_removal_retries_when_codex_writes_after_the_first_delete(
 
     assert not home.exists()
     assert len(deletes) == 2
+
+
+def test_codex_home_is_removed_when_linking_the_login_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    base_auth = _base_auth()
+    base_auth.parent.mkdir()
+    base_auth.write_text("{}", encoding="utf-8")
+
+    def refuse(self: Path, target: Path) -> None:
+        raise OSError("symlinks not permitted")
+
+    monkeypatch.setattr(Path, "symlink_to", refuse)
+
+    with pytest.raises(OSError, match="symlinks not permitted"):
+        fabric_runtime._make_codex_home()
+
+    assert list(Path(tempfile.gettempdir()).iterdir()) == []
+    assert base_auth.exists()

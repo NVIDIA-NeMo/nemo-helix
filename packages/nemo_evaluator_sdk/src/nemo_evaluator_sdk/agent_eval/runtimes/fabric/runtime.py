@@ -431,7 +431,9 @@ class FabricAgentRuntime:
                 skill_paths = installation.skill_paths
 
             if self._isolates_codex_home(agent_config):
-                codex_home = await asyncio.to_thread(_make_codex_home)
+                # Synchronous on purpose (a mkdtemp and a symlink): with no await between creating the
+                # home and recording it, a cancelled task can't leave it behind uncleaned.
+                codex_home = _make_codex_home()
 
             # ``add_skill_path`` appends, so config-declared skills survive.
             task_config = self._compose_config(
@@ -722,9 +724,13 @@ def _make_codex_home() -> Path:
     logs end up in a persisted bundle.
     """
     home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
-    auth = _base_codex_home() / "auth.json"
-    if auth.is_file():
-        (home / "auth.json").symlink_to(auth)
+    try:
+        auth = _base_codex_home() / "auth.json"
+        if auth.is_file():
+            (home / "auth.json").symlink_to(auth)
+    except BaseException:
+        shutil.rmtree(home, ignore_errors=True)
+        raise
     return home
 
 
