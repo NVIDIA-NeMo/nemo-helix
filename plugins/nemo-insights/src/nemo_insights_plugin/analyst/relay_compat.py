@@ -5,7 +5,6 @@
 
 Remove this module once Helix requires a NOOA release whose Relay tool
 middleware returns ToolExecutionResult. Never patch Relay or NOOA globally.
-Follows NVIDIA/NeMo-Fabric#348's compatibility installer.
 """
 
 import asyncio
