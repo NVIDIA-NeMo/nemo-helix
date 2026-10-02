@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ModelFilterControls } from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import type { InferenceParametersProps } from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
 import type { InferenceParams, ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -83,6 +84,8 @@ export interface ModelSelectProps extends ModelSelectParamsProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
+  /** Provider, family and size filters. Spread from `useModelSearch`; omit to hide the filter bar. */
+  modelFilters?: ModelFilterControls;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,
    * directly-selectable items even if they have adapters.
