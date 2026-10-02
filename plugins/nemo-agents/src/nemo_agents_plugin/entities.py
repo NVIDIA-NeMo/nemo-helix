@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agent entity definitions — stored in the NeMo Platform entity store.
+"""Agent entity definitions — stored in the NeMo Helix entity store.
 
 This module contains only entity classes (subclasses of
-:class:`~nemo_platform_plugin.entity.NemoEntity`).  API request/response schemas and
+:class:`~nemo_helix_plugin.entity.NemoEntity`).  API request/response schemas and
 filter models live in :mod:`nemo_agents_plugin.schema`.
 """
 
@@ -15,42 +15,42 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self
 
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     NAT_WORKFLOW_CONFIG_FORMAT as NAT_WORKFLOW_CONFIG_FORMAT,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT as NEMO_AGENTS_SPEC_CONFIG_FORMAT,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     AgentEnvironmentInline as AgentEnvironmentInline,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     ComputeResources as ComputeResources,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     ComputeSpecInline as ComputeSpecInline,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     DeploymentMode as DeploymentMode,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     DeploymentStatus as DeploymentStatus,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     Endpoint as Endpoint,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     EnvironmentSpecInline as EnvironmentSpecInline,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     McpFulfillment as McpFulfillment,
 )
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.types import (
     ModelProviderOverride as ModelProviderOverride,
 )
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
@@ -106,7 +106,7 @@ def is_container_deployment_mode(mode: str) -> bool:
 #
 # The specs are also first-class entities (``agent_environment_spec``,
 # ``agent_compute_spec``, ``agent_environment``) with their own CRUD APIs. Most
-# inline BaseModels come from ``nemo_platform_plugin.agents.types`` so the
+# inline BaseModels come from ``nemo_helix_plugin.agents.types`` so the
 # entity and typed-client contracts share one shape. ``AgentInline`` stays local
 # because persisted agent configs are mutable framework payloads where
 # ``dict[str, Any]`` preserves useful static ergonomics for nested config access.

@@ -10,8 +10,8 @@ from typing import Any
 
 from nemo_guardrails_plugin.constants import GUARDRAILS_DATA_MESSAGE_ROLE
 from nemo_guardrails_plugin.rails import build_guardrails_data
-from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.guardrail.types import GenerationLogOptionsParam
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareError,
     InferenceResponse,

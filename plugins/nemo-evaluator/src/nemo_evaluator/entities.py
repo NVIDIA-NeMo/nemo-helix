@@ -30,12 +30,12 @@ from nemo_evaluator.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_evaluator.shared.metric_bundles.bundles import BundledMetricOutputSpec
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.entities import EntityBase
+from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, Field
 
-# Constants are intentionally local: nmp_common's entity constants are not
+# Constants are intentionally local: nhx_common's entity constants are not
 # re-exported to plugins. Keep these aligned with
-# ``nmp.common.entities.constants``.
+# ``nhx.common.entities.constants``.
 MAX_NAME_LENGTH = 255
 MAX_DESCRIPTION_LENGTH = 1000
 NAME_PATTERN = r"^[\w\-\.]+$"
@@ -58,16 +58,16 @@ REVISION_SELF_FIELDS = frozenset({"content_hash", "revision"})
 #: view of content the digest already covers by another route.
 #:
 #: ``HarborTaskDefinition.config`` qualifies. It is a projection of ``task.toml``, which lives
-#: inside the archive, and Harbor reads the real ``task.toml`` out of the materialized archive at
-#: run time — this copy is never an execution input, only a queryable convenience. ``archive_digest``
+#: inside the task archive, and Harbor reads the real ``task.toml`` out of the materialized tree at
+#: run time — this copy is never an execution input, only a queryable convenience. ``source.files_hash``
 #: is authoritative over every file in that directory including ``task.toml``, so a config change
 #: that actually alters execution or grading already moves the digest. Hashing the projection too
 #: would add no coverage and would make revision history sensitive to Harbor's serialization: a
 #: release that reordered keys or emitted a new defaulted field would cut a revision for
 #: byte-identical files.
 #:
-#: That makes ``archive_digest`` load-bearing. If a Harbor field ever becomes an execution input in
-#: its own right — read from the stored record rather than from the archive — it must be digested.
+#: That makes ``source.files_hash`` load-bearing. If a Harbor field ever becomes an execution input in
+#: its own right — read from the stored record rather than from the tree — it must be digested.
 _DERIVED_SPEC_FIELDS = {"config"}
 
 #: What a *head* record excludes when digesting: its revision pointers, plus derived spec fields.

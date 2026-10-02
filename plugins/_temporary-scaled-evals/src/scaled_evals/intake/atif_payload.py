@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Harbor ATIF → NeMo Platform Intake payload building.
+"""Harbor ATIF → NeMo Helix Intake payload building.
 
 Adapted from an internal ATIF upload helper. Upload via
 :mod:`scaled_evals.intake.client`.

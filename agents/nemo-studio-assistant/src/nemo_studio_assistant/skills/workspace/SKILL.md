@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: workspace
-description: NeMo Platform workspace CRUD playbook through `nemo_api(resource='workspaces')`. Use for workspace creation, listing, retrieval, or deletion.
+description: NeMo Helix workspace CRUD playbook through `nemo_api(resource='workspaces')`. Use for workspace creation, listing, retrieval, or deletion.
 ---
 Workspace tasks
 

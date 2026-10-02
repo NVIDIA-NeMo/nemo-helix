@@ -3,7 +3,7 @@
 
 # NeMo Data Designer Plugin
 
-A NeMo Platform plugin that brings Data Designer into the platform.
+A NeMo Helix plugin that brings Data Designer into the platform.
 
 ## Validate a Config
 

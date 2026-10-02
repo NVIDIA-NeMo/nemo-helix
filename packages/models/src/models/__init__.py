@@ -7,7 +7,7 @@ This module provides extended ModelsResource and AsyncModelsResource
 classes that include convenience methods for OpenAI integration and
 deployment management.
 
-Located at: nemo_platform/models/ (after vendoring)
+Located at: nemo_helix/models/ (after vendoring)
 """
 
 from .resources import AsyncModelsResource as AsyncModelsResource

@@ -6,14 +6,14 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.common.entities.client import ListResponse, PaginationInfo
-from nmp.common.secrets.encryption import (
+from nhx.common.entities.client import ListResponse, PaginationInfo
+from nhx.common.secrets.encryption import (
     SecretKeyEncryptor,
     envelope_decrypt,
     envelope_encrypt,
 )
-from nmp.core.secrets.api.v2.admin.routines import rotate_encryption_keys
-from nmp.core.secrets.entities import PlatformSecret
+from nhx.core.secrets.api.v2.admin.routines import rotate_encryption_keys
+from nhx.core.secrets.entities import HelixSecret
 
 
 def make_secret(
@@ -21,8 +21,8 @@ def make_secret(
     workspace: str,
     encryptor: SecretKeyEncryptor,
     secret_data: str,
-) -> PlatformSecret:
-    """Create a PlatformSecret with envelope encryption.
+) -> HelixSecret:
+    """Create a HelixSecret with envelope encryption.
 
     Uses envelope encryption to encrypt the secret data with a randomly
     generated DEK, then encrypts the DEK with the provided KEK encryptor.
@@ -34,17 +34,17 @@ def make_secret(
         secret_data: The plaintext secret data to encrypt.
 
     Returns:
-        A PlatformSecret with encrypted data, encrypted DEK, and provider set.
+        A HelixSecret with encrypted data, encrypted DEK, and provider set.
     """
     encrypted_data, encrypted_dek, provider = envelope_encrypt(encryptor, secret_data)
-    secret = PlatformSecret(name=name, workspace=workspace, description="Test secret")
+    secret = HelixSecret(name=name, workspace=workspace, description="Test secret")
     secret._data = encrypted_data
     secret._encrypted_dek = encrypted_dek
     secret._secret_provider = provider
     return secret
 
 
-def make_list_response(secrets: list[PlatformSecret]) -> ListResponse[PlatformSecret]:
+def make_list_response(secrets: list[HelixSecret]) -> ListResponse[HelixSecret]:
     """Create a ListResponse with the given secrets."""
     return ListResponse(
         data=secrets,
@@ -58,9 +58,7 @@ def make_list_response(secrets: list[PlatformSecret]) -> ListResponse[PlatformSe
     )
 
 
-def make_paginated_list_responses(
-    secrets: list[PlatformSecret], page_size: int = 100
-) -> list[ListResponse[PlatformSecret]]:
+def make_paginated_list_responses(secrets: list[HelixSecret], page_size: int = 100) -> list[ListResponse[HelixSecret]]:
     """Create a list of paginated ListResponses for the given secrets.
 
     Args:
@@ -135,7 +133,7 @@ async def test_rotate_encryption_keys_happy_path(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 
@@ -183,7 +181,7 @@ async def test_rotate_encryption_keys_idempotent_partial_migration(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 
@@ -232,7 +230,7 @@ async def test_rotate_encryption_keys_rollback_to_v1(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v2_encryptor,
     )
 
@@ -328,7 +326,7 @@ async def test_rotate_encryption_keys_multiple_old_providers(mocker):
         raise ValueError(f"Unknown provider: {name}")
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         side_effect=get_encryptor_by_name,
     )
 
@@ -383,7 +381,7 @@ async def test_rotate_encryption_keys_partial_rollback_after_partial_rollforward
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v2_encryptor,
     )
 
@@ -454,7 +452,7 @@ async def test_rotate_encryption_keys_with_pagination_large_dataset(mocker):
     entity_client.update = AsyncMock()
 
     mocker.patch(
-        "nmp.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
+        "nhx.core.secrets.api.v2.admin.routines.get_encryptor_by_name",
         return_value=v1_encryptor,
     )
 

@@ -5,22 +5,23 @@
 title: "OIDC Setup"
 description: ""
 ---
-Connect NeMo Platform to an external OIDC identity provider (IdP) so users sign in with your organization's identity and receive OAuth2 access tokens for API access.
+
+Connect NeMo Helix to an external OIDC identity provider (IdP) so users sign in with your organization's identity and receive tokens for API access.
 
 **Prerequisites**: You need an OAuth application registered in your IdP with the client ID, issuer URL, and device flow grant enabled. See the [Minimum IdP Checklist](#minimum-idp-checklist) below.
 
 For login after setup, see [Using Authentication](/documentation/access-control/authentication/using-authentication). For the full config reference, see [Auth Configuration](/documentation/access-control/deployment).
 
-## How OIDC Fits in NeMo Platform
+## How OIDC Fits in NeMo Helix
 
 When OIDC is enabled:
 
-1. **Platform configuration** points to your IdP (issuer URL, client ID, optional scope prefix and claim names).
-2. **Discovery**: Clients and the platform discover token and device-auth endpoints from the IdP's `.well-known/openid-configuration` (or from NeMo Platform's aggregated discovery at `{BASE_URL}/apis/auth/discovery`).
-3. **Login**: Users obtain access tokens via **device flow** (browser) or **password grant** (CI) using the CLI.
-4. **API calls**: Requests send the access token in the `Authorization: Bearer <token>` header. NeMo Platform validates the JWT (signature, issuer, audience, expiry) and extracts the principal and scopes for authorization.
+1. **Platform configuration** points to your IdP (issuer URL, client ID, optional claim names, and login scopes).
+2. **Discovery**: Clients and the platform discover token and device-auth endpoints from the IdP's `.well-known/openid-configuration` (or from NeMo Helix's aggregated discovery at `{BASE_URL}/apis/auth/discovery`).
+3. **Login**: Users obtain tokens via **device flow** (browser) or **password grant** (CI) using the CLI, or authorization code flow in Studio.
+4. **API calls**: Clients send the configured bearer token in the `Authorization: Bearer <token>` header. The default is the OAuth access token. NeMo Helix validates signed JWT bearers (signature, issuer, audience when configured, and expiry) and extracts the principal and configured groups for authorization.
 
-OIDC provides the identity; authorization (workspace roles, scopes) works the same as with any other auth method.
+OIDC provides the identity; workspace authorization comes from NeMo Helix role bindings. OAuth `scope` or `scp` values never become group principals or grant roles, but recognized NeMo Helix API scopes such as `platform:read` can narrow which APIs the bearer token can call.
 
 ## Flows Supported
 
@@ -41,60 +42,73 @@ In your IdP (Azure AD, Okta, Keycloak, etc.):
 1. Create a new application registration
 2. Note the **client ID**
 3. Enable **device flow** (device authorization grant)
-4. *(Optional)* Create custom API scopes (`platform:read`, `platform:write`) if you want token-level scope restrictions. See [API Scopes](/documentation/access-control/authorization/api-scopes).
-5. If you created custom scopes, grant admin consent for them (if required by your IdP)
+4. Add the OIDC scopes your login flow needs, such as `openid`, `profile`, `email`, and `offline_access`
+5. If you want OIDC login tokens to carry NeMo Helix API-scope restrictions, expose and consent the NeMo Helix API scopes your deployment requests, such as `platform:read` and `platform:write`
 
-### Step 2: Configure NeMo Platform
+### Step 2: Configure NeMo Helix
 
 Set the OIDC settings in your platform config under `auth.oidc`:
 
 ```yaml
 auth:
- enabled: true
- admin_email: "platform-admin@company.com"
- oidc:
- enabled: true
- issuer: "https://your-idp.example.com/realm"
- client_id: "your-client-id"
- # Optional: strip IdP scope prefix (e.g., Azure AD prepends API URI)
- # scope_prefix: "api://your-client-id/"
- # Optional: override claim names if your IdP uses non-standard names
- # email_claim: "upn"
- # subject_claim: "oid"
- # groups_claim: "groups"
+  enabled: true
+  admin_email: "platform-admin@company.com"
+  oidc:
+    enabled: true
+    issuer: "https://your-idp.example.com/realm"
+    client_id: "your-client-id"
+    # Optional: use the current OIDC ID token as the API bearer.
+    # Keep the default unless your IdP documents this backend pattern.
+    # bearer_token_source: "id_token"
+    # Optional: override claim names if your IdP uses non-standard names
+    # email_claim: "upn"
+    # subject_claim: "oid"
+    # Groups are identity claims used for workspace role bindings.
+    # groups_claim: "groups"
+    # Optional: for IdPs that require resource-qualified API scopes.
+    # Clients prepend this to short Helix API scopes during login, and
+    # NeMo Helix strips it from returned token scopes before authorization.
+    # scope_prefix: "api://your-client-id/"
 ```
+
+By default, NeMo Helix extracts group principals from the JWT `groups` claim. If your IdP sends group or entitlement values such as `employee`, `ml-team`, or `employee.profile.read` in a different claim, set `groups_claim` to that claim name, then grant roles to those exact principal strings. Values inside the OAuth `scope` or `scp` claim are not group principals and do not grant workspace roles.
+
+### Selecting the API bearer
+
+`bearer_token_source` controls which token from the current OIDC session is sent to NeMo Helix APIs:
+
+- `access_token` (default) preserves the standard OAuth resource-server flow and existing provider behavior.
+- `id_token` supports providers that issue opaque access tokens but explicitly document their signed ID token as the browser application's backend credential.
+
+This setting applies to Studio, CLI login, and SDK-managed user-token refresh. Studio reads the token from the current `oidc-client-ts` user on every request, including after silent renewal; it does not retain a separate copy of the initial ID token. The CLI fails authentication instead of falling back to the access token when an ID token is required but absent.
+
+Do not use `id_token` solely to work around an opaque access token. Confirm the provider contract, configure `audience`, and verify that the ID token contains the identity and group claims used by your RBAC policy. The `audience` setting defaults to unset; when it is unset, NeMo Helix validates the token signature, issuer, and expiry but does not require a specific audience.
 
 ### Step 3: Seed Auth Role Bindings
 
-The `auth.admin_email` setting identifies the bootstrap admin, but the role binding is created by the platform seed task. Docker quickstart runs platform seed automatically, and Helm deployments run the platform-seed Job by default. For source installs, start services with `platform.seed_on_startup: true` or `NMP_SEED_ON_STARTUP=true`; if services are already running, run the seed task manually after services are healthy:
+The `auth.admin_email` setting identifies the bootstrap admin, but the role binding is created by the platform seed task. Docker quickstart runs platform seed automatically, and Helm deployments run the platform-seed Job by default. For source installs, start services with `platform.seed_on_startup: true` or `NHX_SEED_ON_STARTUP=true`; if services are already running, run the seed task manually after services are healthy:
 
 ```bash
-# Set NMP_BASE_URL first if services are not on http://localhost:8080.
+# Set NHX_BASE_URL first if services are not on http://localhost:8080.
 curl -sf http://localhost:8080/health/ready
-uv run python -m nmp.platform_seed
+uv run python -m nhx.platform_seed
 ```
 
-The seed task creates the **PlatformAdmin** binding for `auth.admin_email`, the wildcard **Editor** binding for the `default` workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for `system` that preserves open workspace creation by default. Without this step, OIDC login can succeed while admin operations, workspace creation, and access to the default and system workspaces can still return `403 Forbidden`.
+The seed task creates the **HelixAdmin** binding for `auth.admin_email`, the wildcard **Editor** binding for the `default` workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for `system` that preserves open workspace creation by default. Without this step, OIDC login can succeed while admin operations, workspace creation, and access to the default and system workspaces can still return `403 Forbidden`.
 
-### Step 4: Configure Scopes (Optional)
+### Step 4: Configure Login Scopes (Optional)
 
-This step is only needed if you created custom API scopes in Step 1. If you skip scopes, NeMo Platform still enforces RBAC — scopes add an additional token-level restriction on top. See [API Scopes](/documentation/access-control/authorization/api-scopes).
-
-If you are using scopes, configure the default scopes requested during login:
+Configure the OAuth scopes requested during CLI and Studio login:
 
 ```yaml
 auth:
- oidc:
- default_scopes: "openid profile email offline_access platform:read platform:write"
+  oidc:
+    default_scopes: "platform:read platform:write openid profile email offline_access"
 ```
 
-If your IdP prefixes scopes (e.g., Azure AD uses `api://client-id/platform:read`), set `scope_prefix` so NeMo Platform strips it before authorization:
+These are the scopes requested from the IdP during login. Most deployments request OIDC protocol scopes such as `openid`, `profile`, `email`, and `offline_access`. A deployment can also request NeMo Helix API scope names, such as `platform:read` and `platform:write`, when those scopes are exposed by the IdP application. If your IdP application does not expose NeMo Helix API scopes, omit them; RBAC still applies.
 
-```yaml
-auth:
- oidc:
- scope_prefix: "api://your-client-id/"
-```
+Keep short NeMo Helix scope names in `default_scopes`. When auth discovery includes a resource scope prefix, the CLI shows both forms. For example, the login prompt might display `platform:read (api://<app-client-id>/platform:read)`: `platform:read` is the NeMo Helix scope name, and the parenthesized value is the OAuth scope sent to the IdP. Users should pass the short NeMo Helix scope names to the CLI; the CLI applies the discovered prefix automatically.
 
 ### Step 5: Verify
 
@@ -118,16 +132,21 @@ nemo workspaces list
 |-------|------|-------------|
 | `enabled` | bool | Enable OIDC token validation. |
 | `issuer` | string | IdP issuer URL (e.g., `https://login.microsoftonline.com/<tenant>/v2.0`). |
-| `client_id` | string | OAuth client ID for NeMo Platform. |
+| `client_id` | string | OAuth client ID for the NeMo Helix deployment and its default interactive login flows. |
+| `cli_client_id` | string | Optional public-client ID dedicated to CLI user authentication; defaults to `client_id`. |
+| `bearer_token_source` | `access_token` or `id_token` | Token from the IdP response that clients send to NeMo Helix APIs (default: `access_token`). |
 | `additional_issuers` | list | Extra issuer URLs to accept (e.g., Azure AD v1 format). |
-| `audience` | string | Expected token audience (defaults to `client_id`). |
+| `audience` | string | Expected token audience. Unset by default; validation is skipped when unset. |
 | `email_claim` | string | JWT claim for email (default: `email`). |
 | `subject_claim` | string | JWT claim for subject (default: `sub`). |
 | `groups_claim` | string | JWT claim for groups (default: `groups`). |
-| `default_scopes` | string | Space-separated scopes requested when user does not pass `--scope`. |
-| `scope_prefix` | string | Prefix stripped from token scopes before authorization. |
+| `default_scopes` | string | Space-separated OAuth scopes requested when the user does not pass `--scope`. These can include OIDC protocol scopes and NeMo Helix API scopes exposed by the IdP application. |
+| `scope_prefix` | string | Optional provider scope prefix. Clients prepend it to short NeMo Helix API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. |
 | `token_endpoint` | string | Override token endpoint (otherwise discovered from IdP). |
 | `device_authorization_endpoint` | string | Override device auth endpoint. |
+| `device_authorization_requires_device_id` | bool | Add a stable, locally generated `device_id` to CLI device authorization requests (default: `false`). |
+| `device_authorization_display_name` | string | Optional name shown by the IdP during device authorization. |
+| `device_token_request_includes_scope` | bool | Include `scope` in device-flow token polling requests; disable for providers that reject it (default: `true`). |
 | `jwks_uri` | string | Override JWKS URI. |
 
 ## Minimum IdP Checklist
@@ -136,24 +155,35 @@ Regardless of IdP, ensure:
 
 1. You have registered an OAuth application and have the **client ID** (and client secret if required).
 2. The application supports the **device authorization grant** (for `nemo auth login`).
-3. The access token includes claims for email, subject, and groups (or you have configured `email_claim`, `subject_claim`, `groups_claim` to match your IdP's claim names).
-4. *(If using scopes)* Custom API scopes (`platform:read`, `platform:write`) are exposed, included in access tokens, and admin consent is granted if required.
+3. The selected bearer token includes claims for email, subject, and groups (or you have configured `email_claim`, `subject_claim`, `groups_claim` to match your IdP's claim names).
+4. Any group or entitlement values that should grant NeMo roles are present in the configured `groups_claim`.
+5. If `default_scopes` includes NeMo Helix API scopes, those scopes are exposed by the IdP application and consented according to the provider's model.
+
+For providers that issue opaque access tokens but signed ID tokens, set `bearer_token_source: id_token` only when
+the NeMo Helix deployment is intentionally configured to validate that ID token's issuer, signature, and audience.
+
+When `device_authorization_requires_device_id` is enabled, the CLI stores a random installation identifier at
+`$XDG_STATE_HOME/nhx/oidc-device-id` (or `~/.local/state/nhx/oidc-device-id`) with mode `0600`. It reuses that value
+for later logins. If `device_authorization_display_name` is unset, the CLI sends `NeMo Helix CLI`.
+Set `device_token_request_includes_scope: false` when the provider accepts scopes only on the initial device
+authorization request. The default remains enabled for providers that require the scope again while polling.
 
 ## Claim mapping
 
-NeMo Platform maps JWT claims to [trusted identity headers](/documentation/access-control/security-model#trusted-identity-headers) using `email_claim`, `subject_claim`, and `groups_claim` (defaults: `email`, `sub`, `groups`). Override them when your IdP uses different claim names — values must match what you use for workspace members and authorization.
+NeMo Helix maps JWT claims to [trusted identity headers](/documentation/access-control/security-model#trusted-identity-headers) using `email_claim`, `subject_claim`, and `groups_claim` (defaults: `email`, `sub`, `groups`). Override them when your IdP uses different claim names. Group values must match the principal strings you use for workspace members and role bindings.
 
 | Purpose | Config key | Default | Header |
 |---------|------------|---------|--------|
-| Subject (Principal ID) | `subject_claim` | `sub` | `X-NMP-Principal-Id` |
-| Email | `email_claim` | `email` | `X-NMP-Principal-Email` |
-| Groups | `groups_claim` | `groups` | `X-NMP-Principal-Groups` |
+| Subject (Principal ID) | `subject_claim` | `sub` | `X-NHX-Principal-Id` |
+| Email | `email_claim` | `email` | `X-NHX-Principal-Email` |
+| Groups | `groups_claim` | `groups` | `X-NHX-Principal-Groups` |
 
 <Note>
 
-Group values are extracted from the JWT and included in the `X-NMP-Principal-Groups` header and OPA policy data, but **automatic group-to-role mapping is not yet implemented**. Role assignments must be made explicitly via the members API. See [Managing Access](/documentation/access-control/authorization/managing-access).
+For ordinary OIDC bearer validation, group values come from the configured `groups_claim`. They are included in the `X-NHX-Principal-Groups` header and OPA policy data, where they can match explicit workspace member or role-binding principals. Group names may contain dots, for example `employee.profile.read`. OAuth scopes from `scope` or `scp` do not become group principals; recognized NeMo Helix API scopes in those claims can still restrict API access. See [Managing Access](/documentation/access-control/authorization/managing-access).
 
 </Note>
+
 ## Provider-Specific Notes
 
 - **Azure AD**: See [Azure AD Setup](/documentation/access-control/authentication/providers/azure-ad-entra-id) (issuer, `additional_issuers`, device flow, claim overrides).

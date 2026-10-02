@@ -5,7 +5,7 @@ Read this file for agentic task-driven evaluation, direct SDK runners, platform
 
 ## Choose standalone SDK or platform job
 
-Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-platform:
+Use `AgentEvaluator` for lightweight in-process evaluation that does not require a running nemo-helix:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
@@ -39,7 +39,7 @@ Submit the plugin job when platform execution is required:
 
 ```bash
 nemo evaluator agent-evaluate explain
-nemo evaluator agent-evaluate submit \
+nemo evaluator agent-evaluate \
   --spec-file skills/nemo-evaluator-plugin/assets/specs/fabric_agent_eval.json
 ```
 
@@ -100,6 +100,7 @@ from nemo_evaluator.api.schemas import TaskInputs
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalTaskInput,
+    FabricConfigSource,
     FabricRunnerTarget,
 )
 
@@ -113,10 +114,12 @@ spec = AgentEvalInputSpec(
         )
     ],
     target=FabricRunnerTarget(
-        config={
-            "metadata": {"name": "geography-smoke"},
-            "harness": {"adapter_id": "nvidia.fabric.codex"},
-        }
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "geography-smoke"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+            }
+        )
     ),
     max_concurrent_tasks=2,
     fail_fast=False,
@@ -137,7 +140,7 @@ survives into taskset-driven runs; inline tasks are for one-off submissions.
 
 Set `views` on a task to roll two or more of its metric outputs into one named,
 reported score. See
-[Score by Component](https://docs.nvidia.com/nemo-platform/documentation/evaluate-models/agent-eval/score-by-component).
+[Score by Component](https://docs.nvidia.com/nemo-helix/documentation/evaluate-models/agent-eval/score-by-component).
 
 ## Choose a platform target
 
@@ -153,18 +156,50 @@ reported score. See
 `AgentTarget` owns its agent request configuration. Runner targets are resolved
 to an `AgentTaskRunner` inside the job runtime.
 
+A Fabric runner target's `source` is either an inline config or a **registered
+agent**; the two shapes share no field. With an agent, the service resolves it
+at submit: it looks the agent up, binds its models to the workspace Inference
+Gateway exactly as a deployment would, merges the optional `environment` spec,
+and translates the platform `agent.yaml` into the target's `resolved_config`,
+kept next to the qualified `agent` ref. The agent runs fresh for every trial;
+an existing deployment is never called.
+
+```python
+from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget, HarborRunnerTarget
+
+on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
+```
+
+On Harbor the resolved agent runs as the SDK's installed Fabric agent with its
+config in `agent_kwargs.fabric_config`; a registered source has no `model_name`.
+
+There is no model override — a different model is a different registered
+agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
+same spec `nemo agents deploy` takes): MCP fulfilments redirect servers the agent
+declares (mocks), `env` adds process env, `secrets` binds `{ENV_NAME: ref}` and
+travels as `env_secrets` on the resolved target; a name the submitter's
+`env_secrets` also binds keeps the submitter's ref. Skills and prompts the
+config refers to by relative path are copied at submit into a job-owned
+`agent-files-<id>` FileSet (deleted when the run completes) and staged from that
+copy. Only `nemo-agents-spec-v1` agents resolve; a legacy `nat-workflow-v1`
+agent is rejected at submit. When publishing to Intake,
+`publication.intake.agent_name` defaults to the registered agent's name.
+
 For [Fabric](https://github.com/nvidia/nemo-fabric), pass one complete `agent.yaml` as a JSON-shaped `config`; the
 `harness.adapter_id` selects the harness:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
 target = FabricRunnerTarget(
-    config={
-        "metadata": {"name": "regression-suite"},
-        "harness": {"adapter_id": "nvidia.fabric.codex"},
-    },
-    model="<provider>/<model>",
+    source=FabricConfigSource(
+        config={
+            "metadata": {"name": "regression-suite"},
+            "harness": {"adapter_id": "nvidia.fabric.codex"},
+        },
+        model="<provider>/<model>",
+    )
 )
 ```
 
@@ -176,7 +211,7 @@ Use `discover_gym_tasks` to turn Gym JSONL rows into task definitions and attach
 `GymRewardMetric` to score each rollout's reward. A standalone
 `GymAgentTaskRunner` requires `agent`, `agent_config`, and `resources_server`.
 
-For a durable job that uses components already installed in `nmp-gym-tasks`,
+For a durable job that uses components already installed in `nhx-gym-tasks`,
 submit the validated live runner as shown above or build a `GymRunnerTarget`:
 
 ```python
@@ -194,9 +229,9 @@ target = GymRunnerTarget(
 The caller chooses between a local SDK run and a durable platform job. A local
 run executes Evaluator and the `gym` subprocesses on the caller's machine. For
 a platform job, sandbox placement is an operator decision: sandbox-enabled
-deployments run Gym in a separate `nmp-gym-host`; deployments without
+deployments run Gym in a separate `nhx-gym-host`; deployments without
 OpenSandbox can run trusted, built-in Gym components together with Evaluator in
-`nmp-gym-tasks`. The latter is the colocated compatibility path, not a separate
+`nhx-gym-tasks`. The latter is the colocated compatibility path, not a separate
 submission interface.
 
 A custom environment supplies Gym component configuration, code, and
@@ -209,7 +244,7 @@ FileSet-backed environments require sandboxed platform execution. Evaluator
 compiles them into two ordered Jobs steps:
 
 1. `stage-environment` downloads the FileSet onto job-scoped shared storage.
-2. `agent-evaluate` provisions `nmp-gym-host` with the environment mounted
+2. `agent-evaluate` provisions `nhx-gym-host` with the environment mounted
    read-only, collects and scores rollouts, then destroys the host.
 
 ```python
@@ -230,9 +265,11 @@ Set `agent_ref_name` when the package registers that agent under a different
 instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
-A live `GymAgentTaskRunner` cannot carry the wire-only `environment`,
-`agent_ref_name`, or `env_secrets` fields. Build `GymRunnerTarget` explicitly
-and submit it in an agent-evaluate spec for those cases.
+From a live runner, `client.evaluator.submit(tasks=..., target=runner,
+placement=GymPlacement(...))` builds this target without rebuilding it by hand.
+`env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
+from your environment); `environment` and `agent_ref_name` live on the
+`GymPlacement`, because only a deployment can honor them.
 
 `max_concurrent_tasks` limits tasks evaluated concurrently. Target-specific
 settings such as inference parallelism or Harbor
@@ -276,11 +313,12 @@ A standalone run returns an `AgentEvalResult`:
   metric outputs, status, and diagnostics.
 - `result.trials` contains each agent output, its evidence, and its
   `completed`, `partial`, or `failed` status.
-- `result.run_id` identifies the run; `result.benchmark` contains its grouping
-  metadata.
+- `result.run_id` identifies the run; `result.metadata` contains its run
+  provenance — labels, target identity, timings, and SDK version.
 
-When standalone `AgentEvalRunConfig.output_dir` is set, the same information is
-written as a run bundle:
+Call `result.persist()` to write the same information as a run bundle. It
+defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
+`output_dir=` to choose another location:
 
 | File | Contents |
 | --- | --- |
@@ -289,7 +327,7 @@ written as a run bundle:
 | `trials.jsonl` | Trial outputs, evidence, metadata, and status |
 | `tasks.jsonl` | Tasks included in the run |
 | `run.json` | Run ID and artifact manifest |
-| `benchmark.json` | Benchmark-grouping metadata |
+| `metadata.json` | Run provenance — labels, target identity, timings, and SDK version |
 | `report.html` | Browsable dashboard when dashboard generation is enabled |
 
 Use the in-memory result for programmatic follow-up and the bundle for
@@ -347,7 +385,7 @@ that metadata.
 ```python
 from pathlib import Path
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     discover_harbor_tasks,
@@ -369,10 +407,10 @@ result = await AgentEvaluator().run(tasks=tasks, target=runner)
 **Platform SDK:**
 
 ```python
-from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
 
 target = HarborRunnerTarget(
-    agent_name="oracle",
+    source=HarborBuiltinAgentSource(name="oracle"),
     n_attempts=1,
     n_concurrent_trials=2,
     max_retries=0,
@@ -394,11 +432,14 @@ target = HarborRunnerTarget(
   emitted. Missing or Boolean values are omitted with a diagnostic; usable siblings are kept.
 - A secondary reward discovered for one task does not apply to another task.
 
-Use `agent_import_path` for a custom Harbor agent and `agent_model_name` when
-the agent requires a model. Pass the agent's constructor arguments as
+`source` names exactly one agent: `HarborBuiltinAgentSource(name=...)` or
+`HarborImportedAgentSource(import_path=...)` for a custom Harbor agent; both take
+`model_name` when the agent requires a model. Pass the agent's constructor arguments as
 `agent_kwargs` (a JSON mapping, Harbor's `--ak key=value`). Do not put secrets
-in `agent_kwargs`: Harbor persists them unredacted in the job directory's
-`config.json`, and run provenance redacts only credential-looking keys. Inject
-secrets into the job environment instead. The module must be importable in the
-execution environment. Durable execution additionally requires an execution image and
+in `agent_kwargs`: Harbor persists them unredacted across the job directory and
+needs the real value to run. Credential-shaped plaintext is rejected at submit
+time, but that check recognizes common key names and token formats, not every
+secret. Put them in `env_secrets` (`{ENV_NAME: secret-ref}`) instead; the service resolves
+the reference into the job environment and Harbor hands the agent a `${ENV_NAME}`
+template. The module must be importable in the execution environment. Durable execution additionally requires an execution image and
 runtime that provide Harbor and Docker access.

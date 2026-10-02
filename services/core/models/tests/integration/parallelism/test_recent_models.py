@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("torch", reason="torch required for parallelism API tests")
 
-from nmp.core.models.parallelism.api import estimate_parallelization, find_minimum_gpus
+from nhx.core.models.parallelism.api import estimate_parallelization, find_minimum_gpus
 
 # TODO: Mock HuggingFace API calls instead of accessing real gated models
 REQUIRES_HF_TOKEN = pytest.mark.skip(

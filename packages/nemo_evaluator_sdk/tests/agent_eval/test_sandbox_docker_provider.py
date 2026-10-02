@@ -229,7 +229,7 @@ async def test_close_force_removes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_run_timeout_redacts_secrets_in_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real _run interpolates argv into its TimeoutError, and create()'s argv carries `-e KEY=<secret>`.
-    # FabricContainerRuntime catches that error and persists it into error.json, so the message must
+    # FabricAgentRuntime (sandbox mode) catches that error and persists it into error.json, so the message must
     # redact secrets rather than leak the API key into evaluation artifacts.
     from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers import docker as docker_mod
 

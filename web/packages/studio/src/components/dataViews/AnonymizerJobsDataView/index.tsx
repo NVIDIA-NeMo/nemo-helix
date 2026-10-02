@@ -11,6 +11,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import {
@@ -38,6 +39,7 @@ type AnonymizerJobWithId = AnonymizerJob & { id: string };
 
 export const AnonymizerJobsDataView: FC = () => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const workspace = useWorkspaceFromPath();
 
   const dataViewState = useStudioDataViewState({
@@ -198,7 +200,9 @@ export const AnonymizerJobsDataView: FC = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row) => navigate(getAnonymizerJobRoute(workspace, row.name))}
+        onRowClick={(row, _index, event) =>
+          openRow(event, getAnonymizerJobRoute(workspace, row.name))
+        }
         renderBulkActions={({ selectedRows }) => (
           <Button
             kind="tertiary"

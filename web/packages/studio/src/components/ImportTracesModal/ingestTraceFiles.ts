@@ -77,17 +77,36 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-/** Keeps a long tail of per-record failures from burying the summary. */
-const cap = (label: string, errors: string[]): ImportTraceResult[] => {
-  const shown = errors.slice(0, MAX_ERROR_ROWS).map((message) => ({
+/**
+ * Turns a file's failures into one outcome row — the row the modal counts — followed by the
+ * remaining failures as detail, with a long tail replaced by a count so it does not bury the
+ * summary. Pass `underSuccess` when the file already reports a success row: every failure then
+ * reads as detail under it, so a partial import is not counted as a failed file.
+ */
+const cap = (label: string, errors: string[], underSuccess = false): ImportTraceResult[] => {
+  const [first, ...rest] = errors;
+  if (first === undefined) return [];
+  const shown = rest.slice(0, MAX_ERROR_ROWS - 1).map((message) => ({
     label,
     status: 'error' as const,
     message,
+    detail: true,
   }));
-  const hidden = errors.length - shown.length;
-  return hidden > 0
-    ? [...shown, { label, status: 'error', message: `...and ${plural(hidden, 'more failure')}.` }]
-    : shown;
+  const hidden = rest.length - shown.length;
+  return [
+    { label, status: 'error', message: first, ...(underSuccess && { detail: true }) },
+    ...shown,
+    ...(hidden > 0
+      ? [
+          {
+            label,
+            status: 'error' as const,
+            message: `...and ${plural(hidden, 'more failure')}.`,
+            detail: true,
+          },
+        ]
+      : []),
+  ];
 };
 
 const chunk = <T>(items: T[], size: number): T[][] => {
@@ -135,7 +154,7 @@ const ingestAtifFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
@@ -206,7 +225,7 @@ const ingestSpansFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
@@ -236,13 +255,11 @@ const ingestChatCompletionsFile = async (
     }
   }
 
-  const results = cap(label, errors);
+  const results = cap(label, errors, imported > 0);
   if (imported > 0) {
     results.unshift({
       label,
       status: 'success',
-      // Chat-completions ingest carries no agent field, so these spans are queryable
-      // telemetry but never attach to an agent.
       message: `${plural(imported, 'model call')} imported, not attributed to an agent.`,
     });
   }
@@ -257,16 +274,17 @@ const ingestOtlpFile = async (
     const response = await ingestOtlpTraces(workspace, file);
     const errors = response?.errors ?? [];
     return {
-      results:
-        errors.length > 0
-          ? cap(label, errors)
-          : [
-              {
-                label,
-                status: 'success',
-                message: 'OTLP protobuf imported; the agent name comes from its own spans.',
-              },
-            ],
+      results: [
+        {
+          label,
+          status: 'success',
+          message:
+            errors.length > 0
+              ? `OTLP protobuf imported, ${plural(errors.length, 'record')} rejected; the agent name comes from its own spans.`
+              : 'OTLP protobuf imported; the agent name comes from its own spans.',
+        },
+        ...cap(label, errors, true),
+      ],
       agents: [],
     };
   } catch (error) {

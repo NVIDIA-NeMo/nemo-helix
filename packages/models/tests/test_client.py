@@ -6,17 +6,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from models import parse_workspace_name_ref
-from nemo_platform import (
+from nemo_helix import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
-    AsyncNeMoPlatform,
-    NeMoPlatform,
+    AsyncNeMoHelix,
+    NeMoHelix,
     NotFoundError,
 )
-from nemo_platform.types.inference import ModelDeployment, ModelProvider
-from nemo_platform.types.inference.gateway.openai.v1 import OpenAIModelResp
-from nemo_platform.types.models import ModelEntity
+from nemo_helix.types.inference import ModelDeployment, ModelProvider
+from nemo_helix.types.inference.gateway.openai.v1 import OpenAIModelResp
+from nemo_helix.types.models import ModelEntity
 
 # ============================================================================
 # Fixtures
@@ -25,42 +25,42 @@ from nemo_platform.types.models import ModelEntity
 
 @pytest.fixture
 def sdk():
-    """Create a real NeMoPlatform SDK instance for testing."""
-    return NeMoPlatform(base_url="https://nmp.example.com/")
+    """Create a real NeMoHelix SDK instance for testing."""
+    return NeMoHelix(base_url="https://nhx.example.com/")
 
 
 @pytest.fixture
 def sdk_with_workspace():
     """Create SDK with client-level workspace set."""
-    return NeMoPlatform(base_url="https://nmp.example.com/", workspace="client-ws")
+    return NeMoHelix(base_url="https://nhx.example.com/", workspace="client-ws")
 
 
 @pytest.fixture
 def sdk_no_trailing_slash():
     """Create SDK with base_url without trailing slash."""
-    return NeMoPlatform(base_url="https://nmp.example.com")
+    return NeMoHelix(base_url="https://nhx.example.com")
 
 
 @pytest.fixture
 def async_sdk():
-    """Create a real AsyncNeMoPlatform SDK instance for testing."""
-    return AsyncNeMoPlatform(base_url="https://nmp.example.com/")
+    """Create a real AsyncNeMoHelix SDK instance for testing."""
+    return AsyncNeMoHelix(base_url="https://nhx.example.com/")
 
 
 @pytest.fixture
 def async_sdk_with_workspace():
     """Create async SDK with client-level workspace set."""
-    return AsyncNeMoPlatform(base_url="https://nmp.example.com/", workspace="client-ws")
+    return AsyncNeMoHelix(base_url="https://nhx.example.com/", workspace="client-ws")
 
 
 def _not_found_error() -> NotFoundError:
-    request = httpx.Request("GET", "https://nmp.example.com/apis/inference-gateway/openai/v1/models/model-a")
+    request = httpx.Request("GET", "https://nhx.example.com/apis/inference-gateway/openai/v1/models/model-a")
     response = httpx.Response(404, request=request)
     return NotFoundError("not found", response=response, body={"detail": "not found"})
 
 
 def _api_status_error(status_code: int) -> APIStatusError:
-    request = httpx.Request("GET", "https://nmp.example.com/apis/inference-gateway/openai/v1/models/model-a")
+    request = httpx.Request("GET", "https://nhx.example.com/apis/inference-gateway/openai/v1/models/model-a")
     response = httpx.Response(status_code, request=request)
     return APIStatusError("gateway not ready", response=response, body={"detail": "gateway not ready"})
 
@@ -93,7 +93,7 @@ def test_get_base_url_str_removes_trailing_slash(sdk):
     """Test that trailing slash is removed from base URL."""
     result = sdk.models._get_base_url_str()
 
-    assert result == "https://nmp.example.com"
+    assert result == "https://nhx.example.com"
     assert not result.endswith("/")
 
 
@@ -101,7 +101,7 @@ def test_get_base_url_str_handles_no_trailing_slash(sdk_no_trailing_slash):
     """Test that URLs without trailing slash are unchanged."""
     result = sdk_no_trailing_slash.models._get_base_url_str()
 
-    assert result == "https://nmp.example.com"
+    assert result == "https://nhx.example.com"
 
 
 # Tests for get_openai_route_base_url
@@ -111,14 +111,14 @@ def test_get_openai_route_base_url_explicit_workspace(sdk):
     """Test URL generation with explicit workspace."""
     result = sdk.models.get_openai_route_base_url(workspace="default")
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
 
 
 def test_get_openai_route_base_url_custom_workspace(sdk):
     """Test URL generation with custom workspace name."""
     result = sdk.models.get_openai_route_base_url(workspace="my-workspace")
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/my-workspace/openai/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/my-workspace/openai/-/v1"
 
 
 def test_get_openai_route_base_url_with_trailing_slash(sdk):
@@ -126,14 +126,14 @@ def test_get_openai_route_base_url_with_trailing_slash(sdk):
     result = sdk.models.get_openai_route_base_url(workspace="default")
 
     assert "//v2" not in result
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
 
 
 def test_get_openai_route_base_url_without_trailing_slash(sdk_no_trailing_slash):
     """Test URL generation when base_url has no trailing slash."""
     result = sdk_no_trailing_slash.models.get_openai_route_base_url(workspace="default")
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
 
 
 # Tests for get_provider_route_openai_url
@@ -149,7 +149,7 @@ def test_get_provider_route_openai_url_appends_v1(sdk):
     result = sdk.models.get_provider_route_openai_url(provider)
 
     assert (
-        result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/openai-provider/-/v1"
+        result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/openai-provider/-/v1"
     )
 
 
@@ -162,7 +162,7 @@ def test_get_provider_route_openai_url_no_v1_when_host_ends_with_v1(sdk):
 
     result = sdk.models.get_provider_route_openai_url(provider)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-provider/-"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-provider/-"
 
 
 def test_get_provider_route_openai_url_no_v1_when_host_ends_with_v1_slash(sdk):
@@ -174,7 +174,7 @@ def test_get_provider_route_openai_url_no_v1_when_host_ends_with_v1_slash(sdk):
 
     result = sdk.models.get_provider_route_openai_url(provider)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-provider/-"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/nim-provider/-"
 
 
 def test_get_provider_route_openai_url_custom_workspace(sdk):
@@ -186,7 +186,7 @@ def test_get_provider_route_openai_url_custom_workspace(sdk):
 
     result = sdk.models.get_provider_route_openai_url(provider)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/production/provider/my-provider/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/production/provider/my-provider/-/v1"
 
 
 # Tests for get_model_entity_route_openai_url
@@ -201,7 +201,7 @@ def test_get_model_entity_route_openai_url_default_workspace(sdk):
     result = sdk.models.get_model_entity_route_openai_url(model_entity)
 
     assert (
-        result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/model/llama3-70b-instruct/-/v1"
+        result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/model/llama3-70b-instruct/-/v1"
     )
 
 
@@ -213,7 +213,7 @@ def test_get_model_entity_route_openai_url_custom_workspace(sdk):
 
     result = sdk.models.get_model_entity_route_openai_url(model_entity)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/ml-team/model/custom-model/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/ml-team/model/custom-model/-/v1"
 
 
 def test_get_model_entity_route_openai_url_always_appends_v1(sdk):
@@ -249,7 +249,7 @@ def test_resolve_model_reference_fetches_model_and_provider(sdk):
     mock_retrieve.assert_called_once_with("judge", workspace="default")
     mock_provider_retrieve.assert_called_once_with("provider", workspace="default")
     assert result.name == "judge"
-    assert result.url == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    assert result.url == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
     assert result.served_model_name == "publisher/upstream-judge"
 
@@ -297,7 +297,7 @@ def test_get_provider_route_openai_url_for_deployment_fetches_provider(sdk):
 
         mock_retrieve.assert_called_once_with("my-provider", workspace="default")
         assert (
-            result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
+            result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
         )
 
 
@@ -316,7 +316,7 @@ def test_get_provider_route_openai_url_for_deployment_respects_v1_suffix(sdk):
         result = sdk.models.get_provider_route_openai_url_for_deployment(deployment)
 
         assert (
-            result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/production/provider/nim-provider/-"
+            result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/production/provider/nim-provider/-"
         )
 
 
@@ -357,7 +357,7 @@ def test_get_openai_client_returns_configured_client(sdk):
         expected_headers = sdk.models.get_client_default_headers()
 
         mock_openai_cls.assert_called_once_with(
-            base_url="https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
+            base_url="https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
             api_key="not-needed",
             default_headers=expected_headers,
         )
@@ -372,7 +372,7 @@ def test_get_openai_client_custom_workspace(sdk):
         expected_headers = sdk.models.get_client_default_headers()
 
         mock_openai_cls.assert_called_once_with(
-            base_url="https://nmp.example.com/apis/inference-gateway/v2/workspaces/production/openai/-/v1",
+            base_url="https://nhx.example.com/apis/inference-gateway/v2/workspaces/production/openai/-/v1",
             api_key="not-needed",
             default_headers=expected_headers,
         )
@@ -380,9 +380,9 @@ def test_get_openai_client_custom_workspace(sdk):
 
 def test_get_openai_client_includes_auth_headers():
     """Test that auth headers from the SDK are propagated to OpenAI client."""
-    sdk_with_auth = NeMoPlatform(
-        base_url="https://nmp.example.com/",
-        default_headers={"Authorization": "Bearer token-123", "X-NMP-Principal-Id": "user@example.com"},
+    sdk_with_auth = NeMoHelix(
+        base_url="https://nhx.example.com/",
+        default_headers={"Authorization": "Bearer token-123", "X-NHX-Principal-Id": "user@example.com"},
     )
 
     with patch("openai.OpenAI") as mock_openai_cls:
@@ -392,7 +392,7 @@ def test_get_openai_client_includes_auth_headers():
         default_headers = mock_openai_cls.call_args.kwargs["default_headers"]
 
         assert default_headers["Authorization"] == "Bearer token-123"
-        assert default_headers["X-NMP-Principal-Id"] == "user@example.com"
+        assert default_headers["X-NHX-Principal-Id"] == "user@example.com"
 
 
 # Tests for wait_for_openai_model
@@ -451,7 +451,7 @@ def test_wait_for_openai_model_retries_unexpected_model_id(sdk):
 def test_wait_for_openai_model_retries_transient_gateway_errors(sdk, status_code):
     """Test that transient gateway and connection failures keep polling."""
     model_response = OpenAIModelResp(id="ws/model-a", owned_by="test")
-    request = httpx.Request("GET", "https://nmp.example.com/apis/inference-gateway/openai/v1/models/model-a")
+    request = httpx.Request("GET", "https://nhx.example.com/apis/inference-gateway/openai/v1/models/model-a")
 
     with patch.object(
         sdk.inference.gateway.openai.v1.models,
@@ -521,14 +521,14 @@ def test_async_get_base_url_str_removes_trailing_slash(async_sdk):
     """Test that trailing slash is removed from base URL (async resource)."""
     result = async_sdk.models._get_base_url_str()
 
-    assert result == "https://nmp.example.com"
+    assert result == "https://nhx.example.com"
 
 
 def test_async_get_openai_route_base_url(async_sdk):
     """Test URL generation with async resource (sync method, no I/O)."""
     result = async_sdk.models.get_openai_route_base_url(workspace="default")
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
 
 
 def test_async_get_provider_route_openai_url(async_sdk):
@@ -540,7 +540,7 @@ def test_async_get_provider_route_openai_url(async_sdk):
 
     result = async_sdk.models.get_provider_route_openai_url(provider)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
 
 
 def test_async_get_model_entity_route_openai_url(async_sdk):
@@ -551,7 +551,7 @@ def test_async_get_model_entity_route_openai_url(async_sdk):
 
     result = async_sdk.models.get_model_entity_route_openai_url(model_entity)
 
-    assert result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1"
+    assert result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1"
 
 
 @pytest.mark.asyncio
@@ -578,7 +578,7 @@ async def test_async_resolve_model_reference_fetches_model_and_provider(async_sd
     mock_retrieve.assert_awaited_once_with("judge", workspace="default")
     mock_provider_retrieve.assert_awaited_once_with("provider", workspace="default")
     assert result.name == "judge"
-    assert result.url == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
+    assert result.url == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/model/judge/-/v1"
     assert result.host_url == "http://nim.example.test:8000"
 
 
@@ -594,7 +594,7 @@ def test_get_async_openai_client_returns_async_client(async_sdk):
         expected_headers = async_sdk.models.get_client_default_headers()
 
         mock_async_openai_cls.assert_called_once_with(
-            base_url="https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
+            base_url="https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
             api_key="not-needed",
             default_headers=expected_headers,
         )
@@ -609,7 +609,7 @@ def test_get_async_openai_client_custom_workspace(async_sdk):
         expected_headers = async_sdk.models.get_client_default_headers()
 
         mock_async_openai_cls.assert_called_once_with(
-            base_url="https://nmp.example.com/apis/inference-gateway/v2/workspaces/production/openai/-/v1",
+            base_url="https://nhx.example.com/apis/inference-gateway/v2/workspaces/production/openai/-/v1",
             api_key="not-needed",
             default_headers=expected_headers,
         )
@@ -617,9 +617,9 @@ def test_get_async_openai_client_custom_workspace(async_sdk):
 
 def test_get_async_openai_client_includes_auth_headers():
     """Test that auth headers from the async SDK are propagated to AsyncOpenAI client."""
-    sdk_with_auth = AsyncNeMoPlatform(
-        base_url="https://nmp.example.com/",
-        default_headers={"Authorization": "Bearer token-abc", "X-NMP-Principal-Id": "async-user@example.com"},
+    sdk_with_auth = AsyncNeMoHelix(
+        base_url="https://nhx.example.com/",
+        default_headers={"Authorization": "Bearer token-abc", "X-NHX-Principal-Id": "async-user@example.com"},
     )
 
     with patch("openai.AsyncOpenAI") as mock_async_openai_cls:
@@ -629,7 +629,7 @@ def test_get_async_openai_client_includes_auth_headers():
         default_headers = mock_async_openai_cls.call_args.kwargs["default_headers"]
 
         assert default_headers["Authorization"] == "Bearer token-abc"
-        assert default_headers["X-NMP-Principal-Id"] == "async-user@example.com"
+        assert default_headers["X-NHX-Principal-Id"] == "async-user@example.com"
 
 
 # Tests for async wait_for_openai_model
@@ -686,7 +686,7 @@ async def test_async_wait_for_openai_model_retries_unexpected_model_id(async_sdk
 async def test_async_wait_for_openai_model_retries_transient_gateway_errors(async_sdk, status_code):
     """Test that async polling retries transient gateway and timeout failures."""
     model_response = OpenAIModelResp(id="ws/model-a", owned_by="test")
-    request = httpx.Request("GET", "https://nmp.example.com/apis/inference-gateway/openai/v1/models/model-a")
+    request = httpx.Request("GET", "https://nhx.example.com/apis/inference-gateway/openai/v1/models/model-a")
     mock_get = AsyncMock(
         side_effect=[
             APITimeoutError(request=request),
@@ -741,7 +741,7 @@ async def test_async_get_provider_route_openai_url_for_deployment(async_sdk):
 
         mock_retrieve.assert_called_once_with("my-provider", workspace="default")
         assert (
-            result == "https://nmp.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
+            result == "https://nhx.example.com/apis/inference-gateway/v2/workspaces/default/provider/my-provider/-/v1"
         )
 
 

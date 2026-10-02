@@ -225,7 +225,45 @@ async def test_ranking_client_does_not_fall_back_after_auth_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ranking_client_retries_non_finite_logits() -> None:
+async def test_ranking_client_retries_http_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("nemo_evaluator_sdk.retrieval.nim_ranking.asyncio.sleep", fake_sleep)
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 4:
+            return httpx.Response(503, request=request, text="unavailable")
+        return httpx.Response(
+            200,
+            request=request,
+            content=json.dumps({"rankings": [{"index": 0, "logit": 0.9}]}),
+            headers={"content-type": "application/json"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ranked = await NimRankingClient(model=Model(url="https://rank.example.test/v1", name="rerank")).rank(
+            "q",
+            ["only"],
+            client=client,
+        )
+
+    assert attempts == 4
+    assert sleeps == [0.5, 1.0, 2.0]
+    assert ranked == [(0, 0.9)]
+
+
+@pytest.mark.asyncio
+async def test_ranking_client_retries_non_finite_logits(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_sleep(delay: float) -> None:
+        del delay
+
+    monkeypatch.setattr("nemo_evaluator_sdk.retrieval.nim_ranking.asyncio.sleep", fake_sleep)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:

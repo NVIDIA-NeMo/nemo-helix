@@ -27,9 +27,50 @@ def _mount(claim: str, path: str, read_only: bool) -> GymHostVolumeMount:
     )
 
 
-def test_bootstrap_env_rejects_opensandbox_credentials():
-    with pytest.raises(ValueError, match="OPENSANDBOX_API_KEY"):
-        validate_bootstrap_env({"OPENSANDBOX_API_KEY": "secret"})
+@pytest.mark.parametrize(
+    "key",
+    [
+        # The OpenSandbox SDK and the platform's job-pod injection use this spelling.
+        "OPEN_SANDBOX_API_KEY",
+        "OPEN_SANDBOX_DOMAIN",
+        # Gym's sample configs use this one.
+        "OPENSANDBOX_API_KEY",
+        "OPENSANDBOX_DOMAIN",
+    ],
+)
+def test_bootstrap_env_rejects_opensandbox_credentials(key):
+    with pytest.raises(ValueError, match=key):
+        validate_bootstrap_env({key: "secret"})
+
+
+def test_sandbox_bootstrap_env_never_inherits_the_process_environment(monkeypatch):
+    """The sandbox env is a constructed allowlist, never a copy of the trusted process's env.
+
+    The episode broker inherits its Ray actor's runtime env, which carries the episode-backend
+    credential. That credential must reach the broker and never the job sandbox; this is the half
+    of the boundary the package owns.
+    """
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+
+    monkeypatch.setenv("NHX_TEST_AMBIENT_SENTINEL", "ambient-sentinel")
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+
+    env = build_gym_host_spec(_serve_cfg(), broker).bootstrap_env
+
+    assert "NHX_TEST_AMBIENT_SENTINEL" not in env
+    assert not any("ambient-sentinel" in value for value in env.values())
+
+
+def test_caller_host_env_cannot_forward_the_opensandbox_credential():
+    """Job ``env_secrets`` reach the sandbox through ``host_env``, and naming the credential there must fail."""
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+
+    with pytest.raises(ValueError, match="OPEN_SANDBOX_API_KEY"):
+        build_gym_host_spec(_serve_cfg(host_env={"OPEN_SANDBOX_API_KEY": "secret"}), broker)
 
 
 def test_build_bootstrap_env_sets_required_keys():
@@ -43,9 +84,9 @@ def test_build_bootstrap_env_sets_required_keys():
         2048,
         dataset_path="/job/dataset",
     )
-    assert env["NMP_JOB_ID"] == "job-1"
-    assert env["NMP_BROKER_URL"] == "http://broker:51234"
-    assert env["NMP_DATASET_PATH"] == "/job/dataset"
+    assert env["NHX_JOB_ID"] == "job-1"
+    assert env["NHX_BROKER_URL"] == "http://broker:51234"
+    assert env["NHX_DATASET_PATH"] == "/job/dataset"
     assert "OPENSANDBOX_API_KEY" not in env
     assert env[BROKER_URL_ENV] == "http://broker:51234"
     assert env[BROKER_TOKEN_ENV] == "token"
@@ -308,6 +349,23 @@ def test_sandbox_runtime_defaults_respect_an_explicit_uv_pip_set_python():
     assert apply_sandbox_runtime_defaults({"uv_pip_set_python": False})["uv_pip_set_python"] is False
 
 
+def test_sandbox_runtime_defaults_reuse_the_image_prebuilt_venvs():
+    """Reinstalling into a prebuilt venv reaches for the package index, which sandbox egress denies.
+
+    The failure is every Gym server dying with "Process `mcqa` finished unexpectedly!" and no reason.
+    The key is ``nemo_gym.global_config.SKIP_VENV_IF_PRESENT_KEY_NAME``; Gym is not importable here.
+    """
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({})["skip_venv_if_present"] is True
+
+
+def test_sandbox_runtime_defaults_respect_an_explicit_skip_venv_if_present():
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({"skip_venv_if_present": False})["skip_venv_if_present"] is False
+
+
 def test_gym_host_spec_defers_to_the_image_entrypoint_when_omitted():
     # The orchestrator cannot name a path inside the host image: resolving one from its own
     # installation would describe its own container. With no entrypoint configured the image
@@ -377,7 +435,7 @@ def test_gym_host_spec_forwards_the_rollout_deadline():
 
     spec = build_gym_host_spec(cfg, broker)
 
-    assert spec.bootstrap_env["NMP_ROLLOUT_DEADLINE_S"] == "120.0"
+    assert spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"] == "120.0"
 
 
 def test_gym_host_spec_carries_global_config_in_bootstrap():
@@ -527,7 +585,7 @@ def test_gym_host_spec_leaves_the_index_alone_by_default():
 
 def test_the_caller_dialect_accepts_an_offline_environment():
     """`env.nemo_gym` is `extra="forbid"`, so a key the platform emits and this model lacks is
-    not ignored -- it fails validation. nmp/rl's grpo_config sets `environment_offline` on an
+    not ignored -- it fails validation. nhx/rl's grpo_config sets `environment_offline` on an
     offline manifest, so without the field a sandboxed run with one cannot start at all."""
     from sandboxed_gym.host.models import NemoGymSandboxedConfig
 

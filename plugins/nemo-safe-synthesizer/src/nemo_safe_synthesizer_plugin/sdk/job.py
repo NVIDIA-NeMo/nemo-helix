@@ -15,12 +15,12 @@ from typing import Iterator
 
 import httpx
 import pandas as pd
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoClientError
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobLog, PlatformJobStatusResponse
-from nemo_platform_plugin.jobs.types import JobLogsQueryParams
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_safe_synthesizer.config.external_results import SafeSynthesizerSummary
 from typing_extensions import Self
 
@@ -57,7 +57,7 @@ class ReportHtml:
 class SafeSynthesizerJob:
     """Convenience wrapper for a Safe Synthesizer platform job."""
 
-    def __init__(self, job_name: str, client: NeMoPlatform, workspace: str = "default"):
+    def __init__(self, job_name: str, client: NeMoHelix, workspace: str = "default"):
         self.job_name = job_name
         self._client = client
         self._workspace = workspace
@@ -67,7 +67,7 @@ class SafeSynthesizerJob:
         """Fetch the current job status."""
         return self.fetch_status_info().status
 
-    def fetch_status_info(self) -> PlatformJobStatusResponse:
+    def fetch_status_info(self) -> HelixJobStatusResponse:
         """Fetch the current job status response."""
         return self._jobs.get_job_status(name=self.job_name, workspace=self._workspace).data()
 
@@ -146,10 +146,10 @@ class SafeSynthesizerJob:
 
     def _fetch_logs_incremental(
         self, page_cursor: str | None = None, timeout: float | None = None
-    ) -> tuple[list[PlatformJobLog], str | None]:
+    ) -> tuple[list[HelixJobLog], str | None]:
         """Fetch logs incrementally starting from a page cursor."""
         timeout = 300.0 if timeout is None else timeout
-        all_logs: list[PlatformJobLog] = []
+        all_logs: list[HelixJobLog] = []
         current_cursor: str | None = page_cursor
         last_cursor_with_data: str | None = page_cursor
 
@@ -172,7 +172,7 @@ class SafeSynthesizerJob:
                 return all_logs, last_cursor_with_data
             current_cursor = page.metadata["next_page"]
 
-    def fetch_logs(self, timeout: float | None = None) -> Iterator[PlatformJobLog]:
+    def fetch_logs(self, timeout: float | None = None) -> Iterator[HelixJobLog]:
         """Fetch job logs as an iterator over log objects."""
         timeout = 300.0 if timeout is None else timeout
         yield from (

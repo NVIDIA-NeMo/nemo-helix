@@ -202,7 +202,7 @@ def format_table(rows: list[ComparisonRow]) -> str:
 def format_platform_overhead_table(rows: list[ComparisonRow]) -> str:
     """Render a table with mock-LLM time subtracted from p50/p90/avg.
 
-    Isolates NMP + IGW + shim + middleware overhead from the much larger
+    Isolates NHX + IGW + shim + middleware overhead from the much larger
     mock sleeps. The delta columns are the middleware's own cost over the
     bare path.
     """

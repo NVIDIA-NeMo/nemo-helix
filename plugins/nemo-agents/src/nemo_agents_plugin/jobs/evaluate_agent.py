@@ -37,21 +37,21 @@ from nemo_agents_plugin.utils import (
     preflight_validate_llm_models,
     temp_injected_config,
 )
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.file_manager import FilesetFileManager
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.file_manager import FilesetFileManager
+from nemo_helix_plugin.refs import (
     EndpointURL,
     FilesetRef,
     LocalDir,
     OutputTarget,
     classify_output_target,
 )
-from nemo_platform_plugin.run_dependencies import LocalRunError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -85,14 +85,14 @@ class EvaluateAgentSpec(BaseModel):
             this ``None`` and let ``eval_config`` be a real local path.
         output: Where to put the eval outputs.  Accepts either a local
             directory path (``./out``, ``/abs/out``, ``~/out``) or an
-            NeMo Platform fileset reference (``"name"`` or ``"workspace/name"``).
+            NeMo Helix fileset reference (``"name"`` or ``"workspace/name"``).
             Path-shaped values write directly to disk; bare names upload
             results to the named fileset, creating it on demand.  When
             ``None`` the job writes to ``ctx.storage.persistent /
             "results"`` — the platform-injected persistent volume in
             container runs, a tempdir under ``$TMPDIR`` for local CLI
             runs.
-        workspace: NeMo Platform workspace used to scope gateway URL injection,
+        workspace: NeMo Helix workspace used to scope gateway URL injection,
             ``--agent`` resolution, and ``--output`` fileset creation
             when those values are given as bare names.
     """
@@ -123,7 +123,7 @@ class EvaluateAgentSpec(BaseModel):
     output: OutputTarget | None = Field(
         default=None,
         description="Where to write eval outputs — either a local directory "
-        "(path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform fileset "
+        "(path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset "
         "reference ('name' or 'workspace/name').  Filesets are created on "
         "demand if missing.  Defaults to <ctx.storage.persistent>/results "
         "(the platform-injected persistent volume) when not provided.",
@@ -165,14 +165,14 @@ class EvaluateAgentJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.evaluate`` in ``nmp-agents-tasks``."""
-        from nemo_platform_plugin.jobs.api_factory import (
+    ) -> HelixJobSpec:
+        """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.evaluate`` in ``nhx-agents-tasks``."""
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
-            PlatformJobStep,
+            HelixJobStep,
             SubprocessExecutionProviderSpec,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
@@ -182,9 +182,9 @@ class EvaluateAgentJob(NemoJob):
         # (which has its own default and would never be missing).
         spec_dict["workspace"] = workspace
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="evaluate-agent",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",
@@ -210,7 +210,7 @@ class EvaluateAgentJob(NemoJob):
         config: dict,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None = None,
+        sdk: NemoClient | None = None,
     ) -> dict:
         """Run the evaluation by delegating to the ``nat eval`` CLI.
 
@@ -233,18 +233,13 @@ class EvaluateAgentJob(NemoJob):
 
         Args:
             config: Dict matching :class:`EvaluateAgentSpec`.
-            sdk: Platform SDK handle, injected by the
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler` (locally) or
-                :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                (in-container) from the ambient SDK handle.  Required when
+            sdk: Sync platform client passed by the task entrypoint. Required when
                 ``cfg.eval_config_fileset`` or a fileset-shaped ``cfg.output``
                 is set (download / upload respectively); a local-directory
                 output runs without it, so the parameter is declared optional
                 and validated at the point of use.
-            ctx: Runtime context bound by signature DI.  Both
-                :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local`
-                and :func:`~nemo_platform_plugin.tasks.dispatcher.run_task`
-                always supply one; the no-output fallback writes to
+            ctx: Runtime context passed by the task entrypoint. The no-output
+                fallback writes to
                 ``ctx.storage.persistent / "results"`` and tempdirs land
                 under ``ctx.storage.ephemeral`` so they sit on the
                 platform-injected scratch volume.
@@ -336,7 +331,7 @@ class EvaluateAgentJob(NemoJob):
         cfg: EvaluateAgentSpec,
         *,
         ctx: JobContext,
-        sdk: NeMoPlatform | None,
+        sdk: NemoClient | None,
     ) -> Iterator[Path]:
         """Yield a local path to the eval YAML.
 
@@ -354,9 +349,9 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to download "
-                "eval_config_fileset contents, but no platform SDK was available. "
-                "Set NMP_BASE_URL or pass sdk via NemoJobScheduler.run_local(sdk=...)."
+                "EvaluateAgentJob.run requires a sync platform client to download "
+                "eval_config_fileset contents, but no platform client was available. "
+                "Set NHX_BASE_URL before using fileset inputs."
             )
 
         ref = FilesetRef(cfg.eval_config_fileset)
@@ -401,7 +396,7 @@ class EvaluateAgentJob(NemoJob):
         *,
         workspace: str,
         ctx: JobContext,
-        sdk: NeMoPlatform | None,
+        sdk: NemoClient | None,
     ) -> Iterator[Path]:
         """Yield a local base directory for ``nat eval`` outputs.
 
@@ -447,11 +442,9 @@ class EvaluateAgentJob(NemoJob):
 
         if sdk is None:
             raise LocalRunError(
-                "EvaluateAgentJob.run requires a 'sdk: NeMoPlatform' to upload "
-                "results to a fileset, but no platform SDK was available. "
-                "Set NMP_BASE_URL (so the local CLI can build a default SDK), "
-                "pass an explicit sdk via NemoJobScheduler.run_local(sdk=...), "
-                "or use --output <path> to write results to a local directory instead."
+                "EvaluateAgentJob.run requires a sync platform client to upload "
+                "results to a fileset, but no platform client was available. "
+                "Set NHX_BASE_URL or use --output <path> to write results to a local directory instead."
             )
 
         ref = FilesetRef(output)
@@ -488,15 +481,15 @@ class EvaluateAgentJob(NemoJob):
         *,
         fileset: str,
         workspace: str,
-        sdk: NeMoPlatform,
+        sdk: NemoClient,
     ) -> None:
         """Upload *local_dir* recursively to the named fileset.
 
         The fileset is auto-created (idempotent) if it doesn't already
         exist — same semantics as ``nemo files upload <dir> <fileset>``.
 
-        *sdk* is the platform SDK handle injected into :meth:`run` by
-        the :class:`~nemo_platform_plugin.scheduler.NemoJobScheduler` (signature-based
+        *sdk* is the sync platform client injected into :meth:`run` by
+        the :class:`~nemo_helix_plugin.scheduler.NemoJobScheduler` (signature-based
         DI). The upload goes through the typed Files client that shares the
         SDK's transport.
         """

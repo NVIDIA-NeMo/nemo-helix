@@ -12,9 +12,9 @@ Usage::
     uv run --frozen pytest e2e -v --run-e2e
 
     # If you already have services running
-    NMP_BASE_URL=http://localhost:9090 uv run --frozen pytest e2e -v --run-e2e
+    NHX_BASE_URL=http://localhost:9090 uv run --frozen pytest e2e -v --run-e2e
 
-When ``NMP_BASE_URL`` is set the harness skips service startup/shutdown and
+When ``NHX_BASE_URL`` is set the harness skips service startup/shutdown and
 connects to the given URL.  Otherwise it spawns ``nemo services run`` as a
 child process on a free port, polls ``/status`` until ready, and
 terminates the process after the session.
@@ -73,13 +73,15 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nhx.testing.e2e.jobs import wait_budget
+from pydantic import SecretStr
 
 from e2e.services_pool_fixtures import (  # noqa: F401
     _services,
@@ -89,6 +91,7 @@ from e2e.services_pool_fixtures import (  # noqa: F401
     append_services_pool_report_sections,
     configure_services_pool,
     register_services_pool_items,
+    services_pool_client,
     services_pool_sdk,
 )
 
@@ -126,16 +129,58 @@ def ngc_api_key() -> str:
 
 
 @pytest.fixture
-def ngc_secret(sdk: NeMoPlatform, workspace: str, ngc_api_key: str) -> Iterator[str]:
+def ngc_secret(client: NemoClient, workspace: str, ngc_api_key: str) -> Iterator[str]:
     """Create a secret containing the NGC API key, cleaned up after test."""
     secret_name = f"e2e-ngc-key-{uuid.uuid4().hex[:8]}"
-    secrets = client_from_platform(sdk, SecretsClient)
-    secrets.create_secret(workspace=workspace, body=PlatformSecretCreateRequest(name=secret_name, value=ngc_api_key))
+    secrets = SecretsClient.from_client(client)
+    secrets.create_secret(
+        workspace=workspace, body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(ngc_api_key))
+    )
     yield secret_name
     try:
         secrets.delete_secret(workspace=workspace, name=secret_name)
     except Exception:
         pass  # Best-effort cleanup; the workspace is deleted anyway
+
+
+# ---- Job wait budget --------------------------------------------------------
+
+# Share of a test's pytest-timeout budget that job waits may consume. The rest
+# covers the call phase's other work: setup before the wait, the diagnostics a
+# failed wait collects, and ``finally`` cleanup.
+_JOB_WAIT_BUDGET_FRACTION = 0.8
+
+
+def _effective_pytest_timeout(item: pytest.Item) -> float | None:
+    """Return the pytest-timeout budget in force for *item*, in seconds."""
+    marker = item.get_closest_marker("timeout")
+    if marker is not None:
+        value = marker.kwargs.get("timeout")
+        if value is None and marker.args:
+            value = marker.args[0]
+        if value is not None:
+            return float(value)
+    try:
+        configured = item.config.getini("timeout")
+    except (ValueError, KeyError):  # pytest-timeout not installed
+        return None
+    try:
+        return float(configured)
+    except (TypeError, ValueError):
+        return None
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item):
+    """Cap job waits below this test's own pytest-timeout budget.
+
+    Wraps the call phase because that is the phase pytest-timeout arms. See the
+    module docstring of ``nhx/testing/e2e/jobs.py`` for why the order matters.
+    """
+    timeout = _effective_pytest_timeout(item)
+    budget = timeout * _JOB_WAIT_BUDGET_FRACTION if timeout else None
+    with wait_budget(budget):
+        yield
 
 
 # ---- Services log tail on failure ------------------------------------------
@@ -155,21 +200,27 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
 
 
 @pytest.fixture(scope="module", name="sdk")
-def e2e_sdk(request: pytest.FixtureRequest) -> NeMoPlatform:
-    """Provide the conventional e2e SDK fixture name."""
+def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
+    """Generated SDK handle for the Data Designer engine probes that still take one."""
     return request.getfixturevalue("services_pool_sdk")
 
 
+@pytest.fixture(scope="module", name="client")
+def e2e_client(request: pytest.FixtureRequest) -> NemoClient:
+    """Typed platform client for the module's pooled services instance."""
+    return request.getfixturevalue("services_pool_client")
+
+
 @pytest.fixture(scope="module")
-def files_client(sdk: NeMoPlatform) -> FilesClient:
-    """Provide a FilesClient derived from the SDK."""
-    return client_from_platform(sdk, FilesClient)
+def files_client(client: NemoClient) -> FilesClient:
+    """Provide a FilesClient sharing the typed client's transport."""
+    return FilesClient.from_client(client)
 
 
 @pytest.fixture(scope="function")
-def workspace(sdk: NeMoPlatform) -> Iterator[str]:
+def workspace(client: NemoClient) -> Iterator[str]:
     """Create a unique workspace for each test, deleted on teardown."""
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(client)
     name = f"e2e-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
     yield name

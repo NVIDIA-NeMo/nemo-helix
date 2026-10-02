@@ -6,9 +6,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
-from nmp.core.models.controllers.entity_cache import ModelEntityCache, UnflushedMutationsError
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+from nhx.core.models.controllers.entity_cache import ModelEntityCache, UnflushedMutationsError
 
 from .conftest import (
     _AsyncPage,
@@ -33,13 +33,13 @@ async def mock_models_client():
 async def patch_models_client(mock_models_client):
     """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the entity_cache
     module back to :data:`mock_models_client`."""
-    with patch("nmp.core.models.controllers.entity_cache.client_from_platform", return_value=mock_models_client):
+    with patch("nhx.core.models.controllers.entity_cache.client_from_platform", return_value=mock_models_client):
         yield mock_models_client
 
 
 @pytest.fixture
 async def mock_models_sdk(mock_models_client, patch_models_client):
-    sdk = MagicMock(spec=AsyncNeMoPlatform)
+    sdk = MagicMock(spec=AsyncNeMoHelix)
     sdk.models_client = mock_models_client
     return sdk
 

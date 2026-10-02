@@ -16,7 +16,7 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/packages/param"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/config"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/config"
 )
 
 func TestGuardrailsClient(t *testing.T) {

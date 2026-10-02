@@ -29,7 +29,7 @@ These commands change platform state and should be run independently so each
 result can be verified:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 nemo agents create --name nemo-studio-assistant \
   --agent-config agents/nemo-studio-assistant-ethos/agent.yaml
 nemo agents package \

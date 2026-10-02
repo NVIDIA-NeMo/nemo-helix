@@ -4,7 +4,7 @@
 # Minikube values for local development
 # This is a standalone values file - use it in place of ./default.yaml
 #
-# Usage: helm upgrade -i nemo-platform k8s/helm -f e2e/k8s/values/minikube.yaml
+# Usage: helm upgrade -i nemo-helix k8s/helm -f e2e/k8s/values/minikube.yaml
 
 postgresql:
   image:
@@ -36,15 +36,15 @@ platformConfig:
         profile: additional-volume
         backend: kubernetes_job
         config:
-          service_account_name: '{{ include "nmp-core.jobsServiceAccountName" . }}'
-          launcher_image: '{{ include "nmp-core.image" . }}'
+          service_account_name: '{{ include "nhx-core.jobsServiceAccountName" . }}'
+          launcher_image: '{{ include "nhx-core.image" . }}'
           storage:
-            pvc_name: '{{ include "nmp-core.persistentVolumeClaim" . }}'
+            pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
             volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
             additional_volumes:
-              - name: nmp-additional-volume
+              - name: nhx-additional-volume
                 persistent_volume_claim:
-                  claim_name: '{{ include "nmp-core.persistentVolumeClaim" . }}'
+                  claim_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
             additional_volume_mounts:
-              - name: nmp-additional-volume
+              - name: nhx-additional-volume
                 mount_path: /mnt/additional_storage

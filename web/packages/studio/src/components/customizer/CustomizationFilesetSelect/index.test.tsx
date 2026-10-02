@@ -79,7 +79,7 @@ describe('CustomizationFilesetSelect', () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="automodel.dataset.training" />
       </Harness>
     );
@@ -93,11 +93,109 @@ describe('CustomizationFilesetSelect', () => {
     );
   });
 
+  /**
+   * Automodel and unsloth take a second reference for validation, and the canonical job
+   * JSON points both at the same fileset. Without this the picker filled only the training
+   * reference, so a dataset carrying validation rows trained without them.
+   */
+  it('mirrors the fileset into automodel.dataset.validation when it has validation files', async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'automodel' }}>
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent(firstRef)
+    );
+  });
+
+  it('mirrors the fileset into unsloth.dataset.validation_path', async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'unsloth' }}>
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
+        <FieldSpy name="unsloth.dataset.validation_path" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:unsloth.dataset.validation_path')).toHaveTextContent(firstRef)
+    );
+  });
+
+  /** No validation files means the backend should apply its own 90/10 split instead. */
+  it('leaves the validation reference unset when the fileset has none', async () => {
+    mockValidation.mockReturnValue(
+      buildValidation({ hasValidation: false, autoSplitNotice: true, validationRowCount: 0 })
+    );
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness overrides={{ backend: 'automodel' }}>
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
+        <FieldSpy name="automodel.dataset.training" />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.training')).toHaveTextContent(firstRef)
+    );
+    expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent('');
+  });
+
+  /**
+   * Discovery reports no files both while it runs and when it fails, so neither state is
+   * evidence that the fileset lacks validation rows. The field is editable by hand, so
+   * writing on that non-evidence would also wipe what the user typed.
+   */
+  it.each([
+    ['discovery is still running', { isPending: true, hasValidation: false }],
+    ['discovery failed', { discoveryError: new Error('boom'), hasValidation: false }],
+  ])('leaves a hand-entered validation reference alone while %s', async (_label, overrides) => {
+    mockValidation.mockReturnValue(buildValidation(overrides));
+    const user = userEvent.setup();
+    renderRoute(
+      <Harness
+        overrides={{
+          backend: 'automodel',
+          automodel: {
+            ...FORM_DEFAULTS.automodel,
+            dataset: { ...FORM_DEFAULTS.automodel.dataset, validation: 'default/typed-by-hand' },
+          },
+        }}
+      >
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
+        <FieldSpy name="automodel.dataset.validation" />
+      </Harness>
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /dataset/i }));
+    await user.click(await screen.findByRole('option', { name: firstFileset.name ?? '' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('spy:automodel.dataset.validation')).toHaveTextContent(
+        'default/typed-by-hand'
+      )
+    );
+  });
+
   it('writes the picked fileset reference into unsloth.dataset.path', async () => {
     const user = userEvent.setup();
     renderRoute(
       <Harness overrides={{ backend: 'unsloth' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
         <FieldSpy name="unsloth.dataset.path" />
       </Harness>
     );
@@ -111,11 +209,17 @@ describe('CustomizationFilesetSelect', () => {
     );
   });
 
-  it('opens the create-fileset modal when New Dataset is selected', async () => {
+  /**
+   * The picker asks its owner to open the modal rather than rendering it: the modal
+   * renders a `<form>`, and a form nested in the wizard's own form never receives its
+   * submit event, so submitting it would navigate the page instead of creating anything.
+   */
+  it('asks the owner to open the create-fileset modal when New Dataset is selected', async () => {
     const user = userEvent.setup();
+    const onRequestNewDataset = vi.fn();
     renderRoute(
       <Harness overrides={{ backend: 'automodel' }}>
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={onRequestNewDataset} />
       </Harness>
     );
 
@@ -123,7 +227,8 @@ describe('CustomizationFilesetSelect', () => {
     await user.click(trigger);
     await user.click(await screen.findByRole('option', { name: 'New Dataset' }));
 
-    expect(await screen.findByText('Create New Dataset')).toBeInTheDocument();
+    await waitFor(() => expect(onRequestNewDataset).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Create New Dataset')).not.toBeInTheDocument();
   });
 
   it('surfaces the no-training-files error when the selected dataset has none', async () => {
@@ -135,7 +240,7 @@ describe('CustomizationFilesetSelect', () => {
           automodel: { ...FORM_DEFAULTS.automodel, dataset: { training: firstRef } },
         }}
       >
-        <CustomizationFilesetSelect />
+        <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
       </Harness>
     );
 
@@ -161,7 +266,7 @@ describe('CustomizationFilesetSelect', () => {
             },
           }}
         >
-          <CustomizationFilesetSelect />
+          <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
           <FieldSpy name="unsloth.dataset.apply_chat_template" />
         </Harness>
       );
@@ -189,7 +294,7 @@ describe('CustomizationFilesetSelect', () => {
             },
           }}
         >
-          <CustomizationFilesetSelect />
+          <CustomizationFilesetSelect onRequestNewDataset={vi.fn()} />
           <FieldSpy name="unsloth.dataset.apply_chat_template" />
         </Harness>
       );

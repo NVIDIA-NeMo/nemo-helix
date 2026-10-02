@@ -153,6 +153,48 @@ class TaskBuildRepository:
             attempt=row["build_attempts"],
         )
 
+    def bind_platform_job(
+        self,
+        task_id: str,
+        revision: int,
+        *,
+        worker_id: str,
+        job_name: str,
+    ) -> bool:
+        """Transfer a short-lived controller claim to a durable Platform Job."""
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            # ponytail: reuse the existing claim-owner column during the
+            # temporary Postgres bridge. The column disappears at Entity Store
+            # cutover, so adding a second durable pointer would only create
+            # another migration and dual-write to remove.
+            cur.execute(
+                """
+                UPDATE task_revisions
+                SET build_claimed_by = %s,
+                    build_claimed_at = NOW()
+                WHERE task_id = %s AND revision = %s
+                  AND status = 'building' AND build_claimed_by = %s
+                """,
+                (job_name, task_id, revision, worker_id),
+            )
+            return cur.rowcount == 1
+
+    def list_platform_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """List active task builds currently owned by Platform Jobs."""
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT task_id, revision, build_attempts, build_claimed_by AS job_name
+                FROM task_revisions
+                WHERE status = 'building'
+                  AND build_claimed_by LIKE 'scaled-evals-build-%%'
+                ORDER BY build_claimed_at, task_id, revision
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return list(cur.fetchall())
+
     def heartbeat(self, task_id: str, revision: int, *, worker_id: str) -> bool:
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(

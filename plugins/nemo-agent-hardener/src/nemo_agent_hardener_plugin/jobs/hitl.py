@@ -23,9 +23,9 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     AgentHardenerRunError,
 )
 from nemo_agent_hardener_plugin.jobs.synth_client import SynthClient
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import JobsClient
-from nemo_platform_plugin.jobs.types import JobStatusDetailsUpdate
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.types import JobStatusDetailsUpdate
 
 logger = logging.getLogger(__name__)
 

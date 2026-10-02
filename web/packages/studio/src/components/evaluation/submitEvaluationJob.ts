@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FILESET_NAME_MAX_LENGTH, toValidFilesetName } from '@nemo/common/src/utils/filesetName';
-import { generateDefaultName } from '@nemo/common/src/utils/generateDefaultName';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -14,7 +13,10 @@ export const MODE_DEFAULT = 'default';
 export const MODE_EXPERIMENT = 'experiment';
 
 /** Suggested name for a new experiment (e.g. "wise-blue"). */
-export const generateEvalConfigName = (): string => generateDefaultName({ length: 2 });
+/** Fileset `description` that marks a stored model-evaluation config. Written at
+ *  create time and used as the list filter, so the two must stay identical --
+ *  `description` is the only tag the fileset API can filter on. */
+export const MODEL_EVAL_CONFIG_DESCRIPTION = 'Model Evaluation Config';
 
 /** The fileset that stores an experiment's eval config and data artifacts. */
 export const filesetNameForExperiment = (experimentName: string): string =>
@@ -48,10 +50,20 @@ const AGENT_RUN_PARAMS = {
   ignore_request_failure: true,
 } as const;
 
+const JOB_FILESET_PREFIX = 'job-fileset-';
+export const JOB_NAME_MAX_LENGTH = FILESET_NAME_MAX_LENGTH - JOB_FILESET_PREFIX.length;
+
+export const DEFAULT_PARALLELISM = AGENT_RUN_PARAMS.parallelism;
+
+const agentRunParams = (parallelism: number | undefined) => ({
+  ...AGENT_RUN_PARAMS,
+  parallelism: parallelism ?? DEFAULT_PARALLELISM,
+});
+
 export const buildEvalJobName = (filesetName: string): string => {
   const suffix = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
   const base = toValidFilesetName(filesetName)
-    .slice(0, FILESET_NAME_MAX_LENGTH - suffix.length - 1)
+    .slice(0, JOB_NAME_MAX_LENGTH - suffix.length - 1)
     .replace(/-+$/, '');
   return `${base}-${suffix}`;
 };
@@ -125,6 +137,8 @@ export interface SubmitSelections {
   /** Name of an existing Intake Evaluation to publish results under. The job fails if it
    *  names nothing — the worker never creates it. Omitted means the run publishes nowhere. */
   evaluationId?: string;
+  /** Rows sent to the agent at once. Omitted means {@link DEFAULT_PARALLELISM}. */
+  parallelism?: number;
 }
 
 /** ``spec.publication`` for a run that asked to publish, or nothing at all. ``agent_name`` is
@@ -157,10 +171,10 @@ const agentEndpoint = (workspace: string, agent: string, promptVar: string) => (
   stream: false,
 });
 
-export const buildAgentTarget = (workspace: string, agent: string) => ({
+export const buildAgentTarget = (workspace: string, agent: string, parallelism?: number) => ({
   kind: 'agent' as const,
   agent: agentEndpoint(workspace, agent, 'instruction'),
-  params: AGENT_RUN_PARAMS,
+  params: agentRunParams(parallelism),
 });
 
 /** Override a metric's judge model with a ``workspace/name`` ModelRef (resolved
@@ -211,7 +225,7 @@ export const buildAgentEvalRequestBody = (
   ...jobName(selections),
   spec: {
     tasks: spec.tasks,
-    target: buildAgentTarget(selections.workspace, selections.agent),
+    target: buildAgentTarget(selections.workspace, selections.agent, selections.parallelism),
     max_concurrent_tasks: spec.max_concurrent_tasks ?? DEFAULT_MAX_CONCURRENT_TASKS,
     ...(selections.filesetName ? { labels: { eval_config_fileset: selections.filesetName } } : {}),
     ...publicationSpec(selections.evaluationId),
@@ -242,7 +256,7 @@ export const buildDatasetEvalRequestBody = (
     target: buildDatasetAgentTarget(selections.workspace, selections.agent),
     prompt_template: spec.prompt_template,
     ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
-    params: AGENT_RUN_PARAMS,
+    params: agentRunParams(selections.parallelism),
     ...publicationSpec(selections.evaluationId),
   },
 });

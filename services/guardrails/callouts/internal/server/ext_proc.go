@@ -23,9 +23,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/config"
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/guardrails"
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/streams"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/config"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/guardrails"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/streams"
 )
 
 const (

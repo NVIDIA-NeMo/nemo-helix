@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
-import type { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { act, render, screen } from '@testing-library/react';
 
 // Stand in for the highlighted code region to avoid act() warnings from async Shiki
@@ -17,7 +17,7 @@ vi.mock('@nvidia/foundations-react-core', async (importOriginal) => {
   };
 });
 
-function makeLog(index: number): PlatformJobLog {
+function makeLog(index: number): HelixJobLog {
   return {
     timestamp: `2026-01-01T00:00:0${index}Z`,
     job: 'test-job',

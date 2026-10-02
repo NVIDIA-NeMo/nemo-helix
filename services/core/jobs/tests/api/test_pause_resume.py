@@ -3,21 +3,21 @@
 
 import pytest
 from httpx import AsyncClient
-from nmp.core.jobs.api.v2.jobs.schemas import CreatePlatformJobRequest
-from nmp.core.jobs.app.schemas import PlatformJobSpec, PlatformJobStepSpec
-from nmp.core.jobs.app.test_helpers import TestConstants
+from nhx.core.jobs.api.v2.jobs.schemas import CreateHelixJobRequest
+from nhx.core.jobs.app.schemas import HelixJobSpec, HelixJobStepSpec
+from nhx.core.jobs.app.test_helpers import TestConstants
 
 
 @pytest.mark.asyncio
 async def test_job_pause_functionality(test_client: AsyncClient):
     """Test pausing a job that is currently active."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-pause",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -59,13 +59,13 @@ async def test_job_pause_functionality(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_resume_functionality(test_client: AsyncClient):
     """Test resuming a job that is currently paused."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-resume",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -111,14 +111,14 @@ async def test_job_resume_functionality(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_pause_resume_lifecycle(test_client: AsyncClient):
     """Test complete pause-resume lifecycle of a job."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-lifecycle",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
-                PlatformJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step2", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -215,13 +215,13 @@ async def test_job_resume_nonexistent_job(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_pause_pending_job(test_client: AsyncClient):
     """Test pausing a job that is pending, should just pause."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-no-active",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )
@@ -246,13 +246,13 @@ async def test_job_pause_pending_job(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_resume_no_paused_steps(test_client: AsyncClient):
     """Test resuming a job with no paused steps (should handle gracefully)."""
-    req = CreatePlatformJobRequest(
+    req = CreateHelixJobRequest(
         name="test-job-no-paused",
         source="test-source",
         spec={"param1": "value1"},
-        platform_spec=PlatformJobSpec(
+        platform_spec=HelixJobSpec(
             steps=[
-                PlatformJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
+                HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={}),
             ]
         ),
     )

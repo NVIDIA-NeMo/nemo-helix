@@ -1,39 +1,32 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FinetuningType } from '@nemo/sdk/generated/platform/schema';
+import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
+import {
+  AutomodelTrainingSpecFinetuningType,
+  RlGRPOTrainingFinetuningType,
+  UnslothTrainingSpecFinetuningType,
+} from '@nemo/sdk/generated/customizer/schema';
+import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
 
-export const FINETUNING_TYPE_OPTIONS = [
-  { value: FinetuningType.lora, children: 'LoRA' },
-  { value: FinetuningType.lora_merged, children: 'LoRA Merged' },
-  { value: FinetuningType.all_weights, children: 'All Weights' },
-  { value: FinetuningType.last_layer, children: 'Last Layer' },
-  { value: FinetuningType.top_layers, children: 'Top Layers' },
-  { value: FinetuningType.gradual_unfreezing, children: 'Gradual Unfreezing' },
-  { value: FinetuningType.bias_only, children: 'Bias Only' },
-  { value: FinetuningType.attention_only, children: 'Attention Only' },
-  { value: FinetuningType.qlora, children: 'QLoRA' },
-  { value: FinetuningType.adalora, children: 'AdaLoRA' },
-  { value: FinetuningType.dora, children: 'DoRA' },
-  { value: FinetuningType.lora_plus, children: 'LoRA+' },
-  { value: FinetuningType.prefix_tuning, children: 'Prefix Tuning' },
-  { value: FinetuningType.p_tuning, children: 'P-Tuning' },
-  { value: FinetuningType.p_tuning_v2, children: 'P-Tuning v2' },
-  { value: FinetuningType.soft_prompt, children: 'Soft Prompt' },
-  { value: FinetuningType.ppo, children: 'PPO' },
-  { value: FinetuningType.dpo, children: 'DPO' },
-  { value: FinetuningType.cdpo, children: 'cDPO' },
-  { value: FinetuningType.ipo, children: 'IPO' },
-  { value: FinetuningType.orpo, children: 'ORPO' },
-  { value: FinetuningType.kto, children: 'KTO' },
-  { value: FinetuningType.rrhf, children: 'RRHF' },
-  { value: FinetuningType.grpo, children: 'GRPO' },
-];
+/**
+ * Every finetuning_type a completed customization can stamp on a model entity:
+ * the union of the customizer backends' supported values (automodel, unsloth,
+ * rl/GRPO). Sourced from the customizer API schema so it stays in sync with the
+ * backend on SDK regen. The broad platform `FinetuningType` enum also carries
+ * approaches the product does not support, which must not appear in this filter
+ * (ASTD-488).
+ */
+const SUPPORTED_FINETUNING_TYPES: FinetuningType[] = [
+  ...Object.values(AutomodelTrainingSpecFinetuningType),
+  ...Object.values(UnslothTrainingSpecFinetuningType),
+  ...Object.values(RlGRPOTrainingFinetuningType),
+].filter((value, index, all) => all.indexOf(value) === index);
 
 /** Column filter options in FilterItem format ({ value, label }) for single-select filters. */
-export const FINETUNING_TYPE_FILTER_OPTIONS = FINETUNING_TYPE_OPTIONS.map((opt) => ({
-  value: opt.value,
-  label: opt.children,
+export const FINETUNING_TYPE_FILTER_OPTIONS = SUPPORTED_FINETUNING_TYPES.map((value) => ({
+  value,
+  label: formatFinetuningType(value),
 }));
 
 export const HAS_BASE_MODEL = { 'data.base_model': { $not: { $eq: null } } };

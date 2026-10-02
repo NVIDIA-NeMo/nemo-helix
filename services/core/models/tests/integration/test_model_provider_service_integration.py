@@ -4,9 +4,9 @@
 """Integration tests for ModelProvider service with in-memory EntityClient."""
 
 import pytest
-from nmp.common.api.common import Page
-from nmp.core.models.api.service.model_provider_service import ModelProviderService
-from nmp.core.models.schemas import (
+from nhx.common.api.common import Page
+from nhx.core.models.api.service.model_provider_service import ModelProviderService
+from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
     GetModelProviderRequest,
@@ -14,8 +14,8 @@ from nmp.core.models.schemas import (
     UpdateModelProviderStatusRequest,
     UpsertModelProviderRequest,
 )
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import ClientContext, create_test_client
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import ClientContext, create_test_client
 
 
 @pytest.fixture

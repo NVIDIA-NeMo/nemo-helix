@@ -20,7 +20,7 @@ from nemo_auditor.entities import (
     AuditRunData,
     AuditSystemData,
 )
-from nemo_platform_plugin.schema import DatetimeFilter, NemoFilter
+from nemo_helix_plugin.schema import DatetimeFilter, NemoFilter
 from pydantic import BaseModel, Field
 
 

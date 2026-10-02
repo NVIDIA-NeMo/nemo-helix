@@ -3,7 +3,7 @@
 
 # Tool Calling Evaluation (BFCL) - CLI Harbor Test
 
-Tests that a coding agent can prepare a BFCL-format dataset, create a tool-calling metric, run a synchronous evaluation, and verify function_name_accuracy and function_name_and_args_accuracy scores using the NeMo Platform CLI.
+Tests that a coding agent can prepare a BFCL-format dataset, create a tool-calling metric, run a synchronous evaluation, and verify function_name_accuracy and function_name_and_args_accuracy scores using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -20,7 +20,7 @@ This eval does **not** require a live model endpoint. The tool-calling metric co
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 export ANTHROPIC_API_KEY='your-key'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'

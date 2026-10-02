@@ -5,7 +5,7 @@
 
 ## Project Context
 
-- NeMo Studio — React + TypeScript monorepo for the NeMo Platform UI
+- NeMo Studio — React + TypeScript monorepo for the NeMo Helix UI
 - Tech Stack: React 18, TypeScript, Vite, Vitest, Playwright, pnpm workspaces
 - Uses KUI (Kaizen UI) React components, TanStack Query
 

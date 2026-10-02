@@ -24,8 +24,8 @@ from types import MappingProxyType
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client_provider import get_forwarding_headers
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_forwarding_headers
 from nemoguardrails.integrations.langchain.llm_adapter import LangChainLLMAdapter
 from nemoguardrails.llm.providers import register_provider
 from nemoguardrails.types import LLMModel

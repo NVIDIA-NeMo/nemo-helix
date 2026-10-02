@@ -86,7 +86,7 @@ def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app
 
     list_help = runner.invoke(app, ["sessions", "list", "--help"])
     assert list_help.exit_code == 0
-    for option in ("--agent-deployment", "--format", "--no-truncate"):
+    for option in ("--agent-deployment", "--output-format", "--no-truncate", "--all-pages"):
         assert option in list_help.stdout
     for option in ("--page", "--page-size"):
         assert option not in list_help.stdout
@@ -95,8 +95,8 @@ def test_sessions_help_exposes_management_scope_without_pagination_or_delete(app
 def test_sessions_list_defaults_to_newest_first_api_table(app) -> None:
     response = _sessions_response()
     transport, requests = _scripted_responses(response)
-    with transport:
-        result = runner.invoke(app, ["sessions", "list", "--base-url", "http://test"])
+    with transport, patch("nemo_helix_plugin.cli_state.is_tty", return_value=True):
+        result = runner.invoke(app, ["sessions", "list"])
 
     assert result.exit_code == 0, result.output
     assert [(request.method, request.url.path) for request in requests] == [
@@ -115,12 +115,12 @@ def test_sessions_list_supports_existing_output_formats(app, output_format: str)
     response = _sessions_response()
     transport, _requests = _scripted_responses(response)
     with transport:
-        result = runner.invoke(app, ["sessions", "list", "--format", output_format])
+        result = runner.invoke(app, ["sessions", "list", "--output-format", output_format])
 
     assert result.exit_code == 0, result.output
     assert "debug-auth" in result.stdout
     if output_format == "json":
-        assert json.loads(result.stdout) == response
+        assert [session["name"] for session in json.loads(result.stdout)["data"]] == ["debug-auth"]
 
 
 def test_sessions_list_filters_by_deployment_name(app) -> None:
@@ -129,7 +129,7 @@ def test_sessions_list_filters_by_deployment_name(app) -> None:
     with transport:
         result = runner.invoke(
             app,
-            ["sessions", "list", "--agent-deployment", "fabric-deployment", "--format", "json"],
+            ["sessions", "list", "--agent-deployment", "fabric-deployment", "--output-format", "json"],
         )
 
     assert result.exit_code == 0, result.output
@@ -164,7 +164,7 @@ def test_sessions_get_prints_full_session_json(app) -> None:
     session = _sessions_response()["data"][0]
     transport, requests = _scripted_responses(session)
     with transport:
-        result = runner.invoke(app, ["sessions", "get", "debug-auth", "--base-url", "http://test"])
+        result = runner.invoke(app, ["sessions", "get", "debug-auth"])
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout) == session
@@ -186,7 +186,7 @@ def test_sessions_close_accepts_yes_and_calls_close_endpoint(app) -> None:
     with transport:
         result = runner.invoke(
             app,
-            ["sessions", "close", "debug-auth", "--yes", "--workspace", "team-a", "--base-url", "http://test"],
+            ["sessions", "close", "debug-auth", "--yes", "--workspace", "team-a"],
         )
 
     assert result.exit_code == 0, result.output

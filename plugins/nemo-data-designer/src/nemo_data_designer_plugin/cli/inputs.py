@@ -23,6 +23,8 @@ from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
 from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
 _NON_INTERACTIVE_HELP = (
     "Display all records at once instead of browsing interactively. Ignored when --save-results is used."
@@ -90,9 +92,28 @@ def _build_spec_from_builder(builder: DataDesignerConfigBuilder, num_records: in
 
 
 def _pluck_callback(group: typer.Typer, verb: str) -> Callable[..., None]:
-    callback = next(c for c in group.registered_commands if c.name == verb).callback
-    assert callback is not None, f"missing {verb!r} callback to override"
+    for command in group.registered_commands:
+        if command.name == verb:
+            callback = command.callback
+            assert callback is not None, f"missing {verb!r} callback to override"
+            return callback
+    raise RuntimeError(f"missing {verb!r} callback to override")
+
+
+def _pluck_root_callback(group: typer.Typer, verb: str) -> Callable[..., None]:
+    registered_callback = group.registered_callback
+    assert registered_callback is not None, f"missing root callback for {verb!r} override"
+    callback = registered_callback.callback
+    assert callback is not None, f"missing root callback for {verb!r} override"
     return callback
+
+
+def _allow_interspersed_root_args(group: typer.Typer) -> None:
+    context_settings = group.info.context_settings
+    if isinstance(context_settings, dict):
+        group.info.context_settings = {**context_settings, "allow_interspersed_args": True}
+        return
+    group.info.context_settings = {"allow_interspersed_args": True}
 
 
 def _replace_function_submit(group: typer.Typer) -> None:
@@ -103,21 +124,18 @@ def _replace_function_submit(group: typer.Typer) -> None:
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str = typer.Option("default", "--workspace", "-w"),
-        cluster: str | None = typer.Option(None, "--cluster"),
-        base_url: str | None = typer.Option(None, "--base-url"),
+        workspace: WorkspaceOption = None,
         request_id: str | None = typer.Option(None, "--request-id"),
         non_interactive: bool = typer.Option(False, "--non-interactive", help=_NON_INTERACTIVE_HELP),
         save_results: bool = typer.Option(False, "--save-results", help=_SAVE_RESULTS_HELP),
         artifact_path: str | None = typer.Option(None, "--artifact-path", "-o", help=_ARTIFACT_PATH_HELP),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         with _spec_from_builder(config_source, num_records) as spec:
             original(
                 typer_ctx,
                 spec=spec,
                 spec_file=None,
-                cluster=cluster,
-                base_url=base_url,
                 workspace=workspace,
                 request_id=request_id,
                 non_interactive=non_interactive,
@@ -127,17 +145,24 @@ def _replace_function_submit(group: typer.Typer) -> None:
 
 
 def _replace_job_submit(group: typer.Typer) -> None:
-    original = _pluck_callback(group, "create")
+    explain: Callable[..., None] | None = None
+    try:
+        original = _pluck_callback(group, "create")
+        register = group.command("create")
+    except RuntimeError:
+        original = _pluck_root_callback(group, "create")
+        with contextlib.suppress(RuntimeError):
+            explain = _pluck_callback(group, "explain")
+        _allow_interspersed_root_args(group)
+        register = group.callback(invoke_without_command=True)
 
-    @group.command("create")
+    @register
     def create(
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str = typer.Option("default", "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(None, "--profile"),
-        cluster: str | None = typer.Option(None, "--cluster"),
-        base_url: str | None = typer.Option(None, "--base-url"),
         options: list[str] = typer.Option(  # noqa: B008 — Typer evaluates default lazily per invocation
             [],  # noqa: B006
             "-o",
@@ -145,6 +170,11 @@ def _replace_job_submit(group: typer.Typer) -> None:
         ),
         options_file: Path | None = typer.Option(None, "--options-file"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
+        if explain is not None and config_source == "explain":
+            explain(profile=profile)
+            return
+
         with _spec_from_builder(config_source, num_records) as spec:
             original(
                 typer_ctx,
@@ -153,8 +183,6 @@ def _replace_job_submit(group: typer.Typer) -> None:
                 options=options,
                 options_file=options_file,
                 profile=profile,
-                cluster=cluster,
-                base_url=base_url,
                 workspace=workspace,
                 config=None,
                 config_file=None,

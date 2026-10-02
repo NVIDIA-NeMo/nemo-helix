@@ -3,14 +3,14 @@
 
 [project]
 name = "nemo-example-plugin"
-description = "Example reference plugin that validates the NeMo Platform plugin system end-to-end."
+description = "Example reference plugin that validates the NeMo Helix plugin system end-to-end."
 requires-python = ">=3.11,<3.15"
-dependencies = ["nemo-platform-plugin", "nemo-platform", "pydantic>=2.0.0"]
+dependencies = ["nemo-helix-plugin", "nemo-helix", "pydantic>=2.0.0"]
 version = "0.0.0"
 
 [tool.uv.sources]
-nemo-platform = { path = "../../packages/nemo_platform", editable = true }
-nemo-platform-plugin = { path = "../../packages/nemo_platform_plugin", editable = true }
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
 
 
 [project.entry-points."nemo.services"]

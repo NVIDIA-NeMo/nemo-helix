@@ -104,7 +104,7 @@ def test_setup_classify_endpoint_sets_upstream_safe_synthesizer_env(monkeypatch)
     monkeypatch.setenv(
         "CLASSIFY_LLM_ENDPOINT_PATH", "/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
     )
-    monkeypatch.setenv("NMP_MODELS_URL", "http://models.test")
+    monkeypatch.setenv("NHX_MODELS_URL", "http://models.test")
     monkeypatch.delenv("NSS_INFERENCE_ENDPOINT", raising=False)
     monkeypatch.delenv("NSS_INFERENCE_KEY", raising=False)
 
@@ -120,7 +120,7 @@ def test_setup_classify_endpoint_sets_upstream_safe_synthesizer_env(monkeypatch)
 def test_setup_classify_endpoint_preserves_existing_inference_key(monkeypatch):
     task_main = import_task_main_without_heavy_runtime(monkeypatch)
     monkeypatch.setenv("CLASSIFY_LLM_ENDPOINT_PATH", "/route")
-    monkeypatch.setenv("NMP_MODELS_URL", "http://models.test/")
+    monkeypatch.setenv("NHX_MODELS_URL", "http://models.test/")
     monkeypatch.setenv("NSS_INFERENCE_KEY", "real-key")
 
     task_main._setup_classify_endpoint()

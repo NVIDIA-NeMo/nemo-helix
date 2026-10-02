@@ -1,0 +1,28 @@
+diff --git a/nemo_rl/utils/prefetch_venvs.py b/nemo_rl/utils/prefetch_venvs.py
+--- a/nemo_rl/utils/prefetch_venvs.py
++++ b/nemo_rl/utils/prefetch_venvs.py
+@@ -153,3 +153,3 @@
+     # Create wrapper scripts
+-    wrapper_dir = Path("/usr/local/bin")
++    wrapper_dir = Path("/opt/nemo_rl_venv/bin")
+     created_wrappers = []
+diff --git a/nemo_rl/utils/venvs.py b/nemo_rl/utils/venvs.py
+--- a/nemo_rl/utils/venvs.py
++++ b/nemo_rl/utils/venvs.py
+@@ -139,8 +139,9 @@ def create_local_venv(
+-    # Run uv sync first to ensure build requirements are set (for --no-build-isolation packages).
+-    # --inexact: this base-set sync must not prune extras out of a venv that was
+-    # pre-materialized in the image; pruning and re-adding hardlinked packages would copy
+-    # them up into the image's final layer.
+-    subprocess.run(
+-        ["uv", "sync", "--inexact", "--directory", git_root], env=env, check=True
+-    )
++    if not os.environ.get("NRL_PREFETCH_SKIP_INITIAL_SYNC"):
++        # Run uv sync first to ensure build requirements are set (for --no-build-isolation packages).
++        # --inexact: this base-set sync must not prune extras out of a venv that was
++        # pre-materialized in the image; pruning and re-adding hardlinked packages would copy
++        # them up into the image's final layer.
++        subprocess.run(
++            ["uv", "sync", "--inexact", "--directory", git_root], env=env, check=True
++        )
+     subprocess.run(exec_cmd, env=env, check=True)

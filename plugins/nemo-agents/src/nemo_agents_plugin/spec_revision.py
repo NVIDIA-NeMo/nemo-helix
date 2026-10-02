@@ -11,11 +11,9 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from nemo_agents_plugin.entities import ethos_fileset_name
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.log_utils import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +47,6 @@ async def read_spec_revision(files_client: AsyncFilesClient | None, *, workspace
         return SpecRevision()
 
     return SpecRevision(revision=storage.pinned_revision, tracked_revision=storage.tracked_revision or "")
-
-
-def files_client_for(sdk: AsyncNeMoPlatform) -> AsyncFilesClient | None:
-    """Adapt the platform SDK, or None — a deployment must not fail for want of provenance."""
-    try:
-        return client_from_platform(sdk, AsyncFilesClient)
-    except Exception:
-        logger.warning("Could not build a files client for deployment provenance", exc_info=True)
-        return None
 
 
 async def stage_with_spec_revision(

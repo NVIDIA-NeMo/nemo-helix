@@ -23,7 +23,21 @@ export interface UseServedModelResult {
   servedModel?: ServedModelMapping;
   /** `<workspace>/<name>` ref of the provider that serves it. */
   providerRef?: string;
+  /**
+   * The provider that serves it. Callers need `model_deployment_id` to reach the
+   * backing deployment; it is already fetched here, so hand it back rather than
+   * making the caller re-resolve the ref.
+   */
+  provider?: ModelProvider;
   isLoading: boolean;
+  /**
+   * A provider referenced by `model.model_providers` could not be fetched. Only set
+   * when no provider matched, where it is the difference between "nothing serves
+   * this" and "we could not find out". Provider queries do not retry, so a single
+   * 5xx, an authorization failure, or a stale provider reference lands here — and
+   * reporting that as "not served" would be confidently wrong.
+   */
+  isError?: boolean;
 }
 
 /**
@@ -70,10 +84,10 @@ export function useServedModel(
         (sm) => sm.model_entity_id === modelEntityId
       );
       if (match) {
-        return { servedModel: match, providerRef: providerRefs[index], isLoading };
+        return { servedModel: match, providerRef: providerRefs[index], provider, isLoading };
       }
     }
 
-    return { isLoading };
+    return { isLoading, isError: queries.some((q) => q.isError) };
   }, [enabled, queries, modelEntityId, providerRefs]);
 }

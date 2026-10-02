@@ -29,7 +29,7 @@ NEMO_CONFIGS = _nv.NEMO_CONFIGS
 NEMO_CONFIGS_PARAMS = _nv.NEMO_CONFIGS_PARAMS
 REQUIRES_HF_TOKEN = _nv.REQUIRES_HF_TOKEN
 
-from nmp.core.models.parallelism.api import (  # noqa: E402
+from nhx.core.models.parallelism.api import (  # noqa: E402
     estimate_parallelization,
     find_minimum_gpus,
     infer_model_cfg_from_hf,

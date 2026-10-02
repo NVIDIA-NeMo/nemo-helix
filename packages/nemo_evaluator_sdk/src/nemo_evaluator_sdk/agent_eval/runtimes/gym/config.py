@@ -15,9 +15,10 @@ import logging
 import re
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from nemo_evaluator_sdk.values.common import SecretRef
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,10 @@ class GymRuntimeConfig(BaseModel):
     Holds only plain fields; the two-step invocation is built from them at run
     time. The dataset itself is recovered from the tasks (stamped by
     :func:`discover_gym_tasks`), mirroring the Harbor runner.
+
+    Scoped to what a Gym run *is*, not where it runs. Settings that only a deployment can honor —
+    which FileSet supplies the environment, which agent instance a sandboxed host routes to — are
+    supplied at submission instead, so this config means the same thing locally and job-side.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -220,6 +225,14 @@ class GymRuntimeConfig(BaseModel):
         "a property of the environment into a property of whoever launched the run. Redacted from "
         "recorded provenance on the same rules as `hydra_params`.",
     )
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        description="Environment variables whose values come from a secret reference rather than from this "
+        "config, as {ENV_NAME: secret-ref}. Use this rather than `env_vars` for anything secret -- a Gym "
+        "model API key belongs here. Only the reference is ever recorded, so no credential reaches the run "
+        "bundle. Who turns a reference into a value is the caller's: locally `LocalSecretResolver` reads it "
+        "from this process's environment, and a submitted job has it resolved by the platform.",
+    )
     num_repeats: int = Field(default=1, ge=1, description="Attempts per row; each attempt becomes one trial.")
     concurrency: int = Field(
         default=4,
@@ -241,3 +254,14 @@ class GymRuntimeConfig(BaseModel):
         "before escalating to SIGKILL.",
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from each rollout record.")
+
+    @model_validator(mode="after")
+    def _no_variable_is_both_plaintext_and_a_secret(self) -> Self:
+        overlap = sorted(set(self.env_vars) & set(self.env_secrets))
+        if overlap:
+            raise ValueError(
+                f"{overlap} appear in both env_vars and env_secrets, so which value Gym receives would "
+                "depend on layering order rather than on what you asked for. Name each variable once: "
+                "env_secrets for anything secret, env_vars for the rest."
+            )
+        return self

@@ -6,7 +6,7 @@
 import asyncio
 
 import pytest
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
 
 
 @pytest.mark.asyncio

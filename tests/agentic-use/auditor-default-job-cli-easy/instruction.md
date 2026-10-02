@@ -3,9 +3,9 @@
 
 # Run Default Audit (CLI)
 
-You have access to the `nemo` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -40,8 +40,8 @@ nemo auditor configs create <name> -d '{"system": {"lite": true}, "run": {"gener
 ### Audit Run
 
 ```bash
-# Run an audit locally (spec references config and target as namespace/name)
-nemo auditor audit run --spec '{"config": "<namespace>/<config-name>", "target": "<namespace>/<target-name>"}'
+# Submit an audit job (spec references config and target as namespace/name)
+nemo auditor audit --spec '{"config": "<namespace>/<config-name>", "target": "<namespace>/<target-name>"}'
 ```
 
 ## Hints
@@ -49,11 +49,11 @@ nemo auditor audit run --spec '{"config": "<namespace>/<config-name>", "target":
 - The provider type for `nvidia-inference` is `openai` (it's an OpenAI-compatible API)
 - For the audit config, include minimal valid JSON for `system`, `run`, `plugins`, and `reporting`
 - Configs and targets you create are in the `default` namespace, so reference them as `default/default` and `default/audit-target`
-- Use `--spec` with a JSON string for the audit run, not separate flags
+- Use `--spec` with a JSON string for the audit job, not separate flags
 
 ## Success Criteria
 
 The task is complete when:
 - An audit target named `audit-target` exists referencing the model through the provider
 - An audit config named `default` exists
-- The audit run command has been invoked with the default config and audit target
+- The audit command has been invoked with the default config and audit target

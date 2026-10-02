@@ -27,10 +27,10 @@ from nemo_anonymizer_plugin.app.model_configs import (
 )
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 from nemo_anonymizer_plugin.config import get_config
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.function_context import FunctionContext
-from nemo_platform_plugin.functions.frames import Done, Error, FrameModel, Heartbeat
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.function_context import FunctionContext
+from nemo_helix_plugin.functions.frames import Done, Error, FrameModel, Heartbeat
 from pydantic import BaseModel, Field
 
 LogLevel = Literal["debug", "info", "warning", "error"]
@@ -89,7 +89,7 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
         spec: PreviewSpec,
         *,
         ctx: FunctionContext,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncHelixClient,
     ) -> AsyncIterator[BaseModel]:
         num_records = _validate_and_get_num_records(spec.num_records)
         validate_selected_models_have_model_configs(

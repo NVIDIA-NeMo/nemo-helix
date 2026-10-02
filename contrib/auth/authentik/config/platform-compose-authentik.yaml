@@ -17,8 +17,8 @@ auth:
   admin_email: "admin@example.com"
   token_signing:
     issuer: "https://nemo-gateway:8080/apis/auth"
-    key_id: "nemo-platform-signing"
-    private_key_file: "/var/run/secrets/nemo-platform/workload-token-signing/private-key.pem"
+    key_id: "nemo-helix-signing"
+    private_key_file: "/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem"
   access_keys:
     enabled: true
   oidc:
@@ -28,12 +28,12 @@ auth:
       - "http://authentik-server:9000/application/o/nemo/"
       - "https://127.0.0.1:18080/application/o/nemo-cli/"
       - "https://127.0.0.1:18080/application/o/nemo/"
-    client_id: "nemo-platform-cli"
+    client_id: "nemo-helix-cli"
     token_endpoint: "https://127.0.0.1:18080/application/o/token/"
     device_authorization_endpoint: "https://127.0.0.1:18080/application/o/device/"
     workload_token_exchange_enabled: true
-    workload_client_id: "nemo-platform-workload"
-    workload_audience: "nemo-platform"
+    workload_client_id: "nemo-helix-workload"
+    workload_audience: "nemo-helix"
     workload_scope: "openid email groups"
     workload_token_endpoint: "https://nemo-gateway:8080/apis/auth/token"
     workload_subject_jwks_uri: "http://authentik-server:9000/application/o/nemo-workload/jwks/"
@@ -58,12 +58,12 @@ jobs:
         cleanup_completed_jobs_immediately: false
         launcher_tool_path: /tools/jobs-launcher
         env:
-          SSL_CERT_FILE: "/etc/nmp/gateway-tls/tls.crt"
-          REQUESTS_CA_BUNDLE: "/etc/nmp/gateway-tls/tls.crt"
+          SSL_CERT_FILE: "/etc/nhx/gateway-tls/tls.crt"
+          REQUESTS_CA_BUNDLE: "/etc/nhx/gateway-tls/tls.crt"
         storage:
           additional_volume_mounts:
             - volume_name: "authentik_gateway_tls"
-              mount_path: "/etc/nmp/gateway-tls"
+              mount_path: "/etc/nhx/gateway-tls"
   executor_defaults:
     docker:
       cleanup_completed_jobs_immediately: false
@@ -85,7 +85,7 @@ deployments:
         oneshot_observe_timeout_seconds: 30
         additional_volume_mounts:
           - volume_name: "authentik_gateway_tls"
-            mount_path: "/etc/nmp/gateway-tls"
+            mount_path: "/etc/nhx/gateway-tls"
             read_only: true
   controller:
     interval_seconds: 2

@@ -6,7 +6,7 @@
 from collections.abc import Awaitable, Callable
 
 import httpx
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 _SDK_INTAKE_PREFIX = "/apis/intake/"
 _DEFAULT_REAL_PREFIX = "/api/intake/"
@@ -53,7 +53,7 @@ def build_basic_auth_intake_client(
     real_prefix: str = _DEFAULT_REAL_PREFIX,
     sdk_prefix: str = _SDK_INTAKE_PREFIX,
     transport: httpx.AsyncBaseTransport | None = None,
-) -> AsyncNeMoPlatform:
+) -> AsyncNeMoHelix:
     """Build an SDK client for a basic-auth Intake mounted at ``real_prefix``."""
     http_client = build_rewriting_http_client(
         username=username,
@@ -62,4 +62,4 @@ def build_basic_auth_intake_client(
         sdk_prefix=sdk_prefix,
         transport=transport,
     )
-    return AsyncNeMoPlatform(base_url=base_url, http_client=http_client)
+    return AsyncNeMoHelix(base_url=base_url, http_client=http_client)

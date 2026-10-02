@@ -13,7 +13,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: nemo-platform-scaled-evals
+namespace: nemo-helix-scaled-evals
 
 resources:
   - namespace.yaml
@@ -25,8 +25,8 @@ resources:
   - workers.yaml
 
 commonLabels:
-  app.kubernetes.io/name: nemo-platform-scaled-evals
-  app.kubernetes.io/part-of: nemo-platform
+  app.kubernetes.io/name: nemo-helix-scaled-evals
+  app.kubernetes.io/part-of: nemo-helix
 
 images:
   - name: scaled-evals-app
@@ -36,8 +36,8 @@ images:
     # reusing a floating tag.
     newTag: ${SE_APP_IMAGE_TAG}
 
-# Shared by the API and both workers, exactly as in the compose stack. Rendered
-# into a hashed ConfigMap so a settings change rolls the pods.
+# Shared by the API, auxiliary dispatch worker, and Platform Job tasks. Rendered
+# into a hashed ConfigMap so a settings change rolls the long-lived pods.
 configMapGenerator:
   - name: scaled-evals-env
     envs:

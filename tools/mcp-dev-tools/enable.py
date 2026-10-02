@@ -2,9 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Enable the NeMo Platform MCP dev tools server locally.
+"""Enable the NeMo Helix MCP dev tools server locally.
 
-This script configures your local Claude Code settings to enable the nmp-dev
+This script configures your local Claude Code settings to enable the nhx-dev
 MCP server without affecting other developers in the repository.
 
 Uses 'claude mcp add' to add the server to local scope (~/.claude.json),
@@ -28,7 +28,7 @@ def find_repo_root() -> Path:
 
 
 def add_mcp_server(repo_root: Path) -> bool:
-    """Add nmp-dev server using 'claude mcp add' command.
+    """Add nhx-dev server using 'claude mcp add' command.
 
     This adds the server to local scope (~/.claude.json) without modifying
     the committed .mcp.json file.
@@ -44,10 +44,10 @@ def add_mcp_server(repo_root: Path) -> bool:
         )
 
         if result.returncode == 0:
-            # Parse the JSON output to check if nmp-dev exists
+            # Parse the JSON output to check if nhx-dev exists
             servers = json.loads(result.stdout)
-            if any(server.get("name") == "nmp-dev" for server in servers):
-                print("✓ nmp-dev server already configured in local scope")
+            if any(server.get("name") == "nhx-dev" for server in servers):
+                print("✓ nhx-dev server already configured in local scope")
                 return False
     except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
         # If claude command not found or list fails, proceed with add
@@ -60,24 +60,24 @@ def add_mcp_server(repo_root: Path) -> bool:
                 "claude",
                 "mcp",
                 "add",
-                "nmp-dev",
+                "nhx-dev",
                 "--",
                 "sh",
                 "-c",
-                "cd tools/mcp-dev-tools && uv run nmp-dev-mcp",
+                "cd tools/mcp-dev-tools && uv run nhx-dev-mcp",
             ],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=True,
         )
-        print("✅ Added nmp-dev server to local config (~/.claude.json)")
+        print("✅ Added nhx-dev server to local config (~/.claude.json)")
         print("   This keeps the committed .mcp.json file clean")
         return True
     except subprocess.CalledProcessError as e:
         # Check if it's just an "already exists" error
         if "already exists" in e.stderr:
-            print("✓ nmp-dev server already configured in local scope")
+            print("✓ nhx-dev server already configured in local scope")
             return False
         print(f"❌ Failed to add MCP server: {e.stderr}")
         return False
@@ -87,7 +87,7 @@ def add_mcp_server(repo_root: Path) -> bool:
 
 
 def update_settings_json(repo_root: Path) -> bool:
-    """Add nmp-dev permissions to .claude/settings.local.json."""
+    """Add nhx-dev permissions to .claude/settings.local.json."""
     claude_dir = repo_root / ".claude"
     settings_path = claude_dir / "settings.local.json"
 
@@ -116,24 +116,24 @@ def update_settings_json(repo_root: Path) -> bool:
         settings["permissions"]["allow"] = []
         changed = True
 
-    if "mcp__nmp-dev__*" not in settings["permissions"]["allow"]:
-        settings["permissions"]["allow"].append("mcp__nmp-dev__*")
-        print("✅ Added mcp__nmp-dev__* to permissions.allow")
+    if "mcp__nhx-dev__*" not in settings["permissions"]["allow"]:
+        settings["permissions"]["allow"].append("mcp__nhx-dev__*")
+        print("✅ Added mcp__nhx-dev__* to permissions.allow")
         changed = True
     else:
-        print("✓ mcp__nmp-dev__* already in permissions.allow")
+        print("✓ mcp__nhx-dev__* already in permissions.allow")
 
     # Add to enabledMcpjsonServers
     if "enabledMcpjsonServers" not in settings:
         settings["enabledMcpjsonServers"] = []
         changed = True
 
-    if "nmp-dev" not in settings["enabledMcpjsonServers"]:
-        settings["enabledMcpjsonServers"].append("nmp-dev")
-        print("✅ Added nmp-dev to enabledMcpjsonServers")
+    if "nhx-dev" not in settings["enabledMcpjsonServers"]:
+        settings["enabledMcpjsonServers"].append("nhx-dev")
+        print("✅ Added nhx-dev to enabledMcpjsonServers")
         changed = True
     else:
-        print("✓ nmp-dev already in enabledMcpjsonServers")
+        print("✓ nhx-dev already in enabledMcpjsonServers")
 
     # Write updated settings
     if changed:
@@ -154,7 +154,7 @@ def update_agents_local(repo_root: Path) -> bool:
 
 **CRITICAL: Use MCP dev tools instead of bash commands when available.**
 
-The `nmp-dev` MCP server provides dedicated tools for common development tasks with better error handling and focused functionality. Always prefer these over equivalent bash commands:
+The `nhx-dev` MCP server provides dedicated tools for common development tasks with better error handling and focused functionality. Always prefer these over equivalent bash commands:
 
 **Git operations:** Use `git_status`, `git_log`, `git_branch_list`, `git_diff`, `git_diff_summary`, `git_diff_staged`, `git_show` instead of `git` bash commands
 
@@ -196,7 +196,7 @@ Only fall back to bash commands when no MCP tool equivalent exists.
 def main():
     """Main entry point."""
     print("=" * 70)
-    print("🔧 Enabling NeMo Platform MCP Dev Tools")
+    print("🔧 Enabling NeMo Helix MCP Dev Tools")
     print("=" * 70)
     print()
 
@@ -216,7 +216,7 @@ def main():
     print("=" * 70)
 
     if mcp_changed or settings_changed or agents_changed:
-        print("✅ NeMo Platform MCP Dev Tools Enabled!")
+        print("✅ NeMo Helix MCP Dev Tools Enabled!")
         print("=" * 70)
         print()
         print("📋 Next steps:")
@@ -234,7 +234,7 @@ def main():
         print()
         print("📚 See tools/mcp-dev-tools/README.md for full documentation")
     else:
-        print("✓ NeMo Platform MCP Dev Tools Already Enabled")
+        print("✓ NeMo Helix MCP Dev Tools Already Enabled")
         print("=" * 70)
         print()
         print("All configuration is already in place. If the tools aren't")

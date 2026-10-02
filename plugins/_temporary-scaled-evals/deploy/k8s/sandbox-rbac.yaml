@@ -17,6 +17,11 @@ kind: Role
 metadata:
   name: scaled-evals-sandbox-access
 rules:
+  # The Platform Jobs controller creates the outer task-build and evaluation
+  # Jobs. The task pods use the remaining rules for their sandbox children.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   # The plugin creates and observes Sandbox CRs directly. Keep this baseline
   # grant deployment-owned instead of depending on optional installation roles.
   - apiGroups: ["agents.x-k8s.io"]

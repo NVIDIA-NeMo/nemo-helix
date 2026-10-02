@@ -40,7 +40,7 @@ GRPO needs **two** FileSets: an environment package (code + config that runs a r
 The short version, for a Prime Intellect hub env, on an **internet-capable host** (training clusters have no hub egress):
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+uv run --package nhx-rl pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --validation-fraction 0.1 --upload
 ```
@@ -66,7 +66,7 @@ That writes the package plus `training.jsonl` / `validation.jsonl` and, with `--
 
 - `environment` is **required** for GRPO — a string ref to a FileSet with `purpose=environment` carrying a valid `nemo-environment.yaml`. Any of the three formats works. See `gym-environments.md`.
 - `dataset` is Gym JSONL (`training.jsonl` required, `validation.jsonl` optional) — rollout rows with the prompt under `responses_create_params.input`, **not** DPO preference triples and **not** `messages[]` at the top level. Schema and conversion: `dataset-formats.md` § **NeMo-RL (GRPO)**.
-- `sandboxed` is **not** a job field — platform config `NMP_RL_SANDBOXED_GYM_DEFAULT` (default `true`). Shared clusters fail closed until OpenSandbox is declared installed (`NMP_SANDBOX_CLUSTER_CAPABLE=true`, Helm `sandboxClusterCapable` — a **platform** setting, not `NMP_RL_*`) and `NMP_RL_JOB_STORAGE_PVC_CLAIM` names the job-storage PVC the Gym sandbox re-mounts for the environment and dataset. Both are checked **at submit** — the job compiler raises and the API returns 422, before any GPU is claimed. See `rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**.
+- `sandboxed` is **not** a job field — platform config `NHX_RL_SANDBOXED_GYM_DEFAULT` (default `true`). Shared clusters fail closed until OpenSandbox is declared installed (`NHX_SANDBOX_CLUSTER_CAPABLE=true`, Helm `sandboxClusterCapable` — a **platform** setting, not `NHX_RL_*`) and `NHX_RL_JOB_STORAGE_PVC_CLAIM` names the job-storage PVC the Gym sandbox re-mounts for the environment and dataset. Both are checked **at submit** — the job compiler raises and the API returns 422, before any GPU is claimed. See `rl-kubernetes-runtime.md` § **Sandboxed Gym (GRPO)**.
 
 ## Field reference — shared training knobs
 
@@ -115,6 +115,7 @@ That writes the package plus `training.jsonl` / `validation.jsonl` and, with `--
 | `hf_config_overrides` | `null` | Passed to NeMo-RL's `policy.hf_config_overrides` verbatim, which forwards it to the training model as HuggingFace config kwargs and to vLLM as `hf_overrides`. Nesting is preserved, so this reaches models that namespace their config — Qwen3.5 reads the router coefficient under `text_config`, i.e. `{"text_config": {"router_aux_loss_coef": 0.0}}`. Setting `router_aux_loss_coef` here *and* as its own field is rejected at submit time. |
 | `vllm_tensor_parallel_size` | `null` | Tensor parallelism for the rollout engine alone. Defaults to `min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node)`. Set it when the model needs several GPUs to hold inference weights but you want the policy trained at a different tensor-parallel size. |
 | `vllm_gpu_memory_utilization` | `0.5` | Fraction of each GPU vLLM reserves for weights plus KV cache. Raise toward `0.7` for large models, which otherwise cannot load their weight shard. |
+| `log_nemo_gym_full_result_tables` | `false` | Log every rollout's full NeMo-Gym result payload to the user's own W&B as a Table (`<agent>/full_result`). **This is the only place the generated text is readable** — the per-step `train_data_step*.jsonl` carries generations as token ids and leaves `content` empty. Each row is one JSON blob holding the decoded prompt (`prompt_str`), decoded generation (`generation_str`) and every reward component the environment returned; W&B cannot sort or filter on fields *inside* that blob. Payloads are large, so enable it for short debugging runs, not steady-state training. **Requires `integrations.wandb`** — NeMo-RL skips the Tables entirely when W&B is off, so the job is rejected at submit rather than logging nothing. |
 | `val_at_start` | `false` | Run validation **before** the first training step. Enable to measure uplift: baseline and result come from one job on the same data and generation settings, instead of a separate baseline run that must be kept in sync. Costs a full rollout pass, hence off by default. Ignored without a `validation.jsonl`. **GRPO only** — DPO always validates at step 0, since its validation needs no generation. |
 | `max_new_tokens` | `null` → `max_seq_length` | Cap on tokens generated per rollout turn. **Known limitation:** NeMo Gym's `verifiers_agent` does not yet honour this — see below. |
 | `normalize_rewards` | `true` | |
@@ -237,7 +238,7 @@ Full-weight GRPO instead registers a new **model** entity, which does need its o
 
 ### `parallelism`
 
-Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (GRPO only; **implemented only by `policy_backend: "automodel"`** — a value above `1` under `"dtensor"` is rejected at submit, not silently upgraded). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NMP_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
+Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (GRPO only; **implemented only by `policy_backend: "automodel"`** — a value above `1` under `"dtensor"` is rejected at submit, not silently upgraded). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NHX_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
 
 ### Known limitation: `max_new_tokens` does not reach the agent
 

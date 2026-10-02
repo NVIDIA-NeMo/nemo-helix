@@ -34,10 +34,10 @@ Canonical locations:
 Every empty state is exactly one of two governed variants. Never invent a
 third idiom.
 
-| Variant      | When                                                         | Required affordances                                                                             |
-| ------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `first-use`  | Data source is genuinely empty; user hasn't created anything | icon, heading, subheading, primary create CTA, and the "Ask an agent · CLI" self-service snippet |
-| `no-results` | Items exist but current filters/search match zero            | heading naming the mismatch, **"Clear filters"** action; **no** create CTA                       |
+| Variant      | When                                                         | Required affordances                                                                                                                                                |
+| ------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `first-use`  | Data source is genuinely empty; user hasn't created anything | icon, heading, subheading, primary create CTA, and the "Ask an agent · CLI" self-service snippet, labelled "Or use a coding agent or the CLI:" when the CTA renders |
+| `no-results` | Items exist but current filters/search match zero            | heading naming the mismatch, **"Clear filters"** action; **no** create CTA                                                                                          |
 
 **Compute the variant from signals — do not pick it manually.** Inside a
 DataView the signals already exist: `hasFiltersApplied` / `hasSearchApplied`

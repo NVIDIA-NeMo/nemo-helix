@@ -19,9 +19,9 @@ from nemo_anonymizer_plugin.sdk import http
 from nemo_anonymizer_plugin.sdk.errors import AnonymizerJobError
 from nemo_anonymizer_plugin.sdk.job_results import AnonymizerJobResults
 from nemo_anonymizer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ TERMINAL_INCOMPLETE_STATUSES = {"cancelled", "cancelling", "error"}
 T = TypeVar("T")
 
 
-def _job_url(platform: http.PlatformClient, workspace: str | None, path: str) -> str:
+def _job_url(platform: http.HelixClient, workspace: str | None, path: str) -> str:
     return http.url(platform, workspace, f"/jobs/run{path}")
 
 
@@ -58,22 +58,25 @@ def _raise_for_status(resp: httpx.Response) -> None:
 
 @with_logging
 class AnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: NeMoPlatform, workspace: str | None):
+    def __init__(self, *, job_name: str, platform: NemoClient, workspace: str | None):
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
 
+    def _client(self) -> httpx.Client:
+        return self._platform._client
+
     def get_job(self) -> dict[str, object]:
-        resp = self._platform._client.get(
+        resp = self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name)),
             headers=http.headers(self._platform),
         )
         _raise_for_status(resp)
         return resp.json()
 
-    def get_job_status(self) -> PlatformJobStatus | None:
-        resp = self._platform._client.get(
+    def get_job_status(self) -> HelixJobStatus | None:
+        resp = self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
             headers=http.headers(self._platform),
         )
@@ -98,7 +101,7 @@ class AnonymizerJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            resp = self._platform._client.get(
+            resp = self._client().get(
                 _job_url(self._platform, self._workspace, _job_path(self._job_name, "/logs")),
                 headers=http.headers(self._platform),
                 params=params,
@@ -122,7 +125,7 @@ class AnonymizerJobResource:
         output_path = Path(path or self._job_name)
         logger.info(f"Downloading artifacts from job {self._job_name!r}")
 
-        resp = self._platform._client.get(
+        resp = self._client().get(
             _job_url(
                 self._platform,
                 self._workspace,
@@ -159,22 +162,25 @@ class AnonymizerJobResource:
 
 @with_logging
 class AsyncAnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: AsyncNeMoPlatform, workspace: str | None):
+    def __init__(self, *, job_name: str, platform: AsyncNemoClient, workspace: str | None):
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
 
+    def _client(self) -> httpx.AsyncClient:
+        return self._platform._client
+
     async def get_job(self) -> dict[str, object]:
-        resp = await self._platform._client.get(
+        resp = await self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name)),
             headers=http.headers(self._platform),
         )
         _raise_for_status(resp)
         return resp.json()
 
-    async def get_job_status(self) -> PlatformJobStatus | None:
-        resp = await self._platform._client.get(
+    async def get_job_status(self) -> HelixJobStatus | None:
+        resp = await self._client().get(
             _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
             headers=http.headers(self._platform),
         )
@@ -198,7 +204,7 @@ class AsyncAnonymizerJobResource:
         await self._check_if_result_available(ARTIFACTS_RESULT_NAME)
         output_path = Path(path or self._job_name)
 
-        resp = await self._platform._client.get(
+        resp = await self._client().get(
             _job_url(
                 self._platform,
                 self._workspace,
@@ -232,7 +238,7 @@ class AsyncAnonymizerJobResource:
             return fallback
 
 
-def _status_is_complete(status: PlatformJobStatus | None, raise_if_not_complete: bool) -> bool:
+def _status_is_complete(status: HelixJobStatus | None, raise_if_not_complete: bool) -> bool:
     if status == "completed":
         return True
     if status in TERMINAL_INCOMPLETE_STATUSES:

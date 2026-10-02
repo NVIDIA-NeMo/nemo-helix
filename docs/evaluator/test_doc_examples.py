@@ -30,7 +30,7 @@ import pytest
 from nemo_evaluator.sdk import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundlePackagerPolicyError
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 
 class _CustomMetric:
@@ -73,6 +73,21 @@ def test_modelref_imports_from_context_agnostic_sdk() -> None:
     assert ModelRef is not None
 
 
+def test_harbor_codex_platform_target_example_validates() -> None:
+    """The Harbor guide's built-in Codex target uses the current plugin-job contract."""
+    from nemo_evaluator.jobs.agent_spec import HarborBuiltinAgentSource, HarborRunnerTarget
+    from nemo_evaluator_sdk import SecretRef
+
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna"),
+        agent_kwargs={"version": "0.153.0"},
+        env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+    )
+
+    assert target.source == HarborBuiltinAgentSource(name="codex", model_name="gpt-5.6-luna")
+    assert target.env_secrets["OPENAI_API_KEY"].root == "my-workspace/openai-key"
+
+
 def test_cloudpickle_packager_import_path() -> None:
     """Durable-submit docs import the packager from this exact path."""
     from nemo_evaluator.shared.metric_bundles.cloudpickle import (
@@ -88,7 +103,7 @@ def _evaluator() -> Evaluator:
     Client construction and the ``submit`` argument guard are both offline; the
     guard runs before any executor/HTTP work.
     """
-    client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+    client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
     return client.evaluator
 
 

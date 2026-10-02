@@ -14,7 +14,7 @@ from nemo_deployments_plugin.backends.registry import ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 
 class MockDeploymentBackend(DeploymentBackend):
@@ -22,7 +22,7 @@ class MockDeploymentBackend(DeploymentBackend):
 
     def __init__(
         self,
-        sdk: AsyncNeMoPlatform | None = None,
+        sdk: AsyncNeMoHelix | None = None,
         config: dict[str, Any] | None = None,
         *,
         create_status: BackendStatusUpdate | None = None,
@@ -30,12 +30,14 @@ class MockDeploymentBackend(DeploymentBackend):
         delete_status: BackendStatusUpdate | None = None,
         managed_names: list[str] | None = None,
         volume_create_status: VolumeStatusUpdate | None = None,
+        volume_delete_status: VolumeStatusUpdate | None = None,
     ) -> None:
         self.create_status = create_status or BackendStatusUpdate(status="STARTING", status_message="created")
         self.read_status_result = read_status or BackendStatusUpdate(status="READY", status_message="running")
         self.delete_status = delete_status or BackendStatusUpdate(status="SUCCEEDED", status_message="deleted")
         self.managed_names = list(managed_names or [])
         self.volume_create_status = volume_create_status or VolumeStatusUpdate(status="BOUND")
+        self.volume_delete_status = volume_delete_status or VolumeStatusUpdate(status="RELEASED")
         self.create_calls: list[dict[str, Any]] = []
         self.read_calls: list[tuple[str, str]] = []
         self.deployment_delete_calls: list[tuple[str, str]] = []
@@ -83,7 +85,7 @@ class MockDeploymentBackend(DeploymentBackend):
         backend_config: dict[str, Any] | None = None,
     ) -> VolumeStatusUpdate:
         self.volume_delete_calls.append((workspace, name))
-        return VolumeStatusUpdate(status="RELEASED")
+        return self.volume_delete_status
 
 
 @pytest.fixture

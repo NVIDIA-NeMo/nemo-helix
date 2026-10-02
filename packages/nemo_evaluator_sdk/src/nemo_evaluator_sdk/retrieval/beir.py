@@ -7,14 +7,18 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "BeirCorpusDocument",
     "BeirDataset",
     "BeirDatasetError",
+    "BeirQrels",
     "BeirQuery",
 ]
 
@@ -51,6 +55,18 @@ class BeirQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class BeirQrels:
+    """Unique ``(query-id, corpus-id)`` judgments from ``qrels/test.tsv``.
+
+    Duplicate pairs keep the first score; ``dropped_rows`` is the number of
+    later copies discarded.
+    """
+
+    judgments: dict[str, dict[str, int]]
+    dropped_rows: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class BeirDataset:
     """An in-memory BEIR test split.
 
@@ -62,6 +78,7 @@ class BeirDataset:
     corpus: dict[str, BeirCorpusDocument]
     queries: dict[str, BeirQuery]
     qrels: dict[str, dict[str, int]]
+    dropped_qrel_rows: int = 0
 
     @classmethod
     def from_path(cls, path: str | Path) -> BeirDataset:
@@ -70,8 +87,14 @@ class BeirDataset:
         corpus = _load_corpus(root / _CORPUS_FILE)
         queries = _load_queries(root / _QUERIES_FILE)
         qrels = _load_qrels(root / _QRELS_FILE)
-        _validate_references(corpus, queries, qrels)
-        return cls(root=root, corpus=corpus, queries=queries, qrels=qrels)
+        _validate_references(corpus, queries, qrels.judgments)
+        return cls(
+            root=root,
+            corpus=corpus,
+            queries=queries,
+            qrels=qrels.judgments,
+            dropped_qrel_rows=qrels.dropped_rows,
+        )
 
     def query_rows(self) -> list[dict[str, Any]]:
         """Return one dataset row per judged query for metric scoring."""
@@ -149,8 +172,9 @@ def _load_queries(path: Path) -> dict[str, BeirQuery]:
     return queries
 
 
-def _load_qrels(path: Path) -> dict[str, dict[str, int]]:
-    qrels: dict[str, dict[str, int]] = {}
+def _load_qrels(path: Path) -> BeirQrels:
+    judgments: dict[str, dict[str, int]] = {}
+    dropped_rows = 0
     with path.open(encoding="utf-8", newline="") as stream:
         reader = csv.DictReader(stream, delimiter="\t")
         expected = ["query-id", "corpus-id", "score"]
@@ -165,15 +189,20 @@ def _load_qrels(path: Path) -> dict[str, dict[str, int]]:
                 raise BeirDatasetError(f"{path}:{line_number}: score must be an integer") from error
             if not query_id or not document_id:
                 raise BeirDatasetError(f"{path}:{line_number}: query-id and corpus-id must be non-empty")
-            query_qrels = qrels.setdefault(query_id, {})
-            if document_id in query_qrels:
-                raise BeirDatasetError(
-                    f"{path}:{line_number}: duplicate qrel for query {query_id!r} and document {document_id!r}"
-                )
-            query_qrels[document_id] = score
-    if not qrels:
+            query_judgments = judgments.setdefault(query_id, {})
+            if document_id in query_judgments:
+                dropped_rows += 1
+                continue
+            query_judgments[document_id] = score
+    if not judgments:
         raise BeirDatasetError(f"{path}: file contains no relevance judgments")
-    return qrels
+    if dropped_rows:
+        logger.warning(
+            "Dropped %s duplicate qrel row(s) from %s; kept the first score for each pair",
+            dropped_rows,
+            path,
+        )
+    return BeirQrels(judgments=judgments, dropped_rows=dropped_rows)
 
 
 def _validate_references(

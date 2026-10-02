@@ -16,22 +16,22 @@ from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from httpx import AsyncClient
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.schemas import (
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.schemas import (
     FileStorageType,
-    PlatformJobLog,
-    PlatformJobLogPage,
-    PlatformJobResultCreateRequest,
-    PlatformJobStatus,
+    HelixJobLog,
+    HelixJobLogPage,
+    HelixJobResultCreateRequest,
+    HelixJobStatus,
 )
-from nemo_platform_plugin.jobs.types import (
-    CreatePlatformJobRequest,
+from nemo_helix_plugin.jobs.types import (
+    CreateHelixJobRequest,
+    HelixJobStatusUpdateRequest,
+    HelixJobTaskUpdate,
     JobStatusDetailsUpdate,
-    PlatformJobStatusUpdateRequest,
-    PlatformJobTaskUpdate,
 )
-from nmp.common.jobs.file_manager import TmpDirPath
-from nmp.common.jobs.log_client import dep_job_logs_client
+from nhx.common.jobs.file_manager import TmpDirPath
+from nhx.common.jobs.log_client import dep_job_logs_client
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def jobs_client(test_client: AsyncClient) -> AsyncJobsClient:
 
 async def _create_job(
     jobs_client: AsyncJobsClient,
-    request: CreatePlatformJobRequest,
+    request: CreateHelixJobRequest,
     name: str,
 ):
     body = request.model_copy(update={"name": name})
@@ -97,7 +97,7 @@ async def _create_hello_world_job(test_client: AsyncClient, name: str = "e2e-cli
 
 @pytest.mark.asyncio
 async def test_list_jobs_round_trips_through_client(jobs_client: AsyncJobsClient, test_client: AsyncClient):
-    """``list_jobs`` must page + parse real ``PlatformJobResponse`` items."""
+    """``list_jobs`` must page + parse real ``HelixJobResponse`` items."""
     await _create_hello_world_job(test_client, name="list-me")
 
     page = (await jobs_client.list_jobs(workspace="default")).page()
@@ -126,7 +126,7 @@ async def test_get_job_and_status_round_trip(jobs_client: AsyncJobsClient, test_
 @pytest.mark.asyncio
 async def test_job_lifecycle_methods_round_trip(
     jobs_client: AsyncJobsClient,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    sample_platform_job_request: CreateHelixJobRequest,
 ):
     paused_job = await _create_job(jobs_client, sample_platform_job_request, "typed-lifecycle")
     active_step = (
@@ -134,29 +134,29 @@ async def test_job_lifecycle_methods_round_trip(
             workspace="default",
             job=paused_job.name,
             name="basic",
-            body=PlatformJobStatusUpdateRequest(status=PlatformJobStatus.ACTIVE),
+            body=HelixJobStatusUpdateRequest(status=HelixJobStatus.ACTIVE),
         )
     ).data()
-    assert active_step.status == PlatformJobStatus.ACTIVE
+    assert active_step.status == HelixJobStatus.ACTIVE
 
     pausing = (await jobs_client.pause_job(workspace="default", name=paused_job.name)).data()
-    assert pausing.status == PlatformJobStatus.PAUSING
+    assert pausing.status == HelixJobStatus.PAUSING
     await jobs_client.update_job_step_status(
         workspace="default",
         job=paused_job.name,
         name="basic",
-        body=PlatformJobStatusUpdateRequest(status=PlatformJobStatus.PAUSED),
+        body=HelixJobStatusUpdateRequest(status=HelixJobStatus.PAUSED),
     )
     resuming = (await jobs_client.resume_job(workspace="default", name=paused_job.name)).data()
-    assert resuming.status == PlatformJobStatus.RESUMING
+    assert resuming.status == HelixJobStatus.RESUMING
 
     cancelled_job = await _create_job(jobs_client, sample_platform_job_request, "typed-cancel")
     cancelled = (await jobs_client.cancel_job(workspace="default", name=cancelled_job.name)).data()
-    assert cancelled.status == PlatformJobStatus.CANCELLED
+    assert cancelled.status == HelixJobStatus.CANCELLED
 
     deleted_job = await _create_job(jobs_client, sample_platform_job_request, "typed-delete")
     delete_ready = (await jobs_client.cancel_job(workspace="default", name=deleted_job.name)).data()
-    assert delete_ready.status == PlatformJobStatus.CANCELLED
+    assert delete_ready.status == HelixJobStatus.CANCELLED
     deleted = await jobs_client.delete_job(workspace="default", name=deleted_job.name)
     assert deleted.http_response.status_code == 204
 
@@ -164,7 +164,7 @@ async def test_job_lifecycle_methods_round_trip(
 @pytest.mark.asyncio
 async def test_status_steps_and_tasks_round_trip(
     jobs_client: AsyncJobsClient,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    sample_platform_job_request: CreateHelixJobRequest,
 ):
     job = await _create_job(jobs_client, sample_platform_job_request, "typed-state")
     status_update = await jobs_client.update_job_status_details(
@@ -187,13 +187,13 @@ async def test_status_steps_and_tasks_round_trip(
             job=job.name,
             step="basic",
             name="task-1",
-            body=PlatformJobTaskUpdate(
-                status=PlatformJobStatus.ACTIVE,
+            body=HelixJobTaskUpdate(
+                status=HelixJobStatus.ACTIVE,
                 status_details={"message": "running"},
             ),
         )
     ).data()
-    assert task.status == PlatformJobStatus.ACTIVE
+    assert task.status == HelixJobStatus.ACTIVE
     tasks = (await jobs_client.list_job_step_tasks(workspace="default", job=job.name, name="basic")).data()
     assert [item.name for item in tasks.data] == ["task-1"]
     fetched_task = (
@@ -211,15 +211,15 @@ async def test_status_steps_and_tasks_round_trip(
 async def test_logs_round_trip(
     jobs_client: AsyncJobsClient,
     test_client: AsyncClient,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    sample_platform_job_request: CreateHelixJobRequest,
 ):
     job = await _create_job(jobs_client, sample_platform_job_request, "typed-logs")
     timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
     logs_client = AsyncMock()
     logs_client.query_logs.side_effect = [
-        PlatformJobLogPage(
+        HelixJobLogPage(
             data=[
-                PlatformJobLog(
+                HelixJobLog(
                     timestamp=timestamp,
                     job=job.name,
                     job_step="basic",
@@ -231,9 +231,9 @@ async def test_logs_round_trip(
             next_page="cursor-2",
             prev_page=None,
         ),
-        PlatformJobLogPage(
+        HelixJobLogPage(
             data=[
-                PlatformJobLog(
+                HelixJobLog(
                     timestamp=timestamp,
                     job=job.name,
                     job_step="basic",
@@ -293,7 +293,7 @@ async def test_logs_round_trip(
 @pytest.mark.asyncio
 async def test_result_methods_round_trip(
     jobs_client: AsyncJobsClient,
-    sample_platform_job_request: CreatePlatformJobRequest,
+    sample_platform_job_request: CreateHelixJobRequest,
     tmp_path,
 ):
     job = await _create_job(jobs_client, sample_platform_job_request, "typed-results")
@@ -302,7 +302,7 @@ async def test_result_methods_round_trip(
             workspace="default",
             job=job.name,
             name="output",
-            body=PlatformJobResultCreateRequest(
+            body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#output.txt",
                 artifact_storage_type=FileStorageType.FILESET,
             ),
@@ -321,7 +321,7 @@ async def test_result_methods_round_trip(
     result_path.write_bytes(b"typed result")
     downloaded = TmpDirPath(path=result_path, tmp_dir=result_dir)
     with patch(
-        "nmp.core.jobs.api.v2.jobs.endpoints.download_from_result_info",
+        "nhx.core.jobs.api.v2.jobs.endpoints.download_from_result_info",
         new=AsyncMock(return_value=("output.txt", downloaded)),
     ):
         content = await (await jobs_client.download_job_result(workspace="default", job=job.name, name="output")).read()

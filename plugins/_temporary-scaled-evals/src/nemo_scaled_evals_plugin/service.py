@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NeMo Platform HTTP surface for the vendored scaled-evals control plane."""
+"""NeMo Helix HTTP surface for the vendored scaled-evals control plane."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from typing import ClassVar
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.service import ExceptionHandler, NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.service import ExceptionHandler, NemoService, RouterSpec
 from nemo_scaled_evals_plugin.authz import scope, stamp_router_authz
 from nemo_scaled_evals_plugin.migrations import apply_sql
 from scaled_evals.api import s3
@@ -70,9 +70,7 @@ class ScaledEvalsService(NemoService):
     """Mount scaled-evals ``/v1`` routers under ``/apis/scaled-evals``."""
 
     name: ClassVar[str] = "scaled-evals"
-    # The plugin owns its Postgres and object store instead of the platform's, so it
-    # declares no platform service dependencies.
-    dependencies: ClassVar[list[str]] = []
+    dependencies: ClassVar[list[str]] = ["jobs"]
 
     def get_routers(self) -> list[RouterSpec]:
         health = APIRouter()

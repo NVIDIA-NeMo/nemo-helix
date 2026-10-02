@@ -6,14 +6,14 @@ SPDX-License-Identifier: Apache-2.0
 {{/*
 Create a named Envoy service name which can be included from parent chart
 */}}
-{{- define "nmp-envoy.servicename" }}
-{{- printf "%s-envoy" ( include "nemo-platform.fullname" . | trunc 57 ) }}
+{{- define "nhx-envoy.servicename" }}
+{{- printf "%s-envoy" ( include "nemo-helix.fullname" . | trunc 57 ) }}
 {{- end }}
 
 {{/*
 Create the Envoy image reference.
 */}}
-{{- define "nmp-envoy.image" -}}
+{{- define "nhx-envoy.image" -}}
 {{- if .Values.envoyProxy.image.digest -}}
 {{ printf "%s@%s" .Values.envoyProxy.image.repository .Values.envoyProxy.image.digest }}
 {{- else -}}
@@ -24,17 +24,17 @@ Create the Envoy image reference.
 {{/*
 Labels for Envoy proxy resources (component + platform labels).
 */}}
-{{- define "nmp-envoy.labels" -}}
-app.kubernetes.io/component: nmp-envoy
-{{ include "nemo-platform.labels" . }}
+{{- define "nhx-envoy.labels" -}}
+app.kubernetes.io/component: nhx-envoy
+{{ include "nemo-helix.labels" . }}
 {{- end }}
 
 {{/*
 Create the name of the Envoy service account to use
 */}}
-{{- define "nmp-envoy.serviceAccountName" -}}
+{{- define "nhx-envoy.serviceAccountName" -}}
 {{- if .Values.envoyProxy.serviceAccount.create }}
-{{- default (printf "%s-envoy" (include "nemo-platform.fullname" .)) .Values.envoyProxy.serviceAccount.name }}
+{{- default (printf "%s-envoy" (include "nemo-helix.fullname" .)) .Values.envoyProxy.serviceAccount.name }}
 {{- else }}
 {{- default "default" .Values.envoyProxy.serviceAccount.name }}
 {{- end }}

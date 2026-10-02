@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-entities"
+name = "nhx-entities"
 description = "Generic entity storage service with schema-agnostic design"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 
 dependencies = [
-  # API server dependencies (for nmp-api/nmp-core containers)
+  # API server dependencies (for nhx-api/nhx-core containers)
   "fastapi>=0.100.0",
   "uvicorn[standard]>=0.23.0",
   "sqlalchemy>=2.0.0",
@@ -18,28 +18,28 @@ dependencies = [
   "pydantic>=2.0.0",
   "pydantic-settings>=2.0.0",
   "base58>=2.1.0",
-  "nmp-common",
+  "nhx-common",
   "lark>=1.1.0",
   # MCP server dependencies
   "fastmcp>=3.2.0",  # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High): fix in >=3.2.0
-  "nemo-platform-sdk",
+  "nemo-helix-sdk",
   "alembic>=1.13.1",
 ]
 version = "0.0.0"
 
 [project.scripts]
-entities-server = "nmp.core.entities.main:run_standalone"
+entities-server = "nhx.core.entities.main:run_standalone"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"alembic.ini" = "nmp/core/entities/alembic.ini"
-"alembic" = "nmp/core/entities/alembic"
+"alembic.ini" = "nhx/core/entities/alembic.ini"
+"alembic" = "nhx/core/entities/alembic"
 
 
 [dependency-groups]
@@ -59,5 +59,5 @@ pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nemo-platform-sdk = { workspace = true }
+nhx-common = { workspace = true }
+nemo-helix-sdk = { workspace = true }

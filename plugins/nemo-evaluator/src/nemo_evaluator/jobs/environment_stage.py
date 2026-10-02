@@ -10,12 +10,10 @@ from pathlib import Path
 
 from filesets import FilesetFileSystem, FilesetPathError, parse_fileset_ref
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.utils import as_nemo_client
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.sdk import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
 from pydantic import BaseModel, ConfigDict
 
 #: Read-only tree the Gym host mounts at ``/job/environment``.
@@ -43,9 +41,9 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
 
 
-def _download_fileset_contents(*, sdk: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+def _download_fileset_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
     """Download a FileSet root's contents directly into ``destination``."""
-    files_client = FilesClient.from_client(sdk)
+    files_client = FilesClient.from_client(client)
     fs = FilesetFileSystem(client=files_client)
     fs.get(f"{workspace}/{fileset}/", str(destination), recursive=True)
 
@@ -55,12 +53,17 @@ class EnvironmentStageJob(NemoJob):
 
     name = "stage-environment"
     description = "Stage a Gym environment FileSet into persistent job storage."
-    container = "nmp-cpu-tasks"
+    container = "nhx-tasks"
     spec_schema = EnvironmentStageSpec
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | NeMoPlatform) -> dict:
+    def run(
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        client: NemoClient,
+    ) -> dict:
         """Download the FileSet into ``persistent/environment``, replacing any previous tree."""
-        client = as_nemo_client(sdk)
         spec = EnvironmentStageSpec.model_validate(config)
         try:
             workspace, fileset, file_path = parse_fileset_ref(
@@ -68,9 +71,9 @@ class EnvironmentStageJob(NemoJob):
                 workspace_fallback=ctx.workspace,
             )
         except FilesetPathError as exc:
-            raise ValueError(f"invalid Gym environment FileSet reference: {spec.environment.root!r}") from exc
+            raise ValueError(f"invalid environment FileSet reference: {spec.environment.root!r}") from exc
         if file_path:
-            raise ValueError("Gym environment FileSet references must not include a file fragment")
+            raise ValueError("environment FileSet references must not include a file fragment")
 
         destination = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
         staging = ctx.storage.persistent / ENVIRONMENT_STAGING_DIR
@@ -81,7 +84,7 @@ class EnvironmentStageJob(NemoJob):
 
         try:
             _download_fileset_contents(
-                sdk=client,
+                client=client,
                 destination=staging,
                 fileset=fileset,
                 workspace=workspace,

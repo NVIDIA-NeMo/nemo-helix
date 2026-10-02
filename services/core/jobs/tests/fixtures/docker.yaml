@@ -19,4 +19,4 @@ jobs:
   executor_defaults:
     docker:
       storage:
-        volume_name: nemo-platform_jobs_storage
+        volume_name: nemo-helix_jobs_storage

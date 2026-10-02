@@ -93,7 +93,7 @@ result = Evaluator().run_sync(metrics=[accuracy, style], dataset=rows)
 Platform job — put multiple stored metrics on the job spec:
 
 ```bash
-uv run nemo evaluator evaluate submit --spec \
+uv run nemo evaluator evaluate --spec \
   '{"metrics":["default/accuracy","default/style"],"dataset":"default/eval-data"}'
 ```
 

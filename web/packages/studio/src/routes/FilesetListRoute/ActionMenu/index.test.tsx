@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
@@ -174,6 +175,29 @@ describe('ActionMenu', () => {
       expect(screen.getByText('Delete Confirmation Modal')).toBeInTheDocument();
       expect(screen.getByText(`Delete Dataset: ${mockDataset.name}`)).toBeInTheDocument();
     });
+
+    it('surfaces the backend message when the fileset is in use', async () => {
+      const detail =
+        "Cannot delete fileset 'test-workspace/test-dataset' because 2 model entity reference(s) and 1 adapter entity reference(s) still use it. Relink or delete the dependent entities first.";
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      server.use(
+        http.delete(`${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`, () =>
+          HttpResponse.json({ detail }, { status: 409 })
+        )
+      );
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Delete'));
+
+      const modalProps = vi.mocked(DeleteConfirmationModal).mock.calls.at(-1)?.[0];
+      expect(modalProps).toBeDefined();
+      await expect(modalProps?.onDelete()).rejects.toThrow(detail);
+      expect(mockOnDatasetDeleted).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to delete dataset', expect.any(Error));
+      consoleErrorSpy.mockRestore();
+    });
   });
 
   describe('Edit Modal Integration', () => {
@@ -310,8 +334,9 @@ describe('ActionMenu', () => {
       await user.click(triggerButton);
       const deleteButton = screen.getByText('Delete');
       await user.click(deleteButton);
-      const confirmDeleteButton = screen.getByTestId('modal-delete');
-      await user.click(confirmDeleteButton);
+      const modalProps = vi.mocked(DeleteConfirmationModal).mock.calls.at(-1)?.[0];
+      expect(modalProps).toBeDefined();
+      await expect(modalProps?.onDelete()).rejects.toThrow('Delete failed');
 
       await waitFor(() => {
         expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to delete dataset', expect.any(Error));

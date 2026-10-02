@@ -14,8 +14,6 @@
  * text. Add new names by extending the ICONS map.
  *
  * Usage:
- *   import { Icon } from "@/components/Icon";
- *
  *   <Icon name="terminal" />
  *   <Icon name="shield" size={20} />
  */

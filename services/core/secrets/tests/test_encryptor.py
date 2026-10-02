@@ -4,30 +4,30 @@
 """Tests for secrets encryptor module: local key creation config and usage."""
 
 import pytest
-from nmp.common.config import Configuration, nmp_user_data_dir
-from nmp.common.secrets.encryption import SecretKeyEncryptor, get_base64_encoded_random_bytes
-from nmp.core.secrets.app.encryptor import get_encryptor_by_name, local_key_creation
-from nmp.core.secrets.config import SecretsServiceConfig
+from nhx.common.config import Configuration, nhx_user_data_dir
+from nhx.common.secrets.encryption import SecretKeyEncryptor, get_base64_encoded_random_bytes
+from nhx.core.secrets.app.encryptor import get_encryptor_by_name, local_key_creation
+from nhx.core.secrets.config import SecretsServiceConfig
 
 
 def test_secrets_service_config_local_key_fields(monkeypatch, tmp_path):
     """Test SecretsServiceConfig allow_key_creation and local_key_creation_path render and default correctly.
 
-    The default key path lives under the NeMo Platform user data directory (XDG-style)
+    The default key path lives under the NeMo Helix user data directory (XDG-style)
     so it survives macOS ``/tmp/`` cleanup on reboot. We override
-    ``NMP_DATA_DIR`` to keep the assertion stable across developer machines.
+    ``NHX_DATA_DIR`` to keep the assertion stable across developer machines.
     """
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path))
     config = SecretsServiceConfig()
     assert config.allow_key_creation is False
-    assert config.local_key_creation_path == str(nmp_user_data_dir() / "nmp-encryption-key.txt")
+    assert config.local_key_creation_path == str(nhx_user_data_dir() / "nhx-encryption-key.txt")
 
     config_with_overrides = SecretsServiceConfig(
         allow_key_creation=True,
-        local_key_creation_path="/data/nmp-encryption-key.txt",
+        local_key_creation_path="/data/nhx-encryption-key.txt",
     )
     assert config_with_overrides.allow_key_creation is True
-    assert config_with_overrides.local_key_creation_path == "/data/nmp-encryption-key.txt"
+    assert config_with_overrides.local_key_creation_path == "/data/nhx-encryption-key.txt"
 
 
 def test_local_key_creation_raises_when_allow_key_creation_false():
@@ -43,7 +43,7 @@ def test_local_key_creation_raises_when_allow_key_creation_false():
 
 def test_local_key_creation_creates_key_file_when_missing(tmp_path):
     """Test local_key_creation creates and persists a new key file when path does not exist."""
-    key_path = tmp_path / "nmp-encryption-key.txt"
+    key_path = tmp_path / "nhx-encryption-key.txt"
     assert not key_path.exists()
 
     config = SecretsServiceConfig(
@@ -65,7 +65,7 @@ def test_local_key_creation_creates_key_file_when_missing(tmp_path):
 
 def test_local_key_creation_uses_existing_key_file(tmp_path):
     """Test local_key_creation uses existing key file and does not overwrite it."""
-    key_path = tmp_path / "nmp-encryption-key.txt"
+    key_path = tmp_path / "nhx-encryption-key.txt"
     existing_key = get_base64_encoded_random_bytes(32)
     key_path.write_text(existing_key)
 

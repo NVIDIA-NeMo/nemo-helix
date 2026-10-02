@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import Literal, Self
 
 import data_designer.config as dd
-from pydantic import BaseModel, Field, model_validator
+from nemo_data_designer_plugin.retrieval.manifest import GENERATION_MANIFEST_FILENAME
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Key sets required by data-designer-retrieval-sdg GenerationPipelineConfig.
 DEFAULT_QUERY_COUNTS = {"multi_hop": 3, "structural": 2, "contextual": 2}
@@ -43,6 +45,10 @@ class RetrievalGenerateJobConfig(BaseModel):
     sentences_per_chunk: int = Field(default=5, ge=1)
     num_sections: int = Field(default=1, ge=1)
     num_files: int | None = Field(default=None, ge=1)
+    multi_doc: bool = False
+    bundle_size: int = Field(default=2, ge=1)
+    bundle_strategy: Literal["sequential", "doc_balanced", "interleaved"] = "sequential"
+    max_docs_per_bundle: int = Field(default=3, ge=1)
     max_artifacts_per_type: int = Field(default=2, ge=1)
     num_pairs: int = Field(default=7, ge=1)
     query_counts: dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_QUERY_COUNTS))
@@ -51,6 +57,7 @@ class RetrievalGenerateJobConfig(BaseModel):
     max_hops: int = Field(default=3, ge=1)
     min_complexity: int = Field(default=2, ge=1, le=5)
     similarity_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+    max_parallel_requests_for_gen: int | None = Field(default=None, ge=1)
     buffer_size: int = Field(default=200, ge=1)
     resume: Literal["never", "always", "if_possible"] = "never"
     num_records: int | None = Field(default=None, ge=1)
@@ -108,7 +115,18 @@ class RetrievalPrepareJobConfig(BaseModel):
 
     sdg_input: str | None = Field(
         default=None,
-        description="Fileset or hf:// URI to Stage 0 output or generation_result.json.",
+        description=(
+            "Fileset or hf:// URI to Stage 0 output. Name a file with fileset#path or "
+            "hf://org/dataset[@revision]/path; otherwise generation_file is used inside the directory."
+        ),
+    )
+    generation_file: str = Field(
+        default=GENERATION_MANIFEST_FILENAME,
+        description=(
+            "Relative path to the Stage 0 file inside sdg_input when the ref is a directory. "
+            "Live generate writes generation_result.json. Skip-SDG dumps set this (e.g. nv_pp_dd_sdg.json) "
+            "or put the filename on sdg_input."
+        ),
     )
     train_input_file: str | None = Field(
         default=None,
@@ -144,6 +162,14 @@ class RetrievalPrepareJobConfig(BaseModel):
     dist_timeout_minutes: int = Field(default=30, ge=1)
     mining: RetrievalMiningOptions = Field(default_factory=RetrievalMiningOptions)
     hf_token_secret: str | None = None
+
+    @field_validator("generation_file")
+    @classmethod
+    def validate_generation_file(cls, value: str) -> str:
+        posix = PurePosixPath(value.replace("\\", "/"))
+        if not value or posix.is_absolute() or any(part == ".." for part in posix.parts):
+            raise ValueError("generation_file must be a relative path without '..' components")
+        return posix.as_posix()
 
 
 class RetrievalPrepareStepConfig(BaseModel):

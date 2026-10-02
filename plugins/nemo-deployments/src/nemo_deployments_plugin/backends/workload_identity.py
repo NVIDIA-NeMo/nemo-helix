@@ -9,9 +9,9 @@ from typing import overload
 
 from nemo_deployments_plugin.backends.labels import deployment_key
 from nemo_deployments_plugin.entities import DeploymentConfig
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.auth.workload_delegations import WorkloadDelegationLookupScope, WorkloadDelegationScope
-from nemo_platform_plugin.auth.workload_identity import (
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationLookupScope, WorkloadDelegationScope
+from nemo_helix_plugin.auth.workload_identity import (
     WorkloadIdentityConfigError,
     is_workload_identity_token_exchange_enabled,
 )

@@ -13,6 +13,7 @@ through the platform. This module is the one place that logic lives.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from models import parse_workspace_name_ref
@@ -27,12 +28,12 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricWithModels
 from nemo_evaluator_sdk.resolver_protocols import ModelResolver
 from nemo_evaluator_sdk.values import Model, ModelRef
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 
 def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
@@ -56,6 +57,35 @@ def to_runtime_bundle(metric: MetricInline) -> MetricBundle:
     return MetricBundle.model_validate_json(metric.model_dump_json())
 
 
+def to_runtime_metrics(metrics: Sequence[MetricInline]) -> list[Metric]:
+    """Return runtime metrics reconstructed from the ordered inline bundle DTOs.
+
+    Args:
+        metrics: Inline metric bundles to decode without changing their order.
+
+    Returns:
+        One runtime metric instance per supplied bundle.
+    """
+    return [unbundle_metric(to_runtime_bundle(metric)) for metric in metrics]
+
+
+def require_resolved_model_refs(metrics: list[Metric], *, subject: str) -> None:
+    """Require all models in the supplied runtime metrics to be resolved.
+
+    Args:
+        metrics: Runtime metrics whose model references are inspected.
+        subject: Diagnostic prefix identifying the task or scoring kind.
+
+    Returns:
+        None when no unresolved model references remain.
+
+    Raises:
+        ValueError: A metric still carries an unresolved model reference.
+    """
+    if unresolved := unresolved_model_refs(metrics):
+        raise ValueError(f"{subject} metric models must be resolved before run: {', '.join(unresolved)}")
+
+
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
     packager = metric_bundle_packager_for_payload(source_bundle.payload)
     resolved_bundle = bundle_metric(metric, packager)
@@ -71,7 +101,7 @@ def _model_not_found_error(model_ref: ModelRef, workspace: str, name: str) -> Va
 
 
 @dataclass(frozen=True)
-class PlatformMetricModelResolver(ModelResolver):
+class HelixMetricModelResolver(ModelResolver):
     """Resolve evaluator metric ``ModelRef`` values through the typed Models client."""
 
     models_client: AsyncModelsClient
@@ -97,21 +127,18 @@ async def resolve_metrics_to_inline(
     *,
     workspace: str,
     entity_client: EntityClient | None,
-    async_sdk: AsyncNeMoPlatform | None,
+    async_sdk: AsyncNeMoHelix,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
     Stored references are loaded from the entity store; any ``MetricWithModels``
-    model references are resolved through the platform. Raises if a model
-    reference is present without a usable ``async_sdk`` connection.
+    model references are resolved through the platform.
 
     Stored-ref loading awaits real file I/O, so it uses the typed Files client
     derived from the public SDK. Model-ref resolution uses the typed Models client.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
-    files_client = (
-        client_from_platform(async_sdk, AsyncFilesClient) if has_metric_ref and async_sdk is not None else None
-    )
+    files_client = client_from_platform(async_sdk, AsyncFilesClient) if has_metric_ref else None
     resolved_bundles = await resolve_metric_specs(
         metrics,
         workspace=workspace,
@@ -122,13 +149,8 @@ async def resolve_metrics_to_inline(
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
-        if async_sdk is None:
-            raise ValueError(
-                "ModelRef metrics require a platform connection (models + inference) to resolve: "
-                + ", ".join(unresolved)
-            )
         models_client = client_from_platform(async_sdk, AsyncModelsClient)
-        resolver: ModelResolver = PlatformMetricModelResolver(models_client)
+        resolver: ModelResolver = HelixMetricModelResolver(models_client)
         await asyncio.gather(
             *(metric.resolve_models(resolver) for metric in runtime_metrics if isinstance(metric, MetricWithModels))
         )

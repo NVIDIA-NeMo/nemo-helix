@@ -37,9 +37,9 @@ uv run nat info components -t llm_provider -q nim
 uv run nat info components -t function    -q tavily_internet_search
 ```
 
-## Run on NeMo Platform
+## Run on NeMo Helix
 
-This example uses local paths to the monorepo's `nemo-platform`, `nemo-platform-plugin`, and `nemo-insights-plugin` packages. Run `uv sync` from this directory to create its standalone environment.
+This example uses local paths to the monorepo's `nemo-helix`, `nemo-helix-plugin`, and `nemo-insights-plugin` packages. Run `uv sync` from this directory to create its standalone environment.
 
 ### Start services
 
@@ -57,7 +57,7 @@ Confirm the plugin loaded: `nemo plugins list` should include `insights`, and th
 The platform's `intake` service persists spans/traces in ClickHouse. With Docker running,
 `nemo services run` automatically provisions and reuses a local ClickHouse container for the
 resolved NeMo data directory.
-Set `NMP_INTAKE_CLICKHOUSE_URL` before startup to use an externally managed instance instead.
+Set `NHX_INTAKE_CLICKHOUSE_URL` before startup to use an externally managed instance instead.
 
 Verify the Intake read path after the platform starts:
 

@@ -8,9 +8,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nmp.customization_common.schemas.values import OutputNameType
-from nmp.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
-from nmp.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nhx.customization_common.schemas.values import OutputNameType
+from nhx.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
+from nhx.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
 
 
 def _make_output(name: str = "out", out_type: OutputNameType = OutputNameType.MODEL) -> OutputResponse:
@@ -193,7 +193,7 @@ def test_grpo_accepts_a_single_advantage_clip_bound() -> None:
 
 
 def test_grpo_lora_rejects_params_with_all_weights() -> None:
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     with pytest.raises(ValueError, match="lora must be omitted"):
         GRPOTraining(type="grpo", finetuning_type="all_weights", lora=LoRAParams(rank=8))
@@ -227,9 +227,82 @@ def test_batching_defaults() -> None:
     assert t.sequence_length_round == 64
 
 
+def test_sequence_packing_rejected_under_context_parallel_at_submit() -> None:
+    """DTensorPolicyWorker rejects packing under CP; fail the request, not the GPU job."""
+    with pytest.raises(ValueError, match="not supported with context_parallel_size"):
+        GRPOTraining(
+            type="grpo",
+            batching_strategy=BatchingStrategy.SEQUENCE_PACKING,
+            parallelism=ParallelismParams(num_gpus_per_node=2, context_parallel_size=2),
+        )
+
+
+def test_sequence_packing_accepted_without_context_parallel() -> None:
+    t = GRPOTraining(type="grpo", batching_strategy=BatchingStrategy.SEQUENCE_PACKING)
+    assert t.batching_strategy is BatchingStrategy.SEQUENCE_PACKING
+    assert t.parallelism.context_parallel_size == 1
+
+
+def test_train_mb_tokens_rejected_below_max_seq_length() -> None:
+    """A budget under max_seq_length leaves the longest rollout unable to fit anywhere."""
+    with pytest.raises(ValueError, match="below max_seq_length"):
+        GRPOTraining(type="grpo", max_seq_length=2048, train_mb_tokens=1024)
+
+
+def test_train_mb_tokens_accepted_at_max_seq_length() -> None:
+    t = GRPOTraining(type="grpo", max_seq_length=2048, train_mb_tokens=2048)
+    assert t.train_mb_tokens == 2048
+
+
+def test_batch_multiplier_rejected_below_one() -> None:
+    """NeMo-RL's DAPO contract is float >= 1.0; values below that shrink the prompt pool."""
+    with pytest.raises(ValueError, match="batch_multiplier"):
+        GRPOTraining(type="grpo", use_dynamic_sampling=True, batch_multiplier=0.5)
+
+
+def test_batch_multiplier_requires_dynamic_sampling() -> None:
+    with pytest.raises(ValueError, match="use_dynamic_sampling"):
+        GRPOTraining(type="grpo", batch_multiplier=2.0)
+
+
+def test_batch_multiplier_accepted_with_dynamic_sampling() -> None:
+    t = GRPOTraining(type="grpo", use_dynamic_sampling=True, batch_multiplier=1.5)
+    assert t.batch_multiplier == 1.5
+
+
+def test_context_and_sequence_parallel_rejected_under_tensor_parallel() -> None:
+    with pytest.raises(ValueError, match="incompatible with sequence parallel"):
+        ParallelismParams(num_gpus_per_node=4, tensor_parallel_size=2, context_parallel_size=2, sequence_parallel=True)
+
+
+def test_context_parallel_with_sequence_parallel_ok_at_tp_one() -> None:
+    p = ParallelismParams(num_gpus_per_node=2, context_parallel_size=2, sequence_parallel=True)
+    assert p.tensor_parallel_size == 1
+
+
+def test_leave_one_out_rejected_with_singleton_group() -> None:
+    with pytest.raises(ValueError, match="num_generations_per_prompt >= 2"):
+        GRPOTraining(type="grpo", num_generations_per_prompt=1)
+
+
+def test_singleton_group_ok_without_leave_one_out() -> None:
+    t = GRPOTraining(type="grpo", num_generations_per_prompt=1, use_leave_one_out_baseline=False)
+    assert t.num_generations_per_prompt == 1
+
+
+def test_min_learning_rate_cannot_exceed_peak() -> None:
+    with pytest.raises(ValueError, match="min_learning_rate"):
+        DPOTraining(type="dpo", learning_rate=1e-4, min_learning_rate=1e-3)
+
+
+def test_negative_val_check_interval_rejected() -> None:
+    with pytest.raises(ValueError):
+        DPOTraining(type="dpo", val_check_interval=-1.0)
+
+
 def test_use_triton_defaults_to_unset() -> None:
     """Unset is what lets the compiler resolve it from TP without overriding a caller."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     assert LoRAParams().use_triton is None
     t = GRPOTraining(type="grpo", finetuning_type="lora")
@@ -239,7 +312,7 @@ def test_use_triton_defaults_to_unset() -> None:
 def test_triton_lora_rejected_with_tensor_parallelism() -> None:
     """The Triton kernels take raw tensors and TP makes them DTensors; NeMo-RL turns the
     pairing into a bare assert that fires only after the model loads."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     with pytest.raises(ValueError, match="use_triton=true is incompatible"):
         GRPOTraining(
@@ -251,7 +324,7 @@ def test_triton_lora_rejected_with_tensor_parallelism() -> None:
 
 
 def test_triton_lora_accepted_without_tensor_parallelism() -> None:
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     t = GRPOTraining(type="grpo", finetuning_type="lora", lora=LoRAParams(rank=16, use_triton=True))
     assert t.lora is not None and t.lora.use_triton is True
@@ -259,7 +332,7 @@ def test_triton_lora_accepted_without_tensor_parallelism() -> None:
 
 def test_triton_lora_explicitly_disabled_is_allowed_with_tensor_parallelism() -> None:
     """False is the value TP needs, so asking for it must not trip the same check."""
-    from nmp.rl.schemas import LoRAParams
+    from nhx.rl.schemas import LoRAParams
 
     t = GRPOTraining(
         type="grpo",
@@ -401,12 +474,17 @@ def test_grpo_accepts_max_new_tokens_up_to_the_context() -> None:
     assert t.max_new_tokens == 2048
 
 
-def _grpo_job(training: GRPOTraining, out_type: OutputNameType = OutputNameType.MODEL) -> RlJobOutput:
+def _grpo_job(
+    training: GRPOTraining,
+    out_type: OutputNameType = OutputNameType.MODEL,
+    integrations: Any = None,
+) -> RlJobOutput:
     return RlJobOutput(
         model="default/base",
         dataset="default/gym-data",
         environment="default/env",
         training=training,
+        integrations=integrations,
         output=_make_output(out_type=out_type),
     )
 
@@ -494,3 +572,81 @@ def test_no_validation_generations_knob_is_exposed() -> None:
     be accepted and read by nothing. mean@k comes from repeating rows in validation.jsonl.
     """
     assert "num_val_generations_per_prompt" not in GRPOTraining.model_fields
+
+
+def test_job_output_trains_lora_adapter_for_grpo_lora() -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/gym",
+        environment="default/my-env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora"),
+        output=_make_output(out_type=OutputNameType.ADAPTER),
+    )
+
+    assert job.trains_lora_adapter is True
+
+
+def test_job_output_does_not_train_lora_adapter_for_dpo() -> None:
+    job = _make_job_output(DPOTraining(type="dpo"))
+
+    assert job.trains_lora_adapter is False
+
+
+def test_job_output_deployment_config_defaults_to_none() -> None:
+    assert _make_job_output(DPOTraining(type="dpo")).deployment_config is None
+
+
+def test_full_result_tables_default_off() -> None:
+    """NeMo-RL's own reference configs ship it false; the payloads are large."""
+    assert GRPOTraining(type="grpo").log_nemo_gym_full_result_tables is False
+
+
+def test_full_result_tables_require_the_wandb_integration() -> None:
+    """NeMo-RL gates on ``wandb_enabled AND the flag``, so without it this is a no-op."""
+    job = _grpo_job(GRPOTraining(type="grpo", log_nemo_gym_full_result_tables=True))
+    with pytest.raises(ValueError, match="requires the W&B integration"):
+        job.validate_for_training()
+
+
+def test_full_result_tables_accepted_with_the_wandb_integration() -> None:
+    from nemo_helix_plugin.integrations import IntegrationsSpec, WandbIntegration
+
+    job = _grpo_job(
+        GRPOTraining(type="grpo", log_nemo_gym_full_result_tables=True),
+        integrations=IntegrationsSpec(wandb=WandbIntegration(project="p")),
+    )
+    job.validate_for_training()
+
+
+def test_router_recompute_override_rejected_under_moe_checkpointing() -> None:
+    """NeMo-RL's Automodel defaults ignore_router_for_ac to False, so this would crash backward."""
+    with pytest.raises(ValueError, match="ignore_router_for_ac=false"):
+        GRPOTraining(
+            type="grpo",
+            policy_backend=PolicyBackend.AUTOMODEL,
+            activation_checkpointing=True,
+            parallelism=ParallelismParams(num_gpus_per_node=2, expert_parallel_size=2),
+            moe_parallelizer={"ignore_router_for_ac": False},
+        )
+
+
+@pytest.mark.parametrize(
+    ("activation_checkpointing", "expert_parallel_size", "moe_parallelizer"),
+    [
+        (False, 2, {"ignore_router_for_ac": False}),
+        (True, 1, {"ignore_router_for_ac": False}),
+        (True, 2, {"ignore_router_for_ac": True}),
+        (True, 2, {"some_other_knob": 7}),
+    ],
+    ids=["no-checkpointing", "no-expert-parallelism", "explicit-true", "other-knob"],
+)
+def test_moe_parallelizer_accepted_when_the_router_is_saved_or_irrelevant(
+    activation_checkpointing: bool, expert_parallel_size: int, moe_parallelizer: dict[str, Any]
+) -> None:
+    GRPOTraining(
+        type="grpo",
+        policy_backend=PolicyBackend.AUTOMODEL,
+        activation_checkpointing=activation_checkpointing,
+        parallelism=ParallelismParams(num_gpus_per_node=2, expert_parallel_size=expert_parallel_size),
+        moe_parallelizer=moe_parallelizer,
+    )

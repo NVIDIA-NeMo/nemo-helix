@@ -5,11 +5,14 @@
 title: "Seeding with External Datasets"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="data-designer-tutorials-seeding"></a>
 
 This tutorial demonstrates how to use external datasets as seed data for synthetic data generation in Data Designer.
 
-For more detail about seed dataset behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/tutorials/seeding-with-an-external-dataset) of this tutorial.
+For more detail about seed dataset behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/tutorials/seeding-with-an-external-dataset) of this tutorial.
 
 ### HuggingFace Datasets
 
@@ -60,14 +63,14 @@ Upload the symptom-to-diagnosis dataset to a Files API Fileset:
 import os
 import tempfile
 import urllib.request
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 WORKSPACE = "default"
 FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
-base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=base_url, workspace=WORKSPACE)
+base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
 
 # Create fileset
 client.files.filesets.create(name=FILESET_NAME)
@@ -96,7 +99,7 @@ MODEL_ALIAS = "text"
 model_configs = [
     dd.ModelConfig(
         provider="default/nvidia-build",
-        model="nvidia/nemotron-3-nano-30b-a3b",  # Use the `served_model_name` from the provider
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,
@@ -319,5 +322,5 @@ When you configure a seed dataset:
 
 ## Next Steps
 
-- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/columns)
-- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/validators)
+- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/columns)
+- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/validators)

@@ -61,7 +61,7 @@ class AgentEvalPipeline:
         labels: dict[str, str] | None = None,
         output_dir: Path | None = None,
         run_id: str | None = None,
-        prepare_task: Callable[[AgentEvalTask], None] | None = None,
+        prepare_task: Callable[[AgentEvalTask], object] | None = None,
     ) -> AgentEvalResult:
         """Online path: optionally prep each task, run the target, score, gate."""
         prepared = [self._with_extra_metrics(task) for task in tasks]

@@ -7,7 +7,7 @@
  * agent-hardener (plugin)
  */
 import type { DatetimeFilter } from './DatetimeFilter.ts';
-import type { PlatformJobStatus } from './PlatformJobStatus.ts';
+import type { HelixJobStatus } from './HelixJobStatus.ts';
 import type { StringFilter } from './StringFilter.ts';
 
 export interface SynthBenignJobsListFilter {
@@ -20,7 +20,7 @@ export interface SynthBenignJobsListFilter {
   /** Project containing the job. */
   project?: string;
   /** The current status. */
-  status?: PlatformJobStatus;
+  status?: HelixJobStatus;
   /** Jobs updated at 'gte' datetime or 'lte' datetime. */
   updated_at?: DatetimeFilter;
 }

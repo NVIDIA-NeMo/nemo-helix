@@ -24,13 +24,13 @@ def test_stack_resolves_labeled_clickhouse_on_configured_port(monkeypatch, click
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="nmp-intake-clickhouse-managed\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="nhx-intake-clickhouse-managed\n", stderr="")
 
     monkeypatch.setattr(stack.subprocess, "run", fake_run)
 
-    assert stack._intake_clickhouse_container(clickhouse_url) == "nmp-intake-clickhouse-managed"
-    assert "label=nmp.nvidia.com/managed-by=nemo-platform" in commands[0]
-    assert "label=nmp.nvidia.com/component=intake-clickhouse" in commands[0]
+    assert stack._intake_clickhouse_container(clickhouse_url) == "nhx-intake-clickhouse-managed"
+    assert "label=nhx.nvidia.com/managed-by=nemo-helix" in commands[0]
+    assert "label=nhx.nvidia.com/component=intake-clickhouse" in commands[0]
     assert f"publish={expected_port}" in commands[0]
 
 
@@ -48,7 +48,7 @@ def test_stack_rejects_multiple_matching_clickhouse_containers(monkeypatch):
         lambda command, **_kwargs: subprocess.CompletedProcess(
             command,
             0,
-            stdout="nmp-intake-clickhouse-one\nnmp-intake-clickhouse-two\n",
+            stdout="nhx-intake-clickhouse-one\nnhx-intake-clickhouse-two\n",
             stderr="",
         ),
     )
@@ -62,7 +62,7 @@ def test_stack_does_not_select_unlabeled_same_name_container(monkeypatch):
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        # An unrelated nmp-intake-clickhouse is running, but the label query
+        # An unrelated nhx-intake-clickhouse is running, but the label query
         # intentionally excludes it.
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 

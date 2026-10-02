@@ -12,6 +12,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import {
   getGuardrailsGetGuardrailConfigQueryKey,
   useGuardrailsDeleteConfig,
@@ -25,12 +26,11 @@ import { CreateGuardrailModal } from '@studio/routes/guardrails/CreateGuardrailM
 import { getGuardrailDetailRoute, getGuardrailsRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useCallback, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 export const GuardrailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [configToDuplicate, setConfigToDuplicate] = useState<GuardrailConfig | null>(null);
@@ -88,13 +88,13 @@ export const GuardrailsRoute: FC = () => {
         />
         <GuardrailsDataView
           workspace={workspace}
-          onRowClick={(config) => {
+          onRowClick={(config, event) => {
             if (!config.name) return;
             queryClient.setQueryData(
               getGuardrailsGetGuardrailConfigQueryKey(workspace, config.name),
               config
             );
-            navigate(getGuardrailDetailRoute(workspace, config.name));
+            openRow(event, getGuardrailDetailRoute(workspace, config.name));
           }}
           onRequestDuplicate={setConfigToDuplicate}
           onRequestDelete={setConfigToDelete}

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import data_designer.config as dd
-from data_designer_nemo.context import DataDesignerValidationContext
+from data_designer_nemo.context.validation import DataDesignerValidationContext
 from data_designer_nemo.errors import NDDInvalidConfigError
 
 

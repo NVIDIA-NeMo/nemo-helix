@@ -3,7 +3,7 @@
 
 # Auditor Target CRUD Operations - CLI Eval
 
-This Harbor eval tests that a coding agent can perform CRUD (Create, Read, Update, Delete) operations on Auditor targets using the NeMo Platform CLI.
+This Harbor eval tests that a coding agent can perform CRUD (Create, Read, Update, Delete) operations on Auditor targets using the NeMo Helix CLI.
 
 ## What It Tests
 
@@ -23,7 +23,7 @@ The verifier checks:
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 python tests/agentic-use/nat_runner.py auditor-target-crud-cli \
     --agent-backend aut \
     --aut-agent-name <your-agent> \

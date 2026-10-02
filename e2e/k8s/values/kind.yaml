@@ -30,28 +30,39 @@ ingress:
 httpRoute:
   enabled: true
   parentRefs:
-    - name: nmp-e2e-gateway
+    - name: nhx-e2e-gateway
 
 platformConfig:
+  auth:
+    allowed_service_principals:
+      - e2e-test
+      - e2e-test-on-behalf
   inference_gateway:
     mock_provider_prefix: igw-mock-
   jobs:
+    # Applies to every kubernetes_job profile, including the default one that a
+    # job without an explicit ``profile`` resolves to. Every image e2e asks for
+    # is either already on the node or cannot resolve at all, so none of them
+    # needs the production-sized grace period for a registry blip to clear.
+    executor_defaults:
+      kubernetes_job:
+        ttl_seconds_image_pull: 30
     executors:
       - provider: cpu
         profile: additional-volume
         backend: kubernetes_job
         config:
-          service_account_name: '{{ include "nmp-core.jobsServiceAccountName" . }}'
-          launcher_image: '{{ include "nmp-core.image" . }}'
+          service_account_name: '{{ include "nhx-core.jobsServiceAccountName" . }}'
+          launcher_image: '{{ include "nhx-core.image" . }}'
           storage:
-            pvc_name: '{{ include "nmp-core.persistentVolumeClaim" . }}'
+            pvc_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
             volume_permissions_image: '{{ .Values.core.storage.volumePermissionsImage }}'
             additional_volumes:
-              - name: nmp-additional-volume
+              - name: nhx-additional-volume
                 persistent_volume_claim:
-                  claim_name: '{{ include "nmp-core.persistentVolumeClaim" . }}'
+                  claim_name: '{{ include "nhx-core.persistentVolumeClaim" . }}'
             additional_volume_mounts:
-              - name: nmp-additional-volume
+              - name: nhx-additional-volume
                 mount_path: /mnt/additional_storage
   models:
     controller:

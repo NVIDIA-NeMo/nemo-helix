@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "nmp-api.api-servicename" . }}
+  name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-api
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-api
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.api.podDisruptionBudget.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -19,8 +19,8 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-api
-      {{- include "nemo-platform.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-api
+      {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   {{- if .Values.api.podDisruptionBudget.maxUnavailable }}
   maxUnavailable: {{ .Values.api.podDisruptionBudget.maxUnavailable }}
   {{- else }}

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nemo_platform_plugin.interface import StudioSpec
+from nemo_helix_plugin.interface import StudioSpec
 
 
 def get_studio_spec() -> StudioSpec:

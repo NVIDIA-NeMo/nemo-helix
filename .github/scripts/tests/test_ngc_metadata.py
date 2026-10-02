@@ -80,35 +80,35 @@ def test_ngc_sdk_supports_required_metadata_parameters() -> None:
 
 
 def test_default_display_name_preserves_known_names() -> None:
-    assert default_display_name("nmp-cpu-tasks") == "NeMo Platform CPU Tasks"
-    assert default_display_name("safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
+    assert default_display_name("nhx-tasks") == "NeMo Helix Tasks"
+    assert default_display_name("nhx-safe-synthesizer-tasks") == "Safe Synthesizer Tasks"
 
 
-def test_load_asset_uses_defaults(tmp_path: Path) -> None:
-    path = tmp_path / "auditor-tasks.md"
-    path.write_text("# Overview\n", encoding="utf-8")
+@pytest.mark.parametrize("front_matter", ["labels: [NeMo]\n", "display_name: Auditor Tasks\n"])
+def test_load_asset_uses_defaults(tmp_path: Path, front_matter: str) -> None:
+    path = tmp_path / "nhx-auditor-tasks.md"
+    path.write_text(f"---\n{front_matter}---\n# Overview\n", encoding="utf-8")
 
     asset = load_asset(path, "container")
 
-    assert asset.name == "auditor-tasks"
+    assert asset.name == "nhx-auditor-tasks"
     assert asset.display_name == "Auditor Tasks"
-    assert asset.description == "Auditor Tasks is part of the NeMo Platform"
+    assert asset.description == "Auditor Tasks is part of the NeMo Helix"
     assert asset.labels == DEFAULT_LABELS
     assert asset.logo == DEFAULT_LOGO
     assert asset.overview == "# Overview\n"
 
 
 def test_load_chart_uses_deployment_description(tmp_path: Path) -> None:
-    path = tmp_path / "nemo-platform.md"
-    path.write_text("# Overview\n", encoding="utf-8")
+    path = _write_overview(tmp_path / "nemo-helix.md")
 
     asset = load_asset(path, "chart")
 
-    assert asset.description == "Deploy NeMo Platform to Kubernetes"
+    assert asset.description == "Deploy NeMo Helix to Kubernetes"
 
 
 def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
-    path = tmp_path / "auditor-tasks.md"
+    path = tmp_path / "nhx-auditor-tasks.md"
     path.write_text(
         "---\n"
         "display_name: NeMo Auditor\n"
@@ -129,17 +129,86 @@ def test_load_asset_applies_front_matter_overrides(tmp_path: Path) -> None:
     assert asset.overview == "# Overview\n"
 
 
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("", "must start with '---' on the first line"),
+        ("# Overview\n", "must start with '---' on the first line"),
+        ("\n---\n---\n# Overview\n", "must start with '---' on the first line"),
+        (
+            "<!-- Copyright comment -->\n\n---\ndescription: Gym host\n---\n# Overview\n",
+            "must start with '---' on the first line",
+        ),
+        ("---\ndescription: Gym host\n# Overview\n", "must end with '---'"),
+        ("---\ndescription: [\n---\n# Overview\n", "expected"),
+        ("---\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n# Copyright comment\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n{}\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n[]\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n- NeMo\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nfalse\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n0\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nnull\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\nGym host\n---\n# Overview\n", "must be a nonempty mapping"),
+    ],
+)
+def test_load_asset_rejects_invalid_front_matter(tmp_path: Path, content: str, message: str) -> None:
+    path = tmp_path / "nhx-gym-host.md"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert message in str(error.value)
+
+
+@pytest.mark.parametrize("field", ["display_name", "description", "logo"])
+@pytest.mark.parametrize("value", ['""', '"   "', "null", "false", "42", "[]", "{}"])
+def test_load_asset_rejects_invalid_string_fields(tmp_path: Path, field: str, value: str) -> None:
+    path = tmp_path / "nhx-api.md"
+    path.write_text(f"---\n{field}: {value}\n---\n# Overview\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert f"{field} must be a nonblank string" in str(error.value)
+
+
+@pytest.mark.parametrize("value", ["null", "NeMo", "{}", "[]", "[42]", "[null]", '[""]', '[NeMo, "   "]'])
+def test_load_asset_rejects_invalid_labels(tmp_path: Path, value: str) -> None:
+    path = tmp_path / "nhx-api.md"
+    path.write_text(f"---\nlabels: {value}\n---\n# Overview\n", encoding="utf-8")
+
+    with pytest.raises(ValueError) as error:
+        load_asset(path, "container")
+
+    assert str(path) in str(error.value)
+    assert "labels must be a nonempty list of nonblank strings" in str(error.value)
+
+
+def test_load_asset_preserves_overview_with_markdown_separators(tmp_path: Path) -> None:
+    path = tmp_path / "nhx-api.md"
+    overview = "\n# Overview\n\n---\n\nMore details\n"
+    content = f"---\n# Copyright\nlabels: [NeMo]\n---\n{overview}"
+    path.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+
+    assert load_asset(path, "container").overview == overview
+
+
 def test_discover_assets_infers_type_and_name(tmp_path: Path) -> None:
     (tmp_path / "charts").mkdir()
     (tmp_path / "containers").mkdir()
-    (tmp_path / "charts" / "nemo-platform.md").write_text("chart", encoding="utf-8")
-    (tmp_path / "containers" / "nmp-api.md").write_text("container", encoding="utf-8")
+    _write_overview(tmp_path / "charts" / "nemo-helix.md")
+    _write_overview(tmp_path / "containers" / "nhx-api.md")
 
     assets = discover_assets(tmp_path)
 
     assert [(asset.asset_type, asset.name) for asset in assets] == [
-        ("container", "nmp-api"),
-        ("chart", "nemo-platform"),
+        ("container", "nhx-api"),
+        ("chart", "nemo-helix"),
     ]
 
 
@@ -150,14 +219,14 @@ def test_repository_assets_are_valid() -> None:
 
 
 def test_sync_container_updates_existing_asset(tmp_path: Path) -> None:
-    asset = load_asset(_write_overview(tmp_path / "nmp-api.md"), "container")
+    asset = load_asset(_write_overview(tmp_path / "nhx-api.md"), "container")
     client = MagicMock()
 
-    action = sync_container(client, asset, "org/team/nmp-api")
+    action = sync_container(client, asset, "org/team/nhx-api")
 
     assert action == "updated"
     client.registry.image.update.assert_called_once_with(
-        image="org/team/nmp-api",
+        image="org/team/nhx-api",
         desc=asset.description,
         overview=asset.overview,
         labels=DEFAULT_LABELS,
@@ -169,15 +238,15 @@ def test_sync_container_updates_existing_asset(tmp_path: Path) -> None:
 
 
 def test_sync_container_creates_missing_asset(tmp_path: Path) -> None:
-    asset = load_asset(_write_overview(tmp_path / "nmp-api.md"), "container")
+    asset = load_asset(_write_overview(tmp_path / "nhx-api.md"), "container")
     client = MagicMock()
     client.registry.image.info.side_effect = ResourceNotFoundException("missing")
 
-    action = sync_container(client, asset, "org/team/nmp-api")
+    action = sync_container(client, asset, "org/team/nhx-api")
 
     assert action == "created"
     client.registry.image.create.assert_called_once_with(
-        image="org/team/nmp-api",
+        image="org/team/nhx-api",
         desc=asset.description,
         overview=asset.overview,
         label=DEFAULT_LABELS,
@@ -189,7 +258,7 @@ def test_sync_container_creates_missing_asset(tmp_path: Path) -> None:
 
 
 def test_sync_chart_creates_missing_asset(tmp_path: Path) -> None:
-    asset = load_asset(_write_overview(tmp_path / "nemo-platform.md"), "chart")
+    asset = load_asset(_write_overview(tmp_path / "nemo-helix.md"), "chart")
     client = MagicMock()
     client.registry.chart.info.side_effect = ResourceNotFoundException("missing")
     uploaded_overview = ""
@@ -200,12 +269,12 @@ def test_sync_chart_creates_missing_asset(tmp_path: Path) -> None:
 
     client.registry.chart.create.side_effect = capture_overview
 
-    action = sync_chart(client, asset, "org/team/nemo-platform")
+    action = sync_chart(client, asset, "org/team/nemo-helix")
 
     assert action == "created"
     kwargs = client.registry.chart.create.call_args.kwargs
     assert kwargs | {"overview_filepath": None} == {
-        "target": "org/team/nemo-platform",
+        "target": "org/team/nemo-helix",
         "overview_filepath": None,
         "display_name": asset.display_name,
         "labels": DEFAULT_LABELS,
@@ -219,20 +288,58 @@ def test_sync_chart_creates_missing_asset(tmp_path: Path) -> None:
 
 def test_cli_dry_run_lists_assets(tmp_path: Path) -> None:
     (tmp_path / "containers").mkdir()
-    _write_overview(tmp_path / "containers" / "nmp-api.md")
+    _write_overview(tmp_path / "containers" / "nhx-api.md")
 
-    result = CliRunner().invoke(
-        app,
-        ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path), "--dry-run"],
-    )
+    with patch("ngc_metadata.Client") as client:
+        result = CliRunner().invoke(
+            app,
+            ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path), "--dry-run"],
+            env={"NGC_API_KEY": None},
+        )
 
     assert result.exit_code == 0
-    assert result.stdout == "Would sync container org/team/nmp-api\n"
+    assert result.stdout == "Would sync container org/team/nhx-api\n"
+    client.assert_not_called()
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("# Overview\n", "must start with '---' on the first line"),
+        (
+            "<!-- Copyright comment -->\n\n---\ndescription: Gym host\n---\n# Overview\n",
+            "must start with '---' on the first line",
+        ),
+        ("---\ndescription: [\n---\n# Overview\n", "expected"),
+        ("---\nlabels: []\n---\n# Overview\n", "labels must be a nonempty list of nonblank strings"),
+        ("---\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n# Copyright comment\n---\n# Overview\n", "must be a nonempty mapping"),
+        ("---\n{}\n---\n# Overview\n", "must be a nonempty mapping"),
+    ],
+)
+def test_cli_validates_all_assets_before_sync(tmp_path: Path, dry_run: bool, content: str, message: str) -> None:
+    (tmp_path / "containers").mkdir()
+    _write_overview(tmp_path / "containers" / "a-valid.md")
+    invalid_path = tmp_path / "containers" / "z-invalid.md"
+    invalid_path.write_text(content, encoding="utf-8")
+    args = ["--org", "org", "--team", "team", "--assets-dir", str(tmp_path)]
+    args.extend(["--dry-run"] if dry_run else ["--api-key", "service-key"])
+
+    with patch("ngc_metadata.Client") as client:
+        result = CliRunner().invoke(app, args, env={"NGC_API_KEY": None})
+
+    assert result.exit_code == 1
+    assert str(invalid_path) in result.stderr
+    assert message in result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
+    client.assert_not_called()
 
 
 def test_cli_configures_org_auth_for_team_target(tmp_path: Path) -> None:
     (tmp_path / "containers").mkdir()
-    _write_overview(tmp_path / "containers" / "nmp-api.md")
+    _write_overview(tmp_path / "containers" / "nhx-api.md")
     client = MagicMock()
 
     with patch("ngc_metadata.Client", return_value=client):
@@ -252,12 +359,12 @@ def test_cli_configures_org_auth_for_team_target(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     client.configure.assert_called_once_with(api_key="service-key", org_name="org", team_name="no-team")
-    client.registry.image.info.assert_called_once_with("org/team/nmp-api")
+    client.registry.image.info.assert_called_once_with("org/team/nhx-api")
 
 
 def test_cli_can_match_authentication_team(tmp_path: Path) -> None:
     (tmp_path / "containers").mkdir()
-    _write_overview(tmp_path / "containers" / "nmp-api.md")
+    _write_overview(tmp_path / "containers" / "nhx-api.md")
     client = MagicMock()
 
     with patch("ngc_metadata.Client", return_value=client):
@@ -281,7 +388,7 @@ def test_cli_can_match_authentication_team(tmp_path: Path) -> None:
 
 
 def _write_overview(path: Path) -> Path:
-    path.write_text("# Overview\n", encoding="utf-8")
+    path.write_text("---\nlabels: [NeMo]\n---\n# Overview\n", encoding="utf-8")
     return path
 
 

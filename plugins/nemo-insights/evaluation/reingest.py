@@ -22,7 +22,7 @@ Doc -> OTLP inversion (validated against the live platform, 2026-07-06 spike):
 * Catalog-consumed attributes (``model``, ``agent_name``, token counts, ...)
   are NOT in ``raw_attributes`` — they surface as typed doc columns. The
   inversion is derived mechanically from ``span_attribute_catalog`` (imported
-  from the nemo-platform checkout): each doc value is re-emitted under the
+  from the nemo-helix checkout): each doc value is re-emitted under the
   spec's highest-precedence source key, so ingest re-derives the identical
   semantic column. ``agent_version`` is the one catalog field the read API
   does not expose — it cannot be restored (invisible to doc-level diffs, which
@@ -79,12 +79,12 @@ OTLP_REQUEST_MAX_SPANS = 100
 DIRECT_REQUEST_MAX_SPANS = 1000
 DIRECT_REQUEST_MAX_BYTES = 4 * 1024 * 1024
 
-# Where the attribute catalog lives inside a nemo-platform checkout.
-CATALOG_RELPATH = Path("services/intake/src/nmp/intake/spans/span_attribute_catalog.py")
+# Where the attribute catalog lives inside a nemo-helix checkout.
+CATALOG_RELPATH = Path("services/intake/src/nhx/intake/spans/span_attribute_catalog.py")
 
-_CLICKHOUSE_MANAGED_BY_LABEL = "nmp.nvidia.com/managed-by=nemo-platform"
-_CLICKHOUSE_COMPONENT_LABEL = "nmp.nvidia.com/component=intake-clickhouse"
-_CLICKHOUSE_URL_ENV_VAR = "NMP_INTAKE_CLICKHOUSE_URL"
+_CLICKHOUSE_MANAGED_BY_LABEL = "nhx.nvidia.com/managed-by=nemo-helix"
+_CLICKHOUSE_COMPONENT_LABEL = "nhx.nvidia.com/component=intake-clickhouse"
+_CLICKHOUSE_URL_ENV_VAR = "NHX_INTAKE_CLICKHOUSE_URL"
 
 # Fields normalized away in round-trip diffs — every one spike-proven unavoidable:
 # - workspace: the whole point of re-ingest is restoring into a different (fixture/scratch) workspace.
@@ -106,7 +106,7 @@ _POST_DROP = {
     "evaluator_results": ("evaluator_result_id", "workspace", "created_by", "created_at", "ingested_at"),
 }
 
-# The platform's entity-name rule (nmp.common NAME_PATTERN) — target workspaces must satisfy it.
+# The platform's entity-name rule (nhx.common NAME_PATTERN) — target workspaces must satisfy it.
 _WS_OK = re.compile(r"^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$")
 
 _USAGE_DETAIL_FIELDS = {
@@ -125,14 +125,14 @@ SINCE_MARGIN = timedelta(days=1)
 
 
 def default_platform_roots() -> list[Path]:
-    """Auto-detect candidates for a nemo-platform checkout, in resolution order.
+    """Auto-detect candidates for a nemo-helix checkout, in resolution order.
 
     First the containing monorepo, then the legacy workstation layout.
     """
     plugin_root = Path(__file__).resolve().parent.parent
     return [
         plugin_root.parents[1],
-        Path.home() / "workstation" / "nemo-platform",
+        Path.home() / "workstation" / "nemo-helix",
     ]
 
 
@@ -142,9 +142,9 @@ def resolve_platform_root(
     env: Mapping[str, str] | None = None,
     candidates: list[Path] | None = None,
 ) -> Path:
-    """Locate the nemo-platform checkout whose ``span_attribute_catalog`` drives re-ingest.
+    """Locate the nemo-helix checkout whose ``span_attribute_catalog`` drives re-ingest.
 
-    Resolution order: explicit ``--platform-root`` > ``NMP_PLATFORM_ROOT`` env >
+    Resolution order: explicit ``--platform-root`` > ``NHX_PLATFORM_ROOT`` env >
     the first :func:`default_platform_roots` candidate that actually contains the
     catalog. Explicit/env paths are taken at face value (:func:`load_catalog`
     raises the precise error if the catalog is missing there); with nothing
@@ -153,14 +153,14 @@ def resolve_platform_root(
     if explicit:
         return Path(explicit)
     env = os.environ if env is None else env
-    if env.get("NMP_PLATFORM_ROOT"):
-        return Path(env["NMP_PLATFORM_ROOT"])
+    if env.get("NHX_PLATFORM_ROOT"):
+        return Path(env["NHX_PLATFORM_ROOT"])
     for candidate in default_platform_roots() if candidates is None else candidates:
         if (candidate / CATALOG_RELPATH).is_file():
             return candidate
     sys.exit(
-        "no nemo-platform checkout found (its span_attribute_catalog drives the re-ingest "
-        "attribute inversion) — pass --platform-root PATH or set NMP_PLATFORM_ROOT"
+        "no nemo-helix checkout found (its span_attribute_catalog drives the re-ingest "
+        "attribute inversion) — pass --platform-root PATH or set NHX_PLATFORM_ROOT"
     )
 
 
@@ -214,7 +214,7 @@ def manifest_since(manifest: dict) -> datetime:
 
 
 def load_catalog(platform_root: Path) -> ModuleType:
-    """Import ``span_attribute_catalog`` straight from a nemo-platform checkout.
+    """Import ``span_attribute_catalog`` straight from a nemo-helix checkout.
 
     The catalog module is pure stdlib (dataclasses/enum/decimal), so it loads
     by file path without installing the platform's packages. The module must be
@@ -224,9 +224,7 @@ def load_catalog(platform_root: Path) -> ModuleType:
     """
     path = Path(platform_root) / CATALOG_RELPATH
     if not path.is_file():
-        raise FileNotFoundError(
-            f"span_attribute_catalog not found at {path} — pass the root of a nemo-platform checkout"
-        )
+        raise FileNotFoundError(f"span_attribute_catalog not found at {path} — pass the root of a nemo-helix checkout")
     spec = importlib.util.spec_from_file_location("evaluation_span_attribute_catalog", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -725,7 +723,7 @@ def warn_if_stale(manifest: dict, *, now: datetime | None = None) -> str | None:
         f"WARNING: bundle spans start {age_days} days ago (min_start_time={raw}).\n"
         "  Intake TTL-drops spans 90 days after start_time — restored rows can vanish on the next\n"
         "  TTL merge. Run SYSTEM STOP TTL MERGES on the target ClickHouse first. Local restores do\n"
-        "  this automatically only when NMP_INTAKE_CLICKHOUSE_URL verifies a labeled container.\n"
+        "  this automatically only when NHX_INTAKE_CLICKHOUSE_URL verifies a labeled container.\n"
         "  Reads also default to a 30-day lookback: always pass an explicit `since` at or before\n"
         f"  min_start_time ({raw}) when querying restored spans."
     )
@@ -973,7 +971,7 @@ def cleanup_scratch(base_url: str, workspaces: list[str]) -> None:
 
     There is NO delete API for spans/annotations/evaluator-results rows — row
     cleanup only works when the API target is loopback and
-    ``NMP_INTAKE_CLICKHOUSE_URL`` identifies exactly one labeled container
+    ``NHX_INTAKE_CLICKHOUSE_URL`` identifies exactly one labeled container
     publishing that URL's port. The DELETE mutations are scoped to an exact
     IN-list of the scratch names. When the binding cannot be verified NOTHING is
     deleted — docker-execing another container would purge the wrong ClickHouse,

@@ -7,7 +7,7 @@ This Harbor test verifies that Claude Code can create and list workspaces using 
 
 ## Purpose
 
-This test demonstrates that the `nemo` CLI is properly installed and functional in the Harbor test environment, and that Claude Code can successfully use CLI commands to interact with the NeMo Platform.
+This test demonstrates that the `nemo` CLI is properly installed and functional in the Harbor test environment, and that Claude Code can successfully use CLI commands to interact with the NeMo Helix.
 
 ## Difference from workspace-basic-mcp
 

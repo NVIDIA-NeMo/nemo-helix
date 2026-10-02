@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Verify that the agent created and ran GPU jobs through the NeMo Platform jobs pipeline.
+"""Verify that the agent created and ran GPU jobs through the NeMo Helix jobs pipeline.
 
 Tests job creation, GPU execution, failure handling, and agent trajectory.
 """
@@ -12,7 +12,7 @@ import os
 import time
 
 import pytest
-from nemo_platform_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.client import JobsClient
 
 WORKSPACE = "gpu-job-workspace"
 
@@ -32,9 +32,9 @@ def _make_unsigned_jwt() -> str:
 
 @pytest.fixture
 def client() -> JobsClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
     return JobsClient(
-        base_url=nmp_base_url,
+        base_url=nhx_base_url,
         workspace=WORKSPACE,
         auth=_make_unsigned_jwt(),
     )

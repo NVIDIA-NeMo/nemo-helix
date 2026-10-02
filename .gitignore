@@ -61,14 +61,14 @@ e2e/configs/.*.merged.yaml
 .files_storage/
 .data_designer_assets/
 # Auth policy WASM is built in CI/containers, not checked in
-services/core/auth/src/nmp/core/auth/assets/policy.wasm
+services/core/auth/src/nhx/core/auth/assets/policy.wasm
 logs/*
 *.log
 *.log.jsonl
 k8s/helm/Chart.lock
 k8s/helm/charts/
 chart-tmp
-nemo-platform-*.tgz
+nemo-helix-*.tgz
 # Visual Studio Code config
 .vscode/
 # PyCharm config
@@ -107,7 +107,7 @@ services/core/infrastructure/jobs/jobs.db
 
 # SDK artifacts
 sdk/openapi_schema_mapping_report.txt
-sdk/python/nemo-platform/uv.lock
+sdk/python/nemo-helix/uv.lock
 
 # Terraform
 **/.terraform
@@ -179,3 +179,7 @@ crash-dumps/
 # it stays local. plugins/_temporary-scaled-evals/deploy/k8s/local.env.example is the
 # committed template.
 plugins/_temporary-scaled-evals/deploy/k8s/local.env
+
+# Renames
+sdk/python/nemo-helix/
+services/core/auth/src/nmp/

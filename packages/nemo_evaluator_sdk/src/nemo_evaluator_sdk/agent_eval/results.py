@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from enum import Enum
@@ -762,6 +763,7 @@ class AgentEvalResult(BaseModel):
                     format_table(preview),
                 ]
             )
+        parts.extend(_format_trial_errors(self))
         parts.extend(_format_score_errors(self.scores, max_error_rows=max_error_rows))
         return "\n".join(parts)
 
@@ -863,8 +865,65 @@ def _agent_eval_summary_header(result: AgentEvalResult) -> str:
         f"scores={len(result.scores)}",
         f"aggregate_scores={len(result.summary.scores.scores)}",
     ]
+    if result.summary.error_count:
+        fields.append(f"errors={result.summary.error_count}")
     fields.extend(f"{status}={count}" for status, count in sorted(status_counts.items()))
     return f"AgentEvalResult({', '.join(fields)})"
+
+
+#: Trial ids named per error type before the line truncates; the full list stays on
+#: ``summary.error_trial_ids``.
+_MAX_ERROR_TRIAL_IDS = 5
+
+
+def _error_messages_by_occurrence(trials: Sequence[AgentEvalTrial]) -> dict[tuple[str, str], deque[str | None]]:
+    """Error messages keyed by ``(error type, trial id)``, each key holding every occurrence in order.
+
+    Trial ids are not unique -- Gym derives them from a rollout index in two separate loops -- and
+    ``error_trial_ids`` preserves each occurrence rather than deduplicating. Keying on the id alone
+    would let a later duplicate supply the message for an earlier one, printed under an error type
+    that trial never had.
+    """
+    messages: dict[tuple[str, str], deque[str | None]] = {}
+    for trial in trials:
+        if trial.error is not None:
+            messages.setdefault((trial.error.type, trial.id), deque()).append(trial.error.message)
+    return messages
+
+
+def _format_trial_errors(result: AgentEvalResult) -> list[str]:
+    """Render the failed-trial section: what failed, how often, and where to read the rest.
+
+    Rendered from ``summary.error_trial_ids`` rather than from the scores, because a trial whose
+    agent or harness never ran produces no failed score to report — it produces a reward of zero,
+    which is indistinguishable from a genuine zero anywhere else in this output.
+    """
+    error_trial_ids = result.summary.error_trial_ids
+    if not error_trial_ids:
+        return []
+
+    messages = _error_messages_by_occurrence(result.trials)
+    failed = result.summary.error_count
+    parts = [
+        "",
+        f"Failed trials ({failed} of {len(result.trials)})"
+        if len(result.trials) >= failed
+        else f"Failed trials ({failed})",
+    ]
+    for error_type, trial_ids in sorted(error_trial_ids.items()):
+        shown = trial_ids[:_MAX_ERROR_TRIAL_IDS]
+        line = f"  {error_type} ({len(trial_ids)}): {', '.join(shown)}"
+        if len(trial_ids) > len(shown):
+            line += f", ... ({len(trial_ids) - len(shown)} more)"
+        parts.append(line)
+        for trial_id in shown:
+            occurrences = messages.get((error_type, trial_id))
+            message = occurrences.popleft() if occurrences else None
+            if message:
+                parts.append(f"    {trial_id}: {message}")
+    if result.work_dir is not None:
+        parts.append(f"  Trial evidence: {result.work_dir}")
+    return parts
 
 
 def _format_score_errors(

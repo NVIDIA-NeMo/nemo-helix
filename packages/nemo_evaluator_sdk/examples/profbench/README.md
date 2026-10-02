@@ -103,7 +103,7 @@ async def main() -> None:
     output_dir = Path("env/profbench-results/code-sandbox-smoke")
     judge_model = Model(
         url="https://integrate.api.nvidia.com/v1/chat/completions",
-        name="nvidia/nemotron-3-nano-30b-a3b",
+        name="nvidia/nemotron-3.5-lightning-30b-a3b",
         api_key_secret=SecretRef(root="NVIDIA_API_KEY"),
     )
     benchmark = load_profbench(

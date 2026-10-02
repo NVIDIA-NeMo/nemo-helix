@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "nmp-core.controller-servicename" . }}
+  name: {{ include "nhx-core.controller-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-core-controller
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-controller
+    {{- include "nemo-helix.labels" . | nindent 4 }}
     {{- with .Values.core.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -25,8 +25,8 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: nmp-core-controller
-      {{- include "nemo-platform.labels" . | nindent 6 }}
+      app.kubernetes.io/component: nhx-core-controller
+      {{- include "nemo-helix.labels" . | nindent 6 }}
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}

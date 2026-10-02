@@ -30,10 +30,10 @@ The agent must:
 
 ## Environment
 
-- NeMo Platform API server running on localhost:8080
+- NeMo Helix API server running on localhost:8080
 - Real inference provider (`nvidia-inference`) pre-configured via NVIDIA's inference API
 - Model entity `default/guardrails-llm` registered and available
-- CLI available at `/app/.venv/bin/nmp`
+- CLI available at `/app/.venv/bin/nhx`
 - CLI auth pre-configured
 - MCP tools disabled (CLI only)
 

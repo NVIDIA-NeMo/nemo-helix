@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nhx-automodel training - GPU finetune step (nemo_automodel recipes + nhx-automodel package).
+# Same platform glue as tasks; separate image tag for the compiler training step.
+
+ARG SMOKE_MARKER=smoke_nhx_automodel_training
+
+# Supplied by bake. Local builds use the base builder target; CI can override
+# the context to a pinned docker-image:// reference.
+FROM nhx-automodel-base AS automodel-base
+
+FROM automodel-base AS runtime
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+ENV PATH="/bin:${PATH}"
+
+ARG USERNAME=ubuntu
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+ENV HF_HUB_ENABLE_HF_TRANSFER=1 \
+    OTEL_PYTHON_EXCLUDED_URLS="health"
+
+COPY --from=platform-workspace / /app
+WORKDIR /app
+
+RUN mkdir -p /home/${USERNAME}/.cache && \
+    chown -R ${USER_UID}:${USER_GID} /home/${USERNAME} /app/services/automodel
+
+RUN uv pip freeze --python ${VIRTUAL_ENV}/bin/python --exclude-editable > /tmp/base-python-freeze.txt
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /app/docker/automodel/no_override_requirements.txt \
+    -e /app/sdk/python/nemo-helix \
+    -e /app/packages/filesets \
+    -e /app/packages/models \
+    -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nhx_common \
+    -e /app/packages/nhx_customization_common \
+    -e "/app/services/automodel[training]"
+
+# Re-pin nemo_automodel from the base clone without re-resolving transformers (already in base venv).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-deps \
+    -e /opt/Automodel
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python /usr/local/bin/collect-python-sdists.py \
+        --python ${VIRTUAL_ENV}/bin/python \
+        --output /usr/share/nemo-helix/source-distributions/nhx-automodel-training \
+        --baseline-freeze /tmp/base-python-freeze.txt \
+        --label platform-glue
+
+# Late file cleanup for bundled or non-package-managed files.
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/tmp/file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt
+
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "nhx.automodel.tasks.training", "--help"]
+
+USER ${USER_UID}:${USER_GID}
+
+FROM runtime AS smoke-test
+ARG SMOKE_MARKER
+USER 0
+COPY tests/smoke_gpu/ /smoke_test/
+RUN --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/smoke_test/removals/files/base/pytorch-ngc-common.txt,readonly \
+    --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/smoke_test/removals/files/final/customizer-codecs.txt,readonly \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --reinstall pytest && \
+    ${VIRTUAL_ENV}/bin/pytest /smoke_test/ -m ${SMOKE_MARKER} -v
+
+# Default stage for untargeted builds (bake uses --target runtime; smoke-test is opt-in).
+FROM runtime

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A :class:`SandboxProvider` backed by a ``sandboxed-gym`` episode broker.
+"""A :class:`SandboxProvider` backed by a ``nemo-sandboxed-gym`` episode broker.
 
 Where the Docker and Compose providers drive a container runtime on the host, this one is an HTTP
 client. The broker holds the backend credential and enforces policy -- approved images, TTL and
@@ -89,7 +89,7 @@ def _extract_archive(archive: bytes, target_dir: Path) -> None:
     a separate validation loop into the bulk call, and `filter="data"` is a second line of defence
     rather than the only one.
 
-    This mirrors ``nemo_platform_plugin.jobs.archive.safe_extract_tar`` rather than importing it:
+    This mirrors ``nemo_helix_plugin.jobs.archive.safe_extract_tar`` rather than importing it:
     that lives in a platform-internal package, and this SDK is published standalone.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ def _extract_archive(archive: bytes, target_dir: Path) -> None:
 
 
 class BrokerSandboxProvider:
-    """Provision episode sandboxes through a ``sandboxed-gym`` broker over HTTP."""
+    """Provision episode sandboxes through a ``nemo-sandboxed-gym`` broker over HTTP."""
 
     name = "broker"
 

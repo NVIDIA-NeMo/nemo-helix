@@ -9,7 +9,7 @@ Plugin notes:
 
 - When specifying `config`, choose either `config.replace` or `config.rewrite`, not both.
 - Hand-written YAML specs must include a `kind` discriminator inside `replace`.
-- Preview/run execution requires `model_configs` so provider calls route through NeMo Platform Inference Gateway.
+- Preview/run execution requires `model_configs` so provider calls route through NeMo Helix Inference Gateway.
 
 Minimal YAML shape:
 

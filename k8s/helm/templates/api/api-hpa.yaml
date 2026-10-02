@@ -15,10 +15,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "nmp-api.api-servicename" . }}
+  name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-api
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-api
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.api.autoscaling.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -27,7 +27,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "nmp-api.api-servicename" . }}
+    name: {{ include "nhx-api.api-servicename" . }}
   minReplicas: {{ .Values.api.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.api.autoscaling.maxReplicas }}
   metrics:

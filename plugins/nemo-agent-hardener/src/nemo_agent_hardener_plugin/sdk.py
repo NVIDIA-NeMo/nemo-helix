@@ -3,17 +3,16 @@
 
 """SDK resources for the Agent Hardener plugin.
 
-Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.agent_hardener`` via the ``nemo.sdk``
+Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.agent_hardener`` via the ``nemo.sdk``
 entry-point. Exposes ``run(config=..., env_file=..., workspace=...)`` which executes the
-``agent-hardener.war-game`` job locally, in-process, via
-:meth:`~nemo_platform_plugin.scheduler.NemoJobScheduler.run_local` — mirroring the auditor
-plugin's ``client.auditor.run`` — plus ``client.agent_hardener.runs`` to read run records.
+``agent-hardener.war-game`` job locally, in-process, plus ``client.agent_hardener.runs`` to read run records.
 """
 
 from __future__ import annotations
 
 import asyncio
 import itertools
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -22,9 +21,8 @@ from nemo_agent_hardener_plugin.filesets import upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient
-from nemo_platform_plugin.agent_hardener.types import (
+from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
+from nemo_helix_plugin.agent_hardener.types import (
     AGENT_HARDENER_MANIFEST_TYPE,
     AGENT_HARDENER_RUN_TYPE,
     InspectProjectRequest,
@@ -35,11 +33,13 @@ from nemo_platform_plugin.agent_hardener.types import (
     ValidateModelRequest,
     WarGameModels,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.entities.client import EntitiesClient
-from nemo_platform_plugin.entities.types import Entity, ListEntitiesQueryParams
-from nemo_platform_plugin.scheduler import NemoJobScheduler
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.adapter import HelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import Entity, ListEntitiesQueryParams
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 _JSON_MAP_ADAPTER = TypeAdapter(JsonMap)
@@ -52,6 +52,18 @@ def _to_json_map(value: object) -> JsonMap:
 
 def _model_to_json_map(model: BaseModel) -> JsonMap:
     return _to_json_map(model.model_dump(mode="json"))
+
+
+def _local_job_context(*, workspace: str, job_name: str) -> JobContext:
+    root = Path(tempfile.mkdtemp(prefix="nemo-agent-hardener-", suffix=f"-{job_name}"))
+    storage = StoragePaths(ephemeral=root / "ephemeral", persistent=root / "persistent")
+    storage.ephemeral.mkdir(parents=True, exist_ok=True)
+    storage.persistent.mkdir(parents=True, exist_ok=True)
+    return JobContext(
+        workspace=workspace,
+        storage=storage,
+        results=LocalJobResults(root=storage.persistent / "results"),
+    )
 
 
 def _models_to_json_map(models: ModelSelection | None) -> JsonMap | None:
@@ -73,7 +85,7 @@ def _run_to_dict(entity: Entity) -> JsonMap:
 
 
 def _run_war_game(
-    sync_sdk: NeMoPlatform,
+    sync_sdk: SyncHelixClient,
     *,
     config: str | None,
     manifest_id: str | None,
@@ -89,9 +101,9 @@ def _run_war_game(
 ) -> JsonMap:
     """Blocking war-game launch shared by the sync and async resources.
 
-    ``run_local`` runs the job synchronously and the job downloads its filesets (benign suite, replay
-    hitlog, materialized manifest) through the sync ``sdk``, so both entry points funnel through this
-    one sync body — the async twin just runs it on a worker thread with a sync client it builds.
+    The job downloads its filesets (benign suite, replay hitlog, materialized manifest) through the
+    sync ``sdk``, so both entry points funnel through this one sync body — the async twin just runs it
+    on a worker thread with a sync client it builds.
 
     Pass a local ``config`` manifest path or a saved ``manifest_id`` (which materializes the manifest and
     reuses its cached benign suite). Exactly one is required.
@@ -123,11 +135,17 @@ def _run_war_game(
         spec["benign_suite_fileset"] = upload_file_to_fileset(
             sync_sdk, Path(benign_suite), workspace=workspace, prefix="benign-suite"
         )
-    return _to_json_map(NemoJobScheduler().run_local(AgentHardenerRunJob, spec, workspace=workspace, sdk=sync_sdk))
+    return _to_json_map(
+        AgentHardenerRunJob().run(
+            spec,
+            ctx=_local_job_context(workspace=workspace, job_name=AgentHardenerRunJob.name),
+            sdk=sync_sdk,
+        )
+    )
 
 
 def _run_synth_benign(
-    sync_sdk: NeMoPlatform, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
+    sync_sdk: SyncHelixClient, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
 ) -> JsonMap:
     """Blocking benign-suite synthesis for a saved manifest, shared by the sync and async resources.
 
@@ -136,16 +154,19 @@ def _run_synth_benign(
     """
     spec: dict[str, JsonValue] = {"manifest_id": manifest_id, "env_file": env_file, "interview": interview}
     return _to_json_map(
-        NemoJobScheduler().run_local(AgentHardenerSynthBenignJob, spec, workspace=workspace, sdk=sync_sdk)
+        AgentHardenerSynthBenignJob().run(
+            spec,
+            ctx=_local_job_context(workspace=workspace, job_name=AgentHardenerSynthBenignJob.name),
+            sdk=sync_sdk,
+        )
     )
 
 
 def _list_newest(entities: EntitiesClient, entity_type: str, *, workspace: str, limit: int) -> list[JsonMap]:
     """Return at most *limit* records of *entity_type*, newest first.
 
-    ``entities.list`` returns a ``SyncDefaultPagination`` whose ``__iter__`` auto-paginates, so
-    ``page_size`` bounds the *page*, not the total — iterating it walks the entire history. We ask for
-    one page of *limit* and take only that page's items, which is a single request.
+    ``EntitiesClient.list_entities`` returns a typed paginated response. We ask for one page of *limit*
+    and take only that page's items, which is a single request.
     """
     page = entities.list_entities(
         entity_type=entity_type,
@@ -158,7 +179,7 @@ def _list_newest(entities: EntitiesClient, entity_type: str, *, workspace: str, 
 class _RunsResource:
     """``client.agent_hardener.runs`` — read AgentHardenerRun records from the entity store."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
 
     def list(self, *, workspace: str = "default", limit: int = 20) -> Sequence[JsonMap]:
@@ -181,7 +202,7 @@ class _ManifestsResource:
     share one implementation of manifest creation (resolution, persistence, validation).
     """
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
 
     def _client(self) -> AgentHardenerClient:
@@ -236,7 +257,7 @@ class _ManifestsResource:
 class AgentHardenerPluginResource:
     """Sync SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: SyncHelixClient) -> None:
         self._platform = platform
         self._runs: _RunsResource | None = None
         self._manifests: _ManifestsResource | None = None
@@ -378,7 +399,7 @@ class AgentHardenerPluginResource:
 class AsyncAgentHardenerPluginResource:
     """Async SDK namespace mounted as ``client.agent_hardener``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: HelixClient) -> None:
         self._platform = platform
 
     async def run(
@@ -398,11 +419,11 @@ class AsyncAgentHardenerPluginResource:
     ) -> JsonMap:
         """Async twin of :meth:`AgentHardenerPluginResource.run`.
 
-        ``run_local`` and the job it drives are synchronous and reach the platform through a *sync*
-        client (fileset uploads/downloads, manifest materialization). We build one targeting the same
-        base URL as the injected async client and run the whole blocking flow on a worker thread so the
-        caller's event loop stays free. Auth mirrors the CLI's direct-mode ``make_sdk`` (fine for the
-        local-platform path agent-hardener runs against).
+        The job is synchronous and reaches the platform through a *sync* client
+        (fileset uploads/downloads, manifest materialization). We build one
+        targeting the same base URL as the injected async client and run the
+        whole blocking flow on a worker thread so the caller's event loop stays
+        free. Auth mirrors the CLI's direct-mode ``make_sdk``.
         """
         sync_sdk = make_sdk(str(self._platform.base_url))
         return await asyncio.to_thread(

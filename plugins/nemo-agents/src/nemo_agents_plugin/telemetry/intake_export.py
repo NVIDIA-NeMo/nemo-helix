@@ -8,10 +8,10 @@ writing an agent config: the reachable platform URL differs per deployment
 context, and the same config should work whether it is deployed or run as a
 job. So the backend wires it, and the config carries at most a name.
 
-The two contexts differ only in how identity reaches Intake. A deployment
-routes through a loopback auth-proxy sidecar that stamps the principal on the
-way out. A job has one creator for its whole life and is handed that principal
-directly, so it names environment variables the exporter reads instead.
+Every context reaches Intake the same way: through a loopback proxy that
+stamps the caller's identity on the way out -- a sidecar container for a
+deployment, an in-process server for a job. So the only thing that differs
+between them is the origin they wire, and no credential ever enters the config.
 """
 
 from __future__ import annotations
@@ -83,7 +83,6 @@ def configure_intake_atif_export(
     *,
     workspace: str,
     base_url: str,
-    header_env: dict[str, str] | None = None,
 ) -> bool:
     """Point *config*'s ATIF export at *workspace*'s Intake ingest.
 
@@ -104,41 +103,21 @@ def configure_intake_atif_export(
     Args:
         config: Agent config to wire, modified in place.
         workspace: Workspace whose Intake receives the trajectory.
-        base_url: Platform URL reachable from wherever the agent will run.
-        header_env: Header name to environment variable name, for contexts
-            with no auth proxy to stamp identity. The variables must exist in
-            the agent process; the values deliberately never enter the config,
-            which is written into the run's artifacts.
+        base_url: Origin reachable from wherever the agent will run, which
+            authenticates the export on its way to the platform. No credential
+            is carried here: the config is written into the run's artifacts,
+            so anything inline would be a downloadable one.
     """
-    section = config.get("telemetry")
-    try:
-        telemetry = TelemetryConfig.model_validate(section if isinstance(section, dict) else {})
-    except ValidationError as exc:
-        # Leave a section we do not understand exactly as we found it. The jobs
-        # path validates the whole config moments later and will report this
-        # properly; deployments do not, and a telemetry key is no reason to
-        # fail one.
-        logger.warning("Leaving an unrecognized telemetry section unwired: %s", exc)
-        return False
-
-    if telemetry.enabled is False:
-        return False
-    if _declares_atif_storage(telemetry):
+    telemetry = _telemetry_awaiting_destination(config)
+    if telemetry is None:
         return False
 
     storage: dict[str, object] = {
         "type": "http",
         "endpoint": f"{base_url.rstrip('/')}{INTAKE_ATIF_INGEST_PATH.format(workspace=workspace)}",
     }
-    if header_env:
-        storage["header_env"] = dict(header_env)
 
     atif = dict(telemetry.atif or {})
-    if atif.get("enabled") is False:
-        # Declining ATIF while leaving telemetry on is a real choice -- an agent
-        # may want only OTel -- and overriding it would be the opposite of
-        # preserving an explicit declaration.
-        return False
     atif["enabled"] = True
     atif["storage"] = [storage]
 
@@ -152,6 +131,53 @@ def configure_intake_atif_export(
     )
     config["telemetry"] = wired.model_dump(exclude_none=True)
     return True
+
+
+def wants_intake_atif_export(config: dict[str, Any]) -> bool:
+    """Whether *config* leaves its ATIF destination for the backend to fill in.
+
+    Reads the config's own ``telemetry`` section and nothing else, which makes
+    this cheap enough to ask first. :func:`supports_intake_atif_export` resolves
+    a Fabric plan to answer what the *adapter* can do; an agent that already
+    opted out, or that named its own destination, should not pay for that.
+
+    Answering True is not a promise that wiring will happen -- the adapter still
+    has to support the export -- only that nothing in the config forbids it.
+    """
+    return _telemetry_awaiting_destination(config) is not None
+
+
+def _telemetry_awaiting_destination(config: dict[str, Any]) -> TelemetryConfig | None:
+    """Return the parsed telemetry when the backend should fill in a destination.
+
+    ``None`` means leave the config alone, for any of the reasons that amount to
+    "someone already decided": an unreadable section, an explicit opt-out, a
+    declared ATIF destination, or ATIF declined while telemetry stays on.
+
+    Single source of truth for that reading, so the predicate callers ask up
+    front and the wiring itself cannot drift apart.
+    """
+    section = config.get("telemetry")
+    try:
+        telemetry = TelemetryConfig.model_validate(section if isinstance(section, dict) else {})
+    except ValidationError as exc:
+        # Leave a section we do not understand exactly as we found it. The jobs
+        # path validates the whole config moments later and will report this
+        # properly; deployments do not, and a telemetry key is no reason to
+        # fail one.
+        logger.warning("Leaving an unrecognized telemetry section unwired: %s", exc)
+        return None
+
+    if telemetry.enabled is False:
+        return None
+    if _declares_atif_storage(telemetry):
+        return None
+    if isinstance(telemetry.atif, dict) and telemetry.atif.get("enabled") is False:
+        # Declining ATIF while leaving telemetry on is a real choice -- an agent
+        # may want only OTel -- and overriding it would be the opposite of
+        # preserving an explicit declaration.
+        return None
+    return telemetry
 
 
 def _declares_atif_storage(telemetry: TelemetryConfig) -> bool:

@@ -4,7 +4,7 @@
 
 """Pre-configure workspace for the zero-config LLM judge eval.
 
-This script runs after the NeMo Platform API server is healthy but before the agent starts.
+This script runs after the NeMo Helix API server is healthy but before the agent starts.
 It creates the workspace so the agent can focus on evaluation tasks.
 
 Note: Secrets cannot be pre-configured here because ANTHROPIC_API_KEY is not
@@ -14,7 +14,7 @@ available at ENTRYPOINT time (Harbor injects it when docker-exec'ing the agent).
 import subprocess
 import sys
 
-NMP = "/app/.venv/bin/nmp"
+NHX = "/app/.venv/bin/nhx"
 
 
 def run_cmd(cmd: list[str], description: str) -> bool:
@@ -32,7 +32,7 @@ def run_cmd(cmd: list[str], description: str) -> bool:
 
 def setup() -> None:
     if not run_cmd(
-        [NMP, "workspaces", "create", "eval-zeroconfig-workspace"],
+        [NHX, "workspaces", "create", "eval-zeroconfig-workspace"],
         "Create workspace eval-zeroconfig-workspace",
     ):
         raise RuntimeError("Failed to create workspace eval-zeroconfig-workspace")

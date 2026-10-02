@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
-from nemo_platform_plugin.authz import AuthzScope, CallerKind, path_rule
+from nemo_helix_plugin.authz import AuthzScope, CallerKind, path_rule
 
 scope = AuthzScope("scaled-evals")
 

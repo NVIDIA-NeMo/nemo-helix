@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useDataDesignerListCreateJobResults } from '@nemo/sdk/generated/data-designer/data-designer';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
@@ -21,7 +21,7 @@ const ARTIFACTS_RESULT_NAME = 'artifacts';
 export const useDataDesignerArtifactsFileset = () => {
   const { workspace, jobName, job } = useDataDesignerJobFromRoute();
 
-  const isTerminal = job?.status != null && PlatformJobTerminalStatuses.includes(job.status);
+  const isTerminal = job?.status != null && HelixJobTerminalStatuses.includes(job.status);
 
   const {
     data: resultsResponse,

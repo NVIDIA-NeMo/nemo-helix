@@ -3,9 +3,8 @@
 
 """Unit tests for the agent resolver's pure logic and end-to-end manifest build.
 
-The orchestrator is exercised with a fake SDK (plain dicts, matching what
-``client.agents.get`` / ``client.agents.deployments.list`` return), so no live platform or
-agent-hardener install is needed.
+The orchestrator is exercised with a typed ``NemoClient`` over an ``httpx.MockTransport`` serving
+the agents service routes, so no live platform or agent-hardener install is needed.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 import yaml
 from nemo_agent_hardener_plugin.agent_resolver import (
@@ -32,6 +32,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     resolve_agent_to_manifest,
     shipped_dockerfile,
 )
+from nemo_helix_plugin.client.client import NemoClient
 
 # `list` is shadowed by the fake's own `list` method inside the class body, so the parameter type
 # is aliased at module level.
@@ -62,29 +63,36 @@ def _allow_dev_contract_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION", "1")
 
 
-class _FakeDeployments:
-    def __init__(self, deployments: DeploymentRows) -> None:
-        self._deployments = deployments
+def _client(agent: dict | None, deployments: DeploymentRows | None = None) -> NemoClient:
+    """A typed ``NemoClient`` whose transport serves the agents service routes the resolver reads.
 
-    def list(self, workspace: str = "default") -> dict:
-        # Mirror the real SDK shape: a paginated dict, not a bare list.
-        return {"data": self._deployments, "pagination": {"total_results": len(self._deployments)}}
+    The resolver receives the same client the API handlers pass (``get_nemo_client``), so this fails
+    the way production would if the resolver reached for an attribute a typed client does not have.
+    """
+    rows = deployments or []
 
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.startswith("/apis/agents/v2/workspaces/default/agents/"):
+            if agent is None:
+                return httpx.Response(404, json={"detail": "not found"})
+            return httpx.Response(200, json={"name": "calc", "workspace": "default", **agent})
+        if path == "/apis/agents/v2/workspaces/default/deployments":
+            pagination = {
+                "page": 1,
+                "page_size": 50,
+                "current_page_size": len(rows),
+                "total_pages": 1,
+                "total_results": len(rows),
+            }
+            return httpx.Response(200, json={"data": rows, "pagination": pagination})
+        raise AssertionError(f"unexpected platform request: {request.method} {path}")
 
-class _FakeAgents:
-    def __init__(self, agent: dict | None, deployments: list[dict]) -> None:
-        self._agent = agent
-        self.deployments = _FakeDeployments(deployments)
-
-    def get(self, name: str, workspace: str = "default") -> dict:
-        if self._agent is None:
-            raise KeyError(name)
-        return self._agent
-
-
-class _FakeSDK:
-    def __init__(self, agent: dict | None, deployments: list[dict] | None = None) -> None:
-        self.agents = _FakeAgents(agent, deployments or [])
+    return NemoClient(
+        base_url="http://test",
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test"),
+    )
 
 
 # --------------------------------------------------------------------------- parse_agent_ref
@@ -161,13 +169,13 @@ def test_telemetry_dir_complaint_names_only_a_path_agent_hardener_will_not_read(
 # --------------------------------------------------------------------------- resolve_agent_to_manifest
 def test_resolve_builds_a_runnable_agent_package(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(
+    client = _client(
         agent,
         deployments=[{"agent": "calc", "status": "running", "port": 9123}],
     )
     resolved = resolve_agent_to_manifest(
         "calc",
-        sdk=sdk,
+        client=client,
         base_url="http://host:8080",
         default_workspace="default",
         manifest_dir=tmp_path,
@@ -197,27 +205,27 @@ def test_resolve_builds_a_runnable_agent_package(tmp_path):
 
 def test_resolve_declares_gateway_backend_for_local_platform(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    client = _client(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
     resolved = resolve_agent_to_manifest(
-        "calc", sdk=sdk, base_url="http://localhost:8080", default_workspace="default", manifest_dir=tmp_path
+        "calc", client=client, base_url="http://localhost:8080", default_workspace="default", manifest_dir=tmp_path
     )
     assert resolved.manifest["backends"] == [{"name": "nemo-inference-gateway", "ports": [8080]}]
 
 
 def test_resolve_no_backend_for_remote_platform(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    client = _client(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
     resolved = resolve_agent_to_manifest(
-        "calc", sdk=sdk, base_url="https://gw.example.com", default_workspace="default", manifest_dir=tmp_path
+        "calc", client=client, base_url="https://gw.example.com", default_workspace="default", manifest_dir=tmp_path
     )
     assert resolved.manifest["backends"] == []
 
 
 def test_resolve_defaults_port_when_no_running_deployment(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(agent, deployments=[])
+    client = _client(agent, deployments=[])
     resolved = resolve_agent_to_manifest(
-        "calc", sdk=sdk, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
+        "calc", client=client, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
     )
     assert resolved.port == 8000
     assert any("no running deployment" in w for w in resolved.warnings)
@@ -225,10 +233,10 @@ def test_resolve_defaults_port_when_no_running_deployment(tmp_path):
 
 def test_resolve_forwards_egress_and_overrides(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    client = _client(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
     resolved = resolve_agent_to_manifest(
         "calc",
-        sdk=sdk,
+        client=client,
         base_url="http://host:8080",
         default_workspace="default",
         manifest_dir=tmp_path,
@@ -247,9 +255,9 @@ def test_resolve_forwards_egress_and_overrides(tmp_path):
 
 def test_resolve_omits_egress_key_when_none(tmp_path):
     agent = _agent()
-    sdk = _FakeSDK(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
+    client = _client(agent, deployments=[{"agent": "calc", "status": "running", "port": 9123}])
     resolved = resolve_agent_to_manifest(
-        "calc", sdk=sdk, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
+        "calc", client=client, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
     )
     # No egress supplied → no egress key, and port/secrets fall back to derivation.
     assert "egress" not in resolved.manifest["agent"]
@@ -259,24 +267,22 @@ def test_resolve_omits_egress_key_when_none(tmp_path):
 def test_resolve_requires_a_project_dir_for_local_artifacts(tmp_path):
     """Skills live beside the config; packaging only the config yields an agent missing them."""
     agent = _agent(skills={"paths": ["./skills/triage"]})
-    sdk = _FakeSDK(agent, deployments=[])
+    client = _client(agent, deployments=[])
     with pytest.raises(AgentResolutionError, match="local paths"):
         resolve_agent_to_manifest(
-            "calc", sdk=sdk, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
+            "calc", client=client, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
         )
 
 
 def test_resolve_missing_agent_raises(tmp_path):
-    sdk = _FakeSDK(agent=None)
+    client = _client(agent=None)
     with pytest.raises(AgentResolutionError, match="not found"):
         resolve_agent_to_manifest(
-            "ghost", sdk=sdk, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
+            "ghost", client=client, base_url="http://h:8080", default_workspace="default", manifest_dir=tmp_path
         )
 
 
 # --------------------------------------------------------------------------- platform telemetry
-REPO_ROOT = Path(__file__).resolve().parents[4]
-REACT_AGENT = REPO_ROOT / "plugins/nemo-agents/examples/react-agent/react-agent.yml"
 
 
 def test_the_victims_relay_telemetry_is_preserved(tmp_path):
@@ -288,7 +294,7 @@ def test_the_victims_relay_telemetry_is_preserved(tmp_path):
     """
     resolved = resolve_agent_to_manifest(
         "calc",
-        sdk=_FakeSDK(_agent()),
+        client=_client(_agent()),
         base_url="http://host:8080",
         default_workspace="default",
         manifest_dir=tmp_path,
@@ -322,7 +328,7 @@ def test_shipped_dockerfile_is_read_from_the_agents_ethos_fileset(monkeypatch: p
     """Registration uploads the whole agent directory, so an author's Dockerfile is already stored.
 
     Reading it back is what lets an agent pick its own nemo-relay and build from a source checkout —
-    the rendered Dockerfile pins the packaging machine's nemo-platform version, which no index serves
+    the rendered Dockerfile pins the packaging machine's nemo-helix version, which no index serves
     when the platform is installed from git.
     """
     asked = _fake_ethos(monkeypatch, {"agent.yaml": "x", "Dockerfile": "FROM python:3.12-slim\n"})

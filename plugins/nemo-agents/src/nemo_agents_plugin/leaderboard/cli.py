@@ -24,7 +24,7 @@ from nemo_agents_plugin.leaderboard.normalize import normalize_reports
 from nemo_agents_plugin.leaderboard.rank import rank_entries
 from nemo_agents_plugin.leaderboard.render import render_entries
 from nemo_agents_plugin.leaderboard.types import AgentLeaderboardEntry
-from nemo_platform_ext.cli.core.help_formatter import create_typer_app
+from nemo_helix_ext.cli.core.help_formatter import create_typer_app
 
 
 def register_leaderboard_commands(app: typer.Typer) -> None:

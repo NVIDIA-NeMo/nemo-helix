@@ -5,16 +5,58 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', 'true');
 });
 
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { mockOptimizeJobs } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
-import { getAgentDetailRoute } from '@studio/routes/utils';
+import { getAgentDetailRoute, getAgentOptimizeRoute } from '@studio/routes/utils';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
+
+const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
+const OPTIMIZE_JOB_URL = `${OPTIMIZE_JOBS_URL}/:name`;
+
+const FILESET_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`;
+
+const listOnly = (studyName: string, overrides: Partial<RunStrategyJob> = {}) => {
+  const data = mockOptimizeJobs
+    .filter((job) => job.name === studyName)
+    .map((job) => ({ ...job, ...overrides }));
+  server.use(
+    http.get(OPTIMIZE_JOBS_URL, () =>
+      HttpResponse.json({
+        data,
+        pagination: {
+          page: 1,
+          page_size: 20,
+          current_page_size: data.length,
+          total_pages: 1,
+          total_results: data.length,
+        },
+      })
+    )
+  );
+};
+
+const openRowActions = async (user: ReturnType<typeof userEvent.setup>, studyName: string) => {
+  const row = await screen.findByRole(
+    'row',
+    { name: new RegExp(studyName) },
+    { timeout: LG_SELECTOR_TIMEOUT }
+  );
+  await user.click(within(row).getByRole('button', { name: /actions/i }));
+  return screen.findByRole('menuitem', { name: 'Delete' });
+};
 
 const renderDetail = (search = '?tab=optimizations') =>
   renderRoute(undefined, {
@@ -30,23 +72,38 @@ describe('AgentDetailRoute optimizations tab', () => {
       'aria-selected',
       'true'
     );
-    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
-    expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
-    expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
+    await waitFor(
+      () => {
+        expect(screen.getByText('brevity-sweep-3')).toBeInTheDocument();
+        expect(screen.getByText('accuracy-sweep-1')).toBeInTheDocument();
+        expect(screen.queryByText('other-agent-sweep')).not.toBeInTheDocument();
+      },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
+  });
+
+  it('opens the launch modal from the Optimize button', async () => {
+    renderDetail();
+
+    const optimize = await screen.findByRole('button', { name: 'Optimize' });
+    await waitFor(() => expect(optimize).toBeEnabled());
+    fireEvent.click(optimize);
+
+    expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
   });
 
   it('scopes the list server-side with a spec.agent filter', async () => {
     const filters: string[] = [];
     const capture = ({ request }: { request: Request }) => {
       const url = new URL(request.url);
-      if (!url.pathname.endsWith('/jobs/optimize')) return;
+      if (!url.pathname.endsWith('/jobs/run-strategy')) return;
       filters.push(url.searchParams.get('filter') ?? '');
     };
     server.events.on('request:start', capture);
 
     try {
       renderDetail();
-      await screen.findByText('brevity-sweep-3');
+      await screen.findByText('brevity-sweep-3', undefined, { timeout: LG_SELECTOR_TIMEOUT });
 
       await waitFor(() =>
         expect(filters).toContain(
@@ -58,63 +115,177 @@ describe('AgentDetailRoute optimizations tab', () => {
     }
   });
 
-  it('promotes Optimize to the primary action and opens the form in the tab', async () => {
+  const captureDeletes = () => {
+    const deleted = { studies: [] as string[], filesets: [] as string[] };
+    server.use(
+      http.delete(OPTIMIZE_JOB_URL, ({ params }) => {
+        deleted.studies.push(String(params.name));
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.delete(FILESET_URL, ({ params }) => {
+        deleted.filesets.push(String(params.name));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    return deleted;
+  };
+
+  const deleteFromRow = async (user: ReturnType<typeof userEvent.setup>, studyName: string) => {
+    await user.click(await openRowActions(user, studyName));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Optimization Study' });
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  };
+
+  const BUNDLE = 'react-agent-optimize-abc123';
+
+  /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
+  const launchedByStudio = (bundle = BUNDLE) => ({
+    spec: {
+      strategy: 'legacy',
+      optimize_config: 'optimize-brevity.yaml',
+      agent: agentName,
+      optimize_config_fileset: `${workspace}/${bundle}`,
+    },
+    custom_fields: { studio_bundle_fileset: bundle },
+  });
+
+  /** The files service's view of that bundle, carrying the stamp Studio wrote when it staged it. */
+  const serveStampedBundle = () =>
+    server.use(
+      http.get(FILESET_URL, ({ params }) =>
+        HttpResponse.json({
+          name: String(params.name),
+          custom_fields: { studio_optimize_bundle: agentName },
+        })
+      )
+    );
+
+  it('deletes a finished study from its row actions and leaves filesets alone', async () => {
     const user = userEvent.setup();
+    const deleted = captureDeletes();
+    listOnly('brevity-sweep-3');
     renderDetail();
 
-    await screen.findByText('brevity-sweep-3');
-    await user.click(await screen.findByRole('button', { name: 'Optimize' }));
+    await deleteFromRow(user, 'brevity-sweep-3');
 
-    expect(await screen.findByText('New optimization')).toBeInTheDocument();
-    expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Optimize' })).toBeDisabled();
+    await waitFor(() => expect(deleted.studies).toEqual(['brevity-sweep-3']));
+    expect(deleted.filesets).toEqual([]);
   });
 
-  it('returns to the table from the form breadcrumb', async () => {
+  it('deletes the bundle fileset Studio created for the study', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    const deleted = captureDeletes();
+    serveStampedBundle();
+    listOnly('brevity-sweep-3', launchedByStudio());
+    renderDetail();
 
-    await user.click(await screen.findByRole('button', { name: 'Optimizations' }));
+    await deleteFromRow(user, 'brevity-sweep-3');
 
-    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
-    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
+    // The bundle goes first, so waiting on it alone would settle before the study delete lands.
+    await waitFor(() => {
+      expect(deleted.filesets).toEqual([BUNDLE]);
+      expect(deleted.studies).toEqual(['brevity-sweep-3']);
+    });
   });
 
-  it('regenerates the name when the intent changes, until the user types one', async () => {
+  it('leaves a fileset the study does not run from alone, however the study marks it', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    const deleted = captureDeletes();
+    serveStampedBundle();
+    // A marker aimed at someone else's fileset: the study's own spec points somewhere else.
+    listOnly('brevity-sweep-3', {
+      ...launchedByStudio(),
+      custom_fields: { studio_bundle_fileset: 'shared-eval-data' },
+    });
+    renderDetail();
 
-    await screen.findByDisplayValue(new RegExp(`^${agentName}-accuracy-`));
+    await deleteFromRow(user, 'brevity-sweep-3');
 
-    await user.click(await screen.findByRole('radio', { name: /Brevity/ }));
-    const nameField = await screen.findByDisplayValue(new RegExp(`^${agentName}-brevity-`));
-
-    await user.clear(nameField);
-    await user.type(nameField, 'my-own-name');
-    await user.click(await screen.findByRole('radio', { name: /Cost/ }));
-
-    expect(nameField).toHaveValue('my-own-name');
+    await waitFor(() => expect(deleted.studies).toEqual(['brevity-sweep-3']));
+    expect(deleted.filesets).toEqual([]);
   });
 
-  it('reshapes the search space when the intent changes', async () => {
+  it('keeps the study and names the bundle when the fileset cannot be deleted', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    const deleted = captureDeletes();
+    serveStampedBundle();
+    // Registered after captureDeletes, so this failing handler wins.
+    server.use(http.delete(FILESET_URL, () => new HttpResponse(null, { status: 500 })));
+    listOnly('brevity-sweep-3', launchedByStudio());
+    renderDetail();
 
-    // Accuracy is the default intent.
-    expect(await screen.findByText(/temperature 0\.0–0\.6 · 1 parameter/)).toBeInTheDocument();
+    await deleteFromRow(user, 'brevity-sweep-3');
 
-    await user.click(await screen.findByRole('radio', { name: /Creativity/ }));
-
-    expect(await screen.findByText(/temperature 0\.3–1\.5 · 1 parameter/)).toBeInTheDocument();
-  });
-
-  it('holds the run closed while the form is unanswered', async () => {
-    renderDetail('?tab=optimizations&view=new');
-
-    // This agent has no published evaluations, so picking one is the first unanswered question.
     expect(
-      await screen.findByText('Pick an evaluation to score trials against.')
+      await screen.findByText(new RegExp(BUNDLE), undefined, { timeout: LG_SELECTOR_TIMEOUT })
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Run optimization' })).toBeDisabled();
+    expect(deleted.studies).toEqual([]);
+    expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
+  });
+
+  it('does not offer delete while a study is still running', async () => {
+    const user = userEvent.setup();
+    listOnly('accuracy-sweep-1');
+    renderDetail();
+
+    expect(await openRowActions(user, 'accuracy-sweep-1')).toBeDisabled();
+  });
+
+  it('offers Optimize from the empty state', async () => {
+    const user = userEvent.setup();
+    listOnly('no-such-study');
+    renderDetail();
+
+    const emptyState = await screen.findByTestId('entity-empty-state-first-use', undefined, {
+      timeout: LG_SELECTOR_TIMEOUT,
+    });
+    await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
+  });
+
+  describe('arriving with ?action=optimize', () => {
+    const renderArrivingToOptimize = () =>
+      renderRoute(undefined, {
+        history: getAgentOptimizeRoute(workspace, agentName),
+        routes: [
+          {
+            path: ROUTES.workspace.agentDetail,
+            element: (
+              <>
+                <AgentDetailRoute />
+                <LocationDisplay />
+              </>
+            ),
+          },
+        ],
+      });
+
+    it('opens the Optimize modal on the Optimizations tab', async () => {
+      renderArrivingToOptimize();
+
+      expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Optimizations' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+    });
+
+    it('does not open it for an agent that does not exist', async () => {
+      server.use(
+        http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/:name`, () =>
+          HttpResponse.json({ detail: 'Not found' }, { status: 404 })
+        )
+      );
+      renderArrivingToOptimize();
+
+      // The param is stripped only once the agent query settles, so this is the effect's verdict.
+      await waitFor(() =>
+        expect(screen.getByTestId(LOCATION_DISPLAY_TEST_ID).textContent).toBe(
+          `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`
+        )
+      );
+      expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
+    });
   });
 });

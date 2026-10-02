@@ -94,5 +94,5 @@ export {
   CJobCancellableStatuses,
   CJobLaunchableStatuses,
   CJobTerminalStatuses,
-  PlatformJobTerminalStatuses,
+  HelixJobTerminalStatuses,
 } from '@nemo/common/src/constants/query';

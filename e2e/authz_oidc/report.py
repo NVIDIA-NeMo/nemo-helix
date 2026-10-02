@@ -46,7 +46,7 @@ class ReportCollector:
             "",
             "Identity for every request is an RS256-signed JWT minted by the in-harness",
             "OIDC issuer and validated by the platform via JWKS discovery",
-            "(`auth.allow_unsigned_jwt=false`; no `X-NMP-Principal-*` headers anywhere).",
+            "(`auth.allow_unsigned_jwt=false`; no `X-NHX-Principal-*` headers anywhere).",
             "",
         ]
         groups: dict[str, list[Row]] = {}

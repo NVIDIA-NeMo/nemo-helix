@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { Badge, Text } from '@nvidia/foundations-react-core';
 import type { EntityReplacement } from '@studio/components/AnonymizerRecordView/types';
 import { entityTagColor } from '@studio/routes/AnonymizerBuilderRoute/constants';
@@ -17,10 +17,11 @@ interface ReplacementMapTableProps {
 }
 
 export const ReplacementMapTable: FC<ReplacementMapTableProps> = memo(({ replacements }) => {
-  const dataViewState = useStudioDataViewState({ defaultPageSize: REPLACEMENTS_PAGE_SIZE });
+  const dataViewState = DataView.useDataViewState({
+    pagination: { pageSize: REPLACEMENTS_PAGE_SIZE },
+  });
 
   const { pageIndex: requestedPage, pageSize } = dataViewState.pagination.state;
-  // `page` is shared, so it outlives a record pager move to a map with fewer rows.
   const lastPageIndex = Math.max(Math.ceil(replacements.length / pageSize) - 1, 0);
   const pageIndex = Math.min(requestedPage, lastPageIndex);
 

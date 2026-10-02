@@ -11,14 +11,14 @@ sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
 
-from nmp.automodel.entities.values import TrainingType  # noqa: E402
-from nmp.automodel.tasks.training.runner import TrainingRunner  # noqa: E402
-from nmp.automodel.tasks.training.schemas import DistillationConfig, ModelConfig, TrainingStepConfig  # noqa: E402
-from nmp.customization_common.service.context import NMPJobContext  # noqa: E402
+from nhx.automodel.entities.values import TrainingType  # noqa: E402
+from nhx.automodel.tasks.training.runner import TrainingRunner  # noqa: E402
+from nhx.automodel.tasks.training.schemas import DistillationConfig, ModelConfig, TrainingStepConfig  # noqa: E402
+from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
 
 
-def _job_context(storage_path: Path) -> NMPJobContext:
-    return NMPJobContext(
+def _job_context(storage_path: Path) -> NHXJobContext:
+    return NHXJobContext(
         workspace="default",
         job_id="job-1",
         attempt_id="attempt-0",

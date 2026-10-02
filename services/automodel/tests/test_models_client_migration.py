@@ -14,12 +14,13 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
-from nemo_platform_plugin.models.client import AsyncModelsClient
-from nemo_platform_plugin.models.types import ModelDeploymentConfig
-from nmp.automodel.app.jobs.compiler import _resolve_deployment_config_ref
-from nmp.customization_common.service.platform_client import AsyncCustomizationPlatformClients
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.types import ModelDeploymentConfig
+from nhx.automodel.app.jobs.compiler import _resolve_deployment_config_ref
+from nhx.customization_common.service.platform_client import AsyncCustomizationHelixClients
 
 BASE = "http://test:8000"
 
@@ -52,9 +53,11 @@ def _recording_transport(
     return httpx.MockTransport(handler), seen
 
 
-def _platform(transport: httpx.MockTransport) -> AsyncCustomizationPlatformClients:
+def _platform(transport: httpx.MockTransport) -> AsyncCustomizationHelixClients:
     client = AsyncNemoClient(base_url=BASE, workspace="default", http_client=httpx.AsyncClient(transport=transport))
-    return AsyncCustomizationPlatformClients(files=AsyncMock(), models=AsyncModelsClient.from_client(client))
+    return AsyncCustomizationHelixClients(
+        files=AsyncMock(), models=AsyncModelsClient.from_client(client), jobs=AsyncJobsClient.from_client(client)
+    )
 
 
 @pytest.mark.asyncio
@@ -84,5 +87,5 @@ async def test_resolve_deployment_config_defaults_to_the_job_workspace() -> None
 async def test_resolve_deployment_config_maps_404_to_compilation_error() -> None:
     transport, _ = _recording_transport(404, {"detail": "missing"})
 
-    with pytest.raises(PlatformJobCompilationError, match="does not exist in workspace 'other'"):
+    with pytest.raises(HelixJobCompilationError, match="does not exist in workspace 'other'"):
         await _resolve_deployment_config_ref("other/config", "default", _platform(transport))

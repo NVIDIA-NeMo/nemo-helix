@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import {
-  FileStorageType,
-  type PlatformJobResultResponse,
-} from '@nemo/sdk/generated/platform/schema';
+import { FileStorageType, type HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
 
 export interface ArtifactItem {
   resultName: string;
@@ -15,7 +12,7 @@ export interface ArtifactItem {
 }
 
 export const resolveArtifactItems = (
-  results: ReadonlyArray<PlatformJobResultResponse>,
+  results: ReadonlyArray<HelixJobResultResponse>,
   workspaceFallback: string
 ): ArtifactItem[] => {
   const items: ArtifactItem[] = [];

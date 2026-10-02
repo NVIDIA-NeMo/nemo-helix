@@ -20,15 +20,15 @@ from nemo_evaluator.api.schemas import MetricRef, MetricRefOrInline
 from nemo_evaluator.entities import MetricBundleEntity
 from nemo_evaluator.metric_storage import load_bundle
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle
-from nemo_platform_plugin.entity_client import NemoEntityGetterProtocol, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.refs import parse_entity_ref
+from nemo_helix_plugin.entity_client import NemoEntityGetterProtocol, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import parse_entity_ref
 
 
 def parse_metric_ref(root: str, default_workspace: str) -> tuple[str, str]:
     """Split a validated metric reference into ``(workspace, name)``.
 
-    Thin alias over the platform's :func:`~nemo_platform_plugin.refs.parse_entity_ref` (all
+    Thin alias over the platform's :func:`~nemo_helix_plugin.refs.parse_entity_ref` (all
     ``workspace/name`` refs split identically); kept for the existing ``metric_refs`` call sites,
     which want a tuple. A metric ref carries no ``#fragment`` — metrics are not revisioned — so the
     plain entity parser is the right one here.
@@ -48,7 +48,7 @@ async def resolve_metric_ref(
     if entity_client is None or files_client is None:
         raise ValueError(
             "MetricRef metrics require a platform connection (entity store and Files service) to resolve; "
-            "they cannot be used in local execution. Pass an inline metric instead."
+            "pass an inline metric instead."
         )
     ref_workspace, name = parse_metric_ref(ref.root, workspace)
     try:

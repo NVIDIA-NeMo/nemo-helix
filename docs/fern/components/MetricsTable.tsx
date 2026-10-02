@@ -11,8 +11,6 @@
  * Do NOT import React -- the `react` module is not resolvable in Fern's build.
  *
  * Usage in MDX:
- *   import { MetricsTable } from "@/components/MetricsTable";
- *
  *   <MetricsTable
  *     headers={["Variant", "Validation Loss", "Score"]}
  *     rows={[

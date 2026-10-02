@@ -24,6 +24,7 @@ side endpoint that streams content over HTTP.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 import re
@@ -47,10 +48,11 @@ from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_crede
 from nemo_agents_plugin.runner.backend import DeploymentInfo, LocalLog, LogLocation, NotYetAvailable, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+from nemo_agents_plugin.utils import get_base_url
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -80,7 +82,7 @@ def _resolve_nat_bin() -> str:
        container (which prepends ``/app/.venv/bin`` to ``PATH``), and any
        setup where the user has ``nat`` on their shell ``PATH``.
     2. Sibling of ``sys.executable`` — covers ``uv tool install
-       nemo-platform``, where the tool venv's ``bin/`` is **not** prepended
+       nemo-helix``, where the tool venv's ``bin/`` is **not** prepended
        to ``PATH`` (uv only symlinks the declared ``[project.scripts]`` into
        ``~/.local/bin``; the rest of the tool venv stays off ``PATH``).
        ``nat`` is co-installed with ``nemo`` in that same venv, so picking
@@ -99,10 +101,52 @@ def _resolve_nat_bin() -> str:
 
 async def validate_platform_agent_config(config: dict[str, Any], *, base_dir: Path) -> Any:
     """Validate Fabric configs lazily so NAT/container deployments do not import Fabric."""
-    # TODO(AIRCORE-902): Hoist once Fabric runtime is installed in the default Platform image.
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
     from nemo_agents_plugin.fabric.validation import validate_platform_agent_config as _validate_platform_agent_config
 
     return await _validate_platform_agent_config(config, base_dir=base_dir)
+
+
+def configure_intake_telemetry(config: dict[str, Any], *, workspace: str, base_dir: Path) -> dict[str, Any]:
+    """Return *config* with its ATIF trajectory export wired to *workspace*'s Intake.
+
+    Returns the config unchanged when the config already made its own choice, or
+    when the agent's adapter cannot export ATIF.
+
+    Unlike container deployments, a subprocess child runs on the platform host,
+    so the platform's own base URL reaches it as-is: there is no container
+    network to rebase onto and no auth-proxy sidecar to route through.
+
+    No identity either. A container deployment gets it from the sidecar and a
+    job from the in-process proxy it runs for the same purpose
+    (``jobs/gateway_proxy.py``). Subprocess has neither, but it is already an
+    auth-disabled shape: the child carries only the placeholder gateway
+    credential, so with platform auth on, its inference calls fail well before
+    its telemetry does. Wiring identity here alone would half-fix a
+    configuration nothing else supports.
+
+    Imported lazily for the same reason as :func:`validate_platform_agent_config`:
+    ``intake_export`` imports Fabric at module scope, and NAT deployments must
+    not pay for it.
+    """
+    # TODO: Hoist once Fabric runtime is installed in the default Platform image.
+    from nemo_agents_plugin.telemetry.intake_export import (
+        configure_intake_atif_export,
+        supports_intake_atif_export,
+        wants_intake_atif_export,
+    )
+
+    if not wants_intake_atif_export(config):
+        return config
+    if not supports_intake_atif_export(config, base_dir=base_dir):
+        return config
+
+    # The caller's mapping is the live AgentDeployment entity the controller
+    # re-saves, so wiring it in place would persist an inferred endpoint into
+    # the stored deployment.
+    wired = copy.deepcopy(config)
+    configure_intake_atif_export(wired, workspace=workspace, base_url=get_base_url())
+    return wired
 
 
 def system_dir(workspace_dir: Path | None = None) -> Path:
@@ -163,7 +207,7 @@ class InMemoryRunnerBackend(RunnerBackend):
     def output_base_dir(self) -> Path:
         """Backend artifact root: ``workspace_dir`` itself (configs/logs live in ``system/``).
 
-        Defaults to ``nmp_user_data_dir() / "agents"`` (e.g.
+        Defaults to ``nhx_user_data_dir() / "agents"`` (e.g.
         ``~/.local/share/nemo/agents``) so artifacts persist across reboots
         and live in a documented, user-accessible location instead of inside
         the plugin source tree.
@@ -209,7 +253,7 @@ class InMemoryRunnerBackend(RunnerBackend):
                 return candidate
         raise RuntimeError(
             f"No free port available in range [{start}, {end}]. "
-            "Consider adjusting NMP_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
+            "Consider adjusting NHX_AGENTS_CONTROLLER_PORT_RANGE_START / _END."
         )
 
     @staticmethod
@@ -295,6 +339,10 @@ class InMemoryRunnerBackend(RunnerBackend):
         await asyncio.to_thread(base_dir.mkdir, parents=True, exist_ok=True)
         try:
             staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
+            # After staging so the support probe plans against a populated
+            # base_dir, and before the write so the staged config -- which is
+            # what the child process reads -- carries the export.
+            config = await asyncio.to_thread(configure_intake_telemetry, config, workspace=workspace, base_dir=base_dir)
             config_path = await asyncio.to_thread(self._write_fabric_config, base_dir, config)
             await validate_platform_agent_config(config, base_dir=base_dir)
             log_path = self.log_path_for(workspace, name)
@@ -318,8 +366,8 @@ class InMemoryRunnerBackend(RunnerBackend):
             pid=proc.pid,
             endpoint=f"http://127.0.0.1:{port}",
             log_path=str(log_path),
-            extra={"base_dir": str(base_dir)},
             staged_spec=staged_spec,
+            extra={"base_dir": str(base_dir)},
         )
         self._processes[key] = proc
         self._deployments[key] = info

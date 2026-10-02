@@ -5,12 +5,114 @@ import type { ThreadAssistantMessagePart } from '@assistant-ui/react';
 import { ASSISTANT_JOB_PROGRESS_MCP_TOOL_NAME } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
+  ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+  createAssistantThinkingPart,
   getAssistantCompletedMessageParts,
   STUDIO_MESSAGE_SUMMARY_END,
   STUDIO_MESSAGE_SUMMARY_START,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 
 describe('Assistant tool parts', () => {
+  it('collapses reasoning on a completed message that made no tool call', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('The user wants the capital of France.', 'thinking-1'),
+      { type: 'text', text: 'Paris.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toMatchObject([
+      {
+        type: 'tool-call',
+        toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+        args: { text: 'The user wants the capital of France.' },
+      },
+      { type: 'text', text: 'Paris.' },
+    ]);
+  });
+
+  it('folds reasoning into the collapsed thinking block alongside pre-tool text', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('First I need the repo root.', 'thinking-1'),
+      { type: 'text', text: 'Checking the repo.' },
+      {
+        type: 'tool-call',
+        toolCallId: 'toolu_bash',
+        toolName: 'Bash',
+        args: { command: 'pwd' },
+        argsText: '{"command":"pwd"}',
+      },
+      { type: 'text', text: 'Done.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toMatchObject([
+      {
+        type: 'tool-call',
+        toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+        args: { text: 'First I need the repo root.\n\nChecking the repo.' },
+      },
+      { type: 'tool-call', toolName: 'Bash' },
+      { type: 'text', text: 'Done.' },
+    ]);
+  });
+
+  it('keeps reasoning and narration in the order they streamed', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('First I need the repo root.', 'thinking-1'),
+      { type: 'text', text: 'Checking the repo.' },
+      {
+        type: 'tool-call',
+        toolCallId: 'toolu_bash',
+        toolName: 'Bash',
+        args: { command: 'pwd' },
+        argsText: '{"command":"pwd"}',
+      },
+      createAssistantThinkingPart('Now I know where to look.', 'thinking-2'),
+      { type: 'text', text: 'Found it in stream.ts.' },
+      {
+        type: 'tool-call',
+        toolCallId: 'toolu_read',
+        toolName: 'Read',
+        args: { file_path: 'stream.ts' },
+        argsText: '{"file_path":"stream.ts"}',
+      },
+      { type: 'text', text: 'Done.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toMatchObject([
+      {
+        type: 'tool-call',
+        toolName: ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
+        args: {
+          text: [
+            'First I need the repo root.',
+            'Checking the repo.',
+            'Now I know where to look.',
+            'Found it in stream.ts.',
+          ].join('\n\n'),
+        },
+      },
+      { type: 'tool-call', toolName: 'Bash' },
+      { type: 'tool-call', toolName: 'Read' },
+      { type: 'text', text: 'Done.' },
+    ]);
+  });
+
+  it('ignores a whitespace-only reasoning part instead of collapsing the answer', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [
+      createAssistantThinkingPart('   ', 'thinking-1'),
+      { type: 'text', text: 'One.\n\nTwo.\n\nThree.' },
+    ];
+
+    expect(getAssistantCompletedMessageParts(parts)).toEqual([
+      { type: 'text', text: 'One.\n\nTwo.\n\nThree.' },
+    ]);
+  });
+
+  it('keeps a reasoning-free message without a tool call unchanged', () => {
+    const parts: readonly ThreadAssistantMessagePart[] = [{ type: 'text', text: 'Paris.' }];
+
+    expect(getAssistantCompletedMessageParts(parts)).toEqual(parts);
+  });
+
   it('collapses details before a Studio summary block and shows only the summary text', () => {
     const bashPart: ThreadAssistantMessagePart = {
       type: 'tool-call',

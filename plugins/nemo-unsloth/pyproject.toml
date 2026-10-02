@@ -3,22 +3,22 @@
 
 [project]
 name = "nemo-unsloth-plugin"
-description = "Unsloth GPU fine-tuning customization contributor for NeMo Platform (container submit)."
+description = "Unsloth GPU fine-tuning customization contributor for NeMo Helix (container submit)."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nemo-platform-plugin",
-    "nemo-platform",
-    "nmp-unsloth",
-    "nmp-customization-common",
+    "nemo-helix-plugin",
+    "nemo-helix",
+    "nhx-unsloth",
+    "nhx-customization-common",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "typer>=0.12.5",
 ]
 
 # Heavy ML deps no longer live in any plugin extra — they are baked
-# into the nmp-unsloth-training container image. The plugin (and the
-# nmp-unsloth task package) only need the lightweight compile-side
+# into the nhx-unsloth-training container image. The plugin (and the
+# nhx-unsloth task package) only need the lightweight compile-side
 # imports in this process. Users do not install unsloth/torch locally.
 version = "0.0.0"
 
@@ -37,11 +37,11 @@ packages = ["src/nemo_unsloth_plugin"]
 
 
 [tool.uv.sources]
-nemo-platform-plugin = { workspace = true }
-nemo-platform = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+nemo-helix = { workspace = true }
 nemo-customizer-plugin = { workspace = true }
-nmp-unsloth = { workspace = true }
-nmp-customization-common = { workspace = true }
+nhx-unsloth = { workspace = true }
+nhx-customization-common = { workspace = true }
 
 
 [dependency-groups]

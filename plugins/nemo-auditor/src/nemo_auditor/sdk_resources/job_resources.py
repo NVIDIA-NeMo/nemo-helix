@@ -15,9 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ async def _async_pause(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
-def _job_url(platform: NeMoPlatform | AsyncNeMoPlatform, workspace: str, job_name: str, path: str = "") -> str:
+def _job_url(platform: NeMoHelix | AsyncNeMoHelix, workspace: str, job_name: str, path: str = "") -> str:
     base = str(platform.base_url).rstrip("/")
     return f"{base}/apis/auditor/v2/workspaces/{workspace}/jobs/audit/{job_name}{path}"
 
@@ -79,7 +79,7 @@ class _WaitLogCollector:
             logger.info("Audit job completed successfully.")
 
 
-def _status_is_complete(status: PlatformJobStatus | None, raise_if_not_complete: bool) -> bool:
+def _status_is_complete(status: HelixJobStatus | None, raise_if_not_complete: bool) -> bool:
     if status == "completed":
         return True
     if status == "active":
@@ -124,7 +124,7 @@ def _try_parse_log_message(raw_message: str) -> dict[str, str] | None:
 class AuditorJobResource:
     """Sync SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: NeMoPlatform, workspace: str) -> None:
+    def __init__(self, *, job_name: str, platform: NeMoHelix, workspace: str) -> None:
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace
@@ -141,7 +141,7 @@ class AuditorJobResource:
         resp.raise_for_status()
         return resp.json()
 
-    def get_job_status(self) -> PlatformJobStatus | None:
+    def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
         resp = self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name, "/status"))
         resp.raise_for_status()
@@ -236,7 +236,7 @@ class AuditorJobResource:
 class AsyncAuditorJobResource:
     """Async SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: AsyncNeMoPlatform, workspace: str) -> None:
+    def __init__(self, *, job_name: str, platform: AsyncNeMoHelix, workspace: str) -> None:
         self._job_name = job_name
         self._platform = platform
         self._workspace = workspace
@@ -253,7 +253,7 @@ class AsyncAuditorJobResource:
         resp.raise_for_status()
         return resp.json()
 
-    async def get_job_status(self) -> PlatformJobStatus | None:
+    async def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
         resp = await self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name, "/status"))
         resp.raise_for_status()

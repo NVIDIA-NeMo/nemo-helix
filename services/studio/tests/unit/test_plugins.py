@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for nmp.studio.plugins."""
+"""Unit tests for nhx.studio.plugins."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from unittest.mock import Mock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.interface import StudioSpec
-from nmp.studio.plugins import PluginManifestResponse, build_plugins_router, discover_plugins
+from nemo_helix_plugin.interface import StudioSpec
+from nhx.studio.plugins import PluginManifestResponse, build_plugins_router, discover_plugins
 
 
 @pytest.fixture(autouse=True)
@@ -36,15 +36,15 @@ def _manifests(*names: str) -> dict[str, object]:
 
 class TestDiscoverPlugins:
     def test_returns_empty_list_when_no_plugins_installed(self):
-        with patch("nmp.studio.plugins.discover_manifests", return_value={}):
-            with patch("nmp.studio.plugins.discover_studio", return_value={}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value={}):
+            with patch("nhx.studio.plugins.discover_studio", return_value={}):
                 result = discover_plugins()
         assert result == []
 
     def test_plugin_without_studio_entry_appears_with_null_bundle_url(self):
         """A plugin installed via nemo.services (etc.) with no nemo.studio entry shows up."""
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("agents")):
-            with patch("nmp.studio.plugins.discover_studio", return_value={}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("agents")):
+            with patch("nhx.studio.plugins.discover_studio", return_value={}):
                 result = discover_plugins()
 
         assert len(result) == 1
@@ -54,8 +54,8 @@ class TestDiscoverPlugins:
     def test_jobs_only_plugin_appears_in_manifest(self):
         """discover_manifests() is the source of truth, so a plugin that only
         registers dot-scoped surfaces (nemo.jobs/nemo.functions) is listed."""
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("automodel")):
-            with patch("nmp.studio.plugins.discover_studio", return_value={}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("automodel")):
+            with patch("nhx.studio.plugins.discover_studio", return_value={}):
                 result = discover_plugins()
 
         assert [m.name for m in result] == ["automodel"]
@@ -67,9 +67,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="example", bundle_path=bundle_file)
         mock_factory = Mock(return_value=spec)
 
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("example")):
-            with patch("nmp.studio.plugins.discover_entry_points", return_value=_eps("example")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"example": mock_factory}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("example")):
+            with patch("nhx.studio.plugins.discover_entry_points", return_value=_eps("example")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"example": mock_factory}):
                     result = discover_plugins()
 
         mock_factory.assert_called_once()
@@ -81,9 +81,9 @@ class TestDiscoverPlugins:
     def test_failing_studio_factory_falls_back_to_null_bundle_url(self, caplog):
         broken_factory = Mock(side_effect=RuntimeError("oops"))
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("bad-plugin")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"bad-plugin": broken_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("bad-plugin")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"bad-plugin": broken_factory}):
                     result = discover_plugins()
 
         assert len(result) == 1
@@ -95,8 +95,8 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="headless-plugin")
         mock_factory = Mock(return_value=spec)
 
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("headless-plugin")):
-            with patch("nmp.studio.plugins.discover_studio", return_value={"headless-plugin": mock_factory}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("headless-plugin")):
+            with patch("nhx.studio.plugins.discover_studio", return_value={"headless-plugin": mock_factory}):
                 result = discover_plugins()
 
         assert len(result) == 1
@@ -114,9 +114,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="my-plugin", bundle_path=bundle_file)
         mock_factory = Mock(return_value=spec)
 
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-            with patch("nmp.studio.plugins.discover_entry_points", return_value=_eps("my-plugin")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+            with patch("nhx.studio.plugins.discover_entry_points", return_value=_eps("my-plugin")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].bundle_url == "/plugin-ui/my-plugin/index.js"
@@ -127,9 +127,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="other-plugin", bundle_path=Path("/some/index.js"))
         mock_factory = Mock(return_value=spec)
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].name == "my-plugin"
@@ -141,9 +141,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="my-plugin", bundle_path=tmp_path / "index.js")
         mock_factory = Mock(return_value=spec)
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].bundle_url is None
@@ -166,10 +166,10 @@ class TestDiscoverPlugins:
         mock_ep = Mock()
         mock_ep.dist = mock_dist
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-                with patch("nmp.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
-                    with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+                with patch("nhx.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
+                    with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                         result = discover_plugins()
 
         assert result[0].bundle_url is None
@@ -194,9 +194,9 @@ class TestDiscoverPlugins:
         mock_ep = Mock()
         mock_ep.dist = mock_dist
 
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-            with patch("nmp.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+            with patch("nhx.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].bundle_url == "/plugin-ui/my-plugin/index.js"
@@ -217,9 +217,9 @@ class TestDiscoverPlugins:
         mock_ep = Mock()
         mock_ep.dist = mock_dist
 
-        with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-            with patch("nmp.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+            with patch("nhx.studio.plugins.discover_entry_points", return_value={"my-plugin": mock_ep}):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].bundle_url == "/plugin-ui/my-plugin/index.js"
@@ -242,9 +242,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name=invalid_name, bundle_path=Path("/some/index.js"))
         mock_factory = Mock(return_value=spec)
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("entry")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"entry": mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("entry")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"entry": mock_factory}):
                     result = discover_plugins()
 
         assert len(result) == 1
@@ -269,9 +269,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name=invalid_key, bundle_path=Path("/some/index.js"))
         mock_factory = Mock(return_value=spec)
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests(invalid_key)):
-                with patch("nmp.studio.plugins.discover_studio", return_value={invalid_key: mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests(invalid_key)):
+                with patch("nhx.studio.plugins.discover_studio", return_value={invalid_key: mock_factory}):
                     result = discover_plugins()
 
         assert len(result) == 1
@@ -285,9 +285,9 @@ class TestDiscoverPlugins:
         spec = StudioSpec(name="my-plugin", bundle_path=bundle_file)
         mock_factory = Mock(return_value=spec)
 
-        with caplog.at_level(logging.WARNING, logger="nmp.studio.plugins"):
-            with patch("nmp.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
-                with patch("nmp.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
+        with caplog.at_level(logging.WARNING, logger="nhx.studio.plugins"):
+            with patch("nhx.studio.plugins.discover_manifests", return_value=_manifests("my-plugin")):
+                with patch("nhx.studio.plugins.discover_studio", return_value={"my-plugin": mock_factory}):
                     result = discover_plugins()
 
         assert result[0].bundle_url is None

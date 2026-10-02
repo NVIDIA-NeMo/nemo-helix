@@ -27,9 +27,9 @@ from nemo_evaluator_sdk.agent_eval.trials import (
 )
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
-from nemo_platform_plugin.client.errors import NotFoundError, UnprocessableEntityError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.client.errors import NotFoundError, UnprocessableEntityError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import (
     AtifCreateRequest,
     EvaluatorResultCreateRequest,
     IngestResponse,

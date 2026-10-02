@@ -118,7 +118,7 @@ describe('ingestTraceFile', () => {
     expect(atifMock).toHaveBeenCalledTimes(2);
     expect(outcome.results).toHaveLength(2);
     expect(outcome.results[0].status).toBe('success');
-    expect(outcome.results[1]).toMatchObject({ status: 'error' });
+    expect(outcome.results[1]).toMatchObject({ status: 'error', detail: true });
   });
 
   it('batches direct spans under the 1000-span request cap', async () => {
@@ -192,7 +192,12 @@ describe('ingestTraceFile', () => {
     expect(spansMock).not.toHaveBeenCalled();
     expect(outcome.results).toEqual([
       { label: 'spans.json', status: 'error', message: 'Span 1: not a valid span object.' },
-      { label: 'spans.json', status: 'error', message: 'Span 2: not a valid span object.' },
+      {
+        label: 'spans.json',
+        status: 'error',
+        message: 'Span 2: not a valid span object.',
+        detail: true,
+      },
     ]);
   });
 
@@ -221,7 +226,13 @@ describe('ingestTraceFile', () => {
 
     expect(otlpMock).toHaveBeenCalledWith(workspace, file);
     expect(outcome.results).toEqual([
-      { label: 'export.binpb', status: 'error', message: 'span 3 dropped' },
+      {
+        label: 'export.binpb',
+        status: 'success',
+        message:
+          'OTLP protobuf imported, 1 record rejected; the agent name comes from its own spans.',
+      },
+      { label: 'export.binpb', status: 'error', message: 'span 3 dropped', detail: true },
     ]);
   });
 

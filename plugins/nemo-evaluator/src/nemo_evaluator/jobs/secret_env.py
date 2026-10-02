@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from nemo_platform_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
-from nemo_platform_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, EnvironmentVariableFromSecret
+from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 
 #: Env names a job sets itself, so they cannot be sourced from a secret ref.
 RESERVED_SECRET_ENV_NAMES = frozenset({PERSISTENT_JOB_STORAGE_PATH_ENVVAR})
@@ -34,7 +34,9 @@ def build_task_environment(secret_refs: Iterable[tuple[str, str]]) -> list[Envir
             raise ValueError(f"{env_name!r} is reserved and cannot be sourced from secret refs")
         existing = resolved.get(env_name)
         if existing is not None and existing != secret_name:
-            raise ValueError(f"conflicting secret references for environment variable {env_name!r}")
+            raise ValueError(
+                f"conflicting secret references for environment variable {env_name!r}: {existing!r} and {secret_name!r}"
+            )
         resolved[env_name] = secret_name
 
     environment.extend(

@@ -6,8 +6,8 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nmp.common.entities import DEFAULT_WORKSPACE
-from nmp.guardrails.app.services.configs.registry import ConfigRegistry
+from nhx.common.entities import DEFAULT_WORKSPACE
+from nhx.guardrails.app.services.configs.registry import ConfigRegistry
 
 
 class TestConfigNamespaceSupport:

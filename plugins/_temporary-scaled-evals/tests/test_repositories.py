@@ -543,7 +543,8 @@ def test_evaluation_execution_writes_are_fenced() -> None:
     )
     status_sql, status_params = _executed_sql_and_params(cur)
     assert "current_execution = %s::integer" in status_sql
-    assert status_params[-2:] == (2, 2)
+    # The trailing param is the monotonicity guard's status.
+    assert status_params[-3:-1] == (2, 2)
 
     result = EvaluationResultWrite(
         result={"reward": 1},
@@ -562,6 +563,31 @@ def test_evaluation_execution_writes_are_fenced() -> None:
     result_sql, result_params = _executed_sql_and_params(cur, 2)
     assert "current_execution = %s::integer" in result_sql
     assert result_params[-2:] == (2, 2)
+
+
+def test_evaluation_status_cannot_move_backward_off_terminal() -> None:
+    """A terminal row only accepts another terminal status.
+
+    Two writers can observe the same execution: the Platform Job status
+    reconcile and the run itself. Without this guard a stale `running`
+    observation landing after the run finished would resurrect a succeeded
+    evaluation, so the guard has to live in the WHERE clause where it applies
+    to every caller rather than in one call site.
+    """
+    conn, cur = _conn()
+    cur.rowcount = 1
+    repo = EvaluationRepository(conn)
+
+    repo.set_status("ev_safe", "running")
+    sql, params = _executed_sql_and_params(cur)
+    assert "status NOT IN ('succeeded', 'failed', 'cancelled')" in sql
+    # The guard compares the incoming status, so it is the last bound param.
+    assert params[-1] == "running"
+
+    # Terminal-to-terminal still lands: a cancel racing a success is not a
+    # backward move, and refusing it would strand the cancel.
+    repo.set_status("ev_safe", "cancelled")
+    assert _executed_sql_and_params(cur, 2)[1][-1] == "cancelled"
 
 
 def test_evaluation_artifact_publication_locks_current_execution() -> None:

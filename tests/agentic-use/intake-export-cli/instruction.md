@@ -3,13 +3,13 @@
 
 # Export Intake Entries to File (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations, and `curl` for HTTP requests. Note: MCP tools are not available in this environment - you must use the CLI or HTTP API.
+You have access to the `nhx` CLI for NeMo Helix operations, and `curl` for HTTP requests. Note: MCP tools are not available in this environment - you must use the CLI or HTTP API.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The NeMo Platform API server is running at http://localhost:8080.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The NeMo Helix API server is running at http://localhost:8080.
 
 ## Task
 
-The NeMo Platform includes an Intake service for collecting LLM interaction data. Your goal is to create an intake application, populate it with entries, and then export those entries to a file using the Intake export API.
+The NeMo Helix includes an Intake service for collecting LLM interaction data. Your goal is to create an intake application, populate it with entries, and then export those entries to a file using the Intake export API.
 
 Complete the following operations:
 
@@ -22,7 +22,7 @@ Complete the following operations:
 
 ## Notes
 
-- The Intake service API is available under the NeMo Platform API server. You may need to explore the API to discover the available endpoints.
+- The Intake service API is available under the NeMo Helix API server. You may need to explore the API to discover the available endpoints.
 - Entries contain `data` (with request/response content) and `context` (with app, task, and optional thread information).
 - The export job API accepts an `output_file_url` and a `config` with optional filters.
 - The export writes entries in JSONL format, transforming them to include a top-level `messages` array for downstream compatibility.

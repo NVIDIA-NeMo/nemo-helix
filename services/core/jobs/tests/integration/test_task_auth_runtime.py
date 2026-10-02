@@ -1,12 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for task-side auth propagation via ``NMP_PRINCIPAL``.
+"""Integration tests for task-side auth propagation via ``NHX_PRINCIPAL``.
 
 These tests cover the runtime half of the jobs auth propagation story:
 
-- the task receives ``NMP_PRINCIPAL``
-- ``get_task_sdk(as_service=...)`` converts that into service + on-behalf-of headers
+- the task receives ``NHX_PRINCIPAL``
+- ``get_task_nemo_client(...)`` converts that into service + on-behalf-of headers
 - downstream services authorize based on the delegated user's permissions
 """
 
@@ -17,12 +17,11 @@ import os
 from typing import Protocol
 
 import pytest
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import PermissionDeniedError
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.core.secrets.service import SecretsService
-from nmp.testing import (
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nhx.core.secrets.service import SecretsService
+from nhx.testing import (
     TEST_ADMIN_EMAIL,
     ClientContext,
     SDKTestClientAdapter,
@@ -43,13 +42,13 @@ def _secret_access_task_module() -> _SecretAccessTask:
     class _Task:
         @staticmethod
         def run(*, http_client) -> str:
-            from nmp.common.sdk_factory import get_task_sdk
+            from nhx.common.client_factory import get_task_nemo_client
 
             workspace = os.environ["NEMO_JOB_WORKSPACE"]
             secret_name = os.environ["NEMO_TEST_SECRET_NAME"]
 
-            task_sdk = get_task_sdk(as_service="jobs", http_client=http_client)
-            result = client_from_platform(task_sdk, SecretsClient).access_secret(
+            task_client = get_task_nemo_client("jobs", http_client=http_client)
+            result = SecretsClient.from_client(task_client).access_secret(
                 name=secret_name,
                 workspace=workspace,
             )
@@ -72,13 +71,13 @@ class TestTaskRuntimeAuthPropagation:
             client_type=ClientContext,
             workspaces=[workspace],
         ) as ctx:
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
-                body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            SecretsClient.from_client(admin_client).create_secret(
+                body=HelixSecretCreateRequest(name=secret_name, value=SecretStr(secret_value)),
                 workspace=workspace,
             )
             grant_workspace_role(
-                admin_sdk,
+                admin_client,
                 workspace=workspace,
                 principal=creator_email,
                 roles=["Viewer"],
@@ -91,7 +90,7 @@ class TestTaskRuntimeAuthPropagation:
                 monkeypatch.setenv("NEMO_JOB_WORKSPACE", workspace)
                 monkeypatch.setenv("NEMO_TEST_SECRET_NAME", secret_name)
                 monkeypatch.setenv(
-                    "NMP_PRINCIPAL",
+                    "NHX_PRINCIPAL",
                     json.dumps(
                         {
                             "id": creator_email,
@@ -123,9 +122,9 @@ class TestTaskRuntimeAuthPropagation:
             client_type=ClientContext,
             workspaces=[workspace],
         ) as ctx:
-            admin_sdk = as_user(ctx.sdk, TEST_ADMIN_EMAIL)
-            client_from_platform(admin_sdk, SecretsClient).create_secret(
-                body=PlatformSecretCreateRequest(name=secret_name, value=SecretStr("secret-value")),
+            admin_client = as_user(ctx.client, TEST_ADMIN_EMAIL)
+            SecretsClient.from_client(admin_client).create_secret(
+                body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("secret-value")),
                 workspace=workspace,
             )
 
@@ -137,7 +136,7 @@ class TestTaskRuntimeAuthPropagation:
                 monkeypatch.setenv("NEMO_JOB_WORKSPACE", workspace)
                 monkeypatch.setenv("NEMO_TEST_SECRET_NAME", secret_name)
                 monkeypatch.setenv(
-                    "NMP_PRINCIPAL",
+                    "NHX_PRINCIPAL",
                     json.dumps(
                         {
                             "id": creator_email,

@@ -19,7 +19,7 @@ from typing import Any, Literal
 
 from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, DeploymentStatus, Endpoint
 from nemo_agents_plugin.spec_revision import SpecRevision
-from nemo_platform_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext
 
 
 @dataclass(frozen=True)

@@ -187,8 +187,10 @@ function discoverReleaseTags() {
 
 // Optional docs/fern/release-branches.json selects release branches to preview
 // before their tags are cut. Array entries derive release/x.y -> x.y.0; object
-// entries map branch -> tag for patch or nonstandard cases. A real tag always
-// wins once it exists; see docs/fern/README.md#release-versioning.
+// entries map branch -> tag for patch or nonstandard cases. Option objects may
+// set tag to a list when several version snapshots should come from the same
+// branch. A real tag wins once it exists unless the entry explicitly says to
+// keep sourcing that version from the branch; see docs/fern/README.md#release-versioning.
 function discoverBranchReleases() {
   if (!existsSync(branchConfigPath)) {
     return [];
@@ -196,41 +198,46 @@ function discoverBranchReleases() {
 
   const releases = [];
 
-  for (const [branch, tag] of readBranchReleaseEntries()) {
-    if (!tag) {
+  for (const [branch, options] of readBranchReleaseEntries()) {
+    const { tags, source } = options;
+    if (tags.length === 0) {
       console.log(
         `Skipping release branch "${branch}": branch names must be release/x.y or release/x.y.z unless explicitly mapped`,
       );
       continue;
     }
 
-    const release = parseReleaseTag(tag);
-    if (!release) {
-      console.log(`Skipping release branch "${branch}": "${tag}" is not a stable SemVer tag`);
-      continue;
-    }
+    let ref;
+    for (const tag of tags) {
+      const release = parseReleaseTag(tag);
+      if (!release) {
+        console.log(`Skipping release branch "${branch}": "${tag}" is not a stable SemVer tag`);
+        continue;
+      }
 
-    if (gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`])) {
-      console.log(`Skipping branch ${branch}: tag ${tag} already exists`);
-      continue;
-    }
+      const tagExists = gitOk(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
+      if (tagExists && source !== "branch") {
+        console.log(`Skipping branch ${branch}: tag ${tag} already exists`);
+        continue;
+      }
 
-    const ref = resolveBranchRef(branch);
-    if (!ref) {
-      console.log(`Skipping branch ${branch}: branch not found`);
-      continue;
-    }
+      ref ??= resolveBranchRef(branch);
+      if (!ref) {
+        console.log(`Skipping branch ${branch}: branch not found`);
+        break;
+      }
 
-    if (!gitOk(["cat-file", "-e", `${ref}:docs/fern/versions/latest.yml`])) {
-      console.log(`Skipping branch ${branch}: ${ref} does not contain docs/fern/versions/latest.yml`);
-      continue;
-    }
+      if (!gitOk(["cat-file", "-e", `${ref}:docs/fern/versions/latest.yml`])) {
+        console.log(`Skipping branch ${branch}: ${ref} does not contain docs/fern/versions/latest.yml`);
+        break;
+      }
 
-    releases.push({
-      ...release,
-      ref,
-      availability: branchReleaseAvailability,
-    });
+      releases.push({
+        ...release,
+        ref,
+        ...(tagExists ? { overridesTag: true } : { availability: branchReleaseAvailability }),
+      });
+    }
   }
 
   releases.sort(compareReleaseTags);
@@ -246,7 +253,7 @@ function readBranchReleaseEntries() {
         throw new Error(`${branchConfigPath} array entries must be branch names`);
       }
 
-      return [branch, tagForReleaseBranch(branch)];
+      return [branch, { tags: normalizeBranchReleaseTags(tagForReleaseBranch(branch)) }];
     });
   }
 
@@ -254,13 +261,42 @@ function readBranchReleaseEntries() {
     throw new Error(`${branchConfigPath} must be a branch-name array or branch-to-tag object`);
   }
 
-  return Object.entries(config).map(([branch, tag]) => {
-    if (typeof tag !== "string") {
-      throw new Error(`${branchConfigPath} object values must be tag names`);
+  return Object.entries(config).map(([branch, value]) => {
+    if (typeof value === "string") {
+      return [branch, { tags: [value] }];
     }
 
-    return [branch, tag];
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`${branchConfigPath} object values must be tag names or option objects`);
+    }
+
+    const { tag, source } = value;
+    const tags = normalizeBranchReleaseTags(tag);
+    if (tags.length === 0) {
+      throw new Error(`${branchConfigPath} option object values must include a tag string or tag array`);
+    }
+    if (source !== undefined && source !== "branch") {
+      throw new Error(`${branchConfigPath} option object source must be "branch" when set`);
+    }
+
+    return [branch, { tags, source }];
   });
+}
+
+function normalizeBranchReleaseTags(tag) {
+  if (tag === undefined) {
+    return [];
+  }
+
+  if (typeof tag === "string") {
+    return [tag];
+  }
+
+  if (Array.isArray(tag) && tag.every((entry) => typeof entry === "string")) {
+    return tag;
+  }
+
+  throw new Error(`${branchConfigPath} tag must be a string or an array of strings`);
 }
 
 function resolveBranchRef(branch) {
@@ -320,7 +356,7 @@ function cleanGeneratedFiles() {
 }
 
 function materializeRelease(release) {
-  const tempRoot = mkdtempSync(join(tmpdir(), `nemo-platform-docs-${release.dirName}-`));
+  const tempRoot = mkdtempSync(join(tmpdir(), `nemo-helix-docs-${release.dirName}-`));
   const outputRoot = join(generatedRoot, release.dirName);
 
   try {
@@ -340,6 +376,7 @@ function materializeRelease(release) {
     rmSync(outputRoot, { recursive: true, force: true });
     cpSync(exportedDocs, outputRoot, { recursive: true });
     materializeGeneratedDocs(release, outputRoot);
+    pinStaleSnippetReferences(release, outputRoot);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -418,6 +455,61 @@ function materializeGeneratedDocs(release, outputRoot) {
     outputPath,
     buildHelmReferenceMdx(git(["show", helmReadmeRef]), git(["show", helmValuesRef])),
   );
+}
+
+// <Markdown src="/snippets/..."> references embed a page's own snippet includes at
+// build time from the *current* docs/fern/snippets tree, since that tree isn't
+// versioned per release. A rename or deletion of a still-referenced snippet leaves
+// old release snapshots pointing at a path that no longer exists. Pin those specific
+// references to the content the release tag actually shipped with, so a rename can't
+// retroactively break (or silently reword) a frozen release's docs.
+const MARKDOWN_SRC_PATTERN = /<Markdown\s+src="(\/snippets\/[^"]+)"/g;
+const SNIPPET_PIN_DIR = "_pinned-snippets";
+
+function pinStaleSnippetReferences(release, outputRoot) {
+  for (const filePath of walkMdxFiles(outputRoot)) {
+    const original = readFileSync(filePath, "utf8");
+    let rewritten = original;
+    let changed = false;
+
+    for (const match of original.matchAll(MARKDOWN_SRC_PATTERN)) {
+      const snippetRef = match[1];
+      const relSnippetPath = snippetRef.slice(1);
+      if (existsSync(join(fernDir, relSnippetPath))) {
+        continue;
+      }
+
+      const tagRef = `${release.ref}:docs/fern/${relSnippetPath}`;
+      if (!gitOk(["cat-file", "-e", tagRef])) {
+        continue;
+      }
+
+      const pinnedAbsPath = join(outputRoot, SNIPPET_PIN_DIR, relSnippetPath);
+      mkdirSync(dirname(pinnedAbsPath), { recursive: true });
+      writeFileSync(pinnedAbsPath, git(["show", tagRef]));
+
+      const pinnedRef = `/generated/release-versions/${release.dirName}/${pathPosix.join(SNIPPET_PIN_DIR, relSnippetPath)}`;
+      rewritten = rewritten.split(snippetRef).join(pinnedRef);
+      changed = true;
+    }
+
+    if (changed) {
+      writeFileSync(filePath, rewritten);
+    }
+  }
+}
+
+function walkMdxFiles(dir) {
+  const files = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...walkMdxFiles(entryPath));
+    } else if (entry.isFile() && entry.name.endsWith(".mdx")) {
+      files.push(entryPath);
+    }
+  }
+  return files;
 }
 
 function rewriteNavPaths(navText, snapshotPrefix) {
@@ -546,7 +638,12 @@ if (checkTag !== undefined) {
   process.exit(0);
 }
 
-const releases = [...discoverReleaseTags(), ...discoverBranchReleases()].sort(compareReleaseTags);
+const branchReleases = discoverBranchReleases();
+const overriddenTags = new Set(
+  branchReleases.filter((release) => release.overridesTag).map((release) => release.tag),
+);
+const tagReleases = discoverReleaseTags().filter((release) => !overriddenTags.has(release.tag));
+const releases = [...tagReleases, ...branchReleases].sort(compareReleaseTags);
 assertGeneratedVersionPathsAreUnique(releases);
 assertGeneratedVersionNavsAreWritable(releases);
 const previousGeneratedVersionPaths = existingGeneratedVersionPaths();

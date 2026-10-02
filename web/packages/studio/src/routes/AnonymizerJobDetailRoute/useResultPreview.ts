@@ -6,7 +6,6 @@ import { parseDataFile } from '@studio/components/FileRowEditor/parse';
 import type { DataFileRow } from '@studio/components/FileRowEditor/types';
 import {
   metadataTextColumn,
-  orderResultColumns,
   parseArtifactUrl,
   RESULT_PREVIEW_ROWS,
 } from '@studio/routes/AnonymizerJobDetailRoute/util';
@@ -14,7 +13,7 @@ import { useMemo } from 'react';
 
 export interface ResultPreview {
   readonly rows: DataFileRow[];
-  readonly columns: string[];
+  readonly textColumn: string | undefined;
   readonly isLoading: boolean;
   readonly error: Error | null;
 }
@@ -26,7 +25,7 @@ export const useResultPreview = (
   const location = parseArtifactUrl(artifactUrl);
   const enabled = !!location;
 
-  const { data: metadata } = useDatasetFileContent({
+  const { data: metadata, isLoading: metadataLoading } = useDatasetFileContent({
     workspace,
     name: location?.fileset ?? '',
     path: `${location?.basePath}/metadata.json`,
@@ -34,31 +33,27 @@ export const useResultPreview = (
   });
 
   const {
-    data: dataset,
-    isLoading,
+    data: trace,
+    isLoading: traceLoading,
     error,
   } = useDatasetFileContent({
     workspace,
     name: location?.fileset ?? '',
-    path: `${location?.basePath}/dataset.parquet`,
+    path: `${location?.basePath}/trace.parquet`,
     range: [0, RESULT_PREVIEW_ROWS],
     enabled,
   });
 
   const rows = useMemo<DataFileRow[]>(() => {
-    if (!dataset) return [];
+    if (!trace) return [];
     try {
-      return parseDataFile(dataset, 'jsonl');
+      return parseDataFile(trace, 'jsonl');
     } catch {
       return [];
     }
-  }, [dataset]);
+  }, [trace]);
 
-  const columns = useMemo(
-    () =>
-      rows.length ? orderResultColumns(Object.keys(rows[0]), metadataTextColumn(metadata)) : [],
-    [rows, metadata]
-  );
+  const textColumn = useMemo(() => metadataTextColumn(metadata), [metadata]);
 
-  return { rows, columns, isLoading, error };
+  return { rows, textColumn, isLoading: traceLoading || metadataLoading, error };
 };

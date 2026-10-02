@@ -18,9 +18,9 @@ from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.jobs.evaluate import EvaluateJob
 from nemo_evaluator.jobs.retrieve_eval import RetrieveEvalJob
 from nemo_evaluator.schema import HelloResponse
-from nemo_platform_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 #: The ``source`` tag for agent-evaluate job records, passed as ``add_job_routes(..., service_name=)``.
 #: Distinct from ``EvaluateJob``'s derived ``nemo-evaluator`` source: the evaluator plugin owns two job

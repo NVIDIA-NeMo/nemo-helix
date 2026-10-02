@@ -12,7 +12,7 @@ from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.entities import Deployment, Prerequisite, StatusEvent, Volume
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.orphan_cleanup import reconcile_orphans
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from reconciler.conftest import MockDeploymentBackend
 
 NO_VOLUMES: dict[tuple[str, str], Volume] = {}

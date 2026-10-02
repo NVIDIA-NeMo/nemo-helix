@@ -4,6 +4,7 @@
 import type { ThreadAssistantMessagePart, ThreadMessageLike } from '@assistant-ui/react';
 import { COMPLETE_STATUS } from '@nemo/common/src/components/AssistantChat/constants';
 import {
+  createAssistantThinkingPart,
   createAssistantToolCallPart,
   getAssistantCompletedMessageParts,
   groupConsecutiveAssistantSubtleToolCalls,
@@ -36,6 +37,14 @@ const getAssistantMessagePart = (
   assistantMessageId: string
 ): ThreadAssistantMessagePart | undefined => {
   if (part.type === 'text') return { type: 'text', text: part.text };
+  if (part.type === 'thinking') {
+    return part.thinking
+      ? createAssistantThinkingPart(
+          part.thinking,
+          `assistant-history-thinking-${assistantMessageId}-${index}`
+        )
+      : undefined;
+  }
   if (part.type === 'tool_use') {
     const toolName = part.name || 'tool';
     const trimmedId = typeof part.id === 'string' ? part.id.trim() : '';

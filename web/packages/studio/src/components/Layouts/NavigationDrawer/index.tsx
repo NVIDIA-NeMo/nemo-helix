@@ -12,20 +12,20 @@ import { CollapsedNavItem } from '@studio/components/Layouts/NavigationDrawer/co
 import { NavItem } from '@studio/components/Layouts/NavigationDrawer/components/NavItem';
 import { Props } from '@studio/components/Layouts/NavigationDrawer/types';
 import { flattenForRail, toGroups } from '@studio/components/Layouts/NavigationDrawer/utils';
-import { Fragment, useCallback, useMemo, useState, type FC } from 'react';
+import { useLocalStorage } from '@studio/util/hooks/useLocalStorage';
+import { NAV_ACCORDION_STATE_KEY } from '@studio/util/localStorage';
+import { Fragment, useCallback, useMemo, type FC } from 'react';
 import { useLocation } from 'react-router';
 
 export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
   const { pathname } = useLocation();
-  const [accordionState, setAccordionState] = useState<Record<string, boolean>>({});
-
-  // A chevron's pin lasts until the next navigation, then `defaultOpen` decides again. Resetting
-  // during render rather than in an effect keeps the stale pin from painting for a frame.
-  const [lastPathname, setLastPathname] = useState(pathname);
-  if (lastPathname !== pathname) {
-    setLastPathname(pathname);
-    setAccordionState({});
-  }
+  // Each header's open/closed choice belongs to the user: persisted per id in localStorage, it
+  // outlives navigation and the browser session, and only a click ever changes it. Headers the
+  // user has never touched fall through to `defaultOpen`, which opens the current section.
+  const [accordionState = {}, setAccordionState] = useLocalStorage<Record<string, boolean>>(
+    NAV_ACCORDION_STATE_KEY,
+    {}
+  );
 
   const groups = useMemo(() => toGroups(items), [items]);
 
@@ -45,7 +45,7 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
   const isActive = useCallback((href: string) => href === matchedHref, [matchedHref]);
 
   const handleAccordionChange = (itemId: string, open: boolean) => {
-    setAccordionState((prev) => ({ ...prev, [itemId]: open }));
+    setAccordionState({ ...accordionState, [itemId]: open });
   };
 
   // The rail has no room for a heading, so a group announces itself as a rule between icon

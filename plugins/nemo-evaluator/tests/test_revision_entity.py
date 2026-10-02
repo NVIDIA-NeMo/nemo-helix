@@ -24,7 +24,7 @@ from nemo_evaluator.entities import (
     TasksetEntity,
     TasksetRevisionEntity,
 )
-from nemo_platform_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from pydantic import ValidationError
 
 _DIGEST = "a" * 64

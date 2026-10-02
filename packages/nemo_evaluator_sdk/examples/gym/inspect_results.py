@@ -37,7 +37,7 @@ from nemo_evaluator_sdk.agent_eval.results import (
     PerTaskOutcomes,
     numeric_metric_values,
 )
-from nemo_evaluator_sdk.values.results import AggregateScalarScore, AggregateScore
+from nemo_evaluator_sdk.values.results import AggregateScore
 from pydantic import ValidationError
 
 #: Value at which a trial counts as a pass, matching the SDK's pass@k definition (full credit).
@@ -113,21 +113,11 @@ def load_bundle(bundle: Path) -> AgentEvalSummary:
 # --------------------------------------------------------------------------------------------------
 
 
-def headline_value(score: AggregateScore) -> float | None:
-    """The one number for an aggregate: a scalar's ``value``, otherwise the mean of its distribution.
-
-    Scores named ``runner.<name>.*`` came from the runner rather than being computed here, and a
-    backend that reports a single figure (no underlying distribution) arrives as an
-    :class:`AggregateScalarScore` with no ``mean`` — so reading ``mean`` alone would show nothing.
-    """
-    return score.value if isinstance(score, AggregateScalarScore) else score.mean
-
-
 def show_aggregates(summary: AgentEvalSummary) -> None:
     print("Aggregates ('runner.*' are the runner's own numbers, imported)")
     print(f"  {'name':<40} {'value':>8} {'count':>6} {'nan':>5}")
     for score in sorted(summary.scores.scores, key=lambda item: item.name):
-        value = headline_value(score)
+        value = score.headline_value
         shown = "—" if value is None else f"{value:.3f}"
         # None means the producer didn't report a sample size; a real 0 means every sample was NaN.
         count = "—" if score.count is None else str(score.count)
@@ -187,7 +177,7 @@ def show_runner_aggregations(summary: AgentEvalSummary) -> None:
 
     print("\nRunner-provided aggregations (imported into summary.scores)")
     for score in sorted(imported, key=lambda item: item.name):
-        value = headline_value(score)
+        value = score.headline_value
         shown = "—" if value is None else f"{value:g}"
         print(f"      {score.name[len(RUNNER_PREFIX) :]:<34} {shown}")
 
@@ -195,7 +185,7 @@ def show_runner_aggregations(summary: AgentEvalSummary) -> None:
     # agree once you normalise the scale.
     try:
         native = aggregate(summary, "gym_reward.reward.pass@1").mean
-        reported = headline_value(aggregate(summary, f"{RUNNER_PREFIX}pass@1/accuracy"))
+        reported = aggregate(summary, f"{RUNNER_PREFIX}pass@1/accuracy").headline_value
     except KeyError:
         return
     if native is not None and reported is not None:

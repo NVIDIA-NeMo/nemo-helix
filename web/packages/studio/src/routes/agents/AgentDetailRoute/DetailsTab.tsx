@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
+import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { isDefined } from '@nemo/common/src/utils/list';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
@@ -11,6 +12,7 @@ import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/
 import { AnalysisConfigPanel } from '@studio/routes/agents/AgentDetailRoute/analysis/AnalysisConfigPanel';
 import { ConfigValue } from '@studio/routes/agents/AgentDetailRoute/ConfigValue';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
+import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import type { FC } from 'react';
 
 /** Config keys rendered by dedicated structured panels below. */
@@ -48,7 +50,12 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
             <KVPair label="Project" value={agent.project} />
           )}
           {isDefined(agent?.description) && agent.description && (
-            <KVPair label="Description" value={agent.description} />
+            <Stack gap="1">
+              <Text kind="label/regular/sm" className="text-secondary">
+                Description
+              </Text>
+              <MarkdownContent content={agent.description} disableImages />
+            </Stack>
           )}
           {models.length > 0 && <KVPair label="Model" value={models.join(', ')} />}
           {isDefined(agent?.config_format) && (
@@ -63,6 +70,8 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
           )}
         </Stack>
       </DetailPanel>
+
+      <SourcePanel workspace={workspace} agentName={agent?.name ?? agentName} />
 
       <AnalysisConfigPanel
         workspace={agent?.workspace ?? workspace}

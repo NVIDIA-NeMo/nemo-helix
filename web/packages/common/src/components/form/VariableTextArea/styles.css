@@ -20,6 +20,7 @@
   box-shadow: var(--shadow-lg);
   padding: 4px;
   overflow: hidden;
+  max-width: min(420px, 90vw);
 }
 
 .cm-tooltip.nv-kui-autocomplete > ul {
@@ -32,8 +33,9 @@
 
 .cm-tooltip.nv-kui-autocomplete > ul > li {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
+  min-width: 0;
   padding: 4px 8px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -43,12 +45,16 @@
 
 .cm-tooltip.nv-kui-autocomplete > ul > li[aria-selected] {
   background-color: var(--background-color-interaction-hover);
+  color: var(--text-color-primary);
 }
 
 .cm-tooltip.nv-kui-autocomplete .cm-completionDetail {
   color: var(--text-color-secondary);
   font-size: 12px;
   margin-left: auto;
+  white-space: normal;
+  min-width: 0;
+  text-align: right;
 }
 .cm-editor .nv-variable-unknown {
   color: var(--nv-variable-unknown-color, #ff9b3d);

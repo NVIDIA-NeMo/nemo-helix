@@ -3,7 +3,7 @@
 
 """Tests for server configuration and setup."""
 
-from nmp.core.files.service import FilesService
+from nhx.core.files.service import FilesService
 
 
 def test_create_app():

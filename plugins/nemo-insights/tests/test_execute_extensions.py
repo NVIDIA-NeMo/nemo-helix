@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
-from nemo_agents_plugin.jobs.execute_extensions import ExecuteAgentAfterInvokeContext
-from nemo_insights_plugin.execute_extensions import InsightsAnalysisExtension
-from nemo_insights_plugin.jobs.analyze import REPORT_RESULT_NAME
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.agents.execute_extensions import (
+    ExecuteAgentAfterInvokeContext,
+    FabricRuntimeResult,
+)
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_insights_plugin.execute_extensions import REPORT_RESULT_NAME, InsightsAnalysisExtension
 
 
 @pytest.fixture
@@ -54,7 +55,7 @@ def test_insights_extension_persists_analyst_result_and_saves_report(
     client = FakeClient()
     backend = FakeBackend()
 
-    monkeypatch.setattr("nemo_insights_plugin.execute_extensions.get_async_task_sdk", lambda service: client)
+    monkeypatch.setattr("nemo_insights_plugin.execute_extensions.get_async_task_nemo_client", lambda service: client)
     monkeypatch.setattr("nemo_insights_plugin.execute_extensions.make_analyst_backend", lambda **_kwargs: backend)
 
     extension = InsightsAnalysisExtension()

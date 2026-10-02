@@ -80,7 +80,7 @@ _TASK_LIMIT = 2
 #: What the stub answers when a case defines no gradeable answer. Deliberately not empty: an empty
 #: response is indistinguishable from an agent that never ran (see `_agent_never_ran`), so a canned
 #: answer keeps "the plumbing works" separable from "the agent produced nothing".
-_CANNED_ANSWER = "This is a stub response from the NeMo Platform test suite."
+_CANNED_ANSWER = "This is a stub response from the NeMo Helix test suite."
 
 #: Stands in for a per-run absolute directory inside a case's `hydra_params`. A committed
 #: absolute path would be wrong on every machine, so the run substitutes a real one.
@@ -104,7 +104,7 @@ class _StubPolicyServer:
     and arrival order is not the dataset order.
 
     Stdlib rather than ``pytest-httpserver``: Gym reaches this endpoint from *subprocesses*, so it
-    has to be a real socket, and `packages/nemo_evaluator_sdk` does not depend on `nmp-testing`.
+    has to be a real socket, and `packages/nemo_evaluator_sdk` does not depend on `nhx-testing`.
     ``plugins/nemo-guardrails/tests/unit/benchmarks/test_shim.py`` sets the same precedent.
     """
 
@@ -368,7 +368,7 @@ def _bounded_probe(argv: list[str]) -> bool:
 def _environment_dir(gym: str, case: GymEnvironmentCase) -> Path:
     """Locate an environment's directory by asking the CLI, or skip.
 
-    Deliberately not ``importlib.resources``: nemo-platform bans Ray by constraint
+    Deliberately not ``importlib.resources``: nemo-helix bans Ray by constraint
     (``"ray; sys_platform == 'never'"`` in the root pyproject, for an unfixed CVE) while Gym imports
     Ray at module load, so Gym cannot be installed in this SDK's environment. It lives in its own,
     reachable only through the ``gym`` binary on PATH — which means ``resources_servers.<name>`` is

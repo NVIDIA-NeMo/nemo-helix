@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import openai.types.chat as openai_chat_types
 import pytest
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
     InferenceMiddlewareContext,
@@ -24,7 +24,7 @@ from nemo_platform_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from nmp.core.inference_gateway.api.middleware_registry import (
+from nhx.core.inference_gateway.api.middleware_registry import (
     ResolvedMiddlewareCall,
     build_inference_response,
     execute_post_response_middleware,

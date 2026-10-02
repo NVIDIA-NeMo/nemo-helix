@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.api.v2 import runs as runs_router_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerRun
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     NemoPaginationInfo,
     get_entity_client,

@@ -8,7 +8,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Run nemo-customizer. I need to submit an automodel SFT LoRA job on NeMo Platform.",
+      "prompt": "Run nemo-customizer. I need to submit an automodel SFT LoRA job on NeMo Helix.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -43,7 +43,7 @@
     },
     {
       "type": "implicit",
-      "prompt": "Fine-tune Qwen3-1.7B with Unsloth on NeMo Platform \u2014 I want the Unsloth training driver and bitsandbytes 4-bit loading.",
+      "prompt": "Fine-tune Qwen3-1.7B with Unsloth on NeMo Helix \u2014 I want the Unsloth training driver and bitsandbytes 4-bit loading.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -53,7 +53,7 @@
     },
     {
       "type": "explicit",
-      "prompt": "Use nemo customization rl submit to run a DPO job on NeMo Platform.",
+      "prompt": "Use nemo customization rl submit to run a DPO job on NeMo Helix.",
       "expected_skill": "nemo-customizer"
     },
     {
@@ -108,7 +108,7 @@
     },
     {
       "type": "contextual",
-      "prompt": "NeMo Platform is running. Before any customization training, help me explore what my support agent should do.",
+      "prompt": "NeMo Helix is running. Before any customization training, help me explore what my support agent should do.",
       "expected_skill_not": "nemo-customizer"
     },
     {

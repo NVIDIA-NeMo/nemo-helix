@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# The war-game victim, as a NeMo Platform agent.
+# The war-game victim, as a NeMo Helix agent.
 #
 #   nemo agents create --name ledger --agent-config examples/relay-victim/agent.yaml
 #   nemo agent-hardener init --agent ledger --name ledger
@@ -38,7 +38,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia/nvidia/Nemotron-3-Nano-30B-A3B
+    model: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://inference-api.nvidia.com/v1
     api_key_env: INFERENCE_API_KEY
     temperature: 0.0

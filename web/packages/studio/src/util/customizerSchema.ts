@@ -4,7 +4,7 @@
 /**
  * Strict, customizer-aligned schema detection for fine-tuning datasets.
  *
- * Mirrors services/customizer/src/nmp/customizer/tasks/training/datasets/schemas.py
+ * Mirrors services/customizer/src/nhx/customizer/tasks/training/datasets/schemas.py
  * (get_sft_dataset_discriminator and get_preference_dataset_discriminator).
  *
  * Common's detectFileStructure is too permissive for this purpose — it accepts

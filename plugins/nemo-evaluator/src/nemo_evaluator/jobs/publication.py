@@ -32,10 +32,10 @@ from nemo_evaluator_sdk.values import Model
 from nemo_evaluator_sdk.values.agents import AgentBase
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.errors import NemoClientError, NotFoundError
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.intake.types import EvaluationPatchRequest, EvaluationResponse
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import EvaluationPatchRequest, EvaluationResponse
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class PublicationOutcome(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    status: PlatformJobStatus = Field(
+    status: HelixJobStatus = Field(
         description="Platform job status vocabulary: COMPLETED when everything published, ERROR "
         "otherwise. Only those two are ever emitted here.",
     )
@@ -88,7 +88,7 @@ def _skipped_lines(report: PublishReport) -> list[str]:
 
 def _completed(evaluation_id: str, report: PublishReport) -> PublicationOutcome:
     return PublicationOutcome(
-        status=PlatformJobStatus.COMPLETED,
+        status=HelixJobStatus.COMPLETED,
         evaluation_id=evaluation_id,
         trial_count=report.trial_count,
         evaluator_result_count=report.evaluator_result_count,
@@ -98,7 +98,7 @@ def _completed(evaluation_id: str, report: PublishReport) -> PublicationOutcome:
 
 def _failed(evaluation_id: str, error: str, report: PublishReport | None) -> PublicationOutcome:
     return PublicationOutcome(
-        status=PlatformJobStatus.ERROR,
+        status=HelixJobStatus.ERROR,
         evaluation_id=evaluation_id,
         trial_count=report.trial_count if report is not None else 0,
         evaluator_result_count=report.evaluator_result_count if report is not None else 0,
@@ -225,7 +225,7 @@ def publish_agent_eval_result(
         return outcome
 
     if intake is None:
-        return fail("No platform client available to publish with (platformless local run).")
+        return fail("No platform client available for platformless run; cannot publish with Intake.")
 
     logger.info(
         "Publishing %d trial(s) to Intake under evaluation %r in workspace %r",
@@ -287,15 +287,12 @@ def publish_row_eval_result(
     :func:`publish_agent_eval_result` — the failure semantics, the outcome shape, and the
     ``required`` behaviour are all the same.
 
-    ``run_id`` is the job id and is ``None`` on a platformless local run. Unlike agent eval, whose
-    result always carries a generated run id, a row result has none, so there is nothing stable to
-    key published sessions on and the run cannot be published.
+    ``run_id`` is the job id and may be ``None`` for in-process calls. Unlike agent eval, whose
+    result always carries a generated run id, a row result has none, so there is nothing stable to key
+    published sessions on and the run cannot be published.
     """
     if run_id is None:
-        error = (
-            "No job id to publish under (platformless local run); a dataset-driven evaluation takes "
-            "its run identity from the job."
-        )
+        error = "No job id to publish under; a dataset-driven evaluation takes its run identity from the job."
         outcome = _failed(spec.evaluation_id, error, None)
         if spec.required:
             raise PublicationFailedError(outcome)

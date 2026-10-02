@@ -21,7 +21,7 @@ def _single_usage_report(
         "task": {
             "task": "workspace-basic-mcp",
             "timestamp": timestamp,
-            "image": "nmp-nat-workspace-basic-mcp:latest",
+            "image": "nhx-nat-workspace-basic-mcp:latest",
             "reward": 1,
             "build_status": "ok",
             "agent_status": "ok",
@@ -44,7 +44,7 @@ def test_normalize_single_usage_report(tmp_path: Path):
     assert entry.compute_units == 16000.0
     assert entry.compute_units_formula_version == "usage_report_v0_compute_units"
     assert entry.token_count == 2000
-    assert entry.runtime_image == "nmp-nat-workspace-basic-mcp:latest"
+    assert entry.runtime_image == "nhx-nat-workspace-basic-mcp:latest"
     assert entry.created_at == datetime(2026, 4, 29, 22, 0, 0, tzinfo=timezone.utc)
     assert entry.source_path == str(source_path.resolve())
     assert entry.source_dir == "/tmp/workspace-basic-mcp"
@@ -59,7 +59,7 @@ def test_normalize_batch_usage_report():
                 {
                     "task": "workspace-basic-mcp",
                     "timestamp": "20260429T220000Z",
-                    "image": "nmp-nat-workspace-basic-mcp:latest",
+                    "image": "nhx-nat-workspace-basic-mcp:latest",
                     "reward": 1,
                     "build_status": "ok",
                     "agent_status": "ok",
@@ -73,7 +73,7 @@ def test_normalize_batch_usage_report():
                 {
                     "task": "secrets-crud-cli",
                     "timestamp": "20260429T230000Z",
-                    "image": "nmp-nat-workspace-basic-mcp:latest",
+                    "image": "nhx-nat-workspace-basic-mcp:latest",
                     "reward": 1,
                     "build_status": "ok",
                     "agent_status": "ok",
@@ -99,7 +99,7 @@ def test_normalize_batch_usage_report():
     assert entry.compute_units == 26400.0
     assert entry.compute_units_formula_version == "usage_report_v0_compute_units"
     assert entry.token_count == 3300
-    assert entry.runtime_image == "nmp-nat-workspace-basic-mcp:latest"
+    assert entry.runtime_image == "nhx-nat-workspace-basic-mcp:latest"
     assert entry.created_at == datetime(2026, 4, 29, 23, 0, 0, tzinfo=timezone.utc)
     assert entry.run_count == 2
 
@@ -111,7 +111,7 @@ def test_normalize_batch_usage_report_without_shared_runtime_image():
             {
                 "task": "workspace-basic-mcp",
                 "timestamp": "20260429T220000Z",
-                "image": "nmp-nat-workspace-basic-mcp:latest",
+                "image": "nhx-nat-workspace-basic-mcp:latest",
                 "reward": 1,
                 "build_status": "ok",
                 "agent_status": "ok",
@@ -125,7 +125,7 @@ def test_normalize_batch_usage_report_without_shared_runtime_image():
             {
                 "task": "secrets-crud-cli",
                 "timestamp": "20260429T230000Z",
-                "image": "nmp-nat-secrets-crud-cli:latest",
+                "image": "nhx-nat-secrets-crud-cli:latest",
                 "reward": 1,
                 "build_status": "ok",
                 "agent_status": "ok",

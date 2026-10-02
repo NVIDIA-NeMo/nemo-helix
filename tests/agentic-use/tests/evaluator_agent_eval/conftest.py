@@ -17,7 +17,7 @@ def evaluator_task_dir(tmp_path: Path) -> Path:
 version = "1.0"
 
 [metadata]
-author_name = "NeMo Platform Team"
+author_name = "NeMo Helix Team"
 suite_id = "custom_suite"
 suite_version = "v-test"
 

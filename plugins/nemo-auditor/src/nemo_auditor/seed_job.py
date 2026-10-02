@@ -14,8 +14,8 @@ from nemo_auditor.entities import (
     AuditRunData,
     AuditSystemData,
 )
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
-from nemo_platform_plugin.seed import NemoSeedJob
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.seed import NemoSeedJob
 
 logger = logging.getLogger(__name__)
 

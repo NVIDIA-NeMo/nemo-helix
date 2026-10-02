@@ -17,6 +17,7 @@ import logging
 import shutil
 from collections import Counter, deque
 from pathlib import Path
+from typing import Any
 
 import pytest
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import (
@@ -61,6 +62,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_evaluator_sdk.values import SecretRef
+from pydantic import ValidationError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = FIXTURES / "gym_mcqa_example.jsonl"
@@ -921,8 +925,8 @@ def test_flatten_overrides_serializes_a_list_of_dicts() -> None:
     assert _flatten_overrides({"a": {"b": [{"c": 1}]}}) == ["++a.b=[{c:1}]"]
 
 
-def _config(**kwargs: object) -> GymRuntimeConfig:
-    return GymRuntimeConfig(agent="simple_agent", agent_config="cfg.yaml", resources_server="mcqa", **kwargs)  # type: ignore[arg-type]
+def _config(**kwargs: Any) -> GymRuntimeConfig:
+    return GymRuntimeConfig(agent="simple_agent", agent_config="cfg.yaml", resources_server="mcqa", **kwargs)
 
 
 def test_selection_binds_the_resources_server_by_default(tmp_path: Path) -> None:
@@ -1098,7 +1102,7 @@ def test_token_usage_keys_match_the_openai_schemas_they_mirror() -> None:
     """The keys are *wire-format* field names, cross-checked here against their source of truth.
 
     Raised in review of #1295: could these come from Gym directly? No — this runtime never imports
-    `nemo_gym` (it shells out to the CLI, and nemo-platform excludes Ray by constraint), and the
+    `nemo_gym` (it shells out to the CLI, and nemo-helix excludes Ray by constraint), and the
     names are not Gym's anyway. They are OpenAI's, and `openai` *is* a dependency here.
 
     Deliberately a test rather than deriving the tuple at import time. What we match is the JSON a
@@ -1545,3 +1549,46 @@ def test_an_empty_capture_directory_does_not_refuse_a_run(tmp_path: Path) -> Non
     model_call_capture_dir(tmp_path).mkdir(parents=True)
 
     ensure_fresh_output(tmp_path / "rollouts.jsonl")
+
+
+def test_a_local_run_resolves_env_secrets_from_the_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A secret reference means the same thing locally and job-side; only the resolver differs."""
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-from-the-host")
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")}))
+
+    asyncio.run(runner.resolve_secrets(LocalSecretResolver()))
+
+    assert gym_invocation_env(runner.config, runner._resolved_env)["GYM_MODEL_KEY"] == "sk-from-the-host"
+
+
+def test_a_secret_that_does_not_resolve_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unguarded, Gym still starts and scores a run made against whatever credential was lying around.
+    monkeypatch.delenv("GYM_MISSING_KEY", raising=False)
+    monkeypatch.delenv("gym-missing-key", raising=False)
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("gym-missing-key")}))
+
+    with pytest.raises(ValueError, match="gym-missing-key"):
+        asyncio.run(runner.run_tasks([]))
+
+
+def test_naming_a_variable_both_ways_is_refused_rather_than_layered() -> None:
+    """Which value Gym got would otherwise depend on layering order, not on what the caller asked."""
+    with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
+        _config(env_vars={"GYM_MODEL_KEY": "plaintext"}, env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")})
+
+
+@pytest.mark.parametrize(
+    "inputs,metadata", [({}, {}), ({"gym_row": {}}, {"gym_row_extras": []}), ({"gym_row": {}}, {"gym_row_extras": {}})]
+)
+def test_named_gym_row_validator_matches_materialization(inputs, metadata) -> None:
+    """Both entry points accept and reject the same row with identical errors."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import gym_task_row, validate_gym_task_row
+
+    try:
+        gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+    except ValueError as error:
+        with pytest.raises(ValueError) as caught:
+            validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+        assert str(caught.value) == str(error)
+    else:
+        assert validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata) is None

@@ -9,6 +9,6 @@ Route modules and the service import :data:`scope` so the plugin shares one
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import AuthzScope
+from nemo_helix_plugin.authz import AuthzScope
 
 scope = AuthzScope("agents")

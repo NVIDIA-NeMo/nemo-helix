@@ -2,18 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from scaled_evals.api import s3
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
-from scaled_evals.api.db import Database, get_db
+from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.repositories.benchmark_run_repository import derive_run_view
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
 from scaled_evals.api.runnability import BlockedPreflight, preflight_benchmark_run
+from scaled_evals.api.schemas.benchmark_archives import BenchmarkArchiveRequest, BenchmarkArchiveResponse
 from scaled_evals.api.schemas.benchmark_runs import (
     BenchmarkRun,
     BenchmarkRunLinks,
@@ -29,6 +33,7 @@ from scaled_evals.api.utils import make_id
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
 Db = Annotated[Database, Depends(get_db)]
+StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 
 
@@ -46,6 +51,7 @@ def _links(run_id: str) -> BenchmarkRunLinks:
         evaluations=f"{base}/evaluations",
         reproduce=f"{base}/reproduce",
         cancel=f"{base}/cancel",
+        archive=f"{base}/archive",
     )
 
 
@@ -378,3 +384,46 @@ def delete_benchmark_run(run_id: str, db: Db) -> DeleteResponse:
         raise _http_error(404, "not_found", "benchmark run not found")
     db.commit()
     return DeleteResponse(id=run_id)
+
+
+def _benchmark_archive_response(run_id: str, row: dict | None) -> BenchmarkArchiveResponse:
+    if row is None:
+        return BenchmarkArchiveResponse(benchmark_run_id=run_id, status="missing")
+    return BenchmarkArchiveResponse(
+        **{key: value for key, value in row.items() if key != "download"},
+        download=(f"/benchmark-runs/{run_id}/archive/download" if row["status"] == "ready" else None),
+    )
+
+
+@router.get("/{run_id}/archive", response_model=BenchmarkArchiveResponse)
+def get_benchmark_archive(run_id: str, db: Db) -> BenchmarkArchiveResponse:
+    if not db.benchmark_runs.exists(run_id):
+        raise _http_error(404, "not_found", "benchmark run not found")
+    return _benchmark_archive_response(run_id, db.benchmark_archives.get(run_id))
+
+
+@router.post("/{run_id}/archive", response_model=BenchmarkArchiveResponse, status_code=202)
+def request_benchmark_archive(run_id: str, body: BenchmarkArchiveRequest, db: Db) -> BenchmarkArchiveResponse:
+    try:
+        row = db.benchmark_archives.request(run_id, force=body.force)
+    except NotFound as exc:
+        raise _http_error(404, "not_found", exc.message) from exc
+    except Conflict as exc:
+        raise _http_error(409, exc.code, exc.message) from exc
+    db.commit()
+    return _benchmark_archive_response(run_id, row)
+
+
+@router.get("/{run_id}/archive/download")
+def download_benchmark_archive(run_id: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
+    # Short-lived checkout: a request-scoped Db dependency would hold the pooled
+    # connection for the entire archive stream and can exhaust the pool.
+    with database_factory() as db:
+        row = db.benchmark_archives.get(run_id)
+    if row is None or row["status"] != "ready" or not row["object_key"]:
+        raise _http_error(404, "not_found", "benchmark archive not ready")
+    return StreamingResponse(
+        s3.stream_object(row["object_key"]),
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="{run_id}-results.tar.gz"'},
+    )

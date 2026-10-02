@@ -10,7 +10,7 @@
 #
 # Environment variables:
 #   OUTPUT_DIR     - Directory to write policy.wasm into.
-#                    Default: services/core/auth/src/nmp/core/auth/assets
+#                    Default: services/core/auth/src/nhx/core/auth/assets
 #   REPO_ROOT      - Repository root. Default: auto-detected via git.
 #   OPA_VERSION    - OPA release to use. Default: v1.8.0
 #   OPA_BIN        - Optional explicit OPA binary path. Must match OPA_VERSION.
@@ -35,8 +35,8 @@ else
   RESOLVED_OPA_DOWNLOAD_BASE_URLS="https://openpolicyagent.org/downloads https://github.com/open-policy-agent/opa/releases/download"
 fi
 
-POLICY_DIR="${REPO_ROOT}/services/core/auth/src/nmp/core/auth/app/policies"
-OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/services/core/auth/src/nmp/core/auth/assets}"
+POLICY_DIR="${REPO_ROOT}/services/core/auth/src/nhx/core/auth/app/policies"
+OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/services/core/auth/src/nhx/core/auth/assets}"
 ENTRYPOINTS="-e authz/allow -e authz/has_permissions -e authz/has_role"
 
 detect_opa_asset() {

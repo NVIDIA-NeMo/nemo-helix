@@ -169,8 +169,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluation jobs yet',
     subheading:
       'Apply a model_optimization suggestion or submit an evaluate-agent job to see results here.',
-    cliCommand:
-      'nemo evaluator agent-evaluate submit --spec-file <spec>.json --workspace <workspace>',
+    cliCommand: 'nemo evaluator agent-evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt:
       'Help me create my first agent evaluation with the nemo-nemo-evaluator-plugin skill',
   },
@@ -178,7 +177,7 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     heading: 'No evaluations yet',
     subheading: 'Submit an evaluation job to score a model or agent against a benchmark.',
     createAction: { label: 'Create Evaluation' },
-    cliCommand: 'nemo evaluator evaluate submit --spec-file <spec>.json --workspace <workspace>',
+    cliCommand: 'nemo evaluator evaluate --spec-file <spec>.json --workspace <workspace>',
     skillPrompt: 'Help me create my first evaluation with the nemo-nemo-evaluator-plugin skill',
   },
   evaluationSessions: {
@@ -205,7 +204,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
   insightExperiments: {
     heading: 'No experiments yet',
     subheading: 'This insight has no linked experiments yet.',
-    createAction: { label: 'Run Experiment' },
   },
   insightTraces: {
     heading: 'No traces yet',
@@ -216,7 +214,6 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading: 'Trace summaries will appear here after spans are ingested.',
     cliCommand:
       'nemo intake ingest otlp v1 traces create --input-file <otlp-traces>.json --workspace <workspace>',
-    // The skill id is what makes an agent load it; rewording it to prose matches nothing.
     skillPrompt:
       'Help me import traces into the "<workspace>" workspace with the nemo-intake skill.',
   },
@@ -234,8 +231,9 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     subheading:
       "Sweep your agent's parameters against an evaluation to find a config that scores better.",
     cliCommand:
-      'nemo agents optimize submit --optimize-config <config>.yaml --fileset <bundle> --agent <agent-name> --workspace <workspace>',
+      'nemo agents optimize --optimize-config-fileset <workspace>/<bundle> --optimize-config <config>.yaml --agent <agent-name> --workspace <workspace>',
     skillPrompt: 'Help me run my first agent optimization with the nemo-optimization skill',
+    createAction: { label: 'Optimize' },
   },
   agents: {
     heading: 'No agents yet',

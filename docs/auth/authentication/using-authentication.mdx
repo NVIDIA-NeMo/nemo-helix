@@ -33,9 +33,9 @@ nemo auth status
 
 ```text
 Authentication Status
-Cluster             https://nmp.company.com
+Cluster             https://nhx.company.com
 Context             default
-Config File         /home/alice/.config/nmp/config.yaml
+Config File         /home/alice/.config/nhx/config.yaml
 Auth Type           oauth
 Credential Source   config file
 Email               alice@company.com
@@ -49,17 +49,31 @@ All CLI and SDK commands now use the stored token automatically.
 
 ### Requesting Specific Scopes
 
-By default, the CLI requests the scopes configured in `auth.oidc.default_scopes` (typically `platform:read platform:write` plus OIDC standard scopes like `openid profile email offline_access`). Restrict the token's access by specifying fewer scopes:
+By default, the CLI requests the OAuth scopes returned by auth discovery in `default_scopes`. Deployments commonly include OIDC protocol scopes such as `openid`, `profile`, `email`, and `offline_access`, and may also include NeMo Helix API scope names such as `platform:read` and `platform:write`.
+
+The CLI sends API scopes in the form required by the configured OAuth application. If auth discovery includes a resource scope prefix, the login output shows both the short name and the fully qualified value:
+
+```text
+Requesting scopes:
+  platform:read (api://<app-client-id>/platform:read)
+  platform:write (api://<app-client-id>/platform:write)
+  openid
+  profile
+  email
+  offline_access
+```
+
+Pass `--scope` to override the NeMo Helix API scopes requested for one login. The CLI keeps the non-API OIDC defaults and applies the discovered prefix automatically:
 
 ```bash
 nemo auth login --scope "platform:read"
 ```
 
-See [API Scopes](/documentation/access-control/authorization/api-scopes) for the full list of available scopes.
+OAuth scopes requested during login are not group claims and do not grant workspace roles. Workspace authorization still comes from NeMo Helix role bindings over the configured identity claims. If the IdP returns recognized NeMo Helix API scopes in `scp` or `scope`, those scopes narrow the API calls that token can make. See [API Scopes](/documentation/access-control/authorization/api-scopes) for the authorization-scope model.
 
 ### Non-Interactive Login (CI/CD)
 
-For CI pipelines, use the password grant to obtain a token without a browser: `nemo auth login --username <user> --password <pass>` (or set `NMP_OIDC_USERNAME` / `NMP_OIDC_PASSWORD` environment variables). If your CI system can obtain tokens directly (e.g., workload identity federation), pass the token via `access_token` as shown in [Make API Calls](#make-api-calls) below.
+For CI pipelines, use the password grant to obtain a token without a browser: `nemo auth login --username <user> --password <pass>` (or set `NHX_OIDC_USERNAME` / `NHX_OIDC_PASSWORD` environment variables). If your CI system can obtain tokens directly (e.g., workload identity federation), pass the token via `access_token` as shown in [Make API Calls](#make-api-calls) below.
 
 <Warning>
 
@@ -73,12 +87,12 @@ Password grant sends credentials directly to the IdP and **bypasses MFA**. Many 
 The SDK reads credentials from the CLI config automatically — no manual token handling needed:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # After `nemo auth login` (OIDC) or `nemo auth login --unsigned-token --email <email>` (quickstart),
 # the SDK reads base_url, workspace, and the stored token from the CLI config.
 # This is the recommended pattern for interactive / OIDC-authenticated usage.
-client = NeMoPlatform()
+client = NeMoHelix()
 
 workspaces = client.workspaces.list()
 ```
@@ -87,12 +101,12 @@ If you need explicit token control (for example, a token from a CI system or env
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
-    access_token=os.environ.get("NMP_ACCESS_TOKEN"),
+    access_token=os.environ.get("NHX_ACCESS_TOKEN"),
 )
 ```
 
@@ -101,7 +115,7 @@ client = NeMoPlatform(
 ```bash
 TOKEN=$(nemo auth token)
 curl -H "Authorization: Bearer $TOKEN" \
- https://nmp.company.com/apis/entities/v2/workspaces
+ https://nhx.company.com/apis/entities/v2/workspaces
 ```
 
 ## Scoped Access Keys for Non-SDK Clients
@@ -117,14 +131,14 @@ nemo auth access-keys create --name ci-build --description "CI build automation"
 
 Scoped Access Key management commands live under the `auth` namespace as
 `nemo auth access-keys ...`. The `access-keys` command group is not a top-level CLI
-command and is not a separate NeMo Platform plugin.
+command and is not a separate NeMo Helix plugin.
 
 `create` prints the Scoped Access Key token once. Store it in your secret
 manager and send it in the standard `Authorization` header:
 
 ```bash
-curl -H "Authorization: Bearer $NMP_SCOPED_ACCESS_KEY" \
- https://nmp.company.com/apis/entities/v2/workspaces
+curl -H "Authorization: Bearer $NHX_SCOPED_ACCESS_KEY" \
+ https://nhx.company.com/apis/entities/v2/workspaces
 ```
 
 Scoped Access Keys are signed JWT bearer tokens scoped to the principal and
@@ -133,6 +147,34 @@ configured default expiry, which is 30 days unless the administrator changes it.
 Pass `--expires-in <seconds>` to request a specific finite lifetime. Pass
 `--expires-in none` only for deployments where the administrator has explicitly
 allowed unlimited keys.
+
+Restrict a key to specific services with `--scope`, and grant its principal
+workspace membership with `--workspace` (formatted `<workspace>` or
+`<workspace>:<role1>,<role2>`, repeatable) instead of a separate
+`nemo workspaces members create` call. Creating a service-bound key with
+`--service-account` requires the HelixAdmin role; omit it to create a
+personal, user-bound key instead:
+
+```bash
+nemo auth access-keys create --name "intake-worker" --service-account service-id \
+  --scope intake,entities --workspace ml-team:Editor
+```
+
+A `--scope`-restricted key is enforced platform-wide, not just advisory: it can only
+call endpoints whose required scope is covered by the services you listed (plus any
+`platform:read`/`platform:write`-scoped endpoint). This includes the access-key
+management endpoints themselves — a key scoped to `intake,entities` cannot create,
+list, suspend, unsuspend, rotate, or revoke access keys unless `--scope` also includes
+`auth`, which prevents a restricted key from minting itself broader access. This
+applies even to a HelixAdmin's own scoped key: the HelixAdmin bypass only
+grants access within the key's own scope, so a HelixAdmin who scopes down their
+own key is still restricted by it, not granted unconditional access.
+
+Rotate a personal key (one created without `--service-account`) by passing
+`--rotate <jti>` with the prior key's `jti`: once the replacement key is
+created and its requested workspace grants are provisioned, the referenced key
+is revoked. `--rotate` only accepts a key you own that has no service account
+bound to it.
 
 List keys, temporarily suspend and restore one, rotate one, or permanently revoke one by
 its stable `jti`:
@@ -192,7 +234,7 @@ Key claims to check:
 
 You never need to refresh tokens manually — the CLI and SDK handle it transparently:
 
-- **SDK**: Refreshes lazily before each API call when the token is within 60 seconds of expiry. No background threads or timers — the cost is paid only when a refresh is actually needed (typically once per hour). Multiple `NeMoPlatform()` clients in the same Python process share a single token, so only one refresh happens even with many clients.
+- **SDK**: Refreshes lazily before each API call when the token is within 60 seconds of expiry. No background threads or timers — the cost is paid only when a refresh is actually needed (typically once per hour). Multiple `NeMoHelix()` clients in the same Python process share a single token, so only one refresh happens even with many clients.
 - **CLI**: Checks the token before every command and refreshes if it expires within 5 minutes. To disable for a specific command: `nemo --no-auto-refresh workspaces list`.
 
 Running multiple scripts or CLI commands simultaneously is safe — file-level locking prevents conflicts when refreshing tokens across processes.
@@ -212,7 +254,7 @@ nemo auth logout
 <a id="config-file"></a>
 ### Config File
 
-Tokens are stored in `~/.config/nmp/config.yaml`:
+Tokens are stored in `~/.config/nhx/config.yaml`:
 
 ```yaml
 users:
@@ -228,7 +270,7 @@ The OIDC token endpoint is **not** stored — it is discovered at runtime from y
 
 **Token storage security** — Access and refresh tokens are stored in plaintext. Protect this file:
 
-- **File permissions**: Ensure `0600` (owner read/write only). The CLI sets this by default — verify after manual edits: `chmod 600 ~/.config/nmp/config.yaml`.
+- **File permissions**: Ensure `0600` (owner read/write only). The CLI sets this by default — verify after manual edits: `chmod 600 ~/.config/nhx/config.yaml`.
 - **Shared directories**: Do not store in cloud-synced folders (Dropbox, OneDrive, Google Drive) or shared home directories.
 - **Refresh token rotation**: Configure your IdP to rotate refresh tokens on each use. A stolen refresh token becomes invalid after the legitimate client uses it once.
 - **Logout when done**: Run `nemo auth logout` on shared or temporary machines.

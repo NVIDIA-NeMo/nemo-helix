@@ -21,8 +21,8 @@ import uuid
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from pydantic import ValidationError
 
 #: Filename of the serialized bundle stored within each metric's fileset.

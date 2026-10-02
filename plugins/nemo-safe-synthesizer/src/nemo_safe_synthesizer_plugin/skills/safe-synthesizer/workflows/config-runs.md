@@ -138,9 +138,9 @@
 Use the CLI, Jobs API, or SDK for the primary platform-container path. Pass the JSON object above as the CLI spec file or as the `spec` field in the create-job request. Confirm the service is configured for container execution before job creation:
 
 ```bash
-export NMP_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-platform
-export NMP_IMAGE_TAG=<tag>  # match your installed NeMo Platform release
-export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=safe-synthesizer-tasks
+export NHX_IMAGE_REGISTRY=nvcr.io/nvidia/nemo-helix
+export NHX_IMAGE_TAG=<tag>  # match your installed NeMo Helix release
+export NEMO_SAFE_SYNTHESIZER_CONTAINER_IMAGE=nhx-safe-synthesizer-tasks
 ```
 
 ```bash

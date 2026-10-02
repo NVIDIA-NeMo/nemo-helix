@@ -5,7 +5,7 @@
 
 # Unsloth job JSON
 
-Job JSON for `nemo customization unsloth submit` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nmp/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
+Job JSON for `nemo customization unsloth submit` uses **`UnslothJobInput`** (`plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py`). Only fields in that schema are accepted (`extra="forbid"`). The canonical post-transform shape lives in `services/unsloth/src/nhx/unsloth/schemas.py` (`UnslothJobOutput`) and is what the training driver consumes in the GPU container.
 
 **Schema dump:**
 

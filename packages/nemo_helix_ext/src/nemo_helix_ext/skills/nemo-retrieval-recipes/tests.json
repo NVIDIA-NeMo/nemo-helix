@@ -1,0 +1,75 @@
+{
+  "skill": "nemo-retrieval-recipes",
+  "tests": [
+    {
+      "type": "explicit",
+      "prompt": "Use the nemo-retrieval-recipes skill to fine-tune a Nemotron embed model on my corpus.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Invoke nemo-retrieval-recipes for the embedding recipe and retrieve-eval.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "explicit",
+      "prompt": "Run nemo-retrieval-recipes. I need the retrieval recipe for Nemotron rerank.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Fine-tune embedding on this document corpus so domain retrieval nDCG@10 goes up.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Fine-tune rerank with a cross_encoder recipe after retrieve-eval on frozen eval_beir.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Recall@100 is fine but nDCG@10 is bad. Walk me through the Nemotron rerank retrieval recipe.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "implicit",
+      "prompt": "Run retrieval-sdg then Automodel bi_encoder and retrieve-eval for Nemotron embed.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "contextual",
+      "prompt": "Stage 1 already published frozen eval_beir. Submit retrieve-eval for the embedding recipe and report nDCG.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "contextual",
+      "prompt": "I have a domain retrieval corpus on Platform. Fine-tune embedding with the bi_encoder recipe, keep eval_beir frozen.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "contextual",
+      "prompt": "Checkpoint eval looks good. Deploy Nemotron rerank as a ranking NIM after the retrieval recipe using the Automodel ONNX output.",
+      "expected_skill": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Write and validate agent.yaml with Codex as the default harness.",
+      "expected_skill_not": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Help me set up a new Postgres database on my laptop with the test fixtures.",
+      "expected_skill_not": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Compare Claude and GPT-4 for a general chatbot. I am not training anything.",
+      "expected_skill_not": "nemo-retrieval-recipes"
+    },
+    {
+      "type": "negative-control",
+      "prompt": "Use nemo-customizer for chat LoRA SFT on a language model, not encoders.",
+      "expected_skill_not": "nemo-retrieval-recipes"
+    }
+  ]
+}

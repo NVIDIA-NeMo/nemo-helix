@@ -3,9 +3,9 @@
 
 # @nemo/sdk
 
-A collection of generated types and hooks for NeMo Platform.
+A collection of generated types and hooks for NeMo Helix.
 
-This package uses [Orval](https://orval.dev/) to generate TypeScript types and React Query hooks from OpenAPI specifications or interacting with various NeMo Platform.
+This package uses [Orval](https://orval.dev/) to generate TypeScript types and React Query hooks from OpenAPI specifications or interacting with various NeMo Helix.
 
 ## Features
 
@@ -57,8 +57,8 @@ pnpm gen:deployment-management
 # Generate for Entity Store
 pnpm gen:entity-store
 
-# Generate for Evaluation
-pnpm gen:evaluation
+# Generate for Evaluator
+pnpm gen:evaluator
 ```
 
 ### Using Generated Hooks
@@ -66,10 +66,13 @@ pnpm gen:evaluation
 The generated hooks can be used in your React components:
 
 ```typescript
-import { useListModels } from '@nemo/sdk/entity-store/generated/api';
+import { useModelsListModels } from '@nemo/sdk/generated/platform/models';
 
-function MyComponent() {
-  const { data, isLoading } = useListModels();
+function MyComponent({ workspace }: { workspace: string }) {
+  const { data, isLoading } = useModelsListModels(workspace, {
+    page: 1,
+    page_size: 20,
+  });
   // ... use the data
 }
 ```

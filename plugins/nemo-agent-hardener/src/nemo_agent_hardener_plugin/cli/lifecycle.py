@@ -155,7 +155,7 @@ def register(app: typer.Typer) -> None:
     @app.command()
     def init(
         agent: str | None = typer.Option(
-            None, "--agent", help="Registered NeMo Platform agent to war-game (name or workspace/name)."
+            None, "--agent", help="Registered NeMo Helix agent to war-game (name or workspace/name)."
         ),
         project_dir: str | None = typer.Option(
             None,

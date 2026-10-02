@@ -34,7 +34,7 @@ class ClaudeCodingAgent:
 
     async def invoke(self, prompt: str, worktree: Path, *, timeout: float = 600.0) -> InvocationResult:
         # Strip ANTHROPIC_* so the CLI uses OAuth instead of picking up API
-        # keys intended for the NeMo Platform application. Also strip CLAUDE_CODE_* /
+        # keys intended for the NeMo Helix application. Also strip CLAUDE_CODE_* /
         # CLAUDECODE so the subprocess doesn't refuse to nest when the loop
         # is launched from inside an active Claude Code session.
         clean_env = {

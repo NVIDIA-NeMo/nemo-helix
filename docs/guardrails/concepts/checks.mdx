@@ -32,10 +32,10 @@ Create a guardrail configuration that includes self-check input and output rails
 ```python
 
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -89,7 +89,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NMP_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -145,7 +145,7 @@ The checks endpoint supports the same `guardrails.options.log` diagnostics as
 guardrailed inference. Use these fields to debug scenarios where a check blocks or passes unexpectedly. For field descriptions, see [Log Options](/documentation/guardrail-models/core-concepts/running-inference#log-options).
 
 ```bash
-curl -s $NMP_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -187,7 +187,7 @@ nemo guardrail check \
 <Tab title="curl">
 
 ```bash
-curl -s $NMP_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
+curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/nvidia-nemotron-3.5-lightning-30b-a3b",

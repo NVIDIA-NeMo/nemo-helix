@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MockToastProvider } from '@nemo/common/src/tests/MockToastProvider';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { type GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { JobConfigDrawer } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobConfigDrawer';
@@ -49,7 +49,7 @@ const mockJob: GenerateJob = {
   workspace: 'test-namespace',
   created_at: '2024-01-01T00:00:00.000Z',
   updated_at: '2024-01-01T00:00:00.000Z',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     data_source: 'hf://test/dataset',
     config: {

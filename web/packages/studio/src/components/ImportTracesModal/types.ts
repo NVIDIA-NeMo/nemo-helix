@@ -5,6 +5,11 @@ export interface ImportTraceResult {
   label: string;
   status: 'success' | 'error';
   message?: string;
+  /**
+   * A per-record failure listed under a file's outcome rather than an outcome of its own, so
+   * counting files does not count every rejected record inside one.
+   */
+  detail?: boolean;
 }
 
 /** How the user chose to get traces into Intake. */

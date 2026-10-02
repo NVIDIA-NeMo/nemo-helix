@@ -26,13 +26,15 @@ def test_sdk_run_uploads_benign_suite_into_spec(tmp_path: Path, monkeypatch: pyt
 
     captured: dict[str, Any] = {}
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             captured["kwargs"] = kwargs
             return {"status": "completed"}
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
     monkeypatch.setattr(
         sdk_module,
         "upload_file_to_fileset",
@@ -40,11 +42,13 @@ def test_sdk_run_uploads_benign_suite_into_spec(tmp_path: Path, monkeypatch: pyt
     )
 
     suite = _write_suite(tmp_path / "suite.csv")
-    resource = sdk_module.AgentHardenerPluginResource(make_sdk())
+    platform = make_sdk()
+    resource = sdk_module.AgentHardenerPluginResource(platform)
     resource.run(config="agent-hardener.yaml", benign_suite=str(suite), workspace="ws1")
 
     assert captured["spec"]["benign_suite_fileset"] == "ws1/uploaded-suite.csv"
-    assert captured["kwargs"]["workspace"] == "ws1"
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
+    assert captured["kwargs"]["sdk"] is platform
 
 
 def test_sdk_run_without_benign_suite_omits_fileset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,12 +56,14 @@ def test_sdk_run_without_benign_suite_omits_fileset(monkeypatch: pytest.MonkeyPa
 
     captured: dict[str, Any] = {}
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             return {"status": "completed"}
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
 
     resource = sdk_module.AgentHardenerPluginResource(make_sdk())
     resource.run(config="agent-hardener.yaml")
@@ -73,8 +79,10 @@ def test_async_sdk_run_builds_sync_client_and_uploads_benign_suite(
     captured: dict[str, Any] = {}
     sync_client = SimpleNamespace(name="sync-sdk")
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             captured["kwargs"] = kwargs
             return {"status": "completed"}
@@ -83,7 +91,7 @@ def test_async_sdk_run_builds_sync_client_and_uploads_benign_suite(
         captured["base"] = base
         return sync_client
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
     monkeypatch.setattr(sdk_module, "make_sdk", _fake_make_sdk)
     monkeypatch.setattr(
         sdk_module,
@@ -98,7 +106,7 @@ def test_async_sdk_run_builds_sync_client_and_uploads_benign_suite(
 
     assert captured["base"] == "http://localhost:8080/"  # sync client targets the async client's base URL
     assert captured["spec"]["benign_suite_fileset"] == "ws1/uploaded-suite.csv"
-    assert captured["kwargs"]["workspace"] == "ws1"
+    assert captured["kwargs"]["ctx"].workspace == "ws1"
     assert captured["kwargs"]["sdk"] is sync_client  # job runs against the sync client, not async_sdk
 
 
@@ -154,12 +162,14 @@ def test_sdk_run_puts_per_run_overrides_in_spec(monkeypatch: pytest.MonkeyPatch)
 
     captured: dict[str, Any] = {}
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             return {"status": "completed"}
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
 
     resource = sdk_module.AgentHardenerPluginResource(make_sdk())
     resource.run(
@@ -185,12 +195,14 @@ def test_sdk_run_omits_unset_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, Any] = {}
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             return {"status": "completed"}
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
     sdk_module.AgentHardenerPluginResource(make_sdk()).run(manifest_id="finance")
 
     for key in ("rounds", "port", "defenders", "attack_intensity", "replay_hitlog_fileset"):
@@ -201,11 +213,13 @@ def test_sdk_run_rejects_manifest_overrides_with_local_config(monkeypatch: pytes
     """These overlay a materialized manifest, so with --config the job would silently discard them."""
     from nemo_agent_hardener_plugin import sdk as sdk_module
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:  # pragma: no cover - must not run
-            raise AssertionError("launch should have been rejected before scheduling")
+    class _Job:
+        name = "war-game"
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+        def run(self, spec: dict, **kwargs: Any) -> dict:  # pragma: no cover - must not run
+            raise AssertionError("launch should have been rejected before running")
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
     resource = sdk_module.AgentHardenerPluginResource(make_sdk())
 
     with pytest.raises(ValueError, match="cannot be combined with a local 'config' manifest"):
@@ -218,12 +232,14 @@ def test_sdk_run_allows_rounds_with_local_config(monkeypatch: pytest.MonkeyPatch
 
     captured: dict[str, Any] = {}
 
-    class _Scheduler:
-        def run_local(self, _job: Any, spec: dict, **kwargs: Any) -> dict:
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:
             captured["spec"] = spec
             return {"status": "completed"}
 
-    monkeypatch.setattr(sdk_module, "NemoJobScheduler", _Scheduler)
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
     sdk_module.AgentHardenerPluginResource(make_sdk()).run(config="agent-hardener.yaml", rounds=5)
 
     assert captured["spec"]["rounds"] == 5

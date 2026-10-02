@@ -10,7 +10,7 @@
 #   ./apply.sh && ./smoke.sh
 set -euo pipefail
 
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 PORT="${PORT:-18080}"
 BASE="http://127.0.0.1:$PORT/apis/scaled-evals"
 WORK="$(mktemp -d)"
@@ -50,7 +50,7 @@ for i in $(seq 1 60); do
   sleep 5
 done
 python3 -m json.tool "$WORK/readyz.json"
-for check in postgres schema object_store build_worker; do
+for check in postgres schema object_store platform_jobs_controller; do
   [ "$(json "$WORK/readyz.json" "checks.$check")" = ok ] || fail "readyz check '$check' is not ok"
 done
 

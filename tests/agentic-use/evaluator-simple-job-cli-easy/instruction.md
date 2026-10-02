@@ -3,9 +3,9 @@
 
 # Simple Custom Evaluation Job (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Available CLI Commands
 
@@ -49,7 +49,7 @@ Each row in `--data` should be a JSON object with the fields referenced by the m
 
 ## Task
 
-Set up and run a custom evaluation using a string-check metric via the `nmp` CLI:
+Set up and run a custom evaluation using a string-check metric via the `nhx` CLI:
 
 1. **Create a workspace** named `eval-test-workspace`
 
@@ -59,7 +59,7 @@ Set up and run a custom evaluation using a string-check metric via the `nmp` CLI
    {"output": "world", "expected": "world"}
    {"output": "foo", "expected": "bar"}
    ```
-   Include at least one row where the output does NOT match the expected value. Upload it to the NeMo Platform Files service as a fileset named `eval-dataset` in the `eval-test-workspace` workspace.
+   Include at least one row where the output does NOT match the expected value. Upload it to the NeMo Helix Files service as a fileset named `eval-dataset` in the `eval-test-workspace` workspace.
 
 3. **Create a string-check metric** in the workspace that compares the `output` field against the `expected` field using an equals operation
 

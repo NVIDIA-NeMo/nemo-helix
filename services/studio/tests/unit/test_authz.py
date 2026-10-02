@@ -3,8 +3,8 @@
 
 """Authorization derivation for the Studio Assistant bridge."""
 
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
-from nmp.studio.service import StudioService
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
+from nhx.studio.service import StudioService
 
 
 def test_studio_assistant_routes_are_ruled_for_authenticated_principals() -> None:

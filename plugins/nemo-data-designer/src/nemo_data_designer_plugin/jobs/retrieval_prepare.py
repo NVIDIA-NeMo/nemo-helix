@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from nemo_data_designer_plugin.jobs.retrieval_common import (
     RETRIEVAL_MINE_MODULE,
@@ -15,12 +16,15 @@ from nemo_data_designer_plugin.jobs.retrieval_common import (
 )
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nmp.customization_common.retrieval.inline import wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import fetch_model_entity
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nhx.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
+from nhx.customization_common.service.platform_client import (
+    async_customization_platform_clients_from_platform,
+    fetch_model_entity,
+)
 from pydantic import BaseModel
 
 
@@ -37,9 +41,10 @@ class RetrievalPrepareJob(NemoJob):
     async def to_spec(
         cls,
         input_spec: BaseModel,
+        *,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
         job_config = cast(RetrievalPrepareJobConfig, input_spec)
@@ -50,7 +55,8 @@ class RetrievalPrepareJob(NemoJob):
         if not job_config.enable_mining:
             return RetrievalPrepareStepConfig(job_config=job_config, phase="convert")
 
-        model = await fetch_model_entity(job_config.model, workspace, cast(AsyncNeMoPlatform, async_sdk))
+        platform_clients = async_customization_platform_clients_from_platform(async_sdk)
+        model = await fetch_model_entity(job_config.model, workspace, platform_clients)
         if not model.fileset:
             raise ValueError(
                 f"Model '{model.workspace}/{model.name}' has no fileset. "
@@ -66,14 +72,15 @@ class RetrievalPrepareJob(NemoJob):
     @classmethod
     async def compile(
         cls,
+        *,
         workspace: str,
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
-        options: dict | None = None,
-    ) -> PlatformJobSpec:
+        options: dict[str, Any] | None = None,
+    ) -> HelixJobSpec:
         spec = cast(RetrievalPrepareStepConfig, spec)
         steps = [
             await retrieval_step(
@@ -106,16 +113,16 @@ class RetrievalPrepareJob(NemoJob):
                     gpu=True,
                 )
             )
-        return PlatformJobSpec(steps=steps)
+        return HelixJobSpec(steps=steps)
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         step = RetrievalPrepareStepConfig.model_validate(config)
         if step.phase == "mine":
-            raise RuntimeError("Mining runs as nmp.automodel.tasks.retrieval_mine, not this module")
+            raise RuntimeError("Mining runs as nhx.automodel.tasks.retrieval_mine, not this module")
         return _run_convert(step.job_config, work_dir(ctx, "stage1_data_prep"), ctx, sdk)
 
 
-def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform) -> Path:
+def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NemoClient) -> Path:
     hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
         return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
@@ -128,7 +135,7 @@ def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform)
     return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
 
 
-def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NemoClient) -> dict:
     if job.train_input_file:
         train_file = _materialize_input(
             job.train_input_file,
@@ -155,7 +162,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         )
         from nemo_data_designer_plugin.retrieval.conversion import execute_conversion
 
-        input_path = sdg_root if sdg_root.is_file() else _find_generation_input(sdg_root)
+        input_path = _resolve_generation_input(sdg_root, job.generation_file)
         conversion = execute_conversion(
             input_path=input_path,
             output_dir=output_dir,
@@ -172,11 +179,17 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
             raise RuntimeError("Retrieval SDG conversion did not produce a training file")
         train_file = conversion.train_file
 
-    train_file = _stage_train_file(Path(train_file), output_dir)
+    source_train = Path(train_file)
+    train_file = _stage_train_file(source_train, output_dir)
+    _assert_nonempty_training_split(train_file)
+    if job.enable_mining:
+        _stage_corpus_for_mining(source_train, output_dir)
 
     if not job.enable_mining:
         inline_path = output_dir / "training.jsonl"
         wrapped_to_inline_jsonl(train_file, inline_path, output_dir / "corpus" / "train.parquet")
+        move_aux_files_to_additional(output_dir)
+        train_file = output_dir / "additional" / train_file.name
 
     artifacts = ctx.results.save(name="artifacts", local_path=output_dir)
     return {
@@ -185,6 +198,21 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
         "train_file": str(train_file),
         "results": {"artifacts": artifacts.model_dump()},
     }
+
+
+def _assert_nonempty_training_split(train_file: Path) -> None:
+    """Fail before mining when conversion parked every query in the test split."""
+    try:
+        payload = json.loads(train_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Could not read training file {train_file}: {exc}") from exc
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if isinstance(rows, list) and not rows:
+        raise RuntimeError(
+            "Retrieval conversion produced an empty training split. Tiny corpora can "
+            "land entirely in the test split. Generate with more source files "
+            "(recommended 50+ documents) or raise train_ratio before enabling mining."
+        )
 
 
 def _stage_train_file(train_file: Path, output_dir: Path) -> Path:
@@ -197,14 +225,35 @@ def _stage_train_file(train_file: Path, output_dir: Path) -> Path:
     raise FileNotFoundError(f"Training file is not a file: {train_file}")
 
 
-def _find_generation_input(root: Path) -> Path:
-    manifest = root / "generation_result.json"
-    if manifest.exists():
-        return manifest
-    jsonl = list(root.rglob("*.jsonl"))
-    if jsonl:
-        return jsonl[0]
-    raise FileNotFoundError(f"No generation_result.json or JSONL under {root}")
+def _stage_corpus_for_mining(train_file: Path, output_dir: Path) -> None:
+    """Copy sibling ``corpus/`` so the miner can load merlin_metadata.json.
+
+    ``train_input_file`` skips conversion, which normally writes that directory.
+    Mining then fails with ``Metadata File for Corpus does not exist``.
+    """
+    src = train_file.parent / "corpus"
+    dest = output_dir / "corpus"
+    if not src.is_dir():
+        return
+    if src.resolve() == dest.resolve():
+        return
+    shutil.copytree(src, dest, dirs_exist_ok=True)
+
+
+def _resolve_generation_input(staged: Path, generation_file: str) -> Path:
+    """Use a materialized file, or the named file inside a Stage 0 directory."""
+    if staged.is_file():
+        return staged
+    candidate = (staged / generation_file).resolve()
+    if not candidate.is_relative_to(staged.resolve()):
+        raise ValueError(f"generation_file escapes Stage 0 directory: {generation_file}")
+    if candidate.is_file():
+        return candidate
+    raise FileNotFoundError(
+        f"Expected Stage 0 file {generation_file!r} under {staged}. "
+        "Live generate writes generation_result.json; skip-SDG dumps set generation_file "
+        "or pass sdg_input as fileset#path / hf://org/dataset@rev/file."
+    )
 
 
 if __name__ == "__main__":

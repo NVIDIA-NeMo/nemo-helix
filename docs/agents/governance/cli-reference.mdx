@@ -25,7 +25,9 @@ see [Run a War-Game](/documentation/agents/governance/run-a-war-game).
 | `init` | Resolve an agent or project into a saved manifest |
 | `refresh` | Re-resolve a saved manifest against its agent as it is now |
 | `synth-benign` | Generate the benign request suite and cache it on the manifest |
+| `synth` | Submit benign-suite synthesis as a platform job |
 | `run` | Run the attack, defend and validate cycle |
+| `war-game` | Submit the war-game as a platform job |
 | `sanity-check` | Score a chosen subset of a run's defenses without applying them |
 | `status` | Show recent runs |
 | `manifest show` | Print a saved manifest's stored defaults |
@@ -203,6 +205,37 @@ the sandbox is built, so a bad name or key fails in seconds with the list of
 models those credentials can reach. Groups left at their built-in defaults are
 not probed.
 
+### Platform job commands
+
+```bash
+nemo agent-hardener synth --manifest-id <name>
+nemo agent-hardener war-game --manifest-id <name>
+```
+
+`synth` and `war-game` are generated platform-job submit commands. They use the
+same job implementations as Studio, accept generated spec flags, and expose
+their schemas through `explain`:
+
+```bash
+nemo agent-hardener synth explain
+nemo agent-hardener war-game explain
+```
+
+Use `synth-benign` and `run` for the normal local workflow. Use `synth` and
+`war-game` when you want to submit those jobs through the platform job
+executor.
+
+Common generated submission options:
+
+| Option | Effect |
+|--------|--------|
+| `--spec <json>` | Base job spec as a JSON string |
+| `--spec-file <path>` | Base job spec as YAML or JSON |
+| `--profile <name>` | Execution profile |
+| `--cluster <name>` | Configured cluster name to resolve from the NeMo CLI config |
+| `--base-url <url>` | Plugin-service base URL |
+| `--workspace`, `-w <name>` | Workspace for the job submission |
+
 ### `sanity-check`
 
 ```bash
@@ -240,10 +273,10 @@ Agent Hardener resources are available on the platform client as `client.agent_h
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

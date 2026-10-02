@@ -42,4 +42,6 @@ export const uploadAgentFormSchema = z.object({
     .trim()
     .min(1, 'Name is required')
     .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens'),
+  repoUrl: z.string().trim().default(''),
+  secretKey: z.string().default(''),
 });

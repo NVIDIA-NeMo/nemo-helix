@@ -12,11 +12,10 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import NMP_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig, httpx_tls_config_from_env
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
+from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceQueryParams, CreateWorkspaceRequest
 
 from e2e.services_pool import E2EHarnessConfig, E2EServicesPool, RunningServices
 from tests.auth_idp.authentik_live import authentik_gateway_tls_ca_bundle, prepare_authentik_compose_inputs
@@ -113,7 +112,7 @@ def _token_request_body(grant: dict[str, str]) -> dict[str, str]:
         "grant_type": grant_type,
         "client_id": grant["client_id"],
     }
-    if "client_secret" in grant:
+    if "client_secret" in grant and grant.get("client_auth_method") != "client_secret_basic":
         body["client_secret"] = grant["client_secret"]
     if grant_type == "password":
         body["username"] = grant["username"]
@@ -126,6 +125,15 @@ def _token_request_body(grant: dict[str, str]) -> dict[str, str]:
             body["scope"] = grant["scope"]
         return body
     raise ValueError(f"unsupported grant_type for auth_idp token exchange: {grant_type}")
+
+
+def _token_request_auth(grant: dict[str, str]) -> tuple[str, str] | None:
+    if grant.get("client_auth_method") != "client_secret_basic":
+        return None
+    client_secret = grant.get("client_secret")
+    if not client_secret:
+        raise AssertionError("client_secret_basic token acquisition requires client_secret")
+    return grant["client_id"], client_secret
 
 
 def _compose_e2e_config_for_case(
@@ -143,13 +151,13 @@ def _compose_e2e_config_for_case(
     marker = marker_decorator.mark
     config_layers = cast(tuple[str | dict[str, Any], ...], marker.args)
     harness_config = cast(E2EHarnessConfig, dict(marker.kwargs.get("harness") or {}))
-    lifecycle = os.environ.get("NMP_E2E_COMPOSE_LIFECYCLE")
+    lifecycle = os.environ.get("NHX_E2E_COMPOSE_LIFECYCLE")
     if lifecycle:
         harness_config["lifecycle"] = cast(Any, lifecycle)
-    compose_project_name = os.environ.get("NMP_AUTHENTIK_COMPOSE_PROJECT_NAME")
+    compose_project_name = os.environ.get("NHX_AUTHENTIK_COMPOSE_PROJECT_NAME")
     if compose_project_name:
         harness_config["compose_project_name"] = compose_project_name
-    gateway_port = os.environ.get("NMP_AUTHENTIK_COMPOSE_GATEWAY_PORT")
+    gateway_port = os.environ.get("NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT")
     if gateway_port:
         dynamic_ports = dict(harness_config.get("dynamic_ports") or {})
         gateway_config = dict(dynamic_ports.get("gateway") or {})
@@ -173,6 +181,7 @@ def _exchange_token_with_retries(
             response = httpx.post(
                 token_endpoint,
                 data=_token_request_body(grant),
+                auth=_token_request_auth(grant),
                 timeout=30.0,
                 **request_tls_config,
             )
@@ -275,7 +284,7 @@ def _prepare_authentik_compose_inputs_for_e2e(idp_e2e_enabled: bool) -> None:
     if idp_e2e_enabled:
         prepare_authentik_compose_inputs()
         os.environ.setdefault(
-            NMP_CLIENT_SSL_CERT_FILE_ENVVAR,
+            NHX_CLIENT_SSL_CERT_FILE_ENVVAR,
             str(authentik_gateway_tls_ca_bundle()),
         )
 
@@ -348,8 +357,7 @@ def auth_idp_runtime(
 @pytest.fixture
 def auth_idp_workspace(auth_idp_runtime) -> Iterator[str]:
     workspace_name = f"auth-idp-ws-{uuid.uuid4().hex[:8]}"
-    sdk = auth_idp_runtime.e2e_setup_sdk()
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(auth_idp_runtime.e2e_setup_client())
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),
         body=CreateWorkspaceRequest(name=workspace_name, description="Workspace for auth-idp provider contract tests"),
@@ -417,35 +425,23 @@ def interactive_user_token(authentik_stack: ProviderConfig) -> str:
 
 
 @pytest.fixture(scope="module")
-def authentik_e2e_setup_sdk(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {e2e_setup_token}"},
-        max_retries=0,
-    )
+def authentik_e2e_setup_client(authentik_stack: ProviderConfig, e2e_setup_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=e2e_setup_token)
 
 
 @pytest.fixture(scope="module")
-def authentik_interactive_user_sdk(authentik_stack: ProviderConfig, interactive_user_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {interactive_user_token}"},
-        max_retries=0,
-    )
+def authentik_interactive_user_client(authentik_stack: ProviderConfig, interactive_user_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=interactive_user_token)
 
 
 @pytest.fixture(scope="module")
-def workload_provider_sdk(authentik_stack: ProviderConfig, workload_provider_token: str) -> NeMoPlatform:
-    return NeMoPlatform(
-        base_url=authentik_stack.gateway_base_url,
-        default_headers={"Authorization": f"Bearer {workload_provider_token}"},
-        max_retries=0,
-    )
+def workload_provider_client(authentik_stack: ProviderConfig, workload_provider_token: str) -> NemoClient:
+    return NemoClient(base_url=authentik_stack.gateway_base_url, auth=workload_provider_token)
 
 
 @pytest.fixture
-def authentik_workspace(authentik_e2e_setup_sdk: NeMoPlatform) -> Iterator[str]:
-    workspaces = client_from_platform(authentik_e2e_setup_sdk, WorkspacesClient)
+def authentik_workspace(authentik_e2e_setup_client: NemoClient) -> Iterator[str]:
+    workspaces = WorkspacesClient.from_client(authentik_e2e_setup_client)
     workspace_name = f"authentik-ws-{uuid.uuid4().hex[:8]}"
     workspaces.create_workspace(
         query_params=CreateWorkspaceQueryParams(wait_role_propagation=True),

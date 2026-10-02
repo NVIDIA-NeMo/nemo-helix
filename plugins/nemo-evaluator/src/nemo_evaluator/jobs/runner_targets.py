@@ -21,15 +21,24 @@ dropping it would submit a job that runs something *different* from what was tes
 is worse than not submitting at all. Those cases raise :class:`UnsubmittableRunnerError` naming what
 could not travel.
 
-Only :class:`GymAgentTaskRunner` is supported today. The other shipped runners each need their own
-decisions about what survives translation, and are deliberately not guessed at here.
+Gym runners and native Harbor runners are supported. Harbor's local storage is replaced by
+job-owned storage; settings and execution overrides with no target representation are refused.
 """
 
 from __future__ import annotations
 
-from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    AgentRunnerTarget,
+    GymPlacement,
+    GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
+    HarborRunnerTarget,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
+from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
 
@@ -41,26 +50,101 @@ class UnsubmittableRunnerError(TypeError):
     """
 
 
-def runner_to_target(runner: AgentTaskRunner) -> AgentRunnerTarget:
-    """The target spec that reproduces ``runner`` as a job.
+def runner_to_target(runner: AgentTaskRunner, placement: GymPlacement | None = None) -> AgentRunnerTarget:
+    """The target spec that reproduces ``runner`` as a job, placed by ``placement``.
+
+    ``placement`` carries what the deployment decides rather than what the evaluation is — a staged
+    environment FileSet, the agent instance a sandboxed host routes to. It is runner-specific, so
+    supplying one for a runner that cannot be placed is refused rather than ignored.
 
     Raises:
-        UnsubmittableRunnerError: If the runner has no wire form, or carries state that would be
-            lost in translation.
+        UnsubmittableRunnerError: If the runner has no wire form, carries state that would be lost in
+            translation, or was given a placement it cannot use.
     """
     if isinstance(runner, GymAgentTaskRunner):
-        return _gym_target(runner)
+        return _gym_target(runner, placement or GymPlacement())
+    if placement is not None:
+        raise UnsubmittableRunnerError(
+            f"a GymPlacement cannot place a {type(runner).__name__}; placement is per runner kind."
+        )
+    if isinstance(runner, HarborAgentTaskRunner):
+        return _harbor_target(runner)
     raise UnsubmittableRunnerError(
         f"{type(runner).__name__} has no target spec, so it cannot be submitted as a job. Run it "
         "in-process with AgentEvaluator(), or pass a runner target spec directly."
     )
 
 
-def _gym_target(runner: GymAgentTaskRunner) -> GymRunnerTarget:
-    """``GymAgentTaskRunner`` -> ``GymRunnerTarget``.
+def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
+    """Describe a native Harbor runner without carrying local execution state.
 
-    Every field carries, and nothing is rejected — unusual among the runners, and worth saying
-    plainly rather than inventing rejections to look careful. Gym's settings are all *behaviour*
+    Algorithm:
+        - Reject offline runners and explicit local execution overrides.
+        - Require defaults for runtime settings that the target cannot represent.
+        - Copy supported run settings and validate the target's JSON representation.
+
+    ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
+    supply job-owned storage. Standalone execution requires an explicit directory.
+    """
+    config = runner._config
+    if config is None:
+        raise UnsubmittableRunnerError(
+            "Harbor submission requires a native config; use saved-trial rescoring for an offline runner."
+        )
+    for field in ("dataset_path", "task_names", "job_dir", "run_job"):
+        if getattr(runner, f"_{field}") is not None:
+            raise UnsubmittableRunnerError(
+                f"Harbor {field} cannot travel with a platform-based stored-taskset submission."
+            )
+    required_defaults = {
+        "job_name": None,
+        "force_rerun": False,
+        "quiet": True,
+        "agent_dir": None,
+        "timeout_multiplier": None,
+        "verifier_timeout_multiplier": None,
+        "environment_build_timeout_multiplier": None,
+    }
+    for field, default in required_defaults.items():
+        if getattr(config, field) != default:
+            raise UnsubmittableRunnerError(f"Harbor {field} must retain its default for job submission.")
+    source: HarborBuiltinAgentSource | HarborImportedAgentSource
+    if config.agent_import_path is not None:
+        source = HarborImportedAgentSource(import_path=config.agent_import_path, model_name=config.agent_model_name)
+    elif config.agent_name is not None:
+        source = HarborBuiltinAgentSource(name=config.agent_name, model_name=config.agent_model_name)
+    else:
+        raise UnsubmittableRunnerError("Harbor config selects no agent: set agent_name or agent_import_path.")
+    carried_fields = (
+        "agent_kwargs",
+        "env_secrets",
+        "env_vars",
+        "n_attempts",
+        "n_concurrent_trials",
+        "max_retries",
+        "artifacts",
+        "trace_dir",
+        "reward_key",
+        "agent_setup_timeout_multiplier",
+        "agent_timeout_multiplier",
+    )
+    try:
+        target = HarborRunnerTarget(source=source, **{name: getattr(config, name) for name in carried_fields})
+        target.model_dump(mode="json")
+    except (ValidationError, PydanticSerializationError) as error:
+        # Both models set `hide_input_in_errors`, so the text names the problem without echoing a value.
+        raise UnsubmittableRunnerError(
+            f"Harbor config cannot be represented as a valid JSON target spec: {error}"
+        ) from error
+    return target
+
+
+def _gym_target(runner: GymAgentTaskRunner, placement: GymPlacement) -> GymRunnerTarget:
+    """``GymAgentTaskRunner`` + ``GymPlacement`` -> ``GymRunnerTarget``.
+
+    Every config field carries, and nothing is rejected — unusual among the runners, and worth saying
+    plainly rather than inventing rejections to look careful. The placement only adds to that; it
+    overrides nothing. Gym's settings are all *behaviour*
     (which environment, which agent, how many attempts, how long to wait) rather than *location*:
     there is no work root, no local base directory, and no injected callable to lose. The one thing
     that reads like a local path, ``agent_config``, is resolved relative to the Gym installation
@@ -78,7 +162,11 @@ def _gym_target(runner: GymAgentTaskRunner) -> GymRunnerTarget:
     raised from the transport, naming neither the runner nor the field. Checking here turns that
     into the refusal this module promises.
     """
-    target = GymRunnerTarget(**runner.config.model_dump())
+    target = GymRunnerTarget(
+        **runner.config.model_dump(),
+        environment=placement.environment,
+        agent_ref_name=placement.agent_ref_name,
+    )
     try:
         target.model_dump(mode="json")
     except PydanticSerializationError as error:

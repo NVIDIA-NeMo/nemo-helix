@@ -22,6 +22,7 @@ from types import FrameType
 from typing import Any, Protocol, TypeVar
 from urllib.parse import urlparse
 
+import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint
 from sandboxed_gym.host.models import (
@@ -31,6 +32,7 @@ from sandboxed_gym.host.models import (
     GymHostSpec,
     GymHostVolumeMount,
     build_bootstrap_env,
+    render_host_error,
 )
 from sandboxed_gym.host.provider import SandboxedGymHostProvider, get_host_provider
 from sandboxed_gym.runtime.gym_host_runtime import (
@@ -44,6 +46,17 @@ from sandboxed_gym.serve_config import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+#: Signals a container runtime sends before SIGKILL. SIGKILL and node loss cannot be caught and
+#: stay the sandbox ttl_s's problem.
+TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+# Registered shutdown hooks for this process.
+_TERMINATION_SHUTDOWNS: list[Callable[[], None]] = []
+
+#: Job ids this process has already armed. A second call must not replace the
+#: signal handler the first one installed.
+_INSTALLED: set[str] = set()
 
 T = TypeVar("T")
 
@@ -76,10 +89,7 @@ def _sandbox_reported_error(body: str) -> str | None:
     decoded = _decode_json_object(body)
     if decoded is None or decoded.get("error") is None:
         return None
-    error = decoded["error"]
-    if isinstance(error, Mapping):
-        return f"{error.get('code', 'unknown')}: {error.get('message', '')}".strip()
-    return str(error)
+    return render_host_error(decoded["error"])
 
 
 def _proxy_reported_error(body: str) -> str | None:
@@ -155,46 +165,6 @@ class _SessionAsyncRunner:
         self._thread.join()
 
 
-#: Signals a container runtime sends before SIGKILL. SIGKILL and node loss cannot be caught and
-#: stay the sandbox ttl_s's problem.
-TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGINT)
-
-
-def install_termination_cleanup(shutdown: Callable[[], None]) -> None:
-    """Run ``shutdown`` when this process exits without it having been called.
-
-    A process that owns a sandbox is the only thing that can name it. Ray tears an actor's worker
-    down without running user teardown, so a job that is cancelled, evicted or preempted otherwise
-    leaves its sandbox running until ttl_s. ``shutdown`` must tolerate being called twice: an
-    ordinary exit runs it directly and then again from ``atexit``.
-
-    For a process the caller owns -- an actor, a CLI. Not for a library embedded in someone else's
-    host, whose signal handling is not ours to replace.
-    """
-    atexit.register(shutdown)
-
-    def _terminate(signum: int, _frame: FrameType | None) -> None:
-        # Restored before the cleanup runs, not after: a second signal arriving mid-shutdown then
-        # takes the default action and terminates, rather than re-entering this handler on top of
-        # an in-flight destroy. Two SIGTERMs mean the sender wants the process gone.
-        signal.signal(signum, signal.SIG_DFL)
-        LOGGER.warning("received signal %s; destroying sandboxed Gym host before exit", signum)
-        try:
-            shutdown()
-        finally:
-            # Re-raised even if cleanup failed, so the exit status still reports the signal --
-            # swallowing it would make a cancelled job look like a clean stop.
-            os.kill(os.getpid(), signum)
-
-    for signum in TERMINATION_SIGNALS:
-        try:
-            signal.signal(signum, _terminate)
-        except ValueError:
-            # Only the main thread may install handlers, and Ray does not promise to call an
-            # actor method there. atexit still covers the ordinary exit.
-            LOGGER.debug("cannot install a %s handler off the main thread", signum)
-
-
 def apply_sandbox_runtime_defaults(global_config: dict[str, Any]) -> dict[str, Any]:
     """Inject sandbox-local infra defaults only (not RL training knobs)."""
     from sandboxed_gym.host.entrypoint import gym_uv_cache_dir, gym_uv_venv_dir
@@ -217,6 +187,11 @@ def apply_sandbox_runtime_defaults(global_config: dict[str, Any]) -> dict[str, A
     # install into a read-only interpreter tree. The only symptom is every Gym server dying with
     # "Process `policy_model` finished unexpectedly!".
     cfg.setdefault("uv_pip_set_python", True)
+    # Use the venvs the host image prebuilt instead of re-running `uv pip install` into each one on
+    # every start. That reinstall resolves against the package index, which a sandbox's egress policy
+    # normally denies, so the component dies with "Process `mcqa` finished unexpectedly!". A
+    # component with no prebuilt venv (a FileSet's own server) is still installed.
+    cfg.setdefault("skip_venv_if_present", True)
     return cfg
 
 
@@ -336,7 +311,7 @@ def build_gym_host_spec(
 
 
 class SandboxedGymSession:
-    """Live broker + host session. ``run_rollouts`` returns raw Gym host results."""
+    """Live broker + host session. ``arun_rollouts`` / ``run_rollouts`` return raw Gym host results."""
 
     def __init__(
         self,
@@ -382,15 +357,22 @@ class SandboxedGymSession:
         )
 
     def run_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
+        """Blocking form of :meth:`arun_rollouts`."""
+        return _run_coro_sync(self.arun_rollouts(examples))
+
+    async def arun_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         """Run ``examples`` on the host as bounded concurrent chunks.
 
         Results are not in input order and never have been -- Gym yields through
         ``as_completed``. Attribution travels on each result as ``_ng_task_index`` /
         ``_ng_rollout_index``; see ``_with_row_identity`` in the host runtime.
+
+        Cancelling the awaiting task stops the batch: queued chunks are never sent and retry
+        backoffs end. A chunk already in flight finishes its HTTP call in its worker thread.
         """
         if not examples:
             raise ValueError("rollout batch must not be empty")
-        return _run_coro_sync(self._post_all_chunks(examples))
+        return await self._post_all_chunks(examples)
 
     async def _post_all_chunks(self, examples: list[dict[str, Any]]) -> list[Any]:
         chunks = [examples[start : start + self._chunk_size] for start in range(0, len(examples), self._chunk_size)]
@@ -611,7 +593,7 @@ class SandboxedGymSession:
             # A 200 carrying an error: the host had already committed its status line when it
             # failed, so this is the only channel it had left.
             raise RolloutTransportError(
-                f"the sandboxed Gym host reported {decoded['error']}",
+                f"the sandboxed Gym host reported {render_host_error(decoded['error'])}",
                 retryable=False,
                 origin="sandbox",
             )
@@ -661,6 +643,83 @@ class EpisodeBroker(Protocol):
     def shutdown(self) -> None: ...
 
 
+def install_termination_cleanup(shutdown: Callable[[], None]) -> None:
+    """Run ``shutdown`` when this process exits without it having been called.
+
+    A process that owns a sandbox is the only thing that can name it. Ray tears an actor's worker
+    down without running user teardown, so a job that is cancelled, evicted or preempted otherwise
+    leaves its sandbox running until ttl_s. ``shutdown`` must tolerate being called twice: an
+    ordinary exit runs it directly and then again from ``atexit``.
+
+    For a process the caller owns -- an actor, a CLI. Not for a library embedded in someone else's
+    host, whose signal handling is not ours to replace.
+
+    Each call adds a hook. The signal handler runs every hook registered so far, so arming
+    the job reaper and then the session teardown does not leave the reaper installed only
+    on ``atexit``.
+    """
+    _TERMINATION_SHUTDOWNS.append(shutdown)
+    atexit.register(shutdown)
+
+    def _terminate(signum: int, _frame: FrameType | None) -> None:
+        # Restored before the cleanup runs, not after: a second signal arriving mid-shutdown then
+        # takes the default action and terminates, rather than re-entering this handler on top of
+        # an in-flight destroy. Two SIGTERMs mean the sender wants the process gone.
+        signal.signal(signum, signal.SIG_DFL)
+        LOGGER.warning("received signal %s; destroying sandboxed Gym host before exit", signum)
+        error: BaseException | None = None
+        for hook in list(_TERMINATION_SHUTDOWNS):
+            try:
+                hook()
+            except BaseException as exc:
+                # Keep going so one failed teardown cannot spare a sandbox another hook owns.
+                # The first error is re-raised after the rest have run.
+                if error is None:
+                    error = exc
+        try:
+            if error is not None:
+                raise error
+        finally:
+            # Re-raised even if cleanup failed, so the exit status still reports the signal --
+            # swallowing it would make a cancelled job look like a clean stop.
+            os.kill(os.getpid(), signum)
+
+    for signum in TERMINATION_SIGNALS:
+        try:
+            signal.signal(signum, _terminate)
+        except ValueError:
+            # Only the main thread may install handlers, and Ray does not promise to call an
+            # actor method there. atexit still covers the ordinary exit.
+            LOGGER.debug("cannot install a %s handler off the main thread", signum)
+
+
+def install_job_sandbox_reaper(
+    job_id: str,
+    *,
+    host_provider: str = "opensandbox",
+    host_provider_options: Mapping[str, Any] | None = None,
+) -> None:
+    """Arm an ``atexit`` and termination-signal hook that reaps this job's sandboxes.
+
+    Call it from the process the container runtime will signal, before the first
+    sandbox is created. A later call for the same job id does nothing: replacing
+    the signal handler would drop the hook the first call installed.
+    """
+    if not job_id:
+        raise ValueError("sandbox reaper requires a job id")
+    if job_id in _INSTALLED:
+        return
+    _INSTALLED.add(job_id)
+    options = dict(host_provider_options or {})
+    install_termination_cleanup(
+        lambda: job_reaper.reap_job_sandboxes(
+            job_id,
+            host_provider=host_provider,
+            host_provider_options=options,
+        )
+    )
+
+
 class SandboxedGymOrchestrator:
     """Start episode broker, provision Gym host, return a live session."""
 
@@ -682,6 +741,14 @@ class SandboxedGymOrchestrator:
         if not isinstance(cfg, SandboxedGymServeConfig):
             cfg = SandboxedGymServeConfig.model_validate(cfg)
 
+        # Before the host exists, so a cancel during create still has a hook that can
+        # name every sandbox for this job. The actor calls start(); RL does not arm this.
+        install_job_sandbox_reaper(
+            cfg.job_id,
+            host_provider=cfg.host_provider,
+            host_provider_options=cfg.sandbox.host_provider_options,
+        )
+
         broker_server: EpisodeBroker = broker if broker is not None else EpisodeBrokerServer(cfg.broker_config())
         broker_endpoint = broker_server.start()
 
@@ -697,7 +764,8 @@ class SandboxedGymOrchestrator:
             host: GymHostHandle | None = None
             try:
                 host = async_runner.run(host_provider.create_host(host_spec))
-                async_runner.run(host_provider.wait_ready(host, cfg.sandbox.ready_timeout_s))
+                bootstrap_timeout_s = cfg.sandbox.bootstrap_timeout_s or cfg.sandbox.ready_timeout_s
+                async_runner.run(host_provider.wait_ready(host, bootstrap_timeout_s))
             except Exception:
                 if host is not None:
                     try:

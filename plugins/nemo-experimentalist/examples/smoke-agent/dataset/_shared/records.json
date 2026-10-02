@@ -1,8 +1,0 @@
-[
-  {"name": "Ada Lovelace",   "dept": "research", "role": "engineer", "hours": 12},
-  {"name": "Grace Hopper",   "dept": "research", "role": "engineer", "hours": 8},
-  {"name": "Zoë Washington", "dept": "research", "role": "analyst",  "hours": 9},
-  {"name": "O'Brien",        "dept": "ops",      "role": "operator", "hours": 5},
-  {"name": "Ann-Marie Cruz", "dept": "ops",      "role": "operator", "hours": 8},
-  {"name": "Karl Jung",      "dept": "ops",      "role": "",         "hours": 0}
-]

@@ -20,12 +20,13 @@ cp local.env.example local.env   # then fill it in
 ./apply.sh --render      # print substituted manifests, touch nothing
 ./apply.sh               # deploy
 ./smoke.sh               # create -> upload -> Cloud Build -> ready, then verify GAR
-kubectl delete ns nemo-platform-scaled-evals
+./eval-smoke.sh          # execute through Platform Jobs and sandbox-k8s
+kubectl delete ns nemo-helix-scaled-evals
 ```
 
 ## Blast radius
 
-Everything lands in **`nemo-platform-scaled-evals`**. The name deliberately
+Everything lands in **`nemo-helix-scaled-evals`**. The name deliberately
 avoids a bare `scaled-evals-*` prefix, which in a shared project may already
 belong to a standalone deployment, its staging release, and CI's per-MR preview
 namespaces — nothing here should be mistakable for those, and `kubectl delete
@@ -49,7 +50,7 @@ PROJECT=$SE_GCP_PROJECT
 SA=$SE_GCP_SERVICE_ACCOUNT
 BUILD_SA=${SE_CLOUD_BUILD_SERVICE_ACCOUNT##*/}   # strip projects/.../serviceAccounts/
 BUCKET=$SE_GCS_BUCKET
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 
 # Note when choosing SE_GCS_BUCKET: GCS caps bucket names at 63 characters. Over
 # the cap, the API rejects the create with a misleading "Use of this bucket name
@@ -81,8 +82,9 @@ V4 signed URLs possible.
 
 ## Push the image
 
-The application image is the same one the compose stack builds, for amd64. It can
-go to a new image path inside an existing GAR repository: push and pull rights
+The application image is the same one the compose stack builds, for amd64. It
+also carries the Platform Jobs launcher used by task pods. It can go to a new
+image path inside an existing GAR repository: push and pull rights
 are granted on the repository, not per image path —
 
 - push: your user needs `roles/artifactregistry.writer` on the repo (check with
@@ -123,6 +125,7 @@ sed -i.bak "s|^SE_APP_IMAGE_TAG=.*|SE_APP_IMAGE_TAG=$TAG|" local.env && rm local
 | artifacts | RustFS, S3 + HMAC keys | **GCS**, Workload Identity tokens |
 | registry | in-cluster `registry:2`, insecure | **GAR**, credentials refreshed half-hourly |
 | Postgres | compose service, named volume | in-namespace pod, 10Gi `standard-rwo` PVC |
+| execution process | Platform Jobs subprocess profile | **Platform Jobs Kubernetes Job** profile |
 
 Everything else — the image, the settings, the plugin's own startup migration
 and bucket creation — is identical.
@@ -185,7 +188,7 @@ Two compatibility controls are opt-in because they are not neutral:
 
 ## Viewing a run
 
-`kubectl port-forward -n nemo-platform-scaled-evals deploy/scaled-evals-api 8080:8080`,
+`kubectl port-forward -n nemo-helix-scaled-evals deploy/scaled-evals-api 8080:8080`,
 then query the API under `/apis/scaled-evals/v1` — `evaluations/<id>` for status,
 `.../artifacts` to list outputs, `.../archive` for a signed tarball URL, and
 `.../logs` or `.../events` to follow a run. The `scaled-evals` CLI works against

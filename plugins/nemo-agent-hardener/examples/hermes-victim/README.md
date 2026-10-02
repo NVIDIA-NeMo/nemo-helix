@@ -5,7 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 # The war-game victim, Hermes harness
 
-The second guardable harness (deepagents is the other), registered on NeMo Platform like the
+The second guardable harness (deepagents is the other), registered on NeMo Helix like the
 `relay-victim` — but Hermes reaches Relay through an opt-in *plugin*, not the adapter's telemetry
 wiring, and that changes two things.
 
@@ -23,7 +23,7 @@ var itself and runs `hermes plugins enable observability/nemo_relay` — see the
 ## Running it
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 nemo agents package --agent plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml \
                     --dockerfile plugins/nemo-agent-hardener/examples/hermes-victim/Dockerfile \

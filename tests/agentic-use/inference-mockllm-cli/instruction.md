@@ -3,9 +3,9 @@
 
 # MockLLM Provider in IGW (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Context
 
@@ -13,7 +13,7 @@ This environment has the Inference Gateway (IGW) running with **mock provider mo
 
 ## Task
 
-Using the `nmp` CLI, set up and exercise a MockLLM provider through the Inference Gateway:
+Using the `nhx` CLI, set up and exercise a MockLLM provider through the Inference Gateway:
 
 1. **Create a mock inference provider** named `igw-mock-test-llm` in the `default` workspace that returns a deterministic chat completion response. The mock response content should be: `"This is a deterministic mock response from the test LLM."`
 

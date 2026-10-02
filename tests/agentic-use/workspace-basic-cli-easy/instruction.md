@@ -3,7 +3,7 @@
 
 # Workspace Creation Test (CLI)
 
-You have access to the `nemo` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
 ## Task
 
@@ -21,7 +21,7 @@ The `nemo` CLI is available at `/app/.venv/bin/nemo`. You can use these commands
 - `nemo workspaces get <name>` - Get a specific workspace
 - `nemo workspaces delete <name>` - Delete a workspace
 
-Note: The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+Note: The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Success Criteria
 

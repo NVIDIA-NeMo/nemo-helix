@@ -13,9 +13,9 @@ Run directly::
     uv run pytest plugins/nemo-evaluator/tests/integration/test_publish_to_intake.py -v
 
 Requires Docker (Intake is ClickHouse-backed) and a free :8123. The platform binds the port from
-``NMP_BASE_URL`` (default :8080), so set it to run alongside a local dev platform::
+``NHX_BASE_URL`` (default :8080), so set it to run alongside a local dev platform::
 
-    NMP_BASE_URL=http://localhost:8096 uv run pytest ...
+    NHX_BASE_URL=http://localhost:8096 uv run pytest ...
 """
 
 from __future__ import annotations
@@ -42,15 +42,15 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialS
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_platform.types.intake.trace_filter_param import TraceFilterParam
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import Trace, TraceFilterParam
+from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
 WORKSPACE = "default"
 GROUP_NAME = "intake-it-group"
 EXPERIMENT_NAME = "intake-it-exp"
@@ -120,7 +120,7 @@ _CLICKHOUSE_DATA_DIR = REPO_ROOT / "tmp" / "evaluator-intake-clickhouse"
 
 
 #: Bounds one provisioner call, so a wedged Docker fails this fixture instead of the worker.
-_CLICKHOUSE_SCRIPT_TIMEOUT_ENV = "NMP_EVALUATOR_CLICKHOUSE_SCRIPT_TIMEOUT"
+_CLICKHOUSE_SCRIPT_TIMEOUT_ENV = "NHX_EVALUATOR_CLICKHOUSE_SCRIPT_TIMEOUT"
 
 
 def _script_timeout_seconds() -> float:
@@ -184,9 +184,9 @@ def _clickhouse() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session")
-def platform_base_url(_clickhouse: None) -> Iterator[str]:
+def platform_base_url(_clickhouse: None, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     # Bind the port from BASE_URL rather than letting `services run` fall back to its 8080 default:
-    # NMP_BASE_URL is client-side only, so without this the suite silently requires 8080 to be free
+    # NHX_BASE_URL is client-side only, so without this the suite silently requires 8080 to be free
     # and cannot run alongside a local dev platform. Mirrors the sibling fixtures in conftest, which
     # each take their own port for the same reason.
     port = urlsplit(BASE_URL).port or 8080
@@ -195,8 +195,13 @@ def platform_base_url(_clickhouse: None) -> Iterator[str]:
         cwd=REPO_ROOT,
         env={
             **os.environ,
-            "NMP_BASE_URL": BASE_URL,
-            "NMP_INTAKE_CLICKHOUSE_URL": "http://localhost:8123",
+            "NHX_BASE_URL": BASE_URL,
+            "NHX_INTAKE_CLICKHOUSE_URL": "http://localhost:8123",
+            # Its own data dir, as the conftest fixtures each take. Without it this runs against the
+            # developer's real platform database under ~/.local/share/nemo: the suite both mutates it
+            # and inherits whatever Alembic revision another branch last stamped there, which fails
+            # startup with "Can't locate revision".
+            "NHX_DATA_DIR": str(tmp_path_factory.mktemp("intake-platform") / "data"),
         },
     )
     try:
@@ -264,8 +269,14 @@ def _result() -> AgentEvalResult:
     )
 
 
+async def _list_traces(intake: AsyncIntakeClient, trace_filter: TraceFilterParam) -> list[Trace]:
+    traces = await intake.list_traces(workspace=WORKSPACE, query_params={"filter": trace_filter})
+    return [trace async for trace in traces.items()]
+
+
 async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         # Precondition: the Experiment must exist before ingest.
         group = await async_sdk.experiments.create(
             workspace=WORKSPACE, name=GROUP_NAME, description="Intake IT", exist_ok=True
@@ -281,7 +292,7 @@ async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
 
         report = await publish_to_intake(
             _result(),
-            client=client_from_platform(async_sdk, AsyncIntakeClient),
+            client=intake,
             experiment_id=EXPERIMENT_NAME,
             workspace=WORKSPACE,
             agent_name="intake-it-agent",
@@ -295,18 +306,18 @@ async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
         # --- trial-1: trajectory + experiment-context propagation, read back via the Intake API.
         t1 = published["trial-1"]
         trace_filter: TraceFilterParam = {"session_id": t1.session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=WORKSPACE, filter=trace_filter)]
+        traces = await _list_traces(intake, trace_filter)
         assert len(traces) == 1
         trace = traces[0]
         assert trace.session_id == t1.session_id
         assert trace.root_span_id == t1.span_id
         assert trace.evaluation_context is not None
-        evaluation_context = trace.evaluation_context.to_dict()
+        evaluation_context = trace.evaluation_context
         assert evaluation_context["evaluation_name"] == EXPERIMENT_NAME
         assert evaluation_context["test_case_name"] == "task-1"
 
         # --- trial-1 scores: every field, every data_type coercion.
-        rows = await async_sdk.intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
+        rows = await intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
         by_name = {row.name: row for row in rows}
         assert set(by_name) == {"accuracy.score", "accuracy.passed", "judge.verdict"}
         for row in rows:
@@ -324,7 +335,7 @@ async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
         t2 = published["trial-2"]
         assert t2.session_id != t1.session_id
         assert t2.span_id != t1.span_id
-        rows2 = await async_sdk.intake.spans.evaluator_results.list(t2.span_id, workspace=WORKSPACE)
+        rows2 = await intake.spans.evaluator_results.list(t2.span_id, workspace=WORKSPACE)
         by_name2 = {row.name: row for row in rows2}
         assert set(by_name2) == {"accuracy.score", "accuracy.passed"}
         assert by_name2["accuracy.passed"].data_type == "BOOLEAN"
@@ -373,7 +384,8 @@ def _nan_result() -> AgentEvalResult:
 async def test_publish_skips_nan_and_failed_scores(platform_base_url: str) -> None:
     # A NaN value is not representable in JSON and a FAILED score is not a real measurement; neither
     # should reach Intake. Only the finite, completed output should be stored.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -386,14 +398,14 @@ async def test_publish_skips_nan_and_failed_scores(platform_base_url: str) -> No
 
         report = await publish_to_intake(
             _nan_result(),
-            client=client_from_platform(async_sdk, AsyncIntakeClient),
+            client=intake,
             experiment_id=NAN_EXPERIMENT_NAME,
             workspace=WORKSPACE,
             agent_name="intake-it-agent",
         )
 
         published = report.published_trials[0]
-        rows = await async_sdk.intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
+        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
         assert {row.name for row in rows} == {"accuracy.score"}
         assert report.evaluator_result_count == 1
 
@@ -438,7 +450,8 @@ async def test_republishing_the_same_result_is_idempotent(platform_base_url: str
     # double-count. Intake's spans table is a ReplacingMergeTree keyed on start_time, which is only
     # stable because the trajectory carries the run's started_at (see mapping.trial_to_atif_ingest);
     # without it each publish lands a second, uncollapsible row per trial.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -452,7 +465,7 @@ async def test_republishing_the_same_result_is_idempotent(platform_base_url: str
         async def publish() -> PublishReport:
             return await publish_to_intake(
                 _idempotency_result(),
-                client=client_from_platform(async_sdk, AsyncIntakeClient),
+                client=intake,
                 experiment_id=IDEMPOTENCY_EXPERIMENT_NAME,
                 workspace=WORKSPACE,
                 agent_name="intake-it-agent",
@@ -468,12 +481,10 @@ async def test_republishing_the_same_result_is_idempotent(platform_base_url: str
 
         session_id = second.published_trials[0].session_id
         trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=WORKSPACE, filter=trace_filter)]
+        traces = await _list_traces(intake, trace_filter)
         assert len(traces) == 1, "re-publish duplicated the trajectory instead of replacing it"
 
-        rows = await async_sdk.intake.spans.evaluator_results.list(
-            second.published_trials[0].span_id, workspace=WORKSPACE
-        )
+        rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
         assert [row.name for row in rows] == ["accuracy.score"]
 
 
@@ -497,7 +508,8 @@ async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) ->
     # The dataset-driven path adapts rows into the publisher's shape rather than using a second
     # mapping, so it inherits the same idempotency guarantee: re-publishing replaces rather than
     # duplicating. Row identity comes from the configured column, not the row's position.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -517,7 +529,7 @@ async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) ->
             )
             return await publish_to_intake(
                 adapted,
-                client=client_from_platform(async_sdk, AsyncIntakeClient),
+                client=intake,
                 experiment_id=ROW_EXPERIMENT_NAME,
                 workspace=WORKSPACE,
                 agent_name="intake-it-row-agent",
@@ -532,14 +544,12 @@ async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) ->
         assert first.published_trials[0].span_id == second.published_trials[0].span_id
 
         trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=WORKSPACE, filter=trace_filter)]
+        traces = await _list_traces(intake, trace_filter)
         assert len(traces) == 1, "re-publish duplicated the row instead of replacing it"
         assert traces[0].evaluation_context is not None
-        assert traces[0].evaluation_context.test_case_id == "q-1"
+        assert traces[0].evaluation_context["test_case_id"] == "q-1"
 
-        rows = await async_sdk.intake.spans.evaluator_results.list(
-            second.published_trials[0].span_id, workspace=WORKSPACE
-        )
+        rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
         assert [row.name for row in rows] == ["exact_match.score"]
 
 
@@ -592,7 +602,8 @@ def _otlp_result() -> AgentEvalResult:
 
 
 async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_base_url: str) -> None:
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -605,7 +616,7 @@ async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_ba
 
         report = await publish_to_intake(
             _otlp_result(),
-            client=client_from_platform(async_sdk, AsyncIntakeClient),
+            client=intake,
             experiment_id=OTLP_EXPERIMENT_NAME,
             workspace=WORKSPACE,
             agent_name="intake-it-agent",
@@ -617,19 +628,20 @@ async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_ba
         assert published.session_id == f"{OTLP_RUN_ID}:trial-1"
 
         # The stamped session id is what Intake indexed the spans under.
-        spans = await async_sdk.intake.spans.list(workspace=WORKSPACE, filter={"session_id": published.session_id})
-        assert [span.name for span in spans.data] == ["agent run"]
+        spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": published.session_id})).page()
+        assert [span.name for span in spans.items] == ["agent run"]
 
-        assert {span.source for span in spans.data} == {"otel"}
+        assert {span.source for span in spans.items} == {"otel"}
 
-        rows = await async_sdk.intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
+        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
         assert [row.name for row in rows] == ["accuracy.score"]
 
 
 async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(platform_base_url: str) -> None:
     # The session id we stamp is part of the ReplacingMergeTree key, so getting it wrong or
     # letting it vary per publish inserts a second uncollapsible row instead of replacing.
-    async with AsyncNeMoPlatform(base_url=platform_base_url, max_retries=2) as async_sdk:
+    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
         group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
         await async_sdk.evaluations.create(
             workspace=WORKSPACE,
@@ -643,7 +655,7 @@ async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(platf
         async def publish() -> PublishReport:
             return await publish_to_intake(
                 _otlp_result(),
-                client=client_from_platform(async_sdk, AsyncIntakeClient),
+                client=intake,
                 experiment_id=OTLP_EXPERIMENT_NAME,
                 workspace=WORKSPACE,
                 agent_name="intake-it-agent",
@@ -657,8 +669,8 @@ async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(platf
 
         session_id = second.published_trials[0].session_id
         trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=WORKSPACE, filter=trace_filter)]
+        traces = await _list_traces(intake, trace_filter)
         assert len(traces) == 1, "re-publish duplicated the OTLP trace instead of replacing it"
 
-        spans = await async_sdk.intake.spans.list(workspace=WORKSPACE, filter={"session_id": session_id})
-        assert len(spans.data) == 1, "re-publish duplicated the span instead of replacing it"
+        spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": session_id})).page()
+        assert len(spans.items) == 1, "re-publish duplicated the span instead of replacing it"

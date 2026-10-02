@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { RunJob } from '@nemo/sdk/generated/anonymizer/schema';
-import { OUTPUT_SUFFIXES } from '@studio/components/AnonymizerRecordView/parse';
+import type { DataFileRow } from '@studio/components/FileRowEditor/types';
 
 export const ANONYMIZER_POLLING_INTERVAL_MS = 5000;
 
@@ -30,6 +30,10 @@ export const parseArtifactUrl = (artifactUrl: string | undefined): ArtifactLocat
   return fileset ? { fileset, basePath } : undefined;
 };
 
+/** Falls back to the row's first field when `metadata.json` didn't name a text column. */
+export const resolveTextColumn = (row: DataFileRow, textColumn: string | undefined): string =>
+  textColumn ?? Object.keys(row)[0] ?? '';
+
 export const metadataTextColumn = (metadata: string | undefined): string | undefined => {
   try {
     const parsed: unknown = JSON.parse(metadata ?? '{}');
@@ -38,13 +42,4 @@ export const metadataTextColumn = (metadata: string | undefined): string | undef
   } catch {
     return undefined;
   }
-};
-
-export const orderResultColumns = (columns: string[], textColumn: string | undefined): string[] => {
-  if (!textColumn || !columns.includes(textColumn)) return columns;
-  const output = OUTPUT_SUFFIXES.map((suffix) => `${textColumn}${suffix}`).find((column) =>
-    columns.includes(column)
-  );
-  const lead = output ? [textColumn, output] : [textColumn];
-  return [...lead, ...columns.filter((column) => !lead.includes(column))];
 };

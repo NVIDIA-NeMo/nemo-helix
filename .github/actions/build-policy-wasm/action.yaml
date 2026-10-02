@@ -5,12 +5,12 @@ name: Build OPA policy WASM
 description: >
   Installs Flox, activates the OPA environment, and builds the authorization
   policy WASM asset at
-  services/core/auth/src/nmp/core/auth/assets/policy.wasm. Assumes the
+  services/core/auth/src/nhx/core/auth/assets/policy.wasm. Assumes the
   repository has already been checked out to `inputs.source-root`.
 
 inputs:
   source-root:
-    description: Path to the checked-out NeMo Platform repository.
+    description: Path to the checked-out NeMo Helix repository.
     required: false
     default: "."
   activate-as-root:
@@ -41,7 +41,7 @@ runs:
         source_root="$(cd "${SOURCE_ROOT}" && pwd -P)"
         owner_uid="$(id -u)"
         owner_gid="$(id -g)"
-        policy_wasm="${source_root}/services/core/auth/src/nmp/core/auth/assets/policy.wasm"
+        policy_wasm="${source_root}/services/core/auth/src/nhx/core/auth/assets/policy.wasm"
         sudo git config --global --add safe.directory "${source_root}"
         sudo -E flox -q activate --dir="${source_root}/tools/open-policy-agent" -- \
           bash -c 'cd "$1" && ./script/build_policy_wasm.sh' _ "${source_root}"

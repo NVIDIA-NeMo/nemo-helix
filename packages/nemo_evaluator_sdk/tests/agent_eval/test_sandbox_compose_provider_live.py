@@ -52,7 +52,9 @@ def _build_fixture(context: Path, image: str, value: str) -> None:
         "FROM busybox:latest\nCOPY value.txt /value.txt\nRUN adduser -D -u 1001 app\nWORKDIR /home/app\nUSER app\n",
         encoding="utf-8",
     )
-    (context / "value.txt").write_text(value, encoding="utf-8")
+    value_path = context / "value.txt"
+    value_path.write_text(value, encoding="utf-8")
+    value_path.chmod(0o644)
     _run("docker", "build", "--tag", image, str(context))
 
 

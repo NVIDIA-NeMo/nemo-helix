@@ -53,9 +53,9 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.secrets import SecretResolutionError
-from nemo_platform import AsyncNeMoPlatform
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 pytest.importorskip("openshell")  # platform-restricted extra; skip where not installed (e.g. CI)
 
@@ -223,7 +223,7 @@ async def test_load_deployment_config_wraps_an_entities_client_that_accepts_quer
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "not found"}, request=request)
 
-    sdk = AsyncNeMoPlatform(
+    sdk = AsyncNeMoHelix(
         base_url="http://entities.test",
         workspace="default",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
@@ -238,7 +238,7 @@ async def test_load_deployment_config_wraps_an_entities_client_that_accepts_quer
 
 def test_sandbox_name_within_limit_and_deterministic() -> None:
     name = _sandbox_name("a-long-workspace-name", "a-long-deployment-name")
-    assert name.startswith("nmp-")
+    assert name.startswith("nhx-")
     assert len(name) <= _MAX_ROUTABLE_NAME_LEN
     assert name == _sandbox_name("a-long-workspace-name", "a-long-deployment-name")
     assert name != _sandbox_name("other", "name")
@@ -280,14 +280,14 @@ async def test_read_status_includes_exposed_endpoints(
     openshell_backend: OpenShellDeploymentBackend, mock_stub: MagicMock
 ) -> None:
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
-    svc = MagicMock(url="http://nmp-x--http.openshell.localhost:18080/")
+    svc = MagicMock(url="http://nhx-x--http.openshell.localhost:18080/")
     svc.endpoint.service_name = "http"
     mock_stub.ListServices.return_value = MagicMock(services=[svc])
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 
     assert update.status == "READY"
-    assert [e.url for e in update.endpoints] == ["http://nmp-x--http.openshell.localhost:18080/"]
+    assert [e.url for e in update.endpoints] == ["http://nhx-x--http.openshell.localhost:18080/"]
     assert update.endpoints[0].name == "http"
 
 
@@ -634,12 +634,12 @@ async def test_read_status_exposes_after_launch(
     mock_entities.get.return_value = _config()
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
     mock_stub.ExecSandbox.return_value = _exec_events(0)  # marker present
-    mock_stub.ExposeService.return_value = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 
     assert update.status == "READY"
-    assert [e.url for e in update.endpoints] == ["http://nmp-x--http.openshell.localhost:17670/"]
+    assert [e.url for e in update.endpoints] == ["http://nhx-x--http.openshell.localhost:17670/"]
 
 
 async def test_read_status_starting_until_default_tcp_probe_passes(
@@ -686,7 +686,7 @@ async def test_read_status_starting_when_readiness_probe_yields_no_exit(
         _exec_events(0),  # liveness: alive
         _exec_events(0),  # readiness: reachable
     ]
-    mock_stub.ExposeService.return_value = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
     first = await openshell_backend.read_status(workspace="default", name="srv")
 
@@ -711,12 +711,12 @@ async def test_read_status_ready_when_default_tcp_probe_connects(
         _exec_events(0),  # liveness: alive
         _exec_events(0),  # readiness: reachable
     ]
-    mock_stub.ExposeService.return_value = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 
     assert update.status == "READY"
-    assert [e.url for e in update.endpoints] == ["http://nmp-x--http.openshell.localhost:17670/"]
+    assert [e.url for e in update.endpoints] == ["http://nhx-x--http.openshell.localhost:17670/"]
 
 
 async def test_read_status_gates_on_declared_httpget_probe(
@@ -745,7 +745,7 @@ async def test_read_status_fails_when_serve_process_died(
 ) -> None:
     # Ports exposed but the workload is gone.
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
-    svc = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    svc = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
     svc.endpoint.service_name = "http"
     mock_stub.ListServices.return_value = MagicMock(services=[svc])
     mock_stub.ExecSandbox.side_effect = [
@@ -785,7 +785,7 @@ async def test_read_status_stays_ready_when_liveness_is_undecidable(
     # Already serving and the probe cannot decide: only proof of death demotes a
     # deployment, so an undecided probe must not flap it.
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
-    svc = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    svc = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
     svc.endpoint.service_name = "http"
     mock_stub.ListServices.return_value = MagicMock(services=[svc])
     mock_stub.ExecSandbox.return_value = _exec_events(10)
@@ -1270,7 +1270,7 @@ async def test_config_files_not_redelivered_once_serve_is_launched(
     )
     mock_stub.GetSandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
     mock_stub.ExecSandbox.return_value = _exec_events(0)  # marker present, liveness alive
-    mock_stub.ExposeService.return_value = MagicMock(url="http://nmp-x--http.openshell.localhost:17670/")
+    mock_stub.ExposeService.return_value = MagicMock(url="http://nhx-x--http.openshell.localhost:17670/")
 
     update = await openshell_backend.read_status(workspace="default", name="srv")
 

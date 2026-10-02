@@ -63,7 +63,7 @@ rm -rf ~/.local/share/nemo
 ## 2. Create workspace and store NGC API key
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 nemo workspaces create my-workspace
 
@@ -203,7 +203,7 @@ Delete entities in reverse-dependency order (VirtualModel → middleware config 
 provider → secret → workspace).
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 # VirtualModel
 nemo inference virtual-models delete safe-llama --workspace my-workspace

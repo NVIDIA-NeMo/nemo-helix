@@ -46,17 +46,18 @@ from urllib.parse import quote
 from nemo_evaluator.intake.publish import PublishReport, publish_to_intake
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     HarborTasksetLoader,
     discover_harbor_tasks,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
-from nemo_platform import APIError, AsyncNeMoPlatform
-from nemo_platform.types.intake.trace_filter_param import TraceFilterParam
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
+from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.intake.types import TraceFilterParam
 
 #: Tasks to pull and run. Terminal-Bench 2.1 is Apache-2.0 and its tasks ship prebuilt images, so a
 #: run pulls rather than builds; these two are among its quickest.
@@ -93,7 +94,7 @@ def _harbor_cli() -> str:
         return str(candidate)
     found = shutil.which("harbor")
     if found is None:
-        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.16.1"')
+        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.20,<0.21"')
     return found
 
 
@@ -214,7 +215,7 @@ def _preflight(base_url: str, agent: str, model: str | None) -> None:
     A real-agent run costs both time and tokens, so a missing prerequisite should surface now.
     """
     if find_spec("harbor") is None:
-        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.16.1"')
+        raise SystemExit('harbor is not installed: uv pip install "harbor>=0.20,<0.21"')
     if subprocess.run(["docker", "info"], capture_output=True, check=False).returncode != 0:
         raise SystemExit("Docker is not available; Harbor runs every task in a container.")
     # Only the NIM provider reads this key. Other agents authenticate their own way, so demanding
@@ -236,7 +237,7 @@ def _preflight(base_url: str, agent: str, model: str | None) -> None:
         raise SystemExit(f"Platform at {base_url} is not ready.")
 
 
-async def _probe_intake(async_sdk: AsyncNeMoPlatform, workspace: str) -> None:
+async def _probe_intake(intake: AsyncIntakeClient, workspace: str) -> None:
     """Confirm Intake can reach ClickHouse, which platform readiness does not cover.
 
     Intake starts and reports itself ready when ClickHouse is unreachable, serving its
@@ -245,9 +246,8 @@ async def _probe_intake(async_sdk: AsyncNeMoPlatform, workspace: str) -> None:
     """
     probe: TraceFilterParam = {"session_id": "harbor-to-intake-preflight"}
     try:
-        async for _ in async_sdk.intake.traces.list(workspace=workspace, filter=probe):
-            break
-    except APIError as error:
+        (await intake.list_traces(workspace=workspace, query_params={"filter": probe, "page_size": 1})).page()
+    except NemoClientError as error:
         raise SystemExit(f"Intake cannot serve queries — is ClickHouse reachable? {error}") from error
 
 
@@ -291,7 +291,8 @@ async def _evaluate(
 
 
 async def _publish(
-    async_sdk: AsyncNeMoPlatform,
+    async_sdk: AsyncNeMoHelix,
+    intake: AsyncIntakeClient,
     result: AgentEvalResult,
     *,
     workspace: str,
@@ -316,7 +317,7 @@ async def _publish(
 
     report = await publish_to_intake(
         result,
-        client=client_from_platform(async_sdk, AsyncIntakeClient),
+        client=intake,
         experiment_id=evaluation,
         workspace=workspace,
         agent_name=agent,
@@ -330,13 +331,14 @@ async def _publish(
     return report
 
 
-async def _read_back(async_sdk: AsyncNeMoPlatform, report: PublishReport, *, workspace: str) -> None:
+async def _read_back(intake: AsyncIntakeClient, report: PublishReport, *, workspace: str) -> None:
     """Query Intake for what was just written — the trajectory and its score rows."""
     print("\nRead back from Intake:")
     for published in report.published_trials:
         trace_filter: TraceFilterParam = {"session_id": published.session_id}
-        traces = [trace async for trace in async_sdk.intake.traces.list(workspace=workspace, filter=trace_filter)]
-        rows = await async_sdk.intake.spans.evaluator_results.list(published.span_id, workspace=workspace)
+        paginator = await intake.list_traces(workspace=workspace, query_params={"filter": trace_filter})
+        traces = [trace async for trace in paginator.items()]
+        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=workspace)
         print(f"  {published.trial_id}: {len(traces)} trajectory, span {published.span_id}")
         for row in rows:
             value = row.string_value if row.data_type == "TEXT" else row.value
@@ -354,7 +356,7 @@ def _print_studio_links(
     """Print Studio URLs for what was just published.
 
     Studio mounts its SPA under ``/studio`` and the paths mirror two of the destinations Studio
-    itself publishes in ``nmp.studio.studio_links``: ``experiment_detail`` for the Evaluation and
+    itself publishes in ``nhx.studio.studio_links``: ``experiment_detail`` for the Evaluation and
     ``intake_session`` for a single trial's trajectory. The links resolve only when Studio is
     among the running services.
     """
@@ -369,14 +371,16 @@ async def _main(args: argparse.Namespace) -> None:
     _preflight(args.base_url, args.agent, args.model)
     dataset_dir = _ensure_tasks(args.tasks, args.tasks_dir)
     _validate_tasks(dataset_dir, args.tasks)
-    async with AsyncNeMoPlatform(base_url=args.base_url, max_retries=2) as async_sdk:
-        await _probe_intake(async_sdk, args.workspace)
+    async with AsyncNeMoHelix(base_url=args.base_url, max_retries=2) as async_sdk:
+        intake = client_from_platform(async_sdk, AsyncIntakeClient)
+        await _probe_intake(intake, args.workspace)
         result = await _evaluate(dataset_dir, args.tasks, agent=args.agent, model=args.model, jobs_dir=args.jobs_dir)
         # One Evaluation per run by default: a stable name makes every re-run pile more test-case
         # rows into the same list, which is rarely what you want to look at.
         evaluation = args.evaluation or _run_evaluation_name(args.dataset, result.run_id)
         report = await _publish(
             async_sdk,
+            intake,
             result,
             workspace=args.workspace,
             experiment=args.experiment,
@@ -385,7 +389,7 @@ async def _main(args: argparse.Namespace) -> None:
             agent=args.agent,
             model=args.model,
         )
-        await _read_back(async_sdk, report, workspace=args.workspace)
+        await _read_back(intake, report, workspace=args.workspace)
     _print_studio_links(
         args.base_url,
         report,
@@ -397,7 +401,7 @@ async def _main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--base-url", default=os.environ.get("NMP_BASE_URL", "http://localhost:8080"))
+    parser.add_argument("--base-url", default=os.environ.get("NHX_BASE_URL", "http://localhost:8080"))
     parser.add_argument("--workspace", default="default")
     parser.add_argument(
         "--dataset",

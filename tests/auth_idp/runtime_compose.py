@@ -6,11 +6,12 @@ from dataclasses import replace
 from typing import Callable
 
 import httpx
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.client.tls import httpx_tls_config_from_env
+from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix_plugin.client.client import NemoClient
 
 from tests.auth_idp.common import jwt_claims
-from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, TokenSet
+from tests.auth_idp.device_flow import authenticate_authentik_device_flow
+from tests.auth_idp.runtime_contract import AuthIdpCase, DeploymentWorkloadRuntimeConfig, JsonObject, TokenSet
 
 AUTHENTIK_COMPOSE_WORKLOAD_IDENTITY_PASSWORD = "svc-nemo-token-secret-e2e"
 AUTHENTIK_DEFAULT_PASSWORDS_BY_ENVVAR = {
@@ -103,39 +104,46 @@ class ComposeAuthIdpRuntime:
     def deployment_workload_runtime_config(self) -> DeploymentWorkloadRuntimeConfig:
         return DeploymentWorkloadRuntimeConfig(
             env=(
-                {"name": "NMP_BASE_URL", "value": "https://nemo-gateway:8080"},
-                {"name": "NMP_CLIENT_SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-                {"name": "SSL_CERT_FILE", "value": "/etc/nmp/gateway-tls/tls.crt"},
-                {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nmp/gateway-tls/tls.crt"},
+                {"name": "NHX_BASE_URL", "value": "https://nemo-gateway:8080"},
+                {"name": "NHX_CLIENT_SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+                {"name": "SSL_CERT_FILE", "value": "/etc/nhx/gateway-tls/tls.crt"},
+                {"name": "REQUESTS_CA_BUNDLE", "value": "/etc/nhx/gateway-tls/tls.crt"},
             ),
         )
 
-    def e2e_setup_sdk(self) -> NeMoPlatform:
-        token = self.e2e_setup_token().access_token
-        return NeMoPlatform(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def e2e_setup_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.e2e_setup_token().access_token)
 
-    def interactive_user_sdk(self) -> NeMoPlatform:
-        token = self.interactive_user_token().access_token
-        return NeMoPlatform(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def interactive_user_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.interactive_user_token().access_token)
 
-    def workload_provider_sdk(self) -> NeMoPlatform:
-        token = self.workload_platform_token().access_token
-        return NeMoPlatform(
-            base_url=self.gateway_base_url,
-            default_headers={"Authorization": f"Bearer {token}"},
-            max_retries=0,
-        )
+    def workload_provider_client(self) -> NemoClient:
+        return NemoClient(base_url=self.gateway_base_url, auth=self.workload_platform_token().access_token)
 
     def workload_role_principals(self) -> list[str]:
         return list(self.provider.workload_expected_groups)
+
+    def authenticate_device_flow(
+        self,
+        *,
+        device_authorization_endpoint: str,
+        token_endpoint: str,
+        client_id: str,
+        scope: str,
+        username: str,
+        password: str,
+        tls_config: HttpxTLSConfig,
+    ) -> JsonObject:
+        return authenticate_authentik_device_flow(
+            gateway_base_url=self.gateway_base_url,
+            device_authorization_endpoint=device_authorization_endpoint,
+            token_endpoint=token_endpoint,
+            client_id=client_id,
+            scope=scope,
+            username=username,
+            password=password,
+            tls_config=tls_config,
+        )
 
     def cleanup(self) -> None:
         if self._cleaned_up:

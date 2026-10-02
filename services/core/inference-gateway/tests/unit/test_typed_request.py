@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_platform_plugin.inference_middleware import InferenceRequest
-from nmp.core.inference_gateway.api.typed_request import build_inference_request, parse_typed_request
+from nemo_helix_plugin.inference_middleware import InferenceRequest
+from nhx.core.inference_gateway.api.typed_request import build_inference_request, parse_typed_request
 
 
 def _openai_chat_body(**extra: Any) -> dict[str, Any]:

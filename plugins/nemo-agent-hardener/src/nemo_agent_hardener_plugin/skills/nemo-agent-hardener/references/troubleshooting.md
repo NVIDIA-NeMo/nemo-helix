@@ -12,7 +12,7 @@ Symptom → cause → fix. Every entry here has actually happened.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Studio run (or job) stuck in `created` forever, no error | the platform is running without the jobs controller | restart with `nemo services run … --controllers jobs` |
-| Studio shows "404 Error" on the Agent Hardener route, or renders a blank/naked page; browser console shows `Invalid URL: STUDIO_UI_VITE_PLATFORM_BASE_URL/apis/...` | the platform was started without a Studio base URL, so that build-time marker is never substituted and *every* Studio API call fails — it looks like a plugin bug but breaks all of Studio | restart with `NMP_STUDIO_PLATFORM_BASE_URL=$NMP_BASE_URL` set |
+| Studio shows "404 Error" on the Agent Hardener route, or renders a blank/naked page; browser console shows `Invalid URL: STUDIO_UI_VITE_PLATFORM_BASE_URL/apis/...` | the platform was started without a Studio base URL, so that build-time marker is never substituted and *every* Studio API call fails — it looks like a plugin bug but breaks all of Studio | restart with `NHX_STUDIO_PLATFORM_BASE_URL=$NHX_BASE_URL` set |
 | `Port 8000 already in use` at victim start | another war-game, or a stale port-forward from a previous run | `lsof -iTCP:8000 -sTCP:LISTEN`, kill the holder, or pass `--port` |
 | `nemo agents create` fails on upload size | run state or venvs staged next to `agent.yaml` (the upload is capped at ~900 KB / 500 files) | register from a clean directory holding only the agent's own files |
 

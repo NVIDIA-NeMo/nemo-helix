@@ -20,7 +20,7 @@ from nemo_evaluator.sdk.result_resources import (
     EvaluatorEvalResultsResource,
 )
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 
 _BASE = "http://localhost:8080/apis/evaluator/v2/workspaces/default"
 

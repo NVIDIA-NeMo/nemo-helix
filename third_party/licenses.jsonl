@@ -243,10 +243,12 @@
 {"name": "nemo-fabric-adapters-common", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-deepagents", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-hermes", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-collector", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-runtime", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay-cli-bin", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-safe-synthesizer", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-switchyard", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemoguardrails", "license": "APACHE-2.0", "compatible": true}
 {"name": "nest-asyncio", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "nest-asyncio2", "license": "BSD-3-CLAUSE", "compatible": true}

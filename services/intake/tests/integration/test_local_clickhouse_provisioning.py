@@ -11,13 +11,13 @@ from uuid import uuid4
 
 import pytest
 from docker.errors import DockerException, NotFound
-from nmp.intake.local_clickhouse import (
+from nhx.intake.local_clickhouse import (
     CLICKHOUSE_HTTP_PORT_KEY,
     _managed_container_name,
     _reconcile_local_clickhouse,
     remove_local_clickhouse,
 )
-from nmp.intake.spans.clickhouse_client import ClickHouseSettings
+from nhx.intake.spans.clickhouse_client import ClickHouseSettings
 
 import docker
 
@@ -37,7 +37,7 @@ def _docker_is_available() -> bool:
 
 @pytest.mark.integration
 # Serialize with evaluator integration tests that own the legacy fixed-port container.
-@pytest.mark.xdist_group("nmp_intake_clickhouse")
+@pytest.mark.xdist_group("nhx_intake_clickhouse")
 def test_data_directory_owned_container_uses_dynamic_loopback_port_and_is_reused(
     tmp_path: Path,
 ) -> None:

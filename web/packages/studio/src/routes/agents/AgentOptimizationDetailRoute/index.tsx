@@ -9,8 +9,8 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
-import { useAgentsGetOptimizeJob } from '@nemo/sdk/generated/agents/agents';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { useAgentOptimizationGetRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Flex, PageHeader, Panel, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDataView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -25,8 +25,9 @@ import { ScrollText } from 'lucide-react';
 import { type FC, useEffect } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
-const TERMINAL_STATUSES = new Set<PlatformJobStatus>(['completed', 'error', 'cancelled']);
-const FAILED_STATUSES = new Set<PlatformJobStatus>(['error', 'cancelled']);
+const TERMINAL_STATUSES = new Set<HelixJobStatus>(['completed', 'error', 'cancelled']);
+const FAILED_STATUSES = new Set<HelixJobStatus>(['error', 'cancelled']);
+const QUEUED_STATUSES = new Set<HelixJobStatus>(['created', 'pending']);
 
 export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -36,7 +37,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
     data: job,
     isLoading: isLoadingJob,
     error: jobError,
-  } = useAgentsGetOptimizeJob(workspace, jobName, {
+  } = useAgentOptimizationGetRunStrategyJob(workspace, jobName, {
     query: {
       enabled: !!workspace && !!jobName,
       refetchInterval: (query) =>
@@ -49,6 +50,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
   const status = job?.status ?? undefined;
   const isTerminal = status ? TERMINAL_STATUSES.has(status) : false;
   const hasFailed = status ? FAILED_STATUSES.has(status) : false;
+  const isQueued = status ? QUEUED_STATUSES.has(status) : false;
   const agentName = job?.spec?.agent?.split('/').pop() ?? undefined;
 
   const { setBreadcrumbs } = useBreadcrumbs();
@@ -153,9 +155,21 @@ export const AgentOptimizationDetailRoute: FC = () => {
             </Panel>
           </>
         ) : !isTerminal ? (
-          <Text kind="body/regular/md" className="text-secondary">
-            Trials appear once the study finishes.
-          </Text>
+          <Flex
+            direction="col"
+            align="center"
+            justify="center"
+            gap="3"
+            className="min-h-[200px] w-full"
+            data-testid="study-in-progress"
+          >
+            <Spinner size="medium" aria-label={isQueued ? 'Study queued' : 'Study running'} />
+            <Text kind="body/regular/md" className="text-secondary" role="status">
+              {isQueued
+                ? 'Waiting for the study to start. Trials appear once it finishes.'
+                : 'Trials appear once the study finishes.'}
+            </Text>
+          </Flex>
         ) : isResultsError ? (
           <ErrorMessage
             header="Could not load trials"

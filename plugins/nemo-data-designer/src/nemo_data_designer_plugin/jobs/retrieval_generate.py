@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+from typing import Any, ClassVar
 
-from data_designer_nemo.context import create_validation_context
+from data_designer_nemo.context.validation import create_validation_context
 from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work_dir
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from pydantic import BaseModel
 
 
@@ -30,13 +30,17 @@ class RetrievalGenerateJob(NemoJob):
     async def to_spec(
         cls,
         input_spec: BaseModel,
+        *,
         workspace: str,
         entity_client: object,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
-        async_sdk = cast(AsyncNeMoPlatform, async_sdk)
-        job_config = cast(RetrievalGenerateJobConfig, input_spec)
+        job_config = (
+            input_spec
+            if isinstance(input_spec, RetrievalGenerateJobConfig)
+            else RetrievalGenerateJobConfig.model_validate(input_spec.model_dump())
+        )
         dd_ctx = create_validation_context(async_sdk, workspace)
         model_configs = build_retrieval_model_configs(
             provider=job_config.provider,
@@ -58,29 +62,34 @@ class RetrievalGenerateJob(NemoJob):
     @classmethod
     async def compile(
         cls,
+        *,
         workspace: str,
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: object,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
-        options: dict | None = None,
-    ) -> PlatformJobSpec:
-        spec = cast(RetrievalGenerateStepConfig, spec)
-        return PlatformJobSpec(
+        options: dict[str, Any] | None = None,
+    ) -> HelixJobSpec:
+        canonical_spec = (
+            spec
+            if isinstance(spec, RetrievalGenerateStepConfig)
+            else RetrievalGenerateStepConfig.model_validate(spec.model_dump())
+        )
+        return HelixJobSpec(
             steps=[
                 await retrieval_step(
                     "retrieval-generate",
                     "nemo_data_designer_plugin.jobs.retrieval_generate",
-                    spec,
+                    canonical_spec,
                     profile=profile,
                     async_sdk=async_sdk,
-                    hf_token_secret=spec.job_config.hf_token_secret,
+                    hf_token_secret=canonical_spec.job_config.hf_token_secret,
                 )
             ]
         )
 
-    def run(self, config: dict, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         from nemo_data_designer_plugin.retrieval.generation import build_generation_run_config, execute_generation
 
         step = RetrievalGenerateStepConfig.model_validate(config)
@@ -107,6 +116,10 @@ class RetrievalGenerateJob(NemoJob):
             sentences_per_chunk=job.sentences_per_chunk,
             num_sections=job.num_sections,
             num_files=job.num_files,
+            multi_doc=job.multi_doc,
+            bundle_size=job.bundle_size,
+            bundle_strategy=job.bundle_strategy,
+            max_docs_per_bundle=job.max_docs_per_bundle,
             max_artifacts_per_type=job.max_artifacts_per_type,
             num_pairs=job.num_pairs,
             query_counts=job.query_counts,
@@ -115,6 +128,7 @@ class RetrievalGenerateJob(NemoJob):
             reasoning_counts=job.reasoning_counts,
             min_complexity=job.min_complexity,
             similarity_threshold=job.similarity_threshold,
+            max_parallel_requests_for_gen=job.max_parallel_requests_for_gen,
             buffer_size=job.buffer_size,
             resume=job.resume,
             num_records=job.num_records,
@@ -128,8 +142,8 @@ class RetrievalGenerateJob(NemoJob):
         return {
             "exit_code": 0,
             "workspace": ctx.workspace,
-            "dataset_name": getattr(result, "dataset_name", job.dataset_name or job.corpus_id),
-            "num_records": getattr(result, "num_records", None),
+            "dataset_name": result.dataset_name,
+            "num_records": result.num_records,
             "results": {"artifacts": artifacts.model_dump()},
         }
 

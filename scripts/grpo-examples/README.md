@@ -5,7 +5,7 @@
 
 **These are examples.** Nothing in the platform calls them, and they define no behaviour: the
 supported contract is the environment FileSet layout that
-`nmp.rl.tasks.environment.validate` defines. Use them to get a working environment and dataset
+`nhx.rl.tasks.environment.validate` defines. Use them to get a working environment and dataset
 quickly, or as a starting point for your own.
 
 A GRPO job needs three things that no deployment creates for you — a model entity, an
@@ -17,7 +17,7 @@ A GRPO job needs three things that no deployment creates for you — a model ent
 | Requirement | Check | If missing |
 |---|---|---|
 | Platform on `platform.runtime: kubernetes` | `nemo jobs list-execution-profiles -f json` reports `backend: kubernetes_job` | GRPO cannot run; refer to the skill's `rl-kubernetes-runtime.md` |
-| Sandboxed Gym enabled | operator has set `NMP_SANDBOX_CLUSTER_CAPABLE` and `NMP_RL_JOB_STORAGE_PVC_CLAIM` | Submit fails before any GPU is claimed. Operator-only |
+| Sandboxed Gym enabled | operator has set `NHX_SANDBOX_CLUSTER_CAPABLE` and `NHX_RL_JOB_STORAGE_PVC_CLAIM` | Submit fails before any GPU is claimed. Operator-only |
 | A NeMo Gym checkout | `ls $GYM_ROOT/resources_servers` | Gym is **not** vendored here: `git clone https://github.com/NVIDIA-NeMo/Gym ~/workspace/Gym` |
 | Internet on **this** host | — | `wheels-v1` resolves a wheel closure; the dataset script pulls from HuggingFace |
 
@@ -28,21 +28,19 @@ A GRPO job needs three things that no deployment creates for you — a model ent
 ```bash
 uv run scripts/grpo-examples/gym_to_env_package.py \
   --gym-root ~/workspace/Gym \
+  --nemo-rl-root ~/workspace/RL \
   --server resources_servers/math_with_judge \
   --format wheels-v1 --arch x86_64 \
-  --expect-nemo-gym-version <v> --ray-version <v> --openai-version <v> \
   --out-dir /tmp/mwj-env
 ```
 
-`wheels-v1` requires those three versions, because Gym pins every per-server virtualenv to the
-training image's `nemo-gym`, `ray` and `openai`. A closure built against different ones is
-ignored and resolved from an index instead. Read all three from the image:
-
-```bash
-docker run --rm <training-image> sh -c \
-  'PY=$(ls -d /opt/ray_venvs/*NemoGym*/bin/python | head -1); "${PY:-python}" -c \
-   "import importlib.metadata as m; print(m.version(\"nemo-gym\"), m.version(\"ray\"), m.version(\"openai\"))"'
-```
+`wheels-v1` vendors the versions the training image runs. Gym pins every per-server virtualenv
+to that `nemo-gym`, `ray` and `openai`, and a closure built against different ones is ignored
+and resolved from an index instead. `--nemo-rl-root` is the NeMo-RL checkout at the commit
+`NEMO_RL_REF` pins; the caller fetches it. `ray` comes from its `uv.lock`, and `openai` from
+the version the `nemo-gym` package in that lock selects (the lock also carries a second openai
+for other extras). `nemo-gym` comes from `--gym-root`'s `package_info.py`, which must be the
+Gym commit that checkout records.
 
 The same script emits `native-v1` — one flag, not a second script:
 
@@ -59,8 +57,8 @@ The two differ in exactly two ways, both handled for you:
 | | `wheels-v1` | `native-v1` |
 |---|---|---|
 | `wheels/` | full closure vendored | absent — resolved from a package index at job start |
-| `policy_model.yaml` | `configs/` | `responses_api_models/vllm_model/configs/` (the format requires a Gym server prefix) |
-| Cluster egress at job start | not needed | **required** (`NMP_RL_SANDBOX_ALLOW_INTERNET`) |
+| `policy_model.yaml` | `configs/` | beside the packaged server's `configs/` (the format requires a Gym server prefix) |
+| Cluster egress at job start | not needed | **required** (`NHX_RL_SANDBOX_ALLOW_INTERNET`) |
 
 `--arch` is ignored for `native-v1`, since it vendors nothing.
 
@@ -71,7 +69,7 @@ The two differ in exactly two ways, both handled for you:
 | `--format` | `wheels-v1` vendors the closure and needs no egress at job start; `native-v1` ships no wheels and resolves from an index, so the cluster must allow internet |
 | `--arch` | `x86_64` or `aarch64` — the training images ship for both, so match the nodes: `kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'` |
 | `--config` | Repeatable. Defaults to `<implementation>.yaml`; other configs in the directory usually pair the server with an agent this package does not carry |
-| `--expect-nemo-gym-version` | Fail unless the checkout builds this exact version. Gym pins each per-server venv to the image's `nemo-gym` version, so a mismatch is silently resolved from PyPI instead |
+| `--nemo-rl-root` | Required for `wheels-v1`. NeMo-RL checkout at the `NEMO_RL_REF` commit. Its `[tool.uv]` limits the wheelhouse, and its `uv.lock` supplies ray and openai |
 
 It copies the server tree (dropping `data/`, `tests/` and any `.jsonl`), strips inline
 `datasets:` blocks pointing at in-tree files, writes `policy_model.yaml` where the format
@@ -81,7 +79,7 @@ For a `verifiers` / Prime Intellect environment use the converter instead, which
 checkout — note it vendors `x86_64` wheels today:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+uv run --package nhx-rl pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --dataset-dir ./ascii-tree-data --validation-fraction 0.1
 ```
@@ -100,7 +98,7 @@ uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
 ## 3. Validate and upload
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
 
 nemo files filesets create math-with-judge-env -w default --purpose environment --exist-ok
 nemo files upload /tmp/mwj-env/ math-with-judge-env -w default

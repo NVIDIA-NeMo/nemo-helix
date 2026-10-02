@@ -753,7 +753,7 @@ def main() -> None:
         id_generator=DeterministicIdGenerator(seed=f"type-showcase:{workspace}"),
     )
     provider.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
-    tracer = provider.get_tracer("nmp.intake.spans.type_showcase")
+    tracer = provider.get_tracer("nhx.intake.spans.type_showcase")
 
     seeder = Seeder(tracer)
     print(f"=== Seeding span-type showcase into workspace '{workspace}' ===")
@@ -808,7 +808,7 @@ def _preflight(base_url: str, workspace: str) -> None:
         response = httpx.get(_replace_path(base_url, "/openapi.json"), timeout=3.0)
         response.raise_for_status()
     except Exception as exc:
-        raise SystemExit(f"Cannot reach NeMo Platform at {base_url}: {exc}") from exc
+        raise SystemExit(f"Cannot reach NeMo Helix at {base_url}: {exc}") from exc
     # Confirm the workspace exists (Intake validates workspace access on ingest).
     probe = httpx.get(
         f"{base_url}/apis/intake/v2/workspaces/{workspace}/traces",

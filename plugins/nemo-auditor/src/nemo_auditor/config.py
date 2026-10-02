@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 
 
 class AuditorPluginConfig(NemoConfig):
@@ -17,7 +17,7 @@ class AuditorPluginConfig(NemoConfig):
     # "default" is registered out of the box on every runtime (Docker and Kubernetes),
     # so audit jobs work without extra config in CI/k8s. Deployments that redirect
     # cpu/default to a non-container backend (e.g. local dev's subprocess translation
-    # workaround, see packages/nmp_platform/config/local.yaml) should register a
+    # workaround, see packages/nhx_platform/config/local.yaml) should register a
     # dedicated container-backed profile and point this at it instead.
     job_executor_profile: str = "default"
 

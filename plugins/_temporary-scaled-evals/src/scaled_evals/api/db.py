@@ -28,6 +28,7 @@ from scaled_evals.api.repositories import (
     TaskRepository,
     UserRepository,
 )
+from scaled_evals.api.repositories.benchmark_archive_repository import BenchmarkArchiveRepository
 from scaled_evals.api.settings import settings
 
 _pool: ConnectionPool | None = None
@@ -91,6 +92,10 @@ class Database:
     @property
     def benchmark_imports(self) -> BenchmarkImportRepository:
         return BenchmarkImportRepository(self.conn)
+
+    @property
+    def benchmark_archives(self) -> BenchmarkArchiveRepository:
+        return BenchmarkArchiveRepository(self.conn)
 
     @property
     def benchmark_runs(self) -> BenchmarkRunRepository:

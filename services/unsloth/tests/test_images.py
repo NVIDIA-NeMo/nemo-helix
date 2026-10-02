@@ -3,13 +3,13 @@
 
 from types import SimpleNamespace
 
-import nemo_platform_plugin.jobs.image as platform_image
-import nmp.customization_common.service.images as shared_images
-import nmp.unsloth.images as unsloth_images
+import nemo_helix_plugin.jobs.image as platform_image
+import nhx.customization_common.service.images as shared_images
+import nhx.unsloth.images as unsloth_images
 import pytest
-from nmp.customization_common.service.images import CUSTOMIZER_TASKS_IMAGE_NAME
-from nmp.unsloth.config import UnslothConfig
-from nmp.unsloth.images import (
+from nhx.customization_common.service.images import CUSTOMIZER_TASKS_IMAGE_NAME
+from nhx.unsloth.config import UnslothConfig
+from nhx.unsloth.images import (
     TRAINING_IMAGE_NAME,
     get_tasks_image,
     get_training_image,
@@ -56,10 +56,10 @@ def test_unsloth_tasks_image_override(monkeypatch, platform_config):
         unsloth_images,
         "config",
         UnslothConfig(
-            tasks_image="my-registry/nemo-platform-dev/nmp-customizer-tasks:dev",
-            training_image="my-registry/nemo-platform-dev/nmp-unsloth-training:dev",
+            tasks_image="my-registry/nemo-helix-dev/nhx-customizer-tasks:dev",
+            training_image="my-registry/nemo-helix-dev/nhx-unsloth-training:dev",
         ),
     )
 
-    assert get_tasks_image() == "my-registry/nemo-platform-dev/nmp-customizer-tasks:dev"
-    assert get_training_image() == "my-registry/nemo-platform-dev/nmp-unsloth-training:dev"
+    assert get_tasks_image() == "my-registry/nemo-helix-dev/nhx-customizer-tasks:dev"
+    assert get_training_image() == "my-registry/nemo-helix-dev/nhx-unsloth-training:dev"

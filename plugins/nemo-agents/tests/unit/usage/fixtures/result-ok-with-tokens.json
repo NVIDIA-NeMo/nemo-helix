@@ -2,7 +2,7 @@
   "task": "workspace-basic-mcp",
   "timestamp": "20260429T220000Z",
   "output_dir": "/tmp/nat-jobs/20260429T220000Z-workspace-basic-mcp",
-  "image": "nmp-nat-workspace-basic-mcp:latest",
+  "image": "nhx-nat-workspace-basic-mcp:latest",
   "build": "ok",
   "agent": "ok",
   "verify": "ok",

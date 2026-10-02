@@ -13,13 +13,13 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
-from nmp.intake.api.v2.experiments.endpoints import _rewrite_facet_filters
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.entities.experiments import Experiment
-from nmp.intake.service import IntakeService
-from nmp.testing import ClientContext, create_test_client
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.intake.api.v2.experiments.dependencies import get_evaluation_rollup_repository
+from nhx.intake.api.v2.experiments.endpoints import _rewrite_facet_filters
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.entities.experiments import Experiment
+from nhx.intake.service import IntakeService
+from nhx.testing import ClientContext, create_test_client
 
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"

@@ -14,7 +14,7 @@ works even when the ``nemo-deployments[openshell]`` extra is not installed.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.sandbox import SandboxImageProfile, SandboxUser
+from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
 
 # Without ``nftables`` the supervisor falls back to a degraded policy mode. The
 # glibc >= 2.39 floor its binary needs is described rather than enforced: the

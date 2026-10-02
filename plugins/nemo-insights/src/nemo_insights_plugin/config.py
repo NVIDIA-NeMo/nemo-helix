@@ -7,7 +7,7 @@ from enum import IntEnum, StrEnum
 from typing import ClassVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import BaseModel, Field, field_validator
 
 

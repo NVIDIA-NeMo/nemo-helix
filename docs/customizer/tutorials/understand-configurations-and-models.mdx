@@ -29,7 +29,7 @@ This tutorial focuses on understanding and discovery—no actual training jobs a
 
 ### What is a Model Entity?
 
-A **Model Entity** represents a model registered in the NeMo Platform. It contains:
+A **Model Entity** represents a model registered in the NeMo Helix. It contains:
 
 1. **FileSet Reference**: Points to the model checkpoint files (weights, config, tokenizer)
 2. **Model Spec**: Auto-populated metadata about the model architecture (layers, parameters, etc.)
@@ -79,11 +79,11 @@ Upload your model checkpoint files (from Hugging Face, NGC, or local storage) to
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix import NeMoHelix
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -372,15 +372,15 @@ flowchart TD
 
 | Model Type | Status | Details |
 | --- | --- | --- |
-| **Embedding Models** | ✅ Supported | **Model**: Llama 3.2 NV EmbedQA 1B for question-answering and retrieval tasks **Use Cases**: Semantic search, document retrieval, question-answering systems, RAG pipelines **Note**: Typically disabled by default—contact your administrator for access |
-| **Reranking Models** | ❌ Not Supported | **Alternative**: Use embedding models for retrieval tasks, or implement reranking in your application layer |
+| **Embedding Models** | ✅ Supported | **Defaults**: Nemotron 3 Embed 1B (`nvidia/Nemotron-3-Embed-1B-BF16`, `training.recipe: bi_encoder`, Retriever NIM `nemotron-3-embed-1b:2.2.0`) and Llama Nemotron Embed 1B v2. Use cases: semantic search, RAG first-stage retrieval. |
+| **Reranking Models** | ✅ Supported | **Model**: Llama Nemotron Rerank 1B v2 with `training.recipe: cross_encoder`. Automodel merges to a Hugging Face sequence-classification checkpoint, then exports ONNX (`logits`) with HF weights under `alternates/hf/` for Ranking NIM `llama-nemotron-rerank-1b-v2:1.10.0`. |
 
 ### Importing Custom Models
 
 You can import a Hugging Face checkpoint into a FileSet and register it as a Model Entity:
 
 ```python
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 # Create FileSet from Hugging Face
 fileset = client.files.filesets.create(

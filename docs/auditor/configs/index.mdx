@@ -7,17 +7,17 @@ description: ""
 ---
 <a id="auditor-configs"></a>
 
-An `AuditConfig` selects which garak probes and detectors run during an audit, how many generations to make per probe, and where the reports land. Configurations are persisted in the NeMo Platform entity store and referenced by name from `client.auditor.run(...)`.
+An `AuditConfig` selects which garak probes and detectors run during an audit, how many generations to make per probe, and where the reports land. Configurations are persisted in the NeMo Helix entity store and referenced by name from `client.auditor.run(...)`.
 
 ## Initialize the SDK
 
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

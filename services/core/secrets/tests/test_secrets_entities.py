@@ -2,22 +2,22 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
-from nmp.common.secrets.encryption import (
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from nhx.common.secrets.encryption import (
     SecretKeyEncryptor,
     SecretKeyEncryptorConfig,
     envelope_decrypt,
     envelope_encrypt,
 )
-from nmp.core.secrets.entities import PlatformSecret
+from nhx.core.secrets.entities import HelixSecret
 from pydantic import SecretStr
 
 
 async def test_list_secrets_entities_empty(client_context):
     workspace = "default"
-    response = await client_context.entity_client.list(PlatformSecret, workspace=workspace, page_size=10)
+    response = await client_context.entity_client.list(HelixSecret, workspace=workspace, page_size=10)
     assert response.data == []
     assert response.pagination.total_results == 0
 
@@ -37,7 +37,7 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
 
     # Envelope encrypt the secret value
     encrypted_data, encrypted_dek, provider_name = envelope_encrypt(old_encryptor, secret_value)
-    secret = PlatformSecret(
+    secret = HelixSecret(
         name=secret_name,
         workspace="default",
         description="Test secret created via EntityClient",
@@ -65,7 +65,7 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
     new_secret_name = "entity-client-new-secret"
     new_secret_value = "newsupersecret"
     new_created_secret = secrets.create_secret(
-        body=PlatformSecretCreateRequest(
+        body=HelixSecretCreateRequest(
             name=new_secret_name,
             value=SecretStr(new_secret_value),
             description="New secret with current provider",
@@ -81,7 +81,7 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
 
     # Now, access the new secret via the entity client, and try decrypting with the older provider. This should fail.
     retrieved_new_secret = await client_context.entity_client.get(
-        PlatformSecret, workspace="default", name=new_secret_name
+        HelixSecret, workspace="default", name=new_secret_name
     )
     assert retrieved_new_secret.name == new_secret_name
 

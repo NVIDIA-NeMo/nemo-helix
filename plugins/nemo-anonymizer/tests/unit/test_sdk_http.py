@@ -10,9 +10,9 @@ import pytest
 from nemo_anonymizer_plugin.sdk import http
 
 
-def _platform(*, workspace: str | None = "default") -> http.PlatformClient:
+def _platform(*, workspace: str | None = "default") -> http.HelixClient:
     return cast(
-        http.PlatformClient,
+        http.HelixClient,
         SimpleNamespace(
             base_url="https://platform.test/",
             workspace=workspace,

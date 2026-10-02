@@ -9,17 +9,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nmp.rl.schemas.environment import (
+from nhx.rl.schemas.environment import (
     AdapterWheelsV1Manifest,
     EnvironmentFormat,
     GymVerifiersDatasetRow,
 )
-from nmp.rl.tasks.environment.package import (
+from nhx.rl.tasks.environment.package import (
     build_policy_model_yaml,
     build_verifiers_agent_yaml,
     write_adapter_wheels_package,
 )
-from nmp.rl.tasks.environment.validate import (
+from nhx.rl.tasks.environment.validate import (
     EnvironmentPackageValidationError,
     load_manifest,
     offline_wheel_install_required,
@@ -186,7 +186,7 @@ def test_policy_model_interpolations_match_what_nemo_rl_injects() -> None:
 
 
 def test_bootstrap_adapter_wheels_validate_only(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.bootstrap import bootstrap_environment_package
+    from nhx.rl.tasks.environment.bootstrap import bootstrap_environment_package
 
     wheels = tmp_path / "src_wheels"
     wheels.mkdir()
@@ -203,7 +203,7 @@ def test_bootstrap_adapter_wheels_validate_only(tmp_path: Path) -> None:
 
 
 def test_convert_with_wheels_dir_writes_layout(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     wheels = tmp_path / "prebuilt"
     wheels.mkdir()
@@ -228,7 +228,7 @@ def test_convert_with_wheels_dir_writes_layout(tmp_path: Path) -> None:
 
 
 def test_convert_rejects_empty_wheels_dir(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -250,8 +250,8 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
     import sys
     from types import ModuleType
 
-    from nmp.rl.tasks.environment import convert as convert_mod
-    from nmp.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
+    from nhx.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment.convert import ConvertEnvironmentSpec, convert_prime_environment
 
     wheels = tmp_path / "prebuilt"
     wheels.mkdir()
@@ -340,7 +340,7 @@ def test_convert_vendors_hub_dataset_and_configures_its_sandbox_path(tmp_path: P
 
 def test_split_train_validation_never_overlaps() -> None:
     """The old `or all_rows` fallback made train and validation identical."""
-    from nmp.rl.tasks.environment.convert import split_train_validation
+    from nhx.rl.tasks.environment.convert import split_train_validation
 
     rows = [{"task_idx": i} for i in range(10)]
     train, val = split_train_validation(rows, 0.2)
@@ -356,7 +356,7 @@ def test_split_train_validation_never_overlaps() -> None:
 
 @pytest.mark.parametrize(("n_rows", "fraction"), [(1, 0.2), (5, 1.0), (10, 1.0)])
 def test_split_train_validation_rejects_empty_training_set(n_rows: int, fraction: float) -> None:
-    from nmp.rl.tasks.environment.convert import split_train_validation
+    from nhx.rl.tasks.environment.convert import split_train_validation
 
     rows = [{"task_idx": i} for i in range(n_rows)]
     with pytest.raises(ValueError, match="leaves no training rows"):
@@ -366,7 +366,7 @@ def test_split_train_validation_rejects_empty_training_set(n_rows: int, fraction
 def test_validation_fraction_cli_rejects_out_of_range() -> None:
     import argparse
 
-    from nmp.rl.tasks.environment.__main__ import _validation_fraction
+    from nhx.rl.tasks.environment.__main__ import _validation_fraction
 
     assert _validation_fraction("0.2") == 0.2
     assert _validation_fraction("0") == 0.0
@@ -376,7 +376,7 @@ def test_validation_fraction_cli_rejects_out_of_range() -> None:
 
 
 def test_wheel_version_prefers_numeric_order_over_lexicographic() -> None:
-    from nmp.rl.tasks.environment.convert import _wheel_version
+    from nhx.rl.tasks.environment.convert import _wheel_version
 
     wheels = [
         Path("ascii_tree-0.9.0-py3-none-any.whl"),
@@ -420,7 +420,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
     minutes into the job. Resolving to a pinned file and downloading it with --no-deps is
     what makes the output one-file-per-distribution.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 
@@ -459,7 +459,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
 
 def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_path: Path, monkeypatch) -> None:
     """Source-only releases must become target-Python wheels; dropping them breaks offline Gym."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
     monkeypatch.setattr(convert_mod.sys, "executable", "/host/python3.12")
@@ -497,7 +497,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
         "run",
         "--no-project",
         "--python",
-        convert_mod.TARGET_PYTHON_VERSION,
+        convert_mod._sdist_build_python(),
         "--with",
         "pip",
         "python",
@@ -510,7 +510,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
 
 
 def test_complete_wheel_closure_rejects_missing_distribution(tmp_path: Path) -> None:
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -524,7 +524,7 @@ def test_complete_wheel_closure_rejects_missing_distribution(tmp_path: Path) -> 
 
 def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypatch) -> None:
     """Hub install must not rebuild verifiers from a zip sitting next to the wheel."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -545,7 +545,7 @@ def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypat
 
 def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: Path, monkeypatch) -> None:
     """Both roots have to reach the resolver, or the closure is missing one of them."""
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     seen: dict[str, str] = {}
 
@@ -566,20 +566,26 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
             hub_id="primeintellect/ascii-tree",
             out_dir=tmp_path / "env",
             extra_wheels=("some-extra",),
+            ray_version="2.56.1",
+            openai_version="2.6.1",
         ),
         work_dir=tmp_path / "work",
     )
 
+    # One resolve covering the environment and the venv Gym builds around it.
     assert seen["in"].splitlines() == [
         convert_mod.DEFAULT_VERIFIERS_SPEC,
         "ascii_tree",
         "some-extra",
+        *convert_mod.GYM_VENV_REQUIREMENTS,
+        "ray[default]==2.56.1",
+        "openai==2.6.1",
     ]
 
 
 def test_duplicate_wheel_distributions_reports_only_repeats(tmp_path: Path) -> None:
     """Normalized per PEP 503, so `charset_normalizer` and `charset-normalizer` are one."""
-    from nmp.rl.tasks.environment.validate import duplicate_wheel_distributions
+    from nhx.rl.tasks.environment.validate import duplicate_wheel_distributions
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -602,7 +608,7 @@ def test_validate_package_layout_warns_on_duplicate_wheels(tmp_path: Path, caplo
     """A package that does not pin its own closure must say so at validation time."""
     import logging
 
-    from nmp.rl.tasks.environment.package import write_adapter_wheels_package
+    from nhx.rl.tasks.environment.package import write_adapter_wheels_package
 
     src = tmp_path / "prebuilt"
     src.mkdir()
@@ -620,6 +626,381 @@ def test_validate_package_layout_warns_on_duplicate_wheels(tmp_path: Path, caplo
     assert "2 versions of xxhash" in caplog.text
 
 
+def _fake_nemo_rl_checkout(root: Path, *, ray: str = "2.56.1", openai: str = "2.6.1") -> Path:
+    """Minimal stand-in for a NeMo-RL checkout with submodules."""
+    gym = root / "3rdparty/Gym-workspace/Gym"
+    gym.mkdir(parents=True)
+    (gym / "pyproject.toml").write_text('[project]\nname = "nemo-gym"\n', encoding="utf-8")
+    (root / "uv.lock").write_text(
+        f'[[package]]\nname = "ray"\nversion = "{ray}"\n\n'
+        f'[[package]]\nname = "openai"\nversion = "{openai}"\n\n'
+        '[[package]]\nname = "nemo-gym"\nsource = {{ editable = "." }}\n'.replace("{{", "{").replace("}}", "}"),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_nemo_rl_root_derives_gym_root_and_image_pins(tmp_path: Path) -> None:
+    """The checkout the image is built from carries all three; nothing is looked up by hand."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    gym_root, ray_version, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        )
+    )
+    assert gym_root == rl / "3rdparty/Gym-workspace/Gym"
+    assert (ray_version, openai_version) == ("2.56.1", "2.6.1")
+
+
+def test_nemo_gym_dependency_wins_when_the_lock_has_two_openai_versions(tmp_path: Path) -> None:
+    """sglang pins a second openai. Gym's per-server venvs use the nemo-gym edge."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL", openai="2.6.1")
+    (rl / "uv.lock").write_text(
+        '[[package]]\nname = "ray"\nversion = "2.56.1"\n\n'
+        '[[package]]\nname = "openai"\nversion = "2.6.1"\n\n'
+        '[[package]]\nname = "openai"\nversion = "2.44.0"\n\n'
+        '[[package]]\nname = "nemo-gym"\nsource = { editable = "." }\n'
+        'dependencies = [{ name = "openai", version = "2.44.0" }]\n',
+        encoding="utf-8",
+    )
+    _, _, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        )
+    )
+    assert openai_version == "2.44.0"
+
+
+def test_explicit_versions_win_over_the_lock(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    _, ray_version, openai_version = convert_mod._resolve_image_pins(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            nemo_rl_root=rl,
+            ray_version="9.9.9",
+        )
+    )
+    assert (ray_version, openai_version) == ("9.9.9", "2.6.1")
+
+
+def test_nemo_rl_root_without_submodules_is_rejected(tmp_path: Path) -> None:
+    """A checkout cloned without --recurse-submodules has an empty Gym directory."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "uv.lock").write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="recurse-submodules"):
+        convert_mod._resolve_image_pins(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+            )
+        )
+
+
+def test_nemo_rl_root_must_be_a_checkout(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = tmp_path / "RL"
+    (rl / "3rdparty/Gym-workspace/Gym").mkdir(parents=True)
+    (rl / "3rdparty/Gym-workspace/Gym/pyproject.toml").write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no uv.lock"):
+        convert_mod._resolve_image_pins(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+            )
+        )
+
+
+def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkeypatch) -> None:
+    """nemo-gym is not on an index, so its deps only reach the closure via --gym-root."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    seen: dict[str, str] = {}
+
+    def _fake_run(cmd, **kwargs):
+        if cmd[:3] == ["uv", "build", "--wheel"]:
+            out = Path(cmd[cmd.index("--out-dir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        elif "compile" in cmd:
+            seen["in"] = Path(cmd[3]).read_text(encoding="utf-8")
+            Path(cmd[cmd.index("--output-file") + 1]).write_text("", encoding="utf-8")
+        else:
+            dest = Path(cmd[cmd.index("--dest") + 1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+            (dest / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            gym_root=tmp_path / "Gym",
+            nemo_gym_version="0.5.0rc0",
+            ray_version="2.56.1",
+            openai_version="2.6.1",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    lines = seen["in"].splitlines()
+    assert any(ln.startswith("nemo-gym[dev] @ file://") and ln.endswith(".whl") for ln in lines)
+    assert "ray[default]==2.56.1" in lines
+    assert "openai==2.6.1" in lines
+    shipped = list((tmp_path / "work" / "wheels").glob("*.whl"))
+    assert [path.name for path in shipped] == ["ascii_tree-0.1.5-py3-none-any.whl"]
+
+
+def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """A checkout off the image's commit silently yields a wheel Gym would ignore."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    def _fake_run(cmd, **kwargs):
+        out = Path(cmd[cmd.index("--out-dir") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "nemo_gym-0.4.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    with pytest.raises(RuntimeError, match="builds nemo-gym 0.4.0 but the image reports 0.5.0rc0"):
+        convert_mod._agent_closure_requirements(
+            convert_mod.ConvertEnvironmentSpec(
+                hub_id="primeintellect/ascii-tree",
+                out_dir=tmp_path / "env",
+                gym_root=tmp_path / "Gym",
+                nemo_gym_version="0.5.0rc0",
+            ),
+            work_dir=tmp_path / "work",
+        )
+
+
+def test_missing_image_pins_warns_that_package_needs_egress(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    with caplog.at_level(logging.WARNING):
+        reqs = convert_mod._agent_closure_requirements(
+            convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
+            work_dir=tmp_path / "work",
+        )
+
+    assert list(convert_mod.GYM_VENV_REQUIREMENTS) == reqs
+    assert "--gym-root" in caplog.text
+    assert "egress" in caplog.text
+
+
+# A wheelhouse that satisfies the whole offline venv contract, not just the seed step.
+_COMPLETE_VENV_WHEELS = (
+    "pip-25.2-py3-none-any.whl",
+    "setuptools-80.10.2-py3-none-any.whl",
+    "setuptools_scm-10.2.3-py3-none-any.whl",
+    "ray-2.56.1-py3-none-any.whl",
+    "openai-2.6.1-py3-none-any.whl",
+)
+
+
+def test_download_hub_wheels_vendors_venv_seed_packages(tmp_path: Path, monkeypatch) -> None:
+    """`uv venv --seed` resolves pip before any requirement, so the closure must carry it."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    compiled: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
+        compiled.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("ascii-tree==0.1.5\nverifiers==0.1.14\npip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(wheels_dir, *, requirements_file, extra_index_url=None):
+        wheels_dir.mkdir(parents=True, exist_ok=True)
+        for name in (
+            "ascii_tree-0.1.5-py3-none-any.whl",
+            "verifiers-0.1.14-py3-none-any.whl",
+            "pip-25.2-py3-none-any.whl",
+        ):
+            (wheels_dir / name).write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+    monkeypatch.setattr(convert_mod, "_build_downloaded_sdists", lambda wheels_dir: None)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            hub_version="0.1.5",
+            out_dir=tmp_path / "env",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    assert "pip" in compiled[0]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_gets_seed_packages_vendored(tmp_path: Path, monkeypatch) -> None:
+    """--wheels-dir is resolved for the environment, so pip has to be added for it."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    requested: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
+        requested.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("pip==25.2\n", encoding="utf-8")
+        return pinned
+
+    def fake_download(dest, *, requirements_file, extra_index_url=None):
+        (dest / "pip-25.2-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", fake_download)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    # The pinned agent closure, not bare names: unpinned, setuptools resolves past the
+    # pkg_resources ceiling and ray/openai miss the image's versions.
+    assert requested == [list(convert_mod.GYM_VENV_REQUIREMENTS)]
+    assert (wheels / "pip-25.2-py3-none-any.whl").is_file()
+    assert (wheels / "ascii_tree-0.1.5-py3-none-any.whl").is_file()
+
+
+def test_wheels_dir_top_up_carries_the_image_pins(tmp_path: Path, monkeypatch) -> None:
+    """A pre-vendored closure must be completed with the image's versions, not latest."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    requested: list[list[str]] = []
+
+    def fake_compile(work_dir, packages, *, extra_index_url=None, nemo_rl_root=None):
+        requested.append(list(packages))
+        pinned = Path(work_dir) / "requirements.txt"
+        pinned.parent.mkdir(parents=True, exist_ok=True)
+        pinned.write_text("", encoding="utf-8")
+        return pinned
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", fake_compile)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", lambda *a, **k: None)
+    monkeypatch.setattr(convert_mod, "_build_downloaded_sdists", lambda wheels_dir: None)
+    monkeypatch.setattr(convert_mod, "_assert_complete_wheel_closure", lambda *a, **k: None)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+            ray_version="2.56.1",
+            openai_version="2.6.1",
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    roots = requested[0]
+    assert "ray[default]==2.56.1" in roots
+    assert "openai==2.6.1" in roots
+    # The ceiling matters: setuptools 81 dropped pkg_resources, which Gym's hydra imports.
+    assert "setuptools>=61,<81" in roots
+
+
+def test_wheels_dir_already_carrying_seed_packages_is_untouched(tmp_path: Path, monkeypatch) -> None:
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    for name in _COMPLETE_VENV_WHEELS:
+        (src / name).write_bytes(b"PK\x03\x04")
+
+    def boom(*args, **kwargs):
+        raise AssertionError("must not reach the network when the closure is already complete")
+
+    monkeypatch.setattr(convert_mod, "_compile_pinned_requirements", boom)
+    monkeypatch.setattr(convert_mod, "_run_pip_download", boom)
+
+    wheels = convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree",
+            out_dir=tmp_path / "env",
+            wheels_dir=src,
+        ),
+        work_dir=tmp_path / "work",
+    )
+    assert sorted(p.name for p in wheels.glob("*.whl")) == sorted(
+        ["ascii_tree-0.1.5-py3-none-any.whl", *_COMPLETE_VENV_WHEELS]
+    )
+
+
+def test_validate_package_layout_warns_on_missing_seed_packages(tmp_path: Path, caplog) -> None:
+    """A closure without pip cannot build a venv on a deny-default sandbox."""
+    import logging
+
+    from nhx.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor pip" in caplog.text
+
+
+def test_validate_package_layout_quiet_when_seed_packages_present(tmp_path: Path, caplog) -> None:
+    import logging
+
+    from nhx.rl.tasks.environment.package import write_adapter_wheels_package
+
+    src = tmp_path / "prebuilt"
+    src.mkdir()
+    (src / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+    for name in _COMPLETE_VENV_WHEELS:
+        (src / name).write_bytes(b"PK\x03\x04")
+
+    with caplog.at_level(logging.WARNING):
+        write_adapter_wheels_package(
+            out_dir=tmp_path / "env",
+            hub_id="primeintellect/ascii-tree",
+            wheels_src=src,
+        )
+
+    assert "does not vendor" not in caplog.text
+
+
 @pytest.mark.parametrize(
     ("hub_version", "expected"),
     [(None, "ascii_tree"), ("0.1.5", "ascii_tree==0.1.5")],
@@ -634,7 +1015,7 @@ def test_download_hub_wheels_honours_hub_version(
     `requires a different Python`, and a release that still installs may not match the
     training image's interpreter. --hub-version makes the vendored release explicit.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     seen: dict[str, str] = {}
 
@@ -664,7 +1045,7 @@ def test_download_hub_wheels_honours_hub_version(
 
 def test_convert_cli_threads_hub_version_into_the_spec(monkeypatch, tmp_path: Path) -> None:
     """The flag is useless if it stops at argparse."""
-    from nmp.rl.tasks.environment import __main__ as cli
+    from nhx.rl.tasks.environment import __main__ as cli
 
     captured: dict = {}
 
@@ -730,7 +1111,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
     Markers are evaluated at resolve time too, so the compile has to target the same
     platform or the closure is wrong before anything is fetched.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 
@@ -774,7 +1155,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
 )
 def test_assert_wheels_target_platform_rejects_foreign_wheels(tmp_path: Path, filename: str) -> None:
     """Catch foreign platforms and Python ABIs before the cluster install."""
-    from nmp.rl.tasks.environment.convert import assert_wheels_target_platform
+    from nhx.rl.tasks.environment.convert import assert_wheels_target_platform
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -801,7 +1182,7 @@ def test_assert_wheels_target_platform_accepts_portable_wheels(tmp_path: Path, f
     Compound tags count if ANY component matches: pip emits e.g.
     `manylinux2014_x86_64.manylinux_2_17_x86_64` for one file.
     """
-    from nmp.rl.tasks.environment.convert import assert_wheels_target_platform
+    from nhx.rl.tasks.environment.convert import assert_wheels_target_platform
 
     wheels = tmp_path / "wheels"
     wheels.mkdir()
@@ -811,15 +1192,16 @@ def test_assert_wheels_target_platform_accepts_portable_wheels(tmp_path: Path, f
 
 
 def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch) -> None:
-    """The closure is a user's environment, not a nemo-platform dependency set.
+    """The closure is a user's environment, not a nemo-helix dependency set.
 
     uv discovers the nearest pyproject.toml and applies its [tool.uv] policy. This repo's
     override-dependencies exist for its own CVE posture, and an override REPLACES a
     declared requirement rather than narrowing it — `openai>=2.26.0` strips the `<3` upper
-    bound that openai-agents declares. The closure then vendors openai 3.0.0, and the
-    cluster, where no overrides apply, cannot install it.
+    bound that openai-agents declares. ``--no-config`` keeps that policy out of the resolve.
+    The Gym host applies the NeMo-RL checkout's tables instead, and those are passed only
+    when ``--nemo-rl-root`` is set.
     """
-    from nmp.rl.tasks.environment import convert as convert_mod
+    from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
 
@@ -841,3 +1223,109 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
     )
 
     assert "--no-config" in commands[0]
+    assert "--override" not in commands[0]
+
+
+def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) -> None:
+    """The Gym host installs under the NeMo-RL checkout's uv limits, so the resolve must too."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    rl = _fake_nemo_rl_checkout(tmp_path / "RL")
+    (rl / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.uv]",
+                'override-dependencies = ["fastapi[standard]>=0.133.0,<0.137.0"]',
+                'constraint-dependencies = ["urllib3>=2.7.0"]',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        if cmd[:3] == ["uv", "build", "--wheel"]:
+            out = Path(cmd[cmd.index("--out-dir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        elif "compile" in cmd:
+            Path(cmd[cmd.index("--output-file") + 1]).write_text("fastapi==0.136.3\n", encoding="utf-8")
+        else:
+            dest = Path(cmd[cmd.index("--dest") + 1])
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / "fastapi-0.136.3-py3-none-any.whl").write_bytes(b"PK\x03\x04")
+        return None
+
+    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+
+    convert_mod.download_hub_wheels(
+        convert_mod.ConvertEnvironmentSpec(
+            hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env", nemo_rl_root=rl
+        ),
+        work_dir=tmp_path / "work",
+    )
+
+    compile_cmd = next(cmd for cmd in commands if "compile" in cmd)
+    assert "--no-config" in compile_cmd
+    override = Path(compile_cmd[compile_cmd.index("--override") + 1])
+    constraint = Path(compile_cmd[compile_cmd.index("--constraint") + 1])
+    assert override.read_text(encoding="utf-8") == "fastapi[standard]>=0.133.0,<0.137.0\n"
+    assert constraint.read_text(encoding="utf-8") == "urllib3>=2.7.0\n"
+
+
+def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> None:
+    """NeMo-RL's setuptools floor must not resolve past the cap Gym installs."""
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.uv]",
+                'override-dependencies = ["setuptools>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]',
+                'constraint-dependencies = ["urllib3>=2.7.0"]',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    overrides, _constraints = rl_dependency_policy(rl)
+
+    assert overrides == ["setuptools<81,>=80.10.2", "fastapi[standard]>=0.133.0,<0.137.0"]
+
+
+def test_rl_dependency_policy_rejects_a_checkout_without_uv_limits(tmp_path: Path) -> None:
+    from nhx.rl.tasks.environment.convert import rl_dependency_policy
+
+    rl = tmp_path / "RL"
+    rl.mkdir()
+    (rl / "pyproject.toml").write_text("[project]\nname = 'nemo-rl'\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="override-dependencies"):
+        rl_dependency_policy(rl)
+
+
+def test_build_step_keeps_subprocess_output_off_stdout(capfd) -> None:
+    """stdout is the CLI's JSON channel; uv and pip both write there by default."""
+    import sys
+
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    convert_mod._run_build_step([sys.executable, "-c", "print('resolver noise')"])
+
+    out, err = capfd.readouterr()
+    assert "resolver noise" not in out
+    assert "resolver noise" in err
+
+
+def test_converter_routes_every_subprocess_through_the_stderr_helper() -> None:
+    """A bare subprocess.run inherits stdout and would corrupt the JSON result again."""
+    from nhx.rl.tasks.environment import convert as convert_mod
+
+    source = Path(convert_mod.__file__).read_text(encoding="utf-8")
+    bare = [line.strip() for line in source.splitlines() if "subprocess.run(" in line and "stdout=" not in line]
+    assert bare == [], f"these bypass _run_build_step: {bare}"

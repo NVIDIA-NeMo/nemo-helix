@@ -11,6 +11,7 @@ export interface OptimizationsTabProps {
   evals: AgentEvaluationRow[];
   isEvalsPending: boolean;
   isCreating: boolean;
+  onOptimize?: () => void;
   onCloseForm: () => void;
 }
 
@@ -21,6 +22,7 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
   evals,
   isEvalsPending,
   isCreating,
+  onOptimize,
   onCloseForm,
 }) =>
   isCreating ? (
@@ -31,5 +33,5 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
       onBack={onCloseForm}
     />
   ) : (
-    <OptimizeJobsTable agentName={agentName} />
+    <OptimizeJobsTable agentName={agentName} onOptimize={onOptimize} />
   );

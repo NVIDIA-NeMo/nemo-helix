@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve a :class:`~nemo_platform_plugin.refs.LocalDir` to a usable :class:`Path`.
+"""Resolve a :class:`~nemo_helix_plugin.refs.LocalDir` to a usable :class:`Path`.
 
 The context-manager shape mirrors :func:`fileset_path` so callers can
 ``with cls(...) as root:`` without caring which arm they took.
@@ -13,7 +13,7 @@ import contextlib
 from collections.abc import Iterator
 from pathlib import Path
 
-from nemo_platform_plugin.refs import LocalDir
+from nemo_helix_plugin.refs import LocalDir
 
 
 class UsageSourceError(FileNotFoundError):

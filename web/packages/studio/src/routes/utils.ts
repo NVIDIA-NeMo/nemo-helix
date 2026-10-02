@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  encodeColumnFiltersParam,
+  FILTERS_SEARCH_PARAM,
+} from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   AGENTS_ENABLED,
   ANONYMIZER_ENABLED,
   BASE_MODELS_ENABLED,
   ASSISTANT_STUDIO_ENABLED,
   CUSTOMIZER_ENABLED,
-  DASHBOARD_ENABLED,
+  DASHBOARD_ROUTE_ENABLED,
   DATA_DESIGNER_ENABLED,
   DATASETS_ENABLED,
   DEPLOYMENTS_ENABLED,
@@ -22,6 +27,7 @@ import {
   JOBS_ENABLED,
   MEMBERS_ENABLED,
   MODEL_COMPARE_ENABLED,
+  MODEL_EVALUATION_FORM_ENABLED,
   OPTIMIZER_ENABLED,
   PLUGINS_ENABLED,
   SAFE_SYNTHESIZER_ENABLED,
@@ -29,10 +35,11 @@ import {
   SETTINGS_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
-import { generatePath, RouteObject } from 'react-router';
+import { createSearchParams, generatePath, RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
   if (!enabled) return [];
@@ -46,7 +53,7 @@ export const gateCustomizationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(CUSTOMIZER_ENABLED, routes);
 
 export const gateDashboardRoutes = (routes: RouteObject | RouteObject[]) =>
-  gateRoutes(DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED, routes);
+  gateRoutes(DASHBOARD_ROUTE_ENABLED, routes);
 
 export const gateDatasetsRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(DATASETS_ENABLED, routes);
@@ -71,6 +78,9 @@ export const gateDataDesignerRoutes = (routes: RouteObject | RouteObject[]) =>
 
 export const gateAnonymizerRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(ANONYMIZER_ENABLED, routes);
+
+export const gateModelEvaluationFormRoutes = (routes: RouteObject | RouteObject[]) =>
+  gateRoutes(MODEL_EVALUATION_FORM_ENABLED, routes);
 
 export const gateEvaluationRoutes = (routes: RouteObject | RouteObject[]) =>
   gateRoutes(EVALUATOR_ENABLED, routes);
@@ -138,7 +148,7 @@ export const getWorkspaceIndexRoute = (workspace: string) => {
 };
 
 export const getWorkspaceDetailsDefaultRoute = (workspace: string) => {
-  if (DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED) return getWorkspaceDashboardRoute(workspace);
+  if (DASHBOARD_ROUTE_ENABLED) return getWorkspaceDashboardRoute(workspace);
   if (AGENTS_ENABLED) return getAgentsListRoute(workspace);
   if (BASE_MODELS_ENABLED) return getWorkspaceBaseModelsRoute(workspace);
   if (JOBS_ENABLED) return getWorkspaceJobsRoute(workspace);
@@ -545,8 +555,15 @@ export const getFilesetFileRoute = (workspace: string, fileset: string, filePath
   });
 };
 
-export const getIntakeTracesRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.intakeTraces, { workspace });
+export const getIntakeTracesRoute = (workspace: string, options: { agentName?: string } = {}) => {
+  const path = generatePath(ROUTES.workspace.intakeTraces, { workspace });
+  if (!options.agentName) return path;
+  const search = createSearchParams({
+    [FILTERS_SEARCH_PARAM]: encodeColumnFiltersParam([
+      { id: AGENT_NAME_FILTER_ID, value: options.agentName },
+    ]),
+  });
+  return `${path}?${search}`;
 };
 
 export const getIntakeSpansRoute = (workspace: string) => {
@@ -652,6 +669,16 @@ export const getAgentEvaluationsTabRoute = (workspace: string, agentName: string
 
 export const getAgentOptimizationsTabRoute = (workspace: string, agentName: string) => {
   return `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`;
+};
+
+/** The Evaluations tab with the Run Evaluation modal open on arrival. */
+export const getAgentRunEvaluationRoute = (workspace: string, agentName: string) => {
+  return `${getAgentEvaluationsTabRoute(workspace, agentName)}&${ACTION_SEARCH_PARAM}=run-evaluation`;
+};
+
+/** The Optimizations tab with the Optimize agent modal open on arrival. */
+export const getAgentOptimizeRoute = (workspace: string, agentName: string) => {
+  return `${getAgentOptimizationsTabRoute(workspace, agentName)}&${ACTION_SEARCH_PARAM}=optimize`;
 };
 
 export const getAgentOptimizationDetailRoute = (workspace: string, optimizeJobName: string) => {

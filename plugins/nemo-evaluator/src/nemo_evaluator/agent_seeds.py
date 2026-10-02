@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from nemo_evaluator.filesets import FilesetRef, download_dataset_sync
 from nemo_evaluator_sdk.agent_eval.workspace_seeds import WorkspaceSeedError, register_seed_handler
-from nemo_platform_plugin.client_provider import get_task_nemo_client
+from nemo_helix_plugin.client_provider import get_task_nemo_client
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: Service identity used to build the task SDK (matches ``tasks/agent_evaluate.py``).

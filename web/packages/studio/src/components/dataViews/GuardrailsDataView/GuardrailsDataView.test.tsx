@@ -120,7 +120,10 @@ describe('GuardrailsDataView', () => {
     renderComponent({ onRowClick });
     const row = await findPiiFilterRow();
     await user.click(row);
-    expect(onRowClick).toHaveBeenCalledWith(expect.objectContaining({ name: 'pii-filter' }));
+    expect(onRowClick).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'pii-filter' }),
+      expect.anything()
+    );
   });
 
   it('shows empty state when there are no configs', async () => {

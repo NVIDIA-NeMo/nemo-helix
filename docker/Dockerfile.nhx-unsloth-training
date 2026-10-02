@@ -1,0 +1,232 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# nhx-unsloth training image — single GPU image used for all four steps of
+# an unsloth customization job (file_io download, training, file_io upload,
+# model_entity).
+#
+# Install steps:
+#   1. `uv pip install unsloth --torch-backend=auto` plus explicit
+#      `transformers==5.5.0` and `huggingface-hub==1.5.0` pins. Unsloth's
+#      resolver allows transformers 5.5.0, and the explicit pins keep later
+#      platform glue installs from re-solving the HF stack.
+#      Unsloth's resolver still pulls unsloth_zoo
+#      and the rest of the HF stack (trl, peft, accelerate, datasets,
+#      bitsandbytes, xformers, etc.). `--overrides preserve_base_torch.txt`
+#      blocks uv from installing/upgrading torch into the venv so the NGC
+#      base's PyTorch + CUDA remain the runtime stack.
+#   1b. bitsandbytes — compiled from source against the NGC base CUDA (same pattern
+#       as docker/automodel/Dockerfile.nhx-automodel-base). PyPI wheels only ship through
+#       cuda130; source build replaces the wheel from step 1.
+#   1c. mamba-ssm + causal-conv1d — prebuilt cu13.3 / cp312 wheels (shared with
+#       docker/automodel/Dockerfile.nhx-automodel-base).
+#   1d. flash-attn — optional for unsloth and currently NOT installed (see the
+#       commented TODO below). Without it Unsloth falls back when xformers is
+#       also missing (common on newer CUDA stacks), logging "FA2 = False /
+#       Xformers = None".
+#   2. Editable installs of the platform glue (nemo-helix SDK, plugin,
+#      nhx-common, nhx-unsloth[integrations]) from the in-repo workspace slice.
+#
+# Publish target: nhx-unsloth-training
+# Default tag:    `local` (override via BAKE_TAG at build time).
+
+# NGC PyTorch base. 26.07-py3 ships PyTorch + CUDA 13.3 + Python 3.12 (aligned with
+# docker/automodel/Dockerfile.nhx-automodel-base). Override at build time:
+# --set nhx-unsloth-training.args.PYTORCH_BASE=...
+ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
+
+# Prebuilt CUDA-extension wheels (mamba-ssm + causal-conv1d), shared with
+# docker/automodel/Dockerfile.nhx-automodel-base. The bake `nhx-unsloth-training` target
+# resolves these contexts to the causal-conv1d-wheel / mamba-ssm-wheel images
+# (see docker-bake.hcl + docker/base/Dockerfile.python-wheels). Local builds need
+# `USE_LOCAL_WHEELS=1` (build the wheel targets) or a reachable WHEELS_REGISTRY.
+FROM causal-conv1d-wheel-image AS causal-conv1d-wheel-src
+FROM mamba-ssm-wheel-image AS mamba-ssm-wheel-src
+
+FROM ${PYTORCH_BASE} AS base
+
+WORKDIR /opt
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /bin/uv
+COPY docker/scripts/collect-apt-sources.sh \
+    docker/scripts/collect-python-sdists.py \
+    /usr/local/bin/
+ENV PATH="/bin:${PATH}"
+
+RUN dpkg-query -W -f='${binary:Package}\t${Version}\n' > /tmp/base-dpkg-packages.txt
+
+RUN --mount=type=bind,source=docker/scripts/remove-listed-apt-packages.sh,target=/tmp/remove-listed-apt-packages.sh,readonly \
+    --mount=type=bind,source=docker/removals/apt/nhx-unsloth-training.txt,target=/tmp/apt-package-removals.txt,readonly \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade openssl libssl3t64 && \
+    bash /tmp/remove-listed-apt-packages.sh /tmp/apt-package-removals.txt && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV VIRTUAL_ENV=/opt/venv \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    OTEL_PYTHON_EXCLUDED_URLS="health"
+ENV PATH="/opt/venv/bin:/root/.local/bin:${PATH}"
+ENV UNSLOTH_SKIP_TORCHVISION_CHECK=1
+
+# --system-site-packages lets the venv inherit the NGC base's pre-built torch.
+# Without this, `uv pip install unsloth --torch-backend=auto` would download a
+# fresh torch wheel from PyPI, ballooning image size.
+RUN uv venv ${UV_PROJECT_ENVIRONMENT} --system-site-packages
+
+# ──────────────────────────────────────────────────────────────────────────
+# Stage 2 — install unsloth's ML stack + our platform glue.
+# ──────────────────────────────────────────────────────────────────────────
+FROM base AS runtime
+
+ARG USERNAME=ubuntu
+ARG USER_UID=1000
+ARG USER_GID=1000
+ARG UNSLOTH_VERSION=2026.6.1
+ARG TRANSFORMERS_VERSION=5.5.0
+ARG HF_HUB_VERSION=1.5.0
+ARG BITSANDBYTES_VERSION=0.49.2
+ARG BNB_MAX_JOBS=10
+
+WORKDIR /app
+
+COPY docker/unsloth/preserve_base_torch.txt /opt/docker/preserve_base_torch.txt
+COPY docker/unsloth/no_override_requirements.txt /opt/docker/no_override_requirements.txt
+
+RUN mkdir -p /home/${USERNAME}/.cache && \
+    chown -R ${USER_UID}:${USER_GID} /home/${USERNAME}
+
+# Step 1: install unsloth + pinned transformers. --torch-backend=auto tells uv
+# to detect the existing torch's CUDA build (from --system-site-packages
+# inheritance) and pick the matching xformers / bitsandbytes wheels.
+# preserve_base_torch.txt prevents uv from replacing the NGC torch stack.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --torch-backend=auto \
+    --overrides /opt/docker/preserve_base_torch.txt \
+    unsloth==${UNSLOTH_VERSION} \
+    transformers==${TRANSFORMERS_VERSION} \
+    huggingface-hub==${HF_HUB_VERSION}
+
+# Re-pin transformers + huggingface-hub without touching torch.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /opt/docker/preserve_base_torch.txt \
+    --reinstall-package transformers \
+    --reinstall-package huggingface-hub \
+    transformers==${TRANSFORMERS_VERSION} \
+    huggingface-hub==${HF_HUB_VERSION}
+
+# Step 1b: bitsandbytes from source — matches automodel base CUDA.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git /tmp/bitsandbytes && \
+    cd /tmp/bitsandbytes && \
+    git checkout ${BITSANDBYTES_VERSION} && \
+    mkdir -p /usr/share/nemo-helix/source-distributions/nhx-unsloth-training/git && \
+    git archive --format=tar.gz --output /usr/share/nemo-helix/source-distributions/nhx-unsloth-training/git/bitsandbytes-${BITSANDBYTES_VERSION}.tar.gz HEAD && \
+    cmake -DCOMPUTE_CAPABILITY="75;80;86;87;89;90;100;103;110;120;121" -DCOMPUTE_BACKEND=cuda -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -S . && \
+    make -j${BNB_MAX_JOBS} && \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache scikit-build-core --no-deps && \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-build-isolation --no-deps --force-reinstall . && \
+    uv pip uninstall --python ${VIRTUAL_ENV}/bin/python scikit-build-core && \
+    rm -rf /tmp/bitsandbytes
+
+# Step 1c: mamba-ssm + causal-conv1d — cu13.3 / cp312 wheels shared with automodel base.
+RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
+    --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-deps \
+    /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+
+# TODO: Step 1d: Flash Attention 2 — compiled from source against the NGC 26.02 torch.
+# /usr/local/cuda symlinks to an older toolkit; use /usr/local/cuda-13.1 instead.
+# Cap parallel nvcc/ninja work — default uses all CPUs and OOMs typical build hosts.
+# Put flash attention back in when we have a working wheel in a separate image.
+# ARG FLASH_ATTN_MAX_JOBS=40
+# ARG NVCC_THREADS=1
+# RUN --mount=type=cache,target=/root/.cache/uv \
+#     --mount=type=cache,target=/root/.cache/pip \
+#     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+#     ninja einops packaging && \
+#     CUDA_HOME=/usr/local/cuda-13.1 \
+#     MAX_JOBS=${FLASH_ATTN_MAX_JOBS} \
+#     NVCC_THREADS=${NVCC_THREADS} \
+#     FLASH_ATTN_FORCE_BUILD=TRUE \
+#     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+#     --no-build-isolation flash-attn==2.8.3
+
+COPY --from=platform-workspace / /app
+RUN chown -R ${USER_UID}:${USER_GID} /app
+
+# Step 2: install the platform glue editably. No [unsloth] extra here — that's
+# what we just installed in step 1, and re-triggering it would force the
+# resolver to re-evaluate the whole HF stack. The [integrations] extra is
+# training-runtime only; nhx-api installs nhx-unsloth without extras.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --reinstall-package wandb \
+    --overrides /opt/docker/no_override_requirements.txt \
+    -e /app/sdk/python/nemo-helix \
+    -e /app/packages/filesets \
+    -e /app/packages/models \
+    -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nhx_common \
+    -e /app/packages/nhx_customization_common \
+    -e "/app/services/unsloth[integrations]"
+
+# hf-transfer can pull huggingface-hub 1.x — install then re-pin hub + transformers.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /opt/docker/preserve_base_torch.txt \
+    "hf-transfer>=0.1.8,<0.2"
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /opt/docker/preserve_base_torch.txt \
+    --reinstall-package huggingface-hub \
+    --reinstall-package transformers \
+    huggingface-hub==${HF_HUB_VERSION} \
+    transformers==${TRANSFORMERS_VERSION}
+
+# Pin nspect-tracked deps into /opt/venv before removing stale NGC system copies.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
+    --overrides /opt/docker/preserve_base_torch.txt \
+    "aiohttp>=3.14.3,<4" \
+    "urllib3>=2.7.0,<3" \
+    "grpcio>=1.81.1,<2" \
+    "mistune>=3.3.3,<4" \
+    "pillow>=12.3.0,<13" \
+    "soupsieve>=2.8.4,<3" \
+    "GitPython>=3.1.60,<4" \
+    "mlflow-skinny>=3.15.0,<3.16.0" \
+    "sqlparse>=0.6.0,<0.7"
+
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/common-file-removals.txt
+
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    bash /usr/local/bin/collect-apt-sources.sh \
+        /usr/share/nemo-helix/source-distributions/nhx-unsloth-training/apt \
+        --changed-from /tmp/base-dpkg-packages.txt && \
+    python /usr/local/bin/collect-python-sdists.py \
+        --python ${VIRTUAL_ENV}/bin/python \
+        --output /usr/share/nemo-helix/source-distributions/nhx-unsloth-training \
+        --label app-venv
+
+# Late file cleanup for bundled or non-package-managed files.
+RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
+    --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/tmp/file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt
+
+ENTRYPOINT ["/opt/venv/bin/python"]
+CMD ["-m", "nhx.unsloth.tasks.training", "--help"]
+
+USER ${USER_UID}:${USER_GID}

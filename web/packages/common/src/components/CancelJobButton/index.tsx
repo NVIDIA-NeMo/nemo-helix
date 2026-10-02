@@ -10,7 +10,7 @@ import {
   getJobsListJobsQueryKey,
   useJobsCancelJob,
 } from '@nemo/sdk/generated/platform/jobs';
-import { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -19,8 +19,12 @@ import { FC, MouseEvent, useState } from 'react';
 interface CancelJobButtonProps {
   workspace: string;
   jobName: string;
-  jobStatus?: PlatformJobStatus;
+  jobStatus?: HelixJobStatus;
   compact?: boolean;
+  /** Invalidate the caller's own list. This button only knows the platform
+   *  jobs query keys, so a list backed by a different endpoint (e.g. the
+   *  evaluator's) keeps showing the cancelled row as active without it. */
+  onCancelled?: () => void;
 }
 
 export const CancelJobButton: FC<CancelJobButtonProps> = ({
@@ -28,6 +32,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   jobName,
   jobStatus,
   compact,
+  onCancelled,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const toast = useToast();
@@ -43,6 +48,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
         queryClient.invalidateQueries({
           queryKey: getJobsListJobsQueryKey(workspace),
         });
+        onCancelled?.();
       },
     },
   });
@@ -57,7 +63,7 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   };
 
   const isCancellable = jobStatus && CJobCancellableStatuses.includes(jobStatus);
-  const isCancelling = jobStatus === PlatformJobStatus.cancelling;
+  const isCancelling = jobStatus === HelixJobStatus.cancelling;
 
   if (!isCancellable && !isCancelling) {
     return null;

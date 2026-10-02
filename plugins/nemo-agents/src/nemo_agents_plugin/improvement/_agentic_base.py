@@ -4,7 +4,7 @@
 """Shared agentic-base image build helper.
 
 Both the Harbor runner (Claude Code AUT) and the NAT runner (NeMo Agent
-Toolkit AUT) inherit from the same ``nmp-agentic-base:latest`` Docker image.
+Toolkit AUT) inherit from the same ``nhx-agentic-base:latest`` Docker image.
 This module owns the image name and the build helper so both runners go
 through one path; previously the helper lived on the Harbor runner and the
 NAT runner silently depended on Harbor having been run first to populate
@@ -20,7 +20,7 @@ from rich.console import Console
 
 console = Console()
 
-AGENTIC_BASE_IMAGE = "nmp-agentic-base:latest"
+AGENTIC_BASE_IMAGE = "nhx-agentic-base:latest"
 
 
 async def build_agentic_base_image(
@@ -28,7 +28,7 @@ async def build_agentic_base_image(
     max_retries: int = 2,
     dockerfile_name: str = "Dockerfile.agentic-base",
 ) -> None:
-    """Build the shared ``nmp-agentic-base:latest`` image used by both Harbor and NAT runners.
+    """Build the shared ``nhx-agentic-base:latest`` image used by both Harbor and NAT runners.
 
     Retries transient build failures up to ``max_retries`` times. Raises
     ``RuntimeError`` if the build fails on every attempt.

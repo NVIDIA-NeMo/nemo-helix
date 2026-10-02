@@ -10,6 +10,7 @@ import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+  ASSISTANT_THINKING_TOOL_NAME,
 } from '@studio/routes/agents/AssistantChatRoute/toolParts';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -199,6 +200,25 @@ describe('AssistantToolCallPart', () => {
     expect(screen.getByTestId('assistant-collapsed-thinking-content')).toHaveTextContent(
       'I found the files that matter.'
     );
+  });
+
+  it('renders streaming reasoning collapsed under a Thinking disclosure', () => {
+    render(
+      <AssistantToolCallPart
+        addResult={vi.fn()}
+        args={{ text: 'Working out which file owns the panel.' }}
+        argsText='{"text":"Working out which file owns the panel."}'
+        resume={vi.fn()}
+        status={{ type: 'running' }}
+        toolCallId="assistant-thinking-msg-0"
+        toolName={ASSISTANT_THINKING_TOOL_NAME}
+        type="tool-call"
+      />
+    );
+
+    const disclosure = screen.getByTestId('assistant-collapsed-thinking');
+    expect(disclosure).toHaveTextContent('Thinking');
+    expect(disclosure).not.toHaveAttribute('open');
   });
 
   it('replaces a persisted unknown work time with a neutral label', () => {

@@ -10,6 +10,6 @@ Examples:
 
 ```bash
 docker buildx bake --print docker-cpu
-docker buildx bake --print nmp-automodel
-docker buildx bake --print nmp-unsloth
+docker buildx bake --print nhx-automodel
+docker buildx bake --print nhx-unsloth
 ```

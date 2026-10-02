@@ -5,11 +5,14 @@
 title: "The Basics"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="data-designer-tutorials-basics"></a>
 
 This tutorial demonstrates the fundamentals of Data Designer by generating a product review dataset.
 
-For more detail about column behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/tutorials/the-basics) of this tutorial.
+For more detail about column behavior, see the [open-source library's version](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/tutorials/the-basics) of this tutorial.
 
 ## Prerequisites
 
@@ -31,7 +34,7 @@ MODEL_ALIAS = "text"
 model_configs = [
     dd.ModelConfig(
         provider="default/nvidia-build",
-        model="nvidia/nemotron-3-nano-30b-a3b",  # Use the `served_model_name` from the provider
+        model="nvidia/nemotron-3.5-lightning-30b-a3b",  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(
             temperature=1.0,
@@ -45,7 +48,7 @@ config_builder = dd.DataDesignerConfigBuilder(model_configs)
 
 ### Add Columns
 
-Define the columns for your dataset. The [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/tutorials/the-basics) explains these column types in detail.
+Define the columns for your dataset. The [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/tutorials/the-basics) explains these column types in detail.
 
 ```python
 # Product category sampler
@@ -212,14 +215,14 @@ nemo data-designer create product_reviews.py --workspace default --num-records 3
 
 ### SDK Execution
 
-The `DataDesignerResource` is your SDK interface for Data Designer execution on NeMo Platform. You can access it from an existing SDK instance:
+The `DataDesignerResource` is your SDK interface for Data Designer execution on NeMo Helix. You can access it from an existing SDK instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=base_url, workspace="default")
+base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+client = NeMoHelix(base_url=base_url, workspace="default")
 
 data_designer = client.data_designer
 ```
@@ -280,5 +283,5 @@ analysis.to_report()
 ## Next Steps
 
 - **Seed data:** Learn how to use external datasets in the [seeding tutorial](/documentation/design-synthetic-data/tutorials/seeding-with-external-datasets)
-- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/columns)
-- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.1/concepts/validators)
+- **Column types:** Explore all available column types in the [library documentation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/columns)
+- **Advanced features:** Learn about [processors](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/processors) and [validation](https://docs.nvidia.com/nemo/datadesigner/v0.9.3/concepts/validators)

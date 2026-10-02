@@ -1,17 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Divider, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
+import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/DescribeWithAiPanel';
-import { TemplateCard } from '@studio/components/CreateFilesetStart/TemplateCard';
-import { FILESET_TEMPLATES } from '@studio/components/CreateFilesetStart/templates';
+import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
 import type {
   DetailPoint,
   StartOption,
   StartOptionDetailProps,
 } from '@studio/components/CreateFilesetStart/types';
+import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import { Layers, Sparkles, Wand2 } from 'lucide-react';
-import type { FC, ReactNode } from 'react';
+import { useMemo, type FC, type ReactNode } from 'react';
 
 const SCRATCH_POINTS: DetailPoint[] = [
   {
@@ -67,19 +67,16 @@ export const StartOptionDetail: FC<StartOptionDetailProps> = ({
   workspace,
   onValidConfig,
 }) => {
+  const templateGroups = useMemo(buildTemplateGroups, []);
+
   let content: ReactNode;
   if (option.id === 'template') {
     content = (
-      <Grid colMinWidth="300px" gap="density-md">
-        {FILESET_TEMPLATES.map((template) => (
-          <TemplateCard
-            key={template.id}
-            template={template}
-            selected={selectedTemplateId === template.id}
-            onSelect={() => onSelectTemplate(template.id)}
-          />
-        ))}
-      </Grid>
+      <TemplateGroups
+        groups={templateGroups}
+        value={selectedTemplateId}
+        onChange={onSelectTemplate}
+      />
     );
   } else if (option.id === 'ai') {
     content = <DescribeWithAiPanel workspace={workspace} onValidConfig={onValidConfig} />;
@@ -92,11 +89,7 @@ export const StartOptionDetail: FC<StartOptionDetailProps> = ({
   }
 
   return (
-    <Stack gap="density-md" className="w-full">
-      <Divider />
-      <Text kind="label/bold/sm" className="text-secondary">
-        {option.title}
-      </Text>
+    <Stack gap="density-2xl" className="w-full">
       {content}
     </Stack>
   );

@@ -7,10 +7,10 @@ from collections.abc import AsyncIterator, Callable
 from unittest.mock import patch
 
 import pytest
-from nmp.common.api.common import SecretRef
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.factory import storage_impl_factory
-from nmp.core.files.app.backends.github import (
+from nhx.common.api.common import SecretRef
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.factory import storage_impl_factory
+from nhx.core.files.app.backends.github import (
     GithubAccessError,
     GithubBackendError,
     GithubConfigError,
@@ -19,8 +19,8 @@ from nmp.core.files.app.backends.github import (
     GithubUnavailableError,
     raise_for_github_status,
 )
-from nmp.core.files.app.external_hosts import ExternalHostNotAllowedError
-from nmp.core.files.exceptions import NotFoundError
+from nhx.core.files.app.external_hosts import ExternalHostNotAllowedError
+from nhx.core.files.exceptions import NotFoundError
 from pydantic import ValidationError
 
 
@@ -123,7 +123,7 @@ class TestResolveConfig:
     @pytest.mark.asyncio
     async def test_pins_the_revision_to_a_commit_sha(self):
         session = _session_for(lambda _url: _FakeResponse(json_body={"sha": "abc123"}))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             resolved = await _impl().resolve_config()
 
         assert resolved.revision == "abc123"
@@ -139,7 +139,7 @@ class TestResolveConfig:
         """
         session = _session_for(lambda _url: _FakeResponse(json_body={"sha": "def456"}))
         config = _config(revision="abc123", original_revision="attacker-branch")
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             resolved = await GithubStorageImpl(config, {}).resolve_config()
 
         assert (resolved.revision, resolved.original_revision) == ("def456", "abc123")
@@ -148,7 +148,7 @@ class TestResolveConfig:
     @pytest.mark.asyncio
     async def test_rejects_a_response_carrying_no_sha(self):
         session = _session_for(lambda _url: _FakeResponse(json_body={}))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(GithubConfigError, match="no commit SHA"):
                 await _impl().resolve_config()
 
@@ -174,7 +174,7 @@ class TestTrackedRevision:
         session = _session_for(lambda _url: _FakeResponse(json_body={"sha": "newsha"}))
         impl = _impl(_config(revision="oldsha", original_revision="main"))
 
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             resolved = await GithubStorageImpl(impl.config_at_tracked_revision(), {}).resolve_config()
 
         assert resolved.revision == "newsha"
@@ -201,7 +201,7 @@ class TestListFiles:
                 )
             )
         )
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             files = await _impl().list_files()
 
         assert [(f.path, f.size) for f in files] == [("agent.yaml", 80), ("mcps/calculator.py", 20)]
@@ -209,7 +209,7 @@ class TestListFiles:
     @pytest.mark.asyncio
     async def test_asks_github_only_for_the_configured_directory(self):
         session = _session_for(lambda _url: _FakeResponse(json_body=_tree(_blob("agent.yaml"))))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             files = await _impl(_config(revision="abc123", path="agents/calc")).list_files()
 
         assert [f.path for f in files] == ["agent.yaml"]
@@ -238,7 +238,7 @@ class TestListFiles:
         session = _session_for(
             lambda _url: _FakeResponse(json_body=_tree({"path": "thing", "type": entry_type, "size": 7, "mode": mode}))
         )
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             files = await _impl().list_files()
 
         assert [f.path for f in files] == (["thing"] if served else [])
@@ -259,7 +259,7 @@ class TestListFiles:
                 )
             )
         )
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             files = await _impl().list_files()
 
         assert [f.path for f in files] == ["agent.yaml"]
@@ -269,7 +269,7 @@ class TestListFiles:
         session = _session_for(
             lambda _url: _FakeResponse(json_body=_tree(_blob("agent.yaml"), _blob("mcps/calculator.py")))
         )
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             files = await _impl().list_files("mcps")
 
         assert [f.path for f in files] == ["mcps/calculator.py"]
@@ -277,21 +277,21 @@ class TestListFiles:
     @pytest.mark.asyncio
     async def test_raises_not_found_for_a_subpath_with_no_blobs(self):
         session = _session_for(lambda _url: _FakeResponse(json_body=_tree(_blob("agent.yaml"))))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(NotFoundError):
                 await _impl().list_files("nope")
 
     @pytest.mark.asyncio
     async def test_refuses_a_tree_github_could_not_list_in_full(self):
         session = _session_for(lambda _url: _FakeResponse(json_body=_tree(_blob("agent.yaml"), truncated=True)))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(GithubConfigError, match="too large"):
                 await _impl().list_files()
 
     @pytest.mark.asyncio
     async def test_maps_a_404_onto_a_config_error(self):
         session = _session_for(lambda _url: _FakeResponse(status=404))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(GithubConfigError):
                 await _impl().list_files()
 
@@ -300,7 +300,7 @@ class TestGetFile:
     @pytest.mark.asyncio
     async def test_returns_the_blob_at_an_exact_path(self):
         session = _session_for(lambda _url: _FakeResponse(json_body=_tree(_blob("mcps/calculator.py", 20))))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             info = await _impl().get_file("mcps/calculator.py")
 
         assert (info.path, info.size) == ("mcps/calculator.py", 20)
@@ -310,14 +310,14 @@ class TestGetFile:
         """The contents API answers a directory with a JSON listing, so describing it
         with its first child's size would pair that length with unrelated bytes."""
         session = _session_for(lambda _url: _FakeResponse(json_body=_tree(_blob("mcps/calculator.py", 20))))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(NotFoundError):
                 await _impl().get_file("mcps")
 
 
 class TestDownload:
     async def _collect(self, impl: GithubStorageImpl, session: _FakeSession, byte_range=None) -> bytes:
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             stream = await impl.download("agent.yaml", byte_range)
             return b"".join([chunk async for chunk in stream])
 
@@ -422,7 +422,7 @@ class TestValidateStorage:
         session = _session_for(
             lambda url: _FakeResponse(status=404) if "git/trees" in url else _FakeResponse(json_body={})
         )
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             with pytest.raises(GithubConfigError, match="agents/calc"):
                 await _impl(_config(path="agents/calc")).validate_storage()
 
@@ -431,7 +431,7 @@ class TestUrlEncoding:
     @pytest.mark.asyncio
     async def test_a_hash_in_a_filename_does_not_truncate_the_url(self):
         session = _session_for(lambda _url: _FakeResponse(chunks=(b"x",)))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             stream = await _impl(_config(revision="abc123")).download("notes/re#lease.md", None)
             [chunk async for chunk in stream]
 
@@ -443,7 +443,7 @@ class TestUrlEncoding:
     @pytest.mark.asyncio
     async def test_a_slash_in_a_branch_name_survives(self):
         session = _session_for(lambda _url: _FakeResponse(json_body={"sha": "abc123"}))
-        with patch("nmp.core.files.app.backends.github.get_http_session", return_value=session):
+        with patch("nhx.core.files.app.backends.github.get_http_session", return_value=session):
             await _impl(_config(revision="release/0.6")).resolve_config()
 
         assert session.requests[0][0].endswith("/commits/release/0.6")

@@ -41,8 +41,6 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
       )
     }
   >
-    {canDeploy
-      ? message
-      : `${message} Integrate this agent with NeMo Platform to enable deployment.`}
+    {canDeploy ? message : `${message} Integrate this agent with NeMo Helix to enable deployment.`}
   </Banner>
 );

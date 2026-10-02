@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agents plugin service — registers agent lifecycle management on the NeMo Platform."""
+"""Agents plugin service — registers agent lifecycle management on the NeMo Helix."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from typing import ClassVar, NamedTuple
 
 from nemo_agents_plugin.api.v2._perms import GatewayPerms
 from nemo_agents_plugin.authz import scope
-from nemo_platform_plugin.authz import Permission
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import Permission
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ class _JobCollection(NamedTuple):
 # Sub-names are concise and stable and need not match the job's URL path segment:
 #   EvaluateAgentJob   /jobs/evaluate        -> agents.evaluate
 #   EvaluateSuiteJob   /jobs/evaluate-suite  -> agents.suite
-#   OptimizeJob        /jobs/optimize        -> agents.optimize
 #   OptimizeSkillsJob  /jobs/optimize-skills -> agents.optimize-skills
 #   AnalyzeBatchJob    /jobs/analyze         -> agents.analyze
 #   ExecuteAgentJob /jobs/execute          -> agents.execute
@@ -46,7 +45,6 @@ def _job_collections() -> list[_JobCollection]:
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
-    from nemo_optimization.jobs.optimize import OptimizeJob
 
     return [
         _JobCollection(EvaluateAgentJob, "evaluate", None, "Submit and track agent evaluation jobs"),
@@ -61,12 +59,6 @@ def _job_collections() -> list[_JobCollection]:
             "suite",
             "nemo-agents-plugin-evaluate-suite",
             "Submit and track evaluate-suite jobs (Harbor / NAT eval runner).",
-        ),
-        _JobCollection(
-            OptimizeJob,
-            "optimize",
-            "nemo-agents-plugin-optimize",
-            "Submit and track numeric optimize jobs (Fabric-backed Optuna HPO).",
         ),
         _JobCollection(
             OptimizeSkillsJob,

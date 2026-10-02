@@ -12,7 +12,7 @@
     "materialize:versions": "node scripts/materialize-release-versions.mjs",
     "check:gated-links": "node scripts/delink-gated.mjs",
     "fix:gated-links": "node scripts/delink-gated.mjs --fix",
-    "broken-links": "npm run prepare && npx -y fern-api@latest docs broken-links",
+    "broken-links": "npm run prepare && node scripts/check-broken-links.mjs",
     "dev": "npm run prepare && npx -y fern-api@latest docs dev",
     "watch": "node scripts/docs-watch.mjs",
     "generate": "npm run prepare && npx -y fern-api@latest generate --docs",

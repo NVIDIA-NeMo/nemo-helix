@@ -2,24 +2,24 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Minimal Platform workspace slice for nmp-unsloth container installs.
+# Minimal Platform workspace slice for nhx-unsloth container installs.
 # Used as a named build context (platform-workspace).
 # Keep in sync with docker/unsloth/pyproject.workspace.toml members.
 
 FROM scratch AS platform-workspace
 # Use a reduced workspace file for this partial source tree.
 COPY docker/unsloth/pyproject.workspace.toml pyproject.toml
-# nemo-platform-sdk's hatch build force-includes docs/ from the repo root
-# (see sdk/python/nemo-platform/pyproject.toml [tool.hatch.build.targets.wheel.force-include]).
+# nemo-helix-sdk's hatch build force-includes docs/ from the repo root
+# (see sdk/python/nemo-helix/pyproject.toml [tool.hatch.build.targets.wheel.force-include]).
 # docs/fern/openapi/openapi.yaml is a symlink to ../../../openapi/openapi.yaml; copy both
 # trees so the symlink resolves at build time.
 COPY docs docs
 COPY openapi openapi
-COPY packages/nmp_build_tools packages/nmp_build_tools
+COPY packages/nhx_build_tools packages/nhx_build_tools
 COPY packages/filesets packages/filesets
 COPY packages/models packages/models
-COPY packages/nmp_common packages/nmp_common
-COPY packages/nmp_customization_common packages/nmp_customization_common
-COPY packages/nemo_platform_plugin packages/nemo_platform_plugin
-COPY sdk/python/nemo-platform sdk/python/nemo-platform
+COPY packages/nhx_common packages/nhx_common
+COPY packages/nhx_customization_common packages/nhx_customization_common
+COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
+COPY sdk/python/nemo-helix sdk/python/nemo-helix
 COPY services/unsloth services/unsloth

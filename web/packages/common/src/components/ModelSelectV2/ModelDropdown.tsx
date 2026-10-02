@@ -133,7 +133,11 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
   const selectedName = selectedModel?.name ?? (selectedParts?.name || value?.model);
   const selectedWorkspace =
     selectedModel?.workspace ?? (selectedParts?.name ? selectedParts.workspace : undefined);
-  const triggerLabel = selectedName ? (selectedName.split('@')[0] ?? selectedName) : placeholder;
+  const selectedBaseName = selectedName ? (selectedName.split('@')[0] ?? selectedName) : undefined;
+  const triggerLabel =
+    selectedBaseName && value?.adapter
+      ? `${selectedBaseName} / ${value.adapter}`
+      : (selectedBaseName ?? placeholder);
 
   return (
     <DropdownRoot open={open} onOpenChange={handleOpenChange}>

@@ -11,7 +11,7 @@ backend/benchmark/metric stack into every consumer that only wanted ``agent_eval
 * ``nemo_evaluator_sdk/values/__init__.py`` (AALGO-311) — pyarrow, numpy, jinja2 and jsonschema,
   together with the deferred pyarrow import in ``values/results.py``.
 
-Both are covered here in their source form and in the ``nemo_platform.beta.evaluator`` mirror the
+Both are covered here in their source form and in the ``nemo_helix.beta.evaluator`` mirror the
 vendoring tool generates.
 
 Every *assertion* runs out-of-process. Resolving a whole public surface imports openai, sacrebleu,
@@ -32,13 +32,13 @@ from pathlib import Path
 
 import pytest
 
-_VENDORED_MIRROR = "nemo_platform.beta.evaluator"
+_VENDORED_MIRROR = "nemo_helix.beta.evaluator"
 
 # Imported out-of-process on purpose: by the time this module runs under pytest, sibling suites
 # have already pulled the execution stack into sys.modules, so an in-process check proves nothing.
 _IMPORT_SURFACE_PROBE = """
 import json, sys
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 assert HarborAgentTaskRunner is not None
 print(json.dumps(sorted(sys.modules)))
 """
@@ -126,7 +126,7 @@ def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
 
 
 def test_harbor_adapter_invocation_without_extra_has_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import build_trials_from_job_dir
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import build_trials_from_job_dir
 
     _block_harbor_import(monkeypatch)
     with pytest.raises(ModuleNotFoundError, match=r"optional `harbor` extra on Python >=3\.12") as exc_info:
@@ -140,11 +140,11 @@ def test_harbor_execution_without_extra_has_actionable_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, _build_native_job
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, _build_native_job
 
     _block_harbor_import(monkeypatch)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
-    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None)
+    _job_dir, run_job = _build_native_job(config, tmp_path / "dataset", None, env_templates={})
 
     async def invoke_run_job() -> None:
         await run_job()
@@ -179,7 +179,7 @@ def test_every_public_name_resolves(module_name: str, submodule_name: str) -> No
     """
     # Probe the top-level package only. `find_spec` on a dotted name RAISES ModuleNotFoundError
     # when a parent is missing rather than returning None, so probing the full path would error
-    # in exactly the case this guard exists for (no nemo-platform installed). It also imports
+    # in exactly the case this guard exists for (no nemo-helix installed). It also imports
     # every parent in-process, which would defeat this module's isolation.
     root_package = module_name.partition(".")[0]
     if importlib.util.find_spec(root_package) is None:

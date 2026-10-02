@@ -36,7 +36,7 @@ from nemo_evaluator_sdk.metrics.protocol import (
     MetricOutput,
 )
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
-from nemo_platform_plugin.intake.types import EvaluatorResultCreateParams
+from nemo_helix_plugin.intake.types import EvaluatorResultCreateParams
 
 STARTED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 

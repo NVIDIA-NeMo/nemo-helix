@@ -7,36 +7,46 @@ Parallels :mod:`nemo_evaluator.jobs.compiler` (row/model eval), emitting an
 ``agent-evaluate`` step in the platform task environment and, for FileSet-backed
 Gym targets, a preceding ``stage-environment`` step. Standard and sandboxed
 targets use ``cpu-tasks``; colocated Gym targets use ``gym-tasks``. Metric/endpoint
-secrets are surfaced as ``from_secret`` environment variables; an agent *runner*
-target (e.g. Fabric) carries no endpoint secret of its own.
+secrets are surfaced as ``from_secret`` environment variables, as are the
+``env_secrets`` an agent *runner* target declares for its harness.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from nemo_evaluator.config import config, platform_config
-from nemo_evaluator.jobs.agent_spec import AgentEvalSpec, AgentTarget, GymRunnerTarget, ModelTarget
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalSpec,
+    AgentTarget,
+    FabricRunnerTarget,
+    GymRunnerTarget,
+    HarborRunnerTarget,
+    ModelTarget,
+    registered_agent_files,
+)
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     EnvironmentVariable,
-    PlatformJobSpec,
-    PlatformJobStep,
+    HelixJobSpec,
+    HelixJobStep,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.image import get_qualified_image
 
 AGENT_EVAL_STEP_NAME = "agent-evaluate"
 
 #: Container wiring for agent-evaluate steps, run via ``python -m``. Colocated Gym targets use a
 #: dedicated image because NeMo Gym requires Ray. Sandboxed Gym targets only orchestrate the separate
 #: Gym host, so they use the shared CPU task image.
-AGENT_EVAL_IMAGE = "nmp-cpu-tasks"
-GYM_AGENT_EVAL_IMAGE = "nmp-gym-tasks"
+AGENT_EVAL_IMAGE = "nhx-tasks"
+GYM_AGENT_EVAL_IMAGE = "nhx-gym-tasks"
 AGENT_EVAL_ENTRYPOINT = ["python", "-m"]
 GYM_AGENT_EVAL_ENTRYPOINT = ["/app/.venv/bin/python", "-m"]
 AGENT_EVAL_COMMAND = ["nemo_evaluator.tasks.agent_evaluate"]
@@ -44,19 +54,34 @@ ENVIRONMENT_STAGE_STEP_NAME = "stage-environment"
 ENVIRONMENT_STAGE_COMMAND = ["nemo_evaluator.tasks.stage_environment"]
 
 
+@dataclass(frozen=True)
+class _AgentEvalCPUStep:
+    step: HelixJobStep
+    executor: CPUExecutionProviderSpec
+
+
+@dataclass(frozen=True)
+class _AgentEvalCPUCompilation:
+    platform_spec: HelixJobSpec
+    eval_step: HelixJobStep
+    executor: CPUExecutionProviderSpec
+
+
 def compile_agent_eval_job(
     spec: AgentEvalSpec,
     *,
     profile: str | None = None,
     use_subprocess: bool = False,
-) -> PlatformJobSpec:
+) -> HelixJobSpec:
     """Compile a canonical agent-evaluation spec into a plugin-native platform job."""
+    if not use_subprocess:
+        return _compile_agent_eval_cpu_job(spec, profile=profile).platform_spec
+
     sandbox_plan = _sandbox_plan(spec)
     steps = []
-    # FileSet environments are downloaded onto job storage; that step must finish before the
-    # Gym host mounts the same tree read-only.
-    if isinstance(spec.target, GymRunnerTarget) and spec.target.environment is not None:
-        steps.append(_environment_stage_step(spec.target, profile, use_subprocess=use_subprocess))
+    staged = _staged_fileset(spec)
+    if staged is not None:
+        steps.append(_environment_stage_step(staged, profile, use_subprocess=use_subprocess))
 
     steps.append(
         _agent_eval_step(
@@ -67,19 +92,41 @@ def compile_agent_eval_job(
         )
     )
 
-    return PlatformJobSpec(steps=steps)
+    return HelixJobSpec(steps=steps)
+
+
+def _compile_agent_eval_cpu_job(
+    spec: AgentEvalSpec,
+    *,
+    profile: str | None = None,
+) -> _AgentEvalCPUCompilation:
+    """Compile agent evaluation with a CPU executor and return the final step's executor."""
+    sandbox_plan = _sandbox_plan(spec)
+    steps = []
+    staged = _staged_fileset(spec)
+    if staged is not None:
+        steps.append(_environment_stage_step(staged, profile, use_subprocess=False))
+
+    eval_step = _agent_eval_cpu_step(spec, profile, sandbox_plan=sandbox_plan)
+    steps.append(eval_step.step)
+    return _AgentEvalCPUCompilation(
+        platform_spec=HelixJobSpec(steps=steps),
+        eval_step=eval_step.step,
+        executor=eval_step.executor,
+    )
 
 
 def _secret_refs(spec: AgentEvalSpec) -> Iterator[tuple[str, str]]:
     """Yield ``(env_name, secret_name)`` for each metric secret and the endpoint target's api key."""
     for task in spec.tasks:
-        for bundle in task.metrics:
+        metrics = task.spec.metrics
+        for bundle in metrics:
             for env_name, secret_ref in bundle.secrets.items():
                 yield env_name, secret_ref.root
 
-    # A runner target may need credentials of its own -- a Gym environment's model API key reaches
-    # it through the OS environment, not through an endpoint spec.
-    if isinstance(spec.target, GymRunnerTarget):
+    # A runner target may need credentials of its own -- a Gym environment's, Harbor agent's, or Fabric
+    # harness's model API key reaches it through the OS environment, not through an endpoint spec.
+    if isinstance(spec.target, (FabricRunnerTarget, GymRunnerTarget, HarborRunnerTarget)):
         for env_name, secret_ref in spec.target.env_secrets.items():
             yield env_name, secret_ref.root
 
@@ -98,8 +145,11 @@ def _agent_eval_step(
     *,
     use_subprocess: bool,
     sandbox_plan: SandboxPlan | None,
-) -> PlatformJobStep:
+) -> HelixJobStep:
     """Build the evaluation step, including the sandbox plan when Gym runs sandboxed."""
+    if not use_subprocess:
+        return _agent_eval_cpu_step(spec, profile, sandbox_plan=sandbox_plan).step
+
     is_gym_target = isinstance(spec.target, GymRunnerTarget)
     is_colocated_gym = is_gym_target and sandbox_plan is None
     image = (
@@ -114,12 +164,44 @@ def _agent_eval_step(
         command=AGENT_EVAL_COMMAND,
         use_subprocess=use_subprocess,
     )
-    return PlatformJobStep(
+    return HelixJobStep(
         name=AGENT_EVAL_STEP_NAME,
         executor=executor,
         config=spec.model_dump(mode="json"),
         environment=_environment(spec, sandbox_plan=sandbox_plan),
     )
+
+
+def _agent_eval_cpu_step(
+    spec: AgentEvalSpec,
+    profile: str | None,
+    *,
+    sandbox_plan: SandboxPlan | None,
+) -> _AgentEvalCPUStep:
+    """Build the CPU-backed evaluation step and keep its concrete executor type."""
+    is_gym_target = isinstance(spec.target, GymRunnerTarget)
+    is_colocated_gym = is_gym_target and sandbox_plan is None
+    image = (
+        config.gym_tasks_image
+        if is_colocated_gym and config.gym_tasks_image is not None
+        else get_qualified_image(GYM_AGENT_EVAL_IMAGE if is_colocated_gym else AGENT_EVAL_IMAGE)
+    )
+    executor = CPUExecutionProviderSpec(
+        profile=profile or "default",
+        provider="cpu",
+        container=ContainerSpec(
+            image=image,
+            entrypoint=GYM_AGENT_EVAL_ENTRYPOINT if is_colocated_gym else AGENT_EVAL_ENTRYPOINT,
+            command=AGENT_EVAL_COMMAND,
+        ),
+    )
+    step = HelixJobStep(
+        name=AGENT_EVAL_STEP_NAME,
+        executor=executor,
+        config=spec.model_dump(mode="json"),
+        environment=_environment(spec, sandbox_plan=sandbox_plan),
+    )
+    return _AgentEvalCPUStep(step=step, executor=executor)
 
 
 def _sandbox_plan(spec: AgentEvalSpec) -> SandboxPlan | None:
@@ -148,17 +230,29 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
     return environment
 
 
+def _staged_fileset(spec: AgentEvalSpec) -> FilesetRef | None:
+    """The FileSet the evaluation step needs on job storage before it starts, if any.
+
+    A Gym target stages its environment package; a Fabric or Harbor target running a registered agent
+    stages that agent's Ethos files (skills and prompts its config refers to by relative path).
+    """
+    if isinstance(spec.target, GymRunnerTarget):
+        return spec.target.environment
+    if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget)):
+        return registered_agent_files(spec.target)
+    return None
+
+
 def _environment_stage_step(
-    target: GymRunnerTarget,
+    fileset: FilesetRef,
     profile: str | None,
     *,
     use_subprocess: bool,
-) -> PlatformJobStep:
-    """Download a custom Gym environment into the job PVC before evaluation."""
-    assert target.environment is not None
+) -> HelixJobStep:
+    """Download a FileSet into the job PVC before evaluation."""
     image = get_qualified_image(AGENT_EVAL_IMAGE)
-    stage_spec = EnvironmentStageSpec(environment=target.environment)
-    return PlatformJobStep(
+    stage_spec = EnvironmentStageSpec(environment=fileset)
+    return HelixJobStep(
         name=ENVIRONMENT_STAGE_STEP_NAME,
         executor=_executor(
             profile=profile,

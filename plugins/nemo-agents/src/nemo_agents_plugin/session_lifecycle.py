@@ -12,7 +12,7 @@ from urllib.parse import quote
 import httpx
 from nemo_agents_plugin.deployment_routing import get_deployment_endpoint
 from nemo_agents_plugin.entities import AgentDeployment, AgentSession
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
 logger = logging.getLogger(__name__)
 

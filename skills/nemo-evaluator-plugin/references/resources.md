@@ -28,9 +28,9 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
 )
 from nemo_evaluator_sdk import StringCheckMetric
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="<platform-url>", workspace="<workspace>")
+client = NeMoHelix(base_url="<platform-url>", workspace="<workspace>")
 
 client.evaluator.metrics.create(
     "answer-exact",

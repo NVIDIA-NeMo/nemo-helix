@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="nemo-ms-guardrails-observability"></a>
 
-NeMo Platform centrally manages OpenTelemetry across services. You can configure NeMo Guardrails to additionally enable tracing at the individual guardrail configuration level, providing visibility into how your rails execute - which rails fired, which actions ran, and how long each LLM call took.
+NeMo Helix centrally manages OpenTelemetry across services. You can configure NeMo Guardrails to additionally enable tracing at the individual guardrail configuration level, providing visibility into how your rails execute - which rails fired, which actions ran, and how long each LLM call took.
 
 ---
 
@@ -23,14 +23,14 @@ You also need a VirtualModel configured with guardrails middleware. See [Archite
 
 By default, guardrail configurations do not generate traces. To export traces for interactions using a specific guardrail configuration, set `tracing.enabled` to `true` and specify the `OpenTelemetry` adapter in the configuration.
 
-Instantiate the NeMoPlatform SDK.
+Instantiate the NeMoHelix SDK.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```

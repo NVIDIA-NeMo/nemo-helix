@@ -9,19 +9,19 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.jobs.client import AsyncJobsClient, JobsClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobLogPage
-from nemo_platform_plugin.jobs.types import JobLogsQueryParams
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
+from nemo_helix_plugin.jobs.schemas import HelixJobLogPage
+from nemo_helix_plugin.jobs.types import JobLogsQueryParams
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from nemo_safe_synthesizer_plugin.sdk import http_utils
 
 
 class SafeSynthesizerJobsResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NeMoHelix) -> None:
         self._platform = platform
         self._http_client = platform._client
 
@@ -104,13 +104,13 @@ class SafeSynthesizerJobsResource:
             )
             .page()
         )
-        return PlatformJobLogPage(data=page.items, **page.metadata)
+        return HelixJobLogPage(data=page.items, **page.metadata)
 
 
 class SafeSynthesizerResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NeMoHelix) -> None:
         self._platform = platform
         self.jobs = SafeSynthesizerJobsResource(platform)
 
@@ -118,7 +118,7 @@ class SafeSynthesizerResource:
 class AsyncSafeSynthesizerJobsResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNeMoHelix) -> None:
         self._platform = platform
         self._http_client = platform._client
 
@@ -199,13 +199,13 @@ class AsyncSafeSynthesizerJobsResource:
             query_params=cast(JobLogsQueryParams, query_params) or None,
         )
         page = response.page()
-        return PlatformJobLogPage(data=page.items, **page.metadata)
+        return HelixJobLogPage(data=page.items, **page.metadata)
 
 
 class AsyncSafeSynthesizerResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNeMoHelix) -> None:
         self._platform = platform
         self.jobs = AsyncSafeSynthesizerJobsResource(platform)
 

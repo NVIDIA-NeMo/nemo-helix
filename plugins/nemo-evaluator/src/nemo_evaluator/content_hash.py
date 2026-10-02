@@ -38,7 +38,7 @@ import json
 from collections.abc import Mapping, Set
 from typing import Any
 
-from nemo_platform_plugin.entities import EntityBase
+from nemo_helix_plugin.entities import EntityBase
 
 #: Length of a SHA-256 digest rendered as lowercase hex.
 DIGEST_LENGTH = 64

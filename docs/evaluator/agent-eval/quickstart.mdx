@@ -3,11 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "Agent Evaluation Quickstart"
-description: "Evaluate a simple agent end to end with the NeMo Evaluator SDK — define tasks and a metric, run locally, and read the scores and HTML report. No platform services or API keys required."
+description: "Evaluate a simple agent end to end with the NeMo Evaluator SDK — define tasks and a metric, run locally, and read the scores and HTML report. No Helix services or API keys required."
 ---
 
 In this quickstart you'll evaluate an agent on two tasks, score its answers, and produce a run
-bundle with a browsable HTML report — all on your machine, with **no platform services and no API
+bundle with a browsable HTML report — all on your machine, with **no Helix services and no API
 keys**. It takes about five minutes.
 
 For the concepts behind tasks, trials, runners, and metrics, see
@@ -15,11 +15,11 @@ For the concepts behind tasks, trials, runners, and metrics, see
 
 ## Prerequisites
 
-- Python 3.11–3.14
+- Python 3.12–3.14
 - The SDK:
 
 ```bash
-pip install nemo-platform[nemo-evaluator-sdk]
+pip install nemo-helix[nemo-evaluator-sdk]
 ```
 
 <Note>
@@ -111,6 +111,8 @@ an `AgentEvalResult`. It writes nothing on its own — call `result.persist()` t
 disk. (`run()` is async, so it lives inside an `async` function — see the full script below.)
 
 ```python
+from pathlib import Path
+
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
@@ -118,7 +120,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 result = await AgentEvaluator().run(
     tasks=make_tasks(),
     target=CallableAgentTaskRunner(my_agent),
-    config=AgentEvalRunConfig(work_dir="./agent-eval-run", parallelism=2),
+    config=AgentEvalRunConfig(work_dir=Path("./agent-eval-run"), parallelism=2),
 )
 result.persist()
 
@@ -157,6 +159,7 @@ programmatic follow-up, and the bundle (especially `report.html`) to inspect or 
 
 ```python
 import asyncio
+from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.callable_runtime import CallableAgentTaskRunner
@@ -208,7 +211,7 @@ async def main() -> None:
     result = await AgentEvaluator().run(
         tasks=make_tasks(),
         target=CallableAgentTaskRunner(my_agent),
-        config=AgentEvalRunConfig(work_dir="./agent-eval-run", parallelism=2),
+        config=AgentEvalRunConfig(work_dir=Path("./agent-eval-run"), parallelism=2),
     )
     result.persist()
     for aggregate in result.summary.scores.scores:
@@ -227,7 +230,11 @@ Expected output (both answers contain the expected keyword, so the mean is `1.0`
 
 ```
 keyword_match.score: 1.0
+keyword_match.score.pass@1: 1.0
 ```
+
+Alongside each metric's mean, the SDK reports a `pass@k` aggregate — here `pass@1`, because each
+task ran a single trial. See [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
 
 Open `./agent-eval-run/report.html` to see the run in a browser.
 
@@ -236,6 +243,7 @@ Open `./agent-eval-run/report.html` to see the run in a browser.
 <Cards>
   <Card title="Agent Evaluation (concepts)" href="/documentation/evaluate-models/agent-eval" />
   <Card title="Evaluate a Deployed Agent over HTTP" href="/documentation/evaluate-models/agent-eval/evaluate-deployed-agent" />
+  <Card title="Evaluate a NeMo Gym Environment" href="/documentation/evaluate-models/agent-eval/gym-runner" />
 </Cards>
 
 - Swap the stand-in agent for a **real model or a deployed agent over HTTP**.

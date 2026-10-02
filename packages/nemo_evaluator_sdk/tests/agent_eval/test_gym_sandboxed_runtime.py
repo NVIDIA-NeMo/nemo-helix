@@ -17,7 +17,7 @@ from typing import Any
 
 import httpx
 import pytest
-from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks, sandboxed
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
     MODEL_CALLS_RESULT_KEY,
@@ -59,6 +59,7 @@ class _FakeHost:
     ) -> None:
         self.requests: list[httpx.Request] = []
         self.posted: list[dict[str, Any]] = []
+        self.payload: dict[str, Any] = {}
         self._status = status
         self._body = body
         self._content = content
@@ -68,7 +69,8 @@ class _FakeHost:
     def transport(self) -> httpx.MockTransport:
         def handle(request: httpx.Request) -> httpx.Response:
             self.requests.append(request)
-            self.posted = json.loads(request.content.decode())["examples"]
+            self.payload = json.loads(request.content.decode())
+            self.posted = self.payload["examples"]
             if self._content is not None:
                 return httpx.Response(self._status, content=self._content)
             if self._body is not None or self._status >= 400:
@@ -132,6 +134,63 @@ async def test_the_examples_posted_carry_the_index_we_stamped(tasks, tmp_path, m
 
     assert [example[NG_TASK_INDEX] for example in host.posted] == [0, 1]
     assert all("responses_create_params" in example for example in host.posted)
+
+
+async def test_each_repeat_becomes_its_own_trial(tasks, tmp_path, monkeypatch) -> None:
+    host = _FakeHost()
+    runner = runner_against(host, monkeypatch, num_repeats=3)
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(host.requests) == 1
+    assert len(trials) == 6
+    for task in tasks:
+        task_trials = [trial for trial in trials if trial.task_id == task.id]
+        assert sorted(trial.metadata[NG_ROLLOUT_INDEX] for trial in task_trials) == [0, 1, 2]
+    assert len({trial.id for trial in trials}) == 6, "repeats of one task must not share a trial id"
+
+
+async def test_without_a_collector_the_whole_run_is_one_post_of_examples(tasks, tmp_path, monkeypatch) -> None:
+    host = _FakeHost()
+    runner = runner_against(host, monkeypatch, num_repeats=2)
+
+    await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(host.requests) == 1
+    assert list(host.payload) == ["examples"], "the host's /rollouts/run contract is `examples` alone"
+    assert len(host.posted) == 4
+
+
+async def test_an_injected_collector_replaces_the_post(tasks, tmp_path, monkeypatch) -> None:
+    """A caller holding a session collects through it instead, e.g. chunked with retries."""
+    host = _FakeHost(rewards={0: 1.0, 1: 0.0}, model_calls=[_model_call("c0", 1788534870.5)])
+    bind_http_transport(monkeypatch, host.transport())
+    batches: list[list[dict[str, Any]]] = []
+
+    async def collect(examples: list[dict[str, Any]]) -> list[Any]:
+        batches.append(examples)
+        records: list[Any] = []
+        for start in range(0, len(examples), 3):
+            async with httpx.AsyncClient() as client:
+                response = await client.post(ROLLOUT_URL, json={"examples": examples[start : start + 3]})
+            records.extend(response.json()["results"])
+        return [*records, "not a record"]
+
+    runner = SandboxedGymAgentTaskRunner(
+        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, num_repeats=3), collect=collect
+    )
+
+    trials = await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    (batch,) = batches
+    assert [(e[NG_TASK_INDEX], e[NG_ROLLOUT_INDEX]) for e in batch] == [(t, r) for t in (0, 1) for r in range(3)]
+    assert len(host.requests) == 2
+    assert len(trials) == 6
+    rewards = {trial.task_id: {trial.metadata["reward"]} for trial in trials}
+    assert rewards == {tasks[0].id: {1.0}, tasks[1].id: {0.0}}
+    assert all(trial.evidence and trial.evidence.get("ng_trajectory") for trial in trials), (
+        "captures returned through the collector must still be unpacked"
+    )
 
 
 async def test_the_auth_token_is_sent_as_the_proxy_header(tasks, tmp_path, monkeypatch) -> None:
@@ -319,7 +378,7 @@ async def test_a_task_the_host_never_answered_fails_the_run(tasks, tmp_path, mon
 
 def test_runner_info_records_the_host_but_not_the_token() -> None:
     runner = SandboxedGymAgentTaskRunner(
-        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, auth_token="sk-secret-value")
+        config=SandboxedGymRuntimeConfig(rollout_url=ROLLOUT_URL, auth_token="sk-secret-value", num_repeats=3)
     )
 
     info = runner.runner_info()
@@ -327,6 +386,8 @@ def test_runner_info_records_the_host_but_not_the_token() -> None:
     assert info.name == "gym"
     assert info.config["mode"] == "sandboxed"
     assert info.config["rollout_url"] == ROLLOUT_URL
+    assert info.config["num_repeats"] == 3
+    assert info.config["timeout_s"] == 3600.0
     assert "sk-secret-value" not in json.dumps(info.config), "the token must not reach the run bundle"
 
 
@@ -428,3 +489,64 @@ def test_a_caller_that_numbers_its_own_repeats_keeps_its_numbering() -> None:
     _stamp_rollout_indices(examples)
 
     assert [example[NG_ROLLOUT_INDEX] for example in examples] == [7, 0]
+
+
+def test_a_host_failure_surfaces_the_host_output_not_just_a_loopback_500() -> None:
+    """The component servers report an upstream refusal as a 500 from 127.0.0.1.
+
+    Without the host's own output the caller is left with that address and a Gym traceback, and
+    the sandbox holding the real cause has already been destroyed.
+    """
+    message = sandboxed._host_error_message(
+        "http://sandbox/proxy/8080/rollouts/run",
+        {
+            "code": "internal",
+            "message": "ClientResponseError: 500, url='http://127.0.0.1:5902/run'",
+            "host_output_tail": ["(policy_model) upstream returned 401 Unauthorized"],
+        },
+    )
+
+    assert "(policy_model) upstream returned 401 Unauthorized" in message
+    assert "gym host output" in message, "the tail must be labelled, not spliced into the summary"
+    assert "ClientResponseError" in message, "the host's own error still has to survive"
+
+
+def test_a_host_failure_without_output_reads_as_before() -> None:
+    message = sandboxed._host_error_message("http://sandbox/run", {"code": "internal", "message": "boom"})
+
+    assert "gym host output" not in message
+    assert "boom" in message
+
+
+def test_a_non_mapping_error_is_still_rendered() -> None:
+    """Older hosts send a bare string; it must not become a stack trace in the caller."""
+    assert "plain failure" in sandboxed._host_error_message("http://sandbox/run", "plain failure")
+
+
+async def test_a_503_bootstrap_failure_renders_the_envelope_it_carried(tasks, tmp_path, monkeypatch) -> None:
+    """A host that failed to bootstrap answers 503 with the same envelope a 200 would carry.
+
+    Truncating the raw body instead drops the output tail, which is ordered oldest first, so the
+    cut lands on the traceback that says why the host never started.
+    """
+    tail = [f"bootstrap line {index}" for index in range(80)]
+    host = _FakeHost(
+        status=503,
+        body={
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+                "host_output_tail": tail,
+            }
+        },
+    )
+    runner = runner_against(host, monkeypatch)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await runner.run_tasks(tasks, AgentEvalRunConfig(work_dir=tmp_path))
+
+    message = str(excinfo.value)
+    assert "rejected the configured credential" in message
+    assert "gym host output" in message, "the tail must be labelled, not left as raw JSON"
+    assert "bootstrap line 0" in message, "the oldest line is where the traceback starts"
+    assert "bootstrap line 79" in message

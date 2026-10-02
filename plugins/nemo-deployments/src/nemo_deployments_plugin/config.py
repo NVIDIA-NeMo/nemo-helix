@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.config import NemoConfig
+from nemo_helix_plugin.config import NemoConfig
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -61,7 +61,7 @@ class ControllerConfig(BaseModel):
 
 class DeploymentsConfig(NemoConfig):
     plugin_name: ClassVar[str] = "deployments"
-    plugin_description: ClassVar[str] = "Configuration for the NeMo Platform deployments plugin."
+    plugin_description: ClassVar[str] = "Configuration for the NeMo Helix deployments plugin."
 
     executors: list[ExecutorConfigEntry] = Field(
         default_factory=list,
@@ -73,10 +73,10 @@ class DeploymentsConfig(NemoConfig):
     )
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
     auth_proxy_image_name: str = Field(
-        default="nmp-api",
+        default="nhx-api",
         description=(
             "Image name for the auth-proxy sidecar (qualified with the platform image registry/tag). "
-            "Must be an nmp-api image (runs `nemo services run --sidecars auth-proxy`)."
+            "Must be an nhx-api image (runs `nemo services run --sidecars auth-proxy`)."
         ),
     )
     auth_proxy_image: str = Field(

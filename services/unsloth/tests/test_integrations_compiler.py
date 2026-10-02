@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.unsloth.app.jobs.training.compiler import compile_training_step
-from nmp.unsloth.schemas import (
+from nhx.unsloth.app.jobs.training.compiler import compile_training_step
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -52,7 +52,7 @@ def test_compile_training_step_no_integrations() -> None:
 def test_compile_training_step_warns_on_incomplete_wandb(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from nemo_platform_plugin.integrations import IntegrationsSpec
+    from nemo_helix_plugin.integrations import IntegrationsSpec
 
     spec = _job_spec_with_integrations().model_copy(
         update={

@@ -5,21 +5,168 @@
 
 from __future__ import annotations
 
-import pytest
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
-from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
-from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+import re
+from pathlib import Path
+from unittest.mock import Mock
 
-#: Target fields with no counterpart on the runtime config, so a round-trip cannot check them.
-#:
-#: * ``kind`` discriminates the target union.
-#: * ``env_secrets`` holds references the service resolves into the job environment, so a *running*
-#:   runner has already had them delivered as ordinary variables and has no reference to restate.
-#: * ``agent_ref_name`` routes rollouts on the sandboxed host path only; the CLI runner resolves its
-#:   agent from Gym config instead, so there is nothing on the runtime config to compare against.
-#: * ``environment`` identifies a FileSet staged by the platform before the job runs; a live runner
-#:   has no FileSet staging reference to restate.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "env_secrets", "agent_ref_name", "environment"}
+import pytest
+from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import (
+    AgentEvalInputSpec,
+    GymPlacement,
+    GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborRunnerTarget,
+)
+from nemo_evaluator.jobs.runner_targets import UnsubmittableRunnerError, runner_to_target
+from nemo_evaluator.sdk.resources import Evaluator
+from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.values import SecretRef
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from pydantic import ValidationError
+
+#: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
+#: discriminates the target union, and the other two come from the ``GymPlacement``.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
+
+#: The runtime's three agent-selection fields become the target's one ``source``.
+HARBOR_AGENT_VALUES = {
+    "agent_name": "codex",
+    "agent_import_path": "custom_agent:Agent",
+    "agent_model_name": "model",
+}
+HARBOR_CARRIED_VALUES = {
+    "agent_kwargs": {"temperature": 0.2},
+    # A bare ref travels as-is; the platform resolves it in the job's workspace.
+    "env_secrets": {"OPENAI_API_KEY": "openai-api-key"},
+    "env_vars": {"FABRIC_LOG": "debug"},
+    "n_attempts": 2,
+    "n_concurrent_trials": 3,
+    "max_retries": 2,
+    "artifacts": ["/app/output"],
+    "trace_dir": "/app/traces",
+    "reward_key": "score",
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_timeout_multiplier": 5.0,
+}
+HARBOR_REJECTED_VALUES = {
+    "job_name": "existing-job",
+    "force_rerun": True,
+    "quiet": False,
+    "agent_dir": Path("local-agent"),
+    "timeout_multiplier": 2.0,
+    "verifier_timeout_multiplier": 2.0,
+    "environment_build_timeout_multiplier": 2.0,
+}
+
+
+def test_harbor_configuration_survives_submission_without_local_storage(tmp_path, monkeypatch):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", **HARBOR_AGENT_VALUES, **HARBOR_CARRIED_VALUES)
+    runner = HarborAgentTaskRunner(config=config)
+    # Conversion must not inspect the caller's filesystem or start Harbor.
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "exists", Mock(side_effect=AssertionError("local filesystem accessed")))
+        scoped.setattr(Path, "mkdir", Mock(side_effect=AssertionError("local filesystem modified")))
+        target = runner_to_target(runner)
+    assert isinstance(target, HarborRunnerTarget)
+    assert target.model_dump(mode="json") == {
+        "kind": "harbor",
+        "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
+        **HARBOR_CARRIED_VALUES,
+    }
+
+
+_FAKE_KEY = "sk-not-a-real-key-0123456789"
+
+
+@pytest.mark.parametrize(
+    ("env_vars", "message"),
+    [
+        ({"X": "${WORKER_VAR}"}, "looks like a ${NAME} template"),
+        ({"MODEL_CREDS": _FAKE_KEY}, "look like plaintext credentials"),
+        ({"OPENAI_API_KEY": "x"}, "appear in both env_vars and env_secrets"),
+    ],
+)
+def test_harbor_invalid_env_vars_surface_their_own_message_without_the_value(tmp_path, env_vars, message):
+    # `model_copy` skips validators, so the target's own validation is what refuses it.
+    config = HarborRuntimeConfig(
+        jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": SecretRef("openai-api-key")}
+    ).model_copy(update={"env_vars": env_vars})
+
+    with pytest.raises(UnsubmittableRunnerError, match=re.escape(message)) as excinfo:
+        runner_to_target(HarborAgentTaskRunner(config=config))
+
+    assert _FAKE_KEY not in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value.__cause__)
+
+
+def test_nested_harbor_target_error_does_not_echo_the_value():
+    with pytest.raises(ValidationError) as excinfo:
+        AgentEvalInputSpec.model_validate(
+            {"tasks": TasksetRef("suite"), "target": {"kind": "harbor", "env_vars": {"MODEL_CREDS": _FAKE_KEY}}}
+        )
+    assert "plaintext credentials" in str(excinfo.value)
+    assert _FAKE_KEY not in str(excinfo.value)
+
+
+def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
+    )
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
+
+
+def test_every_harbor_runtime_field_has_a_submission_policy():
+    assert set(HarborRuntimeConfig.model_fields) == (
+        set(HARBOR_AGENT_VALUES) | set(HARBOR_CARRIED_VALUES) | set(HARBOR_REJECTED_VALUES) | {"jobs_dir"}
+    )
+
+
+@pytest.mark.parametrize("field,value", HARBOR_REJECTED_VALUES.items())
+def test_harbor_rejects_settings_the_job_cannot_preserve(tmp_path, monkeypatch, field, value):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, agent_import_path="custom_agent:Agent", **{field: value})
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = Mock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    with pytest.raises(UnsubmittableRunnerError, match=field):
+        evaluator.submit(tasks=TasksetRef("suite"), target=HarborAgentTaskRunner(config=config))
+    create_job.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("dataset_path", "dataset"), ("task_names", []), ("job_dir", "job"), ("run_job", Mock())],
+)
+def test_harbor_rejects_local_execution_overrides(tmp_path, monkeypatch, field, value):
+    runner = HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path), **{field: value})
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = Mock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    with pytest.raises(UnsubmittableRunnerError, match=field):
+        evaluator.submit(tasks=TasksetRef("suite"), target=runner)
+    create_job.assert_not_called()
+
+
+def test_harbor_offline_runner_requires_saved_trial_rescoring(tmp_path):
+    with pytest.raises(UnsubmittableRunnerError, match="config"):
+        runner_to_target(HarborAgentTaskRunner(job_dir=tmp_path))
+
+
+def test_harbor_refuses_gym_placement(tmp_path):
+    with pytest.raises(UnsubmittableRunnerError, match="GymPlacement"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path)), GymPlacement())
+
+
+def test_harbor_revalidates_mutated_configuration(tmp_path):
+    config = HarborRuntimeConfig(jobs_dir=tmp_path)
+    config.n_attempts = 0
+    with pytest.raises(UnsubmittableRunnerError) as raised:
+        runner_to_target(HarborAgentTaskRunner(config=config))
+    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def _configured() -> GymRuntimeConfig:
@@ -36,6 +183,7 @@ def _configured() -> GymRuntimeConfig:
         bind_resources_server=False,
         hydra_params={"simple_agent": {"responses_api_agents": {"x": 1}}},
         env_vars={"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"},
+        env_secrets={"NVIDIA_API_KEY": SecretRef("evals/nvidia-api-key")},
         num_repeats=3,
         concurrency=7,
         startup_timeout_s=1800.0,
@@ -136,3 +284,66 @@ def test_an_unsupported_runner_is_refused_by_name() -> None:
     assert "_Unsupported" in message, "the message must name the runner that could not be converted"
     # Points at the alternative rather than dead-ending.
     assert "AgentEvaluator()" in message
+
+
+def test_a_custom_environment_run_with_a_secret_is_submittable_from_a_runner() -> None:
+    """A FileSet environment and a model credential, arriving from the runner and the placement.
+
+    A sandboxed deployment refuses credential-shaped plaintext in ``env_vars``, so this combination
+    is what a real custom-environment evaluation needs, and both halves have to reach one target.
+    """
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="gdpval",
+            env_secrets={"NVIDIA_API_KEY": SecretRef("evals/nvidia-api-key")},
+        )
+    )
+    placement = GymPlacement(
+        environment=FilesetRef(root="evals/gdpval-env"),
+        agent_ref_name="gdpval_simple_agent",
+    )
+
+    target = runner_to_target(runner, placement)
+
+    assert isinstance(target, GymRunnerTarget)
+    assert target.environment is not None and target.environment.root == "evals/gdpval-env"
+    assert target.env_secrets["NVIDIA_API_KEY"].root == "evals/nvidia-api-key"
+    assert target.agent_ref_name == "gdpval_simple_agent"
+    assert target.agent_config == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    AgentEvalInputSpec(tasks=TasksetRef("gdpval"), target=target)
+
+
+def test_a_runner_submitted_without_a_placement_keeps_its_own_agent_config() -> None:
+    target = runner_to_target(GymAgentTaskRunner(config=_configured()))
+
+    assert isinstance(target, GymRunnerTarget)
+    assert target.agent_config == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    assert target.environment is None
+    assert target.agent_ref_name is None
+
+
+def test_a_placement_for_a_runner_that_cannot_be_placed_is_refused() -> None:
+    # Ignoring a placement aimed at the wrong runner would submit a job without the environment.
+    class _Unsupported:
+        def runner_info(self):  # pragma: no cover - never reached
+            raise NotImplementedError
+
+        async def run_tasks(self, tasks, config=None):  # pragma: no cover - never reached
+            return []
+
+    with pytest.raises(UnsubmittableRunnerError, match="GymPlacement"):
+        runner_to_target(_Unsupported(), GymPlacement(environment=FilesetRef(root="ws/env")))
+
+
+def test_a_hand_written_target_cannot_name_a_variable_both_ways_either() -> None:
+    # Same rule as GymRuntimeConfig, because a hand-written spec never passes through one.
+    with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
+        GymRunnerTarget(
+            agent="simple_agent",
+            agent_config="c",
+            resources_server="mcqa",
+            env_vars={"GYM_MODEL_KEY": "plaintext"},
+            env_secrets={"GYM_MODEL_KEY": SecretRef("evals/nvidia-api-key")},
+        )

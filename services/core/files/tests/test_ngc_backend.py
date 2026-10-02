@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import aiohttp
 import pytest
-from nmp.common.api.common import SecretRef
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.factory import storage_impl_factory
-from nmp.core.files.app.backends.ngc import (
+from nhx.common.api.common import SecretRef
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.factory import storage_impl_factory
+from nhx.core.files.app.backends.ngc import (
     NGCBackendError,
     NGCStorageConfig,
     NGCStorageImpl,
@@ -35,10 +35,10 @@ def mock_ngc_client():
     """Mock NGC SDK client and registry API classes (ResourceAPI, ModelAPI, GuestModelAPI).
     Resources always use ResourceAPI; models use GuestModelAPI or ModelAPI."""
     with (
-        patch("nmp.core.files.app.backends.ngc.Client") as mock_client_cls,
-        patch("nmp.core.files.app.backends.ngc.ResourceAPI") as mock_resource_api_cls,
-        patch("nmp.core.files.app.backends.ngc.ModelAPI") as mock_model_api_cls,
-        patch("nmp.core.files.app.backends.ngc.GuestModelAPI") as mock_guest_model_api_cls,
+        patch("nhx.core.files.app.backends.ngc.Client") as mock_client_cls,
+        patch("nhx.core.files.app.backends.ngc.ResourceAPI") as mock_resource_api_cls,
+        patch("nhx.core.files.app.backends.ngc.ModelAPI") as mock_model_api_cls,
+        patch("nhx.core.files.app.backends.ngc.GuestModelAPI") as mock_guest_model_api_cls,
     ):
         mock_client = Mock()
 
@@ -108,7 +108,7 @@ def ngc_secrets() -> dict[str, str]:
         # Public org + resource -> ResourceAPI (GuestResourceAPI not used)
         (
             "nvidia",
-            "nemo-platform",
+            "nemo-helix",
             "nemo-quickstart",
             "resource",
             "resource_api",
@@ -173,7 +173,7 @@ async def test_target_type_defaults_to_resource(mock_ngc_client, ngc_secrets):
 
 def test_legacy_key_rejected(ngc_config, mock_ngc_client):
     """Legacy API keys (without scoped prefix) are rejected with NGCBackendError."""
-    from nmp.core.files.app.backends.ngc import NGCBackendError
+    from nhx.core.files.app.backends.ngc import NGCBackendError
 
     legacy_secrets = {"api_key": "ngc-legacy-key"}
     with pytest.raises(NGCBackendError, match="Legacy NGC keys are not supported"):
@@ -235,7 +235,7 @@ async def test_get_signed_url_success(ngc_config, mock_ngc_client, ngc_secrets):
     )
 
     with patch(
-        "nmp.core.files.app.backends.ngc.download_url",
+        "nhx.core.files.app.backends.ngc.download_url",
         new_callable=AsyncMock,
     ) as mock_download:
         mock_download.return_value = {"urls": ["https://signed-url.com/test.txt"]}
@@ -256,7 +256,7 @@ async def test_get_signed_url_not_found(ngc_config, mock_ngc_client, ngc_secrets
     )
 
     with patch(
-        "nmp.core.files.app.backends.ngc.download_url",
+        "nhx.core.files.app.backends.ngc.download_url",
         new_callable=AsyncMock,
     ) as mock_download:
         mock_download.side_effect = aiohttp.ClientResponseError(
@@ -283,7 +283,7 @@ async def test_get_signed_url_network_error(ngc_config, mock_ngc_client, ngc_sec
     )
 
     with patch(
-        "nmp.core.files.app.backends.ngc.download_url",
+        "nhx.core.files.app.backends.ngc.download_url",
         new_callable=AsyncMock,
     ) as mock_download:
         mock_download.side_effect = aiohttp.ClientError("Connection failed")
@@ -361,10 +361,10 @@ async def test_download_success(ngc_config, mock_ngc_client, ngc_secrets):
 
     with (
         patch(
-            "nmp.core.files.app.backends.ngc.download_url",
+            "nhx.core.files.app.backends.ngc.download_url",
             new_callable=AsyncMock,
         ) as mock_get_url,
-        patch("nmp.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
     ):
         mock_get_url.return_value = {"urls": ["https://signed-url.com/test.txt"]}
 
@@ -396,10 +396,10 @@ async def test_download_with_byte_range(ngc_config, mock_ngc_client, ngc_secrets
 
     with (
         patch(
-            "nmp.core.files.app.backends.ngc.download_url",
+            "nhx.core.files.app.backends.ngc.download_url",
             new_callable=AsyncMock,
         ) as mock_get_url,
-        patch("nmp.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
     ):
         mock_get_url.return_value = {"urls": ["https://signed-url.com/test.txt"]}
 
@@ -431,10 +431,10 @@ async def test_download_file_not_found(ngc_config, mock_ngc_client, ngc_secrets)
 
     with (
         patch(
-            "nmp.core.files.app.backends.ngc.download_url",
+            "nhx.core.files.app.backends.ngc.download_url",
             new_callable=AsyncMock,
         ) as mock_get_url,
-        patch("nmp.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
+        patch("nhx.core.files.app.backends.ngc.download_url_streaming") as mock_stream,
     ):
         mock_get_url.return_value = {"urls": ["https://signed-url.com/missing.txt"]}
 
@@ -537,8 +537,8 @@ def test_factory_creates_ngc_impl(ngc_secrets):
     )
 
     with (
-        patch("nmp.core.files.app.backends.ngc.Client"),
-        patch("nmp.core.files.app.backends.ngc.ResourceAPI"),
+        patch("nhx.core.files.app.backends.ngc.Client"),
+        patch("nhx.core.files.app.backends.ngc.ResourceAPI"),
     ):
         impl = storage_impl_factory(config, ngc_secrets)
 
@@ -579,8 +579,8 @@ async def test_get_cache_path_key_with_explicit_version(ngc_secrets):
     )
 
     with (
-        patch("nmp.core.files.app.backends.ngc.Client"),
-        patch("nmp.core.files.app.backends.ngc.GuestModelAPI"),
+        patch("nhx.core.files.app.backends.ngc.Client"),
+        patch("nhx.core.files.app.backends.ngc.GuestModelAPI"),
     ):
         impl = NGCStorageImpl(config, ngc_secrets)
 
@@ -622,8 +622,8 @@ async def test_resolve_config_with_explicit_version(ngc_secrets):
     )
 
     with (
-        patch("nmp.core.files.app.backends.ngc.Client"),
-        patch("nmp.core.files.app.backends.ngc.ResourceAPI"),
+        patch("nhx.core.files.app.backends.ngc.Client"),
+        patch("nhx.core.files.app.backends.ngc.ResourceAPI"),
     ):
         impl = NGCStorageImpl(config, ngc_secrets)
         resolved_config = await impl.resolve_config()

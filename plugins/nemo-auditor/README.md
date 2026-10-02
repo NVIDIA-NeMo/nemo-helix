@@ -3,8 +3,8 @@
 
 # NeMo Auditor Plugin
 
-A NeMo Platform plugin which provides Auditor, an LLM
-vulnerability scanner service powered by [Garak](https://https://github.com/NVIDIA/garak)
+A NeMo Helix plugin which provides Auditor, an LLM
+vulnerability scanner service powered by [Garak](https://github.com/NVIDIA/garak)
 
 ## CLI quickstart
 
@@ -32,7 +32,7 @@ NeMo CLI:
 
 ```bash
 # Create a config from a JSON file
-nemo auditor configs create quick-scan -w default -f ./quick-scan.json
+nemo auditor configs create quick-scan -w default --data-file ./quick-scan.json
 
 # Create a target inline
 nemo auditor targets create nemotron-3.5-lightning-30b -w default -d '{
@@ -58,12 +58,12 @@ Every CLI verb has a matching Python SDK method on `client.auditor`, plus
 service.
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from nemo_auditor.entities import (
     AuditSystemData, AuditRunData, AuditPluginsData, AuditReportData,
 )
 
-client = NeMoPlatform()
+client = NeMoHelix()
 
 # Persist a config
 cfg = client.auditor.configs.create(

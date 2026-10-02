@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from nemo_example_plugin.studio import get_studio_spec
-from nemo_platform_plugin.interface import StudioSpec
+from nemo_helix_plugin.interface import StudioSpec
 
 
 def test_get_studio_spec_returns_studio_spec():

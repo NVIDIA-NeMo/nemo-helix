@@ -9,7 +9,7 @@ import httpx
 import pytest
 from evaluation import intake_client as intake_client_module
 from evaluation.intake_client import build_basic_auth_intake_client, build_rewriting_http_client
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 
 async def test_rewrites_sdk_prefix_and_attaches_basic_auth() -> None:
@@ -70,7 +70,7 @@ async def test_build_basic_auth_intake_client_returns_sdk_client() -> None:
         password="p",
     )
     try:
-        assert isinstance(client, AsyncNeMoPlatform)
+        assert isinstance(client, AsyncNeMoHelix)
     finally:
         await client.close()
 

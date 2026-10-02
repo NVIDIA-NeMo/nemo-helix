@@ -3,7 +3,7 @@
 
 import { formatAbsoluteTimestamp } from '@nemo/common/src/components/RelativeTime/util';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { PlatformJobResponse, PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { HelixJobResponse, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import {
@@ -79,14 +79,14 @@ describe('CustomizationJobDetailsRoute', () => {
   it('keeps polling an active job after switching away from the Overview tab', async () => {
     let jobRequests = 0;
     server.use(
-      http.get<never, never, PlatformJobResponse>(
+      http.get<never, never, HelixJobResponse>(
         `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`,
         () => {
           jobRequests += 1;
           return HttpResponse.json({
             ...customizationJob1,
-            status: PlatformJobStatus.active,
-          } as unknown as PlatformJobResponse);
+            status: HelixJobStatus.active,
+          } as unknown as HelixJobResponse);
         }
       )
     );

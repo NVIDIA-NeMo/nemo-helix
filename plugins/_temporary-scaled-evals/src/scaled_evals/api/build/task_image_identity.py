@@ -417,12 +417,13 @@ def _registry_auth_headers(registry: str) -> dict[str, str]:
 
 def _registry_auth_entry(registry: str) -> dict[str, str] | None:
     auth_file = settings.task_image_registry_auth_file
-    if not auth_file:
+    auth_json = settings.task_image_registry_auth_json
+    if not auth_file and not auth_json:
         return None
     try:
-        document = json.loads(Path(auth_file).read_text())
+        document = json.loads(Path(auth_file).read_text() if auth_file else auth_json)
     except (OSError, json.JSONDecodeError) as exc:
-        raise TaskImageIdentityError(f"could not read registry auth file: {exc}") from exc
+        raise TaskImageIdentityError(f"could not read registry auth configuration: {exc}") from exc
     for key, value in (document.get("auths") or {}).items():
         normalized = key.removeprefix("https://").removeprefix("http://").rstrip("/")
         if normalized == registry and isinstance(value, dict):

@@ -8,7 +8,7 @@ import shlex
 from typing import Protocol, runtime_checkable
 
 import pytest
-from nemo_platform_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
+from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, JsonObject
 
@@ -36,25 +36,25 @@ def require_capability(case: AuthIdpCase, capability: str) -> None:
         pytest.skip(f"{case.id} does not declare auth-idp capability: {capability}")
 
 
-def nmp_api_image() -> str:
+def nhx_api_image() -> str:
     registry = os.environ.get("IMAGE_REGISTRY", "my-registry")
     tag = os.environ.get("BAKE_TAG", "local")
-    return f"{registry}/nmp-api:{tag}"
+    return f"{registry}/nhx-api:{tag}"
 
 
 def managed_workload_workspace_get_command(*, task_config: JsonObject | None = None) -> str:
     command = (
-        'if [ -n "${NMP_PRINCIPAL:-}" ]; then '
-        "echo 'Unexpected NMP_PRINCIPAL in managed workload'; exit 42; "
+        'if [ -n "${NHX_PRINCIPAL:-}" ]; then '
+        "echo 'Unexpected NHX_PRINCIPAL in managed workload'; exit 42; "
         "fi; "
-        'if [ -z "${NMP_WORKLOAD_IDENTITY_TOKEN_FILE:-}" ]; then '
-        "echo 'Missing NMP_WORKLOAD_IDENTITY_TOKEN_FILE in managed workload'; exit 43; "
+        'if [ -z "${NHX_WORKLOAD_IDENTITY_TOKEN_FILE:-}" ]; then '
+        "echo 'Missing NHX_WORKLOAD_IDENTITY_TOKEN_FILE in managed workload'; exit 43; "
         "fi; "
-        'if [ ! -f "${NMP_WORKLOAD_IDENTITY_TOKEN_FILE}" ]; then '
+        'if [ ! -f "${NHX_WORKLOAD_IDENTITY_TOKEN_FILE}" ]; then '
         "echo 'Workload identity token file is missing'; exit 44; "
         "fi; "
-        "echo 'Workload auth env: NMP_PRINCIPAL=absent NMP_WORKLOAD_IDENTITY_TOKEN_FILE=present'; "
-        "exec nemo-platform run task --task nmp.hello_world.tasks.workload_workspace_get"
+        "echo 'Workload auth env: NHX_PRINCIPAL=absent NHX_WORKLOAD_IDENTITY_TOKEN_FILE=present'; "
+        "exec nemo-helix run task --task nhx.hello_world.tasks.workload_workspace_get"
     )
     if task_config is None:
         return command

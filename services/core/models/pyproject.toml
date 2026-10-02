@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-models"
-description = "NeMo Platform Models provides model configuration, scaling, and deployment capabilities."
+name = "nhx-models"
+description = "NeMo Helix Models provides model configuration, scaling, and deployment capabilities."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 
@@ -16,7 +16,7 @@ classifiers = [
 ]
 
 dependencies = [
-    # API server dependencies (for nmp-api/nmp-core containers)
+    # API server dependencies (for nhx-api/nhx-core containers)
     "fastapi>=0.115.8",
     "pydantic>=2.10.6",
     "uvicorn>=0.34.0",
@@ -24,8 +24,8 @@ dependencies = [
     "sqlmodel>=0.0.22",
     "pyyaml>=6.0.2",
     "urllib3>=2.7.0",
-    "nmp-common",
-    "nemo-platform-plugin",
+    "nhx-common",
+    "nemo-helix-plugin",
     "tenacity>=8.5.0",
 ]
 version = "0.0.0"
@@ -35,14 +35,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 
 [dependency-groups]
-# No task deps for models — `nmp.core.models.parallelism` is the only consumer of
+# No task deps for models — `nhx.core.models.parallelism` is the only consumer of
 # torch/transformers/accelerate, and it's only invoked from the `model_spec` batch
-# task. That task runs in the `nmp-customizer-tasks` image (PyTorch from
-# nmp-automodel-base); parallelism tests in this repo guard with `pytest.importorskip("torch")`.
+# task. That task runs in the `nhx-customizer-tasks` image (PyTorch from
+# nhx-automodel-base); parallelism tests in this repo guard with `pytest.importorskip("torch")`.
 
 dev = [
     "pytest>=8.3.4",
@@ -60,6 +60,6 @@ dev = [
 # (No [tool.pytest.ini_options] section - pytest discovers root config)
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nhx-common = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 models = { workspace = true }

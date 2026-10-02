@@ -5,7 +5,7 @@
 
 Encapsulates the policy for choosing a packager when the caller does not provide
 one explicitly. Built-in metric types use the inline packager (config-serialized,
-no code execution). Custom metrics fall back to cloudpickle for local execution,
+no code execution). Custom metrics fall back to cloudpickle for in-process evaluation,
 or require an explicit cloudpickle opt-in for operations that ship the metric to
 the service.
 """

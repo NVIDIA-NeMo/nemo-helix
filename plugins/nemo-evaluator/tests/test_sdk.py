@@ -36,10 +36,10 @@ from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackag
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import FieldMapping, Model, ModelRef, RunConfig, RunConfigOnline, RunConfigOnlineModel
-from nemo_platform_plugin.client.errors import NemoResponseValidationError, NotFoundError
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
-from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoundError
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from pytest_mock import MockerFixture
 
 _EXACT_MATCH_METRIC = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
@@ -113,11 +113,11 @@ class _CustomRuntimeMetric:
         return MetricResult(outputs=[MetricOutput(name="score", value=1.0)])
 
 
-class _SyncPlatform(EvaluatorClient):
+class _SyncHelix(EvaluatorClient):
     def __init__(self) -> None:
         self.http_client = MagicMock(spec=httpx.Client)
         super().__init__(
-            base_url="http://test:8000",
+            base_url="http://127.0.0.1:8000",
             workspace="platform-ws",
             default_headers={"Authorization": "Bearer sync-platform-token"},
             timeout=httpx.Timeout(42.0),
@@ -125,11 +125,11 @@ class _SyncPlatform(EvaluatorClient):
         )
 
 
-class _AsyncPlatform(AsyncEvaluatorClient):
+class _AsyncHelix(AsyncEvaluatorClient):
     def __init__(self) -> None:
         self.http_client = AsyncMock(spec=httpx.AsyncClient)
         super().__init__(
-            base_url="http://test:8000",
+            base_url="http://127.0.0.1:8000",
             workspace="platform-ws",
             default_headers={"Authorization": "Bearer platform-token"},
             timeout=httpx.Timeout(43.0),
@@ -145,16 +145,16 @@ def _empty_response(method: str, url: str, *, status_code: int = 204) -> httpx.R
     return httpx.Response(status_code, request=httpx.Request(method, url))
 
 
-def _request_body(platform: _SyncPlatform | _AsyncPlatform) -> dict[str, Any]:
+def _request_body(platform: _SyncHelix | _AsyncHelix) -> dict[str, Any]:
     return json.loads(platform.http_client.request.call_args.kwargs["content"].decode())
 
 
-def _last_request_url(platform: _SyncPlatform | _AsyncPlatform) -> str:
+def _last_request_url(platform: _SyncHelix | _AsyncHelix) -> str:
     return platform.http_client.request.call_args.args[1]
 
 
 def test_sync_executor_initializes_without_resource_callbacks() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
 
     executor = _SyncEvaluatorPluginExecutor(client=platform)
 
@@ -162,7 +162,7 @@ def test_sync_executor_initializes_without_resource_callbacks() -> None:
 
 
 def test_async_executor_initializes_without_resource_callbacks() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
 
     executor = _AsyncEvaluatorPluginExecutor(client=platform)
 
@@ -171,7 +171,7 @@ def test_async_executor_initializes_without_resource_callbacks() -> None:
 
 def test_resolve_workspace_requires_explicit_or_default_workspace() -> None:
     """Remote submission should fail when no workspace can be resolved."""
-    client = EvaluatorClient(base_url="http://test:8000", workspace=None)
+    client = EvaluatorClient(base_url="http://127.0.0.1:8000", workspace=None)
     executor = _SyncEvaluatorPluginExecutor(client=client)
 
     with pytest.raises(ValueError, match="workspace must be provided"):
@@ -277,26 +277,26 @@ def test_build_evaluate_spec_preserves_fileset_ref_dataset() -> None:
 
 
 def test_sync_resource_calls_evaluator_plugin_status() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
         {"plugin": "evaluator", "status": "ok"},
     )
 
     resource = Evaluator(platform)
 
     assert resource.plugin_status() == {"plugin": "evaluator", "status": "ok"}
-    assert platform.http_client.request.call_args.args == ("GET", "http://test:8000/apis/evaluator/v1/healthz")
+    assert platform.http_client.request.call_args.args == ("GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz")
     assert platform.http_client.request.call_args.kwargs["headers"] == {"Authorization": "Bearer sync-platform-token"}
     assert platform.http_client.request.call_args.kwargs["params"] is None
     assert platform.http_client.request.call_args.kwargs["timeout"] == platform._timeout
 
 
 def test_sync_resource_rejects_non_object_plugin_status() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
-        "GET", "http://test:8000/apis/evaluator/v1/healthz", ["ok"]
+        "GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz", ["ok"]
     )
     resource = Evaluator(platform)
 
@@ -304,18 +304,34 @@ def test_sync_resource_rejects_non_object_plugin_status() -> None:
         resource.plugin_status()
 
 
-def test_sync_resource_does_not_expose_backend_methods() -> None:
-    resource = Evaluator(_SyncPlatform())
+_EVALUATOR_PUBLIC_RESOURCE_NAMES = {
+    "agent_eval_results",
+    "eval_results",
+    "from_sdk",
+    "get_job_resource",
+    "metrics",
+    "plugin_status",
+    "submit",
+    "tasks",
+    "tasksets",
+}
 
-    for method_name in ("create", "run_local", "evaluate", "evaluate_benchmark", "execution_mode"):
-        assert not hasattr(resource, method_name)
+
+def _public_resource_names(resource: object) -> set[str]:
+    return {name for name in dir(resource) if not name.startswith("_")}
+
+
+def test_sync_resource_exposes_only_evaluator_sdk_surface() -> None:
+    resource = Evaluator(_SyncHelix())
+
+    assert _public_resource_names(resource) == _EVALUATOR_PUBLIC_RESOURCE_NAMES
 
 
 def test_sync_executor_creates_evaluator_job() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -326,12 +342,12 @@ def test_sync_executor_creates_evaluator_job() -> None:
 
     assert isinstance(job, EvaluatorJobResource)
     assert job.name == "job-123"
-    assert job.job.status == PlatformJobStatus.CREATED
+    assert job.job.status == HelixJobStatus.CREATED
     assert job.job.spec is not None
     assert _single_metric(job.job.spec).metric_type == "exact-match"
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {
@@ -342,10 +358,10 @@ def test_sync_executor_creates_evaluator_job() -> None:
 
 
 def test_sync_executor_create_does_not_use_asyncio_thread_bridge() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -360,10 +376,10 @@ def test_sync_executor_create_does_not_use_asyncio_thread_bridge() -> None:
 
 
 def test_sync_executor_create_uses_platform_workspace_by_default() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
         {"name": "job-123", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -375,16 +391,16 @@ def test_sync_executor_create_uses_platform_workspace_by_default() -> None:
     assert _single_metric(job.job.spec).metric_type == "exact-match"
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/platform-ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
 
 
 def test_sync_executor_create_rejects_malformed_response() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         ["job-123"],
         status_code=201,
     )
@@ -392,15 +408,15 @@ def test_sync_executor_create_rejects_malformed_response() -> None:
 
     with pytest.raises(NemoResponseValidationError):
         executor.create(spec=_EXACT_MATCH_EVALUATE_INPUT_SPEC, workspace="ws")
-    assert _last_request_url(platform) == "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
+    assert _last_request_url(platform) == "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
 
 
 def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -412,7 +428,7 @@ def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
     assert isinstance(job, EvaluatorJobResource)
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     wait.assert_called_once_with(
@@ -423,10 +439,10 @@ def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
 
 
 def test_sync_resource_gets_existing_job_resource() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
@@ -437,15 +453,15 @@ def test_sync_resource_gets_existing_job_resource() -> None:
     assert job.name == "job-123"
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
     )
 
 
 def test_sync_resource_propagates_missing_job_response() -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _empty_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/missing",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/missing",
         status_code=404,
     )
     resource = Evaluator(platform)
@@ -458,10 +474,10 @@ def test_sync_resource_propagates_missing_job_response() -> None:
 
 def test_sync_resource_url_encodes_reserved_chars_in_job_name() -> None:
     """Reserved URL characters in ``job_name`` must be percent-encoded so the path stays unambiguous."""
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
         {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
@@ -470,7 +486,7 @@ def test_sync_resource_url_encodes_reserved_chars_in_job_name() -> None:
 
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
     )
 
 
@@ -479,7 +495,7 @@ class TestEvaluatorSubmit:
 
     def test_builds_request_from_unpacked_fields(self, mocker: MockerFixture) -> None:
         """Submit should forward public fields to the executor explicitly."""
-        platform = _SyncPlatform()
+        platform = _SyncHelix()
         resource = Evaluator(platform)
         expected_job = mocker.Mock(spec=EvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", return_value=expected_job)
@@ -512,7 +528,7 @@ class TestEvaluatorSubmit:
 
     def test_accepts_fileset_ref_dataset(self, mocker: MockerFixture) -> None:
         """Submit should forward FilesetRef datasets unchanged to the executor."""
-        platform = _SyncPlatform()
+        platform = _SyncHelix()
         resource = Evaluator(platform)
         expected_job = mocker.Mock(spec=EvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", return_value=expected_job)
@@ -536,7 +552,7 @@ class TestEvaluatorSubmit:
 
     def test_accepts_model_ref_target(self, mocker: MockerFixture) -> None:
         """Submit should forward platform ModelRef targets to the plugin executor."""
-        platform = _SyncPlatform()
+        platform = _SyncHelix()
         resource = Evaluator(platform)
         expected_job = mocker.Mock(spec=EvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", return_value=expected_job)
@@ -568,7 +584,7 @@ class TestEvaluatorSubmit:
 
     def test_defaults_to_inline_packager_for_builtin_metric(self, mocker: MockerFixture) -> None:
         """Submit of a built-in metric without an explicit packager defaults to inline bundling."""
-        resource = Evaluator(_SyncPlatform())
+        resource = Evaluator(_SyncHelix())
         expected_job = mocker.Mock(spec=EvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", return_value=expected_job)
 
@@ -582,7 +598,7 @@ class TestEvaluatorSubmit:
 
     def test_requires_explicit_packager_for_custom_metric(self) -> None:
         """Submit of a custom metric requires an explicit cloudpickle opt-in."""
-        resource = Evaluator(_SyncPlatform())
+        resource = Evaluator(_SyncHelix())
 
         with pytest.raises(MetricBundlePackagerPolicyError, match="CloudpickleMetricBundlePackager"):
             resource.submit(
@@ -592,7 +608,7 @@ class TestEvaluatorSubmit:
 
 
 def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
-    platform = _SyncPlatform()
+    platform = _SyncHelix()
     models_client = mocker.Mock(spec=ModelsClient)
     models_client.resolve_model_reference.return_value = ResolvedModelReference(
         url="https://igw.example.test/v1/chat/completions",
@@ -622,7 +638,7 @@ def test_sync_executor_submit_resolves_model_ref_before_creating_job(mocker: Moc
 
 
 def test_sync_executor_submit_requires_online_model_params_for_model_ref() -> None:
-    executor = _SyncEvaluatorPluginExecutor(client=_SyncPlatform())
+    executor = _SyncEvaluatorPluginExecutor(client=_SyncHelix())
 
     with pytest.raises(TypeError, match="ModelRef target requires RunConfigOnlineModel"):
         executor.submit(
@@ -635,7 +651,7 @@ def test_sync_executor_submit_requires_online_model_params_for_model_ref() -> No
 
 
 def test_sync_executor_submit_rejects_online_params_without_target() -> None:
-    executor = _SyncEvaluatorPluginExecutor(client=_SyncPlatform())
+    executor = _SyncEvaluatorPluginExecutor(client=_SyncHelix())
 
     with pytest.raises(TypeError, match="offline evaluation requires RunConfig"):
         executor.submit(
@@ -648,10 +664,10 @@ def test_sync_executor_submit_rejects_online_params_without_target() -> None:
 
 @pytest.mark.asyncio
 async def test_async_resource_calls_evaluator_plugin_status() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
         {"plugin": "evaluator", "status": "ok"},
     )
 
@@ -661,7 +677,7 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v1/healthz",
+        "http://127.0.0.1:8000/apis/evaluator/v1/healthz",
     )
     assert platform.http_client.request.call_args.kwargs["headers"] == {"Authorization": "Bearer platform-token"}
     assert platform.http_client.request.call_args.kwargs["timeout"] == platform._timeout
@@ -669,9 +685,9 @@ async def test_async_resource_calls_evaluator_plugin_status() -> None:
 
 @pytest.mark.asyncio
 async def test_async_resource_rejects_non_object_plugin_status() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
-        "GET", "http://test:8000/apis/evaluator/v1/healthz", ["ok"]
+        "GET", "http://127.0.0.1:8000/apis/evaluator/v1/healthz", ["ok"]
     )
     resource = AsyncEvaluator(platform)
 
@@ -679,19 +695,18 @@ async def test_async_resource_rejects_non_object_plugin_status() -> None:
         await resource.plugin_status()
 
 
-def test_async_resource_does_not_expose_backend_methods() -> None:
-    resource = AsyncEvaluator(_AsyncPlatform())
+def test_async_resource_exposes_only_evaluator_sdk_surface() -> None:
+    resource = AsyncEvaluator(_AsyncHelix())
 
-    for method_name in ("create", "run_local", "evaluate", "evaluate_benchmark", "execution_mode"):
-        assert not hasattr(resource, method_name)
+    assert _public_resource_names(resource) == _EVALUATOR_PUBLIC_RESOURCE_NAMES
 
 
 @pytest.mark.asyncio
 async def test_async_executor_creates_evaluator_job() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -702,13 +717,13 @@ async def test_async_executor_creates_evaluator_job() -> None:
 
     assert isinstance(job, AsyncEvaluatorJobResource)
     assert job.name == "job-123"
-    assert job.job.status == PlatformJobStatus.CREATED
+    assert job.job.status == HelixJobStatus.CREATED
     assert job.job.spec is not None
     assert _single_metric(job.job.spec).metric_type == "exact-match"
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {
@@ -721,10 +736,10 @@ async def test_async_executor_creates_evaluator_job() -> None:
 
 @pytest.mark.asyncio
 async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -738,7 +753,7 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
 
     assert isinstance(job, AsyncEvaluatorJobResource)
     platform.http_client.request.assert_awaited_once()
-    assert _last_request_url(platform) == "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
+    assert _last_request_url(platform) == "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs"
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     wait.assert_awaited_once_with(
         poll_interval_seconds=mocker.ANY,
@@ -749,10 +764,10 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
 
 @pytest.mark.asyncio
 async def test_async_resource_gets_existing_job_resource() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
@@ -764,17 +779,17 @@ async def test_async_resource_gets_existing_job_resource() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job-123",
     )
 
 
 @pytest.mark.asyncio
 async def test_async_resource_url_encodes_reserved_chars_in_job_name() -> None:
     """Reserved URL characters in ``job_name`` must be percent-encoded on the async path too."""
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
         {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
@@ -784,7 +799,7 @@ async def test_async_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "GET",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
     )
 
 
@@ -794,7 +809,7 @@ class TestAsyncEvaluatorSubmit:
     @pytest.mark.asyncio
     async def test_builds_request_from_unpacked_fields(self, mocker: MockerFixture) -> None:
         """Submit should forward public fields to the executor explicitly."""
-        platform = _AsyncPlatform()
+        platform = _AsyncHelix()
         resource = AsyncEvaluator(platform)
         expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", new=AsyncMock(return_value=expected_job))
@@ -828,7 +843,7 @@ class TestAsyncEvaluatorSubmit:
     @pytest.mark.asyncio
     async def test_accepts_fileset_ref_dataset(self, mocker: MockerFixture) -> None:
         """Submit should forward FilesetRef datasets unchanged to the executor."""
-        platform = _AsyncPlatform()
+        platform = _AsyncHelix()
         resource = AsyncEvaluator(platform)
         expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", new=AsyncMock(return_value=expected_job))
@@ -853,7 +868,7 @@ class TestAsyncEvaluatorSubmit:
     @pytest.mark.asyncio
     async def test_accepts_model_ref_target(self, mocker: MockerFixture) -> None:
         """Submit should forward platform ModelRef targets to the plugin executor."""
-        platform = _AsyncPlatform()
+        platform = _AsyncHelix()
         resource = AsyncEvaluator(platform)
         expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", new=AsyncMock(return_value=expected_job))
@@ -886,7 +901,7 @@ class TestAsyncEvaluatorSubmit:
     @pytest.mark.asyncio
     async def test_defaults_to_inline_packager_for_builtin_metric(self, mocker: MockerFixture) -> None:
         """Async submit of a built-in metric defaults to inline bundling."""
-        resource = AsyncEvaluator(_AsyncPlatform())
+        resource = AsyncEvaluator(_AsyncHelix())
         expected_job = mocker.Mock(spec=AsyncEvaluatorJobResource)
         submit = mocker.patch.object(resource._executor, "submit", new=AsyncMock(return_value=expected_job))
 
@@ -901,7 +916,7 @@ class TestAsyncEvaluatorSubmit:
     @pytest.mark.asyncio
     async def test_requires_explicit_packager_for_custom_metric(self) -> None:
         """Async submit of a custom metric requires an explicit cloudpickle opt-in."""
-        resource = AsyncEvaluator(_AsyncPlatform())
+        resource = AsyncEvaluator(_AsyncHelix())
 
         with pytest.raises(MetricBundlePackagerPolicyError, match="CloudpickleMetricBundlePackager"):
             await resource.submit(
@@ -912,10 +927,10 @@ class TestAsyncEvaluatorSubmit:
 
 @pytest.mark.asyncio
 async def test_async_executor_remote_submit_uses_platform_async_client_headers_and_timeout() -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     platform.http_client.request.return_value = _json_response(
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
         {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
@@ -927,7 +942,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
     platform.http_client.request.assert_awaited_once()
     assert platform.http_client.request.call_args.args == (
         "POST",
-        "http://test:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
+        "http://127.0.0.1:8000/apis/evaluator/v2/workspaces/ws/evaluate/jobs",
     )
     assert _request_body(platform) == {"spec": _EXACT_MATCH_EVALUATE_INPUT_SPEC_JSON}
     assert platform.http_client.request.call_args.kwargs["headers"] == {
@@ -940,7 +955,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
 
 @pytest.mark.asyncio
 async def test_async_executor_submit_resolves_model_ref_before_creating_job(mocker: MockerFixture) -> None:
-    platform = _AsyncPlatform()
+    platform = _AsyncHelix()
     models_client = mocker.Mock(spec=AsyncModelsClient)
     models_client.resolve_model_reference = AsyncMock(
         return_value=ResolvedModelReference(
@@ -973,7 +988,7 @@ async def test_async_executor_submit_resolves_model_ref_before_creating_job(mock
 
 @pytest.mark.asyncio
 async def test_async_executor_submit_rejects_online_params_without_target() -> None:
-    executor = _AsyncEvaluatorPluginExecutor(client=_AsyncPlatform())
+    executor = _AsyncEvaluatorPluginExecutor(client=_AsyncHelix())
 
     with pytest.raises(TypeError, match="offline evaluation requires RunConfig"):
         await executor.submit(

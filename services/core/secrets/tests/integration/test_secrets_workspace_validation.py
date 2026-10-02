@@ -8,9 +8,9 @@ a clear error, not succeed silently.
 """
 
 import pytest
-from nemo_platform_plugin.client.errors import UnprocessableEntityError
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.client.errors import UnprocessableEntityError
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
 
 @pytest.mark.integration
@@ -23,7 +23,7 @@ class TestSecretWorkspaceValidation:
         with pytest.raises(UnprocessableEntityError) as exc_info:
             sdk.create_secret(
                 workspace=workspace,
-                body=PlatformSecretCreateRequest(name="my-secret", value="my-secret-value"),
+                body=HelixSecretCreateRequest(name="my-secret", value="my-secret-value"),
             )
         assert exc_info.value.status_code == 422
         assert f"Workspace '{workspace}' does not exist" in exc_info.value.detail

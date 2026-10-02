@@ -12,6 +12,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type {
@@ -30,7 +31,6 @@ import { BaseModelSearchFilterField } from '@studio/components/FilterFields';
 import { getVirtualModelChatRoute, getVirtualModelDetailsRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 export interface VirtualModelsDataViewProps {
   workspace: string;
@@ -59,7 +59,7 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
+  const openRow = useRowNavigation();
 
   const dataViewState = useStudioDataViewState({
     defaultSort: [{ id: 'created_at', desc: true }],
@@ -68,7 +68,7 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
   const [modalVirtualModel, setModalVirtualModel] = useState<VirtualModel>();
 
   const openVirtualModel = useCallback(
-    (virtualModel: VirtualModelWithId, tab: 'details' | 'chat') => {
+    (virtualModel: VirtualModelWithId, tab: 'details' | 'chat', event?: React.MouseEvent) => {
       if (!virtualModel.name) return;
 
       // The row already holds the full virtual model, so prime the detail query — the detail page
@@ -78,13 +78,14 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
         virtualModel
       );
 
-      navigate(
+      openRow(
+        event,
         tab === 'chat'
           ? getVirtualModelChatRoute(workspace, virtualModel.name)
           : getVirtualModelDetailsRoute(workspace, virtualModel.name)
       );
     },
-    [navigate, queryClient, workspace]
+    [openRow, queryClient, workspace]
   );
 
   const sortState = dataViewState.sorting.state[0];
@@ -274,7 +275,9 @@ export const VirtualModelsDataView: FC<VirtualModelsDataViewProps> = ({
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row: VirtualModelWithId) => openVirtualModel(row, 'details')}
+        onRowClick={(row: VirtualModelWithId, _index, event) =>
+          openVirtualModel(row, 'details', event)
+        }
         attributes={{
           DataViewSearchBar: {
             placeholder: 'Search by name...',

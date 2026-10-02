@@ -2,7 +2,7 @@
   "task": "files-upload-mcp",
   "timestamp": "20260429T230500Z",
   "output_dir": "/tmp/nat-jobs/20260429T230500Z-files-upload-mcp",
-  "image": "nmp-nat-files-upload-mcp:latest",
+  "image": "nhx-nat-files-upload-mcp:latest",
   "build": "ok",
   "agent": "failed",
   "verify": null,

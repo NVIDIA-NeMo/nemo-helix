@@ -176,6 +176,23 @@ def test_resolve_uses_docker_config_basic_auth(monkeypatch: pytest.MonkeyPatch, 
         resolve_task_image("registry.example.com/team/task:signed", client=client)
 
 
+def test_resolve_uses_inline_docker_config_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    encoded = base64.b64encode(b"user:secret").decode()
+    monkeypatch.setattr(settings, "task_image_registry_auth_file", "")
+    monkeypatch.setattr(
+        settings,
+        "task_image_registry_auth_json",
+        json.dumps({"auths": {"registry.example.com": {"auth": encoded}}}),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Basic {encoded}"
+        return httpx.Response(200, headers={"Docker-Content-Digest": DIGEST})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        resolve_task_image("registry.example.com/team/task:signed", client=client)
+
+
 def test_upstream_docker_hub_uses_anonymous_auth_when_config_has_no_entry(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:  # noqa: ANN001

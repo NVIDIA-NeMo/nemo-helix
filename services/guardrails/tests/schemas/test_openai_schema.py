@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.guardrails.api.schemas import BaseRequest, CompletionRequest
+from nhx.guardrails.api.schemas import BaseRequest, CompletionRequest
 from pydantic import ValidationError
 
 

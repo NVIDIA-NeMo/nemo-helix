@@ -3,13 +3,16 @@
 
 # Sandboxed Gym host runtime for Evaluator agent-evaluation jobs.
 #
-ARG NMP_PYTHON_BASE=nmp-python-base
-ARG NMP_PYTHON_IMAGE=python:3.13.15-slim-trixie
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
 
-FROM ${NMP_PYTHON_BASE} AS builder
+FROM ${NHX_PYTHON_BASE} AS builder
 
 # Copy the host's standalone dependency manifest and lockfile.
-COPY docker/locks/nmp-gym-host /app/docker/locks/nmp-gym-host
+COPY docker/locks/nhx-gym-host /app/docker/locks/nhx-gym-host
+
+# Copy local sources used by the standalone lock, including build-system requirements.
+COPY packages/nhx_build_tools /app/packages/nhx_build_tools
 
 # Copy the complete package inputs at the path used by the lock's local source.
 COPY packages/sandboxed_gym/pyproject.toml /app/packages/sandboxed_gym/pyproject.toml
@@ -21,11 +24,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/gym-host-venv \
     uv sync \
-        --project /app/docker/locks/nmp-gym-host \
+        --project /app/docker/locks/nhx-gym-host \
         --locked \
         --no-dev \
         --no-install-project \
         --no-editable
+
+# CVE remediation for the gym-host base venv.
+# cryptography 50.x is not lockable yet because nemo-gym pulls mlflow>=3.15.1,
+# whose current metadata caps cryptography at <50. Pin the post-sync override so
+# the scanner-visible artifact is deterministic until that upstream cap moves.
+# Same pattern as docker/Dockerfile.nhx-gym-tasks (GHSA-g6cj-pr64-35w5).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv UV_LINK_MODE=copy \
+    uv pip install --python /opt/gym-host-venv/bin/python --no-deps "cryptography==50.0.0"
 
 # Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
 # resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
@@ -34,13 +46,34 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv
 RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
-RUN gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
+RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
       "++policy_base_url=http://127.0.0.1:9/v1" "++policy_api_key=unused" "++policy_model_name=unused" \
       "++simple_agent.responses_api_agents.simple_agent.resources_server.name=mcqa" \
-      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}" \
-    || echo "prefetch failed; venvs will be built at run time"
+      "++uv_venv_dir=${NEMO_GYM_VENV_DIR}" "++uv_cache_dir=${UV_CACHE_DIR}"; then \
+      uv cache clean mlflow ray; \
+    else \
+      echo "prefetch failed; venvs will be built at run time"; \
+    fi
 
-FROM ${NMP_PYTHON_IMAGE} AS runtime
+# Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
+# Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" \
+      \( -type f -o -type l \) -path '*/bin/python' \
+    | while IFS= read -r py; do \
+        uv pip uninstall --python "${py}" mlflow || true; \
+      done \
+    && find "${UV_CACHE_DIR}" -path '*/archive-v0/*/mlflow-*.dist-info' -prune \
+      -exec sh -c 'for path; do rm -rf "$(dirname "${path}")"; done' sh {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/mlflow-*.dist-info/METADATA' -print -quit)"
+
+# Ray's bundled Java jars carry httpcore5 CVEs and are only needed for JVM workers.
+RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars' -prune -exec rm -rf {} + \
+    && test -z "$(find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}" \
+      -path '*/ray/jars/*' -print -quit)"
+
+FROM ${NHX_PYTHON_IMAGE} AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl \
@@ -60,7 +93,7 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv \
-    NMP_RUNTIME_HTTP_PORT=8080
+    NHX_RUNTIME_HTTP_PORT=8080
 
 # Create the mount points used by the OpenSandbox provider.
 RUN mkdir -p /job/environment /job/work
@@ -71,7 +104,11 @@ CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime AS smoke-test
 RUN gym --help >/dev/null \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \
+    && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
+        -path '*/ray/jars/*' -print -quit)" \
     && python -c \
-        'import importlib.metadata as m; import nemo_gym, pydantic, yaml; from sandboxed_gym.runtime import gym_host_runtime; print({"nemo-gym": m.version("nemo-gym"), "sandboxed-gym": m.version("sandboxed-gym"), "pydantic": pydantic.__version__, "pyyaml": yaml.__version__, "runtime": gym_host_runtime.__name__})'
+        'import importlib.metadata as m; import nemo_gym, pydantic, yaml; from sandboxed_gym.runtime import gym_host_runtime; print({"nemo-gym": m.version("nemo-gym"), "nemo-sandboxed-gym": m.version("nemo-sandboxed-gym"), "pydantic": pydantic.__version__, "pyyaml": yaml.__version__, "runtime": gym_host_runtime.__name__})'
 
 FROM runtime

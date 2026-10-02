@@ -23,6 +23,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import (
     read_jsonl,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
+from nemo_evaluator_sdk.metrics.protocol import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ def _render_instruction(responses_create_params: Mapping[str, Any]) -> str:
     return "\n\n".join(part for part in parts if part).strip()
 
 
-def _default_gym_metric() -> object:
+def _default_gym_metric() -> Metric:
     """The default reward metric, imported lazily (see ``metrics.runner_rewards``)."""
     from nemo_evaluator_sdk.metrics.runner_rewards import GymRewardMetric
 
@@ -214,18 +215,47 @@ def source_datasets(tasks: Sequence[AgentEvalTask]) -> str:
     return ", ".join(sorted(stamped)) if stamped else "<tasks with no stamped dataset path>"
 
 
+def gym_task_row(
+    *, task_id: str, inputs: Mapping[str, Any], metadata: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    """Validate and return the source parameters and extras required to execute a Gym task."""
+    extras = metadata.get("gym_row_extras")
+    params = inputs.get("gym_row")
+    if not isinstance(extras, Mapping) or not isinstance(params, Mapping):
+        raise ValueError(
+            f"task {task_id!r} is missing inputs['gym_row'] and/or metadata['gym_row_extras']; build tasks "
+            "with discover_gym_tasks so the Gym dataset can be re-materialized for the run"
+        )
+    return params, extras
+
+
+def validate_gym_task_row(*, task_id: str, inputs: Mapping[str, Any], metadata: Mapping[str, Any]) -> None:
+    """Validate a task's Gym row without returning its materialization inputs.
+
+    Args:
+        task_id: Task identifier used in validation errors.
+        inputs: Task inputs containing the source Gym row.
+        metadata: Task metadata containing the source row's extra fields.
+
+    Returns:
+        None when the row and extras are mappings.
+
+    Raises:
+        ValueError: The row or extras are missing or are not mappings.
+    """
+    gym_task_row(task_id=task_id, inputs=inputs, metadata=metadata)
+
+
 def materialize_dataset(tasks: Sequence[AgentEvalTask], dest: Path) -> dict[int, str]:
     """Write the normalized dataset Gym will read, and return its ``_ng_task_index`` → task-id map.
 
-    One line per requested task, in task order, carrying the task's full source row plus an explicitly
-    stamped ``_ng_task_index``. Gym honors a pre-supplied index instead of deriving one, so this makes
-    the rollout→task join total and order-independent, and confines the run to the tasks we asked for.
+    Algorithm:
+        - Reassemble each source row from task inputs and metadata in task order.
+        - Remove source ``_ng_*`` fields and stamp the authoritative task index.
+        - Write one JSON object per task and return the index-to-task-ID join map.
 
-    The row is reassembled from ``inputs['gym_row']`` (``responses_create_params``) and
-    ``metadata['gym_row_extras']`` (everything else), which :func:`discover_gym_tasks` writes as
-    a plain dict that remains structured through submitted job specs. Any pre-existing ``_ng_*``
-    fields are stripped: ours is authoritative, and Gym assigns ``_ng_rollout_index`` itself per
-    attempt.
+    The explicit index makes rollout matching order-independent and confines Gym to the requested
+    tasks. Gym assigns the separate rollout index for repeated attempts.
     """
     index_to_task_id: dict[int, str] = {}
     seen_task_ids: set[str] = set()
@@ -233,13 +263,7 @@ def materialize_dataset(tasks: Sequence[AgentEvalTask], dest: Path) -> dict[int,
     for index, task in enumerate(tasks):
         # The source row is split across inputs and metadata so the run bundle doesn't persist
         # responses_create_params twice; reassemble it here.
-        extras = task.metadata.get("gym_row_extras")
-        params = task.inputs.get("gym_row")
-        if not isinstance(extras, Mapping) or not isinstance(params, Mapping):
-            raise ValueError(
-                f"task {task.id!r} is missing inputs['gym_row'] and/or metadata['gym_row_extras']; build tasks "
-                "with discover_gym_tasks so the Gym dataset can be re-materialized for the run"
-            )
+        params, extras = gym_task_row(task_id=task.id, inputs=task.inputs, metadata=task.metadata)
         if task.id in seen_task_ids:
             raise ValueError(
                 f"task {task.id!r} was supplied more than once; one distinct row is one task, and repeated "

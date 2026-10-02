@@ -3,18 +3,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 title: "OpenSandbox"
-description: "Install OpenSandbox as a cluster engine and point NeMo Platform jobs at the in-cluster server."
+description: "Install OpenSandbox as a cluster engine and point NeMo Helix jobs at the in-cluster server."
 ---
 <a id="install-opensandbox"></a>
 
-The NeMo Platform Helm chart does **not** install [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox). Install the upstream charts, then point the platform at the running server.
+The NeMo Helix Helm chart does **not** install [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox). Install the upstream charts, then point the platform at the running server.
 
 Install OpenSandbox when you run **sandboxed GRPO or Evaluator Gym jobs**: untrusted custom
 environment FileSets run in isolated pods, not in the training or evaluation container. It does
 **not** sandbox the rest of the platform (API, DPO, SFT, inference). For Evaluator-specific settings,
 see [Configure Sandboxed Gym for Evaluator](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
 
-This page is the **shared-kernel** path: sandbox pods use the cluster default OCI runtime. That is often **runc** (containerd) or **crun** (CRI-O, including OKE and OpenShift). **A kernel-isolated runtime is not required.** Use [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) when those Gym/GRPO sandbox pods must be isolated from the host kernel. The documented path is Kata QEMU because it gives each sandbox its own guest kernel; other isolated runtimes may work but have not been tested. Example Helm values live in [`k8s/helm/examples/opensandbox/`](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/k8s/helm/examples/opensandbox).
+This page is the **shared-kernel** path: sandbox pods use the cluster default OCI runtime. That is often **runc** (containerd) or **crun** (CRI-O, including OKE and OpenShift). **A kernel-isolated runtime is not required.** Use [OpenSandbox with Kata](/documentation/kubernetes-deployment/setup/helm/opensandbox-kata) when those Gym/GRPO sandbox pods must be isolated from the host kernel. The documented path is Kata QEMU because it gives each sandbox its own guest kernel; other isolated runtimes may work but have not been tested. Example Helm values live in [`k8s/helm/examples/opensandbox/`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox).
 
 OpenSandbox `[secure_runtime]` is **server-global**. One OpenSandbox server cannot mix shared-kernel and Kata, so point the platform at **one** Service DNS. The cluster keeps its default OCI runtime for every other workload.
 
@@ -24,7 +24,7 @@ Upstream Helm, TOML, and SDK documentation: [Kubernetes deployment](https://gith
 
 - A local [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) checkout with Helm charts under `kubernetes/charts/`, or a published chart tarball
 - `kubectl` access to the cluster
-- The NeMo Platform Helm release namespace (jobs run here; it is also `[kubernetes] namespace` in the server values)
+- The NeMo Helix Helm release namespace (jobs run here; it is also `[kubernetes] namespace` in the server values)
 
 ## Namespace rule
 
@@ -43,22 +43,22 @@ Training and other job pods are OpenSandbox **clients**. They do not need a kube
 | Capability | `sandboxClusterCapable` / `platform.sandbox_cluster_capable` | Defaults to `false` (sandboxed GRPO fail-closes) |
 | Job PVC | `rl.job_storage_pvc_claim` or `evaluator.sandbox_job_storage_pvc_claim` | Sandboxes remount the same claim used by the selected Jobs execution profile |
 
-Gym sample YAML uses `OPENSANDBOX_DOMAIN` / `OPENSANDBOX_API_KEY`. NeMo Platform and the SDK use `OPEN_SANDBOX_*`. Do not mix the names.
+Gym sample YAML uses `OPENSANDBOX_DOMAIN` / `OPENSANDBOX_API_KEY`. NeMo Helix and the SDK use `OPEN_SANDBOX_*`. Do not mix the names.
 
 ## Install the shared-kernel server
 
-Replace `NMP_NAMESPACE` with the platform release namespace.
+Replace `NHX_NAMESPACE` with the platform release namespace.
 
 ```sh
-export NMP_NAMESPACE=nemo-platform
+export NHX_NAMESPACE=nemo-helix
 export OPENSANDBOX_DIR=/path/to/OpenSandbox
 export EXAMPLES=k8s/helm/examples/opensandbox
 
-sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NMP_NAMESPACE}/g" \
+sed -i.bak "s/REPLACE_WITH_RELEASE_NAMESPACE/${NHX_NAMESPACE}/g" \
   "${EXAMPLES}/opensandbox-server.yaml"
 
 kubectl create namespace opensandbox-system --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace "$NMP_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "$NHX_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl apply -f "${EXAMPLES}/batchsandbox-template.yaml"
 
@@ -68,13 +68,13 @@ kubectl create secret generic opensandbox-server-api-key \
 # Jobs cannot secretKeyRef across namespaces. Copy the key into the job namespace.
 kubectl get secret opensandbox-server-api-key -n opensandbox-system -o json \
   | jq 'del(.metadata.uid,.metadata.resourceVersion,.metadata.creationTimestamp,.metadata.namespace)' \
-  | kubectl apply -n "$NMP_NAMESPACE" -f -
+  | kubectl apply -n "$NHX_NAMESPACE" -f -
 
 # The BatchSandbox template hard-codes imagePullSecrets.name: nvcrimagepullsecret.
-# That Secret must exist in $NMP_NAMESPACE. If yours has a different name, edit
+# That Secret must exist in $NHX_NAMESPACE. If yours has a different name, edit
 # imagePullSecrets in batchsandbox-template.yaml (and batchsandbox-template-kata-qemu.yaml
 # if you use Kata) before kubectl apply.
-kubectl get secret nvcrimagepullsecret -n "$NMP_NAMESPACE"
+kubectl get secret nvcrimagepullsecret -n "$NHX_NAMESPACE"
 
 helm upgrade --install opensandbox-controller \
   "${OPENSANDBOX_DIR}/kubernetes/charts/opensandbox-controller" \
@@ -103,7 +103,7 @@ When `sandboxClusterCapable` is true, Kubernetes and Volcano job pods receive `O
 ## Verify
 
 ```sh
-export OPEN_SANDBOX_WORKLOAD_NS="$NMP_NAMESPACE"
+export OPEN_SANDBOX_WORKLOAD_NS="$NHX_NAMESPACE"
 ./k8s/helm/examples/opensandbox/verify/shared-kernel.sh
 ```
 

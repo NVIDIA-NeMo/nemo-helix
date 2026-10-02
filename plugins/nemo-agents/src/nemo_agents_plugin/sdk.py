@@ -8,7 +8,7 @@ instantiates this plugin's sync or async SDK resource as ``client.agents``.
 
 Usage (once the SDK hub is wired up)::
 
-    from nemoplatform import NeMo
+    from nemohelix import NeMo
 
     nemo = NeMo(base_url="http://localhost:8000")
 
@@ -53,8 +53,9 @@ Usage (once the SDK hub is wired up)::
     job = nemo.agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
     job = nemo.agents.jobs.execute.get(job["name"])
     results = nemo.agents.jobs.execute.list_results(job["name"])
+    run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-An async namespace is mounted as ``client.agents`` on ``AsyncNeMoPlatform``.
+An async namespace is mounted as ``client.agents`` on ``AsyncNeMoHelix``.
 It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
 remain sync-only.
 """
@@ -71,9 +72,9 @@ from nemo_agents_plugin.entities import (
     EnvironmentSpecInline,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.agents.client import AgentsClient, AsyncAgentsClient
-from nemo_platform_plugin.agents.types import (
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.agents.client import AgentsClient, AsyncAgentsClient
+from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
     CreateAgentRequest,
     CreateComputeSpecRequest,
@@ -83,9 +84,9 @@ from nemo_platform_plugin.agents.types import (
     InvokeAgentRequest,
     JsonMap,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 _DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
@@ -131,14 +132,14 @@ def _contains_default_model_placeholder(value: object) -> bool:
     return False
 
 
-def _agents_client_from_platform(platform: NeMoPlatform) -> AgentsClient:
+def _agents_client_from_platform(platform: NeMoHelix) -> AgentsClient:
     client = client_from_platform(platform, AgentsClient)
     if client.workspace is None:
         return client.with_workspace(_DEFAULT_WORKSPACE)
     return client
 
 
-def _async_agents_client_from_platform(platform: AsyncNeMoPlatform) -> AsyncAgentsClient:
+def _async_agents_client_from_platform(platform: AsyncNeMoHelix) -> AsyncAgentsClient:
     async_client = client_from_platform(platform, AsyncAgentsClient)
     if async_client.workspace is None:
         return async_client.with_workspace(_DEFAULT_WORKSPACE)
@@ -148,10 +149,10 @@ def _async_agents_client_from_platform(platform: AsyncNeMoPlatform) -> AsyncAgen
 class AgentsResource:
     """SDK namespace for ``nemo.agents.*``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NeMoHelix) -> None:
         """
         Args:
-            platform: The generated ``NeMoPlatform`` client. The Agents resource
+            platform: The generated ``NeMoHelix`` client. The Agents resource
                 adapts it to the typed ``AgentsClient`` while sharing the same
                 base URL, default workspace, auth headers, timeout, retry policy,
                 and underlying HTTP transport.
@@ -646,6 +647,20 @@ class _ExecuteJobsResource:
         response = self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
 
+    def download_result(self, name: str, *, job: str, workspace: str | None = None) -> bytes:
+        """Download one of a finished execute-agent job's results.
+
+        *name* is a result name as reported by :meth:`list_results` --
+        ``output_workdir``, ``fabric_run_result`` and friends. Directory
+        results (the working directories, the artifacts) arrive as a gzipped
+        tarball; ``fabric_run_result`` and ``fabric_error`` arrive as JSON.
+
+        Returns the bytes rather than writing a file, so a caller can hand them
+        straight to ``tarfile``/``json`` without a temporary path.
+        """
+        response = self._client.download_agent_job_result(workspace=workspace, collection="execute", job=job, name=name)
+        return response.read()
+
 
 class _AsyncExecuteJobsResource:
     """Async ``client.agents.jobs.execute``."""
@@ -678,6 +693,13 @@ class _AsyncExecuteJobsResource:
         """List the named results a finished execute-agent job saved."""
         response = await self._client.list_agent_job_results(workspace=workspace, collection="execute", name=name)
         return _json_map_from_response(response)
+
+    async def download_result(self, name: str, *, job: str, workspace: str | None = None) -> bytes:
+        """Download one of a finished execute-agent job's results. See the sync resource."""
+        response = await self._client.download_agent_job_result(
+            workspace=workspace, collection="execute", job=job, name=name
+        )
+        return await response.read()
 
 
 class _JobsResource:
@@ -715,7 +737,7 @@ class AsyncAgentsResource:
     remain sync-only on :class:`AgentsResource`.
     """
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNeMoHelix) -> None:
         self._platform = platform
         self._client = _async_agents_client_from_platform(platform)
         self._jobs: _AsyncJobsResource | None = None

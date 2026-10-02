@@ -34,7 +34,7 @@ print(result.aggregate_scores)
 Platform CLI equivalent for the same checked metric and rows:
 
 ```bash
-uv run nemo evaluator evaluate submit \
+uv run nemo evaluator evaluate \
   --spec-file skills/nemo-evaluator-plugin/assets/specs/exact_match_metric.json
 ```
 
@@ -44,9 +44,9 @@ Use `client.evaluator.submit` for execution through the installed nemo-evaluator
 
 ```python
 from nemo_evaluator_sdk import ExactMatchMetric, RunConfig
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 job = client.evaluator.submit(
     metric=ExactMatchMetric(
         reference="{{item.expected}}",
@@ -81,7 +81,7 @@ dataset = FilesetRef("default/eval-data")
 CLI equivalent, using a stored metric and fileset:
 
 ```bash
-nemo evaluator evaluate submit \
+nemo evaluator evaluate \
   --spec '{"metrics":["default/exact-answer"],"dataset":"default/eval-data"}'
 ```
 
@@ -120,7 +120,7 @@ job.wait_until_done()
 result = job.get_result()
 ```
 
-`nvidia-api-key` names a NeMo Platform workspace secret; the example does not
+`nvidia-api-key` names a NeMo Helix workspace secret; the example does not
 embed the credential value.
 
 **Platform CLI**
@@ -131,7 +131,7 @@ metric-bundle secret references, creating `llm_as_judge.platform.json`, then
 submit that copy:
 
 ```bash
-nemo evaluator evaluate submit \
+nemo evaluator evaluate \
   --spec-file llm_as_judge.platform.json
 ```
 
@@ -159,7 +159,7 @@ Pass it as `field_mapping=mapping` when submitting the job.
 **Platform CLI**
 
 ```bash
-nemo evaluator evaluate submit --spec \
+nemo evaluator evaluate --spec \
   '{
     "metrics": ["default/exact-answer"],
     "dataset": [{"gold_answer": "Paris", "assistant_answer": "Paris"}],
@@ -202,7 +202,7 @@ artifacts = job.download_artifacts("./artifacts")  # local output dir
 Poll until the job is completed before downloading results:
 
 ```bash
-nemo evaluator evaluate submit --spec-file evaluation.json
+nemo evaluator evaluate --spec-file evaluation.json
 nemo jobs get-status <job-name>
 nemo jobs results list <job-name>
 nemo jobs results download aggregate-scores \
@@ -243,7 +243,7 @@ are resolved by the platform submission path:
 Save the spec as `multi-metric.json`, then submit it:
 
 ```bash
-nemo evaluator evaluate submit --spec-file multi-metric.json
+nemo evaluator evaluate --spec-file multi-metric.json
 ```
 
 Inspect the authoritative wire schema before authoring a spec:
@@ -280,5 +280,5 @@ The CLI cannot package a Python metric object or select
 complete spec, submit that spec with:
 
 ```bash
-nemo evaluator evaluate submit --spec-file custom-metric.json
+nemo evaluator evaluate --spec-file custom-metric.json
 ```

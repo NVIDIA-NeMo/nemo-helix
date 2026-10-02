@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-required_uv_version="0.9.14"
+required_uv_version="0.10.10"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv is required to update uv.lock." >&2

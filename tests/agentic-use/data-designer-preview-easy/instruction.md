@@ -3,9 +3,9 @@
 
 # Data Designer Preview
 
-You have access to the `nemo` CLI and the NeMo Platform Python SDK for NeMo Platform operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
+You have access to the `nemo` CLI and the NeMo Helix Python SDK for NeMo Helix operations. Your task is to set up inference and generate a preview of synthetic data using the Data Designer with both sampler and LLM-generated columns.
 
-The `nemo` CLI is available at `/app/.venv/bin/nemo`. The Python SDK is available at `/app/.venv/bin/python` with `from nemo_platform import NeMoPlatform`. Both connect to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The Python SDK is available at `/app/.venv/bin/python` with `from nemo_helix import NeMoHelix`. Both connect to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
@@ -29,9 +29,9 @@ The `ANTHROPIC_API_KEY` environment variable contains an API key that works with
 Register a served model so the inference gateway maps a model entity to an upstream model:
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(base_url="http://localhost:8080")
+sdk = NeMoHelix(base_url="http://localhost:8080")
 sdk.inference.providers.update_status(
     name="<provider_name>",
     workspace="default",
@@ -48,9 +48,9 @@ The `nemo data-designer preview` CLI command is not available. Use the Python SD
 
 ```python
 import data_designer.config as dd
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(base_url="http://localhost:8080", workspace="default")
+client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
 
 # Build config with the ConfigBuilder
 config_builder = dd.DataDesignerConfigBuilder(

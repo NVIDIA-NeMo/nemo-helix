@@ -101,7 +101,7 @@ type DeleteState =
   | null;
 
 export interface CombinedAgentsTableProps {
-  onAgentRowClick?: (agent: AgentTableRow) => void;
+  onAgentRowClick?: (agent: AgentTableRow, event: React.MouseEvent) => void;
   onCreateDeployment?: (agentName: string) => void;
   onCloneAgent?: (agent: AgentTableRow) => void;
   onAgentsLoaded?: (agents: Agent[]) => void;
@@ -341,8 +341,8 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
             <Trash /> Delete
           </Button>
         )}
-        onRowClick={(row: AgentTableRow) => {
-          onAgentRowClick?.(row);
+        onRowClick={(row: AgentTableRow, _index, event) => {
+          onAgentRowClick?.(row, event);
         }}
         attributes={{
           DataViewRoot: {

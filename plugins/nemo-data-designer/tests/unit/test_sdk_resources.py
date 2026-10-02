@@ -45,41 +45,41 @@ from nemo_data_designer_plugin.sdk.resources import (
     DataDesignerResource,
     _decode_preview_frame,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
-from nemo_platform_plugin.data_designer.types import DataDesignerJobResponse
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_helix_plugin.data_designer.types import DataDesignerJobResponse
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel
 
 
 @pytest.fixture
-def platform() -> NeMoPlatform:
-    return NeMoPlatform(base_url="http://testserver", workspace="default", access_token="token")
+def platform() -> NeMoHelix:
+    return NeMoHelix(base_url="http://testserver", workspace="default", access_token="token")
 
 
 @pytest.fixture
-def async_platform() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url="http://testserver", workspace="default", access_token="token")
+def async_platform() -> AsyncNeMoHelix:
+    return AsyncNeMoHelix(base_url="http://testserver", workspace="default", access_token="token")
 
 
 @pytest.fixture
-def resource(platform: NeMoPlatform) -> DataDesignerResource:
+def resource(platform: NeMoHelix) -> DataDesignerResource:
     return DataDesignerResource(platform)
 
 
 @pytest.fixture
-def async_resource(async_platform: AsyncNeMoPlatform) -> AsyncDataDesignerResource:
+def async_resource(async_platform: AsyncNeMoHelix) -> AsyncDataDesignerResource:
     return AsyncDataDesignerResource(async_platform)
 
 
-def test_job_resource_accepts_legacy_platform_constructor(platform: NeMoPlatform) -> None:
+def test_job_resource_accepts_legacy_platform_constructor(platform: NeMoHelix) -> None:
     job = DataDesignerJobResource(job_name="dd-job", platform=platform, workspace="default")
 
     assert job.name == "dd-job"
     assert isinstance(job._client, DataDesignerClient)
 
 
-def test_async_job_resource_accepts_legacy_platform_constructor(async_platform: AsyncNeMoPlatform) -> None:
+def test_async_job_resource_accepts_legacy_platform_constructor(async_platform: AsyncNeMoHelix) -> None:
     job = AsyncDataDesignerJobResource(job_name="dd-job", platform=async_platform, workspace="default")
 
     assert job.name == "dd-job"
@@ -146,11 +146,11 @@ def _make_successful_preview_frames() -> list[BaseModel]:
 
 
 @pytest.mark.parametrize("path", ["preview", "/preview", "///preview"])
-def test_http_url_normalizes_leading_slashes(platform: NeMoPlatform, path: str) -> None:
+def test_http_url_normalizes_leading_slashes(platform: NeMoHelix, path: str) -> None:
     assert sdk_http.url(platform, None, path) == "http://testserver/apis/data-designer/v2/workspaces/default/preview"
 
 
-def test_http_url_normalizes_empty_path(platform: NeMoPlatform) -> None:
+def test_http_url_normalizes_empty_path(platform: NeMoHelix) -> None:
     assert sdk_http.url(platform, None, "") == "http://testserver/apis/data-designer/v2/workspaces/default/"
 
 
@@ -229,7 +229,7 @@ def test_preview_collector_propagates_error_frame_message(
 
 
 def test_get_default_model_configs_returns_empty_list(resource: DataDesignerResource) -> None:
-    """Default model configs aren't supported on the NeMo Platform; the resource returns an
+    """Default model configs aren't supported on the NeMo Helix; the resource returns an
     empty list rather than raising, so callers can still build a config without LLMs."""
     assert resource.get_default_model_configs() == []
 

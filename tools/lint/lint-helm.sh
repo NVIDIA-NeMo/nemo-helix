@@ -6,7 +6,7 @@
 set -xeo pipefail
 
 HELM_FOLDER=${HELM_FOLDER:-k8s/helm}
-HELM_RELEASE_NAME=${HELM_RELEASE_NAME:-nemo-platform}
+HELM_RELEASE_NAME=${HELM_RELEASE_NAME:-nemo-helix}
 HELM_ENVOY_IMAGE=${HELM_ENVOY_IMAGE:-docker.io/envoyproxy/envoy:v1.37.0}
 OPENSHIFT_VERSION=${OPENSHIFT_VERSION:-4.1.0}
 
@@ -75,7 +75,7 @@ for version in 1 2; do
     --app-version "claim-test-${version}" \
     --destination "${postgres_claim_tmp}" >/dev/null
   helm template "${HELM_RELEASE_NAME}" \
-    "${postgres_claim_tmp}/nemo-platform-0.0.0-claim-test.${version}.tgz" \
+    "${postgres_claim_tmp}/nemo-helix-0.0.0-claim-test.${version}.tgz" \
     --show-only templates/postgres/postgres-statefulset.yaml \
     | sed -n '/^  volumeClaimTemplates:/,$p' > "${postgres_claim_tmp}/claim-${version}.yaml"
   test -s "${postgres_claim_tmp}/claim-${version}.yaml"

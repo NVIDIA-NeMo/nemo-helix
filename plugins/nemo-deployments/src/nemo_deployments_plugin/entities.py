@@ -11,6 +11,7 @@ from nemo_deployments_plugin.constants import (
     ENTITY_TYPE_DEPLOYMENT,
     ENTITY_TYPE_DEPLOYMENT_CONFIG,
     ENTITY_TYPE_VOLUME,
+    MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
 )
 from nemo_deployments_plugin.types import (
     AccessMode,
@@ -22,9 +23,9 @@ from nemo_deployments_plugin.types import (
     RestartPolicy,
     VolumeStatus,
 )
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
-from nemo_platform_plugin.entity import NemoEntity
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.entity import NemoEntity
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
 WORKLOAD_IDENTITY_TOKEN_MAX_EXPIRATION_SECONDS = 86400
@@ -214,6 +215,20 @@ class K8sDeploymentConfig(BaseModel):
         ),
     )
 
+    job_ttl_seconds_after_finished: int | None = Field(
+        default=None,
+        ge=MIN_JOB_TTL_SECONDS_AFTER_FINISHED,
+        alias="jobTtlSecondsAfterFinished",
+        description=(
+            "Per-deployment override for ttlSecondsAfterFinished on a finite (Never/OnFailure) Job, "
+            "such as the weight-puller. When set, wins over the executor default; when unset, the "
+            "executor default applies. Controls how quickly a completed Job's pod (and its "
+            "ReadWriteOnce volume attachment) is reaped. A set value must be at least "
+            f"{MIN_JOB_TTL_SECONDS_AFTER_FINISHED}s so the reconciler can observe Job completion before "
+            "the pod is reaped. k8s-only."
+        ),
+    )
+
     model_config = {"populate_by_name": True}
 
 
@@ -351,7 +366,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         alias="authProxySidecarIdentity",
         description=(
             "Service-principal name the auth-proxy sidecar stamps (interpolated into "
-            "'X-NMP-Principal-Id: service:<identity>'). Required when auth_proxy_sidecar is True."
+            "'X-NHX-Principal-Id: service:<identity>'). Required when auth_proxy_sidecar is True."
         ),
     )
     auth_proxy_sidecar_on_behalf_of: str | None = Field(
@@ -359,7 +374,7 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         alias="authProxySidecarOnBehalfOf",
         description=(
             "Optional principal id the auth-proxy sidecar delegates to via "
-            "'X-NMP-Principal-On-Behalf-Of'. When set, the service principal acts on behalf of this "
+            "'X-NHX-Principal-On-Behalf-Of'. When set, the service principal acts on behalf of this "
             "identity so the platform scopes the workload's access to what that principal can reach "
             "(e.g. the deployment's creator) rather than the service principal's full reach. "
             "Only meaningful when auth_proxy_sidecar is True."

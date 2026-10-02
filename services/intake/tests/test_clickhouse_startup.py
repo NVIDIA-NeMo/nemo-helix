@@ -8,10 +8,10 @@ import logging
 from unittest.mock import AsyncMock
 
 import pytest
-from nmp.intake.config import ClickHouseConfig, IntakeConfig
-from nmp.intake.local_clickhouse import DockerUnavailableError, LocalClickHouseProvisioningError
-from nmp.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
-from nmp.intake.service import IntakeService
+from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.local_clickhouse import DockerUnavailableError, LocalClickHouseProvisioningError
+from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.service import IntakeService
 
 
 def _external_config() -> IntakeConfig:
@@ -29,9 +29,9 @@ def test_intake_is_not_ready_when_external_clickhouse_is_inaccessible(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    caplog.set_level(logging.WARNING, logger="nmp.intake.service")
+    caplog.set_level(logging.WARNING, logger="nhx.intake.service")
     stop = AsyncMock(return_value=True)
-    monkeypatch.setattr("nmp.intake.service.stop_local_clickhouse", stop)
+    monkeypatch.setattr("nhx.intake.service.stop_local_clickhouse", stop)
     service = IntakeService().with_config(_external_config())
 
     async def check_readiness() -> bool:
@@ -67,11 +67,11 @@ def test_intake_readiness_surfaces_clickhouse_guidance(monkeypatch: pytest.Monke
 
 
 def test_intake_uses_reconciled_clickhouse_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("NMP_INTAKE_CLICKHOUSE_URL", raising=False)
+    monkeypatch.delenv("NHX_INTAKE_CLICKHOUSE_URL", raising=False)
     reconcile = AsyncMock(return_value="http://127.0.0.1:55123")
     stop = AsyncMock(return_value=True)
-    monkeypatch.setattr("nmp.intake.service.reconcile_local_clickhouse", reconcile)
-    monkeypatch.setattr("nmp.intake.service.stop_local_clickhouse", stop)
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    monkeypatch.setattr("nhx.intake.service.stop_local_clickhouse", stop)
     intake_config = IntakeConfig(clickhouse_config=ClickHouseConfig())
     service = IntakeService().with_config(intake_config)
 
@@ -115,10 +115,10 @@ def test_intake_is_not_ready_after_local_clickhouse_provisioning_failure(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("NMP_INTAKE_CLICKHOUSE_URL", raising=False)
+    monkeypatch.delenv("NHX_INTAKE_CLICKHOUSE_URL", raising=False)
     reconcile = AsyncMock(side_effect=provisioning_error)
-    monkeypatch.setattr("nmp.intake.service.reconcile_local_clickhouse", reconcile)
-    caplog.set_level(log_level, logger="nmp.intake.service")
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    caplog.set_level(log_level, logger="nhx.intake.service")
     service = IntakeService().with_config(IntakeConfig(clickhouse_config=ClickHouseConfig()))
 
     async def check_readiness() -> bool:
@@ -143,15 +143,15 @@ def test_intake_readiness_probes_spans_table_without_recovery(monkeypatch: pytes
     reconcile = AsyncMock()
     stop = AsyncMock()
     check_data_directory = AsyncMock()
-    monkeypatch.setattr("nmp.intake.service.reconcile_local_clickhouse", reconcile)
-    monkeypatch.setattr("nmp.intake.service.stop_local_clickhouse", stop)
-    monkeypatch.setattr("nmp.intake.service.check_local_clickhouse_data_directory", check_data_directory)
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    monkeypatch.setattr("nhx.intake.service.stop_local_clickhouse", stop)
+    monkeypatch.setattr("nhx.intake.service.check_local_clickhouse_data_directory", check_data_directory)
 
     async def check_readiness() -> bool:
         await service.on_startup()
         assert service.clickhouse_client is not None
         fetch_scalar = AsyncMock()
-        monkeypatch.setattr("nmp.intake.service.ClickHouseExecutor.fetch_scalar", fetch_scalar)
+        monkeypatch.setattr("nhx.intake.service.ClickHouseExecutor.fetch_scalar", fetch_scalar)
         ready = await service.is_ready()
         fetch_scalar.assert_awaited_once()
         readiness_query = fetch_scalar.await_args.args[0]
@@ -169,8 +169,8 @@ def test_intake_readiness_probes_spans_table_without_recovery(monkeypatch: pytes
 def test_managed_clickhouse_readiness_checks_data_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     reconcile = AsyncMock(return_value="http://127.0.0.1:55123")
     check_data_directory = AsyncMock(side_effect=PermissionError("read-only volume"))
-    monkeypatch.setattr("nmp.intake.service.reconcile_local_clickhouse", reconcile)
-    monkeypatch.setattr("nmp.intake.service.check_local_clickhouse_data_directory", check_data_directory)
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    monkeypatch.setattr("nhx.intake.service.check_local_clickhouse_data_directory", check_data_directory)
     service = IntakeService().with_config(IntakeConfig(clickhouse_config=ClickHouseConfig()))
 
     async def check_readiness() -> bool:
@@ -198,7 +198,7 @@ def test_successful_probe_does_not_report_ready_after_shutdown_starts(monkeypatc
             probe_started.set()
             await release_probe.wait()
 
-        monkeypatch.setattr("nmp.intake.service.ClickHouseExecutor.fetch_scalar", delayed_fetch)
+        monkeypatch.setattr("nhx.intake.service.ClickHouseExecutor.fetch_scalar", delayed_fetch)
         readiness = asyncio.create_task(service.is_ready())
         await probe_started.wait()
         service._ready = False

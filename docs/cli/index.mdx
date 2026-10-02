@@ -2,12 +2,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Platform CLI"
+title: "NeMo Helix CLI"
 description: ""
 ---
 <a id="nemo-ms-cli"></a>
 
-The NeMo Platform CLI (`nemo`) is a command-line tool for interacting with NeMo Platform. It provides a unified interface for managing models, running jobs, deploying inference endpoints, and working with a local setup.
+The NeMo Helix CLI (`nemo`) is a command-line tool for interacting with NeMo Helix. It provides a unified interface for managing models, running jobs, deploying inference endpoints, and working with a local setup.
 
 ## Key Capabilities
 
@@ -33,7 +33,7 @@ pip uninstall nemo-microservices
 
 ### Install
 
-Install the PyPI `nemo-platform` wrapper package. From a source checkout, run `make bootstrap` from the repository root instead; the generated SDK package under `sdk/python/nemo-platform/pyproject.toml` does not define the wrapper extras.
+Install the PyPI `nemo-helix` wrapper package. From a source checkout, run `make bootstrap` from the repository root instead; the generated SDK package under `sdk/python/nemo-helix/pyproject.toml` does not define the wrapper extras.
 
 <Tabs>
 
@@ -42,7 +42,7 @@ Install the PyPI `nemo-platform` wrapper package. From a source checkout, run `m
 One command, `nemo` available everywhere, nothing to activate.
 
 ```bash
-uv tool install "nemo-platform[all]"
+uv tool install "nemo-helix[all]"
 ```
 
 </Tab>
@@ -54,10 +54,10 @@ Use when you also import the SDK from your own code. `nemo` works only while the
 ```bash
 uv venv
 source .venv/bin/activate
-uv pip install "nemo-platform[all]"
+uv pip install "nemo-helix[all]"
 ```
 
-Plain `pip install "nemo-platform[all]"` works in an environment you manage yourself.
+Plain `pip install "nemo-helix[all]"` works in an environment you manage yourself.
 
 </Tab>
 
@@ -78,7 +78,7 @@ If you see `Unknown command: nemo`, see the [troubleshooting](/documentation/ref
 Set up your connection:
 
 ```bash
-nemo config set --base-url https://nmp.example.com
+nemo config set --base-url https://nhx.example.com
 nemo auth login
 ```
 
@@ -134,7 +134,7 @@ nemo setup
 curl -s http://localhost:8080/health/ready
 
 # View service logs
-cat ~/.local/state/nmp/instances/<scope>/services.log
+cat ~/.local/state/nhx/instances/<scope>/services.log
 
 # Stop services
 pkill -f "nemo services run"

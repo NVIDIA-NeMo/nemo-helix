@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Test that PodDisruptionBudget renders with minAvailable.
-# CI validates by running: helm template nemo-platform . -f ci/14-pdb-min-available.yaml
+# CI validates by running: helm template nemo-helix . -f ci/14-pdb-min-available.yaml
 # The rendered output must include a PodDisruptionBudget for the API with spec.minAvailable: 2.
 
 api:

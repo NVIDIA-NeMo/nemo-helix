@@ -9,8 +9,8 @@ From the repository root::
     uv sync --group insights
     services/intake/scripts/spans/run_clickhouse.sh
     cd web && VITE_FF_OPTIMIZER_ENABLED=preview pnpm --filter nemo-studio-ui build:fastapi && cd ..
-    NMP_INTAKE_CLICKHOUSE_URL=http://localhost:8123 uv run nemo services run \
-      --service-group all --config packages/nmp_platform/config/local.yaml
+    NHX_INTAKE_CLICKHOUSE_URL=http://localhost:8123 uv run nemo services run \
+      --service-group all --config packages/nhx_platform/config/local.yaml
     uv run plugins/nemo-insights/scripts/insights_demo.py seed
 
 Open ``http://localhost:8080/studio/workspaces/insights-demo/optimizer``.
@@ -38,11 +38,11 @@ DEMO_WORKSPACE = "insights-demo"
 DEFAULT_BASE_URL = "http://localhost:8080"
 CLICKHOUSE_RECOVERY_COMMAND = (
     "services/intake/scripts/spans/run_clickhouse.sh, then restart the platform with "
-    "NMP_INTAKE_CLICKHOUSE_URL=http://localhost:8123"
+    "NHX_INTAKE_CLICKHOUSE_URL=http://localhost:8123"
 )
 INSIGHTS_INSTALL_COMMAND = "uv sync --group insights"
 _BASE_TIME = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
-_SOURCE_URL = "https://github.com/NVIDIA-NeMo/nemo-platform/commit"
+_SOURCE_URL = "https://github.com/NVIDIA-NeMo/nemo-helix/commit"
 _SUPPORT_AGENT = ("support-agent", "nvidia/nemotron-mini")
 _RETRIEVAL_AGENT = ("retrieval-agent", "nvidia/llama-3.3-nemotron-super")
 
@@ -496,8 +496,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("seed", "clean"))
     parser.add_argument(
         "--base-url",
-        default=os.getenv("NMP_BASE_URL", DEFAULT_BASE_URL),
-        help=f"Platform base URL (default: NMP_BASE_URL or {DEFAULT_BASE_URL}).",
+        default=os.getenv("NHX_BASE_URL", DEFAULT_BASE_URL),
+        help=f"Platform base URL (default: NHX_BASE_URL or {DEFAULT_BASE_URL}).",
     )
     args = parser.parse_args(argv)
 

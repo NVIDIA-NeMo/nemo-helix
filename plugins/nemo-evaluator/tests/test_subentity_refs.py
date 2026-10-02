@@ -21,7 +21,7 @@ from nemo_evaluator.api.schemas import (
     TasksetRef,
     parse_subentity_ref,
 )
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
 from pydantic import ValidationError
 
 _DIGEST = "a" * 64

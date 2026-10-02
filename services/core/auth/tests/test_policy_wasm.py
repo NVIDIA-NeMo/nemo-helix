@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from nmp.core.auth.app.embedded_pdp.policy_wasm import (
+from nhx.core.auth.app.embedded_pdp.policy_wasm import (
     PolicyWasmError,
     ensure_embedded_policy_wasm,
     policy_wasm_needs_build,

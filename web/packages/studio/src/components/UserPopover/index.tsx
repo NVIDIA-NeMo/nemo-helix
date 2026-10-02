@@ -27,11 +27,11 @@ export const UserPopover = () => {
   const auth = useAuth();
 
   if (!profile && !TELEMETRY_ENABLED) {
-    return <Avatar fallback="N" />;
+    return null;
   }
 
   return (
-    <>
+    <span data-tour="nav-user">
       <DropdownRoot defaultOpen={false}>
         <DropdownTrigger asChild>
           <Button color="neutral" kind="tertiary" className="p-0">
@@ -71,6 +71,6 @@ export const UserPopover = () => {
       {openModal === 'trace' && (
         <ReportTraceModal open={openModal === 'trace'} onClose={() => setOpenModal(undefined)} />
       )}
-    </>
+    </span>
   );
 };

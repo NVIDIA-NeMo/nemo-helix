@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
-from nmp.rl.tasks.training.backends.nemo_rl.checkpoints import (
+from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
     copy_hf_full_weights,
     copy_lora_adapter,
     find_dcp_weights_root,

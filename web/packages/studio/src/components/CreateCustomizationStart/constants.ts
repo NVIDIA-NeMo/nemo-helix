@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StartOption } from '@studio/components/CreateCustomizationStart/types';
-import { LayoutGrid, Plus } from 'lucide-react';
+import { ADVANCED, INTERMEDIATE } from '@studio/components/StartOptions/levels';
+import { LayoutTemplate, Plus } from 'lucide-react';
 
+/**
+ * The non-template ways in. "Start from a template" is not among them — templates are
+ * picked directly from the group below the divider rather than behind an option.
+ */
 export const START_OPTIONS: StartOption[] = [
   {
     id: 'template',
     title: 'Start from a template',
-    description:
-      'Pick a ready-made NVIDIA recipe. It registers the model and loads the dataset for you, then opens the form filled in.',
-    icon: LayoutGrid,
+    description: 'Begin from a ready-made recipe that brings its own model and dataset.',
+    icon: LayoutTemplate,
+    tag: INTERMEDIATE,
     enabled: true,
   },
   {
@@ -18,6 +23,10 @@ export const START_OPTIONS: StartOption[] = [
     title: 'Build from scratch',
     description: 'Open the full form with sensible defaults and choose your own model and data.',
     icon: Plus,
+    tag: ADVANCED,
     enabled: true,
   },
 ];
+
+/** All templates share a task and method today, so they form one group. */
+export const TEMPLATE_GROUP_TITLE = 'Text-to-SQL, LoRA';

@@ -302,7 +302,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -490,7 +490,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -522,7 +522,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -554,7 +554,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -818,7 +818,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1006,7 +1006,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1038,7 +1038,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1070,7 +1070,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1398,7 +1398,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1586,7 +1586,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1618,7 +1618,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1650,7 +1650,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2554,9 +2554,14 @@ components:
           - items:
               $ref: '#/components/schemas/AgentEvalTaskInput'
             type: array
+            minItems: 1
+          - items:
+              $ref: '#/components/schemas/TaskRef'
+            type: array
+            minItems: 1
           title: Tasks
-          description: 'Tasks to evaluate: an inline list (at least one) or a reference
-            to a stored taskset.'
+          description: 'Tasks to evaluate: a nonempty list containing only inline
+            tasks or only task references, or a stored taskset reference.'
       additionalProperties: false
       type: object
       required:
@@ -2565,14 +2570,11 @@ components:
       description: 'Submitter-facing agent-evaluation input.
 
 
-        ``tasks`` is either an inline list of tasks (whose metrics may be inline or
-        references) or a
+        ``tasks`` accepts inline tasks, stored task references, or a stored taskset
+        reference.
 
-        :class:`TasksetRef` naming a stored taskset whose member tasks are loaded
-        and expanded during spec
-
-        resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks``
-        list.'
+        Stored definitions and scoring expand at submission; Harbor archives are prepared
+        on the worker.'
     AgentEvalResult:
       properties:
         id:
@@ -2722,18 +2724,18 @@ components:
             result bundle. Omit to publish nowhere.
         tasks:
           items:
-            $ref: '#/components/schemas/AgentEvalTaskSpec'
+            $ref: '#/components/schemas/ResolvedTask'
           type: array
           minItems: 1
           title: Tasks
-          description: Tasks to evaluate; at least one is required.
+          description: Resolved task snapshots in execution order. Only archive materialization
+            remains on the worker.
       additionalProperties: false
       type: object
       required:
       - tasks
       title: AgentEvalSpec
-      description: 'Canonical agent-evaluation spec: tasks with all metric references
-        resolved to inline.'
+      description: Canonical evaluation containing self-contained, resolved task snapshots.
     AgentEvalTaskInput:
       properties:
         id:
@@ -2786,56 +2788,6 @@ components:
       title: AgentEvalTaskInput
       description: 'Submitter-facing task DTO: metrics may be inline bundles or stored-metric
         references.'
-    AgentEvalTaskSpec:
-      properties:
-        id:
-          type: string
-          title: Id
-          description: Stable task identifier, unique within the task collection.
-        intent:
-          type: string
-          title: Intent
-          description: Human-readable description of the desired agent behavior.
-        inputs:
-          allOf:
-          - $ref: '#/components/schemas/TaskInputs'
-          description: Inputs supplied to the task.
-        reference:
-          additionalProperties: true
-          type: object
-          title: Reference
-          description: Grader-only ground truth (held-out tests, expected outputs,
-            rubric data). Surfaced to metrics but never seeded into the agent's workspace
-            or shown to the agent, so a metric can grade against artifacts the agent
-            cannot influence.
-        views:
-          additionalProperties:
-            $ref: '#/components/schemas/SemanticView'
-          type: object
-          title: Views
-          description: Optional reporting views mapping this task's metric outputs
-            into named semantic scores.
-        metadata:
-          items:
-            $ref: '#/components/schemas/MetadataItem'
-          type: array
-          title: Metadata
-          description: Key/value annotations for the task.
-        metrics:
-          items:
-            $ref: '#/components/schemas/MetricInline'
-          type: array
-          title: Metrics
-          description: Inline metric bundles that score this task; reconstructed to
-            runtime metrics at run time.
-      additionalProperties: false
-      type: object
-      required:
-      - id
-      - intent
-      title: AgentEvalTaskSpec
-      description: 'Canonical task DTO: metrics fully resolved to inline bundles,
-        reconstructed at run time.'
     AgentEvalTrial:
       properties:
         id:
@@ -2920,7 +2872,7 @@ components:
         spec:
           $ref: '#/components/schemas/AgentEvalSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -3000,7 +2952,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -3067,6 +3019,15 @@ components:
       title: AgentOutput
       description: Captured final output from the evaluated agent, model, or imported
         baseline for a trial.
+    AgentRef:
+      type: string
+      pattern: ^[\w\-.]+(/[\w\-.]+)?$
+      title: AgentRef
+      description: "Reference to an agent registered on the platform (format: ``workspace/name``\
+        \ or ``name``).\n\nNames an ``Agent`` entity (``nemo agents create``) so an\
+        \ evaluation can run it without repeating\nits configuration. Same shape as\
+        \ :class:`MetricRef`: a bare name resolves in the job workspace.\nAgents carry\
+        \ no revision fragment \u2014 the entity is looked up as it is at submit time."
     AgentTarget:
       properties:
         kind:
@@ -3485,6 +3446,85 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    EnvironmentSpecInline:
+      properties:
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Plaintext, non-secret env vars.
+        secrets:
+          additionalProperties:
+            type: string
+          type: object
+          title: Secrets
+          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+        model_provider_override:
+          allOf:
+          - $ref: '#/components/schemas/ModelProviderOverride'
+          description: Set only to point at a non-IGW external model provider.
+        provider:
+          type: string
+          title: Provider
+          description: local | docker | opensandbox | k8s.
+          default: local
+        workspace_path:
+          title: Workspace Path
+          description: Workspace path visible to the harness.
+          type: string
+        artifacts_path:
+          title: Artifacts Path
+          description: Provider-specific artifact output location.
+          type: string
+        control_location:
+          title: Control Location
+          description: external_control | in_env_control.
+          type: string
+        ownership:
+          title: Ownership
+          description: caller_owned | fabric_owned.
+          type: string
+        connection:
+          additionalProperties: true
+          type: object
+          title: Connection
+          description: Provider connection metadata (server url, cred ref, namespace).
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+          description: Consumer-provided passthrough metadata.
+        settings:
+          additionalProperties: true
+          type: object
+          title: Settings
+          description: Provider-specific settings.
+        mcp:
+          additionalProperties:
+            $ref: '#/components/schemas/McpFulfillment'
+          type: object
+          title: Mcp
+          description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
+            MCP dependency.
+      type: object
+      title: EnvironmentSpecInline
+      description: 'Inline environment spec - the dependencies and configuration an
+        agent reaches.
+
+
+        This is the fulfillment half of a request/fulfill split: the Agent declares
+
+        the dependencies it needs; the EnvironmentSpec provides concrete endpoints
+
+        and secret references. It compiles into the agent.yaml / FabricConfig and
+
+        the injected process environment.'
     EvaluateInputSpec:
       properties:
         dataset:
@@ -3581,7 +3621,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -3661,7 +3701,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -3913,16 +3953,6 @@ components:
           allOf:
           - $ref: '#/components/schemas/TaskInputs'
           description: Inputs supplied to the task.
-        metrics:
-          items:
-            anyOf:
-            - $ref: '#/components/schemas/MetricInline'
-            - $ref: '#/components/schemas/MetricRef'
-          type: array
-          title: Metrics
-          description: "Metrics that score this task \u2014 stored-metric references,\
-            \ and inline bundles on create (normalized to derived stored metrics before\
-            \ the task is persisted)."
         reference:
           additionalProperties: true
           type: object
@@ -3939,6 +3969,16 @@ components:
           title: Views
           description: Optional reporting views mapping metric outputs into named
             semantic scores.
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          title: Metrics
+          description: "Metrics that score this task \u2014 stored-metric references,\
+            \ and inline bundles on create (normalized to derived stored metrics before\
+            \ the task is persisted)."
       additionalProperties: false
       type: object
       required:
@@ -3998,13 +4038,8 @@ components:
       - kind
       title: EvidenceDescriptor
       description: Descriptor for a candidate trace, source, or artifact.
-    FabricRunnerTarget:
+    FabricConfigSource:
       properties:
-        kind:
-          type: string
-          const: fabric
-          title: Kind
-          default: fabric
         config:
           additionalProperties: true
           type: object
@@ -4017,6 +4052,34 @@ components:
           description: Optional ``provider/model`` slug applied as the config's default
             model; the harness default is used when omitted.
           type: string
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      title: FabricConfigSource
+      description: 'An agent described inline: one complete Fabric ``agent.yaml``
+        as a JSON-shaped mapping.'
+    FabricRunnerTarget:
+      properties:
+        kind:
+          type: string
+          const: fabric
+          title: Kind
+          default: fabric
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/FabricConfigSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
+          title: Source
+          description: 'The agent to run: an inline `config` (with an optional `model`),
+            or a registered `agent` (with an optional `environment`).'
+        resolved_config:
+          title: Resolved Config
+          description: 'Set by submit-time resolution of a registered `agent`, never
+            by the submitter: the Fabric config the agent resolved to, which is what
+            the job runs.'
+          additionalProperties: true
+          type: object
         timeout_s:
           type: integer
           minimum: 1.0
@@ -4029,18 +4092,32 @@ components:
           description: Capture the agent trajectory as ATIF via NeMo Relay and attach
             it to trial evidence. Requires the NeMo Relay gateway in the run environment.
           default: true
+        env_secrets:
+          additionalProperties:
+            $ref: '#/components/schemas/SecretRef'
+          type: object
+          title: Env Secrets
+          description: 'Environment variables for the Fabric harness, sourced from
+            the secrets service, as {ENV_NAME: secret-ref}. The reference travels
+            in the spec; the service resolves it into the job''s environment at compile
+            time, where the harness reads it by name (e.g. a model `api_key_env` or
+            an MCP server''s `env`). No credential is stored on the spec or the run
+            bundle.'
       additionalProperties: false
       type: object
       required:
-      - config
+      - source
       title: FabricRunnerTarget
       description: "Generate trials by driving an agent harness through the NeMo Fabric\
         \ runtime.\n\nFabric is harness-agnostic: the harness (Codex, Hermes, ...)\
-        \ is selected by the supplied\nconfig's ``harness.adapter_id`` and is never\
-        \ inferred from ``model``. ``model`` is applied as the\nconfig's default model\
-        \ when given.\n\nA run is described by exactly one complete ``config``. Fabric\
-        \ 0.1.0rc2 removed profile overlays,\nso the former ``profiles`` field is\
-        \ gone \u2014 fold any overlay you were passing into ``config``."
+        \ is selected by the config's\n``harness.adapter_id`` and is never inferred\
+        \ from a model. The config comes from ``source``: given\ninline, or resolved\
+        \ at submit from a registered platform agent with the same resolution a deployment\n\
+        gets (environment merge, Inference Gateway binding, translation of the platform\
+        \ ``agent.yaml``). A\nresolved registered agent's config is carried as ``resolved_config``\
+        \ next to its source, so the job\nnever looks the agent up. Fabric 0.1.0rc2\
+        \ removed profile overlays, so the former ``profiles`` field\nis gone \u2014\
+        \ fold any overlay into the config."
     FieldMapping:
       properties:
         input:
@@ -4239,11 +4316,13 @@ components:
             \ travel in the spec."
         agent_ref_name:
           title: Agent Ref Name
-          description: Gym agent instance rollouts are routed to when running against
-            a sandboxed host, stamped as each row's `agent_ref`. Defaults to `agent`.
-            Set it when the environment's config defines the agent under a different
-            name -- `mcqa` registers `mcqa_simple_agent`, and routing to `simple_agent`
-            there does not answer.
+          description: 'Gym agent *instance*, as distinct from the `agent` component
+            it configures. Defaults to `agent`. Set it whenever the two differ, which
+            is common in stock Gym: `rewoo_agent` is an instance of the `langgraph_agent`
+            component, as are the whole `anyswe_*` and `anyterminal_*` families of
+            theirs. It keys the resources-server binding, decides whether an environment
+            package declares the agent, and is stamped as each row''s `agent_ref`.
+            Requires sandboxed execution.'
           type: string
         env_secrets:
           additionalProperties:
@@ -4271,11 +4350,15 @@ components:
           type: number
           exclusiveMinimum: 0.0
           title: Startup Timeout S
-          description: Max wait for `gym env start` readiness.
+          description: 'Max wait for the Gym servers to report ready: `gym env start`
+            colocated, the host''s bootstrap when sandboxed. Excludes pulling a sandboxed
+            host''s image.'
           default: 240.0
         collection_timeout_s:
           title: Collection Timeout S
-          description: Max wait for `gym eval run` collection; None = unbounded.
+          description: Max wait for rollout collection, measured from when it starts;
+            exceeding it fails the run. None = unbounded, though a sandboxed host
+            still stops at the end of its lifetime.
           type: number
           exclusiveMinimum: 0.0
         shutdown_grace_s:
@@ -4311,6 +4394,78 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HarborArchiveSource:
+      properties:
+        kind:
+          type: string
+          const: fileset-archive
+          title: Kind
+          default: fileset-archive
+        fileset_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Fileset Ref
+          description: "Exact qualified archive object reference: workspace/fileset#relative/path.\
+            \ Workspace, fileset name, and path must each be NFC-normalized and at\
+            \ most 4096 UTF-8 bytes. Path segments must be nonempty, must not be '.'\
+            \ or '..', and must not end in a space or dot. Control characters (U+0000\u2013\
+            U+001F and U+007F), backslashes, %, ?, #, and : are forbidden within each\
+            \ component. Absolute paths, a//b, a/../b, and trailing slashes are rejected.\
+            \ These canonicalization constraints are enforced by the server in addition\
+            \ to the pattern."
+          examples:
+          - default/harbor-tasks#suite/task/task_archive
+        files_hash:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Files Hash
+          description: SHA-256 of the exact compressed archive bytes.
+        archive_format:
+          type: string
+          const: tar-gzip-v1
+          title: Archive Format
+          default: tar-gzip-v1
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_ref
+      - files_hash
+      title: HarborArchiveSource
+    HarborBuiltinAgentSource:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Built-in Harbor agent to run, e.g. `oracle`.
+        model_name:
+          title: Model Name
+          description: Optional model slug passed to the agent.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: HarborBuiltinAgentSource
+      description: One of Harbor's built-in agents, selected by name.
+    HarborImportedAgentSource:
+      properties:
+        import_path:
+          type: string
+          title: Import Path
+          description: Harbor agent import path, e.g. `harbor_wrapper:WrappedAgent`.
+            The module must already be importable in the run environment.
+        model_name:
+          title: Model Name
+          description: Optional model slug passed to the agent.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - import_path
+      title: HarborImportedAgentSource
+      description: A Harbor agent class the run environment can already import.
     HarborRunnerTarget:
       properties:
         kind:
@@ -4318,31 +4473,49 @@ components:
           const: harbor
           title: Kind
           default: harbor
-        agent_name:
-          title: Agent Name
-          description: Built-in Harbor agent to run (e.g. 'oracle'). Ignored when
-            `agent_import_path` is set.
-          default: oracle
-          type: string
-        agent_import_path:
-          title: Agent Import Path
-          description: Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent');
-            overrides `agent_name`. The module must already be importable in the run
-            environment.
-          type: string
-        agent_model_name:
-          title: Agent Model Name
-          description: Optional model slug passed to the Harbor agent.
-          type: string
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/HarborBuiltinAgentSource'
+          - $ref: '#/components/schemas/HarborImportedAgentSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
+          title: Source
+          description: "The agent Harbor runs in each task container: a built-in agent\
+            \ by `name`, your own by `import_path`, or a registered platform `agent`\
+            \ (with an optional `environment`). A registered agent is resolved at\
+            \ submit into the SDK's installed Fabric agent with the agent's translated\
+            \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
+            \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
+            \ qualified, as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'
           type: object
           title: Agent Kwargs
-          description: 'Keyword arguments forwarded to the Harbor agent''s constructor,
-            the equivalent of Harbor''s `--ak key=value`. Not for secrets: Harbor
-            persists them unredacted in the job dir''s `config.json`; inject secrets
-            through the environment instead.'
+          description: "Keyword arguments forwarded to the Harbor agent's constructor,\
+            \ the equivalent of Harbor's `--ak key=value`. Not for secrets: Harbor\
+            \ persists these unredacted across the job dir. Credential-shaped plaintext\
+            \ is rejected, but that check is a heuristic \u2014 use `env_secrets`\
+            \ regardless."
+        env_secrets:
+          additionalProperties:
+            $ref: '#/components/schemas/SecretRef'
+          type: object
+          title: Env Secrets
+          description: 'Environment variables for the Harbor agent, sourced from the
+            secrets service, as {ENV_NAME: secret-ref}. The reference travels in the
+            spec; the service resolves it into the job''s environment at compile time,
+            and Harbor receives a `${ENV_NAME}` template it expands when the agent
+            is created, so no credential is stored on the spec, the run bundle, or
+            the job dir''s `config.json`. A bare ref resolves in the job''s workspace.'
+        env_vars:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env Vars
+          description: Non-secret environment variables for the Harbor agent, as literal
+            values that travel in the spec and reach only the agent. Keys Harbor treats
+            as secrets (matching KEY, SECRET, TOKEN, PASSWORD, CREDENTIAL or AUTH)
+            are rejected; use `env_secrets` for credentials.
         n_attempts:
           type: integer
           minimum: 1.0
@@ -4377,6 +4550,18 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        agent_setup_timeout_multiplier:
+          title: Agent Setup Timeout Multiplier
+          description: Harbor agent-setup timeout multiplier. An agent that installs
+            itself into the task container (a Fabric harness, a registered agent)
+            needs several times Harbor's default, which is tuned for prebuilt agents.
+          type: number
+          exclusiveMinimum: 0.0
+        agent_timeout_multiplier:
+          title: Agent Timeout Multiplier
+          description: Harbor agent-phase timeout multiplier, applied to every trial.
+          type: number
+          exclusiveMinimum: 0.0
       additionalProperties: false
       type: object
       title: HarborRunnerTarget
@@ -4403,54 +4588,319 @@ components:
           type: string
           const: harbor
           title: Kind
-          description: Task kind discriminator.
-        archive_ref:
+        native_task_id:
           type: string
-          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
-          title: Archive Ref
-          description: 'Files reference to the task''s packaged directory (format:
-            workspace/fileset#path).'
-        archive_digest:
-          type: string
-          maxLength: 64
-          minLength: 64
-          pattern: ^[0-9a-f]{64}$
-          title: Archive Digest
-          description: "Content hash Harbor computed over the task directory. This\
-            \ is the authoritative identity of a Harbor task's content \u2014 every\
-            \ file, including task.toml."
+          minLength: 1
+          title: Native Task Id
+          description: Native task identity, independently verified from the archive.
+        source:
+          $ref: '#/components/schemas/HarborArchiveSource'
+        harbor_hash:
+          $ref: '#/components/schemas/HarborTaskHash'
         instruction:
           title: Instruction
-          description: The task's instruction text, when it has one (multi-step tasks
-            may not).
           type: string
         config:
           additionalProperties: true
           type: object
           title: Config
-          description: "Harbor's own task configuration (verifier, agent, environment,\
-            \ steps), as published. A queryable projection of task.toml \u2014 inspect\
-            \ a task's verifier without downloading the archive. Opaque here: Harbor\
-            \ owns this schema."
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Reporting views over the primary Harbor reward and declared
+            additional metric outputs.
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          title: Metrics
+          description: Additional metrics, appended to the mandatory HarborRewardMetric.
+            Inline bundles are normalized to stored metric references on registration.
+            Do not include HarborRewardMetric here.
       additionalProperties: false
       type: object
       required:
       - kind
-      - archive_ref
-      - archive_digest
+      - native_task_id
+      - source
+      - harbor_hash
       title: HarborTaskDefinition
-      description: "A reference to the task's packaged files, plus a projection of\
-        \ Harbor's own config.\n\nHarbor identifies a task by a *directory* \u2014\
-        \ ``task.toml``, an instruction, an environment \u2014 so\nwhat is stored\
-        \ is a reference to that directory's archive in the Files service, not the\
-        \ files\nthemselves. One fileset per task, so a task shared by several tasksets\
-        \ is stored once. The\narchive is materialized back into ``<dir>/<task-name>/``\
-        \ at run time, which is the layout\nHarbor's own discovery expects.\n\nWhich\
-        \ agent runs the task is *not* stored here. That comes from the run's target\n\
-        (``HarborRunnerTarget``), so the same stored task can be evaluated against\
-        \ different agents.\nHarbor's own ``[agent]`` block \u2014 carried inside\
-        \ ``config`` \u2014 configures how the agent *phase*\nruns (timeout, user,\
-        \ network policy), not which agent it is."
+    HarborTaskHash:
+      properties:
+        digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Digest
+        method:
+          type: string
+          const: harbor-packager-content-v1
+          title: Method
+          default: harbor-packager-content-v1
+        harbor_version:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Harbor Version
+        source_commit:
+          title: Source Commit
+          type: string
+          maxLength: 128
+      additionalProperties: false
+      type: object
+      required:
+      - digest
+      - harbor_version
+      title: HarborTaskHash
+      description: Producer fingerprint for future use; never an integrity or execution
+        gate.
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     HelloResponse:
       properties:
         message:
@@ -4619,6 +5069,38 @@ components:
         \ can supply the dataset identity\n``evaluations.create`` requires."
     JsonValue:
       title: JsonValue
+    McpFulfillment:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Endpoint the environment provides for this MCP server.
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Non-secret env for the MCP server.
+        secrets:
+          additionalProperties:
+            type: string
+          type: object
+          title: Secrets
+          description: ENV_NAME -> Secrets-service ref, merged into the MCP server
+            env at compile.
+      type: object
+      required:
+      - url
+      title: McpFulfillment
+      description: 'EnvironmentSpec-side fulfillment for one MCP server the Agent
+        declares.
+
+
+        The Agent DECLARES an MCP dependency by name; the EnvironmentSpec PROVIDES
+
+        the url + env + secrets for that same name. Matched by server-name key at
+
+        compile time; ``secrets`` are merged into the server''s ``env``.'
     MetadataItem:
       properties:
         key:
@@ -4924,6 +5406,34 @@ components:
       - name
       title: Model
       description: Model definition for use without persisting to the Models API.
+    ModelProviderOverride:
+      properties:
+        base_url:
+          type: string
+          title: Base Url
+          description: External model-provider endpoint.
+        api_key:
+          title: Api Key
+          description: Secrets-service ref for the provider API key (only needed for
+            external providers).
+          type: string
+        provider:
+          title: Provider
+          description: Provider selector (e.g. "openai", "anthropic").
+          type: string
+      type: object
+      required:
+      - base_url
+      title: ModelProviderOverride
+      description: 'Exceptional external model-provider override.
+
+
+        Null in the normal case: model selection is on the Agent and the provider
+
+        URL is the Inference Gateway (auto-injected). Set ONLY to point the agent
+        at
+
+        a non-IGW external provider endpoint.'
     ModelRef:
       type: string
       pattern: ^[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}$
@@ -5148,248 +5658,6 @@ components:
       - p100
       title: Percentiles
       description: Percentile distribution of scores.
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     PublicationSpec:
       properties:
         intake:
@@ -5456,6 +5724,176 @@ components:
       type: object
       title: ReasoningParams
       description: Custom settings that control the model's reasoning behavior.
+    RegisteredAgentSource:
+      properties:
+        agent:
+          allOf:
+          - $ref: '#/components/schemas/AgentRef'
+          description: 'The registered agent to run: `workspace/name`, or `name` in
+            the submission workspace. Rewritten to the qualified form at submit. The
+            agent runs fresh for every trial; an existing deployment is never called.'
+        environment:
+          allOf:
+          - $ref: '#/components/schemas/EnvironmentSpecInline'
+          description: 'Environment to evaluate the agent in, merged onto its config
+            exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
+            the agent declares, process env, secret refs, and Fabric environment settings.'
+        files:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'Set at submit, never by the submitter: a job-owned snapshot
+            of the agent''s Ethos FileSet, taken when the agent was resolved so a
+            re-registration while the job is queued cannot change the files it runs
+            with. Present only when the resolved config refers to files by relative
+            path.'
+      additionalProperties: false
+      type: object
+      required:
+      - agent
+      title: RegisteredAgentSource
+      description: 'An agent registered on the platform (``nemo agents create``),
+        resolved at submit.
+
+
+        The model is part of what the agent is, so there is no model override; what
+        an evaluation shapes is
+
+        the ``environment`` the agent runs in.'
+    ResolvedEvaluatorTaskDefinition:
+      properties:
+        kind:
+          type: string
+          const: evaluator
+          title: Kind
+          description: Task kind discriminator.
+        intent:
+          type: string
+          title: Intent
+          description: Human-readable description of the desired agent behavior.
+        inputs:
+          allOf:
+          - $ref: '#/components/schemas/TaskInputs'
+          description: Inputs supplied to the task.
+        reference:
+          additionalProperties: true
+          type: object
+          title: Reference
+          description: 'Grader-only ground truth (held-out tests, expected outputs,
+            rubric data). Surfaced to metrics but never seeded into the agent''s workspace
+            or shown to the agent, so a metric can grade against artifacts the agent
+            cannot influence. Held out from the *agent*, not from the API: anyone
+            who can read the task can read this.'
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Optional reporting views mapping metric outputs into named
+            semantic scores.
+        provenance:
+          $ref: '#/components/schemas/TaskProvenance'
+        metrics:
+          items:
+            $ref: '#/components/schemas/MetricInline'
+          type: array
+          title: Metrics
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - intent
+      title: ResolvedEvaluatorTaskDefinition
+      description: Job snapshot with expanded metrics and the original stored revision,
+        if any.
+    ResolvedHarborTaskDefinition:
+      properties:
+        kind:
+          type: string
+          const: harbor
+          title: Kind
+        native_task_id:
+          type: string
+          minLength: 1
+          title: Native Task Id
+          description: Native task identity, independently verified from the archive.
+        source:
+          $ref: '#/components/schemas/HarborArchiveSource'
+        harbor_hash:
+          $ref: '#/components/schemas/HarborTaskHash'
+        instruction:
+          title: Instruction
+          type: string
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        views:
+          additionalProperties:
+            $ref: '#/components/schemas/SemanticView'
+          type: object
+          title: Views
+          description: Reporting views over the primary Harbor reward and declared
+            additional metric outputs.
+        provenance:
+          $ref: '#/components/schemas/TaskProvenance'
+        metrics:
+          items:
+            $ref: '#/components/schemas/MetricInline'
+          type: array
+          title: Metrics
+          description: Resolved additional metrics, appended to the mandatory HarborRewardMetric.
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - native_task_id
+      - source
+      - harbor_hash
+      - provenance
+      title: ResolvedHarborTaskDefinition
+      description: Job snapshot with expanded metrics and the original stored revision.
+    ResolvedTask:
+      properties:
+        id:
+          type: string
+          title: Id
+        spec:
+          oneOf:
+          - $ref: '#/components/schemas/ResolvedEvaluatorTaskDefinition'
+          - $ref: '#/components/schemas/ResolvedHarborTaskDefinition'
+          title: Spec
+          discriminator:
+            propertyName: kind
+            mapping:
+              evaluator: '#/components/schemas/ResolvedEvaluatorTaskDefinition'
+              harbor: '#/components/schemas/ResolvedHarborTaskDefinition'
+        metadata:
+          items:
+            $ref: '#/components/schemas/MetadataItem'
+          type: array
+          title: Metadata
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - spec
+      title: ResolvedTask
+      description: 'A task captured in the canonical specification of a submitted
+        job.
+
+
+        This submission-time snapshot is distinct from a persisted task revision:
+        it contains the
+
+        runtime identity, metadata, and execution-ready definition with metric references
+        expanded.
+
+        For a stored task, ``spec.provenance`` identifies the immutable revision from
+        which the
+
+        snapshot was derived. Expanding metric/model references does not rewrite that
+
+        provenance digest; an inline task has no stored revision or provenance.'
     ResultFilter:
       additionalProperties: false
       description: Traits shared by both result collections (used directly for agent-eval
@@ -5525,12 +5963,31 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native
             width.
           type: integer
           exclusiveMinimum: 0.0
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
       additionalProperties: false
       type: object
       required:
@@ -5572,12 +6029,31 @@ components:
           title: Batch Size
           description: Embedding HTTP batch size.
           default: 32
+        embedding_in_flight:
+          type: integer
+          minimum: 1.0
+          title: Embedding In Flight
+          description: Concurrent embedding POSTs to one NIM so the GPU is not idle
+            between batches.
+          default: 2
         embedding_dimensions:
           title: Embedding Dimensions
           description: Expected embedding width. Omit to accept the model's native
             width.
           type: integer
           exclusiveMinimum: 0.0
+        query_prefix:
+          type: string
+          title: Query Prefix
+          description: Literal prefix prepended to each query. Empty string disables
+            prefixing.
+          default: 'query: '
+        passage_prefix:
+          type: string
+          title: Passage Prefix
+          description: Literal prefix prepended to each passage. Empty string disables
+            prefixing.
+          default: 'passage: '
       additionalProperties: false
       type: object
       required:
@@ -5652,7 +6128,7 @@ components:
         spec:
           $ref: '#/components/schemas/RetrieveEvalSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5732,7 +6208,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -6277,6 +6753,25 @@ components:
 
         Additional task- or runtime-specific inputs, such as `gym_row` for Gym tasks,
         are also accepted fields.'
+    TaskProvenance:
+      properties:
+        entity_name:
+          type: string
+          title: Entity Name
+        revision_digest:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Revision Digest
+      additionalProperties: false
+      type: object
+      required:
+      - entity_name
+      - revision_digest
+      title: TaskProvenance
+      description: The digest identifies the published revision, not its expanded
+        job snapshot.
     TaskRef:
       type: string
       pattern: ^[\w\-.]+(/[\w\-.]+)?(#[\w\-.]+)?$
@@ -6356,8 +6851,8 @@ components:
           description: References to the member tasks (set semantics; duplicates rejected).
         files_ref:
           title: Files Ref
-          description: "Files reference to the taskset's own files \u2014 shared by\
-            \ its members, owned by none."
+          description: Reference to taskset-level files shared across member tasks,
+            such as a common scoring script.
           type: string
           pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
         metadata:
@@ -6427,6 +6922,11 @@ components:
       title: TasksetFilter
       type: object
     TasksetInput:
+      oneOf:
+      - required:
+        - tasks
+      - required:
+        - task_ids
       properties:
         description:
           title: Description
@@ -6443,6 +6943,14 @@ components:
             change underneath you when a member republishes. Because membership is
             a set, the stored order is canonical rather than the submitted order:
             reordering the same members is not a content change and publishes no revision.'
+        task_ids:
+          items:
+            type: string
+            minLength: 1
+          type: array
+          title: Task Ids
+          description: Stored task record IDs; mutually exclusive with tasks. Resolved
+            on write.
         files_ref:
           title: Files Ref
           description: "Files reference to the taskset's own files \u2014 shared by\

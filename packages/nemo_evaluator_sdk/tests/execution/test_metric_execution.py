@@ -4,6 +4,7 @@
 """Unit tests for nemo_evaluator_sdk.execution.metric_execution."""
 
 import asyncio
+import contextvars
 import json
 import logging
 import math
@@ -144,7 +145,7 @@ def _is_structured_output_probe(request: dict) -> bool:
     Detect on the probe's own schema marker rather than on message shape, since the probe is sent
     under whichever placement is being tried (response_format or either guided_json position).
     """
-    return "__nmp_probe_score" in json.dumps(request)
+    return "__nhx_probe_score" in json.dumps(request)
 
 
 def _make_agent() -> Agent:
@@ -344,6 +345,18 @@ class TestRunSync:
 
         result = asyncio.run(outer())
         assert result == "from-thread"
+
+    def test_running_loop_thread_preserves_contextvars(self):
+        value_var = contextvars.ContextVar("value_var", default="missing")
+
+        async def outer():
+            value_var.set("captured")
+            return run_sync(lambda: inner())
+
+        async def inner():
+            return value_var.get()
+
+        assert asyncio.run(outer()) == "captured"
 
     def test_propagates_exception_from_thread(self):
         async def outer():
@@ -666,7 +679,7 @@ class TestTargetStructuredOutputPreflight:
             if "response_format" in request or "guided_json" in request.get("extra_body", {}):
                 # Endpoint ignores both of these and answers in prose.
                 return {"choices": [{"message": {"content": "sure thing"}}]}
-            return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+            return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
 
         mocker.patch.object(inference, "make_inference_request", side_effect=fake_inference)
         metric = ExactMatchMetric(reference="{{item.expected}}")
@@ -707,7 +720,7 @@ class TestBenchmarkPathStructuredOutput:
             if _is_structured_output_probe(request):
                 if "response_format" in request or "guided_json" in request.get("extra_body", {}):
                     return {"choices": [{"message": {"content": "prose, not json"}}]}
-                return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
             return {"choices": [{"message": {"content": "sure thing"}}]}
 
         # Patch ONLY the benchmark module's binding. The probe must travel the same seam that
@@ -1355,12 +1368,12 @@ class TestComputeMetricPipeline:
             prompt_template={"messages": [{"role": "user", "content": "{{item.input}}"}]},
             inference_fn=_fake_agent_inference,
             params=RunConfigOnline(ignore_request_failure=True),
-            default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+            default_headers={"X-NHX-Principal-Id": "service:evaluator"},
         )
 
         await pipeline.generate_sample(0, {"input": "row"})
 
-        assert captured_headers == {"X-NMP-Principal-Id": "service:evaluator"}
+        assert captured_headers == {"X-NHX-Principal-Id": "service:evaluator"}
 
     @pytest.mark.parametrize(
         ("row", "expected_message"),
@@ -2019,7 +2032,7 @@ class TestEvaluateMetricOnline:
             captured_judge_requests.append(request)
             if _is_structured_output_probe(request):
                 # Behave like an endpoint that honours response_format, so preflight resolves to it.
-                return {"choices": [{"message": {"content": '{"__nmp_probe_score": 1}'}}]}
+                return {"choices": [{"message": {"content": '{"__nhx_probe_score": 1}'}}]}
             return {"choices": [{"message": {"role": "assistant", "content": '{"helpfulness": 4}'}}]}
 
         metric.set_inference_fn(fake_judge_inference)

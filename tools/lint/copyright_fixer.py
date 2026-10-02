@@ -4,7 +4,7 @@
 
 
 """
-Copyright header fixer for NeMo-Platform
+Copyright header fixer for NeMo-Helix
 
 Scans source files and adds SPDX copyright headers where missing.
 """

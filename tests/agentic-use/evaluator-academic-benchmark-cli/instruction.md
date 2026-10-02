@@ -3,13 +3,13 @@
 
 # Academic Benchmark Evaluation (CLI)
 
-You have access to the `nmp` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nhx` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nmp` CLI is available at `/app/.venv/bin/nmp`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default.
+The `nhx` CLI is available at `/app/.venv/bin/nhx`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.
 
 ## Task
 
-Set up and launch an academic benchmark evaluation job using the `nmp` CLI:
+Set up and launch an academic benchmark evaluation job using the `nhx` CLI:
 
 1. **Create a workspace** named `benchmark-eval-workspace`
 

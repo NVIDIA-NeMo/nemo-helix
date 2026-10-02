@@ -13,6 +13,7 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 from nemo_evaluator_sdk.constants import PLACEHOLDER_INFERENCE_API_KEY
+from nemo_evaluator_sdk.retrieval.http_retry import backoff_seconds, is_retryable_status
 from nemo_evaluator_sdk.values.models import Model, RankingContract, RankingInference
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -124,21 +125,30 @@ class NimRankingClient(BaseModel):
         client: httpx.AsyncClient,
     ) -> list[tuple[int, float]]:
         for attempt in range(self.max_retries + 1):
-            response = await client.post(
-                candidate.url,
-                headers=_headers(self.model),
-                json=_ranking_payload(candidate.contract, self.model, query, passages, truncate),
-            )
+            try:
+                response = await client.post(
+                    candidate.url,
+                    headers=_headers(self.model),
+                    json=_ranking_payload(candidate.contract, self.model, query, passages, truncate),
+                )
+            except httpx.TransportError:
+                if attempt >= self.max_retries:
+                    raise
+                await asyncio.sleep(backoff_seconds(attempt))
+                continue
             if response.is_error:
                 effective_status = _effective_status_code(response)
                 if effective_status in {400, 404, 405, 422}:
                     raise _UnsupportedRankingCandidate(candidate, effective_status)
+                if is_retryable_status(effective_status) and attempt < self.max_retries:
+                    await asyncio.sleep(backoff_seconds(attempt))
+                    continue
                 response.raise_for_status()
             ranked = _parse_rankings(response, expected_count=len(passages))
             if all(math.isfinite(score) for _, score in ranked):
                 return ranked
             if attempt < self.max_retries:
-                await asyncio.sleep(min(0.1 * 2**attempt, 1.0))
+                await asyncio.sleep(backoff_seconds(attempt))
         raise NimRankingError(f"{candidate.contract} returned non-finite values after {self.max_retries + 1} attempts")
 
 

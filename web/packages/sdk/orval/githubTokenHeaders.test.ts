@@ -9,7 +9,7 @@ describe('getGithubTokenHeaders', () => {
     'attaches the token for default GitHub host %s',
     (host) => {
       expect(
-        getGithubTokenHeaders(new URL(`https://${host}/NVIDIA-NeMo/nemo-platform`), 'token')
+        getGithubTokenHeaders(new URL(`https://${host}/NVIDIA-NeMo/nemo-helix`), 'token')
       ).toEqual({
         Authorization: 'Bearer token',
       });
@@ -25,7 +25,7 @@ describe('getGithubTokenHeaders', () => {
   it('does not attach a header when no token is configured', () => {
     expect(
       getGithubTokenHeaders(
-        new URL('https://raw.githubusercontent.com/NVIDIA-NeMo/nemo-platform'),
+        new URL('https://raw.githubusercontent.com/NVIDIA-NeMo/nemo-helix'),
         undefined
       )
     ).toBeUndefined();

@@ -335,6 +335,17 @@ class AggregateScoreBase(BaseModel):
         "than two values.",
     )
 
+    @property
+    def headline_value(self) -> float | None:
+        """The one number this aggregate reports, whatever shape it arrived in.
+
+        Read this rather than :attr:`mean` when the aggregate's type is not known statically: a
+        backend-reported figure is an :class:`AggregateScalarScore` carrying only ``value``, and
+        ``mean`` on it is ``None``, so a caller that reads ``mean`` alone silently drops the
+        measurement instead of reporting it.
+        """
+        return self.mean
+
 
 class AggregateRangeScore(AggregateScoreBase):
     """Aggregated statistics for a range-type score with percentiles and histogram."""
@@ -399,6 +410,15 @@ class AggregateScalarScore(AggregateScoreBase):
 
     score_type: Literal["scalar"] = Field(default="scalar", description="Type of score.")
     value: float = Field(description="The reported value.")
+
+    @property
+    def headline_value(self) -> float | None:
+        """The reported ``value``, overriding :attr:`AggregateScoreBase.headline_value`.
+
+        The base returns ``mean``, which is ``None`` on a scalar score: there is no distribution
+        behind it. Without this override every backend-reported figure would read as absent.
+        """
+        return self.value
 
     _include_fields: frozenset[str] | None = None
 
@@ -659,6 +679,9 @@ def summary_aggregate_record(score: AggregateScore) -> dict[str, Any]:
     score_type = getattr(score, "score_type", None)
     if score_type is not None:
         record["score_type"] = score_type
+    value = getattr(score, "value", None)
+    if value is not None:
+        record["value"] = value
     percentiles = getattr(score, "percentiles", None)
     if percentiles is not None and getattr(percentiles, "p50", None) is not None:
         record["p50"] = percentiles.p50

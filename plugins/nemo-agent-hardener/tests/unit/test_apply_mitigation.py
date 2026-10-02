@@ -15,7 +15,7 @@ from nemo_agent_hardener_plugin.agent_resolver import strip_gateway_url
 from nemo_agent_hardener_plugin.api.v2 import runs as runs_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest, AgentHardenerRun
 from nemo_agents_plugin.entities import Agent
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
 
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
 GATEWAY = "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"

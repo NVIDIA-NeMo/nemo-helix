@@ -100,4 +100,26 @@ describe('MarkdownContent', () => {
       }
     );
   });
+
+  describe('images', () => {
+    it('renders a markdown image by default', () => {
+      render(<MarkdownContent content="![alt text](https://example.com/pic.png)" />);
+      const img = screen.getByRole('img', { name: 'alt text' });
+      expect(img).toHaveAttribute('src', 'https://example.com/pic.png');
+    });
+
+    it('drops markdown images when disableImages is set (untrusted content, CWE-200)', () => {
+      render(
+        <MarkdownContent
+          content="before ![alt text](https://attacker.example/track.png) after"
+          disableImages
+        />
+      );
+      // No <img> is emitted, so the viewer's browser never fetches the remote src.
+      expect(screen.queryByRole('img')).not.toBeInTheDocument();
+      // Surrounding markdown still renders.
+      expect(screen.getByText(/before/)).toBeInTheDocument();
+      expect(screen.getByText(/after/)).toBeInTheDocument();
+    });
+  });
 });

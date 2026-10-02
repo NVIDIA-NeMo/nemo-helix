@@ -11,7 +11,7 @@ from pathlib import Path
 
 def test_vendored_compose_public_imports_are_constructible_without_docker(tmp_path: Path) -> None:
     """The vendored public Compose façade remains importable without Docker."""
-    compose = importlib.import_module("nemo_platform.beta.evaluator.agent_eval.runtimes.sandbox.providers.compose")
+    compose = importlib.import_module("nemo_helix.beta.evaluator.agent_eval.runtimes.sandbox.providers.compose")
     ComposeCleanupError = compose.ComposeCleanupError
     ComposeCommandResult = compose.ComposeCommandResult
     ComposeServiceTopology = compose.ComposeServiceTopology

@@ -5,6 +5,9 @@
 name: anonymizer
 description: Use when the user wants to detect and replace, hash, redact, annotate, or rewrite PII (names, emails, phone numbers, locations, ...) in a CSV or Parquet dataset using the NeMo Anonymizer plugin.
 argument-hint: [describe the dataset and how PII should be handled]
+allowed-tools: Bash, Read
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # Before You Start
@@ -21,7 +24,7 @@ $ARGUMENTS
 
 The plugin wraps the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer) and exposes:
 
-- An `anonymizer.preview` streaming function (small samples, fast iteration) available through the NeMo Platform SDK/service and `nemo anonymizer preview`.
+- An `anonymizer.preview` streaming function (small samples, fast iteration) available through the NeMo Helix SDK/service and `nemo anonymizer preview`.
 - An `anonymizer.run` job for full-dataset execution. Use `nemo anonymizer run` for Jobs-worker execution.
 - A `nemo anonymizer validate` command (synchronous config validation).
 
@@ -40,7 +43,7 @@ Read **only** the workflow file that matches the selected mode, then follow it:
 - Always iterate via `sdk.anonymizer.preview(...)` or `nemo anonymizer preview` before running the full job. Previews are cheap and stream a small sample (default 10 records) with full detection traces.
 - When you include `config`, pick exactly one of `replace` (Annotate/Hash/Redact/Substitute) or `rewrite` on the `AnonymizerConfig`. Not both. Do not claim `config` is required for every flow; the Anonymizer library owns default config behavior and strategy semantics. See `references/replace-strategies.md` for plugin request formatting and the [library docs](https://github.com/NVIDIA-NeMo/Anonymizer/tree/main/docs) for semantics.
 - The input must be a single CSV or Parquet file. `text_column` defaults to `text`; set it explicitly when the free-text column has another name. If the dataset has a stable record id, also set `id_column`. See `references/inputs.md`.
-- Preview and run execution require `model_configs` so requests route through the NeMo Platform Inference Gateway. See `references/model-configs.md`.
+- Preview and run execution require `model_configs` so requests route through the NeMo Helix Inference Gateway. See `references/model-configs.md`.
 - `selected_models` overrides are only valid when `model_configs` is also supplied; aliases must resolve against that pool.
 - Plugin-service / Jobs execution requires an `http(s)` URL or a fileset reference (`<workspace>/<fileset>#<path>` or `fileset://...`).
 - If a spec file matching the user's description already exists in the working directory, ask whether to edit it or create a new one.
@@ -94,7 +97,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 # selected_models:
 #   detection:
 #     entity_detector: gliner-pii-detector
@@ -125,7 +128,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 Include only the bits the task requires — keep `model_configs` in every plugin preview and run request, omit `selected_models` unless overrides are needed, and use `Substitute` / `rewrite` only when the user wants LLM-generated replacements or holistic rewriting. Exceptions for omitted `model_configs` apply only to standalone Anonymizer library workflows outside this plugin skill.

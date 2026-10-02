@@ -18,7 +18,7 @@ def _write_template(path: Path) -> None:
     path.write_text(
         yaml.safe_dump(
             {
-                "batch_name": "nmp_igw_guardrails_sweep_concurrency",
+                "batch_name": "nhx_igw_guardrails_sweep_concurrency",
                 "output_base_dir": "plugins/nemo-guardrails/benchmarks/artifacts/aiperf_results",
                 "base_config": {"model": "benchmark/guardrails-vm"},
                 "sweeps": {"concurrency": [1, 2, 4]},
@@ -81,7 +81,7 @@ class TestCollectSweepResults:
         assert collect_sweep_results(tmp_path / "missing") == []
 
     def test_collects_all_sweeps_with_status(self, tmp_path: Path) -> None:
-        batch = tmp_path / "nmp_igw_guardrails_sweep_concurrency" / "20260527_120000"
+        batch = tmp_path / "nhx_igw_guardrails_sweep_concurrency" / "20260527_120000"
         _make_sweep_dir(batch, "concurrency1", returncode=0, duration=70.5)
         _make_sweep_dir(batch, "concurrency2", returncode=1, duration=70.5)
 

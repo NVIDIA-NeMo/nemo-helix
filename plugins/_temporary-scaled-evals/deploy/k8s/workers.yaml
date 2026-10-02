@@ -1,70 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Both workers run from the same image as the API and read the same settings;
-# only the entrypoint differs. They claim work straight out of Postgres, so
-# neither talks to the API and neither needs a Service.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: scaled-evals-build-worker
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/component: build-worker
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/component: build-worker
-    spec:
-      serviceAccountName: scaled-evals-control-plane
-      containers:
-        - name: build-worker
-          image: scaled-evals-app
-          command: ["scaled-evals-build-worker"]
-          envFrom:
-            - configMapRef:
-                name: scaled-evals-env
-          env:
-            # See api.yaml: libpq takes the password from PGPASSWORD, keeping it out
-            # of the DSN.
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: scaled-evals-postgres
-                  key: password
-            - name: SCALED_EVALS_DATABASE_URL
-              value: postgresql://scaled_evals@postgres:5432/scaled_evals
-            - name: CREDENTIALS_ENCRYPTION_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: scaled-evals-credential-encryption
-                  key: CREDENTIALS_ENCRYPTION_KEY
-          resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: 500m
-              memory: 1Gi
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-            seccompProfile:
-              type: RuntimeDefault
-          volumeMounts:
-            - name: registry-auth
-              mountPath: /var/run/scaled-evals/registry-auth
-              readOnly: true
-      volumes:
-        - name: registry-auth
-          secret:
-            secretName: scaled-evals-gar-registry-auth
----
+# The dispatch worker now owns only cleanup, provenance, and SBOM queues.
+# Platform Jobs owns task-build and evaluation process lifecycle.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

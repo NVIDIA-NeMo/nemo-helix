@@ -7,7 +7,7 @@ Registered under the ``nemo.controllers`` entry-point group so the platform
 runner manages its lifecycle (startup, reconcile loop, graceful shutdown)
 without any wiring in :class:`~nemo_agents_plugin.service.AgentsService`.
 
-Every ``interval_seconds`` (driven by :class:`~nemo_platform_plugin.controller.NemoController`)
+Every ``interval_seconds`` (driven by :class:`~nemo_helix_plugin.controller.NemoController`)
 it queries the Entities Service for ``agent_deployment`` entities and drives
 state transitions:
 
@@ -39,8 +39,8 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.runner.backend import RunnerBackend
 from nemo_agents_plugin.runner.registry import RunnerBackendRegistry
-from nemo_platform_plugin.controller import NemoController
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.controller import NemoController
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
@@ -62,7 +62,7 @@ def _is_fabric_deployment(dep: AgentDeployment) -> bool:
 class AgentDeploymentController(NemoController):
     """Reconciles ``agent_deployment`` entities against a :class:`RunnerBackend`.
 
-    Extends :class:`~nemo_platform_plugin.controller.NemoController` so the platform
+    Extends :class:`~nemo_helix_plugin.controller.NemoController` so the platform
     runner manages its loop, startup, and graceful shutdown automatically.
     Register this class under ``nemo.controllers`` in ``pyproject.toml``; the
     platform will instantiate it and wire it into the thread-based
@@ -135,10 +135,10 @@ class AgentDeploymentController(NemoController):
         # even when the agents controller is never started.  Do not hoist.
         from nemo_agents_plugin.config import AgentsConfig
         from nemo_agents_plugin.runner.registry import set_runner_registry
-        from nemo_platform_plugin.client.adapter import client_from_platform
-        from nemo_platform_plugin.entities import EntityClient as _EntityClient
-        from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-        from nemo_platform_plugin.sdk_provider import get_async_platform_sdk
+        from nemo_helix_plugin.client.adapter import client_from_platform
+        from nemo_helix_plugin.entities import EntityClient as _EntityClient
+        from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+        from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
         config = AgentsConfig.get()
         self._interval_seconds = float(config.controller.interval_seconds)
@@ -149,7 +149,7 @@ class AgentDeploymentController(NemoController):
         # We use get_async_platform_sdk() directly (not entity_client.as_service()) because
         # on_startup() runs outside request scope — there is no existing EntityClient to elevate.
         # get_async_platform_sdk(as_service=..., internal=True) applies the same headers that
-        # as_service(internal=True) would: X-NMP-Principal-Id: service:agents plus
+        # as_service(internal=True) would: X-NHX-Principal-Id: service:agents plus
         # MARK_INTERNAL_REQUEST_HEADERS.  It also wires the shared HTTP client and URL router,
         # which as_service() would inherit from an existing client but we must set up from scratch.
         sdk = get_async_platform_sdk(as_service="agents", internal=True)
@@ -211,7 +211,7 @@ class AgentDeploymentController(NemoController):
     async def reconcile_one(self, obj: object) -> None:
         """Drive the state machine for a single deployment entity.
 
-        :class:`~nmp.common.entities.client.EntityConflictError` is caught and
+        :class:`~nhx.common.entities.client.EntityConflictError` is caught and
         logged as a debug message (optimistic lock; retry next cycle) so it does
         not propagate to the base class's generic error handler.
         """

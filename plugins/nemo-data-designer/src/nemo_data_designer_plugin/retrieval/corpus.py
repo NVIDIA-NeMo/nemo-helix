@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 
 from data_designer_nemo.filesystem import make_filesystem
 from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.adapter import SyncHelixClient
 
 _HF_PREFIX = "hf://"
 
@@ -24,7 +24,7 @@ def hf_token_from_env() -> str | None:
 def materialize_corpus(
     corpus: str,
     dest: Path,
-    sdk: NeMoPlatform,
+    sdk: SyncHelixClient,
     workspace: str,
     hf_token: str | None = None,
     allow_local_path: bool = False,
@@ -77,14 +77,15 @@ def _download_hf(corpus: str, dest: Path, token: str | None) -> Path:
             repo_type="dataset",
             local_dir=str(dest),
             revision=revision,
-            allow_patterns=f"{subdir}/**" if subdir else None,
+            allow_patterns=[subdir, f"{subdir}/**"] if subdir else None,
             token=token,
         )
     )
-    return local_dir / subdir if subdir else local_dir
+    staged = local_dir / subdir if subdir else local_dir
+    return staged
 
 
-def _download_fileset(corpus: str, dest: Path, sdk: NeMoPlatform, workspace: str) -> Path:
+def _download_fileset(corpus: str, dest: Path, sdk: SyncHelixClient, workspace: str) -> Path:
     try:
         fileset_workspace, fileset, fragment = parse_fileset_ref(corpus, workspace_fallback=workspace)
     except FilesetPathError as exc:
@@ -97,4 +98,8 @@ def _download_fileset(corpus: str, dest: Path, sdk: NeMoPlatform, workspace: str
     dest.mkdir(parents=True, exist_ok=True)
     fs = make_filesystem(sdk)
     fs.get(root, str(dest), recursive=True)
+    if fragment:
+        targeted = dest / fragment
+        if targeted.exists():
+            return targeted
     return dest

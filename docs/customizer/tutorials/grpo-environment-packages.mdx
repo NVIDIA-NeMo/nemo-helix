@@ -23,9 +23,9 @@ Do not put `.jsonl` in the environment package. If a Gym config lists `datasets[
 
 Before packaging an environment, ensure you have:
 
-1. **A NeMo Platform configured with `platform.runtime: kubernetes`** — GRPO provisions a Ray cluster and has no local Docker fallback
+1. **A NeMo Helix configured with `platform.runtime: kubernetes`** — GRPO provisions a Ray cluster and has no local Docker fallback
 2. **Sandboxed Gym enabled on the cluster** by your platform operator (`sandbox_cluster_capable` and a job-storage PVC claim). Refer to [Cluster prerequisites](/documentation/customizer-reference/grpo-and-reward-environments#cluster-prerequisites); installing OpenSandbox is covered in [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox)
-3. **The `nemo` CLI on your `PATH`**, or a source checkout where `uv run --package nmp-rl` resolves
+3. **The `nemo` CLI on your `PATH`**, or a source checkout where `uv run --package nhx-rl` resolves
 4. **The training image tag** your cluster runs — vendoring a wheel closure requires the `nemo-gym`, `ray`, and `openai` versions it reports
 5. **A machine with internet access** for the packaging step. Training clusters consume uploaded FileSets only. For details on which environment type require internet access too, see details below.
 
@@ -152,7 +152,7 @@ Convert on a machine with internet. Upload the result; training nodes do not fet
 From a platform install, run `pi-to-gym-conversion`. From this repository:
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion \
+uv run --package nhx-rl pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
@@ -171,7 +171,7 @@ Pin `--hub-version` so the vendored release is reproducible.
 | `--dataset-size` / `--validation-fraction` | Row cap (`-1` = all); split in `[0, 1)` (`0` = train only) |
 | `--wheels-dir` | Existing `*.whl` files instead of download (directory must be non-empty) |
 | `--validate-only <dir>` | Check package layout |
-| `--upload` | Create both FileSets (`NMP_BASE_URL` required). Default names: `<slug>-env` and `<slug>-env-dataset` |
+| `--upload` | Create both FileSets (`NHX_BASE_URL` required). Default names: `<slug>-env` and `<slug>-env-dataset` |
 
 <Note>
 `pi-to-gym-conversion` vendors wheels for `x86_64` today. On an `arm64` cluster, build the closure yourself with the `pip download` command above and pass it via `--wheels-dir`.
@@ -209,7 +209,7 @@ Set `adapter.agent` to `verifiers_agent`. Dataset rows use `agent_ref.name: veri
 `configs/verifiers_agent.yaml` sets `max_tokens` (default 8192). That value caps generation for this agent.
 
 ```bash
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./ascii-tree-pkg
+uv run --package nhx-rl pi-to-gym-conversion --validate-only ./ascii-tree-pkg
 ```
 
 This checks layout (manifest, `config_paths`, `wheels/`). It does not check wheel platform tags, whether the closure is complete, whether `config_paths` define the servers your rows route to, or dataset rows. Those surface at job start.
@@ -373,7 +373,7 @@ pip download --dest weather-env/wheels \
   --platform "manylinux2014_$ARCH" \
   "nemo-gym==$GYM_VERSION" "ray[default]==$RAY_VERSION" "openai==$OPENAI_VERSION" pip \
   -r resources_servers/weather_verifier/requirements.txt
-uv run --package nmp-rl pi-to-gym-conversion --validate-only ./weather-env
+uv run --package nhx-rl pi-to-gym-conversion --validate-only ./weather-env
 ```
 
 `--platform` is repeated because pip matches these tags literally rather than expanding a compatibility range.
@@ -431,7 +431,7 @@ nemo files upload ./weather-env/ weather-env --workspace default
 nemo files list weather-env --workspace default
 ```
 
-Job JSON: [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments#submit-the-job). Sandboxed Gym is configured on the platform (`NMP_RL_SANDBOXED_GYM_DEFAULT`), not in the job payload. Cluster setup: [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
+Job JSON: [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments#submit-the-job). Sandboxed Gym is configured on the platform (`NHX_RL_SANDBOXED_GYM_DEFAULT`), not in the job payload. Cluster setup: [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
 
 ## Next Steps
 

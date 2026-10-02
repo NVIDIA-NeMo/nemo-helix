@@ -14,7 +14,7 @@ export interface RemoteRepoMetadata {
    *  fileset name after running through `toValidFilesetName`. */
   slug: string;
   /** Remote description. Only populated for HuggingFace public repos in phase 1
-   *  — NGC + private HF require the backend preview endpoint (see nmp-1tk). */
+   *  — NGC + private HF require the backend preview endpoint (see nhx-1tk). */
   description: string | null;
 }
 
@@ -54,7 +54,7 @@ async function fetchHuggingFaceMetadata(
 
 function deriveNgcMetadata(target: string): RemoteRepoMetadata {
   // NGC description fetch requires API-key headers; the secret is not
-  // available client-side. Slug-only here. Backend preview (nmp-1tk) closes
+  // available client-side. Slug-only here. Backend preview (nhx-1tk) closes
   // the gap.
   return { slug: target, description: null };
 }

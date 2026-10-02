@@ -74,7 +74,7 @@ export const screenshots: ScreenshotConfig[] = [
   },
   { name: 'jobs', route: `${ws}/jobs` },
   { name: 'secrets', route: `${ws}/secrets` },
-  { name: 'customizations', route: `${ws}/customizations` },
+  { name: 'fine-tune', route: `${ws}/fine-tune` },
   { name: 'prompt-tuned-models', route: `${ws}/customizations/prompt-tuned/new` },
   { name: 'run-evaluation', route: `${ws}/evaluation/results/new` },
   { name: 'evaluations', route: `${ws}/evaluation/results` },

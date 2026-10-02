@@ -32,27 +32,27 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.common.config import Runtime
-from nmp.common.files.metadata import FilesetMetadata, ModelMetadataContent, ToolCallingMetadataContent
-from nmp.core.models.app import ModelWeightsType, get_model_weights_type
-from nmp.core.models.config import config as models_config
-from nmp.core.models.controllers.backends.common import deployment_config_view
-from nmp.core.models.controllers.backends.deployments_plugin.compiler import compile_model_deployment
-from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
-from nmp.core.models.controllers.backends.deployments_plugin.nim_compiler import (
+from nhx.common.config import Runtime
+from nhx.common.files.metadata import FilesetMetadata, ModelMetadataContent, ToolCallingMetadataContent
+from nhx.core.models.app import ModelWeightsType, get_model_weights_type
+from nhx.core.models.config import config as models_config
+from nhx.core.models.controllers.backends.common import deployment_config_view
+from nhx.core.models.controllers.backends.deployments_plugin.compiler import compile_model_deployment
+from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginConfig
+from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import (
     _TOOL_CALL_PLUGIN_PATH,
     compile_nim_server_env,
 )
-from nmp.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
-from nmp.core.models.schemas import (
+from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     ModelDeploymentConfigModelSpec,
     ModelSpec,
     ToolCallConfig,
 )
-from nmp.core.models.tasks.model_spec.run import ModelSpecRunner
-from nmp.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NMPJobContext
-from nmp.testing import ClientContext
+from nhx.core.models.tasks.model_spec.run import ModelSpecRunner
+from nhx.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NHXJobContext
+from nhx.testing import ClientContext
 
 # ============================================================================
 # Constants
@@ -219,7 +219,7 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
        (mocked to return the now-updated fileset), merges ``metadata.model.tool_calling``
        into a ``ModelSpec``, and calls the *real* ``sdk.models.update(spec=...)``.
 
-    ``nmp.core.models.parallelism.api`` depends on torch/accelerate (GPU deps
+    ``nhx.core.models.parallelism.api`` depends on torch/accelerate (GPU deps
     not available in the test environment), so we inject a mock module into
     ``sys.modules`` so the lazy import inside ``analyze_checkpoint`` resolves
     without touching the real GPU module.
@@ -242,7 +242,7 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
     # -- Step 2: Model-spec background task runs ------------------------------
     model_dir = tmp_path / "model"
     model_dir.mkdir(exist_ok=True)
-    job_ctx = NMPJobContext(
+    job_ctx = NHXJobContext(
         workspace=DEFAULT_WORKSPACE,
         job_id="test-job",
         attempt_id="attempt-0",
@@ -261,23 +261,23 @@ def _update_fileset_and_run_task(test_clients, model_name, metadata, tmp_path):
     base_spec = ModelSpec(**MINIMAL_SPEC)
 
     # Mock the torch-dependent parallelism module (not available in test env)
-    mock_api = types.ModuleType("nmp.core.models.parallelism.api")
+    mock_api = types.ModuleType("nhx.core.models.parallelism.api")
     mock_api.infer_model_cfg_from_hf = MagicMock(return_value=base_spec)
     mock_api.find_minimum_gpus_from_metadata = MagicMock(return_value=(1, {}))
 
-    modules_patch = {"nmp.core.models.parallelism.api": mock_api}
-    if "nmp.core.models.parallelism" not in sys.modules:
-        parent = types.ModuleType("nmp.core.models.parallelism")
+    modules_patch = {"nhx.core.models.parallelism.api": mock_api}
+    if "nhx.core.models.parallelism" not in sys.modules:
+        parent = types.ModuleType("nhx.core.models.parallelism")
         parent.__path__ = []
-        modules_patch["nmp.core.models.parallelism"] = parent
+        modules_patch["nhx.core.models.parallelism"] = parent
 
     # Task calls client_from_platform(sdk, FilesClient).get_fileset() → gets the updated fileset
     with (
         patch.dict(sys.modules, modules_patch),
-        patch("nmp.core.models.tasks.model_spec.run.client_from_platform", return_value=mock_files_client),
+        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", return_value=mock_files_client),
         patch.object(sdk.files, "list", return_value=SimpleNamespace(data=[])),
         patch.object(runner.filesystem_sdk, "get"),
-        patch("nmp.core.models.tasks.model_spec.run.os.listdir", return_value=["config.json"]),
+        patch("nhx.core.models.tasks.model_spec.run.os.listdir", return_value=["config.json"]),
     ):
         config = ModelSpecTaskConfig(workspace=DEFAULT_WORKSPACE, name=model_name)
         runner.analyze_checkpoint(config)
@@ -836,8 +836,8 @@ def test_k8s_nimservice_adds_plugin_init_containers_from_model_entity(sample_dep
     env_dict = {item.name: item.value for item in compiled.server_config.containers[0].env}
     assert env_dict["NIM_MODEL_NAME"] == "/model-store"
     assert env_dict["NIM_SERVED_MODEL_NAME"] == "meta/llama-3.2-1b-instruct"
-    assert env_dict["NMP_MODEL_ENTITY_WORKSPACE"] == DEFAULT_WORKSPACE
-    assert env_dict["NMP_MODEL_ENTITY_NAME"] == "integ-k8s-entity-plugin-model"
+    assert env_dict["NHX_MODEL_ENTITY_WORKSPACE"] == DEFAULT_WORKSPACE
+    assert env_dict["NHX_MODEL_ENTITY_NAME"] == "integ-k8s-entity-plugin-model"
     assert env_dict["NIM_TOOL_CALL_PARSER"] == "entity-parser"
     assert env_dict["NIM_TOOL_PARSER_PLUGIN"] == _TOOL_CALL_PLUGIN_PATH
     assert env_dict["NIM_ENABLE_AUTO_TOOL_CHOICE"] == "1"
@@ -880,8 +880,8 @@ def test_k8s_nimservice_deployment_tool_config_takes_priority(sample_deployment)
     env_dict = {item.name: item.value for item in compiled.server_config.containers[0].env}
     assert env_dict["NIM_MODEL_NAME"] == "/model-store"
     assert env_dict["NIM_SERVED_MODEL_NAME"] == "meta/llama-3.2-1b-instruct"
-    assert env_dict["NMP_MODEL_ENTITY_WORKSPACE"] == DEFAULT_WORKSPACE
-    assert env_dict["NMP_MODEL_ENTITY_NAME"] == "integ-k8s-priority-model"
+    assert env_dict["NHX_MODEL_ENTITY_WORKSPACE"] == DEFAULT_WORKSPACE
+    assert env_dict["NHX_MODEL_ENTITY_NAME"] == "integ-k8s-priority-model"
     assert env_dict["NIM_TOOL_CALL_PARSER"] == "deployment-parser"
     assert env_dict["NIM_TOOL_PARSER_PLUGIN"] == _TOOL_CALL_PLUGIN_PATH
     assert env_dict["NIM_ENABLE_AUTO_TOOL_CHOICE"] == "1"

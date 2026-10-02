@@ -11,7 +11,7 @@ export interface BulkDeleteModalProps<T> {
   open: boolean;
   /**
    * Called when the user confirms. Should perform all deletions and throw on
-   * failure — the generic surfaces the thrown message as inline error text.
+   * failure — the confirmation modal surfaces the thrown message to the user.
    */
   onDelete: (items: T[]) => Promise<void>;
   /**
@@ -30,25 +30,18 @@ export const BulkDeleteModal = <T,>({
   title,
   onClose,
 }: BulkDeleteModalProps<T>) => {
-  const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
-
-  const resolvedTitle = typeof title === 'function' ? title(items.length) : title;
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const resolvedTitle = typeof title === 'function' ? title(pendingCount ?? items.length) : title;
 
   const handleDelete = async (): Promise<boolean> => {
-    setDeleteError(undefined);
+    setPendingCount(items.length);
     try {
       await onDelete(items);
       onClose();
       return true;
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : 'Failed to delete');
-      return false;
+    } finally {
+      setPendingCount(null);
     }
-  };
-
-  const handleClose = () => {
-    setDeleteError(undefined);
-    onClose();
   };
 
   if (!open) return null;
@@ -59,8 +52,7 @@ export const BulkDeleteModal = <T,>({
       onDelete={handleDelete}
       simpleConfirm
       title={resolvedTitle}
-      errorText={deleteError}
-      onClose={handleClose}
+      onClose={onClose}
     />
   );
 };

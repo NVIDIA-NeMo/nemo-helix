@@ -106,7 +106,7 @@ Outside the agentic-use harness, `default/mock-llm` won't resolve — either set
 
 ### Plugin attached to only one middleware list
 
-Each list dispatches its own hook independently — `execute_request_middleware` ↔ `process_request` and `execute_response_middleware` ↔ `process_response`, wired in `services/core/inference-gateway/src/nmp/core/inference_gateway/api/middleware_registry.py`. A config with both `rails.input.flows` and `rails.output.flows` attached to only one list silently no-ops on the unlisted side: prompts pass through unblocked, or responses pass through unblocked, even though the config looks complete.
+Each list dispatches its own hook independently — `execute_request_middleware` ↔ `process_request` and `execute_response_middleware` ↔ `process_response`, wired in `services/core/inference-gateway/src/nhx/core/inference_gateway/api/middleware_registry.py`. A config with both `rails.input.flows` and `rails.output.flows` attached to only one list silently no-ops on the unlisted side: prompts pass through unblocked, or responses pass through unblocked, even though the config looks complete.
 
 Attach the same `MiddlewareCall` to **both** `--request-middleware` and `--response-middleware`.
 

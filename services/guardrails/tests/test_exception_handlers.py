@@ -8,11 +8,11 @@ import pytest
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from nemoguardrails.exceptions import InvalidRailsConfigurationError
-from nmp.guardrails.app.exceptions.application_exceptions import (
+from nhx.guardrails.app.exceptions.application_exceptions import (
     CustomHTTPException,
     LLMCallException,
 )
-from nmp.guardrails.app.exceptions.exception_handlers import (
+from nhx.guardrails.app.exceptions.exception_handlers import (
     _format_field_path,
     _format_validation_message,
     _request_has_image_urls,

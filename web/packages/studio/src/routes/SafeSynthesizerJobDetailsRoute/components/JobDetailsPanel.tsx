@@ -4,14 +4,14 @@
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
-import { PlatformJobTerminalStatuses } from '@nemo/common/src/constants/query';
+import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useLiveSeconds } from '@nemo/common/src/hooks/useLiveSeconds';
 import {
   formatTimeInSeconds,
   getDifferenceInMilliseconds,
   utcToLocalDate,
 } from '@nemo/common/src/utils/date';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Banner, Button, Divider, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
@@ -29,7 +29,7 @@ export const JobDetailsPanel: FC<JobDetailsPanelProps> = ({ job, errorMessage })
   const { id, created_at, status, ownership, updated_at } = job;
   const createdBy = ownership?.created_by;
   const [showJobConfig, setShowJobConfig] = useState(false);
-  const isTerminalStatus = PlatformJobTerminalStatuses.includes(status as PlatformJobStatus);
+  const isTerminalStatus = HelixJobTerminalStatuses.includes(status as HelixJobStatus);
 
   const differenceInMilliseconds = getDifferenceInMilliseconds(created_at, updated_at);
   const elapsedSeconds = differenceInMilliseconds
@@ -52,7 +52,7 @@ export const JobDetailsPanel: FC<JobDetailsPanelProps> = ({ job, errorMessage })
                   <Flex align="center" gap="density-sm">
                     <StatusBadge status={status} />
                     {formatTimeInSeconds(
-                      PlatformJobTerminalStatuses.includes(status as PlatformJobStatus)
+                      HelixJobTerminalStatuses.includes(status as HelixJobStatus)
                         ? elapsedSeconds
                         : liveSeconds
                     )}

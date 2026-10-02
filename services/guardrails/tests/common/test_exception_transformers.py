@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from nmp.guardrails.app.exceptions.exception_transformers import (
+from nhx.guardrails.app.exceptions.exception_transformers import (
     MAX_RETRIES_EXCEEDED_SUBSTRING,
     matches_authentication_error,
     matches_connection_error,

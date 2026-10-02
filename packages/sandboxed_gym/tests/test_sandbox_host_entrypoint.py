@@ -19,7 +19,7 @@ from sandboxed_gym.host.models import GymHostSpec, GymHostVolumeMount
 from sandboxed_gym.runtime import gym_host_runtime as runtime
 
 #: These two tests instantiate the host provider, which drives the OpenSandbox SDK directly. The
-#: SDK is an optional extra (`sandboxed-gym[opensandbox]`) because only a deployment that
+#: SDK is an optional extra (`nemo-sandboxed-gym[opensandbox]`) because only a deployment that
 #: provisions real sandboxes needs it, so it is absent from a plain workspace checkout. Everything
 #: else in this package works without it -- the broker contract and the sandbox types are vendored
 #: (see `sandboxed_gym.wire`).
@@ -98,7 +98,7 @@ def test_opensandbox_host_provider_uses_configured_protocol_for_bare_endpoints()
 def _gym_host_spec(*, entrypoint: tuple[str, ...] | None = None) -> GymHostSpec:
     return GymHostSpec(
         job_id="job-1",
-        runtime_image="nmp-gym-host:dev",
+        runtime_image="nhx-gym-host:dev",
         environment_mount=GymHostVolumeMount(
             pvc_claim="job-storage",
             sub_path="environment",

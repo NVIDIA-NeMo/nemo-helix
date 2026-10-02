@@ -5,7 +5,7 @@
 
 ## Overview
 
-This eval tests **real job execution** through the NeMo Platform jobs pipeline. The agent creates three jobs (success, intentional failure, recovery), polls each to terminal status, diagnoses the failure, and demonstrates understanding of the jobs lifecycle.
+This eval tests **real job execution** through the NeMo Helix jobs pipeline. The agent creates three jobs (success, intentional failure, recovery), polls each to terminal status, diagnoses the failure, and demonstrates understanding of the jobs lifecycle.
 
 ## What it tests
 
@@ -25,6 +25,6 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-This is merged with Harbor's base compose files, giving the NeMo Platform API server access to the host Docker daemon via the DOOD (Docker-outside-of-Docker) pattern.
+This is merged with Harbor's base compose files, giving the NeMo Helix API server access to the host Docker daemon via the DOOD (Docker-outside-of-Docker) pattern.
 
 **Prerequisite**: The host machine must have a Docker socket at `/var/run/docker.sock`.

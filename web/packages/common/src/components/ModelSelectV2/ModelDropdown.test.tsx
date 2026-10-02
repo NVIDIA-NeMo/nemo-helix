@@ -4,7 +4,7 @@
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelDropdown } from '@nemo/common/src/components/ModelSelectV2/ModelDropdown';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const makeModel = (name: string, overrides: Partial<ModelEntity> = {}): ModelEntity =>
   ({ id: name, name, workspace: 'nvidia', ...overrides }) as unknown as ModelEntity;
@@ -233,7 +233,7 @@ describe('ModelDropdown', () => {
       renderOpen({ groups: withAdapters });
       const sub = (await screen.findAllByTestId('nv-dropdown-sub'))[0];
 
-      fireEvent.pointerEnter(sub);
+      fireEvent.pointerEnter(within(sub).getByTestId('model-dropdown-item-with-adapters'));
 
       expect(await screen.findByTestId('model-dropdown-adapter-option')).toBeInTheDocument();
 
@@ -241,6 +241,24 @@ describe('ModelDropdown', () => {
 
       // Latched: leaving does not throw the panel away, so a second hover is instant.
       expect(screen.getByTestId('model-dropdown-adapter-option')).toBeInTheDocument();
+    });
+
+    it('checks the selected adapter and not the base model it belongs to', async () => {
+      renderOpen({
+        groups: withAdapters,
+        value: { model: 'nvidia/nemotron-8b', adapter: 'support-v1' },
+      });
+      const sub = (await screen.findAllByTestId('nv-dropdown-sub'))[0];
+
+      fireEvent.pointerEnter(within(sub).getByTestId('model-dropdown-item-with-adapters'));
+
+      const adapterRow = await screen.findByTestId('model-dropdown-adapter-option');
+      expect(within(adapterRow).getByTestId('model-dropdown-selected-check')).toBeInTheDocument();
+      expect(
+        within(screen.getByTestId('model-dropdown-base-option')).queryByTestId(
+          'model-dropdown-selected-check'
+        )
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -274,6 +292,18 @@ describe('ModelDropdown', () => {
       });
 
       expect(screen.getByTestId('model-select-v2-trigger')).toHaveTextContent('nemotron-8b');
+    });
+
+    it('qualifies the label with the adapter when one is selected', () => {
+      renderOpen({
+        open: false,
+        value: { model: 'nvidia/nemotron-8b', adapter: 'support-v1' },
+        groups: withAdapters,
+      });
+
+      expect(screen.getByTestId('model-select-v2-trigger')).toHaveTextContent(
+        'nemotron-8b / support-v1'
+      );
     });
   });
 });

@@ -82,7 +82,8 @@ describe('CombinedAgentsTable', () => {
       await user.click(agentCell);
 
       expect(onAgentRowClick).toHaveBeenCalledWith(
-        expect.objectContaining({ name: MOCK_AGENTS[0].name })
+        expect.objectContaining({ name: MOCK_AGENTS[0].name }),
+        expect.anything()
       );
     });
   });

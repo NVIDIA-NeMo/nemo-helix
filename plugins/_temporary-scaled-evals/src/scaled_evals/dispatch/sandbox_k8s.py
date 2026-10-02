@@ -217,6 +217,14 @@ def load_env_file(path: Path) -> dict[str, str]:
     return env
 
 
+def _staged_task_name(spec: LaunchSpec) -> str:
+    # Harbor derives local task names from the directory basename.
+    name = spec.task_slug or "task"
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", name):
+        raise ValueError("task slug is not a safe directory name")
+    return name
+
+
 def render_harbor_config(
     config_text: str,
     env: Mapping[str, str],
@@ -1569,6 +1577,21 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
+def _kubeconfig_flag(recorded_path: object) -> list[str]:
+    """Return the ``--kubeconfig`` flag for a cleanup, or nothing if it cannot apply.
+
+    The recorded path is captured when the sandbox launches. Under Platform Jobs
+    that happens inside a Job pod whose ``$HOME`` differs from the dispatch
+    worker that later drains the cleanup, so the path can name a file that only
+    ever existed on another pod's filesystem. Passing it anyway fails every
+    kubectl call and wedges the evaluation. Falling back to no flag lets kubectl
+    resolve through the cleanup process's own ``KUBECONFIG``.
+    """
+    if recorded_path and Path(str(recorded_path)).exists():
+        return ["--kubeconfig", str(recorded_path)]
+    return []
+
+
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     """Delete and verify per-evaluation Sandbox resources.
 
@@ -1600,8 +1623,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    if kubeconfig_path:
-        base.extend(["--kubeconfig", str(kubeconfig_path)])
+    base.extend(_kubeconfig_flag(kubeconfig_path))
     if context:
         base.extend(["--context", str(context)])
     if cleanup_metadata.get("verify_ssl") is False:
@@ -1780,8 +1802,7 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    if cleanup.get("kubeconfig_path"):
-        base.extend(["--kubeconfig", str(cleanup["kubeconfig_path"])])
+    base.extend(_kubeconfig_flag(cleanup.get("kubeconfig_path")))
     if cleanup.get("context"):
         base.extend(["--context", str(cleanup["context"])])
     if cleanup.get("verify_ssl") is False:
@@ -1996,7 +2017,7 @@ def make_sandbox_k8s_docker_submitter(
         # uses the task's own task definition. The work dir is mounted into
         # the harbor-runner at /work, so the staged tree is addressed there.
         staged_task_path: str | None = None
-        staged_task_dir = work / spec.evaluation_id / "task"
+        staged_task_dir = work / spec.evaluation_id / _staged_task_name(spec)
         tarball_object_key = spec.tarball_object_key
         if (
             not _is_dataset_only_harbor_profile(spec.harbor_config)
@@ -2004,7 +2025,7 @@ def make_sandbox_k8s_docker_submitter(
             and tarball_object_key is not None
             and _stage_task_tree(tarball_object_key, staged_task_dir)
         ):
-            staged_task_path = f"/work/{spec.evaluation_id}/task"
+            staged_task_path = f"/work/{spec.evaluation_id}/{staged_task_dir.name}"
             if spec.extra_skill_object_keys:
                 materials = _inject_extra_skills(staged_task_dir, spec.extra_skill_object_keys)
                 _save_extra_skill_materials_artifact(
@@ -2500,7 +2521,7 @@ def make_sandbox_k8s_submitter(
         )
         # Host path: harbor runs in-process, so the staged tree is referenced by
         # its real filesystem path rather than a /work container path.
-        staged_task_dir = work / spec.evaluation_id / "task"
+        staged_task_dir = work / spec.evaluation_id / _staged_task_name(spec)
         staged_task_path: str | None = None
         tarball_object_key = spec.tarball_object_key
         if (

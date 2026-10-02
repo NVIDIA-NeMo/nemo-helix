@@ -23,12 +23,12 @@ from nemo_evaluator.api.dependencies import get_result_service
 from nemo_evaluator.api.schemas import AgentEvalResult, DataFilter, EvaluateResult
 from nemo_evaluator.api.service.result_service import ResultService
 from nemo_evaluator.authz import scope
-from nemo_platform_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
-from nemo_platform_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
-from nemo_platform_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.schema import DatetimeFilter, Page
+from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
+from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import DatetimeFilter, Page
 
 logger = logging.getLogger(__name__)
 

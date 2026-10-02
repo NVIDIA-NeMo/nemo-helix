@@ -115,6 +115,7 @@ class BenchmarkRunLinks(BaseModel):
     evaluations: str
     reproduce: str
     cancel: str
+    archive: str | None = None
 
 
 class ReproduceBenchmarkRunResponse(BaseModel):

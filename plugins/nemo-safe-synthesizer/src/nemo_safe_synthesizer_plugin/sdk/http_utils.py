@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from urllib.parse import quote, urljoin
 
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
 
-PlatformClient = NeMoPlatform | AsyncNeMoPlatform
+HelixClient = NeMoHelix | AsyncNeMoHelix
 
 _API_PREFIX = "/apis/safe-synthesizer"
 
@@ -19,7 +19,7 @@ def base_url(source: str) -> str:
     return source.rstrip("/")
 
 
-def resolve_workspace(platform: PlatformClient, workspace: str | None, *, strict: bool = False) -> str:
+def resolve_workspace(platform: HelixClient, workspace: str | None, *, strict: bool = False) -> str:
     """Return the explicit, platform, or default workspace for Safe Synthesizer routes."""
     resolved = workspace or platform.workspace
     if resolved is None:
@@ -29,13 +29,13 @@ def resolve_workspace(platform: PlatformClient, workspace: str | None, *, strict
     return resolved
 
 
-def url(platform: PlatformClient, path: str, workspace: str | None = None) -> str:
+def url(platform: HelixClient, path: str, workspace: str | None = None) -> str:
     """Build a full Safe Synthesizer plugin API URL for the provided route path."""
     resolved_path = path.format(workspace=resolve_workspace(platform, workspace))
     return _join_url(str(platform.base_url), f"{_API_PREFIX}/{resolved_path}")
 
 
-def platform_default_headers(platform: PlatformClient) -> dict[str, str]:
+def platform_default_headers(platform: HelixClient) -> dict[str, str]:
     """Return string-valued default platform headers for direct plugin HTTP calls."""
     return {str(key): value for key, value in platform.default_headers.items() if isinstance(value, str)}
 

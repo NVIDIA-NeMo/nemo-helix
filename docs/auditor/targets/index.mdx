@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="auditor-targets"></a>
 
-An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in the NeMo Platform entity store and referenced by name from `client.auditor.run(...)`.
+An `AuditTarget` identifies the model under test. It pairs a garak generator class (`type`) with a model identifier (`model`) and a generator-specific options dict (`options`). Targets are persisted in the NeMo Helix entity store and referenced by name from `client.auditor.run(...)`.
 
 ## What an AuditTarget Holds
 
@@ -15,7 +15,7 @@ An `AuditTarget` identifies the model under test. It pairs a garak generator cla
 |-------|-------------|
 | `type` | A fully-qualified [garak generator class](https://reference.garak.ai/en/latest/generators.html), such as `nim.NVOpenAIChat`, `openai.OpenAIGenerator`, `rest.RestGenerator`, or `test.Blank`. |
 | `model` | The provider's model identifier passed through to garak (for example, `nvidia/nemotron-3.5-lightning-30b-a3b`). |
-| `options` | A nested dict whose top-level key is the generator namespace (`nim`, `openai`, `rest`, ...). Contents are passed through to garak unchanged, with one exception: the [`nmp_uri_spec`](/documentation/vulnerability-scanning/targets/inference-gateway) sentinel is resolved to a concrete `uri` at run time. |
+| `options` | A nested dict whose top-level key is the generator namespace (`nim`, `openai`, `rest`, ...). Contents are passed through to garak unchanged, with one exception: the [`nhx_uri_spec`](/documentation/vulnerability-scanning/targets/inference-gateway) sentinel is resolved to a concrete `uri` at run time. |
 | `description` | Optional free-form description shown in listings. |
 
 See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for the full field reference.
@@ -24,7 +24,7 @@ See [Target Schema](/documentation/vulnerability-scanning/targets/schema) for th
 
 ### NIM via Inference Gateway
 
-Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Platform provider:
+Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix provider:
 
 ```python
 # List providers registered in your deployment and pick one.
@@ -44,7 +44,7 @@ target = client.auditor.targets.create(
     options={
         "nim": {
             "max_tokens": 1024,
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
                     "provider": "nvidia-inference-api",
@@ -55,7 +55,7 @@ target = client.auditor.targets.create(
 )
 ```
 
-The `nmp_uri_spec` block resolves to a concrete `uri` at run time. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details.
+The `nhx_uri_spec` block resolves to a concrete `uri` at run time. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details.
 
 ### OpenAI-compatible Endpoint
 
@@ -71,7 +71,7 @@ target = client.auditor.targets.create(
         "openai": {
             "max_tokens": 1024,
             "seed": 42,
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {
                     "workspace": "default",
                     "provider": "openai-provider",
@@ -126,7 +126,7 @@ updated = client.auditor.targets.update(
     options={
         "nim": {
             "max_tokens": 2048,
-            "nmp_uri_spec": {
+            "nhx_uri_spec": {
                 "inference_gateway": {"workspace": "default", "provider": "nvidia-inference-api"},
             },
         },

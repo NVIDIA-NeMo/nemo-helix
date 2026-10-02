@@ -51,7 +51,7 @@ def detect_surfaces(
     if (
         contains_nonnegated_substring(soft_text, "plugin sdk")
         or contains_nonnegated_substring(soft_text, "plugin_sdk")
-        or contains_nonnegated_substring(soft_text, "nemo-platform-plugin")
+        or contains_nonnegated_substring(soft_text, "nemo-helix-plugin")
         or contains_nonnegated_substring(soft_text, "nemo-plugin")
     ):
         observed.append("plugin_sdk")

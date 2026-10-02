@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
 from nemo_agent_hardener_plugin.api.v2 import manifests as manifests_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
-from nemo_platform_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
+from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
 
 NOW = datetime.now(timezone.utc)
 PREFIX = "/apis/agent-hardener/v2/workspaces/{workspace}"
@@ -47,7 +47,7 @@ def mock_entity_client() -> AsyncMock:
 
 @pytest.fixture
 def client(mock_entity_client: AsyncMock, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-    monkeypatch.setattr(manifests_module, "get_platform_sdk", lambda **_: MagicMock())
+    monkeypatch.setattr(manifests_module, "get_nemo_client", lambda **_: MagicMock())
     monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", lambda *_a, **kw: _resolved(kw.get("egress")))
     # Resolution now writes a scaffold that gets frozen as a fileset; the real upload needs a real dir.
     monkeypatch.setattr(manifests_module, "upload_project_dir", lambda _sdk, _dir, *, workspace: "default/agent-fs-1")

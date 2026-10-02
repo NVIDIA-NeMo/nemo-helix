@@ -8,8 +8,8 @@
 First build local docker images required.
 
 ```
-# From root of the nmp repo
-BUILD_ARCH=<linux/arm64 or your arch> docker buildx bake guardrails-docker guardrails-callout-docker guardrails-callout-mock-llm --load
+# From root of the nhx repo
+BUILD_ARCH=<linux/arm64 or your arch> docker buildx bake guardrails-docker nhx-guardrails-callout-docker nhx-guardrails-callout-mock-llm --load
 ```
 
 Create nemoguard configs using the Guardrails configuration examples in the product documentation.
@@ -25,7 +25,7 @@ Spin up Guardrails MS via compose.
 docker compose up
 ```
 
-This also creates a new bridge network called `nmp`, which will help connect the external processor container.
+This also creates a new bridge network called `nhx`, which will help connect the external processor container.
 
 Next spin up the Envoy stack + external processor + mock llm backend
 

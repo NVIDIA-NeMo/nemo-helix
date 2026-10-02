@@ -25,7 +25,7 @@ from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBu
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric as RuntimeMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
+from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 
 _BASE = "http://localhost:8080/apis/evaluator/v2/workspaces/default"
 

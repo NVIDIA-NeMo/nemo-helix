@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.entities.base import ListResponse, PaginationInfo
-from nemo_platform_plugin.inference_middleware import NemoInferenceMiddleware
-from nmp.common.entities import EntityNotFoundError
-from nmp.common.service.dependencies import get_entity_client
-from nmp.core.inference_gateway.api.dependencies import global_middleware_registry
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.guardrails.entities import GuardrailConfig
-from nmp.guardrails.service import GuardrailsService
-from nmp.testing import create_test_client
+from nemo_helix_plugin.entities.base import ListResponse, PaginationInfo
+from nemo_helix_plugin.inference_middleware import NemoInferenceMiddleware
+from nhx.common.entities import EntityNotFoundError
+from nhx.common.service.dependencies import get_entity_client
+from nhx.core.inference_gateway.api.dependencies import global_middleware_registry
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.guardrails.entities import GuardrailConfig
+from nhx.guardrails.service import GuardrailsService
+from nhx.testing import create_test_client
 
 
 def _empty_page() -> ListResponse:

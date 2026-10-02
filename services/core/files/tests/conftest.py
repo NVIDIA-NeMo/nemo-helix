@@ -6,8 +6,8 @@
 from typing import AsyncIterator
 
 import pytest
-from nmp.core.files.app.backends.base import ByteRange, FileInfo, StorageImpl
-from nmp.testing.blockbuster import blockbuster_fixture
+from nhx.core.files.app.backends.base import ByteRange, FileInfo, StorageImpl
+from nhx.testing.blockbuster import blockbuster_fixture
 
 # Enable BlockBuster to detect blocking calls in async code
 blockbuster = blockbuster_fixture(autouse=True)

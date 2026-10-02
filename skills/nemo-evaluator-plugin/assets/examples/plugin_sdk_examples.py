@@ -4,7 +4,7 @@
 """Concise examples for the Evaluator plugin SDK surfaces.
 
 These functions are intentionally not called at import time. Copy the one that
-matches the feature being used and supply a configured NeMo Platform client.
+matches the feature being used and supply a configured NeMo Helix client.
 """
 
 from __future__ import annotations
@@ -95,6 +95,7 @@ def build_agent_eval_spec(metric_bundle: Any) -> Any:
     from nemo_evaluator.jobs.agent_spec import (
         AgentEvalInputSpec,
         AgentEvalTaskInput,
+        FabricConfigSource,
         FabricRunnerTarget,
     )
 
@@ -108,10 +109,12 @@ def build_agent_eval_spec(metric_bundle: Any) -> Any:
             )
         ],
         target=FabricRunnerTarget(
-            config={
-                "metadata": {"name": "geography-smoke"},
-                "harness": {"adapter_id": "nvidia.fabric.codex"},
-            }
+            source=FabricConfigSource(
+                config={
+                    "metadata": {"name": "geography-smoke"},
+                    "harness": {"adapter_id": "nvidia.fabric.codex"},
+                }
+            )
         ),
         max_concurrent_tasks=2,
         labels={"benchmark": "geography-smoke"},
@@ -135,7 +138,7 @@ def build_gym_agent_eval_spec() -> Any:
             concurrency=1,
             hydra_params={
                 "policy_base_url": (
-                    "http://nemo-platform-api.default.svc.cluster.local:8080/"
+                    "http://nemo-helix-api.default.svc.cluster.local:8080/"
                     "apis/inference-gateway/v2/workspaces/default/model/my-model/-/v1"
                 ),
                 "policy_api_key": "not-used",

@@ -8,7 +8,7 @@ These live here rather than beside their runners because a built-in metric subcl
 runtime is on the optimizer's light import path — see
 ``test_agent_eval_import_does_not_pull_the_execution_stack`` — so defining them there would make
 every consumer of that module pay for machinery these metrics do not use. The runner modules
-re-export them lazily, so ``from ...harbor_runtime import HarborRewardMetric`` still works.
+re-export them lazily, so ``from ...harbor.runtime import HarborRewardMetric`` still works.
 """
 
 from collections.abc import Mapping
@@ -65,11 +65,20 @@ class HarborRewardMetric(MetricBase):
     The primary reward is always emitted, preserving Harbor's accepted zero
     fallback. Finalized secondary rewards are optional and are omitted when the
     verifier did not provide a usable finite number.
+
+    On a Harbor task this metric is a placeholder. A Harbor runner (``HarborAgentTaskRunner``,
+    ``run_harbor_eval``, or a platform job) replaces it with one whose ``output_name`` is
+    ``HarborRuntimeConfig.reward_key``; ``description`` and ``labels`` are not kept, and
+    ``reward_keys`` are merged with keys found in the trials. Only when saved trials are rescored
+    with ``AgentEvaluator.run(tasks, trials)`` and no runner is the task's metric used as is.
+    Set ``reward_key`` on ``HarborRuntimeConfig`` to choose the primary reward.
     """
 
     type: Literal[MetricType.HARBOR_REWARD] = MetricType.HARBOR_REWARD
     output_name: str = Field(
-        default="reward", description="Name of the emitted score, read from the trial's `reward` metadata."
+        default="reward",
+        description="Name of the emitted score, read from the trial's `reward` metadata. Harbor "
+        "runners replace it with `HarborRuntimeConfig.reward_key`.",
     )
     reward_keys: tuple[str, ...] = Field(
         default=(), description="Finalized task-local Harbor reward keys, including the primary output."

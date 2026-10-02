@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     task_pack_max_members: int = 100_000
     # Guardrails for server-side results.tar.gz creation. These are source
     # object limits; TODO: add tenant/account quotas and compressed-size caps.
+    benchmark_archive_cleanup_interval_seconds: float = Field(default=300.0, gt=0)
+    benchmark_archive_max_files: int = 100_000
+    benchmark_archive_max_source_bytes: int = 10_000_000_000
     evaluation_archive_max_files: int = 10_000
     evaluation_archive_max_source_bytes: int = 1_000_000_000
     # Optional best-effort publication of completed Harbor job directories to
@@ -169,6 +172,90 @@ class Settings(BaseSettings):
     # control-plane Deployment rollouts do not terminate active orchestration.
     dispatch_kubernetes_jobs_enabled: bool = False
     dispatch_job_reconcile_stale_seconds: float = 60.0
+    # Platform Jobs migration flags. Postgres remains the admission and
+    # compatibility source of truth while these are enabled. Default-on since
+    # the GKE acceptance matrix passed end to end; set either to false to fall
+    # back to the legacy in-process workers.
+    platform_build_jobs_enabled: bool = Field(
+        default=True,
+        validation_alias="SCALED_EVALS_PLATFORM_BUILD_JOBS_ENABLED",
+    )
+    platform_evaluation_jobs_enabled: bool = Field(
+        default=True,
+        validation_alias="SCALED_EVALS_PLATFORM_EVALUATION_JOBS_ENABLED",
+    )
+    platform_jobs_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_WORKSPACE",
+    )
+    platform_jobs_profile: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROFILE",
+    )
+    platform_jobs_provider: Literal["cpu", "subprocess"] = Field(
+        default="cpu",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PROVIDER",
+    )
+    # The image must contain this plugin plus its Harbor/sandbox runtime.
+    # Deployments set an immutable image reference before enabling either flag.
+    platform_jobs_image: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_IMAGE",
+    )
+    platform_jobs_postgres_password_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_POSTGRES_PASSWORD_SECRET",
+    )
+    platform_jobs_credentials_encryption_key_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_CREDENTIALS_ENCRYPTION_KEY_SECRET",
+    )
+    platform_jobs_registry_auth_secret: str = Field(
+        default="",
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_REGISTRY_AUTH_SECRET",
+    )
+    # A controller pass handles at most this many rows per queue phase. One row
+    # per pass caps a benchmark at ~6 submissions/minute, so fan-out spends
+    # longer submitting than running.
+    platform_jobs_phase_batch_size: int = Field(
+        default=20,
+        ge=1,
+        le=200,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BATCH_SIZE",
+    )
+    # Bounds how many further rows a phase starts, not how long one row takes:
+    # the deadline is checked between rows. The heartbeat runs only after every
+    # phase and a stale heartbeat marks this controller unhealthy, so a busy
+    # queue must not hold the pass open. A single slow row can still overrun
+    # this, exactly as it could before phases were batched.
+    # Infinity satisfies gt=0 and would disable the deadline entirely.
+    platform_jobs_phase_budget_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        allow_inf_nan=False,
+        validation_alias="SCALED_EVALS_PLATFORM_JOBS_PHASE_BUDGET_SECONDS",
+    )
+    # Entity Store migration flags. Projection writes a derived read model while
+    # Postgres stays authoritative; reads only flip once parity is established,
+    # so the two are deliberately separate switches.
+    entity_store_projection_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_ENABLED",
+    )
+    entity_store_reads_enabled: bool = Field(
+        default=False,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_READS_ENABLED",
+    )
+    entity_store_workspace: str = Field(
+        default="default",
+        validation_alias="SCALED_EVALS_ENTITY_STORE_WORKSPACE",
+    )
+    entity_store_projection_batch_size: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        validation_alias="SCALED_EVALS_ENTITY_STORE_PROJECTION_BATCH_SIZE",
+    )
     # Registry the finalized sandbox images are pushed to and pulled from.
     # Local compose: the in-stack `registry:2` service. Remote: NGC. Everything
     # that differs local-vs-remote lives here — the build logic has no hardcoded
@@ -192,6 +279,7 @@ class Settings(BaseSettings):
     task_image_allowed_repositories: str = ""
     task_image_registry_insecure: bool = False
     task_image_registry_auth_file: str = ""
+    task_image_registry_auth_json: str = ""
     task_image_registry_timeout_seconds: float = 10.0
     task_image_hosted_mode: bool = False
     # Primary Fernet key for BYOK credential payloads. There is deliberately no
@@ -456,7 +544,7 @@ class Settings(BaseSettings):
     # external Switchyard profiles. Empty disables external endpoints.
     switchyard_external_allowed_hosts: str = ""
 
-    # --- NMP Intake (post-run ATIF upload) ---------------------------------
+    # --- NHX Intake (post-run ATIF upload) ---------------------------------
     # Platform root; the client appends ``/apis/intake/v2/...``. No default: an
     # upload target is deployment-specific, and a wrong one would silently ship
     # trajectories off-site. Uploads are opt-in per evaluation via

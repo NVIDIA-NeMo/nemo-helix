@@ -3,7 +3,7 @@
 
 # Academic Benchmark Evaluation - CLI Harbor Test
 
-Tests the agent's ability to set up and launch an academic benchmark evaluation job using the NeMo Platform CLI.
+Tests the agent's ability to set up and launch an academic benchmark evaluation job using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -32,7 +32,7 @@ None of these are available in the current Harbor environment.
 can verify benchmark results end-to-end. This requires Harbor-level changes to mount
 the Docker socket, building the jobs-launcher binary in Dockerfile.agentic-base, and providing
 a mock model endpoint. See services/core/jobs/jobs-launcher/ and
-services/core/jobs/src/nmp/core/jobs/controllers/backends/docker.py for details. -->
+services/core/jobs/src/nhx/core/jobs/controllers/backends/docker.py for details. -->
 
 ## Difficulty: Medium
 
@@ -45,4 +45,4 @@ The agent must:
 ## Notes
 
 - This is a CLI-only eval (MCP is disabled)
-- `NMP_SEED_ON_STARTUP=1` is set in the Dockerfile so system benchmarks are available
+- `NHX_SEED_ON_STARTUP=1` is set in the Dockerfile so system benchmarks are available

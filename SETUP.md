@@ -3,17 +3,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-setup
-description: Set up a local NeMo Platform (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional demo agent. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Platform.
+description: Set up a local NeMo Helix (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional sample workspace. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Helix.
 version: "0.1"
 ---
 
-# NeMo Platform Setup
+# NeMo Helix Setup
 
-Get a local NeMo platform running on `localhost:8080`. Work through the prereq questions below before bootstrapping — they shape which services start and what state survives the run. When setup is finished, [What's next?](#whats-next) maps the user's stated goal to the right follow-up skill.
+Get a local NeMo Helix running on `localhost:8080`. Work through the prereq questions below before bootstrapping — they shape which services start and what state survives the run. When setup is finished, [What's next?](#whats-next) maps the user's stated goal to the right follow-up skill.
 
 > This document is the canonical setup guide. It lives at the repository root as `SETUP.md`. Unlike the other skills, it is **not** installed by `nemo skills install` — it has to be available before the platform is bootstrapped, when the CLI may not yet exist.
 
-## Question 1 — Is a NeMo platform already running locally?
+## Question 1 — Is a NeMo Helix already running locally?
 
 Before starting `nemo services run`, check for an existing instance:
 
@@ -46,32 +46,32 @@ Confirm where the user wants local platform state (entity-store DB, encryption k
 
 Most users accept the default. Override paths follow XDG conventions:
 
-1. **`$NMP_DATA_DIR`** (most explicit) — used as-is, no `/nemo` suffix appended.
+1. **`$NHX_DATA_DIR`** (most explicit) — used as-is, no `/nemo` suffix appended.
 2. **`$XDG_DATA_HOME/nemo`** — if `XDG_DATA_HOME` is set in the shell.
 3. **`~/.local/share/nemo`** — the default.
 
 If the user picks a custom path, export it before starting services so the spawned platform inherits it:
 
 ```bash
-export NMP_DATA_DIR=/custom/path/to/state
+export NHX_DATA_DIR=/custom/path/to/state
 ```
 
-`nemo setup` persists the choice to `~/.config/nmp/config.yaml` under `local_services.data_dir` and re-uses it on subsequent runs. If you're running services manually (not via `nemo setup`), set `NMP_DATA_DIR` yourself each session.
+`nemo setup` persists the choice to `~/.config/nhx/config.yaml` under `local_services.data_dir` and re-uses it on subsequent runs. If you're running services manually (not via `nemo setup`), set `NHX_DATA_DIR` yourself each session.
 
 ## Question 3 — Wipe local platform data?
 
 Ask whether the user wants to wipe local platform data before startup. This is a destructive operation that requires explicit confirmation. Warn clearly that it deletes the entity-store database, encryption key, files, job history, secrets, and Intake ClickHouse traces stored under the selected platform data directory. An explicitly configured ClickHouse data directory outside it is preserved. Providers and secrets must be re-seeded afterward. If the database and encryption key get out of sync, later runs can fail with decryption errors such as `cryptography.exceptions.InvalidTag`. **Stop every `nemo services run` process before wiping** (see the macOS gotcha under Question 1), and remove the managed ClickHouse container before deleting its bind-mounted data. If the user confirms, run this before `nemo services run`:
 
 ```bash
-DATA_DIR="${NMP_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nemo}"
+DATA_DIR="${NHX_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nemo}"
 case "$DATA_DIR" in
   ""|"/"|"$HOME"|"$HOME/"|"."|"./"|"$PWD"|"$PWD/")
     echo "REFUSING_UNSAFE_DATA_DIR: '$DATA_DIR' — abort"; exit 1 ;;
 esac
 lsof -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1 && { echo "PLATFORM_STILL_RUNNING — abort before wipe"; exit 1; }
-CLICKHOUSE_DATA_DIR="${NMP_INTAKE_CLICKHOUSE_DATA_DIR:-$DATA_DIR/intake-clickhouse}"
-if [ -f "$CLICKHOUSE_DATA_DIR/.nmp-clickhouse-identity" ]; then
-  NMP_DATA_DIR="$DATA_DIR" uv run python -m nmp.intake.local_clickhouse --remove || {
+CLICKHOUSE_DATA_DIR="${NHX_INTAKE_CLICKHOUSE_DATA_DIR:-$DATA_DIR/intake-clickhouse}"
+if [ -f "$CLICKHOUSE_DATA_DIR/.nhx-clickhouse-identity" ]; then
+  NHX_DATA_DIR="$DATA_DIR" uv run python -m nhx.intake.local_clickhouse --remove || {
     echo "CLICKHOUSE_CONTAINER_CLEANUP_FAILED — start Docker and retry; data was not deleted"
     exit 1
   }
@@ -79,7 +79,7 @@ fi
 rm -rf "$DATA_DIR"
 ```
 
-Replace the path with whatever was chosen in Q2 (`$NMP_DATA_DIR`,
+Replace the path with whatever was chosen in Q2 (`$NHX_DATA_DIR`,
 `$XDG_DATA_HOME/nemo`, or the default `~/.local/share/nemo`). The cleanup command
 validates and removes only the managed container, restoring host ownership when
 its data lives under the platform data directory. If cleanup fails because Docker
@@ -89,25 +89,25 @@ is unavailable, start Docker and retry—do not proceed to `rm -rf`.
 
 ## Bootstrap and start
 
-This section is the **source checkout** path: use it to work on NeMo Platform itself, on a local plugin, or on Studio assets. To only *use* the platform, install the published wheel instead — `uv tool install "nemo-platform[all]"` needs no checkout and no toolchain, then continue at `nemo setup`.
+This section is the **source checkout** path: use it to work on NeMo Helix itself, on a local plugin, or on Studio assets. To only *use* the platform, install the published wheel instead — `uv tool install "nemo-helix[all]"` needs no checkout and no toolchain, then continue at `nemo setup`.
 
-The steps below cover prerequisites install, service startup, provider registration, default/fast model selection, and demo agent deployment in one shot. Prefer them over the manual sections further down whenever the task fits:
+The steps below cover prerequisites install, service startup, provider registration, default/fast model selection, and optional sample workspace creation. Prefer them over the manual sections further down whenever the task fits:
 
 Before running `make bootstrap`, install Flox from the [Flox installation guide](https://flox.dev/docs/install-flox/install). Flox is the recommended source-development toolchain and does not need to be activated first. Contributors using a preinstalled host toolchain instead need the versions printed by `make toolchain-versions` and a C compiler; they must use `make TOOLCHAIN=system bootstrap`.
 
 === "Interactive"
 
 ```bash
-make bootstrap           # installs Python deps, Studio assets, and plugins (including demo calculator agent)
+make bootstrap           # installs Python deps, Studio assets, and plugins
 flox -q activate         # enter the managed development environment
-nemo setup               # interactive: prompts for provider, picks default/fast models, optionally deploys calculator-agent
+nemo setup               # interactive: configures models, then offers a sample workspace
 ```
 
 === "Non-interactive (CI)"
 
 ```bash
 export NVIDIA_API_KEY=nvapi...
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 `make bootstrap` is the umbrella for three finer-grained targets — use these if you only need a subset:
@@ -171,7 +171,7 @@ uv run nemo services run \
 
 ### Starting the platform with Switchyard middleware
 
-`make bootstrap-python` and bare `uv sync` install `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Start with debug logging to see routing decisions:
+`make bootstrap-python` and bare `uv sync` install the `nemo-switchyard-plugin` distribution from `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The plugin pins `nemo-switchyard==0.3.0`, which provides the native `switchyard_rust` bindings. Start with debug logging to see routing decisions:
 
 ```bash
 # Start with LOG_LEVEL=DEBUG to see routing decisions.
@@ -184,33 +184,30 @@ LOG_LEVEL=DEBUG uv run nemo services run \
 
 ### Local ClickHouse for Intake
 
-When the `intake` service is selected and `NMP_INTAKE_CLICKHOUSE_URL` is unset, Intake automatically
+When the `intake` service is selected and `NHX_INTAKE_CLICKHOUSE_URL` is unset, Intake automatically
 provisions a ClickHouse container owned by the resolved NeMo data directory, with a Docker-assigned
 loopback port. A platform process reuses the container for that data directory; graceful shutdown
 stops it without removing it, while hard process termination can leave it running. Only the explicitly
 confirmed reset in Question 3 or teardown options 2/3 delete its
 default data under the NeMo data directory, after removing the managed container. A separately
-configured `NMP_INTAKE_CLICKHOUSE_DATA_DIR` is preserved. Run only one active local platform instance
+configured `NHX_INTAKE_CLICKHOUSE_DATA_DIR` is preserved. Run only one active local platform instance
 per data directory; stopping it also stops that directory's managed ClickHouse container.
 
 Docker must already be running. If startup logs report `Docker daemon is unavailable`, start Docker
 Desktop on macOS/Windows or the Docker service on Linux, then rerun `nemo setup` or restart
 `nemo services run`. To use an external ClickHouse and bypass local Docker provisioning, export
-`NMP_INTAKE_CLICKHOUSE_URL` before starting the platform.
+`NHX_INTAKE_CLICKHOUSE_URL` before starting the platform.
 
-### Demo agent
+### Sample workspace
 
-`make bootstrap` installs the NeMo agents plugin and the calculator-agent example through the root workspace, so no separate `uv pip install` is needed. After services start, `nemo setup` (or `nemo setup --auto --deploy-agent`) will deploy a demo `calculator-agent` in the default workspace. Verify with:
-
-```bash
-nemo agents list
-nemo agents invoke --agent calculator-agent --input "What is 12 * 8?"
-```
+Interactive `nemo setup` can create a `sample` workspace with the Fabric email
+security agent and evaluation artifacts. Follow the Studio link printed after
+setup to explore them.
 
 ### Local platform environment summary
 
 - **Port**: `8080` (CLI default — do NOT pass a custom `--base-url`).
-- **`export NMP_BASE_URL=http://localhost:8080` — required when targeting a local platform.** If your `~/.config/nmp/config.yaml` already points at a remote cluster, the CLI uses that base URL and ignores the local platform entirely. Setting this env var overrides the config file for the current shell session.
+- **`export NHX_BASE_URL=http://localhost:8080` — required when targeting a local platform.** If your `~/.config/nhx/config.yaml` already points at a remote cluster, the CLI uses that base URL and ignores the local platform entirely. Setting this env var overrides the config file for the current shell session.
 - **Reset state:** follow Question 3 above; it requires explicit confirmation and removes the managed
   ClickHouse container before deleting platform data.
 
@@ -227,13 +224,13 @@ The platform is running. Don't leave the user with "you're good to go" — offer
 | "Can my agent use multiple models?", "split traffic across N backends" | Multi-backend routing via Switchyard | (inline; see `inference` skill) |
 | "Evaluate my model / agent on \<benchmark\>" | Eval against a dataset / harness | `nemo-evaluator`, `evaluator-plugin` |
 | "Generate synthetic data", "I have sensitive data and need…" | Data generation / anonymization / safe synthesis | `data-designer`, `nemo-anonymizer`, `nemo-safe-synthesizer` |
-| "Just deploy / invoke an agent" | Deploy the demo calculator agent or your own | `nemo-agents-optimize` (later, if needed) |
+| "Just deploy / invoke an agent" | Deploy the sample email security agent or your own | `nemo-agents-optimize` (later, if needed) |
 | "Chat with a model", "call \<model\> via inference" | Plain inference through IGW | `inference` skill |
 | "Register an inference provider" (no further use case) | Provider registration only | `inference` skill |
 
 If the user's prompt doesn't already pin one down, ask: *"The platform is up. What would you like to do next — optimize an agent, deploy one, run inference, evaluate, generate data, or something else?"*
 
-If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. For one-off commands, pass the entity ID positionally: `nemo chat <entity-id>`.
+If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. `nemo chat` uses the default model (`--fast` for the fast one); for one-off commands with another model, pass `nemo chat --model <entity-id>`.
 
 ### Available skills
 
@@ -265,7 +262,14 @@ Default flow (already wired into `nemo setup`):
 nemo skills install --agent <claude|cursor|codex|opencode>
 ```
 
-With no `--skill` flag, this installs **all** skills from `nemo skills list` into the chosen agent. Run it again any time `nemo skills list` changes (new plugin installed, plugin updated).
+For another Agent Skills-compatible harness, install to its skills directory explicitly, or have setup do the same with `--skills-path`:
+
+```bash
+nemo skills install --path ~/.my-agent/skills
+nemo setup --install-skills --skills-path ~/.my-agent/skills
+```
+
+With no `--skill` flag, this installs **all** skills from `nemo skills list` into the chosen agent or path. Run it again any time `nemo skills list` changes (new plugin installed, plugin updated).
 
 If the user's goal in the table above maps to a skill that you (the coding agent) don't currently have in this session, install only the skills you need rather than all of them:
 
@@ -284,4 +288,5 @@ If a goal-relevant skill is **missing from `nemo skills list` entirely**, the pl
 ```bash
 uv pip install -e plugins/<plugin-name>
 nemo skills install --agent <agent>            # picks up the new skill(s)
+nemo skills install --path ~/.my-agent/skills  # for custom coding agents
 ```

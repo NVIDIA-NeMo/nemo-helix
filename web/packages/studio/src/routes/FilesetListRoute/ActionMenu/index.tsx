@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
@@ -51,7 +52,12 @@ export const ActionMenu: FC<ActionMenuProps> = ({
       return true;
     } catch (error) {
       logger.error('Failed to delete dataset', error);
-      return false;
+      throw new Error(
+        getErrorMessage(
+          error as Error,
+          'This fileset could not be deleted. It may still be in use.'
+        )
+      );
     }
   };
 

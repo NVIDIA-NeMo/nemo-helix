@@ -4,12 +4,12 @@
 schema-version = "1.14.0"
 
 [install]
-uv = { pkg-path = "uv", version = "0.9.14", pkg-group = "uv" }
+uv = { pkg-path = "uv", version = "0.10.10", pkg-group = "uv" }
 
 [vars]
 UV_VENV_SEED="1"
 UV_MANAGED_PYTHON="1"
-UV_PYTHON="3.12"
+UV_PYTHON="3.13"
 UV_CACHE_DIR="${FLOX_ENV_CACHE}/uv-cache"
 UV_PYTHON_INSTALL_DIR="${FLOX_ENV_CACHE}/python"
 

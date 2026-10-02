@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.entity_client import NemoEntitiesClient
-from nemo_platform_plugin.filter_ops import ComparisonOperation
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from nemo_helix_plugin.filter_ops import ComparisonOperation
 
 EntityT = TypeVar("EntityT", bound=NemoEntity)
 

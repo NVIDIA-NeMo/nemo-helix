@@ -21,9 +21,9 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import (
     validate_referenced_skill_paths,
 )
 from nemo_deployments_plugin.entities import ConfigFile
-from nemo_platform_plugin.client.errors import NemoHTTPError
-from nemo_platform_plugin.client.errors import NotFoundError as PluginClientNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
 
 
 def _fabric_config(*, skills_paths: list[str] | None = None) -> dict[str, Any]:

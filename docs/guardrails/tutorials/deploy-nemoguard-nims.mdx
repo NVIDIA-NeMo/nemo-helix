@@ -20,22 +20,22 @@ NemoGuard NIMs are specialized models built for specific use cases supported by 
 
 Before you begin:
 
-- You have access to a running NeMo Platform.
-- `NMP_BASE_URL` is set to the NeMo Platform base URL.
+- You have access to a running NeMo Helix.
+- `NHX_BASE_URL` is set to the NeMo Helix base URL.
 - Your infrastructure has 1 GPU available per NIM deployment.
 
 ---
 
 ## Step 1: Configure the Client
 
-Instantiate the NeMoPlatform SDK.
+Instantiate the NeMoHelix SDK.
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```
@@ -260,7 +260,7 @@ config = client.guardrail.configs.create(
         "rails": {
             "config": {
                 "jailbreak_detection": {
-                    "nim_base_url": f"{os.environ['NMP_BASE_URL']}/apis/inference-gateway/v2/workspaces/default/provider/nemoguard-jailbreak/-/v1",
+                    "nim_base_url": f"{os.environ['NHX_BASE_URL']}/apis/inference-gateway/v2/workspaces/default/provider/nemoguard-jailbreak/-/v1",
                 }
             },
             "input": {

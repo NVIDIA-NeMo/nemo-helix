@@ -16,11 +16,11 @@ from nemo_evaluator.metric_storage import parse_bundle_ref
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform_plugin.entities import ListResponse, PaginationInfo
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.filter_ops import FilterOperation
+from nemo_helix_plugin.entities import ListResponse, PaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.filter_ops import FilterOperation
 
 _LEGACY_REQUIRED_BUNDLE_JSON = (
     '{"bundle_kind":"metric-bundle","bundle_format_version":"v1","metric_type":"exact-match",'

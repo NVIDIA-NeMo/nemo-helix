@@ -12,7 +12,7 @@ from nemo_evaluator import agent_seeds
 from nemo_evaluator.agent_seeds import _EVALUATOR_SERVICE, FilesetSeed
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator_sdk.agent_eval.workspace_seeds import WorkspaceSeedError, parse_seed, seed_workspace
-from nemo_platform_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import NemoClient
 from pydantic import ValidationError
 
 

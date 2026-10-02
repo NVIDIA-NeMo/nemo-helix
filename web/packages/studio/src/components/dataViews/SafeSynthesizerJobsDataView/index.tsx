@@ -15,6 +15,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/jobs';
@@ -48,6 +49,7 @@ type GenerateJobWithId = GenerateJob & { id: string };
 
 export const GenerateJobsDataView: FC = () => {
   const navigate = useNavigate();
+  const openRow = useRowNavigation();
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
 
@@ -339,9 +341,9 @@ export const GenerateJobsDataView: FC = () => {
         dataViewState={dataViewState}
         searchField="name"
         makeColumns={makeColumns}
-        onRowClick={(row: GenerateJobWithId) => {
+        onRowClick={(row: GenerateJobWithId, _index, event) => {
           if (row.name) {
-            navigate(getGenerateJobRoute(workspace, row.name));
+            openRow(event, getGenerateJobRoute(workspace, row.name));
           }
         }}
         renderBulkActions={({ selectedRows }) => (

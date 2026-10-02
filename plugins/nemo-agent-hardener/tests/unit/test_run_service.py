@@ -19,8 +19,8 @@ from nemo_agent_hardener_plugin.jobs import artifacts, benign_suite, execution
 from nemo_agent_hardener_plugin.jobs import manifest as manifest_mod
 from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext
 
 
 def _provisioned_config(tmp_path: Path) -> AgentHardenerConfig:
@@ -330,7 +330,7 @@ def test_materialize_project_manifest_requires_fileset_and_yaml(tmp_path: Path) 
         manifest_mod._materialize_manifest(sdk, "research-hardening", ctx)
 
 
-def _capturing_sdk() -> tuple[NeMoPlatform, list[dict[str, Any]]]:
+def _capturing_sdk() -> tuple[NemoClient, list[dict[str, Any]]]:
     """A fake SDK whose entity create/update calls capture the recorded run data."""
     captured: list[dict[str, Any]] = []
     entities = SimpleNamespace(
@@ -442,7 +442,7 @@ def test_service_driven_requires_a_platform_job(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr(run_module._common, "execute", lambda *a, **k: (SimpleNamespace(returncode=0), "", None))
 
     ctx = _ctx(tmp_path)
-    ctx.job_id = None  # local run_local: no submitted job to drive status_details HITL
+    ctx.job_id = None  # no submitted platform job to drive status_details HITL
     job = run_module.AgentHardenerRunJob()
     monkeypatch.setattr(job, "report_progress", lambda *a, **k: None)
     # run() no longer raises: the boundary classifies the failure and surfaces it as a failed result.
@@ -646,7 +646,7 @@ def test_apply_manifest_overrides_keeps_guardrails_without_a_workflow() -> None:
     `agent.workflow` made a Studio run that *selected* defenders score 0 blocked, while selecting
     none — which falls through to agent-hardener's defaults — hardened normally.
     """
-    manifest = {"agent": {"name": "x"}, "backends": []}
+    manifest: dict[str, Any] = {"agent": {"name": "x"}, "backends": []}
     manifest_mod._apply_manifest_overrides(manifest, {"defenders": ["guardrails"]})
 
     names = [entry["name"] for entry in manifest["overrides"]["defenders"]]

@@ -13,9 +13,9 @@ Learn the fundamentals of NeMo Safe Synthesizer by creating your first Safe Synt
 
 Before you begin, make sure that you have:
 
-- Access to a deployment of NeMo Platform with NeMo Safe Synthesizer available (see [getting-started](/documentation/synthesize-safe-data))
+- Access to a deployment of NeMo Helix with NeMo Safe Synthesizer available (see [getting-started](/documentation/synthesize-safe-data))
 - **An NVIDIA GPU with 80 GB+ VRAM** — Safe Synthesizer requires GPU access for model training.
-- Python environment with `nemo-platform` SDK installed
+- Python environment with `nemo-helix` SDK installed
 - Basic understanding of Python and pandas
 
 ---
@@ -33,16 +33,16 @@ By the end of this tutorial, you'll understand how to:
 
 ## Step 1: Install the SDK
 
-Install the PyPI `nemo-platform` wrapper package with Safe Synthesizer support.
+Install the PyPI `nemo-helix` wrapper package with Safe Synthesizer support.
 If you are working from a source checkout, run `make bootstrap` from the repository root instead, then install the tutorial-only packages (`kagglehub matplotlib`) in that environment.
 
 For a PyPI install, run the following command in a **terminal (shell)**:
 
 ```shell
 if command -v uv &> /dev/null; then
- uv pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
+ uv pip install "nemo-helix[all]" 'kagglehub==0.3.13' matplotlib
 else
- pip install "nemo-platform[all]" 'kagglehub==0.3.13' matplotlib
+ pip install "nemo-helix[all]" 'kagglehub==0.3.13' matplotlib
 fi
 ```
 
@@ -54,13 +54,13 @@ Set up the client to connect to your Safe Synthesizer deployment:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # Configure the client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
-    access_token=os.environ.get("NMP_ACCESS_TOKEN"),
+    access_token=os.environ.get("NHX_ACCESS_TOKEN"),
 )
 # set to none by default, update it if you need an hf_token
 hf_secret_name = None
@@ -361,7 +361,7 @@ print(f"Total jobs: {len(all_jobs.data)}")
 
 **Connection errors:**
 
-- Verify `NMP_BASE_URL` is correct
+- Verify `NHX_BASE_URL` is correct
 - Check that Safe Synthesizer service is running
 - Ensure network connectivity
 

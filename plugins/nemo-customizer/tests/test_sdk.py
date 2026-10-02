@@ -14,9 +14,9 @@ from nemo_customizer.sdk.resources import (
     _coerce_health_payload,
     customization_sdk_resources,
 )
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.customization_contributor import CustomizationContributorSDKResources
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.customization_contributor import CustomizationContributorSDKResources
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 class _AutomodelContributorStub:
@@ -71,7 +71,7 @@ def test_customization_sdk_resources_entry_point_shape() -> None:
     assert sync_resource is not None
     assert async_resource is not None
 
-    platform = NeMoPlatform(base_url="http://localhost:8000", workspace="default")
+    platform = NeMoHelix(base_url="http://localhost:8000", workspace="default")
     with patch(
         "nemo_customizer.sdk.resources.discover_customization_contributors",
         return_value={},
@@ -80,7 +80,7 @@ def test_customization_sdk_resources_entry_point_shape() -> None:
 
 
 def test_customization_composes_automodel_when_contributor_present() -> None:
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
 
@@ -94,7 +94,7 @@ def test_customization_composes_automodel_when_contributor_present() -> None:
 
 
 def test_customization_skips_contributors_without_sdk() -> None:
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
 
@@ -108,7 +108,7 @@ def test_customization_skips_contributors_without_sdk() -> None:
 
 
 def test_customization_composes_contributor_resources_on_typed_nemo_client() -> None:
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
 
@@ -121,9 +121,9 @@ def test_customization_composes_contributor_resources_on_typed_nemo_client() -> 
     assert customization.automodel.jobs is not None
 
 
-def test_customization_accepts_generated_nemo_platform_owner() -> None:
+def test_customization_accepts_generated_nemo_helix_owner() -> None:
     transport, requests = _recording_customization_transport()
-    platform = NeMoPlatform(
+    platform = NeMoHelix(
         base_url="http://localhost:8000",
         workspace="team-a",
         http_client=httpx.Client(transport=transport),
@@ -145,7 +145,7 @@ def test_customization_accepts_generated_nemo_platform_owner() -> None:
 
 
 def test_customization_keeps_dynamic_contributors_in_mapping() -> None:
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
 
@@ -160,7 +160,7 @@ def test_customization_keeps_dynamic_contributors_in_mapping() -> None:
 
 
 def test_customization_rejects_contributor_resource_without_jobs() -> None:
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
 
@@ -176,7 +176,7 @@ def test_customization_rejects_contributor_resource_without_jobs() -> None:
 
 def test_plugin_status_hits_versioned_hub_healthz() -> None:
     import httpx
-    from nemo_platform_plugin.client.client import NemoClient
+    from nemo_helix_plugin.client.client import NemoClient
 
     requests: list[httpx.Request] = []
 
@@ -210,7 +210,7 @@ def test_plugin_status_rejects_non_object_payload() -> None:
 
 
 async def test_async_plugin_status_hits_versioned_hub_healthz() -> None:
-    from nemo_platform_plugin.client.client import AsyncNemoClient
+    from nemo_helix_plugin.client.client import AsyncNemoClient
 
     requests: list[httpx.Request] = []
 
@@ -238,9 +238,9 @@ async def test_async_plugin_status_hits_versioned_hub_healthz() -> None:
     assert status["status"] == "ok"
 
 
-async def test_async_customization_accepts_generated_nemo_platform_owner() -> None:
+async def test_async_customization_accepts_generated_nemo_helix_owner() -> None:
     transport, requests = _recording_customization_transport()
-    platform = AsyncNeMoPlatform(
+    platform = AsyncNeMoHelix(
         base_url="http://localhost:8000",
         workspace="team-a",
         http_client=httpx.AsyncClient(transport=transport),

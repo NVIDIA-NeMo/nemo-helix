@@ -2,10 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import collections
+import io
 import json
+import os
 import socket
 import threading
 import time
+import urllib.error
+from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -210,7 +215,7 @@ def test_apply_uv_dirs_does_not_override_explicit_config(monkeypatch):
 
 def test_uv_cache_dir_prefers_the_configured_env_var(monkeypatch):
     """`uv cache dir` exits non-zero when the CWD's pyproject pins a conflicting
-    [tool.uv] required-version - true in the nemo-platform image - so an explicit
+    [tool.uv] required-version - true in the nemo-helix image - so an explicit
     UV_CACHE_DIR must win without shelling out at all."""
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("UV_CACHE_DIR", "/home/ubuntu/.cache/uv")
@@ -483,6 +488,16 @@ def test_no_manifest_is_a_no_op(tmp_path, monkeypatch):
     assert runtime._load_runtime_environment_package(str(tmp_path), required=False) is None
 
 
+def test_compose_without_selection_keeps_caller_config_paths(tmp_path):
+    package = _load_composition_package(tmp_path, agents=("selected_agent",), resources_servers=("selected_resources",))
+    global_config = {"config_paths": ["/job/environment/responses_api_models/vllm_model/configs/policy_model.yaml"]}
+
+    configured = runtime._compose_gym_config_with_environment_package(global_config, package)
+
+    assert configured["config_paths"] == global_config["config_paths"]
+    assert configured is not global_config
+
+
 def test_compose_without_package_returns_a_copy():
     global_config = {"config_paths": ["image-owned.yaml"]}
 
@@ -672,9 +687,9 @@ def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatc
     monkeypatch.setattr(runtime, "_allocate_head_server_port", lambda config: 5000)
     monkeypatch.setattr(runtime, "_create_rollout_helper", lambda: "rollout-helper")
     monkeypatch.setattr(runtime, "_install_wheels_v1_dependencies", lambda loaded_package, work_path: None)
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", str(tmp_path))
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", str(tmp_path))
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", str(tmp_path / "work"))
+    monkeypatch.setenv("NHX_WORK_PATH", str(tmp_path / "work"))
     monkeypatch.setenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "/operator/root")
 
     runtime.bootstrap_gym_host()
@@ -752,14 +767,27 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
         "_install_wheels_v1_dependencies",
         lambda loaded_package, work_path: events.append("wheels-installed") if loaded_package is package else None,
     )
-    monkeypatch.setenv("NMP_ENVIRONMENT_PATH", "/job/environment")
+    monkeypatch.setattr(
+        runtime,
+        "_install_huggingface_cache_fallback",
+        lambda dataset_path, work_path: events.append(f"hf-cache-installed:{dataset_path}:{work_path}"),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_apply_huggingface_offline_policy",
+        lambda: events.append("hf-offline-policy-applied"),
+    )
+    monkeypatch.setenv("NHX_ENVIRONMENT_PATH", "/job/environment")
     monkeypatch.setenv(runtime.ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY, "true")
-    monkeypatch.setenv("NMP_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_WORK_PATH", "/job/work")
+    monkeypatch.setenv("NHX_DATASET_PATH", "/job/dataset")
 
     _, head_server_config, rollout_helper = runtime.bootstrap_gym_host()
 
     # Dependencies must be ready before RunHelper starts any Gym servers.
     assert events == [
+        "hf-offline-policy-applied",
+        "hf-cache-installed:/job/dataset:/job/work",
         "environment-validated",
         "environment-composed",
         "environment-root-prepended",
@@ -1169,6 +1197,19 @@ def _body_is_complete(received: bytes) -> bool:
     return False
 
 
+def _decode_chunked_body(received: bytes) -> str:
+    """Reassemble the chunked body in ``received``, heartbeats included."""
+    _, _, rest = received.partition(b"\r\n\r\n")
+    decoded = ""
+    while True:
+        size_line, _, rest = rest.partition(b"\r\n")
+        size = int(size_line, 16)
+        if size == 0:
+            return decoded
+        decoded += rest[:size].decode()
+        rest = rest[size + 2 :]
+
+
 def _raw_rollout_exchange(base_url: str, payload: str, version: str) -> bytes:
     """POST /rollouts/run over a bare socket and return the response bytes as sent.
 
@@ -1223,7 +1264,6 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
     assert body.endswith(b"0\r\n\r\n")
     # A heartbeat is its own chunk -- length-prefixed, so it cannot read as the end.
     assert body.startswith(b"1\r\n \r\n")
-
     decoded = ""
     rest = body
     while True:
@@ -1234,6 +1274,53 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
         decoded += rest[:size].decode()
         rest = rest[size + 2 :]
     assert len(json.loads(decoded)["results"]) == 1
+
+
+def test_rollouts_run_reports_an_unencodable_result_in_the_body(ready_server):
+    """An unencodable result is a failed batch, not an empty one.
+
+    Serializing happens after the status line, so a raised encoder used to escape the
+    handler with the terminating chunk unwritten -- which every hop downstream reports
+    as a well-formed empty 200, i.e. a batch that succeeded with no rewards.
+    """
+
+    class _UnencodableHelper:
+        def run_examples(self, examples, head_server_config=None):
+            async def _one(row):
+                return row, {"reward": object()}
+
+            return [_one(row) for row in examples]
+
+    runtime._ROLLOUT_HELPER = _UnencodableHelper()
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    assert _body_is_complete(received), received
+    head, _, _ = received.partition(b"\r\n\r\n")
+    assert b"200" in head.split(b"\r\n")[0]
+
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "not JSON-serializable" in body["error"]["message"]
+
+
+def test_rollouts_run_never_answers_with_an_empty_body(ready_server):
+    """A body of zero bytes is indistinguishable from a stream that was dropped."""
+
+    def _empty(self, future, started):
+        return b""
+
+    original = runtime.Handler._await_results
+    runtime.Handler._await_results = _empty
+    try:
+        received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+    finally:
+        runtime.Handler._await_results = original
+
+    assert _body_is_complete(received), received
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "empty response body" in body["error"]["message"]
 
 
 def test_rollouts_run_sends_a_length_to_an_http_10_caller(ready_server):
@@ -1338,3 +1425,564 @@ def test_an_empty_chunk_is_never_written():
 
     handler._write_chunk(b" ")
     assert written == [b"1\r\n \r\n"]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_hf_environment(monkeypatch):
+    for key in ("HF_HOME", "HF_DATASETS_CACHE", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE"):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _vendored_hf_cache(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub").mkdir(parents=True)
+    (dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "snapshot.bin").write_text("weights")
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+    return dataset_path, work_path
+
+
+def test_a_vendored_hf_cache_is_copied_into_writable_work(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    monkeypatch.delenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, raising=False)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME
+    assert (copied / "hub" / "snapshot.bin").read_text() == "weights"
+    assert os.environ["HF_HOME"] == str(copied)
+    assert os.environ["HF_DATASETS_CACHE"] == str(copied / "datasets")
+    assert os.environ["HF_HUB_CACHE"] == str(copied / "hub")
+
+
+def test_the_copy_is_writable_so_datasets_can_take_its_lock(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    dataset_path.chmod(0o555)
+    (dataset_path / runtime.HF_CACHE_DIRNAME).chmod(0o555)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    lock = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "datasets.lock"
+    lock.write_text("held")
+    assert lock.read_text() == "held"
+
+
+def test_offline_environments_pin_the_hf_libraries_offline(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_offline_job_is_pinned_offline_even_with_no_snapshot_to_fall_back_on(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+
+    runtime._apply_huggingface_offline_policy()
+    runtime._install_huggingface_cache_fallback("", "")
+
+    # Without this the libraries hit a blocked network instead of reporting a missing file.
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+    assert os.environ["HF_DATASETS_OFFLINE"] == "1"
+
+
+def test_an_online_environment_may_still_reach_the_hub_for_what_the_snapshot_lacks(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert "HF_HUB_OFFLINE" not in os.environ
+    assert "HF_DATASETS_OFFLINE" not in os.environ
+
+
+def test_an_online_job_keeps_offline_flags_a_caller_set_deliberately(monkeypatch):
+    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "false")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+
+    runtime._apply_huggingface_offline_policy()
+
+    assert os.environ["HF_HUB_OFFLINE"] == "1"
+
+
+def test_a_hub_snapshot_stays_a_symlink_instead_of_duplicating_every_blob(tmp_path):
+    dataset_path = tmp_path / "dataset"
+    model = dataset_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    (model / "blobs").mkdir(parents=True)
+    (model / "snapshots" / "rev1").mkdir(parents=True)
+    blob = model / "blobs" / "deadbeef"
+    blob.write_bytes(b"x" * 8192)
+    entry = model / "snapshots" / "rev1" / "model.bin"
+    os.symlink(os.path.relpath(blob, entry.parent), entry)
+    work_path = tmp_path / "work"
+    work_path.mkdir()
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    copied = work_path / runtime.HF_CACHE_DIRNAME / "hub" / "models--org--name"
+    copied_entry = copied / "snapshots" / "rev1" / "model.bin"
+    assert copied_entry.is_symlink()
+    # Resolving inside the copy, not back to the read-only mount.
+    assert copied_entry.resolve() == (copied / "blobs" / "deadbeef").resolve()
+    on_disk = sum(p.stat().st_size for p in copied.rglob("*") if p.is_file() and not p.is_symlink())
+    assert on_disk == 8192
+
+
+def test_a_stale_copy_from_an_earlier_run_is_replaced(tmp_path, monkeypatch):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    (stale / "hub").mkdir(parents=True)
+    (stale / "hub" / "snapshot.bin").write_text("stale")
+    (stale / "hub" / "gone.bin").write_text("gone")
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+    assert not (stale / "hub" / "gone.bin").exists()
+
+
+@pytest.mark.parametrize("kind", ["regular-file", "directory-symlink", "dangling-symlink"])
+def test_whatever_the_environment_left_at_the_cache_path_is_replaced(tmp_path, kind):
+    dataset_path, work_path = _vendored_hf_cache(tmp_path)
+    stale = work_path / runtime.HF_CACHE_DIRNAME
+    if kind == "regular-file":
+        stale.write_text("not a directory")
+    elif kind == "directory-symlink":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        os.symlink(elsewhere, stale)
+    else:
+        os.symlink(tmp_path / "never-existed", stale)
+
+    runtime._install_huggingface_cache_fallback(str(dataset_path), str(work_path))
+
+    assert not stale.is_symlink()
+    assert (stale / "hub" / "snapshot.bin").read_text() == "weights"
+
+
+@pytest.mark.parametrize(
+    "dataset_path,work_path",
+    [("", "work"), ("dataset", ""), ("dataset-without-snapshot", "work")],
+)
+def test_the_fallback_is_inert_without_a_vendored_snapshot(tmp_path, monkeypatch, dataset_path, work_path):
+    (tmp_path / "dataset-without-snapshot").mkdir()
+
+    runtime._install_huggingface_cache_fallback(
+        str(tmp_path / dataset_path) if dataset_path else "",
+        str(tmp_path / work_path) if work_path else "",
+    )
+
+    assert "HF_HOME" not in os.environ
+
+
+def _policy_config(key: str = "${oc.env:GYM_POLICY_API_KEY}") -> dict[str, Any]:
+    return {
+        "policy_base_url": "https://integrate.api.nvidia.com/v1",
+        "policy_api_key": key,
+        "policy_model_name": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    }
+
+
+def _opener(open_fn):
+    """The preflight calls ``_NO_REDIRECT_OPENER.open``, so stubs must present that surface."""
+    return SimpleNamespace(open=open_fn)
+
+
+def _raising_urlopen(status: int):
+    def _urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, status, "", Message(), io.BytesIO(b""))
+
+    return _urlopen
+
+
+def test_preflight_rejects_a_credential_the_policy_endpoint_refuses(monkeypatch) -> None:
+    """An auth refusal fails the host before Gym's servers are built.
+
+    Without this the refusal reaches the caller as a 500 from a loopback address: the component
+    server discards the upstream status, and the sandbox carrying the only log of it is destroyed.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-expired")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(401)))
+
+    config = _policy_config()
+
+    with pytest.raises(runtime.PolicyCredentialRejected) as excinfo:
+        runtime._preflight_policy_credential(config)
+
+    assert str(excinfo.value) == (
+        f"the policy endpoint {config['policy_base_url']} rejected the configured credential "
+        f"(HTTP 401) for model {config['policy_model_name']}, read from $GYM_POLICY_API_KEY. "
+        "Every rollout would fail the same way."
+    )
+
+
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503])
+def test_preflight_lets_a_non_auth_failure_through(monkeypatch, status: int) -> None:
+    """Only authentication fails the run.
+
+    A provider that is overloaded, rate-limiting, or refuses this probe would otherwise turn a
+    retryable rollout error into an unrecoverable startup failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(status)))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+def test_preflight_survives_a_network_error(monkeypatch) -> None:
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+
+    def _urlopen(request, timeout=None):
+        raise OSError("name resolution failed")
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param({"policy_base_url": "https://x/v1"}, id="incomplete"),
+        pytest.param(
+            {"policy_base_url": "${policy_root}", "policy_api_key": "k", "policy_model_name": "m"},
+            id="interpolation-gym-resolves-later",
+        ),
+    ],
+)
+def test_preflight_skips_what_it_cannot_resolve(monkeypatch, config: dict[str, Any]) -> None:
+    """Skipping beats probing an endpoint assembled from unresolved template text."""
+
+    def _never(request, timeout=None):  # pragma: no cover - asserted by not being called
+        raise AssertionError("preflight probed an endpoint it could not resolve")
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_never))
+
+    runtime._preflight_policy_credential(config)
+
+
+def test_preflight_reads_the_key_from_the_environment(monkeypatch) -> None:
+    """The key travels as ``${oc.env:VAR}`` so it stays out of the stored job spec."""
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "sk-live")
+    sent: dict[str, Any] = {}
+
+    def _urlopen(request, timeout=None):
+        sent["auth"] = request.headers.get("Authorization")
+        sent["url"] = request.full_url
+        raise urllib.error.HTTPError(request.full_url, 500, "", Message(), io.BytesIO(b""))
+
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_urlopen))
+    runtime._preflight_policy_credential(_policy_config())
+
+    assert sent["auth"] == "Bearer sk-live", "the resolved value, not the interpolation text"
+    # GET /v1/models is commonly unauthenticated, so it would pass for a key every rollout is refused for.
+    assert sent["url"].endswith("/chat/completions")
+
+
+def test_a_failure_carries_the_host_output_that_the_sandbox_destroys(monkeypatch) -> None:
+    """The error envelope is the only channel out: the sandbox dies with its logs."""
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+    runtime._OUTPUT_TAIL.append("(policy_model) upstream returned 401")
+
+    envelope = runtime._runtime_error("internal", "ClientResponseError: 500")
+
+    assert envelope["error"]["host_output_tail"] == ["(policy_model) upstream returned 401"]
+
+
+def test_an_error_with_no_host_output_omits_the_tail(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
+
+    assert "host_output_tail" not in runtime._runtime_error("internal", "boom")["error"]
+
+
+def test_the_output_tail_keeps_the_most_recent_lines_and_still_writes_through() -> None:
+    """Bounded so a chatty host cannot crowd the rollout results out of the response."""
+    buffer: collections.deque[str] = collections.deque(maxlen=2)
+    underlying = io.StringIO()
+    tail = runtime._OutputTail(underlying, buffer)
+
+    tail.write("first\nsecond\n")
+    tail.write("third\n")
+
+    assert list(buffer) == ["second", "third"]
+    assert underlying.getvalue() == "first\nsecond\nthird\n", "output must still reach the real stream"
+
+
+@pytest.fixture
+def failed_bootstrap_server(monkeypatch):
+    """A host that recorded a bootstrap failure and is serving anyway."""
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(
+        runtime,
+        "_BOOTSTRAP_ERROR",
+        {
+            "error": {
+                "code": "bootstrap_failed",
+                "message": "PolicyCredentialRejected: the policy endpoint rejected the configured credential",
+            }
+        },
+    )
+    server = HTTPServer(("127.0.0.1", 0), runtime.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_health_reports_a_failed_bootstrap_rather_than_starting(failed_bootstrap_server):
+    """A terminal failure reported as "starting" is polled to the readiness deadline.
+
+    The caller then reports a timeout, and the reason the host gave is never read.
+    """
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(f"{failed_bootstrap_server}/health", timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert body["status"] == "failed"
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_rollout_against_a_failed_host_carries_the_bootstrap_error(failed_bootstrap_server):
+    """Nothing guarantees the caller polled /health before posting its first batch."""
+    request = urllib.request.Request(
+        f"{failed_bootstrap_server}/rollouts/run",
+        data=json.dumps({"rollouts": []}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=5)
+
+    body = json.loads(exc.value.read().decode())
+    assert "rejected the configured credential" in body["error"]["message"]
+
+
+def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
+    """Exiting takes the sandbox down with its logs, so the diagnosis dies with it.
+
+    The caller is left polling an address that never answers, and reports a readiness timeout.
+    """
+    import urllib.request
+
+    monkeypatch.setattr(runtime, "_READY", False)
+    monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
+    monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
+    monkeypatch.setattr(runtime, "_install_output_tail", lambda: None)
+
+    def _reject():
+        raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
+
+    monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
+    # Port 0 asks the kernel for a free port. main() otherwise binds 8080 and
+    # serve_forever never returns, so the test process stays on that socket.
+    monkeypatch.setenv("NHX_RUNTIME_HTTP_PORT", "0")
+    servers: list[runtime._Server] = []
+    real_serve = runtime._Server.serve_forever
+
+    def _serve_on_a_background_thread(self, poll_interval: float = 0.5) -> None:
+        servers.append(self)
+        threading.Thread(
+            target=real_serve,
+            args=(self,),
+            kwargs={"poll_interval": poll_interval},
+            daemon=True,
+        ).start()
+
+    monkeypatch.setattr(runtime._Server, "serve_forever", _serve_on_a_background_thread)
+
+    runtime.main()
+
+    assert servers, "main() did not start the server"
+    server = servers[0]
+    port = server.server_address[1]
+    try:
+        deadline = time.time() + 5
+        body = None
+        last_error: Exception | None = None
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode())
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+                last_error = exc
+                time.sleep(0.05)
+        else:
+            raise AssertionError(f"server on port {port} never answered /health: {last_error}")
+        assert body is not None
+        assert body["status"] == "failed"
+        assert "rejected the configured credential" in body["error"]["message"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert runtime._READY is False
+    assert runtime._BOOTSTRAP_ERROR is not None
+    assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]
+
+
+def test_captured_output_masks_secret_env_values(monkeypatch):
+    """The tail is returned to the caller and stored in job logs.
+
+    A component that echoes its own environment would otherwise publish the credential it was
+    given to everyone who can read the evaluation's failure.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    monkeypatch.setenv("HOME", "/root")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("resolved policy_api_key=nvapi-secretvalue123 for HOME=/root\n")
+
+    assert list(buffer) == ["resolved policy_api_key=*** for HOME=/root"]
+
+
+def test_captured_output_bounds_a_single_line(monkeypatch):
+    """One runaway line must not fill the failure response on its own."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("x" * 5000 + "\n")
+
+    assert len(buffer[0]) == runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_captured_output_reaches_the_underlying_stream_unchanged(monkeypatch):
+    """Masking applies to what is captured, not to what the host logs for an operator."""
+    stream = io.StringIO()
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-secretvalue123")
+    tail = runtime._OutputTail(stream, collections.deque(maxlen=10), runtime._captured_output_secrets())
+
+    tail.write("key=nvapi-secretvalue123\n")
+
+    assert stream.getvalue() == "key=nvapi-secretvalue123\n"
+
+
+def test_a_list_valued_policy_base_url_is_still_preflighted(monkeypatch):
+    """A vLLM-backed policy is configured with a list of endpoints, not a scalar.
+
+    Stringifying the list produces a URL no provider answers, the probe fails as inconclusive, and
+    a bad credential reaches the rollouts it was meant to be caught before.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
+    assert runtime._resolved_policy_route(
+        {
+            "policy_base_url": ["http://vllm-0.svc.cluster.local:8000/v1"],
+            "policy_api_key": "${oc.env:GYM_POLICY_API_KEY}",
+            "policy_model_name": ["meta/llama-3.1-8b-instruct"],
+        }
+    ) == ("http://vllm-0.svc.cluster.local:8000/v1", "nvapi-key", "meta/llama-3.1-8b-instruct")
+
+
+def test_captured_output_masks_a_policy_key_the_config_holds_literally(monkeypatch):
+    """A config may inline the key instead of referencing ``${oc.env:VAR}``.
+
+    No env var then holds that value, so a name-based sweep of the environment misses it entirely
+    and the key reaches the caller in the failure the tail was added to produce.
+    """
+    monkeypatch.setenv(
+        runtime.GYM_GLOBAL_CONFIG_ENV_KEY,
+        json.dumps({"policy_api_key": "nvapi-literalkey123", "policy_base_url": "https://x/v1"}),
+    )
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("POST https://x/v1 key=nvapi-literalkey123\n")
+
+    assert list(buffer) == ["POST https://x/v1 key=***"]
+
+
+def test_captured_output_secrets_survive_an_unset_global_config(monkeypatch):
+    """The tail is installed before bootstrap, so the config may be absent or unparseable."""
+    monkeypatch.delenv(runtime.GYM_GLOBAL_CONFIG_ENV_KEY, raising=False)
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-fromenv123")
+
+    assert "nvapi-fromenv123" in runtime._captured_output_secrets()
+
+
+def test_preflight_lets_a_403_through_rather_than_refusing_to_start(monkeypatch):
+    """A 403 is equally an egress proxy, a per-path policy, or a quota rule.
+
+    Refusing to start is unrecoverable, so a status that does not single out the credential must
+    not spend it. The run proceeds and reports per-example, as it did before the preflight existed.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-key")
+    monkeypatch.setattr(runtime, "_NO_REDIRECT_OPENER", _opener(_raising_urlopen(403)))
+
+    runtime._preflight_policy_credential(_policy_config())
+
+
+def test_a_secret_split_across_two_writes_is_still_masked(monkeypatch):
+    """A stream splits where the writer flushes, not where a secret ends.
+
+    Masking each write on its own stores the halves as two unmasked fragments, and the tail goes
+    to the caller and the job log.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-splitsecret123")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("key=nvapi-split")
+    tail.write("secret123 done\n")
+
+    assert list(buffer) == ["key=*** done"]
+
+
+def test_an_unterminated_write_is_held_rather_than_captured(monkeypatch):
+    """Capturing it early is what splits a secret in the first place."""
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer)
+
+    tail.write("no newline yet")
+
+    assert list(buffer) == []
+
+
+def test_the_preflight_refuses_to_follow_a_redirect() -> None:
+    """Following one re-sends the Authorization header wherever the endpoint points.
+
+    Only the sandbox egress policy would stand between the policy key and an arbitrary origin, and
+    Docker applies none. Returning None from ``redirect_request`` makes urllib surface the 3xx as
+    its own status, which the preflight then treats as inconclusive.
+    """
+    # `handlers` is real but absent from typeshed's OpenerDirector stub.
+    handlers = [type(handler) for handler in getattr(runtime._NO_REDIRECT_OPENER, "handlers")]
+    assert runtime._RefuseRedirect in handlers, "the preflight opener must refuse redirects"
+
+    refused = runtime._RefuseRedirect().redirect_request(
+        MagicMock(), MagicMock(), 302, "Found", Message(), "https://evil.example/v1/chat/completions"
+    )
+
+    assert refused is None
+
+
+def test_an_endless_unterminated_write_does_not_grow_without_bound():
+    """Nothing obliges a writer to emit a newline, and this buffer lives in the host process."""
+    tail = runtime._OutputTail(io.StringIO(), collections.deque(maxlen=10))
+
+    for _ in range(100):
+        tail.write("x" * 1000)
+
+    assert len(tail._partial) <= runtime._MAX_CAPTURED_LINE_CHARS
+
+
+def test_a_secret_straddling_the_retention_bound_is_still_masked(monkeypatch):
+    """Bounding what is held must not cut a secret in half and publish the visible end.
+
+    The secret has to cross the bound while the line is still unterminated, which is the only
+    moment the bound applies. Retaining the captured width plus the longest secret keeps one that
+    starts inside that width whole, so the scrub at end-of-line still matches it.
+    """
+    monkeypatch.setenv("GYM_POLICY_API_KEY", "nvapi-straddlingsecret")
+    buffer: collections.deque[str] = collections.deque(maxlen=10)
+    tail = runtime._OutputTail(io.StringIO(), buffer, runtime._captured_output_secrets())
+
+    tail.write("y" * (runtime._MAX_CAPTURED_LINE_CHARS - 3))
+    tail.write("nvapi-straddlingsecret")
+    tail.write(" trailing\n")
+
+    assert "nvapi-straddlingsecret" not in buffer[0]
+    assert "***" in buffer[0], "the secret crossed the bound and must survive whole to be masked"

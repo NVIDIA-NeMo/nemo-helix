@@ -996,7 +996,7 @@ const buildSeedConfig = (columns: BuilderColumn[]): SeedConfig | undefined => {
     seedColumn.values[SEED_FILE_PATH_KEY].trim()
   );
   const seedConfig: SeedConfig = {
-    source: { seed_type: 'nmp', path },
+    source: { seed_type: 'nhx', path },
   };
   const samplingStrategy = seedColumn.values[SEED_SAMPLING_STRATEGY_KEY]?.trim();
   if (samplingStrategy) seedConfig.sampling_strategy = samplingStrategy as SamplingStrategy;
@@ -1082,7 +1082,7 @@ const parseSeedFilesetPath = (path: string): { filesetRef: string; filePath: str
 /**
  * Rebuilds the builder's seed-dataset column from `seed_config` (which is where
  * {@link buildDataDesignerConfig} moves seed columns — they never live in `config.columns`).
- * Only NMP fileset sources map back; other seed source kinds aren't builder-editable. The
+ * Only NHX fileset sources map back; other seed source kinds aren't builder-editable. The
  * seed file's discovered columns aren't recoverable from the config, so `available_columns`
  * stays empty until the fileset is re-inspected.
  */
@@ -1091,7 +1091,7 @@ const seedColumnFromConfig = (
   id: string
 ): BuilderColumn | null => {
   const source = seedConfig?.source as FilesetFileSeedSource | undefined;
-  if (!source || source.seed_type !== 'nmp' || typeof source.path !== 'string') return null;
+  if (!source || source.seed_type !== 'nhx' || typeof source.path !== 'string') return null;
   const option = findColumnOption({ columnType: 'seed-dataset' });
   if (!option) return null;
 

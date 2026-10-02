@@ -16,12 +16,12 @@ import os
 import sys
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
 
 sys.path.insert(0, "/tests/shared")
-from nemo_platform_plugin.workspaces.client import WorkspacesClient
+from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from trace_reader import get_session
 
 WORKSPACE = "tool-calling-eval-workspace"
@@ -42,9 +42,9 @@ def _make_unsigned_jwt() -> str:
     return f"{header}.{payload}."
 
 
-def _get_client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+def _get_client() -> NeMoHelix:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
 
 
 def _get_files_client() -> FilesClient:

@@ -16,6 +16,7 @@ import base64
 import hashlib
 import io
 import json
+import re
 import shutil
 import tarfile
 import tempfile
@@ -32,7 +33,7 @@ import httpx
 from botocore.client import Config
 from botocore.exceptions import ClientError
 
-from scaled_evals.api.redaction import redact_secret_text
+from scaled_evals.api.redaction import redact_json_text, redact_secret_text
 from scaled_evals.api.settings import settings
 
 # s3v4: universal modern signing standard (boto3's default; pinned defensively).
@@ -41,6 +42,7 @@ from scaled_evals.api.settings import settings
 _CONFIG = Config(signature_version="s3v4", s3={"addressing_style": "path"})
 # Fail-fast variant for the readiness probe — short timeouts, single attempt.
 _READYZ_CONFIG = _CONFIG.merge(Config(connect_timeout=3, read_timeout=3, retries={"max_attempts": 1}))
+_GCS_OBJECT_KEY_RE = re.compile(r"[^\x00-\x1f\x7f\\?#]+")
 ARTIFACT_MANIFEST_PATH = "scaled-evals-manifest.json"
 ARCHIVE_FILE_NAME = "results.tar.gz"
 HARBOR_VIEWER_ARCHIVE_FILE_NAME = "harbor-viewer.tar.gz"
@@ -139,12 +141,30 @@ def _gcs_url(path: str) -> str:
     return f"{settings.gcs_api_base_url.rstrip('/')}{path}"
 
 
+def _validated_gcs_object_key(object_key: str) -> str:
+    """Return a GCS object key that is safe to place in a JSON API URL.
+
+    Object keys are data, not URLs. Keep them relative and free of URL/control
+    syntax before percent-encoding the complete value as one path component.
+    """
+    if not object_key or len(object_key.encode("utf-8")) > 1024:
+        raise ValueError("GCS object key must contain between 1 and 1024 UTF-8 bytes")
+    if _GCS_OBJECT_KEY_RE.fullmatch(object_key) is None:
+        raise ValueError("GCS object key contains unsafe URL characters")
+    parts = object_key.split("/")
+    if any(part in {"", ".", ".."} for part in parts) or ":" in parts[0]:
+        raise ValueError("GCS object key must be a relative path without traversal")
+    return object_key
+
+
 def _gcs_object_metadata_url(object_key: str) -> str:
-    return _gcs_url(f"/storage/v1/b/{quote(_bucket(), safe='')}/o/{quote(object_key, safe='')}")
+    safe_key = _validated_gcs_object_key(object_key)
+    return _gcs_url(f"/storage/v1/b/{quote(_bucket(), safe='')}/o/{quote(safe_key, safe='')}")
 
 
 def _gcs_media_url(object_key: str) -> str:
-    return _gcs_url(f"/download/storage/v1/b/{quote(_bucket(), safe='')}/o/{quote(object_key, safe='')}")
+    safe_key = _validated_gcs_object_key(object_key)
+    return _gcs_url(f"/download/storage/v1/b/{quote(_bucket(), safe='')}/o/{quote(safe_key, safe='')}")
 
 
 def _gcs_can_sign_urls() -> bool:
@@ -346,17 +366,20 @@ def _read_object_bytes(object_key: str) -> bytes:
 
 
 def _gcs_stream_object(object_key: str) -> Iterator[bytes]:
-    with (
-        httpx.Client(timeout=None) as client,
-        client.stream(
-            "GET",
-            _gcs_media_url(object_key),
-            params={"alt": "media"},
-            headers=_gcs_headers(),
-        ) as response,
-    ):
-        _raise_for_gcs("GetObject", response)
-        yield from response.iter_bytes()
+    if _GCS_OBJECT_KEY_RE.fullmatch(object_key):
+        with (
+            httpx.Client(timeout=None) as client,
+            client.stream(
+                "GET",
+                _gcs_media_url(object_key),
+                params={"alt": "media"},
+                headers=_gcs_headers(),
+            ) as response,
+        ):
+            _raise_for_gcs("GetObject", response)
+            yield from response.iter_bytes()
+        return
+    raise ValueError("GCS object key contains unsafe URL characters")
 
 
 def can_presign_get() -> bool:
@@ -662,7 +685,11 @@ def _redacted_text_body(path: Path) -> bytes | None:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    redacted = redact_secret_text(text)
+    redacted = (
+        redact_json_text(text, lines=path.suffix.lower() == ".jsonl")
+        if path.suffix.lower() in {".json", ".jsonl"}
+        else redact_secret_text(text)
+    )
     if redacted == text:
         return None
     return redacted.encode("utf-8")

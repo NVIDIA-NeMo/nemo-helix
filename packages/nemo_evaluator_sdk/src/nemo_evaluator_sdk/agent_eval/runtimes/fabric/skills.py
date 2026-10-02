@@ -45,7 +45,7 @@ import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -76,6 +76,17 @@ _SKILLS_TARGET_NATIVE = "harness_native"
 # Fabric adapter id of Codex, which self-discovers ``.agents/skills/`` rather than
 # accepting the native ``skills`` config.
 _CODEX_ADAPTER_ID = "nvidia.fabric.codex"
+
+#: Adapters whose harness reads skills through a filesystem view rooted at ``environment.workspace``.
+#: DeepAgents builds ``FilesystemBackend(root_dir=<workspace>, virtual_mode=True)``, so every path it is
+#: handed is taken *under the workspace root*: a skill staged beside the workspace is unreadable, and the
+#: path must name a directory of ``<name>/SKILL.md`` bundles, not one bundle root as Fabric's
+#: ``skills.paths`` entries do. Such a harness gets its skills copied into the workspace instead.
+WORKSPACE_ROOTED_SKILL_ADAPTER_IDS = frozenset({"nvidia.fabric.langchain.deepagents"})
+
+#: The one ``skills.paths`` entry a workspace-rooted harness is handed: :data:`CODEX_SKILLS_DIR` as the
+#: harness sees it from the workspace root.
+WORKSPACE_SKILLS_SOURCE = "/" + CODEX_SKILLS_DIR
 
 
 class SkillInjectionError(ValueError):
@@ -183,6 +194,50 @@ def resolve_skill_mode(*, capability_plan: Mapping[str, object], adapter_id: str
     return None
 
 
+def workspace_rooted_skills(adapter_id: str) -> bool:
+    """Whether ``adapter_id``'s harness can only read skills placed inside the trial workspace."""
+    return adapter_id.strip().lower() in WORKSPACE_ROOTED_SKILL_ADAPTER_IDS
+
+
+def relocate_skills_into_workspace(config: Any, *, base_dir: Path | None, workspace_dir: Path) -> list[str]:
+    """Copy every ``skills.paths`` bundle into ``<workspace>/.agents/skills/<name>/`` and point the config there.
+
+    For a workspace-rooted harness (:func:`workspace_rooted_skills`). Each entry is a bundle root holding
+    ``SKILL.md``, resolved against ``base_dir`` when relative (``Path.cwd()`` when there is none, as
+    Fabric resolves it); config-declared and injected native bundles are treated alike. The config's
+    ``skills.paths`` is replaced by the single source :data:`WORKSPACE_SKILLS_SOURCE`. Returns the
+    workspace-relative locations staged, for :func:`_remove_injected_bundle` after the run.
+
+    Blocking file I/O — call via ``asyncio.to_thread``. Two bundles with one basename would land on the
+    same path, so that is refused rather than letting the second silently win.
+    """
+    skills = getattr(config, "skills", None)
+    entries = [str(path) for path in (skills.paths if skills is not None else [])]
+    if not entries:
+        return []
+    root = base_dir if base_dir is not None else Path.cwd()
+    locations: list[str] = []
+    seen: dict[str, str] = {}
+    for entry in entries:
+        source = Path(entry).expanduser()
+        if not source.is_absolute():
+            source = root / source
+        source = source.resolve()
+        name = source.name
+        if name in seen:
+            raise SkillInjectionError(
+                f"skills.paths entries {seen[name]!r} and {entry!r} both stage as {CODEX_SKILLS_DIR}/{name}; "
+                "a workspace-rooted harness needs distinct bundle directory names"
+            )
+        seen[name] = entry
+        _stage_bundle(source, workspace_dir / CODEX_SKILLS_DIR / name, reserved=True)
+        locations.append((Path(CODEX_SKILLS_DIR) / name).as_posix())
+    for entry in entries:
+        config.remove_skill_path(entry)
+    config.add_skill_path(WORKSPACE_SKILLS_SOURCE)
+    return locations
+
+
 def install_skill(
     *,
     skill: AgentSkill,
@@ -257,12 +312,10 @@ def require_unique_skill_names(skills: Sequence[AgentSkill]) -> None:
 
 @dataclass(frozen=True)
 class SkillSet:
-    """Immutable, name-validated collection of :class:`AgentSkill`\\s shared by both Fabric runtimes.
+    """Immutable, name-validated collection of :class:`AgentSkill`\\s held by a Fabric runtime.
 
-    Centralizes the uniqueness check and clone-on-mutation pattern that
-    :class:`~...FabricAgentRuntime` and :class:`~...FabricContainerRuntime` would otherwise
-    duplicate: construction validates that skill names are unique; :meth:`with_skills` and
-    :meth:`with_skill` each return a new ``SkillSet`` without modifying ``self``.
+    Construction validates that skill names are unique; :meth:`with_skills` and :meth:`with_skill`
+    each return a new ``SkillSet`` without modifying ``self``.
     """
 
     skills: tuple[AgentSkill, ...] = ()

@@ -14,14 +14,14 @@ import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.service import AgentsService
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import PlatformJobResults
-from nmp.core.files.service import FilesService
-from nmp.core.jobs.service import JobsService
-from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
-from nmp.testing import ClientContext, create_test_client
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import HelixJobResults
+from nhx.core.files.service import FilesService
+from nhx.core.jobs.service import JobsService
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
+from nhx.testing import ClientContext, create_test_client
 
 pytestmark = pytest.mark.integration
 
@@ -132,7 +132,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
         job_ctx = JobContext(
             workspace="default",
             storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-            results=PlatformJobResults(
+            results=HelixJobResults(
                 job_name=job_name,
                 workspace="default",
                 client=client_from_platform(ctx.sdk, NemoClient),
@@ -146,7 +146,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
             return FabricRuntimeResult(status="succeeded", response="done")
 
         with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
-            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.sdk)
+            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
         assert result["status"] == "completed"
         assert result["input_workdir"]["name"] == "input_workdir"
 
@@ -245,7 +245,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
         job_ctx = JobContext(
             workspace="default",
             storage=StoragePaths(ephemeral=ephemeral, persistent=persistent),
-            results=PlatformJobResults(
+            results=HelixJobResults(
                 job_name=job_name,
                 workspace="default",
                 client=client_from_platform(ctx.sdk, NemoClient),
@@ -262,7 +262,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
             patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
             pytest.raises(RuntimeError, match="fabric exploded"),
         ):
-            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.sdk)
+            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
 
         results_response = ctx.test_client.get(f"/apis/agents/v2/workspaces/default/jobs/execute/{job_name}/results")
         assert results_response.status_code == 200, results_response.text

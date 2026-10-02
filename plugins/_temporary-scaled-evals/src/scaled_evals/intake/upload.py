@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Post-run Harbor ATIF upload to NeMo Platform Intake.
+"""Post-run Harbor ATIF upload to NeMo Helix Intake.
 
 Creates the run's Experiment (idempotent, one per benchmark run) then POSTs each
 trial's ATIF trajectory tagged with that experiment via ``evaluation_context``.

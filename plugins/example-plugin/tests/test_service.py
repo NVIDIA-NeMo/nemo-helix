@@ -19,7 +19,7 @@ from nemo_example_plugin.entities import ExampleItem
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
 from nemo_example_plugin.middleware_service import _get_entity_client as _get_middleware_entity_client
 from nemo_example_plugin.service import ExampleService, _get_entity_client
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError, NemoPaginationInfo
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError, NemoPaginationInfo
 
 NOW = datetime.now(timezone.utc)
 

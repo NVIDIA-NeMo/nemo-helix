@@ -26,10 +26,10 @@ Two agent formats are supported:
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
@@ -39,7 +39,7 @@ evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
 
 If your agent endpoint requires authentication, configure `api_key_secret` on the `Agent`.
 
-For `evaluator.submit(...)` jobs, `api_key_secret` must name a NeMo platform secret in the target workspace. See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).
+For `evaluator.submit(...)` jobs, `api_key_secret` must name a NeMo Helix secret in the target workspace. See [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).
 
 For remote `evaluator.submit(...)` jobs, create the secret in the platform workspace before submitting the job:
 

@@ -27,7 +27,7 @@ _SPAN_KIND_ATTRIBUTE = "openinference.span.kind"
 # Span attributes that can carry an agent's final answer, in precedence order.
 #
 # Deliberately narrower than Intake's ``OTLP_OUTPUT_PAYLOAD_ATTRIBUTE_KEYS``
-# (``services/intake/src/nmp/intake/spans/ingest/otlp.py``), which answers "what payload did
+# (``services/intake/src/nhx/intake/spans/ingest/otlp.py``), which answers "what payload did
 # this span emit" for storage and so also admits ``gen_ai.tool.call.result`` and
 # ``tool_response``. A tool result is not the agent's answer, and this value is compared
 # against a reference by the content metrics, so admitting one would score a tool's output

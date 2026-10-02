@@ -61,13 +61,13 @@ from nemo_guardrails_plugin.streaming import (
     strings_to_chunks,
 )
 from nemo_guardrails_plugin.transforms import GenerationResponseMapper
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.config import get_common_service_config
-from nemo_platform_plugin.guardrail.client import AsyncGuardrailClient
-from nemo_platform_plugin.guardrail.types import GenerationLogOptionsParam
-from nemo_platform_plugin.guardrail.types import RailsConfig as PlatformRailsConfig
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.config import get_common_service_config
+from nemo_helix_plugin.guardrail.client import AsyncGuardrailClient
+from nemo_helix_plugin.guardrail.types import GenerationLogOptionsParam
+from nemo_helix_plugin.guardrail.types import RailsConfig as HelixRailsConfig
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
@@ -80,7 +80,7 @@ from nemo_platform_plugin.inference_middleware import (
     ResponseResult,
     VirtualModel,
 )
-from nemo_platform_plugin.refs import parse_entity_ref
+from nemo_helix_plugin.refs import parse_entity_ref
 from nemoguardrails.rails.llm.llmrails import LLMRails
 from nemoguardrails.rails.llm.options import GenerationResponse
 from nemoguardrails.types import LLMModel
@@ -177,7 +177,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
     _client: AsyncNemoClient | None = None
     # Cache of ``LLMRails`` instances keyed by stabilized content hash.
     _rails_cache: LLMRailsCache | None = None
-    # Memoization of ``PlatformRailsConfig`` to ``StableRailsConfig``
+    # Memoization of ``HelixRailsConfig`` to ``StableRailsConfig``
     # transform by entity identity ``(workspace, name, updated_at)``.
     _stable_cache: StabilizedRailsConfigCache | None = None
 
@@ -297,17 +297,17 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
     async def validate_middleware_config(self, config_type: str, config: Any) -> GuardrailConfigSource:
         """Validate an inline guardrails config from ``MiddlewareCall.config``.
 
-        Accepts a ``PlatformRailsConfig``-shaped dict; idempotent on a
+        Accepts a ``HelixRailsConfig``-shaped dict; idempotent on a
         :class:`GuardrailConfigSource`.
         """
         self._require_supported_config_type(config_type)
         if isinstance(config, (EntityGuardrailConfigSource, InlineGuardrailConfigSource)):
             return config
-        if isinstance(config, PlatformRailsConfig):
+        if isinstance(config, HelixRailsConfig):
             return InlineGuardrailConfigSource(rails=config, label=None)
         if isinstance(config, dict):
             payload = dict(config)
-            # ``PlatformRailsConfig`` has no ``name`` field but is configured
+            # ``HelixRailsConfig`` has no ``name`` field but is configured
             # with ``extra="allow"`` (Stainless default), so leaving ``name``
             # in the payload wouldn't fail validation — it would silently
             # land in ``model_extra`` where the inline source can't see it.
@@ -322,11 +322,11 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
                     type(raw_label).__name__,
                 )
             try:
-                rails = PlatformRailsConfig.model_validate(payload)
+                rails = HelixRailsConfig.model_validate(payload)
             except Exception as exc:
                 raise ValueError(f"Inline guardrails config failed validation: {exc}") from exc
             return InlineGuardrailConfigSource(rails=rails, label=label)
-        raise ValueError(f"Inline guardrails config must be a dict or PlatformRailsConfig, got {type(config).__name__}")
+        raise ValueError(f"Inline guardrails config must be a dict or HelixRailsConfig, got {type(config).__name__}")
 
     # ------------------------------------------------------------------
     # Request / Response hooks
@@ -645,7 +645,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         """
         client = self._client
         if client is None:
-            raise RuntimeError("NeMo Platform client is not initialized. Was on_startup() called?")
+            raise RuntimeError("NeMo Helix client is not initialized. Was on_startup() called?")
         return client
 
     async def _resolve_call(self, call: MiddlewareCall) -> GuardrailConfigSource | None:

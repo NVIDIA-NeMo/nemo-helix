@@ -7,14 +7,14 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 # provider is the single category and states what the secret is for: the model
-# providers carry an API key; 'nmp' is NMP Intake (workspace token as `yaml`);
+# providers carry an API key; 'nhx' is NHX Intake (workspace token as `yaml`);
 # 'openshift' is a user's OpenShift/Kubernetes bearer token (as `key`) that
 # dispatch turns into a per-evaluation kubeconfig so the run acts as that user
 # (lets a user run custom-image / direct-mode Harbor tasks with their own
 # cluster rights — no service-account NetworkPolicy grant). See
 # scaled_evals.dispatch.sandbox_k8s. 'switchyard' is an evaluation-scoped
 # client token for an operator-approved external Switchyard endpoint.
-CredentialProvider = Literal["openai", "anthropic", "nvidia", "nmp", "openshift", "switchyard"]
+CredentialProvider = Literal["openai", "anthropic", "nvidia", "nhx", "openshift", "switchyard"]
 # Which write-once payload was supplied. Both are secret material (the whole
 # resource is a secrets store); `key` is a single-string secret (model API
 # key), `yaml` is a structured secret blob (intake workspace token).

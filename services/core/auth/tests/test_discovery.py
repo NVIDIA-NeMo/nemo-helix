@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nmp.common.config import AuthConfig, Configuration
-from nmp.common.config.base import OIDCConfig
-from nmp.core.auth.api.v2.discovery.endpoints import (
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig, TokenSigningConfig
+from nhx.core.auth.api.v2.discovery.endpoints import (
     AuthDiscoveryResponse,
     OIDCDiscoveryResponse,
     _clear_idp_discovery_cache,
@@ -33,13 +33,19 @@ def oidc_config():
         enabled=True,
         issuer="https://sso.example.com",
         client_id="test-client",
+        cli_client_id="test-cli-client",
+        bearer_token_source="id_token",
         authorization_endpoint="https://sso.example.com/authorize",
         token_endpoint="https://sso.example.com/token",
         device_authorization_endpoint="https://sso.example.com/device/code",
+        device_authorization_requires_device_id=True,
+        device_authorization_display_name="NeMo Helix CLI",
+        device_token_request_includes_scope=False,
+        userinfo_endpoint="https://sso.example.com/userinfo",
         workload_token_exchange_enabled=True,
         workload_client_id="test-workload-client",
         workload_token_endpoint="https://workload-idp.example.com/token",
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_scope="openid email groups",
     )
 
@@ -50,6 +56,7 @@ def auth_config_oidc_enabled(oidc_config):
     return AuthConfig(
         enabled=True,
         policy_decision_point_base_url="http://localhost:8181",
+        token_signing=TokenSigningConfig(private_key_file="/var/run/secrets/nemo-helix/token-signing/private.pem"),
         oidc=oidc_config,
     )
 
@@ -86,6 +93,11 @@ class TestOIDCDiscoveryResponse:
             device_authorization_endpoint="https://sso.example.com/device/code",
             userinfo_endpoint="https://sso.example.com/userinfo",
             client_id="test-client",
+            cli_client_id="test-cli-client",
+            bearer_token_source="id_token",
+            device_authorization_requires_device_id=True,
+            device_authorization_display_name="NeMo Helix CLI",
+            device_token_request_includes_scope=False,
         )
 
         assert response.issuer == "https://sso.example.com"
@@ -94,6 +106,11 @@ class TestOIDCDiscoveryResponse:
         assert response.device_authorization_endpoint == "https://sso.example.com/device/code"
         assert response.userinfo_endpoint == "https://sso.example.com/userinfo"
         assert response.client_id == "test-client"
+        assert response.cli_client_id == "test-cli-client"
+        assert response.bearer_token_source == "id_token"
+        assert response.device_authorization_requires_device_id is True
+        assert response.device_authorization_display_name == "NeMo Helix CLI"
+        assert response.device_token_request_includes_scope is False
 
     def test_oidc_discovery_response_optional_fields(self):
         """Test OIDCDiscoveryResponse with optional fields."""
@@ -107,6 +124,11 @@ class TestOIDCDiscoveryResponse:
         assert response.token_endpoint is None
         assert response.device_authorization_endpoint is None
         assert response.userinfo_endpoint is None
+        assert response.cli_client_id is None
+        assert response.bearer_token_source == "access_token"
+        assert response.device_authorization_requires_device_id is False
+        assert response.device_authorization_display_name is None
+        assert response.device_token_request_includes_scope is True
 
     def test_oidc_discovery_response_includes_workload_exchange_fields(self):
         """Test OIDCDiscoveryResponse includes workload identity token exchange fields."""
@@ -117,14 +139,14 @@ class TestOIDCDiscoveryResponse:
             workload_token_exchange_enabled=True,
             workload_client_id="test-workload-client",
             workload_token_endpoint="https://workload-idp.example.com/token",
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_scope="openid email groups",
         )
 
         assert response.workload_token_exchange_enabled is True
         assert response.workload_client_id == "test-workload-client"
         assert response.workload_token_endpoint == "https://workload-idp.example.com/token"
-        assert response.workload_audience == "nemo-platform"
+        assert response.workload_audience == "nemo-helix"
         assert response.workload_scope == "openid email groups"
 
 
@@ -173,13 +195,19 @@ class TestGetAuthDiscovery:
             assert result.oidc is not None
             assert result.oidc.issuer == "https://sso.example.com"
             assert result.oidc.client_id == "test-client"
+            assert result.oidc.cli_client_id == "test-cli-client"
+            assert result.oidc.bearer_token_source == "id_token"
+            assert result.oidc.device_authorization_requires_device_id is True
+            assert result.oidc.device_authorization_display_name == "NeMo Helix CLI"
+            assert result.oidc.device_token_request_includes_scope is False
             assert result.oidc.authorization_endpoint == "https://sso.example.com/authorize"
             assert result.oidc.token_endpoint == "https://sso.example.com/token"
             assert result.oidc.device_authorization_endpoint == "https://sso.example.com/device/code"
+            assert result.oidc.userinfo_endpoint == "https://sso.example.com/userinfo"
             assert result.oidc.workload_token_exchange_enabled is True
             assert result.oidc.workload_client_id == "test-workload-client"
             assert result.oidc.workload_token_endpoint == "https://workload-idp.example.com/token"
-            assert result.oidc.workload_audience == "nemo-platform"
+            assert result.oidc.workload_audience == "nemo-helix"
             assert result.oidc.workload_scope == "openid email groups"
         finally:
             Configuration.clear_overrides()
@@ -210,6 +238,7 @@ class TestGetAuthDiscovery:
         auth_config = AuthConfig(
             enabled=True,
             policy_decision_point_base_url="http://localhost:8181",
+            token_signing=TokenSigningConfig(private_key_file="/var/run/secrets/nemo-helix/token-signing/private.pem"),
             oidc=oidc_config,
         )
         Configuration.set_override(auth_config)
@@ -348,6 +377,49 @@ class TestGetAuthDiscovery:
         finally:
             Configuration.clear_overrides()
 
+    @pytest.mark.asyncio
+    async def test_configured_userinfo_endpoint_used_when_discovery_omits_it(self):
+        """A configured userinfo_endpoint override must surface even if the IdP's discovery
+        document doesn't advertise one (matches the other endpoint overrides)."""
+        oidc_config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            client_id="test-client",
+            userinfo_endpoint="https://custom.example.com/userinfo",
+        )
+
+        auth_config = AuthConfig(
+            enabled=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=oidc_config,
+        )
+
+        Configuration.set_override(auth_config)
+
+        discovery_doc = {
+            "authorization_endpoint": "https://sso.example.com/auth",
+            "token_endpoint": "https://sso.example.com/token",
+            # userinfo_endpoint intentionally omitted from discovery
+        }
+
+        try:
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_response = MagicMock()
+                mock_response.is_success = True
+                mock_response.json.return_value = discovery_doc
+                mock_client.get.return_value = mock_response
+                mock_client.__aenter__.return_value = mock_client
+                mock_client.__aexit__.return_value = None
+                mock_client_class.return_value = mock_client
+
+                result = await get_auth_discovery()
+
+                assert result.oidc is not None
+                assert result.oidc.userinfo_endpoint == "https://custom.example.com/userinfo"
+        finally:
+            Configuration.clear_overrides()
+
 
 class TestIdpDiscoveryCache:
     """Tests for IdP discovery document caching."""
@@ -360,7 +432,7 @@ class TestIdpDiscoveryCache:
             "token_endpoint": "https://sso.example.com/token",
         }
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -380,12 +452,12 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_cache_miss_after_ttl_expiry(self):
         """Test that expired cache triggers a new HTTP call."""
-        import nmp.core.auth.api.v2.discovery.endpoints as mod
+        import nhx.core.auth.api.v2.discovery.endpoints as mod
 
         discovery_v1 = {"token_endpoint": "https://sso.example.com/token-v1"}
         discovery_v2 = {"token_endpoint": "https://sso.example.com/token-v2"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -410,11 +482,11 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_fetch_failure_returns_stale_cache(self):
         """Test graceful degradation: stale cache is served on fetch failure."""
-        import nmp.core.auth.api.v2.discovery.endpoints as mod
+        import nhx.core.auth.api.v2.discovery.endpoints as mod
 
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True
@@ -440,7 +512,7 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_fetch_failure_without_cache_returns_empty(self):
         """Test that fetch failure with no prior cache returns empty dict."""
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.get.side_effect = httpx.HTTPError("Connection refused")
             mock_client.__aenter__.return_value = mock_client
@@ -455,7 +527,7 @@ class TestIdpDiscoveryCache:
         """Test that setting TTL to 0 disables caching."""
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
 
-        with patch("nmp.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.is_success = True

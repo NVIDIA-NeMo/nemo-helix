@@ -38,7 +38,7 @@ def extract_http_error_info(exc: httpx.HTTPStatusError) -> tuple[int, str]:
     """Pull the status code and a human-readable detail string out of an httpx error.
 
     Tries to parse the response body as JSON and use its ``detail`` field (the
-    convention used by FastAPI / NeMo Platform); falls back to the raw body
+    convention used by FastAPI / NeMo Helix); falls back to the raw body
     text if that isn't available.
     """
     response = exc.response

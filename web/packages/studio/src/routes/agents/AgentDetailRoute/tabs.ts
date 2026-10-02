@@ -19,6 +19,12 @@ export type AgentDetailTab = (typeof DETAIL_TABS)[number];
 
 export const DEFAULT_TAB: AgentDetailTab = AGENT_OVERVIEW_ENABLED ? 'overview' : 'deployments';
 
+/**
+ * Opens a modal on arrival, for callers elsewhere in Studio that link to an action rather than
+ * a tab. One-shot: the route strips it once handled, so reload and Back do not reopen the modal.
+ */
+export const ACTION_SEARCH_PARAM = 'action';
+
 export const isAgentDetailTab = (value: string | null): value is AgentDetailTab =>
   !!value &&
   DETAIL_TABS.includes(value as AgentDetailTab) &&

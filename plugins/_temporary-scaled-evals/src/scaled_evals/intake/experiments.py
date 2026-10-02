@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Create NeMo Platform Intake Experiments (and their Groups) for scaled-evals runs.
+"""Create NeMo Helix Intake Experiments (and their Groups) for scaled-evals runs.
 
 Each benchmark run (or standalone evaluation) maps to one Experiment; its member
 tasks are ``test_case_id``s and each trial is a session. One Group per benchmark.
@@ -19,9 +19,9 @@ from typing import Any
 
 from scaled_evals.intake.client import create_evaluation, create_experiment_group
 
-# Version stamp of the nemo-platform intake contract this upload targets. Bump on contract changes;
+# Version stamp of the nemo-helix intake contract this upload targets. Bump on contract changes;
 # stamped onto every Evaluation so a run records which contract produced it.
-INTAKE_CONTRACT_REF = "nemo-platform@3df96dd4d7cadeb6fbe5049696b40cfa54bc5c5b"
+INTAKE_CONTRACT_REF = "nemo-helix@3df96dd4d7cadeb6fbe5049696b40cfa54bc5c5b"
 MAX_INTAKE_EVALUATION_NAME_LENGTH = 63
 
 

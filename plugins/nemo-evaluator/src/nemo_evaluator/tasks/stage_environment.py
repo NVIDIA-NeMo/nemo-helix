@@ -8,12 +8,12 @@ from __future__ import annotations
 import sys
 
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
-from nemo_evaluator.tasks.runner import run_task_main
+from nemo_evaluator.tasks.runner import run_sync_task_main
 
 
 def main() -> int:
     """Run the stage-environment job inside the CPU tasks container."""
-    return run_task_main(EnvironmentStageJob, service_name="evaluator")
+    return run_sync_task_main(EnvironmentStageJob, service_name="evaluator")
 
 
 if __name__ == "__main__":

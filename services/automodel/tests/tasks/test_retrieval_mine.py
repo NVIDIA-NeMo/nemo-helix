@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 import yaml
-from nmp.automodel.tasks.retrieval_mine.runner import RetrievalMineJobConfig, RetrievalMiningOptions, run_mine
+from nhx.automodel.tasks.retrieval_mine.runner import RetrievalMineJobConfig, RetrievalMiningOptions, run_mine
 
 
 def test_run_mine_launches_torchrun_then_unrolls(tmp_path: Path) -> None:
@@ -56,15 +56,18 @@ def test_run_mine_launches_torchrun_then_unrolls(tmp_path: Path) -> None:
         )
 
     job = RetrievalMineJobConfig(mining_batch_size=8, mining=RetrievalMiningOptions(corpus_chunk_size=1024))
-    with patch("nmp.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine) as mine:
+    with patch("nhx.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine) as mine:
         result = run_mine(job, output_dir, ctx, model_trust_remote_code=True)
 
     mine.assert_called_once()
     assert result["exit_code"] == 0
-    assert (output_dir / "mining_config.yaml").exists()
-    assert (output_dir / "train_mined.automodel.json").exists()
-    assert (output_dir / "train_mined.automodel_unrolled.json").exists()
     assert (output_dir / "training.jsonl").exists()
+    assert (output_dir / "additional" / "train.json").exists()
+    assert (output_dir / "additional" / "train_mined.automodel.json").exists()
+    assert (output_dir / "additional" / "mining_config.yaml").exists()
+    assert not (output_dir / "train.json").exists()
+    assert result["train_file"] == str(output_dir / "additional" / "train_mined.automodel_unrolled.json")
+    assert Path(result["train_file"]).exists()
     ctx.results.save.assert_called_once()
 
 
@@ -103,7 +106,7 @@ def test_run_mine_selects_shallowest_train_file_deterministically(tmp_path: Path
             encoding="utf-8",
         )
 
-    with patch("nmp.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine):
+    with patch("nhx.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine):
         run_mine(RetrievalMineJobConfig(), output_dir, ctx, model_trust_remote_code=False)
 
 
@@ -124,7 +127,7 @@ def test_run_mine_rejects_empty_training_jsonl(tmp_path: Path) -> None:
         )
 
     with (
-        patch("nmp.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine),
+        patch("nhx.automodel.tasks.retrieval_mine.runner.run_hard_negative_mining", side_effect=_fake_mine),
         pytest.raises(ValueError, match="No training rows"),
     ):
         run_mine(RetrievalMineJobConfig(), output_dir, ctx, model_trust_remote_code=False)

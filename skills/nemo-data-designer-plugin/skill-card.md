@@ -25,13 +25,13 @@ Risk: Review before execution as proposals could introduce incorrect or misleadi
 Mitigation: Review and scan skill before deployment. <br>
 
 ## Reference(s): <br>
-- [NeMo Plugin Additions](references/nemo-platform-plugin-additions.md) <br>
+- [Platform Execution](references/platform-execution.md) <br>
 - [Retrieval SDG](references/retrieval-sdg.md) <br>
 - [Person Sampling Reference](references/person-sampling.md) <br>
 - [Seed Datasets](references/seed-datasets.md) <br>
 - [Autopilot Workflow](workflows/autopilot.md) <br>
 - [Interactive Workflow](workflows/interactive.md) <br>
-- [NeMo Platform Documentation](https://docs.nvidia.com/nemo-platform) <br>
+- [NeMo Helix Documentation](https://docs.nvidia.com/nemo-helix) <br>
 
 
 ## Skill Output: <br>

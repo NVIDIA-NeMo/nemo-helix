@@ -3,7 +3,7 @@
 
 # Zero-Config LLM-as-a-Judge Evaluation - CLI Eval
 
-Tests that a coding agent can set up and run an LLM-as-a-Judge evaluation using only minimal configuration (model + scores) via the NeMo Platform CLI, letting the system auto-generate prompt templates, parsers, and structured output schemas.
+Tests that a coding agent can set up and run an LLM-as-a-Judge evaluation using only minimal configuration (model + scores) via the NeMo Helix CLI, letting the system auto-generate prompt templates, parsers, and structured output schemas.
 
 ## What This Tests
 
@@ -15,7 +15,7 @@ Tests that a coding agent can set up and run an LLM-as-a-Judge evaluation using 
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 export ANTHROPIC_API_KEY='<your-key>'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'

@@ -13,10 +13,10 @@ from nemo_data_designer_plugin.cli.personas import make_fileset_command
 from nemo_data_designer_plugin.cli.renderers import CreateRenderer, PreviewRenderer
 from nemo_data_designer_plugin.functions.preview import PreviewFunction
 from nemo_data_designer_plugin.jobs.create import CreateJob
-from nemo_platform_plugin.cli import NemoCLI
-from nemo_platform_plugin.cli_renderer import CLIRenderer
-from nemo_platform_plugin.function import NemoFunction
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli_renderer import CLIRenderer
+from nemo_helix_plugin.function import NemoFunction
+from nemo_helix_plugin.job import NemoJob
 
 
 class DataDesignerCLI(NemoCLI):
@@ -26,6 +26,7 @@ class DataDesignerCLI(NemoCLI):
     def get_cli(self) -> typer.Typer:
         from data_designer.cli.main import agent_app
         from data_designer.cli.runtime import ensure_cli_default_model_settings
+        from nemo_data_designer_plugin.cli.check_models import check_models_command
         from nemo_data_designer_plugin.cli.retrieval import retrieval_app
         from nemo_data_designer_plugin.cli.validate import validate_command
 
@@ -33,6 +34,7 @@ class DataDesignerCLI(NemoCLI):
 
         app = typer.Typer(name=self.name, help=self.description, no_args_is_help=True)
         app.command("validate")(validate_command)
+        app.command("check-models")(check_models_command)
 
         personas_app = typer.Typer(
             name="personas",

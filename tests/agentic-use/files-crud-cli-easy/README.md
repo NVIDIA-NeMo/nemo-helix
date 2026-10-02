@@ -3,7 +3,7 @@
 
 # Fileset CRUD Operations - CLI Harbor Test
 
-Tests fileset CRUD operations (create, upload, list, download, delete) using the NeMo Platform CLI.
+Tests fileset CRUD operations (create, upload, list, download, delete) using the NeMo Helix CLI.
 
 ## What It Tests
 
@@ -17,7 +17,7 @@ Tests fileset CRUD operations (create, upload, list, download, delete) using the
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 export NVIDIA_API_KEY='your-key'
 

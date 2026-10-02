@@ -28,9 +28,9 @@ import os
 import sys
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
 
 sys.path.insert(0, "/tests/shared")
 from trace_reader import get_session
@@ -54,14 +54,14 @@ def _make_unsigned_jwt() -> str:
     return f"{header}.{payload}."
 
 
-def _get_nmp_client() -> NeMoPlatform:
-    """Get NeMoPlatform client for the eval workspace."""
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+def _get_nhx_client() -> NeMoHelix:
+    """Get NeMoHelix client for the eval workspace."""
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
 
 
 def _get_files_client() -> FilesClient:
-    return client_from_platform(_get_nmp_client(), FilesClient)
+    return client_from_platform(_get_nhx_client(), FilesClient)
 
 
 # --- Dataset checks ---
@@ -76,7 +76,7 @@ def test_fileset_exists() -> None:
 
 def test_fileset_has_data() -> None:
     """Verify the dataset fileset has files uploaded."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     files = client.files.list(fileset=FILESET)
     assert len(files.data) > 0, f"Fileset '{FILESET}' has no files uploaded"
 
@@ -86,7 +86,7 @@ def test_fileset_has_data() -> None:
 
 def test_llm_judge_metric_exists() -> None:
     """Verify an LLM-as-a-Judge metric named zeroconfig-judge was created."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     response = client.evaluation.metrics.list()
     metric_names = [m.name for m in response.data]
     assert METRIC_NAME in metric_names, (
@@ -98,7 +98,7 @@ def test_llm_judge_metric_exists() -> None:
 
 def test_metric_has_rubric_score() -> None:
     """Verify the metric has a rubric-based quality score with at least 3 levels."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     metric = client.evaluation.metrics.retrieve(name=METRIC_NAME)
 
     assert len(metric.scores) > 0, "Metric has no scores defined"
@@ -113,7 +113,7 @@ def test_metric_has_rubric_score() -> None:
 
 def test_metric_model_config() -> None:
     """Verify the metric has correct model config pointing to inference endpoint."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     metric = client.evaluation.metrics.retrieve(name=METRIC_NAME)
 
     assert hasattr(metric, "model"), "Metric has no model config"
@@ -132,7 +132,7 @@ def test_metric_has_default_prompt_template() -> None:
     'expert evaluator' from the DEFAULT_JUDGE_SYSTEM_PROMPT_TEMPLATE.
     This is the key zero-config verification.
     """
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     metric = client.evaluation.metrics.retrieve(name=METRIC_NAME)
 
     assert metric.prompt_template is not None, "Metric has no prompt_template (should have auto-generated default)"
@@ -160,7 +160,7 @@ def test_sync_evaluation_produces_scores() -> None:
     If the external inference API is unreachable from the container, falls back
     to checking that the agent's own evaluation produced scores (via trace).
     """
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     try:
         response = client.evaluation.metrics.evaluate(
             metric=f"{WORKSPACE}/{METRIC_NAME}",

@@ -30,7 +30,10 @@ export const PLATFORM_BASE_URL = resolveBrowserBaseUrl(getEnvVar('VITE_PLATFORM_
 
 // Vars to indicate whether certain microservices should be turned off, to
 // distinguish that logic from code that calls the URL itself
+export const AGENT_CONTAINER_DEPLOYMENTS_ENABLED =
+  featureFlags.agentContainerDeploymentsEnabled !== false;
 export const AGENT_OPTIMIZATIONS_ENABLED = featureFlags.agentOptimizationsEnabled !== false;
+export const AGENT_OPTIMIZATION_FORM_ENABLED = featureFlags.agentOptimizationFormEnabled === true;
 export const AGENT_OVERVIEW_ENABLED = featureFlags.agentOverviewEnabled !== false;
 export const AGENTS_ENABLED = featureFlags.agentsEnabled !== false;
 export const ANONYMIZER_ENABLED = featureFlags.anonymizerEnabled !== false;
@@ -39,6 +42,12 @@ export const ASSISTANT_STUDIO_ENABLED =
   featureFlags.assistantStudioEnabled !== false || featureFlags.copilotStudioEnabled !== false;
 export const CUSTOMIZER_ENABLED = featureFlags.customizerEnabled !== false;
 export const DASHBOARD_ENABLED = featureFlags.dashboardEnabled !== false;
+export const DASHBOARD_SANDBOX_ENABLED = featureFlags.dashboardSandboxEnabled !== false;
+// The /dashboard route is reachable if any variant behind it is enabled — kept as one derived
+// constant so the three flags can't drift out of sync across the route table, the side-nav
+// link, and the default-landing redirect (each of which needs this exact condition).
+export const DASHBOARD_ROUTE_ENABLED =
+  DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED || DASHBOARD_SANDBOX_ENABLED;
 export const DATA_DESIGNER_ENABLED = featureFlags.dataDesignerEnabled !== false;
 export const DATASETS_ENABLED = featureFlags.datasetsEnabled !== false;
 export const DEPLOYMENTS_ENABLED = featureFlags.deploymentsEnabled !== false;
@@ -51,6 +60,7 @@ export const INTAKE_ENABLED = featureFlags.intakeEnabled !== false;
 export const JOBS_ENABLED = featureFlags.jobsEnabled !== false;
 export const MEMBERS_ENABLED = featureFlags.membersEnabled !== false;
 export const MODEL_COMPARE_ENABLED = featureFlags.modelCompareEnabled !== false;
+export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
 export const OPTIMIZER_ENABLED = featureFlags.optimizerEnabled !== false;
 export const PLUGINS_ENABLED = featureFlags.pluginsEnabled !== false;
@@ -72,6 +82,7 @@ export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV')?.toLowerCase()
 // Vars used by the oidc provider
 export const AUTH_CLIENT_ID = getEnvVar('VITE_AUTH_CLIENT_ID');
 export const AUTH_AUTHORITY = getEnvVar('VITE_AUTH_AUTHORITY');
+export const AUTH_BEARER_TOKEN_SOURCE = getEnvVar('VITE_AUTH_BEARER_TOKEN_SOURCE');
 export const AUTH_SCOPES = getEnvVar('VITE_AUTH_SCOPES');
 export const AUTH_SCOPE_PREFIX = getEnvVar('VITE_AUTH_SCOPE_PREFIX');
 

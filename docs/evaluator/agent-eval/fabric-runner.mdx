@@ -15,6 +15,10 @@ it answered.
 The result and bundle are the same as the
 [quickstart](/documentation/evaluate-models/agent-eval/quickstart) — only the runner changes.
 
+This runner executes the harness on the host. To run a Fabric harness inside Harbor's Docker sandbox and
+score it with a Harbor verifier instead, see
+[Run a NeMo Fabric Agent inside Harbor](/documentation/evaluate-models/agent-eval/harbor-fabric-agent).
+
 ## Harnesses
 
 | `adapter_id` | Harness | Transport |
@@ -145,7 +149,9 @@ result = AgentEvaluator().run_sync(
 | `trajectory_extra` | no | extra fields merged into the captured trajectory |
 | `runtime_name` | no | the name recorded on `runner_info`, default `fabric` |
 | `skills` | no | skills injected into the agent's workspace |
-| `task_hook` | no | a `FabricTaskRunHook` invoked around each task run |
+| `sandbox` | no | a `SandboxProvider`; when set, each task runs inside a sandbox (see below) |
+| `image` | no | the sandbox image; only valid with `sandbox` |
+| `secrets` | no | secret references injected as environment variables inside the sandbox; only valid with `sandbox` |
 
 ## Seed files into the workspace
 
@@ -219,46 +225,126 @@ several signals into one reported score.
 
 ## Submit as a platform job
 
-`FabricRunnerTarget` carries the same config into a durable job:
+`FabricRunnerTarget` carries the same config into a durable job. Its `source` says where the agent
+comes from: an inline config, or a registered agent (next section).
 
 ```python
-from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
-target = FabricRunnerTarget(config=config, model="<provider>/<model>", capture_trajectory=True)
+target = FabricRunnerTarget(
+    source=FabricConfigSource(config=config, model="<provider>/<model>"),
+    capture_trajectory=True,
+)
 ```
 
 | Field | Required | Notes |
 |---|---|---|
-| `config` | yes | the same agent config, as a JSON-shaped mapping |
-| `model` | no | a `provider/model` slug applied as the config's default model |
+| `source.config` | yes | the same agent config, as a JSON-shaped mapping |
+| `source.model` | no | a `provider/model` slug applied as the config's default model |
 | `timeout_s` | no | per-task timeout for the Fabric run |
 | `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` the service resolves into the job's environment for the harness to read. For a registered agent, a name the agent also binds keeps the target's ref, with a warning in the service log |
 
-Submit it with `nemo evaluator agent-evaluate submit`, or as the `target` of an
+Submit it with `nemo evaluator agent-evaluate`, or as the `target` of an
 `AgentEvalInputSpec`. See
 [Targets and Runners](/documentation/evaluate-models/agent-eval/targets-and-runners).
 
+Specs written before 0.8 put `config` and `model` directly on the target. That shape is still accepted
+with a deprecation warning and will be removed in 0.9; move both under `source`.
+
+### Evaluate an agent registered on the platform
+
+If the agent is already registered with `nemo agents create`, make it the `source`:
+
+```json
+{"kind": "fabric", "source": {"agent": "calculator-agent"}}
+```
+
+At submit time the service looks the agent up, applies the same resolution a deployment gets — its
+models are bound to the workspace's Inference Gateway, so no credential travels in the spec — and
+translates the platform `agent.yaml` into a config like the one above. The persisted job spec carries
+it as `resolved_config`, next to the `source` it came from; the job never looks the agent up. It runs
+the agent fresh for every trial and never calls an existing deployment, so the evaluation is
+independent of what is (or is not) deployed.
+
+| Field | Required | Notes |
+|---|---|---|
+| `source.agent` | yes | `name` in the submission workspace, or `workspace/name` |
+| `source.environment` | no | an environment spec (the same shape `nemo agents deploy` takes) merged onto the agent's config |
+| `timeout_s` | no | per-task timeout for the Fabric run |
+| `capture_trajectory` | no | capture the ATIF trajectory and attach it to trial evidence |
+
+A registered-agent source has no `model`. If the agent's config refers to skills or prompts by relative
+path, submission copies the agent's Ethos FileSet into a job-owned `agent-files-<id>` FileSet and the job
+stages that copy before the run, so a re-registration while the job is queued cannot change the files it
+runs with. The copy is deleted when the run completes; a failed run keeps it for a retry. For the
+DeepAgents harness, which reads files only through its per-trial workspace, each skill bundle is copied
+into the trial workspace under `.agents/skills/<name>/` for the run and removed afterwards. The same source
+shape is a [Harbor target's `source`](/documentation/evaluate-models/agent-eval/harbor-fabric-agent#run-a-registered-agent),
+which runs the registered agent inside each task container instead of on the host.
+
+There is no model override: the model is part of what the agent *is*, so a different model is a
+different registered agent. What an evaluation does get to shape is the **environment** the agent runs
+in. `environment` takes the same spec a deployment does, so you can point the agent's declared MCP
+servers at mocks, add process env, and bind secrets by reference:
+
+```json
+{
+  "kind": "fabric",
+  "source": {
+    "agent": "calculator-agent",
+    "environment": {
+      "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+      "env": {"EVAL_MODE": "mock"},
+      "secrets": {"CALC_TOKEN": "calc-token"}
+    }
+  }
+}
+```
+
+Only servers the agent already declares are fulfilled — an environment can redirect a tool, not hand
+the agent one it never had. Secret values never enter the spec: the refs travel as `env_secrets` on the
+resolved Fabric target and the service injects them into the job's environment. A secret bound to a
+**stdio** server is also named in that server's `env` as a `${NAME}` template, because an MCP stdio
+server does not inherit the harness's environment; the host runtime fills the template at launch and
+the persisted spec keeps only the template.
+
+Only agents with `config_format: nemo-agents-spec-v1` resolve. A legacy `nat-workflow-v1` agent is
+rejected at submit — it describes a NeMo Agent Toolkit workflow, which has no runner here. When the
+job publishes to Intake, the trajectories are recorded under the agent's name unless
+`publication.intake.agent_name` says otherwise.
+
 ## Running in a sandbox
 
-`FabricContainerRuntime` takes the same config and runs it inside a sandbox rather than on the host:
+Pass `sandbox=` to run the same configuration inside a sandbox rather than on the host:
 
 ```python
-from nemo_evaluator_sdk.agent_eval.runtimes.fabric.container_runtime import FabricContainerRuntime
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 
-runtime = FabricContainerRuntime(config=config, provider=DockerSandboxProvider())
+runtime = FabricAgentRuntime(config=config, sandbox=DockerSandboxProvider())
 ```
 
 | Field | Required | Notes |
 |---|---|---|
-| `config` | yes | the same agent config, or a `FabricConfig` |
-| `provider` | yes | a `SandboxProvider` — `DockerSandboxProvider` or `DockerComposeSandboxProvider` |
-| `secrets` | no | secret references made available inside the sandbox |
-| `image` | no | override the sandbox image |
-| `skills` | no | skills injected into the agent's workspace |
+| `sandbox` | yes | a `SandboxProvider` — `DockerSandboxProvider` or `DockerComposeSandboxProvider` |
+| `image` | no | override the sandbox image; built on first run when omitted |
+| `secrets` | no | `{env_var: SecretRef}` resolved by the orchestrator and injected into the sandbox |
+
+`model`, `timeout_s`, `capture_trajectory`, `trajectory_extra`, `skills`, `work_root`, and
+`runtime_name` behave the same in both modes. `base_dir` only applies on the host and is rejected
+together with `sandbox`; `image` and `secrets` are rejected without it.
+
+Both modes lay evidence out the same way under the per-task directory and expose the same `result`,
+`trace`, and `workspace` evidence, so the same metrics score either. Sandbox trials additionally carry
+`logs` (the harness's stderr and the OTLP receiver log) and record `image` and `sandbox_provider` in
+their metadata.
 
 Use it when the agent should not run on the host — untrusted tasks, or a workspace that must be
-discarded per task. The host runtime is otherwise the simpler choice.
+discarded per task. Host mode is otherwise the simpler choice.
+
+`FabricContainerRuntime(config, provider=...)` is a deprecated alias for
+`FabricAgentRuntime(config, sandbox=...)` and warns on construction.
 
 ## Next steps
 

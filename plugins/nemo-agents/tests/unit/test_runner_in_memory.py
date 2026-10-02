@@ -15,7 +15,7 @@ CLI) rely on:
   so the controller can mark deployments failed without waiting for the
   health-check timeout.
 - The system dir lives under the configured ``workspace_dir`` (default:
-  ``nmp_user_data_dir() / "agents"``), not the plugin source tree.
+  ``nhx_user_data_dir() / "agents"``), not the plugin source tree.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -34,8 +35,14 @@ from nemo_agents_plugin.config import AgentsConfig, ControllerConfig
 from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
-from nemo_platform_plugin.config import Configuration, nmp_user_data_dir
-from nemo_platform_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
+from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 STAGED_SHA = "1" * 40
 
@@ -57,33 +64,43 @@ def _backend(workspace_dir: Path) -> InMemoryRunnerBackend:
     return InMemoryRunnerBackend(cfg)
 
 
+def _without_telemetry(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop the ``telemetry`` the backend wires in on its own.
+
+    Tests about staging and validation care that the *agent's* config reaches
+    the child unchanged. The auto-wired export is the backend's addition and is
+    pinned by the telemetry tests at the bottom of this module.
+    """
+    return {key: value for key, value in config.items() if key != "telemetry"}
+
+
 # ---------------------------------------------------------------------------
-# Default workspace_dir resolves through nmp_user_data_dir()
+# Default workspace_dir resolves through nhx_user_data_dir()
 # ---------------------------------------------------------------------------
 
 
 def test_default_workspace_dir_is_under_user_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The default workspace_dir resolves to ``nmp_user_data_dir() / 'agents'``.
+    """The default workspace_dir resolves to ``nhx_user_data_dir() / 'agents'``.
 
     Earlier versions defaulted to the plugin source root, which leaked
     runtime state into the source tree (and was undocumented).  Artifacts
-    now route through the standard NMP user-data location so they survive
+    now route through the standard NHX user-data location so they survive
     ``/tmp/`` cleanup and live in a well-known place.
     """
-    monkeypatch.setenv("NMP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path))
     Configuration.clear_cache()
     try:
         cfg = AgentsConfig.get()
         # workspace_dir is computed relative to the user-data root.
-        assert cfg.controller.workspace_dir == nmp_user_data_dir() / "agents"
+        assert cfg.controller.workspace_dir == nhx_user_data_dir() / "agents"
         assert cfg.controller.workspace_dir == tmp_path / "agents"
     finally:
         Configuration.clear_cache()
 
 
 def test_workspace_dir_follows_xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NMP state."""
-    monkeypatch.delenv("NMP_DATA_DIR", raising=False)
+    """``XDG_DATA_HOME`` shifts the workspace_dir alongside the rest of NHX state."""
+    monkeypatch.delenv("NHX_DATA_DIR", raising=False)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     Configuration.clear_cache()
     try:
@@ -250,8 +267,11 @@ async def test_create_deployment_validates_platform_agent_config(tmp_path: Path)
     assert info.port == 49210
     assert info.pid == 4242
     assert Path(info.log_path).exists()
-    assert validation_calls == [{"config": config, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"}]
-    assert yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text()) == config
+    assert validation_calls == [
+        {"config": ANY, "base_dir": tmp_path / "system" / "ws" / "fabric-dep-fabric"},
+    ]
+    assert _without_telemetry(validation_calls[0]["config"]) == config
+    assert _without_telemetry(yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())) == config
     status = await backend.get_deployment_status("ws", "fabric-dep")
     assert status is info
 
@@ -514,7 +534,7 @@ def test_resolve_nat_bin_uses_path(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_resolve_nat_bin_uses_sibling_of_sys_executable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When `nat` is not on PATH, look next to `sys.executable`.
 
-    This is the `uv tool install nemo-platform` case: the tool venv contains
+    This is the `uv tool install nemo-helix` case: the tool venv contains
     `nat` (it's co-installed with `nemo` via the `[services]` chain), but the
     venv's `bin/` is not prepended to PATH, so `shutil.which` returns None.
     """
@@ -600,7 +620,7 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     assert info.staged_spec is not None
     assert (info.staged_spec.revision, info.staged_spec.tracked_revision) == (STAGED_SHA, "main")
     assert (base_dir / "mcps" / "calculator.py").exists()
-    assert yaml.safe_load((base_dir / "agent.yaml").read_text()) == config
+    assert _without_telemetry(yaml.safe_load((base_dir / "agent.yaml").read_text())) == config
 
 
 @pytest.mark.asyncio
@@ -693,3 +713,198 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
 
     assert base_dirs[0] == base_dirs[1]
     assert sorted(path.name for path in (base_dirs[1] / "skills").iterdir()) == ["new.md"]
+
+
+# ---------------------------------------------------------------------------
+# Intake ATIF telemetry is auto-wired for Fabric-backed subprocess deployments
+#
+# The child runs on the platform host, so the platform's own base URL reaches
+# it with no container rebase and no auth-proxy sidecar in front.
+# ---------------------------------------------------------------------------
+
+
+_INTAKE_ENDPOINT = "http://platform.test:8080/apis/intake/v2/workspaces/ws/ingest/atif"
+
+
+def _telemetry_agent_config(telemetry: dict[str, Any] | None = None) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "config_format": "nemo-agents-spec-v1",
+        "name": "fabric-agent",
+        "default_harness": "hermes",
+        "harnesses": {"hermes": {"kind": "hermes"}},
+        "models": {
+            "default": {
+                "provider": "nvidia",
+                "model": "default/test-model",
+                "base_url": "http://platform/apis/inference-gateway/v2/workspaces/ws/openai/-/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            }
+        },
+    }
+    if telemetry is not None:
+        config["telemetry"] = telemetry
+    return config
+
+
+async def _deploy_and_read_staged_config(
+    backend: InMemoryRunnerBackend,
+    config: dict[str, Any],
+    *,
+    port: int = 49400,
+) -> tuple[DeploymentInfo, dict[str, Any]]:
+    """Deploy *config* with validation and spawn stubbed; return the staged YAML."""
+
+    async def _validate(config_: dict[str, Any], *, base_dir: Path) -> Any:
+        del config_, base_dir
+        return SimpleNamespace(agent_config=SimpleNamespace(name="fabric-agent"))
+
+    def _spawn_fabric(self_, name, config_path, log_path, port_, credential_env=None):  # noqa: ANN001
+        del self_, name, config_path, port_, credential_env
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("")
+        return SimpleNamespace(pid=4242, returncode=None, poll=lambda: None)
+
+    with (
+        patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
+        patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
+    ):
+        info = await backend.create_deployment("ws", "fabric-dep", config, port=port)
+
+    staged = yaml.safe_load((Path(info.extra["base_dir"]) / "agent.yaml").read_text())
+    return info, staged
+
+
+@pytest.fixture
+def platform_base_url(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Pin the platform URL the wired endpoint must be built from."""
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform.test:8080")
+    return "http://platform.test:8080"
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_wires_intake_telemetry_when_config_is_silent(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert staged["telemetry"]["enabled"] is True
+    assert staged["telemetry"]["provider"] == "relay"
+    assert staged["telemetry"]["agent_name"] == "fabric-agent"
+    assert staged["telemetry"]["atif"] == {
+        "enabled": True,
+        "storage": [{"type": "http", "endpoint": _INTAKE_ENDPOINT}],
+    }
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_omits_header_env(tmp_path: Path) -> None:
+    """No sidecar and no env-named credentials: subprocess exports unauthenticated.
+
+    Pinned so that wiring identity here later is a deliberate change rather than
+    a silent one — it only makes sense together with the rest of subprocess mode
+    under platform auth.
+    """
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    assert "header_env" not in staged["telemetry"]["atif"]["storage"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_honors_telemetry_opt_out(tmp_path: Path) -> None:
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_preserves_declared_atif_storage(tmp_path: Path) -> None:
+    """An explicit destination beats an inferred one."""
+    declared = {
+        "atif": {"storage": [{"type": "http", "endpoint": "https://telemetry.example.com/atif"}]},
+    }
+    backend = _backend(tmp_path)
+
+    _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config(declared))
+
+    assert staged["telemetry"] == declared
+
+
+@requires_hermes_adapter
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_does_not_mutate_the_caller_config(tmp_path: Path) -> None:
+    """The mapping passed in is the live AgentDeployment entity the controller re-saves.
+
+    Wiring it in place would persist an inferred endpoint into the stored
+    deployment, which no later run would know to recompute.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    _, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert "telemetry" not in config
+    assert "telemetry" in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_starts_when_adapter_cannot_export_atif(tmp_path: Path) -> None:
+    """An adapter with no Relay ATIF output runs untraced rather than failing.
+
+    Patched at the probe rather than expressed as a config, because "this
+    adapter does not advertise ATIF" is a property of the adapter descriptor,
+    not of anything the agent config can say.
+    """
+    backend = _backend(tmp_path)
+    config = _telemetry_agent_config()
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", return_value=False):
+        info, staged = await _deploy_and_read_staged_config(backend, config)
+
+    assert info.status == "starting"
+    assert "telemetry" not in staged
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_skips_adapter_probe_when_telemetry_is_opted_out(tmp_path: Path) -> None:
+    """The opt-out is answered before the probe resolves a Fabric plan.
+
+    Ordering, not behavior: the staged config is the same either way. Pinned
+    because the wasted plan is invisible from the output -- only the call count
+    shows it.
+    """
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config({"enabled": False}))
+
+    probe.assert_not_called()
+    assert staged["telemetry"] == {"enabled": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("platform_base_url")
+async def test_fabric_deployment_probes_adapter_when_config_is_silent(tmp_path: Path) -> None:
+    """The counterpart: a config that wants wiring does reach the probe."""
+    backend = _backend(tmp_path)
+    probe = MagicMock(return_value=True)
+
+    with patch("nemo_agents_plugin.telemetry.intake_export.supports_intake_atif_export", probe):
+        _, staged = await _deploy_and_read_staged_config(backend, _telemetry_agent_config())
+
+    probe.assert_called_once()
+    assert staged["telemetry"]["atif"]["storage"] == [{"type": "http", "endpoint": _INTAKE_ENDPOINT}]

@@ -14,6 +14,8 @@ from nemo_evaluator_sdk.agent_eval.metrics import (
     AgentPhaseSuccessMetric,
     EvidencePresenceMetric,
     SkillUsedMetric,
+    ToolArgumentMatchesInputMetric,
+    ToolCallCountMetric,
 )
 from nemo_evaluator_sdk.agent_eval.trials import standard_evidence_descriptors
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
@@ -81,6 +83,11 @@ async def test_evidence_presence_metric_scores_over_evidence(tmp_path: Path) -> 
         (AgentPhaseSuccessMetric, "agent_phase_success"),
         (lambda: EvidencePresenceMetric(evidence_name="workspace", require_non_empty=False), "evidence_presence"),
         (lambda: SkillUsedMetric(trace_evidence="atif"), "skill_used"),
+        (lambda: ToolCallCountMetric(tool_name="search", expected_calls=2), "tool_call_count"),
+        (
+            lambda: ToolArgumentMatchesInputMetric(tool_name="search", argument="query", normalize="exact"),
+            "tool_argument_matches_input",
+        ),
     ],
 )
 def test_runner_and_agent_eval_metrics_are_built_in(factory, expected_type: str) -> None:

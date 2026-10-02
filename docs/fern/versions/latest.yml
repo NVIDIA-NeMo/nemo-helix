@@ -27,9 +27,6 @@ navigation:
                 path: ../../get-started/concepts/projects.mdx
               - page: Workspaces
                 path: ../../get-started/concepts/workspaces.mdx
-          - page: Example Agent
-            hidden: true
-            path: ../../get-started/example-agent.mdx
       - section: Models and Inference
         path: ../../run-inference/about.mdx
         contents:
@@ -53,20 +50,15 @@ navigation:
             path: ../../agents/scan-trace-data.mdx
           - section: Optimize Agents
             contents:
-              - page: ETHOS.md
-                path: ../../agents/ethos.mdx
-                slug: ethos
               - page: Run the Agent Optimizer
                 path: ../../agents/optimization.mdx
-              - page: Insight-Driven Optimization
-                path: ../../agents/insight-driven-optimization.mdx
           - page: Plugins and Skills
             path: ../../agents/plugins.mdx
       - section: Evaluate Agents & Models
         slug: evaluate-models
         path: ../../evaluator/index.mdx
         contents:
-          - page: Dataset-Driven vs Task-Driven Evaluation
+          - page: Evaluation Approaches
             slug: dataset-driven-vs-task-driven-evaluation
             path: ../../evaluator/evaluation-approaches.mdx
           - section: Agent Evaluation
@@ -82,6 +74,9 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evaluator/agent-eval/harbor-runner.mdx
+              - page: Run a NeMo Fabric Agent inside Harbor
+                slug: harbor-fabric-agent
+                path: ../../evaluator/agent-eval/harbor-fabric-agent.mdx
               - page: Evaluate a NeMo Gym Environment
                 slug: gym-runner
                 path: ../../evaluator/agent-eval/gym-runner.mdx
@@ -245,6 +240,9 @@ navigation:
               - page: Embedding Customization Job
                 path: ../../customizer/tutorials/embedding-customization-job.mdx
                 slug: embedding-customization-job
+              - page: Train on SPECTER or Triplet JSONL
+                path: ../../customizer/tutorials/embedding-triplet-dataset.mdx
+                slug: embedding-triplet-dataset
               - page: Job Metrics
                 path: ../../customizer/tutorials/metrics.mdx
                 slug: metrics
@@ -265,6 +263,9 @@ navigation:
                 path: ../../data-designer/tutorials/basics.mdx
               - page: Seeding with External Datasets
                 path: ../../data-designer/tutorials/seeding.mdx
+              - page: Generate Retrieval Training Data
+                path: ../../data-designer/tutorials/retrieval-generate.mdx
+                slug: retrieval-generate
           - page: SDK Resources
             path: ../../data-designer/sdk-resources.mdx
           - page: Migrating from Standalone Library
@@ -375,6 +376,8 @@ navigation:
         contents:
           - page: Agents
             path: ../../studio/agents.mdx
+          - page: Anonymizer
+            path: ../../studio/anonymizer.mdx
           - page: Custom Models
             slug: customization
             path: ../../studio/customization.mdx
@@ -386,8 +389,6 @@ navigation:
             path: ../../studio/insights.mdx
           - page: Model Evaluations
             path: ../../studio/model-evaluations.mdx
-          - page: Monitor
-            path: ../../studio/monitor.mdx
           - page: Plugin UIs
             slug: plugins
             path: ../../studio/plugins.mdx
@@ -519,6 +520,15 @@ navigation:
             contents:
               - page: Current Release
                 path: ../../about/release-notes/current-release.mdx
+              - page: v0.6.0
+                slug: release-0-6-0
+                path: ../../about/release-notes/release-0-6-0.mdx
+              - page: v0.5.1
+                slug: release-0-5-1
+                path: ../../about/release-notes/release-0-5-1.mdx
+              - page: v0.5.0
+                slug: release-0-5-0
+                path: ../../about/release-notes/release-0-5-0.mdx
               - page: v0.4.0
                 slug: release-0-4-0
                 path: ../../about/release-notes/release-0-4-0.mdx

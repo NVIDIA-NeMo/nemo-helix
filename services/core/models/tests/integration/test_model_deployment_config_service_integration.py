@@ -4,18 +4,18 @@
 """Integration tests for ModelDeploymentConfig service with in-memory EntityClient."""
 
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
-from nmp.common.api.common import Page
-from nmp.common.entities.client import EntityClient
-from nmp.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
-from nmp.core.models.schemas import (
+from nemo_helix_plugin.client.errors import NotFoundError
+from nhx.common.api.common import Page
+from nhx.common.entities.client import EntityClient
+from nhx.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
     ModelDeploymentConfigModelSpec,
     ModelType,
     UpdateModelDeploymentConfigRequest,
 )
-from nmp.testing import create_test_client
+from nhx.testing import create_test_client
 
 
 @pytest.fixture

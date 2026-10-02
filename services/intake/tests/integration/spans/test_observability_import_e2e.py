@@ -16,8 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[5]
-SCRIPTS = ROOT / "packages/nemo_platform_ext/src/nemo_platform_ext/skills/nemo-intake/scripts"
-FIXTURES = ROOT / "packages/nemo_platform_ext/tests/skills/fixtures/observability"
+SCRIPTS = ROOT / "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-intake/scripts"
+FIXTURES = ROOT / "packages/nemo_helix_ext/tests/skills/fixtures/observability"
 
 SPANS_URL = "/apis/intake/v2/workspaces/default/spans"
 EVALUATORS_URL = "/apis/intake/v2/workspaces/default/evaluator-results"

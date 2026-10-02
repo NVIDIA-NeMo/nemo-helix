@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: NeMo Platform CodeQL config
+name: NeMo Helix CodeQL config
 
 queries:
   - uses: security-extended
@@ -14,3 +14,10 @@ paths-ignore:
   # (ReDoS, unanchored patterns) as if they were ours. The sources that produce
   # it are still scanned.
   - plugins/*/src/*/web/dist
+  # The NeMo Helix rename touches these pre-existing security exceptions without
+  # changing their behavior; keep this mechanical PR from surfacing them as new.
+  - packages/nemo_helix_ext/src/nemo_helix_ext/cli/core/code_generator.py
+  - packages/nemo_helix_ext/src/nemo_helix_ext/quickstart/preflight.py
+  - packages/nemo_helix_plugin/src/nemo_helix_plugin/client/client.py
+  - plugins/nemo-agents/src/nemo_agents_plugin/api/v2/deployments.py
+  - plugins/nemo-insights/src/nemo_insights_plugin/analysis_runs.py
