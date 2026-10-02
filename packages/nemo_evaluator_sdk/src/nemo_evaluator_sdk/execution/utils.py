@@ -27,13 +27,20 @@ def unique_metric_keys(metrics: Sequence[Metric]) -> list[str]:
         Unique metric keys in the same order as the input metrics.
     """
 
+    # A type name ending in ``_<n>`` can equal another type's suffixed key, so bump past collisions.
     seen: dict[str, int] = {}
+    used: set[str] = set()
     keys: list[str] = []
     for metric in metrics:
         base = metric_type_name(metric)
-        seen[base] = seen.get(base, 0) + 1
-        suffix = seen[base]
-        keys.append(base if suffix == 1 else f"{base}_{suffix}")
+        suffix = seen.get(base, 0) + 1
+        key = base if suffix == 1 else f"{base}_{suffix}"
+        while key in used:
+            suffix += 1
+            key = f"{base}_{suffix}"
+        seen[base] = suffix
+        used.add(key)
+        keys.append(key)
     return keys
 
 
