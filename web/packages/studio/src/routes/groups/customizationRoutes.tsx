@@ -18,6 +18,11 @@ const NewCustomizationRoute = lazy(() =>
     default: module.NewCustomizationRoute,
   }))
 );
+const NewCustomizationFormRoute = lazy(() =>
+  import('@studio/routes/NewCustomizationFormRoute/index').then((module) => ({
+    default: module.NewCustomizationFormRoute,
+  }))
+);
 const CustomizationJobListRoute = lazy(() =>
   import('@studio/routes/CustomizationJobListRoute').then((module) => ({
     default: module.CustomizationJobListRoute,
@@ -33,6 +38,11 @@ export const customizationRoutes: RouteObject[] = gateCustomizationRoutes([
   {
     path: ROUTES.workspace.newCustomizationJob,
     element: <NewCustomizationRoute />,
+    errorElement: <RouteErrorPanel title="Fine-tuning" />,
+  },
+  {
+    path: ROUTES.workspace.newCustomizationJobScratch,
+    element: <NewCustomizationFormRoute />,
     errorElement: <RouteErrorPanel title="Fine-tuning" />,
   },
   {
