@@ -104,7 +104,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
     agent_kwargs={
         "fabric_config": fabric_config,
-        "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
+        "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0",
         "fabric_workspace": "/app",
     },
     # Standalone, an uppercase ref names the process env var directly: this reads NVIDIA_API_KEY.
@@ -186,7 +186,7 @@ async def main() -> None:
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent",
         agent_kwargs={
             "fabric_config": fabric_config,  # the mapping from "The agent" above
-            "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+            "fabric_package": "nemo-fabric[deepagents]==0.4.0",
             "fabric_workspace": "/app",  # the task image's working directory
         },
         # Standalone, an uppercase ref names the process env var directly: this reads NVIDIA_API_KEY.
@@ -225,7 +225,7 @@ key travels through `env_secrets` instead. Inspect the persisted agent entry aft
   "import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent",
   "kwargs": {
     "fabric_config": {"metadata": {"name": "hello-world-deepagents"}, "harness": {"...": "..."}, "models": {"...": "..."}},
-    "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+    "fabric_package": "nemo-fabric[deepagents]==0.4.0",
     "fabric_workspace": "/app"
   },
   "env": {"NVIDIA_API_KEY": "${NVIDIA_API_KEY}"}
@@ -253,7 +253,7 @@ Then reference it as `my-workspace/nvidia-api-key`:
     "source": {"import_path": "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent:NemoFabricAgent"},
     "agent_kwargs": {
       "fabric_config": {"metadata": {"name": "hello-world-deepagents"}, "harness": {"...": "..."}, "models": {"...": "..."}},
-      "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+      "fabric_package": "nemo-fabric[deepagents]==0.4.0",
       "fabric_workspace": "/app"
     },
     "env_secrets": {

@@ -25,8 +25,8 @@ harnesses:
       api_key_env: replace-or-remove-credential-env-var
       base_url: replace-or-remove-provider-base-url
       temperature: 0.0
-    settings:
       max_tokens: 512
+    settings:
       reasoning_config:
         effort: none
   deepagents:
