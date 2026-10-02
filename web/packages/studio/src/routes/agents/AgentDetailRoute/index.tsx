@@ -52,7 +52,7 @@ import {
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { getAgentsListRoute } from '@studio/routes/utils';
-import { Dot, GitCommitHorizontal } from 'lucide-react';
+import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 
@@ -199,41 +199,22 @@ export const AgentDetailRoute: FC = () => {
         <PageHeader
           className="shrink-0 p-0"
           slotHeading={
-            <Stack gap="1">
-              <Flex align="baseline" gap="3">
-                <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
-                <StatusBadge status={status} label={statusPillLabel} />
-                {specSource ? (
-                  <Link
-                    to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
-                    className="contents"
-                    aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
-                  >
-                    <Badge kind="solid" color="gray" className="cursor-pointer">
-                      <GitCommitHorizontal size={12} aria-hidden />
-                      {shortRevision(specSource.revision)}
-                    </Badge>
-                  </Link>
-                ) : null}
-              </Flex>
-              <Flex align="center" gap="1">
-                <Text kind="body/regular/sm" className="text-secondary">
-                  {modelNames.join(', ')}
-                </Text>
-                {agent?.description && (
-                  <>
-                    <Dot className="size-2" aria-hidden />
-                    <Text
-                      kind="body/regular/sm"
-                      className="line-clamp-1 text-secondary"
-                      title={agent.description}
-                    >
-                      {agent.description}
-                    </Text>
-                  </>
-                )}
-              </Flex>
-            </Stack>
+            <Flex align="baseline" gap="3">
+              <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
+              <StatusBadge status={status} label={statusPillLabel} />
+              {specSource ? (
+                <Link
+                  to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
+                  className="contents"
+                  aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+                >
+                  <Badge kind="solid" color="gray" className="cursor-pointer">
+                    <GitCommitHorizontal size={12} aria-hidden />
+                    {shortRevision(specSource.revision)}
+                  </Badge>
+                </Link>
+              ) : null}
+            </Flex>
           }
           slotActions={
             <AgentDetailCTAs
