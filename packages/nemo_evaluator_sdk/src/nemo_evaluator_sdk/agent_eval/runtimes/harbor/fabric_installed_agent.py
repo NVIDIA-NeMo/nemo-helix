@@ -15,7 +15,7 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
         agent_import_path="nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.3.0",
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.4.0",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
@@ -29,7 +29,7 @@ yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstall
 prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
 backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
 not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
-at the final ``uv pip install`` with an unsatisfiable resolution -- 0.3.0 publishes macOS arm64 and
+at the final ``uv pip install`` with an unsatisfiable resolution -- 0.4.0 publishes macOS arm64, Windows, and
 manylinux wheels only, and this is not something the agent can work around.
 """
 
@@ -175,7 +175,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
         if not self.fabric.fabric_package:
             raise ValueError(
                 "fabric_package is required: name the Fabric distribution and harness extra to "
-                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.3.0"'
+                'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.4.0"'
             )
 
     @staticmethod
