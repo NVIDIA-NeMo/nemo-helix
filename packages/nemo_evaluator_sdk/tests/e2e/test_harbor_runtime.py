@@ -113,7 +113,7 @@ async def test_sdk_runs_harbor_hello_world_natively(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Path) -> None:
-    """Regression for AALGO-430 — a real Harbor resume with ``agent_dir`` set.
+    """Regression test — a real Harbor resume with ``agent_dir`` set.
 
     This is the case every faked-``Job`` test misses, and the reason the bug went
     unnoticed: the scoped agent import path used to carry a fresh uuid per run, so

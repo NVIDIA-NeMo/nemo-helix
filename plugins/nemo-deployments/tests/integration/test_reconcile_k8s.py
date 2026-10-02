@@ -3,7 +3,7 @@
 
 """Integration test for deployment reconciliation against a real k8s backend.
 
-Requires AIRCORE-757 K8sDeploymentBackend to be registered in BACKEND_CLASSES.
+Requires the K8sDeploymentBackend to be registered in BACKEND_CLASSES.
 
 The puller/server scenario has no PVC mount (unlike ``test_reconcile_docker.py``): kind's
 default ``local-path`` StorageClass uses ``WaitForFirstConsumer`` binding, so an unconsumed
@@ -40,7 +40,7 @@ from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconcile
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
 pytestmark = [
-    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend (AIRCORE-757)"),
+    pytest.mark.skipif("k8s" not in BACKEND_CLASSES, reason="Requires K8sDeploymentBackend"),
     skip_without_kubeconfig,
 ]
 

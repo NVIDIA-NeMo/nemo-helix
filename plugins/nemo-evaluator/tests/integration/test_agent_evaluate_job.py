@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for the agent-evaluation job (AALGO-297).
+"""Integration tests for the agent-evaluation job.
 
 These exercise the job against *real* execution seams, across the dimensions that
 matter for this work:
@@ -13,7 +13,7 @@ matter for this work:
 * execution mode — in-process sync job execution and service-side ``submit`` on both
   the subprocess and docker backends, against the session ``subprocess_platform`` /
   ``docker_platform`` fixtures in ``conftest.py``. (Docker submit is xfail today — the
-  cpu-tasks image predates this work; tracked in AALGO-301.)
+  cpu-tasks image predates this work; tracked separately.)
 
 Marked ``integration`` (auto-applied to ``/integration/`` paths). Model/Agent tests
 need only the running platform's IGW.
@@ -678,7 +678,7 @@ def test_submit_harbor_target_to_docker_backend_fails_fast(docker_platform: str)
     "this work: the published image predates the nemo_evaluator.tasks.agent_evaluate entrypoint "
     "(container exits with ModuleNotFoundError). This submits an offline trials spec (no online "
     "generation, no online target, no IGW), so the stale image is the only remaining failure cause — the "
-    "xfail flips the moment the image ships the entrypoint. Tracked in AALGO-301.",
+    "xfail flips the moment the image ships the entrypoint. Tracked separately.",
     strict=False,
 )
 def test_submit_to_docker_backend_runs_agent_eval(docker_platform: str) -> None:

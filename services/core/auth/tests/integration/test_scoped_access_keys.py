@@ -429,7 +429,7 @@ def test_platform_admin_creates_service_bound_key_with_independent_identity(tmp_
         assert listed.status_code == 200, listed.text
         assert listed.json()["data"][0]["principal"] == "service-account:otel-collector"
 
-        # Service-bound keys are platform-owned, not creator-owned (AIRCORE-986): a second
+        # Service-bound keys are platform-owned, not creator-owned: a second
         # HelixAdmin who did not create this key must still see it in their own listing,
         # not just be able to look it up by jti.
         other_admin_headers = {

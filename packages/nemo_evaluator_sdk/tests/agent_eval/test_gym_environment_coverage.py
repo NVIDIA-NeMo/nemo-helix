@@ -37,7 +37,7 @@ Prerequisites, in the order the skips report them:
 A model endpoint is *not* a prerequisite: the stub supplies one. ``NEMO_GYM_POLICY_BASE_URL`` is an
 override for running against a real model, not a gate.
 
-Tracked by AALGO-485; the CI and GPU-runner story is AALGO-494.
+Coverage and the CI/GPU-runner story are tracked separately.
 """
 
 from __future__ import annotations
@@ -510,7 +510,7 @@ def test_gym_environment_config_validates(case: GymEnvironmentCase, tmp_path: Pa
     # Only the environment itself is required. Docker and GPU are *execution* prerequisites, and
     # gating on them here would throw away the coverage this test exists for — `wmt_translation`'s
     # config would go unvalidated on every machine without an NVIDIA card, which is all of them
-    # until AALGO-494 lands the GPU runner.
+    # until the GPU runner lands.
     _environment_dir(gym, case)
 
     proc = subprocess.run(

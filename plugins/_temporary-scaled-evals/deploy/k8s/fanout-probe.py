@@ -114,7 +114,7 @@ def main() -> int:
         time.sleep(args.interval)
 
     # Submissions per minute over the window it took to submit them all, which
-    # is the number AALGO-656 moves. One-per-pass at a 10s interval is ~6/min.
+    # is the number this probe measures. One-per-pass at a 10s interval is ~6/min.
     submit_window = next((t for t, n in ramp if n >= args.expect_members), None)
     per_min = round(args.expect_members / (submit_window / 60), 1) if submit_window else None
 

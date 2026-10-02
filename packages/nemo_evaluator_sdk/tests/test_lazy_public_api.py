@@ -7,8 +7,8 @@ Two barrels re-export lazily, and importing any submodule runs both in turn, so 
 convenience ``from … import …`` added at either module scope silently re-drags the whole
 backend/benchmark/metric stack into every consumer that only wanted ``agent_eval``:
 
-* ``nemo_evaluator_sdk/__init__.py`` (AALGO-429) — the execution/backend and metric stack.
-* ``nemo_evaluator_sdk/values/__init__.py`` (AALGO-311) — pyarrow, numpy, jinja2 and jsonschema,
+* ``nemo_evaluator_sdk/__init__.py`` — the execution/backend and metric stack.
+* ``nemo_evaluator_sdk/values/__init__.py`` — pyarrow, numpy, jinja2 and jsonschema,
   together with the deferred pyarrow import in ``values/results.py``.
 
 Both are covered here in their source form and in the ``nemo_helix.beta.evaluator`` mirror the

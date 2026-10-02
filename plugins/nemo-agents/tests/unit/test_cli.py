@@ -258,7 +258,7 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
 def test_create_resolves_default_model_placeholder(tmp_path, placeholder: str) -> None:
     """`nemo agents create` resolves NEMO_DEFAULT_MODEL before POST.
 
-    Regression for AIRCORE-613: the agents service has no user context at
+    Regression test: the agents service has no user context at
     deploy time, so an unresolved literal would be persisted on the Agent.
     Covers both braced ``${VAR}`` and bare ``$VAR`` forms supported by
     ``expand_env_vars``.
@@ -717,7 +717,7 @@ def test_create_rejects_unsupported_config_format(tmp_path) -> None:
 @pytest.mark.parametrize("placeholder", ["${NEMO_DEFAULT_MODEL}", "$NEMO_DEFAULT_MODEL"])
 def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) -> None:
     """If no default model is selected, refuse to POST a config with an unresolved
-    NEMO_DEFAULT_MODEL placeholder (braced or bare). Regression for AIRCORE-613."""
+    NEMO_DEFAULT_MODEL placeholder (braced or bare). Regression test."""
     config = tmp_path / "agent.yml"
     config.write_text(f"llms:\n  llm:\n    _type: openai\n    model_name: {placeholder}\n")
 
@@ -876,7 +876,7 @@ def test_local_invoke_fabric_config_exits_nonzero_on_failed_result(tmp_path: Pat
 def test_platform_invoke_writes_clean_json_to_stdout() -> None:
     """`nemo agents invoke --agent` returns JSON on stdout with no spinner bleed.
 
-    AIRCORE-574: the spinner must render only on stderr so consumers can pipe
+    The spinner must render only on stderr so consumers can pipe
     stdout to `jq`. CliRunner's non-TTY stderr auto-disables the spinner, so
     here we just verify the response JSON is intact on stdout.
     """

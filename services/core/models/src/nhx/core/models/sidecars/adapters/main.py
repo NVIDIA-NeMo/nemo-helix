@@ -154,8 +154,8 @@ class AdaptersController(HeartbeatMixin, Controller):
 
     def _update_prompt_tuned_models(self, dirs_to_keep: set[str]):
         # Prompt-tuned variants are intentionally NOT migrated to the
-        # ``{adapter_ws}--{adapter_name}`` encoding used by LoRA adapters
-        # (AALGO-129): they remain single-workspace for now and continue to
+        # ``{adapter_ws}--{adapter_name}`` encoding used by LoRA adapters:
+        # they remain single-workspace for now and continue to
         # use the bare model_entity.name as their on-disk directory.
         logger.info(f"Fetching prompt data for {self.workspace}/{self.model_name}")
         model_entities: list[ModelEntity] = list(

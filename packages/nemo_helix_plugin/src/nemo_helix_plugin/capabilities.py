@@ -7,7 +7,7 @@ Runtime (``platform.runtime``) describes *where the platform process runs*.
 Capability probes answer *which backends can run jobs/deployments right now*.
 
 This module owns the Docker probe used by jobs, deployments, setup, and
-customization. GPU/Kubernetes probes are deferred to AIRCORE-972.
+customization. GPU/Kubernetes probes are deferred follow-up work.
 
 Caching
 -------

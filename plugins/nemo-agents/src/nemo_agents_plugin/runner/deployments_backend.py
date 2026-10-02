@@ -593,7 +593,7 @@ def build_deployment_config(
     init_containers: list[Container] = []
 
     # K8s only: init container stages workspace plugin wheels into a shared volume.
-    # Docker backend rejects init_containers in v1. Full wheel-source contract is AIRCORE-863.
+    # Docker backend rejects init_containers in v1. The full wheel-source contract is a follow-up.
     # Constructors use camelCase aliases (ty + pydantic alias validation).
     if mode == "k8s" and plugin_wheels_init_image:
         volume_mounts.append(VolumeMount(name=_PLUGIN_WHEELS_VOLUME, mountPath=_PLUGIN_WHEELS_MOUNT, readOnly=True))
@@ -603,7 +603,7 @@ def build_deployment_config(
                 image=plugin_wheels_init_image,
                 command=["sh", "-c"],
                 args=[
-                    f"echo 'plugin-wheels init stub; hardened in AIRCORE-863' "
+                    f"echo 'plugin-wheels init stub' "
                     f"&& mkdir -p {_PLUGIN_WHEELS_MOUNT} && touch {_PLUGIN_WHEELS_MOUNT}/.ready"
                 ],
             ).model_copy(

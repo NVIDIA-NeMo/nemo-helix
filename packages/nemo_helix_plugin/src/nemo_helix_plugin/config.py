@@ -715,11 +715,10 @@ class NemoHelixConfig(ServiceConfig):
             if not validate_docker_available():
                 # Deprecated convenience: Runtime is topology, not capability.
                 # Capability probes (nemo_helix_plugin.capabilities) own Docker
-                # availability. Soft-downgrade remains for one release; AIRCORE-972
-                # removes or shrinks Runtime.NONE as a Docker-absence signal.
+                # availability. The soft-downgrade remains for one release before
+                # Runtime.NONE is removed or shrunk as a Docker-absence signal.
                 logger.warning(
-                    "Docker is not available, setting runtime to NONE "
-                    "(deprecated: prefer capability probes; see AIRCORE-972)"
+                    "Docker is not available, setting runtime to NONE (deprecated: prefer capability probes)"
                 )
                 self.runtime = Runtime.NONE
         return self

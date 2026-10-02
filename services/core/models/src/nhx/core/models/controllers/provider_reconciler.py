@@ -1175,7 +1175,7 @@ class ModelProviderReconciler:
                 adapter_ws, sep, adapter_name = adapter_segment.partition("--")
                 if sep != "--":
                     # Legacy id: no ``--``. Anchor on the base model's workspace, not the
-                    # provider's. Pre-AALGO-129 sidecars nested adapters under the model
+                    # provider's. Legacy sidecars nested adapters under the model
                     # entity (so they shared the model's workspace), and the new sidecar's
                     # ``_resolve_adapter_workspace`` fallback also collapses onto the
                     # base model's workspace when the SDK doesn't expose

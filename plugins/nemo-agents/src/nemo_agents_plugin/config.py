@@ -99,7 +99,7 @@ class DeploymentsRunnerConfig(BaseModel):
         default=None,
         description=(
             "Optional init-container image that stages workspace plugin wheels (k8s only). "
-            "When unset, init_containers are omitted; AIRCORE-863 hardens the full contract."
+            "When unset, init_containers are omitted; the full wheel-source contract is a follow-up."
         ),
     )
     config_mount_path: str = Field(
