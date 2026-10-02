@@ -6,7 +6,7 @@
     "performed_at": "2026-08-18T04:00:00Z",
     "platform": "linux/amd64",
     "python_version": "3.12.14",
-    "checks": ["exact-package-install", "adapter-imports", "harbor-run-help"],
+    "checks": ["exact-package-install", "adapter-imports", "opensandbox-import", "harbor-run-help"],
     "e2e_status": "pending"
   },
   "sandbox_k8s": {
@@ -150,6 +150,7 @@
     "0.20.0": {
       "selectable": true,
       "qualification": "supported",
+      "extras": ["opensandbox"],
       "git_tag": "v0.20.0",
       "git_tag_object_sha": "f75477f2ad0b04fad199b0cb80689cc23a06c72d",
       "git_commit_sha": "459ff6ec99417589b7f679d14ddf3b3f0ae4f1dc",
