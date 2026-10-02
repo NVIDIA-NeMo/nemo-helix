@@ -15,7 +15,7 @@ dependencies = [
   "nemo-helix",
   "nemo-helix-plugin",
   "nemo-relay>=0.9.3,<0.10",
-  "nooa>=0.0.9",
+  "nooa>=0.0.10,<0.0.11",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",
   "pydantic>=2.12.0",

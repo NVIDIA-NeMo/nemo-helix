@@ -10,6 +10,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -81,6 +82,28 @@ def _runtime_context(telemetry: contract.RuntimeTelemetryContext | None = None) 
 
 def _request(context: dict[str, Any] | None = None) -> contract.AgentRunRequest:
     return contract.AgentRunRequest(input="Analyze telemetry.", context=context or {})
+
+
+@pytest.fixture
+def isolated_relay_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    config_home = tmp_path / "xdg"
+    config_home.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.chdir(tmp_path)
+    return config_home
+
+
+def _clean_activation() -> SimpleNamespace:
+    return SimpleNamespace(report={"config": {"diagnostics": []}})
+
+
+def _minimal_relay_telemetry(tmp_path: Path) -> contract.RuntimeTelemetryContext:
+    config_path = tmp_path / "relay-minimal.json"
+    config_path.write_text(
+        json.dumps({"relay": {"config": {"version": 1, "components": [{"kind": "observability", "enabled": True}]}}}),
+        encoding="utf-8",
+    )
+    return contract.RuntimeTelemetryContext(relay_enabled=True, config_path=str(config_path), env={})
 
 
 async def test_fabric_adapter_returns_unpersisted_analyst_result(monkeypatch) -> None:
@@ -221,7 +244,7 @@ async def test_fabric_adapter_logs_the_whole_cause_chain(monkeypatch, caplog) ->
 
 
 async def test_relay_activates_fabrics_config_and_scopes_the_agent(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
 ) -> None:
     """Fabric resolves the whole export; the adapter activates it and names the scope.
 
@@ -271,12 +294,12 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         return AnalystResult(summary="done"), object()
 
     @asynccontextmanager
-    async def fake_activate(config: Any) -> AsyncIterator[None]:
+    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
         seen["plugin_config"] = config
         # Relay resolves header_env against the environment while exporting,
         # so the variables have to be set for the duration of the run.
         seen["env_during_run"] = os.environ.get("FABRIC_RELAY_CONFIG_PATH")
-        yield
+        yield _clean_activation()
 
     monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fake_run_analyst_change_set)
     monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
@@ -299,6 +322,76 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
     # The runtime serves many invocations; a leftover config path would make
     # the next one export against a stale, possibly deleted, config.
     assert "FABRIC_RELAY_CONFIG_PATH" not in os.environ
+
+
+async def test_relay_refuses_an_ambient_user_plugin_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
+) -> None:
+    (isolated_relay_config / "nemo-relay").mkdir()
+    (isolated_relay_config / "nemo-relay" / "plugins.toml").write_text("version = 1\n", encoding="utf-8")
+    activated: list[Any] = []
+
+    @asynccontextmanager
+    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
+        activated.append(config)
+        yield _clean_activation()
+
+    async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
+        raise AssertionError("analyst ran")
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(
+        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+    )
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert "ambient user or project configuration" in result.output["response"]
+    assert activated == []
+
+
+async def test_relay_refuses_plugin_config_inherited_during_activation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_relay_config: Path
+) -> None:
+    inherited = SimpleNamespace(
+        report={
+            "config": {
+                "diagnostics": [
+                    {
+                        "code": "plugin.configuration_inherited",
+                        "level": "warning",
+                        "message": "inherited plugin configuration from discovered file: /home/user/plugins.toml",
+                    }
+                ]
+            }
+        }
+    )
+
+    @asynccontextmanager
+    async def fake_activate(config: Any) -> AsyncIterator[SimpleNamespace]:
+        yield inherited
+
+    async def fail_if_called(**kwargs: Any) -> tuple[AnalystResult, object]:
+        raise AssertionError("analyst ran")
+
+    monkeypatch.setattr(fabric_adapter, "run_analyst_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.InsightsAnalystRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(
+        _request({"job_workspace": "w"}), _runtime_context(_minimal_relay_telemetry(tmp_path))
+    )
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert "/home/user/plugins.toml" in result.output["response"]
 
 
 async def test_without_relay_the_agent_runs_unscoped() -> None:

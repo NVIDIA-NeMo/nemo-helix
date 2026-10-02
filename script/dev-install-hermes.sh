@@ -10,7 +10,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM_PY="${REPO_ROOT}/.venv/bin/python"
 HERMES_VENV="${REPO_ROOT}/.venv-hermes"
 HERMES_PY="${HERMES_VENV}/bin/python"
-HERMES_COMMIT="29112bef099274229cadff79cdff7bf7b99c4b77" # Hermes Agent 0.21.0
+# Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
+HERMES_COMMIT="dccb84b92401234db294667ec203d3ac3dc1b87f"
 HERMES_CHECKOUT="${HERMES_VENV}/src/hermes-agent"
 
 if [[ ! -x "${PLATFORM_PY}" ]]; then
@@ -29,8 +30,12 @@ if [[ -z "${fabric_version}" ]]; then
   exit 1
 fi
 
+if [[ -x "${HERMES_PY}" ]] && ! "${HERMES_PY}" -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 14))'; then
+  echo "${HERMES_VENV} was not created with Python 3.14. Remove it and rerun this script." >&2
+  exit 1
+fi
 if [[ ! -x "${HERMES_PY}" ]]; then
-  uv --no-config venv --python 3.12 "${HERMES_VENV}"
+  uv --no-config venv --python 3.14 "${HERMES_VENV}"
 fi
 
 if [[ -e "${HERMES_CHECKOUT}" && ! -d "${HERMES_CHECKOUT}/.git" ]]; then
@@ -58,6 +63,6 @@ uv --no-config pip install --prerelease=allow --python "${HERMES_PY}" \
   --editable "${HERMES_CHECKOUT}"
 uv --no-config pip check --python "${HERMES_PY}"
 
-echo "Hermes Agent 0.21.0 installed in ${HERMES_VENV}."
+echo "Hermes Agent ${HERMES_COMMIT:0:10} installed in ${HERMES_VENV}."
 echo "Set this before starting NeMo Helix:"
 echo "export ADAPTER_PYTHON=\"${HERMES_PY}\""
