@@ -678,6 +678,21 @@ def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
         HarborRunnerTarget(agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}})
 
 
+def test_model_target_validation_error_does_not_echo_rejected_auth_header() -> None:
+    """The target wrapper must preserve credential redaction when its nested Model rejects auth."""
+    with pytest.raises(ValidationError, match="authentication headers") as excinfo:
+        ModelTarget.model_validate(
+            {
+                "model": {
+                    "url": "http://model.test",
+                    "name": "test",
+                    "default_headers": {"Authorization": "LEAKME"},
+                }
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
 def test_gym_target_validation_error_does_not_echo_rejected_secret() -> None:
     """Direct target validation must not print a credential rejected as an environment collision."""
     with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
