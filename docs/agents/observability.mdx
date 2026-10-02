@@ -8,7 +8,7 @@ description: "Ingest, store, and query agent telemetry with NeMo Intake, includi
 
 <a id="agents-observability"></a>
 
-Observability on NeMo Platform is provided by **NeMo Intake**, the trace ingestion and query service
+Observability on NeMo Helix is provided by **NeMo Intake**, the trace ingestion and query service
 for agent telemetry, and optionally by [NeMo Studio](/documentation/studio), the web user interface
 (UI) for browsing
 that telemetry. Observability helps humans and agents understand what happened in an agent system:
@@ -26,13 +26,13 @@ diagnose failures from traces, in a production system or in offline evaluation f
 ### Requirements
 
 - A reachable ClickHouse database.
-- A NeMo Platform environment with the `intake` service running.
+- A NeMo Helix environment with the `intake` service running.
 - A telemetry source, such as an OpenTelemetry or OpenInference exporter, NeMo Agent Toolkit (NAT),
   NeMo Flow, NeMo Evaluator runs, captured OpenAI-compatible chat-completion payloads, or Agent
   Trajectory Interchange Format (ATIF) trajectories.
 - Optional: [NeMo Studio](/documentation/studio) for the UI review flow.
 
-You do not need to deploy your agents on NeMo Platform. To start, run the platform, post one
+You do not need to deploy your agents on NeMo Helix. To start, run the platform, post one
 representative interaction, and confirm that it appears.
 
 ## How It Works
@@ -95,7 +95,7 @@ error. A practical test: the trace can answer _where did the system go wrong, an
 
 ### Setup
 
-The examples assume a running NeMo Platform reachable at `$NMP_BASE_URL`. Point at whatever you have,
+The examples assume a running NeMo Helix reachable at `$NMP_BASE_URL`. Point at whatever you have,
 whether a deployed platform or a local one from `nemo setup` or `nemo quickstart up`:
 
 ```bash

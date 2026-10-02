@@ -24,7 +24,7 @@ const VALUES = resolve(repoRoot, "k8s", "helm", "values.yaml");
 const OUTPUT = resolve(repoRoot, "docs", "helm", "index.mdx");
 
 const FRONTMATTER = `---
-title: "NeMo Platform Helm Chart"
+title: "NeMo Helix Helm Chart"
 description: ""
 ---
 `;
@@ -38,7 +38,7 @@ const DEPLOYMENT_LINK =
 const DEPLOYMENT_LINK_REPLACEMENT =
   "For deployment guide, see " +
   "[Kubernetes Deployment](/documentation/kubernetes-deployment/setup) " +
-  "in the NeMo Platform documentation.";
+  "in the NeMo Helix documentation.";
 
 const EXAMPLES_OVERLAY_LINK = /\[examples\/opensandbox\]\(examples\/opensandbox\)/;
 const EXAMPLES_OVERLAY_REPLACEMENT =
@@ -104,7 +104,7 @@ export function buildHelmReferenceMdx(readme, valuesYaml) {
     extractIntro(readme) +
     "\n\n" +
     "## Values\n\n" +
-    "The following is the complete `values.yaml` for the NeMo Platform Helm Chart.\n" +
+    "The following is the complete `values.yaml` for the NeMo Helix Helm Chart.\n" +
     "All configuration options are documented inline with comments.\n\n" +
     "```yaml wordWrap\n" +
     valuesYaml.trimEnd() +

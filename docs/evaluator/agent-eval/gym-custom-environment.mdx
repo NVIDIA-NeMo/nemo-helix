@@ -6,13 +6,13 @@ title: "Run a Custom NeMo Gym Environment"
 description: "Package a custom NeMo Gym environment as a FileSet and run it as a sandboxed agent-evaluate job."
 ---
 
-A custom Gym environment runs from a NeMo Platform FileSet rather than from the components bundled
+A custom Gym environment runs from a NeMo Helix FileSet rather than from the components bundled
 in the Gym task image. Evaluator stages the FileSet onto job storage, mounts it read-only in an
 OpenSandbox Gym host, and returns the rollouts through the normal agent-evaluation result bundle.
 
 ## Prerequisites
 
-- A running NeMo Platform with the Evaluator plugin.
+- A running NeMo Helix with the Evaluator plugin.
 - An OpenSandbox-capable Kubernetes deployment configured for sandboxed Gym. See
   [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration).
 - A taskset built from Gym rows as described in
