@@ -11,6 +11,22 @@ const SEMVER_PATTERN = new RegExp(
     "(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$",
 );
 
+function resolveNightlyBaseVersion(sourceBranch, tags) {
+  const [major, minor] = sourceBranch
+    .slice("release/".length)
+    .split(".")
+    .map(Number);
+  let nextPatch = 0;
+  for (const { name } of tags) {
+    if (!SEMVER_CORE_PATTERN.test(name)) continue;
+    const [tagMajor, tagMinor, patch] = name.split(".").map(Number);
+    if (tagMajor === major && tagMinor === minor) {
+      nextPatch = Math.max(nextPatch, patch + 1);
+    }
+  }
+  return `${major}.${minor}.${nextPatch}`;
+}
+
 function selectArtifacts(value, allowedArtifacts, label, inputName) {
   if (!value.trim()) {
     return [];
@@ -75,7 +91,10 @@ async function resolveReleasePlan({
         "A pinned nightly source must be an exact 40-character SHA.",
       );
     }
-    if (!sourceSha && dryRun) {
+    if (
+      !sourceSha &&
+      (dryRun || /^refs\/heads\/release\/\d+\.\d+$/.test(context.ref ?? ""))
+    ) {
       sourceSha = context.sha;
     } else if (!sourceSha) {
       sourceSha = await getCommit(context.payload.repository.default_branch);
@@ -165,4 +184,4 @@ async function resolveReleasePlan({
   };
 }
 
-module.exports = { resolveReleasePlan };
+module.exports = { resolveReleasePlan, resolveNightlyBaseVersion };
