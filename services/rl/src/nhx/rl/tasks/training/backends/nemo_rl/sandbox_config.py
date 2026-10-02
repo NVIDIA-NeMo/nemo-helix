@@ -24,6 +24,8 @@ DEFAULT_ROLLOUT_CHUNK_SIZE = 8
 #: NeMo-RL's ``DEFAULT_ROLLOUT_MAX_IN_FLIGHT``. Concurrent POSTs; effective in-flight
 #: rollouts are ``rollout_chunk_size * rollout_max_in_flight``.
 DEFAULT_ROLLOUT_MAX_IN_FLIGHT = 8
+#: NeMo-RL's ``DEFAULT_HOST_READY_TIMEOUT_S`` (``environments/sandbox/host/models.py``).
+DEFAULT_HOST_READY_TIMEOUT_S = 15 * 60
 
 
 class SandboxNetworkPolicy(BaseModel):

@@ -155,6 +155,27 @@ The job's own `startup_timeout_s` and `collection_timeout_s` apply to sandboxed 
 - `collection_timeout_s: null` (the default) sets no collection deadline. The Gym host still stops
   when its sandbox lifetime ends, four hours after creation.
 
+Three more timeouts bound the sandbox creation itself. They must agree, because the OpenSandbox
+server holds the create request open until the sandbox pod is Running:
+
+| Timeout | Where it is set | Value |
+| --- | --- | --- |
+| Host ready wait | Fixed for Evaluator jobs | 900s |
+| OpenSandbox SDK request timeout | `sandbox_host_provider_options.connection.request_timeout_s` | Defaults to the host ready wait |
+| Server create wait | OpenSandbox server `sandbox_create_timeout_seconds` | 900s in the example server values |
+
+The SDK request timeout must be at least the server create wait. When it is shorter, a node that
+still has to pull the `nhx-gym-host` image fails the job with `Request timed out` while the server
+is still creating the sandbox. Set it only when the server create wait is longer than the default:
+
+```yaml
+platformConfig:
+  evaluator:
+    sandbox_host_provider_options:
+      connection:
+        request_timeout_s: 1200
+```
+
 ## Local Docker provider
 
 Set `sandbox_host_provider: docker` only when debugging the runtime contract on a local deployment.

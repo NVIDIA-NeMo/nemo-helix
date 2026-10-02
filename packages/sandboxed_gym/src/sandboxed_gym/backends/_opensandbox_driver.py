@@ -194,14 +194,25 @@ class OpenSandboxDriver:
         # Kept off `SandboxHandle`, which mirrors NeMo-Gym's type field for field.
         self._workdirs: dict[str, str] = {}
 
+    def _create_connection_config(self, spec: SandboxSpec) -> Any:
+        """The create POST stays open until the pod is Running, so its timeout must cover the ready wait."""
+        if self._connection.get("request_timeout_s") is not None or spec.ready_timeout_s is None:
+            return self._connection_config
+        default_request_timeout_s = self._connection_config.request_timeout.total_seconds()
+        return connection_config(
+            {**self._connection, "request_timeout_s": max(default_request_timeout_s, spec.ready_timeout_s)}
+        )
+
     async def create(self, spec: SandboxSpec) -> SandboxHandle:
         from opensandbox import Sandbox
+        from opensandbox.exceptions import SandboxTimeoutException
 
         if spec.image is None:
             raise EpisodeBackendError("an episode image is required")
 
         create_attempt_id = uuid4().hex
         metadata = {**spec.metadata, _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+        create_connection_config = self._create_connection_config(spec)
         try:
             sandbox = await Sandbox.create(
                 spec.image,
@@ -217,13 +228,13 @@ class OpenSandboxDriver:
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
-                connection_config=self._connection_config,
+                connection_config=create_connection_config,
             )
             sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
             if spec.workdir:
                 self._workdirs[sandbox_id] = spec.workdir
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
-        except BaseException:
+        except BaseException as exc:
             try:
                 removed = await self.destroy_sandboxes_matching(
                     {_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
@@ -237,6 +248,13 @@ class OpenSandboxDriver:
             except BaseException:
                 # Preserve the create failure: it is the actionable cause.
                 LOGGER.exception("failed to reconcile sandbox create attempt %s", create_attempt_id)
+            if isinstance(exc, SandboxTimeoutException):
+                request_timeout_s = create_connection_config.request_timeout.total_seconds()
+                raise EpisodeBackendError(
+                    f"OpenSandbox did not answer the create request within the SDK request timeout of "
+                    f"{request_timeout_s:g}s; the server may still have been creating the sandbox (image pull, VM "
+                    f"boot). Set connection.request_timeout_s to at least the server's sandbox_create_timeout_seconds."
+                ) from exc
             raise
 
     def _sandbox(self, handle: SandboxHandle) -> Sandbox:

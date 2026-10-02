@@ -26,7 +26,7 @@ from sandboxed_gym.backends._opensandbox_driver import (
     _resource_limits,
     _resource_requests,
 )
-from sandboxed_gym.backends.base import UnsupportedEpisodeOperationError
+from sandboxed_gym.backends.base import EpisodeBackendError, UnsupportedEpisodeOperationError
 from sandboxed_gym.sandbox_types import SandboxResources, SandboxSpec, SandboxStatus
 
 requires_opensandbox = pytest.mark.skipif(
@@ -284,3 +284,76 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
     assert handle.sandbox_id == "sandbox-1"
     assert captured["resource"] == {"cpu": "4", "memory": "12Gi"}
     assert captured["resource_requests"] == {"cpu": "500m"}
+
+
+def _create_capturing_connection_config(captured: dict[str, object]):
+    async def create(image: str, **kwargs: object) -> object:
+        from types import SimpleNamespace
+
+        captured["connection_config"] = kwargs["connection_config"]
+        return SimpleNamespace(sandbox_id="sb-1")
+
+    return staticmethod(create)
+
+
+@requires_opensandbox
+async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The server holds the create POST until the pod is Running.
+
+    The SDK's own per-request default is 30s, so with ``ready_timeout_s`` above that a cold node's
+    image pull is cut off client-side and the sandbox it just created is destroyed.
+    """
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+
+    await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 900
+
+
+@requires_opensandbox
+async def test_a_short_ready_wait_does_not_lower_the_sdk_request_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+
+    await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=5))
+
+    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 30
+
+
+@requires_opensandbox
+async def test_an_operator_request_timeout_is_used_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+
+    driver = OpenSandboxDriver(connection={"request_timeout_s": 120})
+    await driver.create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 120
+
+
+@requires_opensandbox
+async def test_a_create_cut_off_by_the_sdk_request_timeout_names_the_timeout_and_the_knob(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The SDK raises ``Request timed out:`` with no detail, which reads as a dead server."""
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    SandboxTimeoutException = getattr(importlib.import_module("opensandbox.exceptions"), "SandboxTimeoutException")
+
+    async def time_out(image: str, **kwargs: object) -> object:
+        raise SandboxTimeoutException("Request timed out:")
+
+    async def no_orphans(metadata: Mapping[str, str]) -> tuple[str, ...]:
+        return ()
+
+    monkeypatch.setattr(Sandbox, "create", staticmethod(time_out))
+    driver = OpenSandboxDriver(connection={"request_timeout_s": 30})
+    monkeypatch.setattr(driver, "destroy_sandboxes_matching", no_orphans)
+
+    with pytest.raises(EpisodeBackendError, match=r"request timeout of 30s.*connection\.request_timeout_s") as info:
+        await driver.create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    assert isinstance(info.value.__cause__, SandboxTimeoutException)
