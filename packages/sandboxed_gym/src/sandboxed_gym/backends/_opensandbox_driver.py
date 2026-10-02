@@ -142,6 +142,11 @@ def _joined_output(messages: Any) -> str | None:
     return joined or None
 
 
+#: Added to ``ready_timeout_s`` for the create request. The server answers only once the pod is
+#: Running, so a pod that makes it just inside the ready wait still needs the response to arrive.
+CREATE_REQUEST_HEADROOM_S = 30.0
+
+
 def connection_config(connection: Mapping[str, Any] | None) -> Any:
     """Build an SDK ``ConnectionConfig`` from this package's own connection mapping.
 
@@ -198,10 +203,8 @@ class OpenSandboxDriver:
         """The create POST stays open until the pod is Running, so its timeout must cover the ready wait."""
         if self._connection.get("request_timeout_s") is not None or spec.ready_timeout_s is None:
             return self._connection_config
-        default_request_timeout_s = self._connection_config.request_timeout.total_seconds()
-        return connection_config(
-            {**self._connection, "request_timeout_s": max(default_request_timeout_s, spec.ready_timeout_s)}
-        )
+        request_timeout_s = spec.ready_timeout_s + CREATE_REQUEST_HEADROOM_S
+        return connection_config({**self._connection, "request_timeout_s": request_timeout_s})
 
     async def create(self, spec: SandboxSpec) -> SandboxHandle:
         from opensandbox import Sandbox

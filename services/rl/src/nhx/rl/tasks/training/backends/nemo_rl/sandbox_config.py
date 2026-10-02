@@ -26,6 +26,9 @@ DEFAULT_ROLLOUT_CHUNK_SIZE = 8
 DEFAULT_ROLLOUT_MAX_IN_FLIGHT = 8
 #: NeMo-RL's ``DEFAULT_HOST_READY_TIMEOUT_S`` (``environments/sandbox/host/models.py``).
 DEFAULT_HOST_READY_TIMEOUT_S = 15 * 60
+#: SDK request timeout for the sandbox create call: the server answers only once the pod is Running,
+#: so the request has to outlast the ready wait by enough for the response to arrive.
+SANDBOX_CREATE_REQUEST_TIMEOUT_S = DEFAULT_HOST_READY_TIMEOUT_S + 30
 
 
 class SandboxNetworkPolicy(BaseModel):

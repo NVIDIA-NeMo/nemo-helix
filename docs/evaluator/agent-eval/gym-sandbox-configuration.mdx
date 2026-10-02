@@ -161,12 +161,14 @@ server holds the create request open until the sandbox pod is Running:
 | Timeout | Where it is set | Value |
 | --- | --- | --- |
 | Host ready wait | Fixed for Evaluator jobs | 900s |
-| OpenSandbox SDK request timeout | `sandbox_host_provider_options.connection.request_timeout_s` | Defaults to the host ready wait |
+| OpenSandbox SDK request timeout | `sandbox_host_provider_options.connection.request_timeout_s` | Defaults to the host ready wait plus 30s |
 | Server create wait | OpenSandbox server `sandbox_create_timeout_seconds` | 900s in the example server values |
 
-The SDK request timeout must be at least the server create wait. When it is shorter, a node that
-still has to pull the `nhx-gym-host` image fails the job with `Request timed out` while the server
-is still creating the sandbox. Set it only when the server create wait is longer than the default:
+The SDK request timeout must be longer than the server create wait. When it is shorter, a node that
+still has to pull the `nhx-gym-host` image fails the job with
+`OpenSandbox did not answer the create request within the SDK request timeout`, caused by the SDK's
+`Request timed out`, while the server is still creating the sandbox. Set it only when the server
+create wait is longer than the default:
 
 ```yaml
 platformConfig:

@@ -25,9 +25,9 @@ from nhx.rl.app.jobs.training.schemas import (
 from nhx.rl.entities.values import FinetuningType, TrainingType
 from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config
 from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
-    DEFAULT_HOST_READY_TIMEOUT_S,
     DEFAULT_ROLLOUT_CHUNK_SIZE,
     DEFAULT_ROLLOUT_MAX_IN_FLIGHT,
+    SANDBOX_CREATE_REQUEST_TIMEOUT_S,
 )
 
 
@@ -614,14 +614,14 @@ def test_the_sdk_request_timeout_covers_the_hosts_ready_wait(
     The OpenSandbox server holds that request open until the pod is Running, for up to its own
     create timeout, while the SDK gives up after 30s unless told otherwise. NeMo-RL forwards
     ``connection.request_timeout_s`` to the SDK but never defaults it, so the compiled config has
-    to, and to the same number the host is allowed to wait.
+    to, and to longer than the host is allowed to wait so the response itself fits.
     """
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
 
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
 
-    assert sandbox["host_provider_options"]["connection"]["request_timeout_s"] == DEFAULT_HOST_READY_TIMEOUT_S
+    assert sandbox["host_provider_options"]["connection"]["request_timeout_s"] == SANDBOX_CREATE_REQUEST_TIMEOUT_S
 
 
 def test_generation_sampling_comes_from_the_grpo_hyperparameters(

@@ -20,6 +20,7 @@ import pytest
 from sandboxed_gym.backends._opensandbox_driver import (
     _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY,
     _STATUS_ALIASES,
+    CREATE_REQUEST_HEADROOM_S,
     OpenSandboxDriver,
     _exec_identity,
     _joined_output,
@@ -301,7 +302,8 @@ async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatc
     """The server holds the create POST until the pod is Running.
 
     The SDK's own per-request default is 30s, so with ``ready_timeout_s`` above that a cold node's
-    image pull is cut off client-side and the sandbox it just created is destroyed.
+    image pull is cut off client-side and the sandbox it just created is destroyed. The headroom
+    is for the response itself: the server answers only once the pod is Running.
     """
     Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
     captured: dict[str, object] = {}
@@ -309,18 +311,7 @@ async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatc
 
     await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
 
-    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 900
-
-
-@requires_opensandbox
-async def test_a_short_ready_wait_does_not_lower_the_sdk_request_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
-    captured: dict[str, object] = {}
-    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
-
-    await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=5))
-
-    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 30
+    assert getattr(captured["connection_config"], "request_timeout").total_seconds() == 900 + CREATE_REQUEST_HEADROOM_S
 
 
 @requires_opensandbox
