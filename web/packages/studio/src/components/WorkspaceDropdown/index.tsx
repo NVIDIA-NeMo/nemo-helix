@@ -26,11 +26,13 @@ import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
 import cn from 'classnames';
 import { Plus, Filter } from 'lucide-react';
-import { ChangeEvent, FC, lazy, useMemo, useState } from 'react';
+import { ChangeEvent, FC, lazy, startTransition, Suspense, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
+const loadWorkspaceCreateModal = () => import('@studio/components/WorkspaceCreateModal');
+
 const WorkspaceCreateModal = lazy(() =>
-  import('@studio/components/WorkspaceCreateModal').then((module) => ({
+  loadWorkspaceCreateModal().then((module) => ({
     default: module.WorkspaceCreateModal,
   }))
 );
@@ -180,6 +182,10 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
           if (open) {
             // Workspaces can be created outside this dropdown (CLI, other tabs, the assistant)
             void refetch();
+            // Preload so "New Workspace" opens without waiting on the chunk
+            loadWorkspaceCreateModal().catch(() => {
+              // The lazy component re-imports on render and surfaces any error there
+            });
           } else {
             setFilter('');
           }
@@ -253,7 +259,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
               })}
             </div>
             <div className="border-base border-t flex items-center w-full">
-              <DropdownItem onSelect={() => openModal()}>
+              <DropdownItem onSelect={() => startTransition(openModal)}>
                 <Flex gap="density-md">
                   <Plus /> New Workspace
                 </Flex>
@@ -263,13 +269,18 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
         </DropdownContent>
       </DropdownRoot>
 
-      {isModalOpen && (
-        <WorkspaceCreateModal
-          open={isModalOpen}
-          onClose={closeModal}
-          onCreate={(workspace) => addRecentWorkspace(workspace.name)}
-        />
-      )}
+      {/* Scoped boundary so loading the modal doesn't fall back to RootLayout's full-page loader.
+          Kept mounted so the transition in onSelect waits for the module instead of committing
+          the fallback, which React throttles before revealing the modal. */}
+      <Suspense fallback={null}>
+        {isModalOpen && (
+          <WorkspaceCreateModal
+            open={isModalOpen}
+            onClose={closeModal}
+            onCreate={(workspace) => addRecentWorkspace(workspace.name)}
+          />
+        )}
+      </Suspense>
     </>
   );
 };
