@@ -15,13 +15,7 @@ function validateDispatchTarget(env) {
   return { owner: destination[1], repo: destination[2], ref };
 }
 
-async function dispatchRelease({
-  core,
-  github,
-  env,
-  eventType,
-  clientPayload,
-}) {
+async function dispatchRelease({ core, env, eventType, clientPayload }) {
   const workflows = {
     "release-branch-updated": "docker.yaml",
     release: "docker.yaml",
@@ -57,12 +51,21 @@ async function dispatchRelease({
     workflow_id: workflows[eventType],
     inputs,
   };
-  if (env.ACT === "true") {
-    core.info(`ACT=true; would dispatch: ${JSON.stringify(request)}`);
-    return;
-  }
-  await github.rest.actions.createWorkflowDispatch(request);
-  core.info(`Dispatched ${eventType}: ${JSON.stringify(request)}`);
+  const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+  const command = [
+    `gh workflow run ${quote(request.workflow_id)}`,
+    "--repo OWNER/REPO",
+    `--ref ${quote(request.ref)}`,
+    ...Object.entries(inputs).map(
+      ([key, value]) => `--raw-field ${quote(`${key}=${value}`)}`,
+    ),
+  ].join(" \\\n  ");
+  const heading = "MANUAL ACTION REQUIRED — RUN THIS COMMAND LOCALLY";
+  core.info(`${heading}\n${command}`);
+  await core.summary
+    .addHeading(heading, 2)
+    .addCodeBlock(command, "bash")
+    .write();
 }
 
 module.exports = { dispatchRelease, validateDispatchTarget };

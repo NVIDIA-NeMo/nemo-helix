@@ -2,10 +2,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const test = require("node:test");
 const { dispatchCiConsumer } = require("../dispatch.cjs");
 
 const SHA = "a".repeat(40);
+function readPushPayload(log) {
+  const [heading, ...lines] = log.split("\n");
+  assert.equal(heading, "MANUAL ACTION REQUIRED — RUN THIS COMMAND LOCALLY");
+  const output = execFileSync(
+    "/bin/sh",
+    ["-c", "gh() { printf '%s\\0' \"$@\"; }\n" + lines.join("\n")],
+    {
+      encoding: "utf8",
+      env: {},
+    },
+  );
+  const args = output.split("\0").slice(0, -1);
+  assert.deepEqual(args.slice(0, 8), [
+    "workflow",
+    "run",
+    "docker.yaml",
+    "--repo",
+    "OWNER/REPO",
+    "--ref",
+    "maintenance/legacy",
+    "--raw-field",
+  ]);
+  assert.ok(args[8].startsWith("release-branch-payload="));
+  return JSON.parse(args[8].slice("release-branch-payload=".length));
+}
+
 function harness(branch = "release/0.5", tags = []) {
   const requests = [];
   const logs = [];
@@ -25,7 +52,18 @@ function harness(branch = "release/0.5", tags = []) {
         DISPATCH_REPO: "example/builds",
         CI_LEGACY_DISPATCH_REF: "maintenance/legacy",
       },
-      core: { info: (message) => logs.push(message) },
+      core: {
+        info: (message) => logs.push(message),
+        summary: {
+          addHeading() {
+            return this;
+          },
+          addCodeBlock() {
+            return this;
+          },
+          async write() {},
+        },
+      },
       github: {
         rest: {
           repos: {
@@ -83,25 +121,19 @@ for (const minor of ["0.5", "0.6"]) {
     ],
   ]) {
     test(`${minor} push selects the exact source and next patch ${patch}`, async () => {
-      const { args, requests, tagReads } = harness(`release/${minor}`, tags);
+      const { args, requests, tagReads, logs } = harness(
+        `release/${minor}`,
+        tags,
+      );
       await dispatchCiConsumer(args);
       assert.equal(tagReads.length, 1);
-      assert.deepEqual(requests, [
-        {
-          owner: "example",
-          repo: "builds",
-          ref: "maintenance/legacy",
-          workflow_id: "docker.yaml",
-          inputs: {
-            "release-branch-payload": JSON.stringify({
-              ref: SHA,
-              branch: `release/${minor}`,
-              version: minor,
-              release_version: `${minor}.${patch}`,
-            }),
-          },
-        },
-      ]);
+      assert.deepEqual(requests, []);
+      assert.deepEqual(readPushPayload(logs[0]), {
+        ref: SHA,
+        branch: `release/${minor}`,
+        version: minor,
+        release_version: `${minor}.${patch}`,
+      });
     });
   }
 }
@@ -112,11 +144,10 @@ for (const branch of ["main", "release/0.5", "release/0.6"]) {
     args.env.ACT = "true";
     await dispatchCiConsumer(args);
     assert.deepEqual(requests, []);
-    const request = JSON.parse(logs[0].split("would dispatch: ")[1]);
     const payload =
       branch === "main"
-        ? request.client_payload
-        : JSON.parse(request.inputs["release-branch-payload"]);
+        ? JSON.parse(logs[0].split("would dispatch: ")[1]).client_payload
+        : readPushPayload(logs[0]);
     assert.equal(payload.ref, SHA);
     assert.equal(payload.branch, branch);
   });
@@ -181,9 +212,9 @@ test("unrepresentable patch version prevents dispatch", async () => {
   assert.deepEqual(requests, []);
 });
 
-test("dispatch failure does not log success", async () => {
-  const { args, logs } = harness();
-  args.github.rest.actions.createWorkflowDispatch = async () => {
+test("main dispatch failure does not log success", async () => {
+  const { args, logs } = harness("main");
+  args.github.rest.repos.createDispatchEvent = async () => {
     throw new Error("Dispatch failed");
   };
   await assert.rejects(dispatchCiConsumer(args), /Dispatch failed/);

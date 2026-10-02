@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   notify-ci-consumer:
-    name: Notify CI consumer
+    name: ${{ github.ref == 'refs/heads/main' && 'Notify CI consumer' || 'Generate manual candidate build command' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow revision
@@ -24,13 +24,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Send completion event
+      - name: ${{ github.ref == 'refs/heads/main' && 'Send completion event' || 'Generate manual candidate build command' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
           CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.ref == 'refs/heads/main' && secrets.CI_DISPATCH_TOKEN || github.token }}
           script: |
             const { dispatchCiConsumer } = require("./.github/scripts/dispatch.cjs");
             await dispatchCiConsumer({ core, github, context, env: process.env });

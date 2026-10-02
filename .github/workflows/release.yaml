@@ -421,7 +421,7 @@ jobs:
       AIRE_NGC_GITHUB_PLATFORM_RW: ${{ secrets.AIRE_NGC_GITHUB_PLATFORM_RW }}
 
   dispatch-release-registration:
-    name: Dispatch release registration
+    name: Generate manual release registration command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.release_type == 'stable' &&
@@ -433,7 +433,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Dispatch registration workflow
+      - name: Generate manual registration command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
@@ -448,7 +448,7 @@ jobs:
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           HELM_VERSION: ${{ needs.plan-release.outputs.helm_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 
@@ -472,7 +472,7 @@ jobs:
             });
 
   dispatch-wheel-stage:
-    name: Dispatch wheel builds
+    name: Generate manual wheel build command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_wheels == 'true' &&
@@ -484,7 +484,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Dispatch wheel builds
+      - name: Generate manual wheel build command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
@@ -497,7 +497,7 @@ jobs:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 
@@ -516,7 +516,7 @@ jobs:
             });
 
   dispatch-container-stage:
-    name: Dispatch nightly container builds
+    name: Generate manual nightly container build command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_containers == 'true' &&
@@ -529,7 +529,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Dispatch container builds
+      - name: Generate manual container build command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
@@ -539,7 +539,7 @@ jobs:
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
             const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 

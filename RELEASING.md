@@ -15,14 +15,19 @@ the selected release branch commit.
 
 ## Maintenance releases
 
-Run this workflow from the matching `release/0.5` or `release/0.6` branch.
+Run this workflow from `release/0.5`.
 Set the repository variable `CI_LEGACY_DISPATCH_REF` to the maintenance tooling
-branch before live runs; keep the existing dispatch destination and token secrets.
-The downstream tooling must support `release-branch-payload` before enabling
-these branch-push requests.
+branch before live runs; keep the existing dispatch destination secret.
 
-Pushes request container builds tagged with the source SHA and readiness for the
-next patch version. Before a stable release, check that
+**MANUAL ACTION REQUIRED:** Build and registration jobs print `gh workflow run`
+commands in their logs and workflow summaries. Replace `OWNER/REPO` in each
+command with the internal tooling repository, then run the commands
+using your authenticated GitHub CLI while the release workflow waits for artifacts.
+The commands contain no credentials or private repository name. These maintenance
+requests do not use the cross-repository dispatch token.
+
+Pushes print a command to build containers tagged with the source SHA and start
+readiness for the next patch version. Before a stable release, check that
 `release/container-readiness/<version>` is successful for the selected SHA.
 The release workflow does not enforce that status automatically. It publishes
 the existing containers from `nemo-platform-dev` under the patch version,
@@ -102,9 +107,9 @@ America/Los_Angeles.
 2. Checks out the selected source and validates the selected wheel paths,
    Docker Bake targets, and NGC overview files.
 3. Optionally synchronizes NGC metadata, when requested on a non-dry-run.
-4. Dispatches wheel builds, nightly container builds, and stable-release registration to the
-   configured internal release repository. The selected source SHA, release
-   type, version, and selected IDs are passed with the dispatch.
+4. Prints commands to start wheel builds, nightly container builds, and
+   stable-release registration. Run them locally; the selected source SHA,
+   release type, version, and selected IDs are already filled in.
 5. Packages the Helm chart with the planned chart version. A nightly chart uses
    the latest release or RC Git tag core reachable from the selected source with
    `-nightly-<UTC timestamp>` appended, falling back to the `Chart.yaml`
@@ -151,8 +156,8 @@ Dry-runs do not poll or send the delayed or final notification.
 
 | Secret | Used for |
 | --- | --- |
-| `CI_DISPATCH_REPO` | `owner/repo` of the internal release repository that receives release dispatches. |
-| `CI_DISPATCH_TOKEN` | Authenticating those cross-repository dispatches. |
+| `CI_DISPATCH_REPO` | Internal tooling `owner/repo`; validated but neither its name nor value appears in generated commands. |
+| `CI_DISPATCH_TOKEN` | Existing automatic CI dispatch from `main` only; not used by maintenance release commands. |
 | `AIRE_NVCR_GITHUB` | Staging stable Helm charts in NGC. |
 | `AIRE_NGC_GITHUB_PLATFORM_RW` | Optional NGC metadata synchronization. |
 | `SLACK_ALERTS_WEBHOOK` | Release starts, delay alerts, and failed final statuses. |
