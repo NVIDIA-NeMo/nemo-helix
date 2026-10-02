@@ -46,6 +46,7 @@ type UseAssistantChatRuntimeOptions = Pick<
   | 'onEmptyChange'
   | 'promptData'
   | 'tools'
+  | 'extraHeaders'
   | 'workspace'
   | 'enableImageAttachments'
 >;
@@ -56,6 +57,7 @@ export const useAssistantChatRuntime = ({
   baseURL,
   promptData,
   tools,
+  extraHeaders,
   disabled = false,
   initialMessages = [],
   onError,
@@ -131,6 +133,7 @@ export const useAssistantChatRuntime = ({
           temperature: promptData?.inference_params?.temperature,
           stream: true,
           tools: tools?.length ? tools : undefined,
+          extraHeaders,
           signal: runController.signal,
         });
 
@@ -243,6 +246,7 @@ export const useAssistantChatRuntime = ({
       baseURL,
       createChatCompletion,
       disabled,
+      extraHeaders,
       model,
       onError,
       onMessageComplete,
