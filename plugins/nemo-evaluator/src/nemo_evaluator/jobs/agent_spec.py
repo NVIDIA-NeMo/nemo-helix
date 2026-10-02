@@ -361,7 +361,7 @@ class GymRunnerTarget(BaseModel):
     to materialize the selected tasks for rollout collection.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["gym"] = "gym"
     environment: FilesetRef | None = Field(

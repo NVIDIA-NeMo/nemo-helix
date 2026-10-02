@@ -678,6 +678,21 @@ def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
         HarborRunnerTarget(agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}})
 
 
+def test_gym_target_validation_error_does_not_echo_rejected_secret() -> None:
+    """Direct target validation must not print a credential rejected as an environment collision."""
+    with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
+        GymRunnerTarget.model_validate(
+            {
+                "agent": "simple_agent",
+                "agent_config": "config.yaml",
+                "resources_server": "mcqa",
+                "env_secrets": {"KEY": "ws/key"},
+                "env_vars": {"KEY": "LEAKME"},
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
 def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs: dict[str, JsonValue] = {

@@ -1656,6 +1656,21 @@ def test_naming_a_variable_both_ways_is_refused_rather_than_layered() -> None:
         _config(env_vars={"GYM_MODEL_KEY": "plaintext"}, env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")})
 
 
+def test_gym_config_validation_error_does_not_echo_rejected_secret() -> None:
+    """Reject an inline secret collision without printing the credential in the input mapping."""
+    with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
+        GymRuntimeConfig.model_validate(
+            {
+                "agent": "simple_agent",
+                "agent_config": "config.yaml",
+                "resources_server": "mcqa",
+                "env_secrets": {"KEY": "ws/key"},
+                "env_vars": {"KEY": "LEAKME"},
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
 @pytest.mark.parametrize(
     "inputs,metadata", [({}, {}), ({"gym_row": {}}, {"gym_row_extras": []}), ({"gym_row": {}}, {"gym_row_extras": {}})]
 )
