@@ -3,9 +3,21 @@
 
 import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import {
+  collectModelFamilies,
+  EMPTY_MODEL_FILTERS,
+  matchesModelSize,
+  MODEL_SIZE_OPTIONS,
+  withSelectedOption,
+  type ModelFilterControls,
+  type ModelFilterOption,
+  type ModelFilterValues,
+} from '@nemo/common/src/api/models/modelFilters';
+import {
   getNextModelsPageParam,
   getQueryKeyInfiniteModels,
+  getQueryKeyModelProviderOptions,
   type ListModels,
+  type ListProviders,
   type ModelWorkspaceGroup,
 } from '@nemo/common/src/api/models/modelPages';
 import { groupModelsByWorkspace } from '@nemo/common/src/utils/models';
@@ -14,7 +26,7 @@ import {
   ModelEntitySortField,
   type ModelEntityFilter,
 } from '@nemo/sdk/generated/platform/schema';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { skipToken, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /**
@@ -23,12 +35,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
  */
 export const MODEL_SEARCH_PAGE_SIZE = 25;
 
+const PROVIDER_OPTIONS_PAGE_SIZE = 100;
+
 export type ModelSearchFilter = WithFilterOperators<ModelEntityFilter>;
 
 export interface UseModelSearchCoreOptions {
   /** Workspace to search. The query stays idle while this is null. */
   workspace: string | null;
   listModels: ListModels;
+  /** Fills the provider filter's options. Without it the provider filter offers only its current value. */
+  listProviders?: ListProviders;
   /** Extra filters merged into the request (e.g. `lora_enabled`, `base_model`). */
   filter?: ModelSearchFilter;
   sort?: ModelEntitySortField;
@@ -40,6 +56,7 @@ export interface UseModelSearchCoreOptions {
    * filters down to nothing, so an excluded page never stalls the list.
    */
   include?: (model: ModelEntity) => boolean;
+  initialFilters?: ModelFilterValues;
 }
 
 /**
@@ -53,6 +70,7 @@ export interface ModelSearchProps {
   onLoadMore: () => Promise<void>;
   hasMore: boolean;
   isLoadingMore: boolean;
+  modelFilters: ModelFilterControls;
 }
 
 export interface UseModelSearchResult extends ModelSearchProps {
@@ -76,26 +94,32 @@ export interface UseModelSearchResult extends ModelSearchProps {
 export const useModelSearchCore = ({
   workspace,
   listModels,
+  listProviders,
   filter,
   sort = ModelEntitySortField.name,
   pageSize = MODEL_SEARCH_PAGE_SIZE,
   enabled = true,
   include,
+  initialFilters = EMPTY_MODEL_FILTERS,
 }: UseModelSearchCoreOptions): UseModelSearchResult => {
   const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<ModelFilterValues>(initialFilters);
+  const [knownFamilies, setKnownFamilies] = useState<string[]>([]);
 
   const query = useMemo(() => {
     const trimmed = search.trim();
     const merged: ModelSearchFilter = {
       ...filter,
       ...(trimmed ? { name: { $like: trimmed } } : {}),
+      ...(filters.provider ? { model_providers: filters.provider } : {}),
+      ...(filters.family ? { family: filters.family } : {}),
     };
     return {
       page_size: pageSize,
       sort,
       ...(Object.keys(merged).length > 0 ? { filter: merged as ModelEntityFilter } : {}),
     };
-  }, [filter, pageSize, search, sort]);
+  }, [filter, filters.family, filters.provider, pageSize, search, sort]);
 
   const isEnabled = enabled && !!workspace;
   const queryWorkspace = workspace ?? 'default';
@@ -115,12 +139,75 @@ export const useModelSearchCore = ({
     initialPageParam: 1,
   });
 
-  const models = useMemo(() => {
-    const loaded = data?.pages.flatMap((page) => page.data ?? []) ?? [];
-    return include ? loaded.filter(include) : loaded;
-  }, [data?.pages, include]);
+  const loadedModels = useMemo(
+    () => data?.pages.flatMap((page) => page.data ?? []) ?? [],
+    [data?.pages]
+  );
+
+  const size = filters.size;
+  const includeModel = useMemo(() => {
+    if (!size && !include) return undefined;
+    return (model: ModelEntity) =>
+      (!size || matchesModelSize(model, size)) && (!include || include(model));
+  }, [include, size]);
+
+  const models = useMemo(
+    () => (includeModel ? loadedModels.filter(includeModel) : loadedModels),
+    [includeModel, loadedModels]
+  );
 
   const groups = useMemo(() => groupModelsByWorkspace(models, { sort: true }), [models]);
+
+  const providerParams = { page_size: PROVIDER_OPTIONS_PAGE_SIZE, sort: 'name' } as const;
+  const { data: providersPage, isLoading: providersLoading } = useQuery({
+    queryKey: getQueryKeyModelProviderOptions(queryWorkspace, providerParams),
+    queryFn: listProviders ? () => listProviders(queryWorkspace, providerParams) : skipToken,
+    enabled: isEnabled,
+  });
+
+  useEffect(() => {
+    const families = collectModelFamilies(loadedModels).map((option) => option.value);
+    if (families.length === 0) return;
+    setKnownFamilies((known) => {
+      const merged = new Set([...known, ...families]);
+      return merged.size === known.length ? known : [...merged];
+    });
+  }, [loadedModels]);
+
+  const providerOptions = useMemo<ModelFilterOption[]>(
+    () =>
+      withSelectedOption(
+        (providersPage?.data ?? []).map((provider) => ({
+          value: `${provider.workspace}/${provider.name}`,
+          label: provider.name,
+        })),
+        filters.provider
+      ),
+    [filters.provider, providersPage?.data]
+  );
+
+  const familyOptions = useMemo(
+    () =>
+      withSelectedOption(
+        [...knownFamilies]
+          .sort((a, b) => a.localeCompare(b))
+          .map((family) => ({ value: family, label: family })),
+        filters.family
+      ),
+    [filters.family, knownFamilies]
+  );
+
+  const modelFilters = useMemo<ModelFilterControls>(
+    () => ({
+      values: filters,
+      onChange: setFilters,
+      providerOptions,
+      familyOptions,
+      sizeOptions: MODEL_SIZE_OPTIONS,
+      providersLoading: !!listProviders && providersLoading,
+    }),
+    [familyOptions, filters, listProviders, providerOptions, providersLoading]
+  );
 
   const hasMore = !!hasNextPage;
 
@@ -162,5 +249,6 @@ export const useModelSearchCore = ({
     onLoadMore,
     hasMore,
     isLoadingMore: isFetchingNextPage,
+    modelFilters,
   };
 };

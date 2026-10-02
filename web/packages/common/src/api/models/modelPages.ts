@@ -5,7 +5,9 @@ import { QUERY_PREFIX_PLATFORM } from '@nemo/common/src/constants/api';
 import type {
   ModelEntity,
   ModelEntitysPage,
+  ModelProvidersPage,
   ModelsListModelsParams,
+  ModelsListProvidersParams,
 } from '@nemo/sdk/generated/platform/schema';
 
 /**
@@ -49,3 +51,14 @@ export const buildWorkspaceGroup = (
   workspace: workspaceName,
   models: [...models].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
 });
+
+/** Lists one page of a workspace's model providers, on the same client as {@link ListModels}. */
+export type ListProviders = (
+  workspace: string,
+  params: ModelsListProvidersParams
+) => Promise<ModelProvidersPage>;
+
+export const getQueryKeyModelProviderOptions = (
+  workspace: string,
+  params: ModelsListProvidersParams
+) => [QUERY_PREFIX_PLATFORM, 'models', 'v2', 'providers', workspace, params];

@@ -98,7 +98,11 @@ export {
   type UseModelSearchCoreOptions as UseModelSearchOptions,
   type UseModelSearchResult,
 } from '@nemo/common/src/api/models/useModelSearchCore';
-export type { ListModels, ModelWorkspaceGroup } from '@nemo/common/src/api/models/modelPages';
+export type {
+  ListModels,
+  ListProviders,
+  ModelWorkspaceGroup,
+} from '@nemo/common/src/api/models/modelPages';
 
 export { fetchAllPages } from '@nemo/common/src/api/fetchAllPages';
 export type { FetchAllPagesOptions, PaginatedResponse } from '@nemo/common/src/api/fetchAllPages';
