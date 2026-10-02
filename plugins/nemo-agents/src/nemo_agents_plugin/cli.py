@@ -84,6 +84,7 @@ from nemo_agents_plugin.entities import (
     AgentSession,
     SessionStatus,
     ethos_fileset_name,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
@@ -1172,13 +1173,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         mode: str = typer.Option(
             "subprocess",
             "--mode",
-            help="Runtime backend: subprocess (default), docker, or k8s.",
+            help="Runtime backend: subprocess (default), docker, k8s, or openshell.",
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes (falls back to deployments.default_image).",
+            help="Container image for docker/k8s/openshell modes (falls back to deployments.default_image).",
         ),
         use_image_entrypoint: bool = typer.Option(
             False,
@@ -1227,9 +1228,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
         scripted pipelines that prefer to poll separately via ``nemo agents
         deployments wait``.
 
-        Container modes (``--mode docker|k8s``) compile to the nemo-deployments
+        Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
         plugin. Requires a configured deployments executor (``deployments.executors``
-        / ``agents.deployments.docker_executor`` or ``k8s_executor``). Container
+        / ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
         endpoint gateway routing and the full k8s runtime contract (in-cluster
         inference gateway, wheel staging) are still evolving — docker mode is the
         supported local path today.
@@ -1240,10 +1241,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if image and mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if use_image_entrypoint and mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if use_image_entrypoint and not supports_image_entrypoint(mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
 
         base_url = _resolve_base_url()
@@ -1306,14 +1307,18 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--mode",
             help=(
-                "Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted."
+                "Runtime backend: subprocess, docker, k8s, or openshell. "
+                "Auto-detected from the existing deployment when omitted."
             ),
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.",
+            help=(
+                "Container image for docker/k8s/openshell modes. "
+                "Auto-detected from the existing deployment when omitted."
+            ),
         ),
         use_image_entrypoint: Optional[bool] = typer.Option(
             None,
@@ -1422,10 +1427,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if resolved_use_entrypoint and resolved_mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if resolved_use_entrypoint and not supports_image_entrypoint(resolved_mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
         if resolved_environment is not None and not str(resolved_environment).strip():
             resolved_environment = None
@@ -2987,6 +2992,11 @@ def _clear_existing_ethos_artifacts(
 
 _LIVE_DEPLOYMENT_STATUSES = frozenset({"pending", "starting", "running"})
 """Deployment statuses that represent a live deployment worth undeploying."""
+
+_USE_IMAGE_ENTRYPOINT_MODE_ERROR = (
+    "--use-image-entrypoint requires --mode docker or k8s. The openshell sandbox does not run "
+    "the image ENTRYPOINT/CMD, so --mode openshell needs the platform-injected serve command."
+)
 
 
 def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:

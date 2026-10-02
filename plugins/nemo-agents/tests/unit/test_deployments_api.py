@@ -130,6 +130,7 @@ def _configure_deployments(
     default_executor: str | None = None,
     docker_executor: str | None = None,
     k8s_executor: str | None = None,
+    openshell_executor: str | None = None,
     default_image: str = "",
     docker_available: bool = True,
     executor_configs: dict[str, dict[str, Any]] | None = None,
@@ -146,6 +147,7 @@ def _configure_deployments(
     monkeypatch.setattr(agents_cfg.deployments, "default_executor", default_executor)
     monkeypatch.setattr(agents_cfg.deployments, "docker_executor", docker_executor)
     monkeypatch.setattr(agents_cfg.deployments, "k8s_executor", k8s_executor)
+    monkeypatch.setattr(agents_cfg.deployments, "openshell_executor", openshell_executor)
     monkeypatch.setattr(agents_cfg.deployments, "default_image", default_image)
     monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: agents_cfg))
 
@@ -491,6 +493,25 @@ class TestCreateDeployment:
         assert "use_image_entrypoint requires deployment_mode" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
+    def test_create_rejects_image_entrypoint_for_openshell(self) -> None:
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        client = _test_client(mock_entity_client)
+
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "deployment_mode": "openshell",
+                "use_image_entrypoint": True,
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "not supported for deployment_mode 'openshell'" in resp.json()["detail"]
+        mock_entity_client.create.assert_not_called()
+
     def test_create_with_environment_ref_snapshots_config_and_compute(self) -> None:
         agent = _make_agent()
         environment = AgentEnvironment(
@@ -694,6 +715,7 @@ class TestListDeploymentModes:
             "subprocess": {"mode": "subprocess", "enabled": True, "requires_image": False},
             "docker": {"mode": "docker", "enabled": False, "requires_image": True},
             "k8s": {"mode": "k8s", "enabled": False, "requires_image": True},
+            "openshell": {"mode": "openshell", "enabled": False, "requires_image": True},
         }
 
     def test_k8s_is_disabled_when_it_would_fall_back_to_a_docker_executor(
@@ -709,15 +731,17 @@ class TestListDeploymentModes:
     def test_each_container_mode_is_enabled_by_its_own_executor(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _configure_deployments(
             monkeypatch,
-            executors={"local": "docker", "cluster": "k8s"},
+            executors={"local": "docker", "cluster": "k8s", "sandboxes": "openshell"},
             docker_executor="local",
             k8s_executor="cluster",
+            openshell_executor="sandboxes",
         )
 
         modes = self._modes()
 
         assert modes["docker"]["enabled"] is True
         assert modes["k8s"]["enabled"] is True
+        assert modes["openshell"]["enabled"] is True
 
     def test_docker_is_disabled_when_the_daemon_is_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _configure_deployments(

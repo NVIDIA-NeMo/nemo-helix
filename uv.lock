@@ -4619,7 +4619,7 @@ requires-dist = [
     { name = "kubernetes", marker = "extra == 'k8s'", specifier = ">=30.1.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-sdk", editable = "sdk/python/nemo-helix" },
-    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.0.92" },
+    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.1.2" },
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -9743,18 +9743,17 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.0.99"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "googleapis-common-protos", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "grpcio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "protobuf", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/d5/8f6c394c1129ae01637fb1c9f56b8f5a10a988d667e0e4bd5fecc5e44067/openshell-0.0.99-py3-none-macosx_13_0_arm64.whl", hash = "sha256:f7db8eb284fa0815c0ab375016def8524873ee033049940f071ffef4d0c1a61e", size = 8440178, upload-time = "2026-08-05T15:33:31.493Z" },
-    { url = "https://files.pythonhosted.org/packages/db/29/7ddde3ec2d44357d7f911484b9df5fed814758922b241acd045ebe5a54a2/openshell-0.0.99-py3-none-manylinux_2_39_aarch64.whl", hash = "sha256:b06e062563201d4f98a87e8de23e10e40733b548e12891623982ca5b120bccf2", size = 8506339, upload-time = "2026-08-05T15:33:52.563Z" },
-    { url = "https://files.pythonhosted.org/packages/76/cb/8520cd87729942de875ce6af08953e9d1e19296a5db0a1da92d76a77a682/openshell-0.0.99-py3-none-manylinux_2_39_x86_64.whl", hash = "sha256:72f8f14c304f5da233755ae285ee8c4c19aaf7fb7b40b14f6c6b17ef9752141f", size = 8988885, upload-time = "2026-08-05T15:34:12.529Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/0d/9f0c2e133bd4bfc96b9e261b870d58230d7d98fc6c51ae8f7f71f8520157/openshell-0.1.2-py3-none-any.whl", hash = "sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf", size = 150901, upload-time = "2026-09-28T03:58:28.39Z" },
 ]
 
 [[package]]

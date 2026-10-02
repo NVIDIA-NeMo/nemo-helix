@@ -845,3 +845,116 @@ async def test_active_session_listing_follows_pagination() -> None:
             page_size=100,
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Container recovery: running -> starting while the deployments plugin recovers
+# ---------------------------------------------------------------------------
+
+
+def _running_container_deployment() -> AgentDeployment:
+    return AgentDeployment(
+        name="dep-1",
+        workspace="default",
+        agent="calc",
+        status="running",
+        deployment_mode="openshell",
+    )
+
+
+@pytest.mark.asyncio
+async def test_recovering_container_deployment_reports_starting() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+
+    await ctrl._verify_running(dep)
+
+    assert dep.status == "starting"
+    assert "recovering" in dep.error
+    ctrl._reconcile_deployment_sessions_after_restart.assert_awaited_once_with(dep)
+    ctrl._save.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recovery_is_not_cut_short_by_the_startup_health_timeout() -> None:
+    # The deployments plugin owns the recovery deadline; the agents-side first-start timeout
+    # would otherwise delete a sandbox an operator stopped for more than two minutes.
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+    ctrl._starting_since[("default", "dep-1")] = time.monotonic() - 10_000
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "starting"
+    backend.delete_deployment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_first_start_still_times_out() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    dep = _running_container_deployment()
+    dep.status = "starting"
+    ctrl._starting_since[("default", "dep-1")] = time.monotonic() - 10_000
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "failed"
+    backend.delete_deployment.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recovered_container_deployment_returns_to_running_and_clears_the_error() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    ctrl._observe_runtime_instance = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="running"))
+    await ctrl._check_health(dep)
+
+    assert dep.status == "running"
+    assert dep.error == ""
+    assert ("default", "dep-1") not in ctrl._recovering
+
+
+@pytest.mark.asyncio
+async def test_recovery_that_gives_up_reports_failed() -> None:
+    ctrl, backend = _make_controller()
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="starting"))
+    ctrl._reconcile_deployment_sessions_after_restart = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    await ctrl._verify_running(dep)
+
+    backend.get_deployment_status = AsyncMock(
+        return_value=DeploymentInfo(name="dep-1", status="failed", error="Drift recovery failed after 5 attempts.")
+    )
+    await ctrl._check_health(dep)
+
+    assert dep.status == "failed"
+    assert "Drift recovery failed" in dep.error
+    assert ("default", "dep-1") not in ctrl._recovering
+
+
+@pytest.mark.asyncio
+async def test_recovery_finished_after_a_controller_restart_clears_the_error() -> None:
+    # A restarted controller has no in-memory recovery marker, but the persisted recovery
+    # error must still not outlive the return to running.
+    ctrl, backend = _make_controller()
+    ctrl._observe_runtime_instance = AsyncMock()  # type: ignore[method-assign]
+    dep = _running_container_deployment()
+    dep.status = "starting"
+    dep.error = "Runtime went offline; the deployments plugin is recovering it."
+    backend.get_deployment_status = AsyncMock(return_value=DeploymentInfo(name="dep-1", status="running"))
+
+    await ctrl._check_health(dep)
+
+    assert dep.status == "running"
+    assert dep.error == ""

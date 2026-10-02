@@ -35,6 +35,7 @@ from nemo_agents_plugin.entities import (
     DeploymentMode,
     EnvironmentSpecInline,
     is_container_deployment_mode,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -43,7 +44,10 @@ from nemo_agents_plugin.environment_resolution import (
     merge_environment_spec_into_agent_config,
     resolve_environment,
 )
-from nemo_agents_plugin.runner.deployments_backend import require_deployment_mode_available
+from nemo_agents_plugin.runner.deployments_backend import (
+    image_entrypoint_unsupported_message,
+    require_deployment_mode_available,
+)
 from nemo_agents_plugin.schema import (
     CreateDeploymentRequest,
     DeploymentFilter,
@@ -110,6 +114,8 @@ async def create_deployment(
             status_code=400,
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
+    if body.use_image_entrypoint and not supports_image_entrypoint(body.deployment_mode):
+        raise HTTPException(status_code=400, detail=image_entrypoint_unsupported_message(body.deployment_mode))
 
     # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
     try:

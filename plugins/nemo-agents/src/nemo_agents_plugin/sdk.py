@@ -70,6 +70,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     ComputeSpecInline,
     EnvironmentSpecInline,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
 from nemo_helix import AsyncNeMoHelix, NeMoHelix
@@ -357,10 +358,10 @@ class _DeploymentResource:
             agent: Name of the agent to deploy.
             name: Deployment name (auto-generated if omitted).
             deployment_mode: Runtime backend — ``"subprocess"`` (default),
-                ``"docker"``, or ``"k8s"``. Container modes run the agent as a
+                ``"docker"``, ``"k8s"``, or ``"openshell"``. Container modes run the agent as a
                 durable container through the deployments plugin and require a
                 configured executor.
-            image: Container image for ``docker``/``k8s`` modes. Falls back to
+            image: Container image for container modes. Falls back to
                 ``agents.deployments.default_image`` when omitted. Rejected in
                 ``subprocess`` mode.
             use_image_entrypoint: For ``docker``/``k8s`` modes, preserve the
@@ -377,8 +378,8 @@ class _DeploymentResource:
             The created deployment as a dict.
         """
         if image and deployment_mode == "subprocess":
-            raise ValueError("image requires deployment_mode='docker' or 'k8s'.")
-        if use_image_entrypoint and deployment_mode == "subprocess":
+            raise ValueError("image requires deployment_mode='docker', 'k8s', or 'openshell'.")
+        if use_image_entrypoint and not supports_image_entrypoint(deployment_mode):
             raise ValueError("use_image_entrypoint requires deployment_mode='docker' or 'k8s'.")
         if isinstance(environment, Mapping):
             environment_body: str | AgentEnvironmentInline | None = AgentEnvironmentInline.model_validate(environment)
