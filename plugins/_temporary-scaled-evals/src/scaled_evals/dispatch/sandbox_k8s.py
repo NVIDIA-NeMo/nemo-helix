@@ -795,7 +795,12 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
     the recorded digest remains mandatory provenance and dispatch verifies
     mutable tags before launch.
     """
-    image_ref = spec.image_ref.strip()
+    return _image_ref_for_sandbox(spec.image_ref, spec.image_digest)
+
+
+def _image_ref_for_sandbox(image_ref: str, image_digest: str | None) -> str:
+    """``_task_image_ref_for_sandbox`` for any recorded image, such as a separate verifier image."""
+    image_ref = image_ref.strip()
     if settings.sandbox_k8s_task_image_reference_mode == "tag":
         last_slash = image_ref.rfind("/")
         last_colon = image_ref.rfind(":")
@@ -805,7 +810,7 @@ def _task_image_ref_for_sandbox(spec: LaunchSpec) -> str:
                 "digest-only and tag-plus-digest references are not admitted"
             )
         return image_ref
-    digest = (spec.image_digest or "").strip()
+    digest = (image_digest or "").strip()
     if re.fullmatch(r"[^\s]+@sha256:[0-9a-fA-F]{64}", digest):
         return digest
     if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
