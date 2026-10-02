@@ -43,11 +43,11 @@ Experimentalist; their provider credentials stay in Platform Secrets.
 
 To use an external ClickHouse instead, set `NMP_INTAKE_CLICKHOUSE_URL` before running setup.
 
-You should now be able to navigate to `http://localhost:8080` and see NeMo Helix web UI.
+You should now be able to navigate to `http://localhost:8080` and see the NeMo Helix web UI.
 
 ## 3. Prepare τ-Bench and run the airline agent
 
-Now that we have a running NeMo Helix, it's time to load up some data! This example uses the τ-Bench from Sierra. It's a great representation of a simplified agent that performs a business-critical task. Our first step will be to set up our environment variables so that we can run models properly.
+Now that we have a running NeMo Helix deployment, it's time to load up some data! This example uses the τ-Bench from Sierra. It's a great representation of a simplified agent that performs a business-critical task. Our first step will be to set up our environment variables so that we can run models properly.
 
 ```bash
 cp plugins/nemo-experimentalist/examples/tau3-nooa-agent/.env.example plugins/nemo-experimentalist/examples/tau3-nooa-agent/.env

@@ -7,7 +7,7 @@ description: ""
 
 [Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/embedding-customization-job.ipynb)
 
-Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is NeMo Helix mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
+Fine-tune Nemotron 3 Embed 1B on domain retrieval data and score it against the base checkpoint with BEIR nDCG and Recall. This is the NeMo Helix mapping of the [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/docs/nemotron/embed/README.md).
 
 Pre-trained embeddings handle general retrieval well but underperform on specialized vocabulary, document structure, and query phrasing. Fine-tuning adapts the model to your corpus. Expect larger gains where the base model has the least prior exposure, such as legal, biomedical, and internal engineering documents, and smaller ones on corpora close to its pre-training mix.
 

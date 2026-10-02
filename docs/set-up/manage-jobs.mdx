@@ -71,7 +71,7 @@ For full configuration details, see the [platform configuration reference](/docu
 
 ### Default Execution Profiles
 
-The NeMo Helix defines a default execution profile for each execution backend depending on the platform's control plane. The default execution profile is used when no specific execution profile is specified for a job.
+NeMo Helix defines a default execution profile for each execution backend depending on the platform's control plane. The default execution profile is used when no specific execution profile is specified for a job.
 
 - Default CPU Execution Profile (`cpu`): The default execution profile for CPU based jobs.
 - Default GPU Execution Profile (`gpu`): The default execution profile for GPU based jobs.
@@ -119,9 +119,9 @@ NeMo Helix currently supports the following execution backends:
 
 ### Docker
 
-The NeMo Helix supports Docker as an execution backend for CPU and GPU based jobs. When the shared GPU pool is configured (see below), Docker will use only the configured GPU devices and will not over-schedule jobs if there are not currently enough GPUs available.
+NeMo Helix supports Docker as an execution backend for CPU and GPU based jobs. When the shared GPU pool is configured (see below), Docker will use only the configured GPU devices and will not over-schedule jobs if there are not currently enough GPUs available.
 
-**Note:** The NeMo Helix supports Docker-based job execution by default when running NeMo Helix in quickstart mode, which requires no configuration.
+**Note:** NeMo Helix supports Docker-based job execution by default when running NeMo Helix in quickstart mode, which requires no configuration.
 
 <Tip>
 
@@ -151,7 +151,7 @@ jobs:
 
 ### Kubernetes Jobs
 
-The NeMo Helix supports Kubernetes Jobs as an execution backend for CPU and GPU based jobs.
+NeMo Helix supports Kubernetes Jobs as an execution backend for CPU and GPU based jobs.
 
 ```yaml
 jobs:
@@ -230,7 +230,7 @@ See the [KAI Scheduler documentation](https://github.com/kai-scheduler/KAI-Sched
 
 ### Volcano Jobs
 
-The NeMo Helix supports Volcano Jobs as an execution backend for launching distributed GPU jobs. Install Volcano as a cluster engine; see [Volcano](/documentation/kubernetes-deployment/setup/helm/volcano).
+NeMo Helix supports Volcano Jobs as an execution backend for launching distributed GPU jobs. Install Volcano as a cluster engine; see [Volcano](/documentation/kubernetes-deployment/setup/helm/volcano).
 
 Volcano Jobs are configured using the same configuration as Kubernetes Jobs, but with the following additional configuration:
 

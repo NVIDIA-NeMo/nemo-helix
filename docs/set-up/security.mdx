@@ -17,7 +17,7 @@ This page provides security guidelines and best practices for deploying and mana
 - The NeMo Helix, by design, can access all content in the NeMo Data Store microservice, including LoRA adapters, training data, evaluation data, and evaluation results.
  This access is required for model evaluation.
  Carefully weigh the risk of data exposure from serving customized models directly to production against the overhead of a separate deployment.
-- The NeMo Helix is not intended to be internet-facing. Deploy them as the logic (middle) tier in a three-tier architecture.
+- The NeMo Helix is not intended to be internet-facing. Deploy it as the logic (middle) tier in a three-tier architecture.
 - You are responsible for securing access to any application using the microservices. This includes:
  - Implementing an authentication layer between users and your application
  - Applying required authorization controls
