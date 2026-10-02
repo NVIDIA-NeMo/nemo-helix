@@ -42,10 +42,6 @@ from nhx.core.jobs.entities import (
     HelixJobTask,
 )
 
-# Deletion queries the entity store before reaching the barrier. These tests
-# verify lock ordering, so allow slow CI workers time to finish that setup.
-_DELETE_STARTED_TIMEOUT_S = 10.0
-
 
 async def create_job_with_attempt(dispatcher: JobDispatcher, job_request: CreateHelixJobRequest) -> HelixJobResponse:
     """Helper to create a job through the dispatcher."""
@@ -316,7 +312,7 @@ async def test_delete_job_serializes_with_rerun_job(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         rerun_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=_DELETE_STARTED_TIMEOUT_S)
+            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
 
             rerun_task = asyncio.create_task(other_dispatcher.rerun_job(job_name, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -359,7 +355,7 @@ async def test_delete_job_serializes_with_same_name_create(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=_DELETE_STARTED_TIMEOUT_S)
+            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
 
             create_task = asyncio.create_task(other_dispatcher.create_job(create_request, DEFAULT_WORKSPACE))
             await asyncio.sleep(0.05)
@@ -405,7 +401,7 @@ async def test_delete_job_serializes_with_task_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         task_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=_DELETE_STARTED_TIMEOUT_S)
+            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
 
             task_create_task = asyncio.create_task(
                 other_dispatcher.create_or_update_task(
@@ -458,7 +454,7 @@ async def test_delete_job_serializes_with_result_creation(
         delete_task = asyncio.create_task(mock_dispatcher.delete_job(job_name, DEFAULT_WORKSPACE))
         result_create_task = None
         try:
-            await asyncio.wait_for(delete_started.wait(), timeout=_DELETE_STARTED_TIMEOUT_S)
+            await asyncio.wait_for(delete_started.wait(), timeout=1.0)
 
             result_create_task = asyncio.create_task(
                 other_dispatcher.create_result(
