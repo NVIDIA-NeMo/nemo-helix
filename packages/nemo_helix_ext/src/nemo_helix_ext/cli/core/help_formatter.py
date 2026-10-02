@@ -18,7 +18,6 @@ import sys
 import time
 from io import StringIO
 from typing import Any, Callable, Mapping, Sequence
-from urllib.parse import urlsplit, urlunsplit
 
 import click
 from click import Command
@@ -574,13 +573,14 @@ class NhxGroup(NhxErrorHandlingMixin, TyperGroup):
     def _format_active_context_line(self) -> str | None:
         """Format the current context/workspace for root help."""
         from nemo_helix_ext.config.config import get_context
+        from nemo_helix_ext.config.urls import display_url
 
         try:
             display_context = get_context()
         except Exception:
             return None
 
-        platform_url = _display_url(str(display_context.cluster.base_url))
+        platform_url = display_url(str(display_context.cluster.base_url))
         return (
             f"Active context: {display_context.context_name} "
             f"(workspace: {display_context.workspace}, platform: {platform_url})"
@@ -818,13 +818,6 @@ def create_typer_app(**kwargs) -> Typer:
     """
     kwargs.setdefault("cls", NhxGroup)
     return plugin_create_typer_app(**kwargs)
-
-
-def _display_url(url: str) -> str:
-    """Drop userinfo, query, and fragment so help output never echoes URL credentials."""
-    parts = urlsplit(url)
-    host = parts.netloc.rpartition("@")[2]
-    return urlunsplit((parts.scheme, host, parts.path, "", "")).rstrip("/")
 
 
 def _maybe_format_agent_helpers(ctx: click.Context, formatter: click.HelpFormatter) -> None:

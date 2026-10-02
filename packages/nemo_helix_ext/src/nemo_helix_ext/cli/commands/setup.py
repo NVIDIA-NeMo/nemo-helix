@@ -64,6 +64,7 @@ from nemo_helix_ext.cli.telemetry.events import OnboardingStepEvent, TaskStatusE
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 from nemo_helix_ext.config.config import Config
 from nemo_helix_ext.config.models import DEFAULT_BASE_URL, ConfigFile, ConfigParams, LocalServicesConfig, NoAuthUser
+from nemo_helix_ext.config.urls import display_url
 from nemo_helix_ext.local.install import services_extra_install_command
 from nemo_helix_ext.local.process import (
     PortConflict,
@@ -389,7 +390,7 @@ def _prompt_remote_base_url(*, default_url: str = "", certificate_authority: str
         if _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
             return base_url
 
-        console.print(f"{CROSS} Unable to connect to NeMo Helix at {base_url}.")
+        console.print(f"{CROSS} Unable to connect to NeMo Helix at {display_url(base_url)}.")
 
 
 def _resolve_setup_workspace(cli_context: CLIContext, workspace: str | None) -> str:
@@ -763,7 +764,7 @@ def _wait_for_models_impl(
                     provider_msg = getattr(provider, "status_message", None) or ""
 
                     if _NON_COMPLIANT_MARKER in provider_msg:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(
                             f"\n  {WARN} Provider '{provider_name}'{url_hint} returned a non-OpenAI "
                             f"compliant response from GET /v1/models."
@@ -776,7 +777,7 @@ def _wait_for_models_impl(
                         return []
 
                     if provider_status in _PROVIDER_UNHEALTHY_STATUSES:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(f"\n  {WARN} Provider '{provider_name}'{url_hint} is in {provider_status} state.")
                         if provider_msg:
                             console.print(f"  {provider_msg}")
@@ -1076,7 +1077,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
     """Ask how to proceed when a configured remote Platform is already reachable."""
     hostname = _platform_host_label(base_url)
     action = prompt_choice(
-        message=f"Platform reachable at {hostname} ({base_url}). What would you like to do?",
+        message=f"Platform reachable at {hostname} ({display_url(base_url)}). What would you like to do?",
         options=[
             (_RemoteConnectionChoice.CONTINUE, "Continue with this remote Platform"),
             (_RemoteConnectionChoice.START_LOCAL, "Start local services instead"),
@@ -1085,7 +1086,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
         default=_RemoteConnectionChoice.CONTINUE,
     )
     if action == _RemoteConnectionChoice.CONTINUE:
-        console.print(f"{CHECK} Platform already running at {base_url}\n")
+        console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
         return "ready"
     if action == _RemoteConnectionChoice.CHANGE_REMOTE:
         return "connect_remote"
@@ -1277,14 +1278,14 @@ def _maybe_start_services(
 
     if already_running and start_services is not True:
         if _is_local_base_url(base_url) or auto:
-            console.print(f"{CHECK} Platform already running at {base_url}\n")
+            console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
             return "ready"
         return _prompt_reachable_remote_connection(base_url)
 
     should_start = start_services
     if should_start is None:
         if auto:
-            console.print(f"{CROSS} Cannot reach platform at {base_url}")
+            console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
             console.print("  Start the platform first, or pass --start-services:")
             console.print("    [cyan]nemo setup --auto --start-services[/cyan]")
             console.print("    [cyan]nemo services run[/cyan]")
@@ -1292,7 +1293,7 @@ def _maybe_start_services(
         if not _is_local_base_url(base_url):
             return "connect_remote"
         action = prompt_choice(
-            message=f"Platform not reachable at {base_url}. Start local services?",
+            message=f"Platform not reachable at {display_url(base_url)}. Start local services?",
             options=[
                 ("yes", "Yes, start services now"),
                 ("remote", "No, I want to connect to a remote Platform instance"),
@@ -1305,7 +1306,7 @@ def _maybe_start_services(
         should_start = action == "yes"
 
     if not should_start:
-        console.print(f"{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
         console.print("  Start the platform first:")
         console.print("    [cyan]nemo services run[/cyan]   (local development)")
         raise typer.Exit(1)
@@ -1368,7 +1369,7 @@ def _maybe_start_services(
             console.print(f"  {DOCKER_PREFLIGHT_MESSAGE}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform running at {base_url} (pid {proc.pid})\n")
+    console.print(f"{CHECK} Platform running at {display_url(base_url)} (pid {proc.pid})\n")
     return "ready"
 
 
@@ -1842,7 +1843,7 @@ def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> boo
 
 def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
     """Print the sample workspace completion card."""
-    studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
+    studio_url = f"{display_url(base_url)}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
     remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
     if complete:
         status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
@@ -2113,7 +2114,7 @@ def _maybe_deploy_sample_agent(
         headers=headers,
         certificate_authority=certificate_authority,
     ):
-        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping sample agent deployment")
+        console.print(f"  {WARN} Agents API not ready at {display_url(base_url)}, skipping sample agent deployment")
         return False
 
     try:
@@ -2220,7 +2221,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
     else:
         _create_provider(
             clients,
@@ -2231,7 +2232,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
 
 def _probe_response_detail(resp: httpx.Response) -> str:
@@ -2509,7 +2510,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
         else:
             _create_provider(
                 clients,
@@ -2520,7 +2521,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
         return provider_name
 
@@ -2717,10 +2718,10 @@ def setup_command(
         raise typer.Exit(0) from None
 
     if not _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
-        console.print(f"\n{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"\n{CROSS} Cannot reach platform at {display_url(base_url)}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform reachable at {base_url}\n")
+    console.print(f"{CHECK} Platform reachable at {display_url(base_url)}\n")
 
     # Ensure the config file exists on disk so later Config.write() calls
     # (e.g. saving the default model) can find the cluster and context.
@@ -3047,7 +3048,7 @@ def _print_setup_complete(
         raise typer.Exit(1)
 
     lines = [
-        f"[bold]Platform:[/bold] {base_url.rstrip('/')}",
+        f"[bold]Platform:[/bold] {display_url(base_url)}",
         f"[bold]Provider:[/bold] {provider_name}",
     ]
     if default_model:

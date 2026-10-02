@@ -4919,6 +4919,18 @@ class TestPrintSetupComplete:
         assert "Default model:[/bold] some-model" in panel.renderable
         assert "Fast model:[/bold] fast-model" in panel.renderable
 
+    def test_platform_line_hides_url_credentials(self):
+        with (
+            patch(f"{SETUP_MOD}._verify_platform_health", return_value=True),
+            patch(f"{SETUP_MOD}.console") as mock_console,
+        ):
+            _print_setup_complete("https://s3cr3t-userinfo@api.example.com/?token=abc123", "nvidia-build", None)
+
+        panel = mock_console.print.call_args.args[0]
+        assert "Platform:[/bold] https://api.example.com" in panel.renderable
+        assert "s3cr3t-userinfo" not in panel.renderable
+        assert "abc123" not in panel.renderable
+
     def test_unhealthy_platform_exits(self):
         with (
             patch(f"{SETUP_MOD}._verify_platform_health", return_value=False),
