@@ -697,6 +697,36 @@ def test_a_registered_gym_agent_refuses_colocated_execution(tmp_path: Path) -> N
         AgentEvalJob._resolve_target(target, _job_context(tmp_path))
 
 
+async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixture) -> None:
+    """Submission compiles after resolving; a refusal there has no job to clean up after, so compile does."""
+    from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+
+    files = mocker.Mock()
+    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch.object(
+        AgentEvalJob, "_execution_profile", side_effect=HelixJobCompilationError("no such execution profile")
+    )
+    target = _gym_by_agent(
+        AgentRef(root="dev/calc"),
+        resolved_config={"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
+    ).model_copy(
+        update={
+            "source": RegisteredAgentSource(
+                agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+            )
+        }
+    )
+    spec = AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target.model_dump(mode="json")})
+
+    with pytest.raises(HelixJobCompilationError, match="no such execution profile"):
+        await AgentEvalJob.compile(
+            workspace="dev", spec=spec, entity_client=None, job_name=None, async_sdk=_async_platform()
+        )
+
+    files.delete_fileset.assert_awaited_once_with(workspace="dev", name="agent-files-0123abcd4567")
+
+
 # --- Spec boundary -------------------------------------------------------------------------------------
 
 
