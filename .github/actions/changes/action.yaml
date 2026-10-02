@@ -180,6 +180,7 @@ runs:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            - 'packages/nhx_sandbox/**'
           e2e:
             - 'e2e/**'
           docs:
