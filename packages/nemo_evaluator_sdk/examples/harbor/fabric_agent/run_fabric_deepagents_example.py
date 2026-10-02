@@ -77,7 +77,7 @@ def fabric_config_for(model: str, api_key_env: str) -> dict[str, JsonValue]:
 async def _main(jobs_dir: Path, *, model: str, api_key_env: str, job_name: str | None) -> None:
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_config": fabric_config_for(model, api_key_env),
-        "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+        "fabric_package": "nemo-fabric[deepagents]==0.4.0",
         # The task image's working directory; Fabric's default `/testbed` does not exist there.
         "fabric_workspace": "/app",
     }
