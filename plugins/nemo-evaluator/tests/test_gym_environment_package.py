@@ -38,6 +38,29 @@ def test_wheels_v1_manifest_is_accepted_against_a_valid_listing() -> None:
     validate_environment_manifest_against_listing(manifest, WHEELS_LISTING)
 
 
+def test_native_v1_accepts_a_declared_model_config() -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    manifest = parse_environment_manifest(
+        f"format: native-v1\nconfig_paths:\n  - {config_path}\nmetadata:\n  name: custom\n"
+    )
+
+    validate_environment_manifest_against_listing(manifest, ["nemo-environment.yaml", config_path])
+    assert manifest.config_paths == (config_path,)
+
+
+def test_native_v1_rejects_undeclared_model_files() -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    manifest = parse_environment_manifest(
+        f"format: native-v1\nconfig_paths:\n  - {config_path}\nmetadata:\n  name: custom\n"
+    )
+
+    with pytest.raises(GymEnvironmentPackageError, match="model configuration is operator-owned"):
+        validate_environment_manifest_against_listing(
+            manifest,
+            [config_path, "responses_api_models/vllm_model/app.py"],
+        )
+
+
 def test_native_v1_manifest_is_accepted_against_a_valid_listing() -> None:
     manifest = parse_environment_manifest(NATIVE_MANIFEST)
     validate_environment_manifest_against_listing(

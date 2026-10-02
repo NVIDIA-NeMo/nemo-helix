@@ -4,6 +4,7 @@
 """LLM judge metric runtime implementation."""
 
 import asyncio
+import json
 import logging
 from copy import copy, deepcopy
 from typing import Any, Literal, Protocol, Self
@@ -25,7 +26,11 @@ from nemo_evaluator_sdk.metrics.template_rendering import (
     sample_template_payload,
 )
 from nemo_evaluator_sdk.resolver_protocols import ModelResolver, SecretResolver
-from nemo_evaluator_sdk.structured_output import InferenceStructuredOutput, detect_structured_output_mode
+from nemo_evaluator_sdk.structured_output import (
+    InferenceStructuredOutput,
+    StructuredOutputMode,
+    detect_structured_output_mode,
+)
 from nemo_evaluator_sdk.templates import render_request
 from nemo_evaluator_sdk.values.common import SecretRef, SupportedJobTypes
 from nemo_evaluator_sdk.values.llm_judge_defaults import (
@@ -251,6 +256,17 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
         """Return whether a structured-output hook is still carrying an unprobed default."""
         return any(isinstance(hook, InferenceStructuredOutput) and not hook.resolved for hook in self._preprocess_hooks)
 
+    def _structured_output_needs_chat(self) -> bool:
+        """Whether structured output adds ``response_format``, which only the chat endpoint accepts.
+
+        Guided JSON travels in ``extra_body`` and text completions accept it, so those modes keep the
+        prompt there along with any completion-only options such as ``echo``.
+        """
+        return any(
+            isinstance(hook, InferenceStructuredOutput) and hook.mode == StructuredOutputMode.OPENAI_RESPONSE_FORMAT
+            for hook in self._preprocess_hooks
+        )
+
     def secrets(self) -> dict[str, SecretRef]:
         """Return secret env mappings required by this metric."""
         if isinstance(self.model, ModelRef):
@@ -324,6 +340,10 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
                 "Register it with LocalBackend.model_resolver.register_model() before local execution."
             )
         request = render_request(self.prompt_template, context=context)
+        if "prompt" in request and "messages" not in request and self._structured_output_needs_chat():
+            # Text completions reject response_format, so send the prompt to chat instead.
+            request["messages"] = [{"role": "user", "content": request.pop("prompt")}]
+        _serialize_message_contents(request)
 
         if "max_tokens" not in request:
             request["max_tokens"] = 1024
@@ -387,6 +407,30 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
             _logger.debug("Parsed score %s: %s", score_name, score.value)
             result.outputs.extend(_score_outputs(parser.score, score.value, _selected_rubric_label(score)))
         return result
+
+
+def _serialize_message_contents(request: dict) -> None:
+    """JSON-encode chat message contents that a bare-expression template rendered as native values.
+
+    ``{{ item }}`` keeps the row as a dict, which chat endpoints reject. Lists of typed content parts
+    are valid chat content and are left alone.
+    """
+    for message in request.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if content is None or isinstance(content, str) or _is_content_parts(content):
+            continue
+        message["content"] = json.dumps(content, default=str)
+
+
+_CHAT_CONTENT_PART_TYPES = frozenset({"text", "image_url", "input_audio", "file", "video_url", "audio_url"})
+
+
+def _is_content_parts(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(part, dict) and part.get("type") in _CHAT_CONTENT_PART_TYPES for part in value
+    )
 
 
 def _score_outputs(score: Score, value: float, label: str) -> list[MetricOutput]:

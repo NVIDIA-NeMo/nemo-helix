@@ -25,7 +25,7 @@ from sandboxed_gym.host.models import (
     GymHostVolumeMount,
     render_host_error,
 )
-from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider
+from sandboxed_gym.host.opensandbox import OpenSandboxGymHostProvider, _create_options_for_host
 
 HEALTH_URL = "https://sandbox.example/gym-1/health"
 ROLLOUT_URL = "https://sandbox.example/gym-1/rollouts/run"
@@ -124,6 +124,35 @@ def _spec() -> GymHostSpec:
         environment_mount=GymHostVolumeMount(pvc_claim="env", mount_path="/job/environment", read_only=True),
         workspace_mount=GymHostVolumeMount(pvc_claim="work", mount_path="/job/work"),
     )
+
+
+def test_host_size_is_the_create_limit_when_no_cap_is_configured() -> None:
+    """The SDK's default limit is 1 CPU / 2Gi. A larger request with that cap is an invalid pod."""
+    options = _create_options_for_host({}, {"cpu": "2", "memory": "4Gi"})
+
+    assert options["resource"] == {"cpu": "2", "memory": "4Gi"}
+
+
+def test_an_empty_memory_string_uses_memory_mib_as_the_limit() -> None:
+    """A blank memory key still requests memory_mib, so the limit has to use that size too."""
+    options = _create_options_for_host({}, {"cpu": "2", "memory": "", "memory_mib": "4096"})
+
+    assert options["resource"] == {"cpu": "2", "memory": "4096Mi"}
+
+
+def test_a_set_memory_value_is_kept_when_memory_mib_is_also_present() -> None:
+    options = _create_options_for_host({}, {"memory": "4Gi", "memory_mib": "4096"})
+
+    assert options["resource"] == {"memory": "4Gi"}
+
+
+def test_an_explicit_resource_cap_is_not_replaced_by_the_host_size() -> None:
+    options = _create_options_for_host(
+        {"resource": {"cpu": "8", "memory": "16Gi"}},
+        {"cpu": "2", "memory": "4Gi"},
+    )
+
+    assert options["resource"] == {"cpu": "8", "memory": "16Gi"}
 
 
 def test_a_host_that_reports_a_failed_bootstrap_stops_the_poll_immediately(

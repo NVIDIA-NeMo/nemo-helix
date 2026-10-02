@@ -282,6 +282,34 @@ def test_duplicate_wheel_distributions_are_rejected(tmp_path: Path) -> None:
         load_environment_package(tmp_path)
 
 
+def test_native_v1_accepts_a_declared_model_config(tmp_path: Path) -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    _write_config(tmp_path, config_path)
+    _write_manifest(tmp_path, _complete_manifest("native-v1", config_path))
+
+    package = load_environment_package(tmp_path)
+
+    assert package.manifest.config_paths == (config_path,)
+
+
+def test_rejects_native_config_outside_gym_server_dirs(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, _complete_manifest("native-v1", "configs/policy_model.yaml"))
+
+    with pytest.raises(EnvironmentPackageError, match="responses_api_models/"):
+        load_environment_manifest(tmp_path)
+
+
+def test_listing_rejects_undeclared_model_files() -> None:
+    config_path = "responses_api_models/vllm_model/configs/policy_model.yaml"
+    manifest = parse_environment_manifest(_complete_manifest("native-v1", config_path))
+
+    with pytest.raises(EnvironmentPackageError, match="model configuration is operator-owned"):
+        validate_environment_manifest_against_listing(
+            manifest,
+            [config_path, "responses_api_models/vllm_model/app.py"],
+        )
+
+
 def test_listing_rejects_customer_model_configuration() -> None:
     config_path = "resources_servers/custom/configs/custom.yaml"
     manifest = parse_environment_manifest(_complete_manifest("wheels-v1", config_path))

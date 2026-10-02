@@ -1289,6 +1289,89 @@ class TestGenerateStructuredOutput:
         assert request["extra_body"]["nvext"]["max_thinking_tokens"] == 256
         assert "guided_json" in request["extra_body"]["nvext"]
 
+    def test_render_request_offline_default_serializes_item_as_json_content(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            job_type=SupportedJobTypes.OFFLINE,
+        )
+        metric.apply_evaluation_job_params(RunConfig())
+        item = {"question": "Capital of France?", "output": "Paris"}
+
+        request = metric._render_request(item, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == item
+
+    def test_render_request_keeps_content_parts_lists(self):
+        parts = [{"type": "text", "text": "Rate this answer."}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.parts }}"}]},
+        )
+
+        request = metric._render_request({"parts": parts}, {})
+
+        assert request["messages"][-1]["content"] == parts
+
+    def test_render_request_serializes_record_lists_with_type_keys(self):
+        events = [{"type": "search_result", "text": "Paris is the capital"}]
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[_make_metric_score()],
+            prompt_template={"messages": [{"role": "user", "content": "{{ item.events }}"}]},
+        )
+
+        request = metric._render_request({"events": events}, {})
+
+        assert json.loads(request["messages"][-1]["content"]) == events
+
+    def test_render_request_sends_string_prompt_as_chat_with_response_format(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "prompt" not in request
+        assert request["messages"][-1] == {"role": "user", "content": "Rate this answer: Paris"}
+        assert "response_format" in request
+
+    def test_render_request_keeps_string_prompt_when_structured_output_unsupported(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template="Rate this answer: {{ item.answer }}",
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(StructuredOutputMode.UNSUPPORTED)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+
+    @pytest.mark.parametrize("mode", [StructuredOutputMode.ROOT_GUIDED_JSON, StructuredOutputMode.NVEXT_GUIDED_JSON])
+    def test_render_request_keeps_prompt_and_completion_options_with_guided_json(self, mode):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template={"prompt": "Rate this answer: {{ item.answer }}", "echo": False},
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(mode)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+        assert request["echo"] is False
+        assert "guided_json" in json.dumps(request["extra_body"])
+
 
 # =============================================================================
 # Hooks
