@@ -7417,7 +7417,8 @@ paths:
         schema:
           $ref: '#/components/schemas/ModelEntityFilter'
         description: Filter models by name, project, workspace, base_model, adapters,
-          finetuning_type, prompt, lora_enabled, description, created_at, and updated_at.
+          finetuning_type, prompt, lora_enabled, family, model_providers, description,
+          created_at, and updated_at.
       responses:
         '200':
           description: Return a list of models
@@ -16992,6 +16993,16 @@ components:
           description: 'Filter by fileset: true = has a fileset, false = no fileset,
             string = match fileset reference in the form {workspace}/{fileset_name}.'
           title: Fileset
+        family:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Filter by model architecture family (e.g. 'llama', 'mixtral').
+          title: Family
+        model_providers:
+          description: Filter models served by this ModelProvider, in the form {workspace}/{provider_name}.
+          title: Model Providers
+          type: string
         created_at:
           allOf:
           - $ref: '#/components/schemas/DatetimeFilter'
