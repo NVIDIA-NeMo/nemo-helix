@@ -451,9 +451,9 @@ def make_harbor_opensandbox_submitter(
 
         # Only credential names are logged, never values.
         LOG.info(
-            "dispatch %s: harbor_opensandbox launch trusted_hosts=%s credential_env keys=%s",
+            "dispatch %s: harbor_opensandbox launch trusted_hosts_count=%d credential_env keys=%s",
             spec.evaluation_id,
-            trusted_hosts,
+            len(trusted_hosts),
             sorted(spec.credential_env),
         )
 
