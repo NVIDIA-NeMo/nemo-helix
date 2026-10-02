@@ -226,11 +226,17 @@ class GymRunnerTarget(BaseModel):
         ge=1,
         description="Concurrent rollouts for `gym eval run`.",
     )
-    startup_timeout_s: float = Field(default=240.0, gt=0, description="Max wait for `gym env start` readiness.")
+    startup_timeout_s: float = Field(
+        default=240.0,
+        gt=0,
+        description="Max wait for the Gym servers to report ready: `gym env start` colocated, the host's "
+        "bootstrap when sandboxed. Excludes pulling a sandboxed host's image.",
+    )
     collection_timeout_s: float | None = Field(
         default=None,
         gt=0,
-        description="Max wait for `gym eval run` collection; None = unbounded.",
+        description="Max wait for rollout collection, measured from when it starts; exceeding it fails the "
+        "run. None = unbounded, though a sandboxed host still stops at the end of its lifetime.",
     )
     shutdown_grace_s: float = Field(
         default=30.0,

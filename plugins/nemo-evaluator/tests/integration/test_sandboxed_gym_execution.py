@@ -32,7 +32,7 @@ from typing import Any
 import pytest
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
-from nemo_evaluator.jobs.gym_sandbox import SessionBackedGymRunner, resolve_sandbox_plan
+from nemo_evaluator.jobs.gym_sandbox import CollectionTimeoutError, SessionBackedGymRunner, resolve_sandbox_plan
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
@@ -104,6 +104,8 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
     delay_s = 0.0
     #: When set, each POST blocks until this event is set, holding the request in flight.
     gate: threading.Event | None = None
+    #: When set with `gate`, the held POST streams whitespace at this interval, as the real host does.
+    heartbeat_s: float | None = None
     post_received = threading.Event()
     in_flight = 0
     peak_in_flight = 0
@@ -128,6 +130,9 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
             cls.in_flight += 1
             cls.peak_in_flight = max(cls.peak_in_flight, cls.in_flight)
         cls.post_received.set()
+        if cls.gate is not None and cls.heartbeat_s is not None:
+            self._heartbeat_until(cls.gate, cls.heartbeat_s)
+            return
         if cls.gate is not None:
             cls.gate.wait(timeout=30)
         time.sleep(cls.delay_s)
@@ -148,6 +153,23 @@ class _StubGymHostHandler(BaseHTTPRequestHandler):
             for example in payload["examples"]
         ]
         self._send(200, {"results": results})
+
+    def _heartbeat_until(self, gate: threading.Event, interval_s: float) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        try:
+            while not gate.wait(interval_s):
+                self.wfile.write(b"1\r\n \r\n")
+                self.wfile.flush()
+            body = json.dumps({"results": []}).encode()
+            self.wfile.write(b"%X\r\n%s\r\n0\r\n\r\n" % (len(body), body))
+        except OSError:
+            pass
+        finally:
+            with type(self)._lock:
+                type(self).in_flight -= 1
 
     def _send(self, status: int, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode()
@@ -204,6 +226,7 @@ def stub_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[_StubHostProvider
     _StubGymHostHandler.reply = None
     _StubGymHostHandler.delay_s = 0.0
     _StubGymHostHandler.gate = None
+    _StubGymHostHandler.heartbeat_s = None
     _StubGymHostHandler.post_received = threading.Event()
     _StubGymHostHandler.in_flight = _StubGymHostHandler.peak_in_flight = 0
     provider = _StubHostProvider()
@@ -397,6 +420,57 @@ async def test_cancelling_a_run_stops_it_sending_the_rollouts_still_queued(
     # A leaked dispatcher sends the next chunk within milliseconds of the first returning.
     await asyncio.sleep(0.5)
     assert len(attempts) == 1, f"{len(attempts) - 1} chunk POST(s) attempted after the run was cancelled"
+
+
+async def test_the_collection_timeout_bounds_the_whole_run_not_each_chunk(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    """Every chunk finishes well inside the budget; together they do not, and the run must fail."""
+    _StubGymHostHandler.delay_s = 0.4
+    # Six single-example chunks, one in flight at a time: 2.4s of work against a 1s budget.
+    runner = SessionBackedGymRunner(
+        target=_target(num_repeats=3, concurrency=1, collection_timeout_s=1.0), plan=_plan(), job_id="eval-job-budget"
+    )
+
+    with pytest.raises(CollectionTimeoutError, match=r"collection_timeout_s=1s"):
+        await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(_StubGymHostHandler.received_payloads) < 6, "chunks still queued at the deadline must not be sent"
+    assert stub_provider.destroyed == ["stub-host"]
+
+
+async def test_heartbeats_do_not_extend_the_collection_deadline(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    """The host keeps a long chunk's connection alive with whitespace; that must not reset the budget."""
+    release = _StubGymHostHandler.gate = threading.Event()
+    _StubGymHostHandler.heartbeat_s = 0.05
+    runner = SessionBackedGymRunner(target=_target(collection_timeout_s=1.0), plan=_plan(), job_id="eval-job-heartbeat")
+    try:
+        started = time.monotonic()
+        with pytest.raises(CollectionTimeoutError):
+            await asyncio.wait_for(
+                runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path)), timeout=10
+            )
+        assert time.monotonic() - started < 5
+        assert stub_provider.destroyed == ["stub-host"]
+    finally:
+        release.set()
+
+
+async def test_a_run_inside_its_timeouts_completes_and_records_them(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    runner = SessionBackedGymRunner(
+        target=_target(startup_timeout_s=45, collection_timeout_s=30), plan=_plan(), job_id="eval-job-in-budget"
+    )
+
+    trials = await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    assert len(trials) == 2
+    info = runner.runner_info().config
+    assert (info["startup_timeout_s"], info["collection_timeout_s"]) == (45, 30)
+    assert info["rollout_timeout_s"] > 30
 
 
 async def _raise_boom(*args: Any, **kwargs: Any) -> Any:

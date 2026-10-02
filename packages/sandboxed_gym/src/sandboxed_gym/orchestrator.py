@@ -215,6 +215,11 @@ def apply_sandbox_runtime_defaults(global_config: dict[str, Any]) -> dict[str, A
     # install into a read-only interpreter tree. The only symptom is every Gym server dying with
     # "Process `policy_model` finished unexpectedly!".
     cfg.setdefault("uv_pip_set_python", True)
+    # Use the venvs the host image prebuilt instead of re-running `uv pip install` into each one on
+    # every start. That reinstall resolves against the package index, which a sandbox's egress policy
+    # normally denies, so the component dies with "Process `mcqa` finished unexpectedly!". A
+    # component with no prebuilt venv (a FileSet's own server) is still installed.
+    cfg.setdefault("skip_venv_if_present", True)
     return cfg
 
 
@@ -702,7 +707,8 @@ class SandboxedGymOrchestrator:
             host: GymHostHandle | None = None
             try:
                 host = async_runner.run(host_provider.create_host(host_spec))
-                async_runner.run(host_provider.wait_ready(host, cfg.sandbox.ready_timeout_s))
+                bootstrap_timeout_s = cfg.sandbox.bootstrap_timeout_s or cfg.sandbox.ready_timeout_s
+                async_runner.run(host_provider.wait_ready(host, bootstrap_timeout_s))
             except Exception:
                 if host is not None:
                     try:

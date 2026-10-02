@@ -14,7 +14,7 @@ import { HelixJobStatus, type HelixJobResponse } from '@nemo/sdk/generated/platf
 import { Flex } from '@nvidia/foundations-react-core';
 import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizationJobStatus';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getNewCustomizationJobRoute } from '@studio/routes/utils';
+import { getNewCustomizationFormRoute } from '@studio/routes/utils';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, Copy } from 'lucide-react';
@@ -94,7 +94,7 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
             label: 'Clone',
             icon: <Copy />,
             onSelect: () =>
-              navigate(getNewCustomizationJobRoute(workspace), { state: { cloneFromJob: job } }),
+              navigate(getNewCustomizationFormRoute(workspace), { state: { cloneFromJob: job } }),
           },
           ...(isCancellable || isCancelling
             ? [

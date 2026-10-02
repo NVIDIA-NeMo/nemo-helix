@@ -97,7 +97,8 @@ def sanitize_name(prefix: str, name: str) -> str:
     name = name.split("/")[-1]
     sanitized = re.sub(r"[^a-z0-9@.+_-]", "-", name.lower())
     sanitized = re.sub(r"-+", "-", sanitized).strip("-")
-    return f"{prefix}-{sanitized}"[:59].rstrip("-")
+    # 55 leaves room for the deployments-plugin ``-weights`` suffix (63 - 8).
+    return f"{prefix}-{sanitized}"[:55].rstrip("-")
 
 
 def build_training_config(training_type: str, config: TrainingTypeConfig) -> dict:

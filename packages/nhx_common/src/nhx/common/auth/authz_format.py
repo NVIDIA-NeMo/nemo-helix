@@ -31,8 +31,5 @@ from nemo_helix_plugin.authz_format import (
     validate_permission_strings as validate_permission_strings,
 )
 from nemo_helix_plugin.authz_format import (
-    validate_runtime_authorize_scopes as validate_runtime_authorize_scopes,
-)
-from nemo_helix_plugin.authz_format import (
     validate_static_authz_data as validate_static_authz_data,
 )

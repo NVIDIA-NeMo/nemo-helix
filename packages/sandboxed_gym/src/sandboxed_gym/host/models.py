@@ -207,6 +207,8 @@ class SandboxConfig(BaseModel):
     workspace_sub_path: str = ""
     runtime_http_port: int = Field(default=DEFAULT_RUNTIME_HTTP_PORT, ge=1, le=65535)
     ready_timeout_s: float = Field(default=float(DEFAULT_HOST_READY_TIMEOUT_S), gt=0)
+    # Gym's /health wait once the sandbox runs; unset reuses ready_timeout_s, which also covers the pull.
+    bootstrap_timeout_s: float | None = Field(default=None, gt=0)
     rollout_timeout_s: float = Field(default=float(DEFAULT_ROLLOUT_TIMEOUT_S), gt=0)
     rollout_chunk_size: int = Field(default=DEFAULT_ROLLOUT_CHUNK_SIZE, gt=0)
     rollout_max_in_flight: int = Field(default=DEFAULT_ROLLOUT_MAX_IN_FLIGHT, gt=0)

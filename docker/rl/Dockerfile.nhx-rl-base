@@ -491,6 +491,11 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     if "${py}" -c 'import importlib.metadata as m; m.version("hydra-core")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
     fi
+    # GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical). Same floor as the
+    # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
+    if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
+        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
+    fi
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
         uv pip install --python "${py}" --upgrade-package wandb "wandb>=0.29.0"
     fi
@@ -517,6 +522,7 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
         && ! compgen -G "${d}mlflow_skinny-*.dist-info" >/dev/null \
         && ! compgen -G "${d}hydra_core-*.dist-info" >/dev/null \
         && ! compgen -G "${d}sqlparse-*.dist-info" >/dev/null \
+        && ! compgen -G "${d}gitpython-*.dist-info" >/dev/null \
         && ! compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
         continue
     fi

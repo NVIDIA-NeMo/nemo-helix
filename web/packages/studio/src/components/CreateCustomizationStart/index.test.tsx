@@ -43,13 +43,12 @@ const serveRows = (rows: () => Promise<Record<string, unknown>[]>) => {
 const serveDefaultRows = () =>
   serveRows(() => Promise.resolve(Array.from({ length: ROW_SUPPLY }, () => ({ ...HF_ROW }))));
 
-const renderStart = (onContinue: Mock = vi.fn()) => {
+const renderStart = (onContinue: Mock = vi.fn()) =>
   render(
     <TestProviders>
       <CreateCustomizationStart workspace={DEFAULT_WORKSPACE} onContinue={onContinue} />
     </TestProviders>
   );
-};
 
 const continueButton = () => screen.getByRole('button', { name: /continue/i });
 
@@ -172,6 +171,47 @@ describe('CreateCustomizationStart', () => {
         )
       );
       expect(dataset.sourceFilesetName).not.toBe(dataset.name);
+    });
+
+    /**
+     * Setup runs long enough that walking away part-way through is realistic, and nothing
+     * stops it. The promise resolves either way and `onContinue` navigates, so a finished
+     * setup must not pull a user who has already left back to the form.
+     */
+    it('does not continue when the picker unmounts part-way through setup', async () => {
+      let releaseRows: () => void = () => {};
+      serveRows(
+        () =>
+          new Promise((resolve) => {
+            releaseRows = () => resolve(Array.from({ length: ROW_SUPPLY }, () => ({ ...HF_ROW })));
+          })
+      );
+
+      // The uploads are the last thing setup does before handing values over, so seeing
+      // both is proof the run carried on to completion after the unmount.
+      let uploads = 0;
+      server.use(
+        http.put(`${FILESETS_URL}/:name/-/:path`, () => {
+          uploads += 1;
+          return HttpResponse.json({ path: 'ok' });
+        })
+      );
+
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      const { unmount } = renderStart(onContinue);
+
+      await user.click(screen.getByText('Start from a template'));
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
+
+      // Leave only once setup is genuinely in flight, blocked on the dataset read.
+      await waitFor(() => expect(rowsOptions).toHaveBeenCalled());
+      unmount();
+      releaseRows();
+
+      await waitFor(() => expect(uploads).toBe(2), { timeout: 10_000 });
+      expect(onContinue).not.toHaveBeenCalled();
     });
 
     it('reports a failed dataset read and does not continue', async () => {

@@ -13,7 +13,6 @@ from nemo_helix_plugin.authz_format import (
     is_wildcard_permission,
     validate_nhx_scope_strings_for_config,
     validate_permission_strings,
-    validate_runtime_authorize_scopes,
     validate_static_authz_data,
 )
 from nhx.common.auth.exceptions import InvalidPermissionFormatError, InvalidScopeFormatError
@@ -77,19 +76,6 @@ class TestValidateScopeStringsForConfig:
 
     def test_accepts_valid(self) -> None:
         validate_nhx_scope_strings_for_config(["secrets:read", "platform:read"], context="test")
-
-
-class TestValidateRuntimeAuthorizeScopes:
-    def test_allows_oidc_style_scopes(self) -> None:
-        validate_runtime_authorize_scopes(["openid", "email"])
-
-    def test_rejects_permission_like_values(self) -> None:
-        with pytest.raises(InvalidScopeFormatError, match="permission syntax"):
-            validate_runtime_authorize_scopes(["secrets.read"])
-
-    def test_none_or_empty(self) -> None:
-        validate_runtime_authorize_scopes(None)
-        validate_runtime_authorize_scopes([])
 
 
 class TestValidateStaticAuthzData:

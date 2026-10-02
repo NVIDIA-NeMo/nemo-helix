@@ -23,6 +23,7 @@ from nemo_helix_plugin.client.errors import (
     NotFoundError,
 )
 from nemo_helix_plugin.deployment import DeploymentParams, is_unbound_deployment_config
+from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
@@ -79,7 +80,15 @@ def get_config(config_path: Path) -> ModelEntityTaskConfig:
         return ModelEntityTaskConfig.model_validate(json.load(f))
 
 
-MAX_RESOURCE_NAME_LEN = 59
+# Entity names are at most NAME_MAX_LENGTH (63). A generated deployment name is
+# stored as ``{name}-v{version}`` and the deployments plugin derives
+# ``{name}-weights``, ``{name}-scratch``, ``{name}-puller``, and ``{name}-server``
+# from the same logical name. ``-weights`` is the longest of those suffixes, so
+# the generated name itself stops short of 63. Reserving only for ``-v1`` (the
+# old 59-character cap) lets ``{name}-weights`` reach 67 and the volume create
+# fails with string_pattern_mismatch after the deployment record exists.
+_LONGEST_DERIVED_NAME_SUFFIX = "-weights"
+MAX_RESOURCE_NAME_LEN = NAME_MAX_LENGTH - len(_LONGEST_DERIVED_NAME_SUFFIX)
 MAX_DISCRIMINATOR_LEN = 24
 TEMPLATE_DIGEST_LEN = 8
 
@@ -121,6 +130,10 @@ def sanitize_name(prefix: str, name: str, discriminator: str | None = None) -> s
     truncated away: it is capped, then the model segment gives up whatever room is
     left. Two distinct discriminators therefore cannot collapse into one name, which
     is the property the separation depends on.
+
+    The whole name is capped at ``MAX_RESOURCE_NAME_LEN`` so the deployments-plugin
+    suffixes (longest: ``-weights``) and the ``-v{version}`` entity name still fit
+    the 63-character entity-name limit.
     """
     model = _sanitize_segment(name)
     if discriminator is None:
@@ -130,7 +143,7 @@ def sanitize_name(prefix: str, name: str, discriminator: str | None = None) -> s
     budget = MAX_RESOURCE_NAME_LEN - len(prefix) - len(tail) - 2  # two joining hyphens
     parts = [prefix, model[: max(budget, 0)], tail]
     joined = "-".join(part for part in parts if part)
-    return re.sub(r"-+", "-", joined).strip("-")[:MAX_RESOURCE_NAME_LEN]
+    return re.sub(r"-+", "-", joined).strip("-")[:MAX_RESOURCE_NAME_LEN].rstrip("-")
 
 
 class ModelEntityRunner:

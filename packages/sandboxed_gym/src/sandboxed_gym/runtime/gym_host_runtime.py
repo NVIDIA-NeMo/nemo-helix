@@ -581,6 +581,9 @@ def _compose_gym_config_with_environment_package(
         if selection is not None:
             raise RuntimeError("Gym component selection was supplied without an environment package")
         return gym_config
+    if selection is None:
+        # Training writes config_paths itself. Eval supplies component selection.
+        return gym_config
     if not isinstance(selection, dict):
         raise RuntimeError("A mounted environment package requires Gym component selection metadata")
 
@@ -1051,7 +1054,11 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
-    # Before bootstrap, so component startup output is captured if a rollout later fails.
+    # Before bootstrap, so this host's own startup output is captured if a rollout later fails.
+    # Gym's component servers are not: they inherit fd 1/2 and write past this wrapper. Gym's
+    # `nemo_gym_log_dir` would capture them, but in nemo-gym 0.5.0 it runs each component under
+    # `set -o pipefail`, which kills any non-editable install whose requirements.txt has nothing
+    # left after Gym filters out its `../..` lines -- a FileSet server then dies printing nothing.
     _install_output_tail()
     Handler.max_request_bytes = _env_int("NHX_MAX_REQUEST_BYTES", Handler.max_request_bytes)
     Handler.max_response_bytes = _env_int("NHX_MAX_RESPONSE_BYTES", Handler.max_response_bytes)
