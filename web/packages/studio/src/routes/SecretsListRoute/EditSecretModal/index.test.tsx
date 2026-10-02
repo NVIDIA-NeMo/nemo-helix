@@ -41,7 +41,7 @@ describe('EditSecretModal', () => {
   });
 
   it('waits for the secret before showing the form', () => {
-    mockGetSecret.mockReturnValue({ data: undefined, error: null, isLoading: true });
+    mockGetSecret.mockReturnValue({ data: undefined, error: null, isFetching: true });
 
     renderModal();
 
@@ -55,7 +55,7 @@ describe('EditSecretModal', () => {
     mockGetSecret.mockReturnValue({
       data: { name: 'github-token', description: 'Read-only PAT' } as HelixSecretResponse,
       error: null,
-      isLoading: false,
+      isFetching: false,
     });
 
     renderModal();
@@ -70,7 +70,7 @@ describe('EditSecretModal', () => {
     mockGetSecret.mockReturnValue({
       data: { name: 'github-token', description: 'Read-only PAT' } as HelixSecretResponse,
       error: null,
-      isLoading: false,
+      isFetching: false,
     });
 
     renderModal();
@@ -90,11 +90,26 @@ describe('EditSecretModal', () => {
     );
   });
 
+  it('holds the form back while a cached secret is being refetched', () => {
+    mockGetSecret.mockReturnValue({
+      data: { name: 'github-token', description: 'description from a previous open' },
+      error: null,
+      isFetching: true,
+    });
+
+    renderModal();
+
+    // Mounting here would capture the cached description as the form default, and the next
+    // save would write it back over whatever replaced it.
+    expect(screen.getByLabelText('Loading github-token')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('description from a previous open')).not.toBeInTheDocument();
+  });
+
   it('surfaces a failure to load the secret', () => {
     mockGetSecret.mockReturnValue({
       data: undefined,
       error: new Error('Secret not found'),
-      isLoading: false,
+      isFetching: false,
     });
 
     renderModal();

@@ -18,6 +18,7 @@ import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
+  getSecretsGetSecretQueryKey,
   getSecretsListSecretsQueryKey,
   useSecretsGetSecret,
   useSecretsUpdateSecret,
@@ -51,11 +52,13 @@ export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, name, ope
   const {
     data: secret,
     error,
-    isLoading,
+    isFetching,
   } = useSecretsGetSecret(workspace, name, { query: { enabled: open && Boolean(name) } });
 
-  // Remounts per secret so the form's defaults are the ones it was opened with.
-  if (secret) {
+  // Not `if (secret)`: a cached record is served before its refetch settles, and the form reads
+  // its defaults once at mount. Mounting on stale data would let the next save write back a
+  // description the user already replaced.
+  if (secret && !isFetching) {
     return (
       <EditSecretForm
         key={`${workspace}/${name}`}
@@ -77,7 +80,7 @@ export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, name, ope
       submitDisabled
       errorText={error ? getErrorMessage(error) : undefined}
     >
-      {isLoading ? (
+      {isFetching ? (
         <Flex align="center" justify="center" className="py-8">
           <Spinner aria-label={`Loading ${name}`} />
         </Flex>
@@ -105,6 +108,11 @@ const EditSecretForm: FC<EditSecretFormProps> = ({ workspace, secret, open, onCl
       onSuccess: () => {
         toast.success('Secret updated successfully');
         queryClient.invalidateQueries({ queryKey: getSecretsListSecretsQueryKey(workspace) });
+        // The list key is not a prefix of the detail key, so invalidating the list alone would
+        // leave this secret's own cache entry holding the description it had before this save.
+        queryClient.invalidateQueries({
+          queryKey: getSecretsGetSecretQueryKey(workspace, secret.name),
+        });
         resetAndClose();
       },
     },
