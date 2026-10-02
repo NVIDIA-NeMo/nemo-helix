@@ -1084,12 +1084,12 @@ paths:
         in: query
         required: false
         schema:
-          description: Optional direct string data field whose matching values should
-            be counted.
+          description: Optional string data field, such as data.status or data.spec.family,
+            whose matching values should be counted.
           title: Count By
           type: string
-        description: Optional direct string data field whose matching values should
-          be counted.
+        description: Optional string data field, such as data.status or data.spec.family,
+          whose matching values should be counted.
       - name: filter
         in: query
         required: false
@@ -7309,6 +7309,83 @@ paths:
                   $ref: '#/components/schemas/ModelDeployment'
                 title: Response List Deployment Versions Apis Models V2 Workspaces  Workspace  Deployments  Name  Versions
                   Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/models/v2/workspaces/{workspace}/model-families:
+    get:
+      tags:
+      - Models
+      summary: List Model Families
+      description: 'List the distinct model architecture families (`spec.family`)
+        among a workspace''s models.
+
+
+        Each family is returned once with the number of models in it. Models with
+        no family are
+
+        left out. Accepts the same filters as List Models, so the families can be
+        narrowed to those
+
+        of a given provider, for example.'
+      operationId: list_model_families_apis_models_v2_workspaces__workspace__model_families_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          description: Page number.
+          default: 1
+          title: Page
+        description: Page number.
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          description: Page size.
+          default: 100
+          title: Page Size
+        description: Page size.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/ModelFamilySort'
+          description: The field to sort by. To sort in decreasing order, use `-`
+            in front of the field name.
+          default: name
+        description: The field to sort by. To sort in decreasing order, use `-` in
+          front of the field name.
+      - in: query
+        name: filter
+        style: deepObject
+        required: false
+        explode: true
+        schema:
+          $ref: '#/components/schemas/ModelEntityFilter'
+        description: 'Narrow the models counted into each family, using the same filters
+          as List Models: name, project, workspace, base_model, adapters, finetuning_type,
+          prompt, lora_enabled, model_providers, description, created_at, and updated_at.'
+      responses:
+        '200':
+          description: Return the model architecture families and how many models
+            belong to each
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelFamilysPage'
         '422':
           description: Validation Error
           content:
@@ -17048,6 +17125,56 @@ components:
       required:
       - data
       title: ModelEntitysPage
+    ModelFamily:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Model architecture family, from spec.family (e.g. 'llama',
+            'mixtral').
+        model_count:
+          type: integer
+          title: Model Count
+          description: Number of models in this family that match the filter.
+      type: object
+      required:
+      - name
+      - model_count
+      title: ModelFamily
+      description: A model architecture family and how many models belong to it.
+    ModelFamilySort:
+      type: string
+      enum:
+      - name
+      - -name
+      - model_count
+      - -model_count
+      title: ModelFamilySort
+      description: Sort fields for Model Family queries.
+    ModelFamilysPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/ModelFamily'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: Pagination information.
+        sort:
+          title: Sort
+          description: The field on which the results are sorted.
+          type: string
+        filter:
+          title: Filter
+          description: Filtering information.
+          additionalProperties: true
+          type: object
+      type: object
+      required:
+      - data
+      title: ModelFamilysPage
     ModelMetadataContent:
       properties:
         tool_calling:
