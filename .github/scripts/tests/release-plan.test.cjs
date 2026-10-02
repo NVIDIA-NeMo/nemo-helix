@@ -88,3 +88,38 @@ test("rejects duplicate custom artifact IDs", async () => {
     /wheel-ids contains duplicate entries/,
   );
 });
+
+for (const branch of ["release/0.5", "release/0.6"]) {
+  for (const pinned of [false, true]) {
+    test(`${branch} nightly uses ${pinned ? "the pinned source" : "the workflow commit"}`, async () => {
+      const context = manualContext({
+        "release-type": "nightly",
+        "source-sha": pinned ? SHA : "",
+      });
+      context.ref = `refs/heads/${branch}`;
+      const plan = await resolveReleasePlan({
+        env: environment(),
+        context,
+        getCommit: async () =>
+          assert.fail(
+            "Do not select the default branch for a maintenance nightly",
+          ),
+      });
+      assert.equal(plan.sourceSha, pinned ? SHA : context.sha);
+    });
+  }
+}
+
+test("an unpinned nightly on main retains default-branch selection", async () => {
+  const context = manualContext({ "release-type": "nightly" });
+  context.ref = "refs/heads/main";
+  const plan = await resolveReleasePlan({
+    env: environment(),
+    context,
+    getCommit: async (ref) => {
+      assert.equal(ref, "main");
+      return SHA;
+    },
+  });
+  assert.equal(plan.sourceSha, SHA);
+});

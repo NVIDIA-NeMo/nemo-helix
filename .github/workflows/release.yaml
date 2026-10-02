@@ -130,7 +130,7 @@ env:
     ]
   RELEASE_HELM_ID: nemo-platform
   RELEASE_HELM_PATH: k8s/helm
-  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-platform
+  RELEASE_HELM_REGISTRY: nvcr.io/0921617854601259/nemo-platform-dev
   STABLE_IMAGE_REGISTRY: nvcr.io/nvidia/nemo-platform
   RELEASE_PUBLISH_NIGHTLY_WHEELS: "false"
   RELEASE_NIGHTLY_WHEEL_INDEX: https://pypi.nvidia.com
@@ -177,6 +177,9 @@ jobs:
 
       - name: Resolve release plan
         id: plan
+        env:
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ github.token }}
@@ -193,6 +196,10 @@ jobs:
                 return commit.sha;
               },
             });
+            if (!plan.dryRun) {
+              const { validateDispatchTarget } = require("./.github/scripts/release-dispatch.cjs");
+              validateDispatchTarget(process.env);
+            }
             const outputs = {
               release_type: plan.releaseType,
               release_scope: plan.releaseScope,
@@ -414,38 +421,45 @@ jobs:
       AIRE_NGC_GITHUB_PLATFORM_RW: ${{ secrets.AIRE_NGC_GITHUB_PLATFORM_RW }}
 
   dispatch-release-registration:
-    name: Dispatch release registration
+    name: Generate manual release registration command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.release_type == 'stable' &&
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch registration workflow
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Generate manual registration command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
           RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           SOURCE_RUN_URL: >-
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WHEEL_VERSION: ${{ needs.plan-release.outputs.wheel_version }}
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
           INCLUDE_HELM: ${{ needs.plan-release.outputs.include_helm }}
           HELM_VERSION: ${{ needs.plan-release.outputs.helm_version }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
+            const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "register-release-artifacts",
-              client_payload: {
+            await dispatchRelease({
+              core, github, env: process.env,
+              eventType: "register-release-artifacts",
+              clientPayload: {
                 version: process.env.RELEASE_VERSION,
                 source_sha: process.env.SOURCE_SHA,
                 source_run_url: process.env.SOURCE_RUN_URL,
+                wheel_version: process.env.WHEEL_VERSION,
                 wheel_ids: JSON.parse(process.env.WHEEL_IDS),
                 container_ids: JSON.parse(process.env.CONTAINER_IDS),
                 helm_id: process.env.INCLUDE_HELM === "true"
@@ -458,17 +472,23 @@ jobs:
             });
 
   dispatch-wheel-stage:
-    name: Dispatch wheel builds
+    name: Generate manual wheel build command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_wheels == 'true' &&
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch wheel builds
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Generate manual wheel build command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
@@ -477,15 +497,14 @@ jobs:
           WHEEL_IDS: ${{ needs.plan-release.outputs.wheel_ids }}
           PUBLISH_NIGHTLY_WHEELS: ${{ env.RELEASE_PUBLISH_NIGHTLY_WHEELS }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
+            const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "stage-wheels",
-              client_payload: {
+            await dispatchRelease({
+              core, github, env: process.env,
+              eventType: "stage-wheels",
+              clientPayload: {
                 ref: process.env.SOURCE_SHA,
                 cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
                 release_label: process.env.RELEASE_LABEL,
@@ -497,31 +516,37 @@ jobs:
             });
 
   dispatch-container-stage:
-    name: Dispatch container builds
+    name: Generate manual nightly container build command
     needs: plan-release
     if: >-
       needs.plan-release.outputs.has_containers == 'true' &&
+      needs.plan-release.outputs.release_type == 'nightly' &&
       needs.plan-release.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch container builds
+      - name: Check out workflow revision
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Generate manual container build command
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           CONTAINER_IDS: ${{ needs.plan-release.outputs.container_ids }}
         with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          github-token: ${{ github.token }}
           script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
+            const { dispatchRelease } = require("./.github/scripts/release-dispatch.cjs");
 
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "release",
-              client_payload: {
+            await dispatchRelease({
+              core, github, env: process.env,
+              eventType: "release",
+              clientPayload: {
                 ref: process.env.SOURCE_SHA,
                 cadence: process.env.RELEASE_TYPE,
                 version: process.env.RELEASE_LABEL,
@@ -653,40 +678,7 @@ jobs:
             helm cm-push "${CHART_PACKAGE}" nemo-platform
           fi
 
-  signal-deployment:
-    name: Signal deployment
-    needs: [plan-release, stage-helm, poll-final-release]
-    if: >-
-      !cancelled() &&
-      needs.poll-final-release.result == 'success' &&
-      needs.plan-release.outputs.include_helm == 'true' &&
-      needs.plan-release.outputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch deployment creation
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
-          SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
-          RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
-          RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
-          HELM_VERSION: ${{ needs.stage-helm.outputs.chart_version }}
-        with:
-          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
-          script: |
-            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
-
-            await github.rest.repos.createDispatchEvent({
-              owner,
-              repo,
-              event_type: "create-release-deployment",
-              client_payload: {
-                ref: process.env.SOURCE_SHA,
-                cadence: process.env.RELEASE_TYPE === "stable" ? "release" : "nightly",
-                release_label: process.env.RELEASE_LABEL,
-                helm_version: process.env.HELM_VERSION,
-              },
-            });
+  # Maintenance releases publish artifacts without deployment signaling.
 
   poll-final-release:
     name: Wait for published release artifacts
@@ -913,6 +905,7 @@ jobs:
     name: Create GitHub Release
     needs: [plan-release, poll-final-release]
     if: >-
+      !cancelled() &&
       needs.plan-release.outputs.release_type == 'stable' &&
       needs.plan-release.outputs.release_scope == 'all' &&
       needs.plan-release.outputs.dry_run != 'true' &&
@@ -961,7 +954,6 @@ jobs:
       - plan-release
       - poll-final-release
       - create-github-release
-      - signal-deployment
       - stage-helm
     if: >-
       !cancelled() &&
@@ -995,7 +987,7 @@ jobs:
           NGC_CATALOG_BASE: ${{ env.RELEASE_NGC_CATALOG_BASE }}
           POLL_RESULT: ${{ needs.poll-final-release.result }}
           GITHUB_RELEASE_RESULT: ${{ needs.create-github-release.result }}
-          DEPLOYMENT_RESULT: ${{ needs.signal-deployment.result }}
+          DEPLOYMENT_RESULT: skipped
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_NUMBER: ${{ github.run_number }}
         with:
