@@ -20,7 +20,7 @@ import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplate
 import { toCustomizationBackend } from '@studio/util/customizationBackend';
 import { templateToFormFields } from '@studio/util/forms/customization';
 import { Box, Bookmark } from 'lucide-react';
-import { useMemo, useState, type FC } from 'react';
+import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 
 /** Namespaces saved-template ids so they cannot collide with a curated recipe's id. */
 const SAVED_PREFIX = 'saved:';
@@ -46,6 +46,21 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     isLoading: savedLoading,
     refetch: refetchSaved,
   } = useSavedTemplates(workspace);
+
+  // Setup runs long enough that leaving the page part-way through is a realistic move, and
+  // nothing here blocks it. The promise resolves regardless of whether this is still on
+  // screen, and `onContinue` navigates — so without this, finishing setup would yank the
+  // user to the form from wherever they had gone.
+  // Set on the way in as well as cleared on the way out: StrictMode runs an effect, its
+  // cleanup, then the effect again, so a cleanup-only version latches to false on mount in
+  // development and never hands anything over.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   // A backend the form has no arm for cannot seed it, so it is not offered.
   const savedTemplates = useMemo(
@@ -104,8 +119,9 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
     // reference them, so it happens here rather than on the next screen.
     const initialValues = await runTemplateSetup(selectedTemplate);
     // Provisioning spans a render, and the page is locked throughout, but only hand over
-    // values that still match what is selected.
-    if (initialValues && selectedTemplateId === selectedTemplate.id) {
+    // values that still match what is selected, and only if there is still a picker to
+    // hand them over from.
+    if (initialValues && mounted.current && selectedTemplateId === selectedTemplate.id) {
       onContinue({ optionId: 'template', initialValues });
     }
   };

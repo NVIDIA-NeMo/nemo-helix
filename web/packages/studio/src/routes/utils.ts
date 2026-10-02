@@ -416,8 +416,17 @@ export const getEvaluationSessionTraceDetailRoute = (
   return `${path}?${searchParams.toString()}`;
 };
 
-export const getNewCustomizationJobRoute = (workspace: string, options?: { model?: string }) => {
-  const basePath = generatePath(ROUTES.workspace.newCustomizationJob, { workspace });
+/** The "how do you want to start?" selection page. */
+export const getNewCustomizationJobRoute = (workspace: string) => {
+  return generatePath(ROUTES.workspace.newCustomizationJob, { workspace });
+};
+
+/**
+ * The full fine-tuning form. `model` preselects a base model, for entry points that
+ * already know which one the user means.
+ */
+export const getNewCustomizationFormRoute = (workspace: string, options?: { model?: string }) => {
+  const basePath = generatePath(ROUTES.workspace.newCustomizationJobScratch, { workspace });
   if (options?.model) {
     return `${basePath}?${QUERY_PARAMETERS.model}=${encodeURIComponent(options.model)}`;
   }

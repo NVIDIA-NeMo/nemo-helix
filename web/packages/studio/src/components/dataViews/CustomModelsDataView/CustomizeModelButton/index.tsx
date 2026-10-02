@@ -6,7 +6,7 @@ import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { CreateButton } from '@studio/components/common/CreateButton';
 import { useModelCustomizationEligibility } from '@studio/hooks/useModelCustomizationEligibility';
-import { getNewCustomizationJobRoute } from '@studio/routes/utils';
+import { getNewCustomizationFormRoute, getNewCustomizationJobRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -26,7 +26,12 @@ export const CustomizeModelButton: FC<CustomizeModelButtonProps> = ({ workspace,
   const { canFineTune, isLoading } = useModelCustomizationEligibility(model);
 
   const goToFineTuning = () =>
-    navigate(getNewCustomizationJobRoute(workspace, { model: getURNFromNamedEntityRef(model) }));
+    navigate(
+      // Naming a model already answers "how do you want to start?" — skip the picker.
+      model
+        ? getNewCustomizationFormRoute(workspace, { model: getURNFromNamedEntityRef(model) })
+        : getNewCustomizationJobRoute(workspace)
+    );
 
   return model ? (
     <LoadingButton
