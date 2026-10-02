@@ -133,6 +133,19 @@ def test_host_size_is_the_create_limit_when_no_cap_is_configured() -> None:
     assert options["resource"] == {"cpu": "2", "memory": "4Gi"}
 
 
+def test_an_empty_memory_string_uses_memory_mib_as_the_limit() -> None:
+    """A blank memory key still requests memory_mib, so the limit has to use that size too."""
+    options = _create_options_for_host({}, {"cpu": "2", "memory": "", "memory_mib": "4096"})
+
+    assert options["resource"] == {"cpu": "2", "memory": "4096Mi"}
+
+
+def test_a_set_memory_value_is_kept_when_memory_mib_is_also_present() -> None:
+    options = _create_options_for_host({}, {"memory": "4Gi", "memory_mib": "4096"})
+
+    assert options["resource"] == {"memory": "4Gi"}
+
+
 def test_an_explicit_resource_cap_is_not_replaced_by_the_host_size() -> None:
     options = _create_options_for_host(
         {"resource": {"cpu": "8", "memory": "16Gi"}},
