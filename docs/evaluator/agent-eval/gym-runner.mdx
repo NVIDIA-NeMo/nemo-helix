@@ -440,6 +440,33 @@ translated config on the target as `resolved_config`. Gym's `policy_*` settings 
 default model, so the policy model server proxies to the same model the agent would call when deployed;
 set them in `hydra_params` to point it elsewhere.
 
+```json
+{
+  "tasks": "default/my-gym-taskset",
+  "target": {
+    "kind": "gym",
+    "source": {
+      "agent": "calculator-agent",
+      "environment": {
+        "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+        "env": {"CALC_MODE": "strict"},
+        "secrets": {"CALC_TOKEN": "calc-token"}
+      }
+    },
+    "resources_server": "mcqa",
+    "hydra_params": {
+      "policy_base_url": "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    }
+  }
+}
+```
+
+`environment.mcp.calculator.url` replaces the URL of the `calculator` server the agent declares (a server it
+does not declare is rejected), `env` is plain process environment for the component, and `secrets` binds
+an environment variable to a Secrets entry by name. `hydra_params.policy_base_url` is the laptop case:
+the policy model server runs inside the sandbox, so it reaches the gateway through `host.docker.internal`.
+A value you set in `hydra_params` always wins over the default derived from the agent.
+
 The job's `stage-environment` step then assembles a `wheels-v1` environment package: the platform's
 Gym agent component, an agent-instance config carrying the resolved config, the agent's Ethos files
 (skills and prompts it refers to by relative path, from the snapshot submission took), and a wheelhouse with the Fabric harness the
@@ -477,7 +504,8 @@ What this requires:
   Rows that are already complete, like the bundled `example.jsonl`, are faithful; an environment
   whose rows need templating would need that step run first.
 - **Custom environments require platform support.** Package the environment as a FileSet and use
-  sandboxed execution; `environment` and `agent_ref_name` are `GymPlacement` fields supplied at
+  sandboxed execution; `environment` and `agent_ref_name` (the target's `source.instance`) are
+  `GymPlacement` fields supplied at
   submission, so a live `GymAgentTaskRunner` cannot carry them. `env_secrets` is *not* in that
   group — it lives on `GymRuntimeConfig` and resolves locally from your environment, so it works
   the same way in both places.

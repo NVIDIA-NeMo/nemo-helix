@@ -404,9 +404,32 @@ class _AgentEvalJobBase(NemoJob):
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
-        """Compile the canonical spec into a plugin-native agent-evaluation job."""
+        """Compile the canonical spec into a plugin-native agent-evaluation job.
+
+        Submission runs ``to_spec`` and then this, and only then creates the job. A refusal here (an
+        execution profile the deployment lacks, a sandbox requirement the FileSet or registered agent
+        cannot meet) therefore leaves no job to own the files snapshot resolution took, so it is deleted
+        here, as ``to_spec`` does for its own failures.
+        """
         del entity_client, job_name, options
         canonical_spec = spec if isinstance(spec, AgentEvalSpec) else AgentEvalSpec.model_validate(spec.model_dump())
+        try:
+            return await cls._compile(canonical_spec, async_sdk=async_sdk, profile=profile)
+        except Exception:
+            target = canonical_spec.target
+            snapshot = (
+                registered_agent_files(target)
+                if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+                else None
+            )
+            if snapshot is not None and async_sdk is not None:
+                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            raise
+
+    @classmethod
+    async def _compile(
+        cls, canonical_spec: AgentEvalSpec, *, async_sdk: AsyncHelixClient | None, profile: str | None
+    ) -> HelixJobSpec:
         execution_profile: BaseExecutionProfile | None = None
         if isinstance(canonical_spec.target, GymRunnerTarget):
             evaluator_config = get_config() if canonical_spec.target.environment is not None else None
@@ -429,7 +452,6 @@ class _AgentEvalJobBase(NemoJob):
                     )
                 except SandboxUnavailableError as exc:
                     raise HelixJobCompilationError(str(exc)) from exc
-        del workspace
         if isinstance(canonical_spec.target, HarborRunnerTarget):
             compilation = _compile_agent_eval_cpu_job(canonical_spec, profile=profile)
             compilation.eval_step["executor"] = await cls._resolve_harbor_subprocess_executor(
