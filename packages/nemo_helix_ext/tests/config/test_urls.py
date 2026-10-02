@@ -14,6 +14,7 @@ from nemo_helix_ext.config.urls import display_url
         ("https://s3cr3t-userinfo@api.example.com:8443/nhx", "https://api.example.com:8443/nhx"),
         ("https://api.example.com/?token=abc123#frag", "https://api.example.com"),
         ("http://[::1]:8080", "http://[::1]:8080"),
+        ("http://[::1", "<invalid URL>"),
     ],
 )
 def test_display_url_strips_userinfo_query_and_fragment(url: str, expected: str):
