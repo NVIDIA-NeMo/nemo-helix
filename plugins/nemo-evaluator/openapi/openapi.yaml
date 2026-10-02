@@ -4125,54 +4125,54 @@ components:
           description: Binding for the canonical 'input' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         output:
           title: Output
           description: Binding for the canonical 'output' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         context:
           title: Context
           description: Binding for the canonical 'context' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         reference:
           title: Reference
           description: Binding for the canonical 'reference' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         trajectory:
           title: Trajectory
           description: Binding for the canonical 'trajectory' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         messages:
           title: Messages
           description: Binding for the canonical 'messages' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         tool_calls:
           title: Tool Calls
           description: Binding for the canonical 'tool_calls' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         tools:
           title: Tools
           description: Binding for the canonical 'tools' evaluator field.
           type: string
           minLength: 1
-          pattern: ^[^\[\]]*$
+          pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
         custom:
           additionalProperties:
             type: string
             minLength: 1
-            pattern: ^[^\[\]]*$
+            pattern: ^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$
           type: object
           title: Custom
           description: Additional evaluator field bindings keyed by canonical field
