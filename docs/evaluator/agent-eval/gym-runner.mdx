@@ -494,6 +494,9 @@ What this requires:
 - The wheelhouse is resolved under `sandbox_gym_wheel_constraints` (default `openai<=2.7.2`, the cap
   `nemo-gym` 0.5.0 carries) so the harness and Gym's own servers install from one consistent set.
   Change the constraints together with `sandbox_runtime_image` when the host image moves to a newer Gym.
+- The agent's `runtime.timeout_seconds` is its per-rollout task budget, enforced by Fabric from the moment
+  the harness starts the task; an agent that declares none gets 600 seconds. Adapter start-up and
+  wheelhouse installation inside the host do not count against it.
 - A registered agent that binds several models keeps only its default through Gym's policy server;
   named secondary models still call the gateway directly. Relay/ATIF trajectory capture from inside
   the Gym host is not wired yet; the rollout record carries the agent's messages as Responses items.

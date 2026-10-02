@@ -87,7 +87,7 @@ def test_the_package_is_a_valid_wheels_v1_environment_running_the_platform_compo
         "name": "???",
     }  # bound by the resolver's Hydra override
     assert instance["model_server"] == {"type": "responses_api_models", "name": "policy_model"}
-    assert instance["timeout"] == 900
+    assert "timeout" not in instance  # the agent's own deadline travels inside fabric_config.runtime
     assert calls == [(["nemo-fabric[deepagents,relay]==0.3.0", "mcp==1.29.0"], ["openai<=2.7.2"], "3.13", None)]
 
 
