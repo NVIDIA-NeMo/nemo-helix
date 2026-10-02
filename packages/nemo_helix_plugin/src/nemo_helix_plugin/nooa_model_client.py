@@ -221,7 +221,10 @@ def _completion_client(
     # Backend format is the Platform-facing wire contract, not the upstream
     # provider identity. The LiteLLM prefix selects the adapter for that shape.
     platform_auth = models_client._auth
-    if model_entity.backend_format == _OPENAI_FORMAT:
+    # An unset backend format means OPENAI_CHAT, matching Inference Gateway
+    # routing and the ModelEntity field contract.
+    backend_format = model_entity.backend_format or _OPENAI_FORMAT
+    if backend_format == _OPENAI_FORMAT:
         litellm_model = f"openai/{served_model_name}"
         return _platform_completion_client(
             litellm_model,
@@ -239,12 +242,12 @@ def _completion_client(
             # reasoning_effort value (including "none") to /responses.
             _skip_responses_api_bridge=True,
         )
-    elif model_entity.backend_format == _ANTHROPIC_FORMAT:
+    elif backend_format == _ANTHROPIC_FORMAT:
         api_base = api_base.removesuffix("/v1")
     else:
         raise ValueError(
             f"Model '{model_entity.workspace}/{model_entity.name}' has unsupported backend format "
-            f"{model_entity.backend_format!r}; expected {_OPENAI_FORMAT} or {_ANTHROPIC_FORMAT}"
+            f"{backend_format!r}; expected {_OPENAI_FORMAT} or {_ANTHROPIC_FORMAT}"
         )
 
     litellm_model = f"anthropic/{served_model_name}"
