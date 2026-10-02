@@ -349,7 +349,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
       <FormModal
         open={open}
         onClose={resetAndClose}
-        className="w-[720px] max-w-[90vw]"
+        className="w-[800px] max-w-[90vw]"
         title="Register an agent with NeMo Helix"
         submitButtonText={replaceOrphan ? 'Replace and register' : 'Register'}
         onSubmit={(event) => {
