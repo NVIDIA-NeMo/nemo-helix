@@ -917,8 +917,9 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
             config=GymRuntimeConfig(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml")
         )
 
-        async def collect(input_path, output_path, work_dir):
+        async def collect(input_path, output_path, work_dir, resolved_env):
             """Return fake Gym rollouts in reverse order to test attribution by task index."""
+            assert resolved_env == {}
             rows = [json.loads(line) for line in input_path.read_text().splitlines()]
             assert [row["_ng_task_index"] for row in rows] == [0, 1, 2]
             assert all(row["responses_create_params"] == {} for row in rows)

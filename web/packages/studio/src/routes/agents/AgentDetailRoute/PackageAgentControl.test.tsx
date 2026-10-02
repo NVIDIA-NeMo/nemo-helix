@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DeploymentModes } from '@studio/api/agents/useDeploymentModes';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
@@ -13,6 +14,24 @@ const workspace = workspace1.workspace;
 const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
+const platform = vi.hoisted(() => ({
+  buildsUnsupported: false,
+  modes: { status: 'ready', enabled: ['subprocess', 'docker'] } as DeploymentModes,
+}));
+
+vi.mock('@studio/api/agents/useImageBuildsUnsupported', () => ({
+  useImageBuildsUnsupported: () => platform.buildsUnsupported,
+}));
+
+vi.mock('@studio/api/agents/useDeploymentModes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/api/agents/useDeploymentModes')>()),
+  useDeploymentModes: () => platform.modes,
+}));
+
+beforeEach(() => {
+  platform.buildsUnsupported = false;
+  platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+});
 
 const renderControl = (props?: {
   canPackage?: boolean;
@@ -325,5 +344,97 @@ describe('PackageAgentControl', () => {
 
     expect(onImageAvailable).not.toHaveBeenCalled();
     expect(screen.getByText(/rebuild to pick up newer changes/)).toBeInTheDocument();
+  });
+
+  describe('when the platform cannot build images', () => {
+    beforeEach(() => {
+      platform.buildsUnsupported = true;
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
+    });
+
+    const commandSnippets = async () => {
+      const dialog = screen.getByRole('dialog');
+      await waitFor(() => expect(dialog).toHaveTextContent(/nemo agents deploy/));
+      return within(dialog)
+        .getAllByRole('code')
+        .map((code) => code.textContent);
+    };
+
+    it('disables the build and shows build and deploy as separate steps', async () => {
+      await openControl();
+      const dialog = screen.getByRole('dialog');
+
+      expect(within(dialog).getByText(/can't build images/)).toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+      expect(within(dialog).queryByText('Push options')).not.toBeInTheDocument();
+      expect(await commandSnippets()).toEqual([
+        'nemo agents package --agent agent.yaml --publish --registry REGISTRY',
+        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode k8s --image IMAGE`,
+      ]);
+      expect(dialog).toHaveTextContent(/replacing REGISTRY with your registry/);
+      expect(dialog).not.toHaveTextContent(/[<>]/);
+    });
+
+    it('skips publishing and the registry for a Docker deployment', async () => {
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+      await openControl();
+
+      expect(await commandSnippets()).toEqual([
+        'nemo agents package --agent agent.yaml',
+        `nemo agents deploy --agent my-agent --workspace ${workspace} --mode docker --image IMAGE`,
+      ]);
+      expect(screen.getByRole('dialog')).not.toHaveTextContent(/REGISTRY/);
+    });
+
+    it('waits for the deployment modes before showing commands', async () => {
+      platform.modes = { status: 'loading' };
+      await openControl();
+      const dialog = screen.getByRole('dialog');
+
+      expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+      expect(dialog).not.toHaveTextContent(/nemo agents/);
+    });
+
+    it('leaves the mode to the user when the deployment modes cannot be read', async () => {
+      platform.modes = { status: 'unknown' };
+      await openControl();
+
+      expect((await commandSnippets())[1]).toMatch(/--mode MODE --image IMAGE$/);
+      expect(screen.getByRole('dialog')).toHaveTextContent(/and MODE with docker or k8s/);
+    });
+
+    it('keeps the Platform-managed message for agents that cannot be packaged', async () => {
+      await openControl({ canPackage: false });
+
+      expect(
+        screen.getByText(/Packaging is available for Platform-managed agents/)
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/can't build images/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('explains instead of hiding when no container deployment mode is enabled', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess'] };
+    await openControl();
+    const dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByText(/no Docker or Kubernetes deployment mode/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Build image' })).toBeDisabled();
+  });
+
+  it('does not hand an image to a deployment the platform cannot run', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess'] };
+    mockRestoredJob('completed');
+    await openControl({ onImageBuilt: vi.fn() });
+
+    await screen.findByText('nemo-agents/default/my-agent:1.0');
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+  });
+
+  it('names only the deployable modes', async () => {
+    platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
+    await openControl();
+
+    expect(screen.getByText(/to deploy it with Kubernetes\./)).toBeInTheDocument();
   });
 });

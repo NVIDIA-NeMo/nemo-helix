@@ -411,16 +411,10 @@ print(f"Output model: {OUTPUT_NAME}")
 ```
 
 ```python
-while True:
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
-    clear_output(wait=True)
-    print(status.model_dump_json(indent=2))
-    if status.status in ("completed", "failed", "cancelled", "error"):
-        break
-    time.sleep(30)
+from nemo_helix_ext.quickstart import wait_for_training
 
-if status.status != "completed":
-    raise RuntimeError(f"Training finished with status: {status.status}")
+wait_for_training(client, job.job.name, poll_interval=30)
+
 ```
 
 ### Interpreting contrastive loss

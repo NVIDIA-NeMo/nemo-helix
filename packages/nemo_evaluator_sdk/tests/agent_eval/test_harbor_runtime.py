@@ -3333,11 +3333,8 @@ async def test_missing_secret_fails_before_the_job_dir_is_touched(
 
 
 class _FixedSource:
-    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
+    def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
         return "CUSTOM_SRC"
-
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
-        return "unused"
 
 
 class _ValueOnlyResolver:

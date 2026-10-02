@@ -42,6 +42,7 @@ from .config import QuickstartConfig
 from .container import ContainerManager, PullProgress
 from .platform_config import HelixConfig
 from .preflight import CheckStatus, PreflightChecker, PreflightResult
+from .progress import show_training_progress, status_text, wait_for_training
 from .prompts import (
     RegistryCredentials,
     detect_registry_auth_type,
@@ -96,4 +97,8 @@ __all__ = [
     "validate_docker_socket",
     "validate_storage_path",
     "validate_port_available",
+    # Notebook training progress
+    "show_training_progress",
+    "status_text",
+    "wait_for_training",
 ]

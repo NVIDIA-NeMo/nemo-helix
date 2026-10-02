@@ -15,7 +15,6 @@ import pytest
 
 pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
-from botocore.exceptions import ClientError
 from scaled_evals.api import build
 from scaled_evals.api.db import get_conn
 from scaled_evals.api.settings import settings
@@ -389,10 +388,9 @@ def test_finalize_can_pin_exact_reserved_revision(monkeypatch: pytest.MonkeyPatc
 def test_finalize_rejects_missing_task_pack_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     _use_conn(_conn_returning([_latest_revision_row(object_key="missing")]))
 
-    def _missing(_key: str) -> int:
-        raise ClientError({"Error": {"Code": "NoSuchKey"}}, "HeadObject")
-
-    monkeypatch.setattr("scaled_evals.api.routers.tasks.s3.object_size", _missing)
+    # On Files, a not-yet-uploaded pack simply has no size (object_size -> None); there is no
+    # separate object-store error to raise.
+    _mock_task_pack_size(monkeypatch, None)
 
     response = client.post("/v1/tasks/task_x/finalize")
 
@@ -402,15 +400,20 @@ def test_finalize_rejects_missing_task_pack_upload(monkeypatch: pytest.MonkeyPat
     assert "upload the tarball" in error["message"]
 
 
-def test_finalize_rejects_missing_content_length(monkeypatch: pytest.MonkeyPatch) -> None:
-    deleted = _mock_task_pack_size(monkeypatch, None)
-    _use_conn(_conn_returning([_latest_revision_row(object_key="unknown-size")]))
+def test_finalize_rejects_cloud_build_after_files_migration(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Cloud Build reads the pack from a GCS storageSource, but packs now live in the Files
+    # service, so a Cloud Build finalize would build against an object that was never written.
+    # With cloud build the only configured builder (no image-builder URL), finalize must refuse.
+    monkeypatch.setattr(settings, "cloud_build_enabled", True)
+    monkeypatch.setattr(settings, "image_builder_service_url", "")
+    _use_conn(_conn_returning([_latest_revision_row(object_key="k")]))
 
     response = client.post("/v1/tasks/task_x/finalize")
 
-    assert response.status_code == 409
-    assert response.json()["detail"]["error"]["code"] == "task_pack_size_unknown"
-    deleted.assert_called_once_with("unknown-size")
+    assert response.status_code == 503
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "cloud_build_unsupported"
+    assert "Files service" in error["message"]
 
 
 def test_finalize_rejects_oversized_task_pack(monkeypatch: pytest.MonkeyPatch) -> None:

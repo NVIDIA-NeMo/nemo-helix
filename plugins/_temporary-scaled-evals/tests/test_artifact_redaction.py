@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,19 +17,32 @@ except ImportError as exc:
     pytest.skip(f"scaled-evals plugin not installed: {exc}", allow_module_level=True)
 
 
-def test_json_artifact_upload_redacts_without_corrupting_json_or_source(tmp_path: Path) -> None:
+def test_json_artifact_upload_redacts_without_corrupting_json_or_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "job"
     root.mkdir()
     observation = json.dumps({"output": "password=synthetic-value", "exit_code": 0})
     source = json.dumps({"observation": observation, "reward": 1.0}, indent=2).encode()
     (root / "trajectory.json").write_bytes(source)
     (root / "events.jsonl").write_text('{"password":"synthetic-value"}\n{"step":2}\n')
-    uploaded: dict[str, bytes] = {}
-    client = MagicMock()
-    client.upload_file.side_effect = lambda filename, _bucket, key: uploaded.update({key: Path(filename).read_bytes()})
 
-    with patch.object(s3, "_client", return_value=client):
-        assert s3.sync_directory_to_prefix(root, "evaluations/ev_json/artifacts/") == 3
+    # Capture what the Files-backed transport would upload. Regular files go through
+    # upload_file (from a local staged path); the manifest is written via put_bytes.
+    uploaded: dict[str, bytes] = {}
+
+    def fake_upload_file(path: Path, object_key: str, *, content_type: str) -> int:
+        data = Path(path).read_bytes()
+        uploaded[object_key] = data
+        return len(data)
+
+    def fake_put_bytes(object_key: str, body: bytes, *, content_type: str | None = None) -> None:
+        uploaded[object_key] = body
+
+    monkeypatch.setattr(s3._files_backend, "upload_file", fake_upload_file)
+    monkeypatch.setattr(s3._files_backend, "put_bytes", fake_put_bytes)
+
+    assert s3.sync_directory_to_prefix(root, "evaluations/ev_json/artifacts/") == 3
 
     trajectory = uploaded["evaluations/ev_json/artifacts/trajectory.json"]
     assert "synthetic-value" not in trajectory.decode()
@@ -42,7 +54,7 @@ def test_json_artifact_upload_redacts_without_corrupting_json_or_source(tmp_path
         {"password": "<redacted>"},
         {"step": 2},
     ]
-    manifest = json.loads(client.put_object.call_args_list[0].kwargs["Body"])
+    manifest = json.loads(uploaded["evaluations/ev_json/artifacts/" + s3.ARTIFACT_MANIFEST_PATH])
     for item in manifest["files"]:
         body = uploaded["evaluations/ev_json/artifacts/" + item["path"]]
         assert item["sha256"] == "sha256:" + hashlib.sha256(body).hexdigest()

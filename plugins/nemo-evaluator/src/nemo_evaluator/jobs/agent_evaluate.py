@@ -70,6 +70,7 @@ from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskK
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
+from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.task_refs import (
@@ -86,7 +87,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRu
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -282,30 +283,6 @@ async def prepare_gym_submission(
             metadata={item.key: item.value for item in task.metadata},
         )
     return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
-
-
-class JobEnvSecretResolver:
-    """Name the env var holding each Harbor ``env_secrets`` entry inside a platform job.
-
-    The service injected every secret into this process's environment under its ``env_secrets`` key at
-    compile time, so the key *is* the source variable. No other variable is consulted.
-    """
-
-    def __init__(self, *, workspace: str) -> None:
-        self._workspace = workspace
-
-    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
-        """``env_name`` when the service injected a non-empty value under it, else ``None``."""
-        return env_name if os.environ.get(env_name) else None
-
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
-        """Point at the secret in its workspace: the ref's own, or the job's for a bare ref."""
-        workspace, sep, name = secret_ref.root.rpartition("/")
-        workspace = workspace if sep else self._workspace
-        return (
-            f"secret {secret_ref.root!r} was not injected into this job's environment. Check the secret exists "
-            f"in workspace {workspace!r}: nemo secrets get {name} --workspace {workspace}"
-        )
 
 
 def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
@@ -630,13 +607,15 @@ class _AgentEvalJobBase(NemoJob):
                     bind_resources_server=target.bind_resources_server,
                     hydra_params=target.hydra_params,
                     env_vars=target.env_vars,
+                    env_secrets=target.env_secrets,
                     num_repeats=target.num_repeats,
                     concurrency=target.concurrency,
                     startup_timeout_s=target.startup_timeout_s,
                     collection_timeout_s=target.collection_timeout_s,
                     shutdown_grace_s=target.shutdown_grace_s,
                     reward_key=target.reward_key,
-                )
+                ),
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
@@ -662,7 +641,7 @@ class _AgentEvalJobBase(NemoJob):
                     agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
                     agent_timeout_multiplier=target.agent_timeout_multiplier,
                 ),
-                secret_resolver=JobEnvSecretResolver(workspace=ctx.workspace),
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None
         return None, None, None

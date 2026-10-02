@@ -39,6 +39,28 @@ def _http_error(status: int, code: str, message: str) -> HTTPException:
     )
 
 
+def _ensure_upload_fileset(object_key: str) -> None:
+    """Pre-create the Files fileset for a newly-allocated uploading revision.
+
+    Benchmark-import creates task revisions in ``uploading`` status; the CLI then uploads the
+    pack directly to Files. Ensure the destination fileset exists at revision-allocation time
+    (mirroring the create/revise routes) so that direct upload can't 404 — the ``_detail`` read
+    path deliberately does NOT create it. A Files failure maps to the retryable
+    ``503 object_store_unavailable`` (same error model as task create/revise + finalize) rather
+    than an unhandled 500.
+    """
+    from scaled_evals.api import s3
+
+    try:
+        s3.upload_target(object_key, ensure_fileset=True)
+    except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
+        raise _http_error(
+            503,
+            "object_store_unavailable",
+            f"could not provision the task-pack upload target {object_key!r} in object storage; retry shortly",
+        ) from exc
+
+
 def _import_status(tasks: list[dict[str, Any]], benchmarks: list[dict[str, Any]]) -> str:
     statuses = {row["status"] for row in tasks}
     if "failed" in statuses:
@@ -57,7 +79,14 @@ def _detail(db: Database, row: dict[str, Any]) -> BenchmarkImport:
     benchmarks = db.benchmark_imports.benchmarks(row["id"])
     task_models = []
     for task in tasks:
-        upload = _upload_for(task["tarball_object_key"]).model_dump() if task["status"] == "uploading" else None
+        # Detail is a READ path: compute the upload coordinates without a live Files write.
+        # The fileset is created when the task is created / revised (ensure_fileset=True there),
+        # not on every detail render — so a GET never depends on Files availability.
+        upload = (
+            _upload_for(task["tarball_object_key"], ensure_fileset=False).model_dump()
+            if task["status"] == "uploading"
+            else None
+        )
         task_models.append(
             BenchmarkImportTask(
                 slug=task["slug"],
@@ -195,6 +224,7 @@ def create_benchmark_import(
                 object_key=object_key,
                 owner_id=current.owner_id,
             )
+            _ensure_upload_fileset(object_key)
         else:
             task_id = existing_task["id"]
             if body.visibility == "public" and existing_task.get("visibility") != "public":
@@ -211,6 +241,7 @@ def create_benchmark_import(
                 new_revision = db.tasks.create_next_revision(task_id)
                 assert new_revision is not None
                 revision = new_revision.revision
+                _ensure_upload_fileset(new_revision.object_key)
         image = body.images.get(task.slug)
         db.benchmark_imports.add_task(
             import_id,
