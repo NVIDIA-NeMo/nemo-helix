@@ -62,7 +62,6 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
-from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import SecretRef
 from pydantic import ValidationError
 
@@ -1551,14 +1550,94 @@ def test_an_empty_capture_directory_does_not_refuse_a_run(tmp_path: Path) -> Non
     ensure_fresh_output(tmp_path / "rollouts.jsonl")
 
 
-def test_a_local_run_resolves_env_secrets_from_the_process_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A secret reference means the same thing locally and job-side; only the resolver differs."""
-    monkeypatch.setenv("NVIDIA_API_KEY", "sk-from-the-host")
+def test_a_reused_runner_resolves_current_secret_on_each_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rotated or removed secret cannot retain a value from a prior run."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    monkeypatch.setenv("NVIDIA_API_KEY", "first")
     runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")}))
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    observed: list[str] = []
 
-    asyncio.run(runner.resolve_secrets(LocalSecretResolver()))
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env["GYM_MODEL_KEY"])
+        raise RuntimeError("stop before start")
 
-    assert gym_invocation_env(runner.config, runner._resolved_env)["GYM_MODEL_KEY"] == "sk-from-the-host"
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    for value in ("first", "second"):
+        monkeypatch.setenv("NVIDIA_API_KEY", value)
+        with pytest.raises(RuntimeError, match="stop before start"):
+            asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["first", "second"]
+    monkeypatch.delenv("NVIDIA_API_KEY")
+    with pytest.raises(ValueError, match="nvidia-api-key"):
+        asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["first", "second"]
+
+
+def test_workspace_secret_prefers_prefixed_variable_then_bare_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    monkeypatch.setenv("MY_WORKSPACE_PROBE_API_KEY", "workspace-value")
+    monkeypatch.setenv("PROBE_API_KEY", "bare-value")
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("my-workspace/probe-api-key")}))
+    observed: list[str] = []
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env["GYM_MODEL_KEY"])
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks))
+    monkeypatch.delenv("MY_WORKSPACE_PROBE_API_KEY")
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["workspace-value", "bare-value"]
+
+
+def test_custom_secret_resolver_supplies_gym_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    class Resolver:
+        def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+            return "CUSTOM_SRC"
+
+    monkeypatch.setenv("CUSTOM_SRC", "custom-value")
+    runner = GymAgentTaskRunner(
+        config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("key")}), secret_resolver=Resolver()
+    )
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        assert subprocess_env["GYM_MODEL_KEY"] == "custom-value"
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(discover_gym_tasks(EXAMPLE)[:1]))
+
+
+def test_value_only_resolver_is_refused_at_construction() -> None:
+    class ValueOnlyResolver:
+        async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
+            return "value"
+
+    value_only: Any = ValueOnlyResolver()
+    config = _config(env_secrets={"GYM_MODEL_KEY": SecretRef("key")})
+
+    with pytest.raises(TypeError, match="ValueOnlyResolver can't name an env var.*Gym env_secrets"):
+        GymAgentTaskRunner(config=config, secret_resolver=value_only)
+    # Without env_secrets the resolver is never consulted.
+    GymAgentTaskRunner(config=_config(), secret_resolver=value_only)
+
+
+def test_runner_info_records_secret_references_without_values() -> None:
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("ws/key")}))
+    assert runner.runner_info().config["env_secrets"] == {"GYM_MODEL_KEY": "ws/key"}
 
 
 def test_a_secret_that_does_not_resolve_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1575,6 +1654,21 @@ def test_naming_a_variable_both_ways_is_refused_rather_than_layered() -> None:
     """Which value Gym got would otherwise depend on layering order, not on what the caller asked."""
     with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
         _config(env_vars={"GYM_MODEL_KEY": "plaintext"}, env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")})
+
+
+def test_gym_config_validation_error_does_not_echo_rejected_secret() -> None:
+    """Reject an inline secret collision without printing the credential in the input mapping."""
+    with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
+        GymRuntimeConfig.model_validate(
+            {
+                "agent": "simple_agent",
+                "agent_config": "config.yaml",
+                "resources_server": "mcqa",
+                "env_secrets": {"KEY": "ws/key"},
+                "env_vars": {"KEY": "LEAKME"},
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
 
 
 @pytest.mark.parametrize(

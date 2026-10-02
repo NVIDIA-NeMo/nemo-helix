@@ -45,7 +45,7 @@ class ModelTarget(BaseModel):
     The prompt template *is* the request sent to the model, so it lives here with the endpoint.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["model"] = "model"
     model: Model = Field(description="The model endpoint to generate trials against.")
@@ -361,7 +361,7 @@ class GymRunnerTarget(BaseModel):
     to materialize the selected tasks for rollout collection.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["gym"] = "gym"
     environment: FilesetRef | None = Field(
