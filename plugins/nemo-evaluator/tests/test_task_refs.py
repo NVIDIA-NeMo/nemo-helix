@@ -1013,7 +1013,7 @@ async def test_gym_content_rejected_before_environment_resolution(source, field,
         "taskset": TasksetRef("suite"),
     }
     resolve_environment = AsyncMock()
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolve_environment)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolve_environment)
     with pytest.raises(ValueError, match="task 'invalid'.*gym_row.*gym_row_extras"):
         await AgentEvalJob.to_spec(
             AgentEvalInputSpec(

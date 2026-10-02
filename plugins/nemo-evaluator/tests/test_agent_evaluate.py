@@ -27,7 +27,6 @@ from nemo_evaluator.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
-    _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -52,6 +51,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
     SessionBackedGymRunner,
 )
+from nemo_evaluator.jobs.gym_submission import resolve_gym_environment
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
@@ -1665,7 +1665,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="custom-gym"),
         source=GymAgentSource(
@@ -1674,7 +1674,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
         resources_server="custom_resources",
     )
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         target,
         workspace="dev",
         async_client=_async_sdk(),
@@ -1715,9 +1715,9 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         _gym_environment_target(),
         workspace="dev",
         async_client=_async_sdk(),
@@ -1732,7 +1732,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     response.data.return_value = SimpleNamespace(purpose=FilesetPurpose.DATASET)
     files = mocker.Mock()
     files.get_fileset = mocker.AsyncMock(return_value=response)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="dev/not-an-environment"),
         source=GymAgentSource(
@@ -1742,7 +1742,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     )
 
     with pytest.raises(ValueError, match="expected 'environment'"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             target,
             workspace="dev",
             async_client=_async_sdk(),
@@ -1760,10 +1760,10 @@ async def test_resolve_gym_environment_rejects_missing_manifest(mocker: MockerFi
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock()
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="has no nemo-environment.yaml at its root"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -1783,10 +1783,10 @@ async def test_resolve_gym_environment_rejects_manifest_listing_mismatch(mocker:
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="config_paths reference files that are not in the package"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -2410,7 +2410,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
     from nemo_evaluator.api.schemas import MetadataItem
 
     resolver = AsyncMock(side_effect=lambda target, **kwargs: target)
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolver)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolver)
     request = AgentEvalInputSpec(
         tasks=[
             AgentEvalTaskInput(
