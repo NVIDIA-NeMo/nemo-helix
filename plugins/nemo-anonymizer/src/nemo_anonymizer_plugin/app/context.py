@@ -38,7 +38,7 @@ class AnonymizerContext:
     ) -> list[DDModelProvider] | None:
         registry = await make_model_provider_registry(
             model_configs,
-            sdk=self._sdk,
+            client=self._sdk,
             default_workspace=self._workspace,
         )
         if registry is None:

@@ -34,7 +34,6 @@ from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig
 from nemo_data_designer_plugin.jobs.task_results import ANALYSIS_RESULT_NAME, ARTIFACTS_RESULT_NAME
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.jobs.client import JobsClient
 
 pytestmark = pytest.mark.integration
@@ -48,7 +47,7 @@ def _load_results(ctx: u.CreateJobTestContext, job_name: str, tmp_path: Path) ->
     resource's ``get_job_status`` to bypass that gate, then download artifacts
     the same way an end user would.
     """
-    job_resource = DataDesignerResource(ctx.sdk).get_job_resource(job_name, workspace="default")
+    job_resource = DataDesignerResource(ctx.client).get_job_resource(job_name, workspace="default")
     with patch.object(job_resource, "get_job_status", return_value="completed"):
         return job_resource.download_artifacts(tmp_path)
 
@@ -62,7 +61,7 @@ def _get_analysis(ctx: u.CreateJobTestContext, job_name: str, tmp_path: Path) ->
 
 
 def _list_job_results(ctx: u.CreateJobTestContext, job_name: str):
-    return client_from_platform(ctx.sdk, JobsClient).list_job_results(name=job_name).data()
+    return JobsClient.from_client(ctx.client).list_job_results(name=job_name).data()
 
 
 @pytest.fixture

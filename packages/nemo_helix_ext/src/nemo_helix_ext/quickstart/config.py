@@ -317,13 +317,8 @@ class QuickstartConfig(BaseModel):
         - **Public GA tags** (e.g. ``26.03``) live in the public NGC registry.
           No key is required; the image is returned directly if it exists.
 
-        The image tag is sourced from (in priority order):
-
-        1. ``NHX_IMAGE_TAG`` environment variable — overrides the SDK-baked
-           tag so you can test against a specific release without reinstalling
-           (e.g. ``NHX_IMAGE_TAG=26.03``).
-        2. ``__image_tag__`` stamped into the installed ``nemo-helix`` SDK
-           (``nemo_helix._version``) at release time.
+        The image tag comes from the ``NHX_IMAGE_TAG`` environment variable
+        (e.g. ``NHX_IMAGE_TAG=26.03``).
 
         The access check is performed via the Docker daemon's distribution
         endpoint (a lightweight manifest HEAD — no image data is transferred).
@@ -334,15 +329,7 @@ class QuickstartConfig(BaseModel):
         if self.image is not None and self.image != "":
             return self.image
 
-        # NHX_IMAGE_TAG overrides the SDK-baked tag for pre-release testing.
-        image_tag: str | None = os.environ.get("NHX_IMAGE_TAG") or None
-        if image_tag is None:
-            try:
-                from nemo_helix._version import __image_tag__
-            except ImportError:
-                return self.image
-            image_tag = __image_tag__
-
+        image_tag = os.environ.get("NHX_IMAGE_TAG")
         if not image_tag:
             return self.image
 

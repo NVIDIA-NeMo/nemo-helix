@@ -15,7 +15,6 @@ from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_for_locale
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
@@ -62,7 +61,7 @@ def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
 
 def _data_designer(client: NemoClient) -> DataDesignerResource:
     """High-level Data Designer resource driven by the typed platform client."""
-    return DataDesignerResource(client)  # ty: ignore[invalid-argument-type]
+    return DataDesignerResource(client)
 
 
 def _make_mock_provider(client: NemoClient, workspace: str) -> str:
@@ -360,37 +359,30 @@ def _single_model_config(provider_name: str, model: str) -> dd.DataDesignerConfi
     return builder
 
 
-def test_check_models_passes_for_servable_models(sdk: NeMoHelix, client: NemoClient, workspace: str) -> None:
+def test_check_models_passes_for_servable_models(client: NemoClient, workspace: str) -> None:
     """The only place a real model probe runs: integration tests cannot, because
     the engine's HTTP client does not carry their ASGI transport.
-
-    check_models runs the engine pass, which still converts the generated SDK
-    handle (data_designer_nemo.sdk_translation), so the probe is driven from ``sdk``.
     """
     provider_name = _make_mock_provider(client, workspace)
     config_builder = _setup_dd_config(provider_name)
 
-    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+    report = _data_designer(client).check_models(config_builder, workspace=workspace)
 
     assert report.ok, [(e.error_type, e.message) for e in report.errors]
 
 
-def test_check_models_catches_model_the_provider_cannot_serve(
-    sdk: NeMoHelix, client: NemoClient, workspace: str
-) -> None:
+def test_check_models_catches_model_the_provider_cannot_serve(client: NemoClient, workspace: str) -> None:
     """validate can be green while check_models is red;
     only the latter makes a live inference call.
-
-    Both run the engine pass, which still converts the generated SDK handle
-    (data_designer_nemo.sdk_translation), so the probes are driven from ``sdk``.
     """
     provider_name = _make_unservable_model_provider(client, workspace)
     config_builder = _single_model_config(provider_name, MODEL_UNSERVABLE)
 
-    validation_report = sdk.data_designer.validate(config_builder, workspace=workspace)
+    data_designer = _data_designer(client)
+    validation_report = data_designer.validate(config_builder, workspace=workspace)
     assert validation_report.ok, [e.message for e in validation_report.errors]
 
-    report = sdk.data_designer.check_models(config_builder, workspace=workspace)
+    report = data_designer.check_models(config_builder, workspace=workspace)
 
     assert not report.ok
     assert report.errors

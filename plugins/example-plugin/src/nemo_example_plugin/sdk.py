@@ -10,8 +10,6 @@ The client classes expose them as direct methods via ``method()`` wrappers.
 from __future__ import annotations
 
 from nemo_example_plugin.types import endpoints
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.method import method
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
@@ -37,15 +35,7 @@ class AsyncExampleClient(_ExampleMethods, AsyncNemoClient):
     """Async client for the example plugin API."""
 
 
-def _make_sync_resource(platform: NeMoHelix) -> ExampleClient:
-    return client_from_platform(platform, ExampleClient)
-
-
-def _make_async_resource(platform: AsyncNeMoHelix) -> AsyncExampleClient:
-    return client_from_platform(platform, AsyncExampleClient)
-
-
 example_sdk_resources = NemoPluginSDKResources(
-    sync_resource=_make_sync_resource,
-    async_resource=_make_async_resource,
+    sync_resource=ExampleClient.from_client,
+    async_resource=AsyncExampleClient.from_client,
 )

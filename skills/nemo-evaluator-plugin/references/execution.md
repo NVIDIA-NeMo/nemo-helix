@@ -40,14 +40,15 @@ uv run nemo evaluator evaluate \
 
 **Platform Python SDK**
 
-Use `client.evaluator.submit` for execution through the installed nemo-evaluator-plugin:
+Use `evaluator.submit` (`evaluator = Evaluator.from_client(client)`) for execution through the installed nemo-evaluator-plugin:
 
 ```python
 from nemo_evaluator_sdk import ExactMatchMetric, RunConfig
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
-job = client.evaluator.submit(
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+evaluator = Evaluator.from_client(client)
+job = evaluator.submit(
     metric=ExactMatchMetric(
         reference="{{item.expected}}",
         candidate="{{item.output}}",
@@ -107,7 +108,7 @@ target = Model(
     api_key_secret=SecretRef(root="nvidia-api-key"),
 )
 
-job = client.evaluator.submit(
+job = evaluator.submit(
     metric=ExactMatchMetric(reference="{{item.expected}}"),
     dataset=[{"question": "Capital of France?", "expected": "Paris"}],
     target=target,
@@ -177,7 +178,7 @@ Use field_mapping when a metric or online prompt uses canonical evaluator fields
 **Platform SDK**
 
 ```python
-job = client.evaluator.submit(
+job = evaluator.submit(
     metric=metric,
     dataset=dataset,
     config=config,
@@ -260,7 +261,7 @@ metric submitted to a service, opt in explicitly:
 ```python
 from nemo_evaluator.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 
-job = client.evaluator.submit(
+job = evaluator.submit(
     metric=custom_metric,
     dataset=rows,
     metric_bundle_packager=HybridMetricBundlePackager(),

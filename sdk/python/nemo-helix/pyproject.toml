@@ -131,10 +131,6 @@ target = "nemo_helix_ext"
 include = ["**/*.py", "skills/**/*.md", "skills/**/*.yaml", "skills/**/*.yml", "skills/**/*.json"]
 
 [[tool.hatch.build.targets.wheel.hooks.custom.source-packages]]
-source = "packages/models/src/models"
-target = "models"
-
-[[tool.hatch.build.targets.wheel.hooks.custom.source-packages]]
 source = "packages/filesets/src/filesets"
 target = "filesets"
 
@@ -164,10 +160,6 @@ path = "hatch_build.py"
 source = "packages/nemo_helix_ext/src/nemo_helix_ext"
 target = "nemo_helix_ext"
 include = ["**/*.py", "skills/**/*.md", "skills/**/*.yaml", "skills/**/*.yml", "skills/**/*.json"]
-
-[[tool.hatch.build.targets.sdist.hooks.custom.source-packages]]
-source = "packages/models/src/models"
-target = "models"
 
 [[tool.hatch.build.targets.sdist.hooks.custom.source-packages]]
 source = "packages/filesets/src/filesets"

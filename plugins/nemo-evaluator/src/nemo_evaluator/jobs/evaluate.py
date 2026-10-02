@@ -299,7 +299,7 @@ class _EvaluateJobBase(NemoJob):
             submit_spec.metrics,
             workspace=workspace,
             entity_client=entity_client,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
         )
         return EvaluateSpec(
             metrics=metrics,

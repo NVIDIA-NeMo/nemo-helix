@@ -14,6 +14,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 
 ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS = ROOT / "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-intake/scripts"
@@ -267,22 +268,22 @@ def test_provider_mapper_reports_missing_required_start_time(provider: str, fiel
         mapper(payload, project="fixture", include_feedback=False)
 
 
-def test_intake_writer_uses_sdk_factory_for_context_and_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_intake_writer_uses_config_bootstrap_for_context_and_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
-    sdk = Mock(base_url="https://platform.example.com", workspace="oauth-workspace")
-    sdk._client = Mock()
-    factory = Mock(return_value=sdk)
-    monkeypatch.setattr(common, "create_client", factory)
+    client = Mock(base_url="https://platform.example.com", workspace="oauth-workspace")
+    client._client = Mock()
+    factory = Mock(return_value=client)
+    monkeypatch.setattr(common, "build_nemo_client", factory)
     intake_client = Mock()
-    adapter = Mock(return_value=intake_client)
-    monkeypatch.setattr(common, "client_from_platform", adapter)
+    from_client = Mock(return_value=intake_client)
+    monkeypatch.setattr(common.IntakeClient, "from_client", from_client)
 
     writer = common.IntakeWriter(base_url=None, workspace=None)
 
     assert writer.base_url == "https://platform.example.com"
     assert writer.workspace == "oauth-workspace"
-    factory.assert_called_once_with(base_url=None, access_token=None, timeout=60.0, max_retries=0)
-    adapter.assert_called_once_with(sdk, common.IntakeClient)
+    factory.assert_called_once_with(base_url=None, access_token=None, timeout=60.0, retry=None)
+    from_client.assert_called_once_with(client)
     verify_spans = Mock()
     monkeypatch.setattr(writer, "_verify_spans", verify_spans)
     span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
@@ -298,12 +299,10 @@ def test_intake_writer_uses_sdk_factory_for_context_and_oauth(monkeypatch: pytes
     assert [item.span_id for item in body.spans] == ["span-1"]
     verify_spans.assert_called_once_with([span], source="langsmith")
     writer.close()
-    sdk.close.assert_called_once_with()
+    client.close.assert_called_once_with()
 
 
 def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pytest.MonkeyPatch) -> None:
-    from nemo_helix import NeMoHelix
-
     common = importlib.import_module("_import_common")
     captured: list[httpx.Request] = []
 
@@ -311,14 +310,14 @@ def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pyte
         captured.append(request)
         return httpx.Response(201)
 
-    # The SDK factory seeds Authorization into default_headers; mirror that here.
-    sdk = NeMoHelix(
+    # The config bootstrap seeds Authorization into default_headers; mirror that here.
+    client = NemoClient(
         base_url="https://platform.example.com",
         workspace="typed-workspace",
         default_headers={"Authorization": "Bearer test-token"},
         http_client=httpx.Client(transport=httpx.MockTransport(handle)),
     )
-    monkeypatch.setattr(common, "create_client", Mock(return_value=sdk))
+    monkeypatch.setattr(common, "build_nemo_client", Mock(return_value=client))
     span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
 
     with common.IntakeWriter(base_url=None, workspace=None) as writer:
@@ -333,6 +332,56 @@ def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pyte
     assert payload["source"] == "langsmith"
     assert payload["spans"][0]["span_id"] == "span-1"
     assert payload["spans"][0]["trace_id"] == "trace-1"
+
+
+def test_intake_writer_bootstrap_branch_requests_through_the_client_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an injected session the writer's raw requests ride the bootstrap client's own httpx
+    client: its Authorization header, repeated query params encoded by httpx, and a close() that
+    releases the transport.
+    """
+    common = importlib.import_module("_import_common")
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    # build_nemo_client puts the context's Authorization on the httpx client and owns it.
+    transport = httpx.Client(
+        transport=httpx.MockTransport(handle),
+        headers={"Authorization": "Bearer bootstrap-token"},
+    )
+    client = NemoClient(
+        base_url="https://platform.example.com",
+        workspace="bootstrap-workspace",
+        http_client=transport,
+        owns_http_client=True,
+    )
+    monkeypatch.setattr(common, "build_nemo_client", Mock(return_value=client))
+
+    writer = common.IntakeWriter(base_url=None, workspace=None)
+
+    assert writer.session is transport
+    assert writer.headers == {}
+
+    payload = writer._request(
+        "GET",
+        f"{writer.prefix}/annotations",
+        params=[("filter[trace_id]", "trace-1"), ("filter[trace_id]", "trace-2")],
+        expected={200},
+    )
+
+    assert payload == {"data": []}
+    request = captured[0]
+    assert request.url.path == "/apis/intake/v2/workspaces/bootstrap-workspace/annotations"
+    assert request.url.params.get_list("filter[trace_id]") == ["trace-1", "trace-2"]
+    assert request.headers["authorization"] == "Bearer bootstrap-token"
+
+    writer.close()
+
+    assert transport.is_closed
 
 
 def test_intake_writer_reports_only_new_annotation_writes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -444,41 +493,6 @@ def test_intake_writer_paginated_data_advances_pages_and_enforces_cap(monkeypatc
     assert pages == [1, 2]
 
 
-def test_sdk_session_uses_public_sdk_request_methods() -> None:
-    common = importlib.import_module("_import_common")
-    client = Mock()
-    adapter = common._SdkSession(client)
-
-    adapter.request(
-        "GET",
-        "https://platform.example.com/apis/intake/v2/workspaces/default/spans",
-        params=[("page", 1)],
-        headers={},
-        timeout=60,
-        follow_redirects=False,
-    )
-    adapter.request(
-        "POST",
-        "https://platform.example.com/apis/intake/v2/workspaces/default/annotations",
-        json={"kind": "note"},
-        headers={},
-        timeout=60,
-        follow_redirects=False,
-    )
-
-    client.get.assert_called_once_with(
-        "https://platform.example.com/apis/intake/v2/workspaces/default/spans",
-        cast_to=httpx.Response,
-        options={"params": {"page": 1}, "headers": {}, "timeout": 60, "follow_redirects": False},
-    )
-    client.post.assert_called_once_with(
-        "https://platform.example.com/apis/intake/v2/workspaces/default/annotations",
-        cast_to=httpx.Response,
-        body={"kind": "note"},
-        options={"headers": {}, "timeout": 60, "follow_redirects": False},
-    )
-
-
 class _Response:
     def __init__(self, payload: dict[str, Any], *, status_code: int = 200) -> None:
         self._payload = payload
@@ -509,32 +523,3 @@ def _at_path(value: Any, path: list[str | int]) -> Any:
     for part in path:
         current = current[part]
     return current
-
-
-def test_sdk_session_query_filters_reach_real_sdk_transport() -> None:
-    from nemo_helix import NeMoHelix
-
-    common = importlib.import_module("_import_common")
-    captured: list[httpx.Request] = []
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        captured.append(request)
-        return httpx.Response(200, json={"data": []})
-
-    with NeMoHelix(
-        base_url="https://platform.example.com",
-        access_token="test-token",
-        http_client=httpx.Client(transport=httpx.MockTransport(handle)),
-    ) as sdk:
-        response = common._SdkSession(sdk).request(
-            "GET",
-            "https://platform.example.com/apis/intake/v2/workspaces/default/spans",
-            params=[("filter[trace_id]", "gym-trace"), ("filter[source]", "gym"), ("page", 1)],
-            follow_redirects=False,
-        )
-    assert response.status_code == 200
-    assert dict(captured[0].url.params) == {
-        "filter[trace_id]": "gym-trace",
-        "filter[source]": "gym",
-        "page": "1",
-    }

@@ -30,7 +30,7 @@ from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
 from nemo_evaluator_sdk.values import GenericAgent, Model, ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from pydantic import BaseModel, field_serializer
 
 
@@ -84,9 +84,9 @@ async def test_snapshot_serializes_nested_reference_and_isolates_mutation() -> N
 
     reference = Reference(answers=["yes"])
     task = AgentEvalTaskInput(id="task", intent="Answer", reference={"nested": reference})
-    async with AsyncNeMoHelix(base_url="http://unused.test") as sdk:
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
         snapshot = await EvaluatorTaskAdapter().resolve(
-            LoadedTask(inline=task), SubmitContext("default", None, sdk, KIND_ADAPTERS)
+            LoadedTask(inline=task), SubmitContext("default", None, async_client, KIND_ADAPTERS)
         )
     reference.answers.append("changed")
     task.reference["extra"] = "changed"
@@ -106,9 +106,9 @@ async def test_stored_adapter_returns_definition_with_selected_revision_origin()
         spec=task.spec,
         content_hash="a" * 64,
     )
-    async with AsyncNeMoHelix(base_url="http://unused.test") as sdk:
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
         definition = await EvaluatorTaskAdapter().resolve(
-            LoadedTask(stored=(task, revision)), SubmitContext("default", None, sdk, KIND_ADAPTERS)
+            LoadedTask(stored=(task, revision)), SubmitContext("default", None, async_client, KIND_ADAPTERS)
         )
     assert definition.provenance is not None
     assert definition.provenance.entity_name == "other/stored"
@@ -131,8 +131,8 @@ async def test_inline_snapshot_is_independent_and_evaluator_does_not_read_harbor
         id="task", intent="Do it", inputs=TaskInputs(instruction="yes"), metrics=[metric_bundle()]
     )
     item = LoadedTask(inline=original)
-    async with AsyncNeMoHelix(base_url="http://unused.test") as sdk:
-        definition = await adapter.resolve(item, SubmitContext("default", None, sdk, KIND_ADAPTERS))
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
+        definition = await adapter.resolve(item, SubmitContext("default", None, async_client, KIND_ADAPTERS))
     task = ResolvedTask(id=adapter.runtime_id(item), spec=definition)
     original.inputs.instruction = "changed"
     original.metrics.clear()

@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from models import ResolvedModelReference
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, EvaluateSpec
@@ -40,6 +39,7 @@ from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoun
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
+from nemo_helix_plugin.models.refs import ResolvedModelReference
 from pytest_mock import MockerFixture
 
 _EXACT_MATCH_METRIC = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
@@ -307,7 +307,7 @@ def test_sync_resource_rejects_non_object_plugin_status() -> None:
 _EVALUATOR_PUBLIC_RESOURCE_NAMES = {
     "agent_eval_results",
     "eval_results",
-    "from_sdk",
+    "from_client",
     "get_job_resource",
     "metrics",
     "plugin_status",

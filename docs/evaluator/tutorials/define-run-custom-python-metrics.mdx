@@ -286,15 +286,22 @@ To run the same metric remotely, install and start NeMo Helix using the [Setup g
 ```python
 import os
 
+from nemo_evaluator.sdk import Evaluator as HelixEvaluator
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 WORKSPACE = "custom-python-metrics"
 MODEL_REF = os.environ.get("NHX_EVAL_MODEL_REF", "default/my-model")
 
-client = NeMoHelix(
+sdk = NeMoHelix(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace=WORKSPACE,
+)
+helix_evaluator = HelixEvaluator.from_client(client)
 ```
 
 ### Create a Workspace
@@ -305,7 +312,7 @@ Create a workspace for the tutorial. If it already exists, continue using it.
 from nemo_helix import ConflictError
 
 try:
-    client.workspaces.create(name=WORKSPACE)
+    sdk.workspaces.create(name=WORKSPACE)
     print(f"Workspace '{WORKSPACE}' created")
 except ConflictError:
     print(f"Workspace '{WORKSPACE}' already exists, continuing...")
@@ -349,7 +356,7 @@ dataset_path.write_text(
 )
 
 try:
-    fileset = client.files.filesets.create(
+    fileset = sdk.files.filesets.create(
         name=DATASET_NAME,
         description="Math expression evaluation dataset",
         purpose="dataset",
@@ -370,10 +377,10 @@ try:
     )
     print(f"Created fileset: {fileset.workspace}/{fileset.name}")
 except ConflictError:
-    fileset = client.files.filesets.retrieve(name=DATASET_NAME)
+    fileset = sdk.files.filesets.retrieve(name=DATASET_NAME)
     print(f"Fileset exists: {fileset.workspace}/{fileset.name}")
 
-client.files.upload(
+sdk.files.upload(
     fileset=fileset.name,
     local_path=str(dataset_path),
     remote_path=DATASET_FILE,
@@ -387,7 +394,7 @@ The `nemo_evaluator_sdk` package provides metric and runtime types, such as `Met
 
 ## 7. Submit a Durable Evaluator Job
 
-Pass `CloudpickleMetricBundlePackager()` to `client.evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
+Pass `CloudpickleMetricBundlePackager()` to `helix_evaluator.submit(...)` so the SDK serializes the metric object into the evaluator job spec. The job runtime hydrates the metric bundle before scoring rows. Use `ModelRef` to reference the platform model entity you configured with `NHX_EVAL_MODEL_REF`.
 
 <Note>
 
@@ -399,7 +406,7 @@ Submit from a Python 3.13 environment. A bundle created on another minor version
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk import InferenceParams, ModelRef, RunConfigOnlineModel
 
-job = client.evaluator.submit(
+job = helix_evaluator.submit(
     metric=metric,
     dataset=dataset_ref,
     config=RunConfigOnlineModel(

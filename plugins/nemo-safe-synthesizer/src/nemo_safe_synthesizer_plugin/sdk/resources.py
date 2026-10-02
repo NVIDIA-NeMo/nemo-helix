@@ -9,8 +9,7 @@ from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLogPage
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
@@ -21,7 +20,7 @@ from nemo_safe_synthesizer_plugin.sdk import http_utils
 class SafeSynthesizerJobsResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
 
@@ -84,7 +83,7 @@ class SafeSynthesizerJobsResource:
 
     def get_status(self, name: str, *, workspace: str | None = None) -> Any:
         """Retrieve Safe Synthesizer job status."""
-        return client_from_platform(self._platform, JobsClient).get_job_status(name=name, workspace=workspace).data()
+        return JobsClient.from_client(self._platform).get_job_status(name=name, workspace=workspace).data()
 
     def get_logs(
         self,
@@ -96,7 +95,7 @@ class SafeSynthesizerJobsResource:
         """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
         query_params = {key: value for key, value in params.items() if value is not None}
         page = (
-            client_from_platform(self._platform, JobsClient)
+            JobsClient.from_client(self._platform)
             .list_job_logs(
                 name=name,
                 workspace=workspace,
@@ -110,7 +109,7 @@ class SafeSynthesizerJobsResource:
 class SafeSynthesizerResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
         self.jobs = SafeSynthesizerJobsResource(platform)
 
@@ -118,7 +117,7 @@ class SafeSynthesizerResource:
 class AsyncSafeSynthesizerJobsResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
 
@@ -181,7 +180,7 @@ class AsyncSafeSynthesizerJobsResource:
 
     async def get_status(self, name: str, *, workspace: str | None = None) -> Any:
         """Retrieve Safe Synthesizer job status."""
-        jobs = client_from_platform(self._platform, AsyncJobsClient)
+        jobs = AsyncJobsClient.from_client(self._platform)
         return (await jobs.get_job_status(name=name, workspace=workspace)).data()
 
     async def get_logs(
@@ -193,7 +192,7 @@ class AsyncSafeSynthesizerJobsResource:
     ) -> Any:
         """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
         query_params = {key: value for key, value in params.items() if value is not None}
-        response = await client_from_platform(self._platform, AsyncJobsClient).list_job_logs(
+        response = await AsyncJobsClient.from_client(self._platform).list_job_logs(
             name=name,
             workspace=workspace,
             query_params=cast(JobLogsQueryParams, query_params) or None,
@@ -205,7 +204,7 @@ class AsyncSafeSynthesizerJobsResource:
 class AsyncSafeSynthesizerResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self.jobs = AsyncSafeSynthesizerJobsResource(platform)
 

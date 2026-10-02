@@ -142,7 +142,7 @@ async def _resolve_gym_environment(
     target: GymRunnerTarget,
     *,
     workspace: str,
-    async_sdk: AsyncHelixClient | None,
+    async_client: AsyncHelixClient | None,
 ) -> GymRunnerTarget:
     """Validate and qualify a Gym environment FileSet through the Files service."""
     if target.environment is None:
@@ -159,7 +159,7 @@ async def _resolve_gym_environment(
     if file_path:
         raise ValueError("Gym environment FileSet references must not include a file fragment")
 
-    files = client_from_platform(async_sdk, AsyncFilesClient)
+    files = client_from_platform(async_client, AsyncFilesClient)
     try:
         environment = (
             await files.get_fileset(
@@ -274,7 +274,7 @@ async def prepare_gym_submission(
             inputs=task.spec.inputs.model_dump(exclude_none=True),
             metadata={item.key: item.value for item in task.metadata},
         )
-    return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
+    return await _resolve_gym_environment(target, workspace=ctx.workspace, async_client=ctx.async_client)
 
 
 def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
@@ -320,7 +320,7 @@ class _AgentEvalJobBase(NemoJob):
         ctx = SubmitContext(
             workspace=workspace,
             entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
             adapters=cls.adapters,
         )
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
@@ -355,7 +355,7 @@ class _AgentEvalJobBase(NemoJob):
                 evaluator_config is not None and evaluator_config.sandbox_host_provider == "opensandbox"
             )
             execution_profile = await cls._execution_profile(
-                async_sdk=async_sdk,
+                async_client=async_sdk,
                 profile=profile or "default",
                 require_pvc_storage=require_pvc_storage,
             )
@@ -375,7 +375,7 @@ class _AgentEvalJobBase(NemoJob):
             compilation = _compile_agent_eval_cpu_job(canonical_spec, profile=profile)
             compilation.eval_step["executor"] = await cls._resolve_harbor_subprocess_executor(
                 executor=compilation.executor,
-                async_sdk=async_sdk,
+                async_client=async_sdk,
             )
             platform_spec = compilation.platform_spec
         else:
@@ -389,13 +389,13 @@ class _AgentEvalJobBase(NemoJob):
     @staticmethod
     async def _execution_profile(
         *,
-        async_sdk: AsyncHelixClient | None,
+        async_client: AsyncHelixClient | None,
         profile: str,
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
         """Resolve the profile that Jobs will use for this submission."""
         try:
-            profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
         if require_pvc_storage:
@@ -424,12 +424,12 @@ class _AgentEvalJobBase(NemoJob):
 
     @staticmethod
     async def _resolve_harbor_subprocess_executor(
-        *, executor: CPUExecutionProviderSpec, async_sdk: AsyncHelixClient | None
+        *, executor: CPUExecutionProviderSpec, async_client: AsyncHelixClient | None
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = executor.profile
         try:
-            profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
 

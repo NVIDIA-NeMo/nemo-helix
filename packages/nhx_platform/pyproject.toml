@@ -18,7 +18,6 @@ dependencies = [
     "nhx-auth",
     "nhx-entities",
     "nhx-models",
-    "models",
     "nhx-files",
     "nhx-jobs",
     "nhx-inference-gateway",
@@ -39,7 +38,6 @@ nhx-platform-runner = { workspace = true }
 nhx-auth = { workspace = true }
 nhx-entities = { workspace = true }
 nhx-models = { workspace = true }
-models = { workspace = true }
 nhx-files = { workspace = true }
 nhx-jobs = { workspace = true }
 nhx-inference-gateway = { workspace = true }

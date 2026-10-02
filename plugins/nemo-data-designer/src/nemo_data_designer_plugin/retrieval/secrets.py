@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def resolve_hf_token(
-    async_sdk: AsyncHelixClient,
+    async_client: AsyncHelixClient,
     hf_token_secret: str | None,
     workspace: str,
 ) -> str | None:
@@ -32,7 +32,7 @@ async def resolve_hf_token(
         return None
     secret_workspace, name = parse_secret_reference(hf_token_secret, workspace)
     try:
-        secrets = client_from_platform(async_sdk, AsyncSecretsClient)
+        secrets = client_from_platform(async_client, AsyncSecretsClient)
         response = (await secrets.access_secret(name=name, workspace=secret_workspace)).data()
     except NotFoundError as exc:
         raise NDDInvalidConfigError(f"Could not find secret {name!r} in workspace {secret_workspace!r}") from exc

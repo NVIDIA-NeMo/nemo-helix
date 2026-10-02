@@ -28,8 +28,8 @@ from data_designer_nemo.nemotron_personas import (
     get_locale_fileset_file_ref,
     get_resource_name_for_locale,
 )
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_ext.client.bootstrap import build_nemo_client
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import FilesClient
 
@@ -39,10 +39,10 @@ def _fail(message: str) -> NoReturn:
     sys.exit(1)
 
 
-def _require_fileset(sdk: NeMoHelix, locale: str) -> None:
+def _require_fileset(client: NemoClient, locale: str) -> None:
     """Exit with an actionable message when the locale's fileset isn't usable."""
     fileset_name = get_resource_name_for_locale(locale)
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
 
     try:
         files.get_fileset(name=fileset_name, workspace=WORKSPACE)
@@ -70,7 +70,7 @@ def main(locale: str) -> None:
         _fail(f"unsupported locale {locale!r}; choose from {', '.join(sorted(SUPPORTED_LOCALES))}")
 
     try:
-        sdk = NeMoHelix()
+        client = build_nemo_client()
     except Exception as exc:
         _fail(
             f"could not connect to NeMo Helix: {exc}\n"
@@ -78,11 +78,11 @@ def main(locale: str) -> None:
             "(`nemo config current-context`)."
         )
 
-    _require_fileset(sdk, locale)
+    _require_fileset(client, locale)
 
     file_ref = get_locale_fileset_file_ref(locale)
     try:
-        with make_filesystem(sdk).open(file_ref, "rb") as f:
+        with make_filesystem(client).open(file_ref, "rb") as f:
             schema = {field.name: str(field.type) for field in pq.read_schema(f)}
     except Exception as exc:
         _fail(f"could not read persona data at {file_ref!r}: {exc}")
