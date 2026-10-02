@@ -49,7 +49,9 @@ class _FakeConfig:
         self.harness = _FakeHarness(mapping.get("harness", {}).get("adapter_id", ""))
         self.environment: _FakeEnvironment | None = None
         self.runtime = _FakeRuntimeCfg()
-        self.models: dict[str, Any] = dict(mapping.get("models", {}))
+        self.models: dict[str, Any] = {
+            name: _FakeModelConfig(**value) for name, value in mapping.get("models", {}).items()
+        }
         self.relay: dict[str, Any] | None = None  # records enable_relay(...)
         # Mirrors FabricConfig.skills.paths: seeded from the config, then appended to by
         # add_skill_path (which the capability-plan probe and native skill injection both use).
@@ -226,7 +228,7 @@ class _FakeResult:
         return {"status": self.status, "output": self.output, "harness": self.harness}
 
 
-def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> type:
+def _install_fake_fabric(monkeypatch: pytest.MonkeyPatch, handler: Any) -> Any:
     """Inject a fake ``nemo_fabric`` module (the runtime imports it lazily); return the client class."""
 
     class _FakeClient:

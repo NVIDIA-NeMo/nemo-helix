@@ -558,6 +558,8 @@ class _AgentEvalJobBase(NemoJob):
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
                 base_dir=_staged_agent_files(target, ctx),
+                env_secrets=target.env_secrets,
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
