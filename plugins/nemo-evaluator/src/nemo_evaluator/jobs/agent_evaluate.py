@@ -34,6 +34,10 @@ from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
 )
+from nemo_evaluator.jobs.agent_files_snapshot import (
+    discard_registered_agent_files,
+    discard_registered_agent_files_sync,
+)
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -44,8 +48,10 @@ from nemo_evaluator.jobs.agent_spec import (
     ModelTarget,
     ResolvedTask,
     Target,
+    registered_agent_files,
     validate_task_collection,
 )
+from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.jobs.gym_environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
     GymEnvironmentPackageError,
@@ -62,6 +68,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
+from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
@@ -76,10 +83,10 @@ from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig, validate_gym_task_row
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -277,15 +284,52 @@ async def prepare_gym_submission(
     return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
 
 
-def _harbor_agent_env_from_host(target: HarborRunnerTarget) -> list[str]:
-    """The ``env_secrets`` names to forward to the Harbor agent, after checking the service resolved them."""
+class JobEnvSecretResolver:
+    """Name the env var holding each Harbor ``env_secrets`` entry inside a platform job.
+
+    The service injected every secret into this process's environment under its ``env_secrets`` key at
+    compile time, so the key *is* the source variable. No other variable is consulted.
+    """
+
+    def __init__(self, *, workspace: str) -> None:
+        self._workspace = workspace
+
+    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
+        """``env_name`` when the service injected a non-empty value under it, else ``None``."""
+        return env_name if os.environ.get(env_name) else None
+
+    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
+        """Point at the secret in its workspace: the ref's own, or the job's for a bare ref."""
+        workspace, sep, name = secret_ref.root.rpartition("/")
+        workspace = workspace if sep else self._workspace
+        return (
+            f"secret {secret_ref.root!r} was not injected into this job's environment. Check the secret exists "
+            f"in workspace {workspace!r}: nemo secrets get {name} --workspace {workspace}"
+        )
+
+
+def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
+    """Check the service resolved every ``env_secrets`` entry into this job's environment."""
     missing = sorted(name for name in target.env_secrets if name not in os.environ)
     if missing:
         raise ValueError(
-            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Harbor "
-            "agent cannot be given them."
+            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Fabric "
+            "harness cannot read them."
         )
-    return list(target.env_secrets)
+
+
+def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: JobContext) -> Path | None:
+    """Where the preceding staging step put a registered agent's Ethos files, once it is verified present."""
+    fileset = registered_agent_files(target)
+    if fileset is None:
+        return None
+    staged = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
+    if not staged.is_dir():
+        raise ValueError(
+            f"registered agent files {fileset.root!r} were not staged at {staged}; the stage-environment "
+            "step did not run or did not complete"
+        )
+    return staged
 
 
 class _AgentEvalJobBase(NemoJob):
@@ -326,12 +370,24 @@ class _AgentEvalJobBase(NemoJob):
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
-        validate_execution_support(resolved_tasks, target=submit_spec.target, adapters=ctx.adapters)
-        target = submit_spec.target
-        if isinstance(target, GymRunnerTarget):
-            target = await prepare_gym_submission(resolved_tasks, target, ctx)
-        validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-        return AgentEvalSpec(tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"}))
+        target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
+        try:
+            validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
+            if isinstance(target, GymRunnerTarget):
+                target = await prepare_gym_submission(resolved_tasks, target, ctx)
+            validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
+            return AgentEvalSpec(
+                tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
+            )
+        except Exception:
+            # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
+            # to clean the snapshot up, so it goes here.
+            snapshot = (
+                registered_agent_files(target) if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) else None
+            )
+            if snapshot is not None:
+                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            raise
 
     @classmethod
     async def compile(
@@ -516,12 +572,15 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, AgentTarget):
             return target.agent, None, target.params or RunConfigOnline()
         if isinstance(target, FabricRunnerTarget):
+            _require_fabric_env_secrets_resolved(target)
+            assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
-                config=target.config,
+                config=expand_mcp_secret_env(target.config, os.environ),
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
+                base_dir=_staged_agent_files(target, ctx),
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
@@ -581,21 +640,29 @@ class _AgentEvalJobBase(NemoJob):
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
+            agent_kwargs = dict(target.agent_kwargs)
+            staged = _staged_agent_files(target, ctx)
+            if staged is not None:
+                agent_kwargs["fabric_config_bundle"] = str(staged)
             harbor_runtime = HarborAgentTaskRunner(
                 config=HarborRuntimeConfig(
                     jobs_dir=ctx.storage.persistent / "harbor",
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
-                    agent_kwargs=target.agent_kwargs,
-                    agent_env_from_host=_harbor_agent_env_from_host(target),
+                    agent_kwargs=agent_kwargs,
+                    env_secrets=target.env_secrets,
+                    env_vars=target.env_vars,
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
                     max_retries=target.max_retries,
                     artifacts=target.artifacts,
                     trace_dir=target.trace_dir,
                     reward_key=target.reward_key,
-                )
+                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                    agent_timeout_multiplier=target.agent_timeout_multiplier,
+                ),
+                secret_resolver=JobEnvSecretResolver(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None
         return None, None, None
@@ -703,6 +770,16 @@ class _AgentEvalJobBase(NemoJob):
                 intake=intake,
             )
             output["publication"] = outcome.model_dump(exclude_none=True)
+
+        # The run is complete and its bundle durable; the files snapshot taken at submit has served its
+        # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
+        snapshot = (
+            registered_agent_files(spec.target)
+            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget))
+            else None
+        )
+        if snapshot is not None:
+            discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
 

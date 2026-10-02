@@ -15,8 +15,8 @@ pytest.importorskip("harbor", reason="FabricInstalledAgent builds on Harbor's Ba
 import harbor
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.environments.base import BaseEnvironment
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_agent import NemoFabricAgent
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
     DEFAULT_FABRIC_MAX_TURNS,
     DEFAULT_UV_VERSION,
     FabricInstalledAgent,
@@ -24,6 +24,18 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_fabric_installed_agent import
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
 _PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
+_CONFIG: dict[str, Any] = {
+    "metadata": {"name": "hello-world"},
+    "harness": {"adapter_id": _DEEPAGENTS},
+    "models": {
+        "default": {
+            "provider": "nvidia",
+            "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "api_key_env": "NVIDIA_API_KEY",
+            "base_url": "https://integrate.api.nvidia.com/v1",
+        }
+    },
+}
 
 
 class _ExecResult:
@@ -60,13 +72,9 @@ class _RecordingEnvironment:
 
 
 def _agent(tmp_path: Path, **kwargs: Any) -> FabricInstalledAgent:
-    return FabricInstalledAgent(
-        logs_dir=tmp_path,
-        fabric_adapter_id=_DEEPAGENTS,
-        fabric_package=_PACKAGE,
-        fabric_workspace="/app",
-        **kwargs,
-    )
+    options: dict[str, Any] = {"fabric_config": _CONFIG, "fabric_package": _PACKAGE, "fabric_workspace": "/app"}
+    options.update(kwargs)
+    return FabricInstalledAgent(logs_dir=tmp_path, **options)
 
 
 def _ran(environment: _RecordingEnvironment, needle: str) -> str:
@@ -152,6 +160,26 @@ async def test_install_provisions_curl_uv_and_the_fabric_venv_in_order(tmp_path:
     # The venv's python, never the image's: that is what makes an arbitrary task image workable.
     assert f"uv pip install --python /tmp/nemo-fabric-venv/bin/python '{_PACKAGE}'" in install
     assert environment.commands.index((prepare, "root")) < environment.commands.index((install, None))
+
+
+async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> None:
+    """A harness's companions can be pinned next to Fabric; a quoted specifier with a marker stays whole."""
+    agent = _agent(
+        tmp_path,
+        fabric_package="""nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
+    )
+    environment = _RecordingEnvironment()
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    install = _ran(environment, "astral.sh/uv")
+    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.3.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+
+
+async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, fabric_package="   ")
+    with pytest.raises(ValueError, match="at least one requirement"):
+        await agent.install(cast(BaseEnvironment, _RecordingEnvironment()))
 
 
 async def test_the_uv_installer_is_pinned_to_a_release(tmp_path: Path) -> None:
@@ -252,7 +280,7 @@ async def test_every_supported_package_manager_installs_ca_certificates(tmp_path
 def test_fabric_package_is_required(tmp_path: Path) -> None:
     """Without it the wrapped agent's ``_runner_python`` falls back to the image's ``python3``."""
     with pytest.raises(ValueError, match="fabric_package is required"):
-        FabricInstalledAgent(logs_dir=tmp_path, fabric_adapter_id=_DEEPAGENTS)
+        FabricInstalledAgent(logs_dir=tmp_path, fabric_config=_CONFIG)
 
 
 def test_an_unquoted_yaml_python_version_is_rejected(tmp_path: Path) -> None:
@@ -268,13 +296,14 @@ def test_the_harness_gets_a_turn_budget_by_default(tmp_path: Path) -> None:
     trajectory, no error, just `AgentTimeoutError`. Six of ten `terminal-bench-sample` trials died
     that way before this default existed.
     """
-    assert _agent(tmp_path).fabric.fabric_max_turns == DEFAULT_FABRIC_MAX_TURNS
+    assert _agent(tmp_path).fabric._build_config().runtime.max_turns == DEFAULT_FABRIC_MAX_TURNS
 
 
 def test_an_explicit_turn_budget_wins_including_unbounded(tmp_path: Path) -> None:
     """`None` is a real choice (Fabric's own behaviour), not an absent argument."""
-    assert _agent(tmp_path, fabric_max_turns=5).fabric.fabric_max_turns == 5
-    assert _agent(tmp_path, fabric_max_turns=None).fabric.fabric_max_turns is None
+    budgeted = {**_CONFIG, "runtime": {"max_turns": 5}}
+    assert _agent(tmp_path, fabric_config=budgeted).fabric._build_config().runtime.max_turns == 5
+    assert _agent(tmp_path, fabric_default_max_turns=None).fabric._build_config().runtime.max_turns is None
 
 
 def test_the_version_probe_reads_the_venv_not_the_host(tmp_path: Path) -> None:

@@ -233,6 +233,14 @@ def compile_dpo_config(
                 "lora_A_init": "xavier",
                 "use_triton": True,
             },
+            # The DTensor policy worker reads its save options from here and raises
+            # KeyError without them; the top-level checkpointing config rejects them.
+            # "every" consolidates each save, so the best checkpoint is publishable.
+            "checkpoint": {
+                "model_save_format": "safetensors",
+                "save_consolidated": "every",
+                "v4_compatible": customizer_config.model.v4_compatible,
+            },
         },
         "dynamic_batching": {"enabled": False},
         "sequence_packing": _build_sequence_packing_config(customizer_config),

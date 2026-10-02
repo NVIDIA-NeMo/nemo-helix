@@ -12,6 +12,7 @@ from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
 )
+from nhx.guardrails.app.utils.platform_request_headers import get_platform_auth_headers_from_context
 from nhx.guardrails.config import settings
 from nhx.guardrails.entities.values._private import Model, RailsConfig
 from nhx.guardrails.entities.values.chat import GuardrailChatCompletionRequest
@@ -64,7 +65,10 @@ def get_main_model_from_config(models: List[Model]) -> Optional[Model]:
 
 def get_merged_custom_headers_token(token: str | None) -> str:
     """Merge the custom headers from the request context into the token."""
-    headers = get_request_default_headers_from_context()
+    headers = {
+        **get_request_default_headers_from_context(),
+        **get_platform_auth_headers_from_context(),
+    }
     headers_str = json.dumps(headers, sort_keys=True)
     merged_token_headers = f"{token}{headers_str}" if token else headers_str
     return merged_token_headers

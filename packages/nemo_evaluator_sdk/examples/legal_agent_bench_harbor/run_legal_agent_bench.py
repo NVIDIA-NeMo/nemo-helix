@@ -57,7 +57,7 @@ from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRuntimeConfig,
     discover_harbor_tasks,

@@ -27,9 +27,16 @@ job-owned storage; settings and execution overrides with no target representatio
 
 from __future__ import annotations
 
-from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymPlacement, GymRunnerTarget, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    AgentRunnerTarget,
+    GymPlacement,
+    GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
+    HarborRunnerTarget,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
@@ -78,8 +85,6 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
 
     ``jobs_dir`` is optional at construction and deliberately omitted from submission: workers
     supply job-owned storage. Standalone execution requires an explicit directory.
-    Host environment forwarding cannot become managed secret references implicitly; callers
-    needing ``env_secrets`` must submit a target spec, for example through the CLI.
     """
     config = runner._config
     if config is None:
@@ -97,38 +102,40 @@ def _harbor_target(runner: HarborAgentTaskRunner) -> HarborRunnerTarget:
         "quiet": True,
         "agent_dir": None,
         "timeout_multiplier": None,
-        "agent_timeout_multiplier": None,
         "verifier_timeout_multiplier": None,
-        "agent_setup_timeout_multiplier": None,
         "environment_build_timeout_multiplier": None,
     }
     for field, default in required_defaults.items():
         if getattr(config, field) != default:
             raise UnsubmittableRunnerError(f"Harbor {field} must retain its default for job submission.")
-    if config.agent_env_from_host:
-        raise UnsubmittableRunnerError(
-            "Harbor agent_env_from_host cannot be submitted through the runner-based API. "
-            "Submit a job specification through the nemo-evaluator plugin's SDK or CLI, setting "
-            "target.env_secrets to map environment variable names to Platform secret "
-            'references, e.g. {"OPENAI_API_KEY": "default/openai-key"}.'
-        )
+    source: HarborBuiltinAgentSource | HarborImportedAgentSource
+    if config.agent_import_path is not None:
+        source = HarborImportedAgentSource(import_path=config.agent_import_path, model_name=config.agent_model_name)
+    elif config.agent_name is not None:
+        source = HarborBuiltinAgentSource(name=config.agent_name, model_name=config.agent_model_name)
+    else:
+        raise UnsubmittableRunnerError("Harbor config selects no agent: set agent_name or agent_import_path.")
     carried_fields = (
-        "agent_name",
-        "agent_import_path",
-        "agent_model_name",
         "agent_kwargs",
+        "env_secrets",
+        "env_vars",
         "n_attempts",
         "n_concurrent_trials",
         "max_retries",
         "artifacts",
         "trace_dir",
         "reward_key",
+        "agent_setup_timeout_multiplier",
+        "agent_timeout_multiplier",
     )
     try:
-        target = HarborRunnerTarget(**{name: getattr(config, name) for name in carried_fields})
+        target = HarborRunnerTarget(source=source, **{name: getattr(config, name) for name in carried_fields})
         target.model_dump(mode="json")
     except (ValidationError, PydanticSerializationError) as error:
-        raise UnsubmittableRunnerError("Harbor config cannot be represented as a valid JSON target spec.") from error
+        # Both models set `hide_input_in_errors`, so the text names the problem without echoing a value.
+        raise UnsubmittableRunnerError(
+            f"Harbor config cannot be represented as a valid JSON target spec: {error}"
+        ) from error
     return target
 
 

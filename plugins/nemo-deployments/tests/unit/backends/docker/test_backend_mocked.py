@@ -300,7 +300,7 @@ async def test_create_deployment_uses_workload_identity_token_ttl(
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_does_not_mount_workload_identity_on_auth_proxy_sidecar(
+async def test_create_deployment_mounts_workload_identity_on_auth_proxy_sidecar(
     docker_backend: DockerDeploymentBackend,
     mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
@@ -337,16 +337,14 @@ async def test_create_deployment_does_not_mount_workload_identity_on_auth_proxy_
         )
 
     assert update.status == "STARTING"
-    assert workload_store.register.await_count == 1
-    assert mock_docker_client.volumes.create.call_count == 1
+    assert workload_store.register.await_count == 2
+    assert mock_docker_client.volumes.create.call_count == 2
     sidecar_kwargs = mock_docker_client.containers.create.call_args_list[1].kwargs
     assert sidecar_kwargs["labels"][CONTAINER_ROLE_LABEL] == "auth-proxy"
-    assert DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL not in sidecar_kwargs["labels"]
-    assert DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL not in sidecar_kwargs["labels"]
-    assert WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR not in sidecar_kwargs["environment"]
-    assert all(
-        binding["bind"] != WORKLOAD_IDENTITY_VOLUME_PATH for binding in sidecar_kwargs.get("volumes", {}).values()
-    )
+    assert sidecar_kwargs["labels"][DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL in sidecar_kwargs["labels"]
+    assert sidecar_kwargs["environment"][WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
+    assert any(binding["bind"] == WORKLOAD_IDENTITY_VOLUME_PATH for binding in sidecar_kwargs["volumes"].values())
 
 
 @pytest.mark.asyncio

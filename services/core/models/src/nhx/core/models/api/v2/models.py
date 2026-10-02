@@ -170,7 +170,8 @@ async def create_model(
         filter_schema=ModelEntityFilter,
         filter_description=(
             "Filter models by name, project, workspace, base_model, adapters, "
-            "finetuning_type, prompt, lora_enabled, description, created_at, and updated_at."
+            "finetuning_type, prompt, lora_enabled, family, model_providers, description, "
+            "created_at, and updated_at."
         ),
     ),
 )

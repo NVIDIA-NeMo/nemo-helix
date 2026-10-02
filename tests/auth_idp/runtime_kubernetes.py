@@ -101,6 +101,7 @@ HELM_REPO_TIMEOUT_SECONDS = 60
 HELM_DEPENDENCY_TIMEOUT_SECONDS = 300
 HTTP_RETRY_TIMEOUT_SECONDS = 180
 HTTP_REQUEST_TIMEOUT_SECONDS = 10.0
+PLATFORM_API_REQUEST_TIMEOUT_SECONDS = 60.0
 RETRY_SLEEP_SECONDS = 2.0
 SECRET_TIMEOUT_SECONDS = 180
 SECRET_GET_TIMEOUT_SECONDS = 30
@@ -1405,6 +1406,7 @@ class KubernetesAuthIdpRuntime:
         return NemoClient(
             base_url=self.gateway_base_url,
             auth=token,
+            timeout=PLATFORM_API_REQUEST_TIMEOUT_SECONDS,
             http_client=httpx.Client(verify=self.verify),
             owns_http_client=True,
         )

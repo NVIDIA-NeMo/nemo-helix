@@ -3,7 +3,7 @@
 
 """Audit job — runs garak against a target using inline config + target.
 
-``nemo auditor audit run --spec-file spec.yaml`` shells out to a pre-installed
+``nemo auditor audit --spec-file spec.yaml`` submits an audit job that shells out to a pre-installed
 garak interpreter (by default tries ``~/.auditor/.venv/bin/python``
 and ``/app/.garak_venv/bin/python``, overridable via ``NEMO_AUDITOR_GARAK_PYTHON``).
 
@@ -339,6 +339,7 @@ class AuditJob(NemoJob):
     container: ClassVar[str] = "nhx-auditor-tasks"
     input_spec_schema: ClassVar[type[BaseModel] | None] = AuditInputSpec
     spec_schema: ClassVar[type[BaseModel] | None] = AuditSpec
+    generate_legacy_verbs: ClassVar[bool] = False
 
     @classmethod
     async def to_spec(

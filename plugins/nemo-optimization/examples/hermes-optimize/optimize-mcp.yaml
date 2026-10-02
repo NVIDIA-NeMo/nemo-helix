@@ -24,14 +24,14 @@ harness:
 models:
   default:
     provider: nvidia
-    model: nvidia/nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://inference-api.nvidia.com/v1
     api_key_env: NVIDIA_API_KEY
     temperature: 0.0
     top_p: 1.0
   judge:
     provider: nvidia
-    model: nvidia/nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nvidia/nemotron-3.5-lightning-30b-a3b
     base_url: https://inference-api.nvidia.com/v1
     api_key_env: NVIDIA_API_KEY
     temperature: 0.0

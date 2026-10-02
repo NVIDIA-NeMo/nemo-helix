@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 from sandboxed_gym.environment_package import (
+    IMAGE_ADAPTER_ALLOWLIST,
+    AdapterRef,
+    AdapterWheelsV1Manifest,
+    AdapterWheelsV1Package,
     ComponentNamespaces,
     EnvironmentFormat,
     EnvironmentMetadata,
@@ -60,6 +64,65 @@ def test_loads_complete_wheels_v1_fixture() -> None:
     assert package.wheel_files == (
         (WHEELS_V1_ENVIRONMENT / "wheels/example_dependency-1.0-py3-none-any.whl").resolve(),
     )
+
+
+def test_loads_adapter_wheels_v1_package(tmp_path: Path) -> None:
+    """The format the platform writes for a hub environment. The host must accept it."""
+    config = "configs/verifiers_agent.yaml"
+    _write_config(tmp_path, config)
+    wheel = tmp_path / "wheels" / "example_dependency-1.0.0-py3-none-any.whl"
+    wheel.parent.mkdir()
+    wheel.write_bytes(b"PK\x03\x04")
+    _write_manifest(
+        tmp_path,
+        "format: adapter-wheels-v1\n"
+        "adapter:\n"
+        "  agent: verifiers_agent\n"
+        "  agent_type: responses_api_agents\n"
+        "  image_config_root: responses_api_agents/verifiers_agent\n"
+        "config_paths:\n"
+        "  - configs/verifiers_agent.yaml\n"
+        "metadata:\n"
+        "  name: ascii-tree\n"
+        "  hub_id: primeintellect/ascii-tree\n"
+        "  vf_env_id: ascii-tree\n"
+        "  adapter_agent: verifiers_agent\n",
+    )
+
+    package = load_environment_package(tmp_path)
+
+    assert isinstance(package, AdapterWheelsV1Package)
+    assert package.manifest == AdapterWheelsV1Manifest(
+        format=EnvironmentFormat.ADAPTER_WHEELS_V1,
+        adapter=AdapterRef(
+            agent="verifiers_agent",
+            image_config_root=IMAGE_ADAPTER_ALLOWLIST["verifiers_agent"],
+        ),
+        config_paths=(config,),
+        metadata=EnvironmentMetadata(
+            name="ascii-tree",
+            hub_id="primeintellect/ascii-tree",
+            vf_env_id="ascii-tree",
+            adapter_agent="verifiers_agent",
+        ),
+    )
+    assert package.wheel_files == (wheel.resolve(),)
+
+
+def test_adapter_wheels_rejects_an_agent_the_image_does_not_ship(tmp_path: Path) -> None:
+    _write_manifest(
+        tmp_path,
+        "format: adapter-wheels-v1\n"
+        "adapter:\n"
+        "  agent: not_in_the_image\n"
+        "config_paths:\n"
+        "  - configs/verifiers_agent.yaml\n"
+        "metadata:\n"
+        "  name: ascii-tree\n",
+    )
+
+    with pytest.raises(EnvironmentPackageError, match="not built into the training image"):
+        load_environment_manifest(tmp_path)
 
 
 def test_loads_native_v1_fixture() -> None:

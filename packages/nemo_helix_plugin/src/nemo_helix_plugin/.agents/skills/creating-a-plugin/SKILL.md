@@ -130,14 +130,14 @@ pythonpath = ["src"]
 ```python
 # src/nemo_my_plugin/cli.py
 import typer
-from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 class MyCLI(NemoCLI):
     name = "my-plugin"
     description = "My plugin commands."
 
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help=self.description)
+        app = create_typer_app(help=self.description)
 
         @app.command()
         def greet(name: str = typer.Option("world")) -> None:
@@ -146,6 +146,11 @@ class MyCLI(NemoCLI):
 
         return app
 ```
+
+For commands that call the platform, take the typed client from `cli_state(ctx)` and use the shared
+options and output helpers in `nemo_helix_plugin` (`--workspace`, `--output-format`, `-f code`); see
+`plugins/example-plugin/src/nemo_example_plugin/cli.py`. Never add a per-command `--base-url`: the
+platform comes from the global `nemo --base-url` / `--context`.
 
 **Add a job:**
 
@@ -174,7 +179,7 @@ class SayHelloJob(NemoJob):
         ...
 ```
 
-Entry-point key uses dot: `"my-plugin.say-hello"` under the `nemo.jobs` group. The platform auto-generates `nemo my-plugin say-hello run / submit / explain`. Mount server routes with `add_job_routes(SayHelloJob, authz=AuthzScope("my-plugin"))` from `nemo_helix_plugin.jobs.routes` — the `authz=` kwarg is required, or the generated routes are unruled and fail the OPA bundle build. See the `plugin-job` skill for the full pattern.
+Entry-point key uses dot: `"my-plugin.say-hello"` under the `nemo.jobs` group. By default, the platform auto-generates `nemo my-plugin say-hello submit` for submission and `nemo my-plugin say-hello explain` for schemas. A job can set `generate_legacy_verbs = False` to move generated submission to `nemo my-plugin say-hello`. Mount server routes with `add_job_routes(SayHelloJob, authz=AuthzScope("my-plugin"))` from `nemo_helix_plugin.jobs.routes` — the `authz=` kwarg is required, or the generated routes are unruled and fail the OPA bundle build. See the `plugin-job` skill for the full pattern.
 
 **Add a function:**
 
@@ -193,13 +198,14 @@ class GreetResponse(BaseModel):
 class GreetFunction(NemoFunction[GreetSpec]):
     name: ClassVar[str] = "greet"                        # suffix ONLY — NOT "my-plugin.greet"
     description: ClassVar[str] = "Say hello to a name."
+    generate_legacy_verbs: ClassVar[bool] = False         # required for new functions; see below
     spec_schema: ClassVar[type[BaseModel]] = GreetSpec
 
     async def run(self, spec: GreetSpec) -> GreetResponse:
         return GreetResponse(message=f"Hello, {spec.name}!")
 ```
 
-Entry-point key uses dot: `"my-plugin.greet"` under the `nemo.functions` group. The platform auto-generates `nemo my-plugin greet run / submit` (two verbs — no `explain`). Mount the HTTP route inside your `NemoService` with `add_function_routes(GreetFunction, authz=AuthzScope("my-plugin"), permission_description="Invoke the greet function")` from `nemo_helix_plugin.functions.routes` — the `authz=` kwarg is required, or the route is unruled and fails the OPA bundle build. Streaming functions return an `AsyncIterator` (one NDJSON frame per line); non-streaming ones return a value. `run` **must be `async def`** — sync work goes through `await asyncio.to_thread(...)`. See the `plugin-function` skill for the full pattern.
+Entry-point key uses dot: `"my-plugin.greet"` under the `nemo.functions` group. With `generate_legacy_verbs = False`, the platform auto-generates `nemo my-plugin greet`, which submits to the plugin service (no `explain`). Leaving the default `True` generates a deprecated `run` / `submit` group whose `run` verb executes locally, in-process — don't do that for new functions. Mount the HTTP route inside your `NemoService` with `add_function_routes(GreetFunction, authz=AuthzScope("my-plugin"), permission_description="Invoke the greet function")` from `nemo_helix_plugin.functions.routes` — the `authz=` kwarg is required, or the route is unruled and fails the OPA bundle build. Streaming functions return an `AsyncIterator` (one NDJSON frame per line); non-streaming ones return a value. `run` **must be `async def`** — sync work goes through `await asyncio.to_thread(...)`. See the `plugin-function` skill for the full pattern.
 
 **Add a controller:**
 

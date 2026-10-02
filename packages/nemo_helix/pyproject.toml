@@ -377,6 +377,7 @@ nemo-deployments-plugin = [
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
   "filesets",
+  "nemo-agents-plugin",
   "nemo-evaluator-sdk[harbor]",
   "nemo-helix-plugin",
   "pydantic>=2.12.0",

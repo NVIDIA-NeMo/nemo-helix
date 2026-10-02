@@ -30,9 +30,9 @@ nemo data-designer retrieval-run --workspace default --spec '{
   "generate": {
     "corpus": "default/my-docs",
     "provider": "default/nvidia-build",
-    "artifact_extraction_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "qa_generation_model": "nvidia/nemotron-3-nano-30b-a3b",
-    "quality_judge_model": "nvidia/nemotron-3-nano-30b-a3b",
+    "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     "embed_model": "nvidia/nemotron-3-embed-1b"
   },
   "prepare": {

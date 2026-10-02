@@ -729,9 +729,7 @@ authz:
       post:
         permissions:
         - jobs.logs.create
-        scopes:
-        - files:write
-        - platform:write
+        scopes: []
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
       post:
         permissions:

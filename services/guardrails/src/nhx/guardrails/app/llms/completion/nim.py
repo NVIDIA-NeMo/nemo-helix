@@ -23,9 +23,9 @@ from nhx.guardrails.app.llms.utils import (
 )
 from nhx.guardrails.app.utils.context_utils import (
     get_main_model_from_context,
-    get_request_default_headers_from_context,
     set_x_model_response_headers_into_context,
 )
+from nhx.guardrails.app.utils.platform_request_headers import headers_for_model_endpoint
 from pydantic import SecretStr
 from pydantic_core import PydanticUndefined
 
@@ -142,7 +142,7 @@ class NIM(FlexibleLLMBase, BaseRequest):
         if kwargs.get("stream"):
             headers["x-stream"] = "true"
 
-        custom_headers = get_request_default_headers_from_context()
+        custom_headers = headers_for_model_endpoint(self._get_api_host())
 
         if custom_headers:
             headers.update(custom_headers)

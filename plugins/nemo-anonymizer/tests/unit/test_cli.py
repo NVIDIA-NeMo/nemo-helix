@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import yaml
@@ -14,6 +15,11 @@ from nemo_anonymizer_plugin.functions.preview import PreviewFunction
 from nemo_helix_plugin.commands import add_function_commands, add_job_commands
 from nemo_helix_plugin.job import NemoJob
 from typer.testing import CliRunner
+
+
+def _platform(base_url: str) -> SimpleNamespace:
+    """Stand-in CLI state: the platform comes from ``nemo --base-url`` / the active context."""
+    return SimpleNamespace(get_base_url=lambda default=None: base_url)
 
 
 class _RunJob(NemoJob):
@@ -83,9 +89,8 @@ def test_preview_function_uses_flat_remote_submit(monkeypatch) -> None:
             ),
             "--workspace",
             "team-a",
-            "--base-url",
-            "http://platform.example",
         ],
+        obj=_platform("http://platform.example"),
     )
     nested_result = runner.invoke(app, ["preview", "submit", "--spec", "{}"])
 
@@ -129,9 +134,8 @@ def test_run_job_uses_flat_remote_submit(monkeypatch) -> None:
             '{"name": "Remote"}',
             "--workspace",
             "team-a",
-            "--base-url",
-            "http://platform.example",
         ],
+        obj=_platform("http://platform.example"),
     )
     nested_result = runner.invoke(app, ["run", "run", "--spec", '{"name": "Nested"}'])
     help_result = runner.invoke(app, ["run", "--help"])

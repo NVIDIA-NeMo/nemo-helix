@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import {
   Button,
@@ -33,11 +34,13 @@ const scoreNameSchema = z
   .min(1, 'Score name is required')
   .regex(/^[a-z0-9_]+$/, 'Only lowercase letters, numbers, and underscores allowed');
 
+const scoringCriteriaSchema = z.string().min(1, 'Scoring criteria is required');
+
 const localRangeSchema = z
   .object({
     scoreType: z.literal('range'),
     name: scoreNameSchema,
-    description: z.string().optional(),
+    description: scoringCriteriaSchema,
     minimum: requiredNumber('Minimum value is required'),
     maximum: requiredNumber('Maximum value is required'),
   })
@@ -49,7 +52,7 @@ const localRangeSchema = z
 const localRubricSchema = z.object({
   scoreType: z.literal('rubric'),
   name: scoreNameSchema,
-  description: z.string().optional(),
+  description: scoringCriteriaSchema,
   rubric: z
     .array(
       z.object({
@@ -220,9 +223,13 @@ export const ScoreModal: FC<ScoreModalProps> = ({ open, onClose, onSave, initial
                 placeholder="e.g., quality"
               />
 
-              <ControlledTextInput
+              <ControlledTextArea
                 useControllerProps={{ control: form.control, name: 'description' }}
-                label="Description (optional)"
+                label="Scoring Criteria"
+                rows={2}
+                formFieldProps={{
+                  slotHelp: "Tells the judge how to apply this score. Sent in the judge's prompt.",
+                }}
               />
 
               {scoreType === 'range' && (

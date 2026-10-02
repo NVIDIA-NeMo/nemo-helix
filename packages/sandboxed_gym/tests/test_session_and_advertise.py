@@ -6,6 +6,9 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import signal
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,8 +16,42 @@ import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.broker import EpisodeBrokerServer
 from sandboxed_gym.config import BrokerEndpoint, EpisodeBrokerConfig
 from sandboxed_gym.host.models import GymHostHandle
-from sandboxed_gym.orchestrator import SandboxedGymOrchestrator, SandboxedGymSession
+from sandboxed_gym.orchestrator import (
+    _INSTALLED,
+    _TERMINATION_SHUTDOWNS,
+    TERMINATION_SIGNALS,
+    SandboxedGymOrchestrator,
+    SandboxedGymSession,
+)
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
+
+
+@pytest.fixture(autouse=True)
+def _drop_the_reaper_the_session_arms():
+    """start() arms a process-exit sweep. These tests must not leave it installed."""
+    original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    registered: list[Callable[..., object]] = []
+    real_register = atexit.register
+    installed = set(_INSTALLED)
+    prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
+
+    def _tracking_register(func, *args, **kwargs):
+        registered.append(func)
+        return real_register(func, *args, **kwargs)
+
+    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    try:
+        yield
+    finally:
+        atexit.register = real_register
+        for func in registered:
+            atexit.unregister(func)
+        for signum, handler in original.items():
+            signal.signal(signum, handler)
+        _INSTALLED.clear()
+        _INSTALLED.update(installed)
+        _TERMINATION_SHUTDOWNS.clear()
+        _TERMINATION_SHUTDOWNS.extend(prior_shutdowns)
 
 
 def test_advertise_url_preferred_over_host():

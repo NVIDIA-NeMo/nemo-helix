@@ -1197,6 +1197,19 @@ def _body_is_complete(received: bytes) -> bool:
     return False
 
 
+def _decode_chunked_body(received: bytes) -> str:
+    """Reassemble the chunked body in ``received``, heartbeats included."""
+    _, _, rest = received.partition(b"\r\n\r\n")
+    decoded = ""
+    while True:
+        size_line, _, rest = rest.partition(b"\r\n")
+        size = int(size_line, 16)
+        if size == 0:
+            return decoded
+        decoded += rest[:size].decode()
+        rest = rest[size + 2 :]
+
+
 def _raw_rollout_exchange(base_url: str, payload: str, version: str) -> bytes:
     """POST /rollouts/run over a bare socket and return the response bytes as sent.
 
@@ -1251,7 +1264,6 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
     assert body.endswith(b"0\r\n\r\n")
     # A heartbeat is its own chunk -- length-prefixed, so it cannot read as the end.
     assert body.startswith(b"1\r\n \r\n")
-
     decoded = ""
     rest = body
     while True:
@@ -1262,6 +1274,53 @@ def test_rollouts_run_frames_the_body_so_a_heartbeat_cannot_end_it(ready_server)
         decoded += rest[:size].decode()
         rest = rest[size + 2 :]
     assert len(json.loads(decoded)["results"]) == 1
+
+
+def test_rollouts_run_reports_an_unencodable_result_in_the_body(ready_server):
+    """An unencodable result is a failed batch, not an empty one.
+
+    Serializing happens after the status line, so a raised encoder used to escape the
+    handler with the terminating chunk unwritten -- which every hop downstream reports
+    as a well-formed empty 200, i.e. a batch that succeeded with no rewards.
+    """
+
+    class _UnencodableHelper:
+        def run_examples(self, examples, head_server_config=None):
+            async def _one(row):
+                return row, {"reward": object()}
+
+            return [_one(row) for row in examples]
+
+    runtime._ROLLOUT_HELPER = _UnencodableHelper()
+
+    received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+
+    assert _body_is_complete(received), received
+    head, _, _ = received.partition(b"\r\n\r\n")
+    assert b"200" in head.split(b"\r\n")[0]
+
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "not JSON-serializable" in body["error"]["message"]
+
+
+def test_rollouts_run_never_answers_with_an_empty_body(ready_server):
+    """A body of zero bytes is indistinguishable from a stream that was dropped."""
+
+    def _empty(self, future, started):
+        return b""
+
+    original = runtime.Handler._await_results
+    runtime.Handler._await_results = _empty
+    try:
+        received = _raw_rollout_exchange(ready_server, _one_example(), "HTTP/1.1")
+    finally:
+        runtime.Handler._await_results = original
+
+    assert _body_is_complete(received), received
+    body = json.loads(_decode_chunked_body(received).strip())
+    assert body["error"]["code"] == "internal"
+    assert "empty response body" in body["error"]["message"]
 
 
 def test_rollouts_run_sends_a_length_to_an_http_10_caller(ready_server):
@@ -1705,6 +1764,8 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
 
     The caller is left polling an address that never answers, and reports a readiness timeout.
     """
+    import urllib.request
+
     monkeypatch.setattr(runtime, "_READY", False)
     monkeypatch.setattr(runtime, "_BOOTSTRAP_ERROR", None)
     monkeypatch.setattr(runtime, "_ensure_event_loop", lambda: None)
@@ -1714,14 +1775,50 @@ def test_a_bootstrap_failure_starts_the_server_instead_of_exiting(monkeypatch):
         raise runtime.PolicyCredentialRejected("the policy endpoint rejected the configured credential")
 
     monkeypatch.setattr(runtime, "bootstrap_gym_host", _reject)
-    served = []
-    monkeypatch.setattr(
-        runtime, "ThreadingHTTPServer", lambda *a, **k: SimpleNamespace(serve_forever=lambda: served.append(True))
-    )
+    # Port 0 asks the kernel for a free port. main() otherwise binds 8080 and
+    # serve_forever never returns, so the test process stays on that socket.
+    monkeypatch.setenv("NHX_RUNTIME_HTTP_PORT", "0")
+    servers: list[runtime._Server] = []
+    real_serve = runtime._Server.serve_forever
+
+    def _serve_on_a_background_thread(self, poll_interval: float = 0.5) -> None:
+        servers.append(self)
+        threading.Thread(
+            target=real_serve,
+            args=(self,),
+            kwargs={"poll_interval": poll_interval},
+            daemon=True,
+        ).start()
+
+    monkeypatch.setattr(runtime._Server, "serve_forever", _serve_on_a_background_thread)
 
     runtime.main()
 
-    assert served == [True]
+    assert servers, "main() did not start the server"
+    server = servers[0]
+    port = server.server_address[1]
+    try:
+        deadline = time.time() + 5
+        body = None
+        last_error: Exception | None = None
+        while time.time() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1)
+            except urllib.error.HTTPError as exc:
+                body = json.loads(exc.read().decode())
+                break
+            except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+                last_error = exc
+                time.sleep(0.05)
+        else:
+            raise AssertionError(f"server on port {port} never answered /health: {last_error}")
+        assert body is not None
+        assert body["status"] == "failed"
+        assert "rejected the configured credential" in body["error"]["message"]
+    finally:
+        server.shutdown()
+        server.server_close()
+
     assert runtime._READY is False
     assert runtime._BOOTSTRAP_ERROR is not None
     assert "rejected the configured credential" in runtime._BOOTSTRAP_ERROR["error"]["message"]

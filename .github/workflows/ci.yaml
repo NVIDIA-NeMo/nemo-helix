@@ -47,6 +47,7 @@ jobs:
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
       fabric: ${{ steps.changes.outputs.fabric }}
+      harbor-integration: ${{ steps.changes.outputs.harbor-integration }}
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
@@ -142,7 +143,7 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Show uv version
         run: uv --version
@@ -164,7 +165,7 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
-          python-version: "3.12"
+          python-version: "3.13"
 
       - name: Show uv version
         run: uv --version
@@ -944,7 +945,7 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
-          python-version: "3.12"
+          python-version: "3.13"
           cache-dependency-glob: uv.lock
       - name: Install nodejs
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -1018,7 +1019,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run tools unit tests
@@ -1137,7 +1138,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run scaled-evals plugin tests
@@ -1231,7 +1232,7 @@ jobs:
             packages/nemo_evaluator_sdk/tests/agent_eval/test_fabric_surface.py -v
 
   # Installs only nemo-evaluator-sdk (no workspace/extras/dev) and imports
-  # agent_eval.runtimes.harbor_runtime. Catches undeclared deps (workspace sync hides them)
+  # agent_eval.runtimes.harbor.runtime. Catches undeclared deps (workspace sync hides them)
   # and broken lazy barrels that pull in the metric/execution stack.
   evaluator-sdk-closure-smoke:
     name: Evaluator SDK dependency-closure smoke (Linux, py${{ matrix.python-version }})
@@ -1294,7 +1295,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Log in to Docker Hub
@@ -1345,12 +1346,15 @@ jobs:
     name: Evaluator integration tests
     # Required (see ci-status), unlike the repo-wide `python-integration-test` job, which stays
     # advisory so this does not make every team's integration suite blocking. Path-filtered, so it
-    # skips -- and skips count as pass -- on PRs that do not touch the evaluator.
+    # skips -- and skips count as pass -- on PRs that do not touch the evaluator. Also hosts the
+    # opt-in Harbor taskset integration step so its failures gate merges too.
     needs: [changes, policy-wasm]
     if: >-
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.evaluator-integration == 'true'
+        needs.changes.outputs.evaluator-integration == 'true' ||
+        needs.changes.outputs.harbor-integration == 'true' ||
+        needs.changes.outputs.deps == 'true'
       )
     runs-on: ubuntu-latest
     steps:
@@ -1369,7 +1373,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run evaluator integration tests
@@ -1378,6 +1382,43 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # Run separately from xdist: the shared platform fixture binds one port.
+      # Keep opt-in and plugin isolation scoped to this step, not the general suite.
+      - name: Run Harbor taskset integration
+        id: harbor-integration
+        # Directory/file patterns live in .github/actions/changes/action.yaml.
+        # Dependency changes can also affect Harbor; manual runs always exercise it.
+        if: >
+          !cancelled() && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.harbor-integration == 'true'
+          )
+        timeout-minutes: 10
+        run: |
+          uv sync --frozen --package nemohelix --package nemo-evaluator-plugin --extra harbor
+          # Preserve the Harbor extra when the fixture launches `uv run nemo services run`.
+          export UV_NO_SYNC=1
+          uv run --frozen --no-sync pytest \
+            plugins/nemo-evaluator/tests/integration/test_harbor_taskset.py -v -n 0 \
+            --basetemp="$RUNNER_TEMP/harbor-taskset" \
+            --junitxml="$RUNNER_TEMP/harbor-taskset.xml" -o junit_logging=all
+        env:
+          RUN_AGENT_EVAL_INTEGRATION: "1"
+          NEMO_PLUGIN_SERVICES_ALLOWLIST: evaluator
+          NEMO_PLUGIN_CONTROLLERS_ALLOWLIST: ""
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      - name: Upload Harbor integration diagnostics
+        if: always() && (steps.harbor-integration.outcome == 'success' || steps.harbor-integration.outcome == 'failure')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harbor-taskset-results
+          retention-days: 14
+          if-no-files-found: warn
+          # Exclude the platform database and ClickHouse storage in sibling directories.
+          path: |
+            ${{ runner.temp }}/harbor-taskset.xml
+            ${{ runner.temp }}/harbor-taskset/test_harbor_taskset*/
 
   python-auth-idp-static-test:
     name: Python auth-idp static tests
@@ -1401,7 +1442,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run auth-idp static tests
@@ -1474,7 +1515,7 @@ jobs:
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Setup Kind cluster
@@ -2178,7 +2219,7 @@ jobs:
         with:
           working-directory: nemo-helix
           version: ${{ env.UV_VERSION }}
-          python-version: "3.12"
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Bootstrap Python environment

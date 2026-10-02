@@ -93,7 +93,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 
 mcp:
@@ -588,8 +588,8 @@ conventions apply to `agent.yaml`:
 
 - **Set `models.default.model` to the Inference Gateway entity name.** The
   models controller creates these names by replacing slashes and dots with
-  hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes
-  `nvidia-nemotron-3-nano-30b-a3b`).
+  hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes
+  `nvidia-nemotron-3-5-lightning-30b-a3b`).
 - **Leave `base_url` unset for a Platform-routed model.** When `provider` is
   `nvidia`, `openai`, or `openai-compatible`, the deployment supplies the
   Inference Gateway URL. `api_key_env` names the environment variable expected
@@ -601,7 +601,7 @@ The calculator agent uses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 ```
 

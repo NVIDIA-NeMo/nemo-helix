@@ -8,15 +8,22 @@
 # Builds Python wheels for:
 #   - causal-conv1d (CUDA extension required by mamba-ssm)
 #   - mamba-ssm     (selective state space model)
+#   - magi-attention (context-parallel attention, Automodel `magi` dependency group)
 #   - av + opencv-python-headless + decord2 (FFmpeg 8.1.2 bundled wheels for nspect / VLM)
+#   - rl-cuda-ext-wheel (CPython 3.13 / torch 2.13.0+cu130 extensions for nhx-rl-base)
 #
-# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc.
+# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc; magi-attention is
+# git-only and compiles CUDA kernels against the NGC torch.
 # av / opencv wheels bundle FFmpeg; upstream PyPI wheels lag nspect 8.1.2.
-# Build via the nhx-automodel-gpu-wheels bake group.
+# The cp311/cp312 causal-conv1d and mamba-ssm targets stay for Automodel and Unsloth.
+# Build those via the nhx-automodel-gpu-wheels bake group.
+# Build the RL set via the rl-cuda-ext-wheel target.
 #
 # Build args:
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
 #   MAMBA_22_COMMIT        - git SHA or tag to build
+#   MAGI_ATTENTION_COMMIT  - MagiAttention git SHA (match Automodel's [tool.uv.sources] rev)
+#   NVSHMEM_VERSION        - nvidia-nvshmem-cu13 for magi-attention (match nhx-automodel-base)
 #   CUDA_VERSION           - CUDA devel image version      (default: 12.8.1)
 #   TORCH_CUDA_ARCH_LIST   - semicolon-separated SM targets (default: "8.0;8.6;9.0")
 #   FFMPEG_VERSION         - FFmpeg for av/opencv wheels   (default: 8.1.2)
@@ -27,6 +34,10 @@
 #######
 
 ARG CUDA_VERSION=12.8.1
+# FROM args for the rl-cuda-ext-wheel stages. They must be global (before the
+# first FROM) or the FROM lines see them as empty.
+ARG RL_CUDA_EXT_BASE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
+ARG RL_CUDA_EXT_PYTHON=3.13.15
 
 # =============================================================================
 # Shared base: CUDA + Python 3.11 + torch (required by extension builds)
@@ -281,6 +292,46 @@ COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
 
 # =============================================================================
+# magi-attention wheel — Python 3.12 (for Python 3.12 consumers) - Using CUDA 13.3
+# =============================================================================
+FROM mamba-wheel-base-py312-cu13.3 AS magi-attention-wheel-builder-py312-cu13.3
+
+ARG MAGI_ATTENTION_COMMIT=d7ea8afd44c790b65fab68a04a6a0fdd5adbf182
+ARG NVSHMEM_VERSION=3.6.5
+
+# Automodel's docker/Dockerfile installs the RDMA headers and NVSHMEM before it builds
+# MagiAttention. Without NVSHMEM, magi_attn_comm still compiles its internode kernels and
+# fails. MagiAttention finds NVSHMEM through the nvidia.nvshmem package and records its lib
+# dir as the extension's RPATH, so nhx-automodel-base installs the same NVSHMEM_VERSION with
+# the system pip, at the same path.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --allow-change-held-packages rdma-core libibverbs-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir "nvidia-nvshmem-cu13==${NVSHMEM_VERSION}" && \
+    python -c "import nvidia.nvshmem"
+
+# Build settings mirror Automodel's docker/Dockerfile: Hopper + Blackwell kernels only,
+# FFA kernels JIT-compiled at runtime instead of prebuilt. versioningit stamps the wheel
+# version from git tags (Automodel lists it as an extra build dependency). uv checks out a
+# git dependency's submodules (CUTLASS, the flash-attention fork), so this clone does too.
+RUN mkdir -p /wheels && \
+    pip install --no-cache-dir versioningit && \
+    git clone https://github.com/SandAI-org/MagiAttention.git /src/magi-attention && \
+    cd /src/magi-attention && \
+    git checkout ${MAGI_ATTENTION_COMMIT} && \
+    git submodule update --init --recursive && \
+    MAGI_ATTENTION_BUILD_COMPUTE_CAPABILITY="90,100" \
+    MAGI_ATTENTION_PREBUILD_FFA=0 \
+    uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/magi-attention
+
+# The final magi-attention-wheel image contains:
+#   - cu13.3/magi_attention-*-cp312-*.whl  (for Automodel on CUDA 13.3)
+FROM scratch AS magi-attention-wheel
+COPY --from=magi-attention-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
+
+# =============================================================================
 # FFmpeg / VLM wheels (manylinux_2_28) — av + opencv-python-headless + decord2
 # =============================================================================
 FROM quay.io/pypa/manylinux_2_28_x86_64:latest AS ffmpeg-vendor-base-py312-amd64
@@ -421,3 +472,141 @@ COPY --from=av-wheel-builder-py312 /wheels /wheels
 COPY --from=opencv-headless-wheel-builder-py312 /wheels /wheels
 COPY --from=opencv-headless-wheel-builder-py313 /wheels /wheels
 COPY --from=decord2-wheel-builder-py313 /wheels /wheels
+
+# =============================================================================
+# RL CUDA extension wheels — CPython 3.13.15, CUDA 13.3
+#
+# One platform build emits nine wheels under /wheels. Each package is its own
+# stage off a shared base so BuildKit compiles them in parallel. mamba-ssm
+# waits for the causal-conv1d wheel and installs it before compiling.
+# Do not reuse the cp312 causal-conv1d / mamba-ssm stages above: those are a
+# different Python, torch, and source revision.
+#
+# docker/rl/scripts/sync-rl-cuda-wheels.py copies the git commits and sdist
+# versions below from NeMo-RL's pyproject.toml at NEMO_RL_REF.
+# NeMo-RL commit: 3f05fc8abe69d0ffa786767cdc5335a52c612c65
+# =============================================================================
+FROM python:${RL_CUDA_EXT_PYTHON}-slim-bookworm AS rl-cuda-ext-cpython
+
+FROM ${RL_CUDA_EXT_BASE} AS rl-cuda-ext-base
+ARG UV_VERSION=0.11.33
+ARG CMAKE_VERSION=4.0.3
+ENV DEBIAN_FRONTEND=noninteractive \
+    UV_PYTHON=/opt/cpython/bin/python3.13 \
+    LD_LIBRARY_PATH=/opt/cpython/lib \
+    PATH="/opt/venv/bin:/opt/cpython/bin:/usr/local/cuda/bin:/usr/local/bin:${PATH}" \
+    VIRTUAL_ENV=/opt/venv \
+    CUDA_HOME=/usr/local/cuda \
+    TORCH_CUDA_ARCH_LIST="9.0 10.0" \
+    CPLUS_INCLUDE_PATH=/usr/local/cuda/include/cccl \
+    UV_HTTP_TIMEOUT=120 \
+    UV_HTTP_RETRIES=8 \
+    CAUSAL_CONV1D_REV=4f6ae4e26ae5fe8af9372f8d312ab25cc4595223 \
+    MAMBA_SSM_REV=a14b1dff0454a3bc27d9eb31355dc01e4b2490ec \
+    NV_GROUPED_GEMM_REV=6dfaf60e6112166b8b82e9210b51c7f557956f0a \
+    FAST_HADAMARD_REV=f134af63deb2df17e1171a9ec1ea4a7d8604d5ca \
+    FLASH_MLA_REV=b7643bd54521f563b839b98289b5cd048c062ba2 \
+    DEEP_EP_REV=17cfb817bccec3a9c247013360cc550c2bac441e \
+    DEEP_GEMM_REV=67fc64863d43521080bf2005e6528d0fceee9510
+
+COPY --from=rl-cuda-ext-cpython /usr/local /opt/cpython
+COPY docker/base/build-rl-cuda-ext-wheel.sh /usr/local/bin/build-rl-cuda-ext-wheel.sh
+
+RUN chmod -R a+rX /opt/cpython && \
+    chmod +x /usr/local/bin/build-rl-cuda-ext-wheel.sh && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    git \
+    libibverbs-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    ARCH="$(uname -m)" && \
+    F="cmake-${CMAKE_VERSION}-linux-${ARCH}" && \
+    curl --retry 3 --retry-delay 2 -fsSL -o "${F}.tar.gz" \
+    "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${F}.tar.gz" && \
+    tar -xzf "${F}.tar.gz" && \
+    cp -r "${F}/bin/"* /usr/local/bin/ && \
+    cp -r "${F}/share/"* /usr/local/share/ && \
+    rm -rf "${F}" "${F}.tar.gz" && \
+    curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" | sh && \
+    cp /root/.local/bin/uv /usr/local/bin/uv && \
+    python3.13 -c 'import ssl; print(ssl.OPENSSL_VERSION)' && \
+    uv venv --python /opt/cpython/bin/python3.13 /opt/venv && \
+    uv pip install --python /opt/venv/bin/python \
+    --index-url https://download.pytorch.org/whl/cu130 \
+    --extra-index-url https://pypi.org/simple \
+    --index-strategy unsafe-best-match \
+    "torch==2.13.0+cu130" \
+    ninja packaging "setuptools>=80" wheel psutil einops numpy pybind11 && \
+    mkdir -p /wheels
+
+# causal-conv1d. Installed into the mamba-ssm stage before that build.
+FROM rl-cuda-ext-base AS rl-cuda-ext-causal-conv1d
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/Dao-AILab/causal-conv1d "$CAUSAL_CONV1D_REV"
+
+# mamba-ssm. This revision builds with its own triton dependency;
+# do not strip triton the way the 2.2.5 stage above does.
+FROM rl-cuda-ext-base AS rl-cuda-ext-mamba-ssm
+COPY --from=rl-cuda-ext-causal-conv1d /wheels /tmp/causal-conv1d-wheels
+RUN uv pip install --python /opt/venv/bin/python --no-deps /tmp/causal-conv1d-wheels/*.whl && \
+    build-rl-cuda-ext-wheel.sh git https://github.com/state-spaces/mamba.git "$MAMBA_SSM_REV"
+
+# nv-grouped-gemm. Submodules carry the CUTLASS headers the build includes.
+FROM rl-cuda-ext-base AS rl-cuda-ext-nv-grouped-gemm
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/fanshiqing/grouped_gemm "$NV_GROUPED_GEMM_REV" --submodules
+
+# fast-hadamard-transform.
+FROM rl-cuda-ext-base AS rl-cuda-ext-fast-hadamard
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/Dao-AILab/fast-hadamard-transform.git "$FAST_HADAMARD_REV"
+
+# flash-mla. setup.py stamps the version from `git rev-parse`,
+# so the checkout is the full commit, not a shallow clone that hides it.
+# CUTLASS lives in csrc/cutlass.
+FROM rl-cuda-ext-base AS rl-cuda-ext-flash-mla
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/FlashMLA "$FLASH_MLA_REV" --submodules
+
+# deep-ep. libibverbs-dev is in the base. nvshmem is a build input.
+# NCCL is a submodule under third-party/nccl.
+FROM rl-cuda-ext-base AS rl-cuda-ext-deep-ep
+RUN uv pip install --python /opt/venv/bin/python \
+    --extra-index-url https://pypi.org/simple \
+    "nvidia-nvshmem-cu13==3.7.2" && \
+    build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/DeepEP.git "$DEEP_EP_REV" --submodules
+
+# deep-gemm. CUDA 13 moved the CCCL headers; CPLUS_INCLUDE_PATH is set on the base.
+# CUTLASS and fmt are submodules under third-party/.
+FROM rl-cuda-ext-base AS rl-cuda-ext-deep-gemm
+RUN build-rl-cuda-ext-wheel.sh git https://github.com/deepseek-ai/DeepGEMM.git "$DEEP_GEMM_REV" --submodules
+
+# flash-attn from the PyPI sdist. 4 jobs matches the RL pyproject cap.
+FROM rl-cuda-ext-base AS rl-cuda-ext-flash-attn
+ENV MAX_JOBS=4
+RUN build-rl-cuda-ext-wheel.sh sdist "flash-attn==2.8.1"
+
+# transformer-engine-torch from the PyPI sdist. The meta packages already
+# publish wheels. Two ptxas jobs keeps the arm64 builder from running eight at once.
+# CUDNN_HOME points at the pip cuDNN wheel, which TE prefers over the image's copy.
+FROM rl-cuda-ext-base AS rl-cuda-ext-transformer-engine
+ENV NVTE_FRAMEWORK=pytorch \
+    NVTE_CUDA_ARCHS="90;100" \
+    NVTE_BUILD_MAX_JOBS=2 \
+    CUDNN_HOME=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn \
+    CUDNN_PATH=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn
+RUN uv pip install --python /opt/venv/bin/python \
+    --extra-index-url https://pypi.org/simple \
+    "nvidia-cudnn-cu13==9.20.0.48" && \
+    build-rl-cuda-ext-wheel.sh sdist "transformer-engine-torch==2.18.0"
+
+# One /wheels directory, one architecture per platform build.
+FROM scratch AS rl-cuda-ext-wheel
+COPY --from=rl-cuda-ext-causal-conv1d /wheels /wheels
+COPY --from=rl-cuda-ext-mamba-ssm /wheels /wheels
+COPY --from=rl-cuda-ext-nv-grouped-gemm /wheels /wheels
+COPY --from=rl-cuda-ext-fast-hadamard /wheels /wheels
+COPY --from=rl-cuda-ext-flash-mla /wheels /wheels
+COPY --from=rl-cuda-ext-deep-ep /wheels /wheels
+COPY --from=rl-cuda-ext-deep-gemm /wheels /wheels
+COPY --from=rl-cuda-ext-flash-attn /wheels /wheels
+COPY --from=rl-cuda-ext-transformer-engine /wheels /wheels

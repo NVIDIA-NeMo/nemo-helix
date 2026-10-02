@@ -34,7 +34,9 @@ def build_task_environment(secret_refs: Iterable[tuple[str, str]]) -> list[Envir
             raise ValueError(f"{env_name!r} is reserved and cannot be sourced from secret refs")
         existing = resolved.get(env_name)
         if existing is not None and existing != secret_name:
-            raise ValueError(f"conflicting secret references for environment variable {env_name!r}")
+            raise ValueError(
+                f"conflicting secret references for environment variable {env_name!r}: {existing!r} and {secret_name!r}"
+            )
         resolved[env_name] = secret_name
 
     environment.extend(

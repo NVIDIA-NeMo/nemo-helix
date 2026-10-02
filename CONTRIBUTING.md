@@ -119,7 +119,7 @@ This provides hot module replacement (HMR) at the local URL printed by Vite.
 When you're ready to test with the FastAPI service, rebuild with
 `pnpm build:fastapi`.
 
-##### Running the Platform with Studio
+##### Running NeMo Helix with Studio
 
 Ensure you have bootstrapped Python dependencies and Studio UI assets:
 

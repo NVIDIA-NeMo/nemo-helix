@@ -71,7 +71,7 @@ context for the current shell and add local process and health checks before
 listing deployments:
 
 ```bash
-export NHX_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080   # nhx-base-url-allow: intentional local override when the user explicitly selects the local Platform
 lsof -iTCP:8080 -sTCP:LISTEN >/dev/null 2>&1 || { echo "PLATFORM_DOWN"; exit 1; }
 curl -sS --connect-timeout 2 --max-time 5 "$NHX_BASE_URL/health/ready" -o /dev/null -w "%{http_code}\n" 2>/dev/null | grep -q "^200$" || { echo "PLATFORM_WEDGED"; exit 1; }
 .venv/bin/nemo agents deployments list 2>/dev/null

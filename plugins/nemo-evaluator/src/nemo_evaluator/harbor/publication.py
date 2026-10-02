@@ -9,14 +9,14 @@ from pathlib import Path
 from nemo_evaluator.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition, HarborTaskHash
 from nemo_evaluator.harbor.archive import MAX_ARCHIVE_BYTES, extract_task, pack_task, run_blocking_archive_operation
 from nemo_evaluator.harbor.archive_io import download_verified, download_verified_async
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import (
     CHUNK_BYTES,
     capture_task,
     capture_validated_task,
     normalize_harbor_instruction,
     private_directory,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_tasks import HarborAgentEvalTask
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
 from nemo_helix_plugin.client.errors import NemoTransportError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest

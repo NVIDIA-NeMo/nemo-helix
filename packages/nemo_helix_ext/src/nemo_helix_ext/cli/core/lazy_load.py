@@ -218,6 +218,10 @@ def lazy_plugin_loader(plugin_name: str, import_path: str) -> Callable[[], click
             if plugin_functions:
                 _add_plugin_function_commands(plugin_app, plugin_functions, cli=cli_obj)
 
+        # Shell completion belongs to the root ``nemo`` app. A plain
+        # ``typer.Typer()`` defaults to advertising it, and Typer only exposes
+        # the setting as a constructor argument, so clear it before converting.
+        plugin_app._add_completion = False
         try:
             return typer_get_command(plugin_app)
         except RuntimeError as exc:

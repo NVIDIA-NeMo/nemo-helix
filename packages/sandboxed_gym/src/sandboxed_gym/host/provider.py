@@ -26,6 +26,14 @@ class SandboxedGymHostProvider(Protocol[TProvider]):
     async def destroy_host(self, handle: GymHostHandle[TProvider]) -> None:
         """Terminate the host. Best-effort; must not raise after a successful destroy."""
 
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Destroy every sandbox this provider still has for ``job_id``.
+
+        Cancel and process exit do not hold the handles ``destroy_host`` needs. The
+        implementation finds them by the job id stamped at create time.
+        """
+        ...
+
 
 def get_host_provider(name: str, options: dict | None = None) -> SandboxedGymHostProvider:
     """Construct a registered job-host provider by name."""

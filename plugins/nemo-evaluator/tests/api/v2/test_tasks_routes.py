@@ -43,7 +43,7 @@ class _FakeMetricService:
 @pytest.fixture(autouse=True)
 def verified_archive_projection(monkeypatch):
     # These tests isolate entity/API semantics; real archive verification has separate tests.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import NativeTask
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import NativeTask
 
     async def verify(spec, files_client):
         return NativeTask("fixture", spec.instruction, spec.config)

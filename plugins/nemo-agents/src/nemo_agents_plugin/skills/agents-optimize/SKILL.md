@@ -124,7 +124,7 @@ Each suggestion sets `model` to the new model name and includes:
   `--model` override flag on `evaluate`; the model swap goes through the
   sibling agent, or by editing the eval-config YAML.
 - `nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'` then
-  `nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'`
+  `nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'`
   to verify the new model is robust against jailbreaks before promotion.
 
 Pure set subtraction — no downloads required.
@@ -225,8 +225,8 @@ routing split" so existing UI tiles render without a frontend change. The
 ### Optional `apply` block (one-click action)
 
 When set, the `apply` block defines a single-action mutation that a downstream
-consumer can execute against the Platform API on the user's behalf. The
-contract is **strictly same-origin** to the Platform API host — consumers
+consumer can execute against the NeMo Helix API on the user's behalf. The
+contract is **strictly same-origin** to the NeMo Helix API host — consumers
 re-validate this at request time and reject anything else.
 
 Shape — single step (most common):
@@ -254,7 +254,7 @@ Rules — these MUST be followed when emitting an `apply` block:
 - `path` MUST start with `/`. It MUST NOT contain `://`, MUST NOT start with
   `//` (protocol-relative), MUST NOT contain query/fragment, and MUST NOT
   contain control characters.
-- The path is resolved against the configured Platform API URL; the frontend
+- The path is resolved against the configured NeMo Helix API URL; the frontend
   rejects any spec that resolves to a different origin.
 - The path's `workspaces/<ws>/` segment MUST equal the workspace the
   suggestion was emitted for. Cross-workspace mutations are rejected.
@@ -334,7 +334,7 @@ nemo files filesets list
 
 # Auditor (jailbreak robustness check on a candidate model)
 nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
-nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'
+nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'
 ```
 
 ## What requires execution vs. what can be reasoned

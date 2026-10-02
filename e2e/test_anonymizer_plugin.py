@@ -228,7 +228,9 @@ def _model_configs(provider_name: str) -> list[dd.ModelConfig]:
     return [
         dd.ModelConfig(alias="gliner-pii-detector", provider=provider_name, model="nvidia/gliner-pii"),
         dd.ModelConfig(alias="gpt-oss-120b", provider=provider_name, model="openai/gpt-oss-120b"),
-        dd.ModelConfig(alias="nemotron-30b-thinking", provider=provider_name, model="nvidia/nemotron-3-nano-30b-a3b"),
+        dd.ModelConfig(
+            alias="nemotron-30b-thinking", provider=provider_name, model="nvidia/nemotron-3.5-lightning-30b-a3b"
+        ),
     ]
 
 
@@ -395,7 +397,9 @@ def mock_model_provider(client: NemoClient, anonymizer_workspace: str) -> str:
         mock_response_body_by_model={
             "nvidia/gliner-pii": [MockProviderResponse(response_body=_detector_completion())],
             "openai/gpt-oss-120b": [MockProviderResponse(response_body=_json_completion(_llm_payload()))],
-            "nvidia/nemotron-3-nano-30b-a3b": [MockProviderResponse(response_body=_json_completion(_llm_payload()))],
+            "nvidia/nemotron-3.5-lightning-30b-a3b": [
+                MockProviderResponse(response_body=_json_completion(_llm_payload()))
+            ],
         },
     )
     # The module-scoped workspace deletion cascades provider/model cleanup.

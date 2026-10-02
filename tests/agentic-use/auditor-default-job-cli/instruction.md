@@ -30,8 +30,8 @@ nhx auditor targets create audit-target -d '{"model": "aws/anthropic/bedrock-cla
 # Create the default audit config.
 nhx auditor configs create default -d '{"system": {"lite": true}, "run": {"generations": 5}, "plugins": {"probe_spec": "dan.AutoDANCached,goodside"}, "reporting": {}}'
 
-# Run the audit locally.
-nhx auditor audit run --spec '{"config": "default/default", "target": "default/audit-target"}'
+# Submit the audit job.
+nhx auditor audit --spec '{"config": "default/default", "target": "default/audit-target"}'
 ```
 
 ## Success Criteria
@@ -39,4 +39,4 @@ nhx auditor audit run --spec '{"config": "default/default", "target": "default/a
 The task is complete when:
 - An audit target named `audit-target` exists referencing the model through the provider
 - An audit config named `default` exists
-- The audit run command has been invoked with the default config and audit target
+- The audit command has been invoked with the default config and audit target

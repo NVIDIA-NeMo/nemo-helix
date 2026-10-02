@@ -25,6 +25,8 @@ from nemo_helix_plugin._spec_flags import kw
 from nemo_helix_plugin.cli_options import (
     WORKSPACE_HELP,
     WORKSPACE_RESOLUTION,
+    EntityOutputFormatOption,
+    ListOutputFormatOption,
     WorkspaceOption,
     workspace_help,
     workspace_option,
@@ -133,3 +135,49 @@ class TestWorkspaceHelpText:
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0, result.output
         assert "Custom lead." in result.output
+
+
+def _app_with_list_format() -> typer.Typer:
+    app = typer.Typer()
+
+    @app.command()
+    def show(output_format: ListOutputFormatOption = None) -> None:
+        typer.echo(repr(output_format))
+
+    return app
+
+
+class TestOutputFormatOptions:
+    """Plugin and core commands must accept the same format flags and values."""
+
+    def test_omitted_flag_is_none_so_the_global_preference_applies(self) -> None:
+        result = runner.invoke(_app_with_list_format(), [])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "None"
+
+    @pytest.mark.parametrize("flag", ["--output-format", "--output", "-f"])
+    def test_every_standard_flag_name(self, flag: str) -> None:
+        result = runner.invoke(_app_with_list_format(), [flag, "json"])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == "'json'"
+
+    @pytest.mark.parametrize("value", ["table", "json", "yaml", "markdown", "csv", "raw", "code"])
+    def test_list_formats(self, value: str) -> None:
+        result = runner.invoke(_app_with_list_format(), ["-f", value])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == repr(value)
+
+    @pytest.mark.parametrize("flag", ["--format", "-o"])
+    def test_nonstandard_flag_names_are_rejected(self, flag: str) -> None:
+        result = runner.invoke(_app_with_list_format(), [flag, "json"])
+        assert result.exit_code == 2
+
+    def test_entity_format_rejects_table(self) -> None:
+        app = typer.Typer()
+
+        @app.command()
+        def show(output_format: EntityOutputFormatOption = None) -> None:  # pragma: no cover - rejected before call
+            typer.echo(repr(output_format))
+
+        result = runner.invoke(app, ["-f", "table"])
+        assert result.exit_code == 2

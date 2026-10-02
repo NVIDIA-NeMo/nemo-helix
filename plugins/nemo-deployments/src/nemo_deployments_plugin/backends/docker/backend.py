@@ -15,7 +15,6 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from nemo_deployments_plugin.auth_proxy import is_auth_proxy_container
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
@@ -485,15 +484,14 @@ class DockerDeploymentBackend(DeploymentBackend):
             sidecar_identity: tuple[str, str] | None = None
             sidecar_labels = {**base_labels, CONTAINER_ROLE_LABEL: sidecar.name}
             try:
-                if not is_auth_proxy_container(sidecar):
-                    sidecar_identity = await self._prepare_workload_identity_for_container(
-                        workspace=workspace,
-                        deployment_name=name,
-                        config=config,
-                        role=sidecar.name,
-                        base_labels=sidecar_labels,
-                        auth_context=auth_context,
-                    )
+                sidecar_identity = await self._prepare_workload_identity_for_container(
+                    workspace=workspace,
+                    deployment_name=name,
+                    config=config,
+                    role=sidecar.name,
+                    base_labels=sidecar_labels,
+                    auth_context=auth_context,
+                )
                 if sidecar_identity is not None:
                     sidecar_labels = self._workload_identity_volume_labels(
                         base_labels=base_labels,

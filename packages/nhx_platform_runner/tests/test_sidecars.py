@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.config import AuthConfig
 from nhx.common.config.base import OIDCConfig
 from nhx.common.controller import Controller, ControllerManager, Loop, TimedLoopWaiter
@@ -343,10 +344,16 @@ def test_real_adapters_sidecar_entrypoint_starts_and_stops_with_required_env(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """``run`` registers the loop, starts it, and stops it once the stop signal is set.
+
+    Driven synchronously: the fake loop's ``start`` sets the stop signal, so ``run`` returns on its own
+    and the assertions read final state. The earlier version started ``run`` on a thread and gave it one
+    second of wall clock to reach ``start``, which a loaded CI worker missed.
+    """
     from nhx.core.models.sidecars.adapters import main as adapters_main
 
-    started = threading.Event()
-    stopped = threading.Event()
+    stop_signal = threading.Event()
+    events: list[str] = []
     manager = MagicMock()
 
     class FakeLoop:
@@ -354,13 +361,14 @@ def test_real_adapters_sidecar_entrypoint_starts_and_stops_with_required_env(
             pass
 
         def start(self) -> None:
-            started.set()
+            events.append("start")
+            stop_signal.set()  # the controller's "shut down" arrives as soon as the loop is running
 
         def stop(self) -> None:
-            stopped.set()
+            events.append("stop")
 
         def join(self) -> None:
-            return None
+            events.append("join")
 
     lora_dir = tmp_path / "loras"
     monkeypatch.setenv("NIM_PEFT_SOURCE", str(lora_dir))
@@ -370,27 +378,19 @@ def test_real_adapters_sidecar_entrypoint_starts_and_stops_with_required_env(
     monkeypatch.delenv("VLLM_ENDPOINT", raising=False)
 
     monkeypatch.setattr(adapters_main, "get_platform_config", lambda: MagicMock(base_url="http://platform.local"))
-    monkeypatch.setattr(adapters_main, "get_platform_sdk", lambda **_kwargs: MagicMock())
+    monkeypatch.setattr(
+        adapters_main, "get_platform_sdk", lambda **_kwargs: NemoClient(base_url="http://platform.local")
+    )
     monkeypatch.setattr(adapters_main.asyncio, "new_event_loop", lambda: MagicMock())
     monkeypatch.setattr(adapters_main, "Loop", FakeLoop)
     monkeypatch.setattr(adapters_main, "TimedLoopWaiter", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(adapters_main.ControllerManager, "get_instance", classmethod(lambda _cls: manager))
 
-    stop_signal = threading.Event()
-    thread = threading.Thread(target=adapters_main.run, args=(stop_signal,), daemon=True)
     try:
-        thread.start()
-
-        assert started.wait(timeout=1.0)
-        manager.register.assert_called_once()
-        assert manager.register.call_args.args[0] == "adapters_controller"
-
-        stop_signal.set()
-        thread.join(timeout=1.0)
-
-        assert not thread.is_alive()
-        assert stopped.is_set()
+        adapters_main.run(stop_signal)
     finally:
-        stop_signal.set()
-        thread.join(timeout=1.0)
         adapters_main.adapters_controller_monitored = None
+
+    manager.register.assert_called_once()
+    assert manager.register.call_args.args[0] == "adapters_controller"
+    assert events == ["start", "stop", "join"]

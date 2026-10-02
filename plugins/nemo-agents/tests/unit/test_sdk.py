@@ -36,7 +36,7 @@ def _platform(
     default_headers: Mapping[str, str] | None = None,
 ) -> NeMoHelix:
     return NeMoHelix(
-        base_url="http://test",
+        base_url="https://test",
         workspace=workspace,
         default_headers=default_headers,
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
@@ -46,7 +46,7 @@ def _platform(
 
 def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoHelix:
     return AsyncNeMoHelix(
-        base_url="http://test",
+        base_url="https://test",
         workspace=workspace,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         max_retries=0,

@@ -76,7 +76,15 @@ variable "MAMBA_SSM_WHEEL_CONTEXT" {
   default = ""
 }
 
+variable "MAGI_ATTENTION_WHEEL_CONTEXT" {
+  default = ""
+}
+
 variable "FFMPEG_VLM_WHEEL_CONTEXT" {
+  default = ""
+}
+
+variable "RL_CUDA_EXT_WHEEL_CONTEXT" {
   default = ""
 }
 
@@ -126,7 +134,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "a5b789d7cc1551600bff82285afd5da13a55c35e" # soluwalana/RL nhx/customizer
+  default = "62d76953283a44021031025f7f545a808f492a1b" # soluwalana/RL default branch
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -134,7 +142,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "54ae40bf653127f1300399912e6c1083f0b96771"
+  default = "67cc126a137e475f22c4925be21cfc76f99847f2"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
@@ -182,6 +190,19 @@ variable "CAUSAL_CONV1D_VERSION" {
   default = "v1.5.3"
 }
 
+# Keep in sync with the magi_attention rev in Automodel's [tool.uv.sources]
+# (AUTOMODEL_COMMIT in docker/automodel/Dockerfile.nhx-automodel-base).
+variable "MAGI_ATTENTION_COMMIT" {
+  default = "d7ea8afd44c790b65fab68a04a6a0fdd5adbf182"
+}
+
+# nvidia-nvshmem-cu13 that magi-attention-wheel builds against and nhx-automodel-base ships; the
+# wheel's RPATH points at it, so both targets take this one value. Keep in sync with the NVSHMEM
+# pin in Automodel's docker/Dockerfile.
+variable "NVSHMEM_VERSION" {
+  default = "3.6.5"
+}
+
 function "get_causal_conv1d_wheel_image" {
   params = []
   result = "${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}"
@@ -192,9 +213,19 @@ function "get_mamba_ssm_wheel_image" {
   result = "${WHEELS_REGISTRY}/mamba-ssm-wheel:${WHEELS_TAG}"
 }
 
+function "get_magi_attention_wheel_image" {
+  params = []
+  result = "${WHEELS_REGISTRY}/magi-attention-wheel:${WHEELS_TAG}"
+}
+
 function "get_ffmpeg_vlm_wheel_image" {
   params = []
   result = "${WHEELS_REGISTRY}/ffmpeg-vlm-wheel:${WHEELS_TAG}"
+}
+
+function "get_rl_cuda_ext_wheel_image" {
+  params = []
+  result = "${WHEELS_REGISTRY}/rl-cuda-ext-wheel:${WHEELS_TAG}"
 }
 
 function "get_arch_tag" {
@@ -229,9 +260,19 @@ function "mamba_ssm_wheel_context" {
   result = notequal(MAMBA_SSM_WHEEL_CONTEXT, "") ? MAMBA_SSM_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:mamba-ssm-wheel" : "docker-image://${get_mamba_ssm_wheel_image()}"
 }
 
+function "magi_attention_wheel_context" {
+  params = []
+  result = notequal(MAGI_ATTENTION_WHEEL_CONTEXT, "") ? MAGI_ATTENTION_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:magi-attention-wheel" : "docker-image://${get_magi_attention_wheel_image()}"
+}
+
 function "ffmpeg_vlm_wheel_context" {
   params = []
   result = notequal(FFMPEG_VLM_WHEEL_CONTEXT, "") ? FFMPEG_VLM_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:ffmpeg-vlm-wheel" : "docker-image://${get_ffmpeg_vlm_wheel_image()}"
+}
+
+function "rl_cuda_ext_wheel_context" {
+  params = []
+  result = notequal(RL_CUDA_EXT_WHEEL_CONTEXT, "") ? RL_CUDA_EXT_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:rl-cuda-ext-wheel" : "docker-image://${get_rl_cuda_ext_wheel_image()}"
 }
 
 function "wheel_tags" {
@@ -363,6 +404,8 @@ group "nhx-automodel-gpu-wheels" {
   targets = [
     "causal-conv1d-wheel",
     "mamba-ssm-wheel",
+    "rl-cuda-ext-wheel",
+    "magi-attention-wheel",
   ]
 }
 
@@ -461,6 +504,9 @@ target "nhx-rl-base-builder" {
   target     = "nhx-rl-base"
   context    = "."
   dockerfile = "docker/rl/Dockerfile.nhx-rl-base"
+  contexts = {
+    rl-cuda-ext-wheel = rl_cuda_ext_wheel_context()
+  }
   args = {
     NEMO_RL_REPO        = NEMO_RL_REPO
     NEMO_RL_REF         = NEMO_RL_REF
@@ -822,8 +868,8 @@ target "nhx-gym-host-smoke-test" {
   platforms  = get_platforms()
 }
 
-# Python wheel builders (causal-conv1d, mamba-ssm, av, opencv-python-headless).
-# CUDA extensions only ship source on PyPI; av/opencv bundle FFmpeg. Pre-built for
+# Python wheel builders (causal-conv1d, mamba-ssm, magi-attention, av, opencv-python-headless).
+# CUDA extensions only ship source on PyPI (or git); av/opencv bundle FFmpeg. Pre-built for
 # amd64 and arm64. Wheels live at /wheels/*.whl inside each image.
 
 target "causal-conv1d-wheel" {
@@ -857,6 +903,21 @@ target "mamba-ssm-wheel" {
   platforms = get_platforms()
 }
 
+target "magi-attention-wheel" {
+  target     = "magi-attention-wheel"
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.python-wheels"
+  cache-to   = maybe_registry_cache_to("magi-attention-wheel")
+  cache-from = maybe_registry_cache_from("magi-attention-wheel")
+  tags       = wheel_tags("magi-attention-wheel")
+  output     = image_output()
+  args = {
+    MAGI_ATTENTION_COMMIT = MAGI_ATTENTION_COMMIT
+    NVSHMEM_VERSION       = NVSHMEM_VERSION
+  }
+  platforms = get_platforms()
+}
+
 target "ffmpeg-vlm-wheel" {
   target     = "ffmpeg-vlm-wheel"
   context    = "."
@@ -864,6 +925,20 @@ target "ffmpeg-vlm-wheel" {
   cache-to   = maybe_registry_cache_to("ffmpeg-vlm-wheel")
   cache-from = maybe_registry_cache_from("ffmpeg-vlm-wheel")
   tags       = wheel_tags("ffmpeg-vlm-wheel")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+# CPython 3.13 / torch 2.13.0+cu130 wheels for the nine CUDA extensions nhx-rl-base
+# would otherwise compile. Automodel and Unsloth keep causal-conv1d-wheel and
+# mamba-ssm-wheel; those are cp312 and a different source revision.
+target "rl-cuda-ext-wheel" {
+  target     = "rl-cuda-ext-wheel"
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.python-wheels"
+  cache-to   = maybe_registry_cache_to("rl-cuda-ext-wheel")
+  cache-from = maybe_registry_cache_from("rl-cuda-ext-wheel")
+  tags       = wheel_tags("rl-cuda-ext-wheel")
   output     = image_output()
   platforms  = get_platforms()
 }
@@ -1048,11 +1123,13 @@ target "nhx-automodel-base-builder" {
   tags            = base_tags("nhx-automodel-base")
   output          = image_output()
   contexts = {
-    causal-conv1d-wheel-image = causal_conv1d_wheel_context()
-    mamba-ssm-wheel-image     = mamba_ssm_wheel_context()
+    causal-conv1d-wheel-image  = causal_conv1d_wheel_context()
+    mamba-ssm-wheel-image      = mamba_ssm_wheel_context()
+    magi-attention-wheel-image = magi_attention_wheel_context()
   }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
+    NVSHMEM_VERSION     = NVSHMEM_VERSION
   }
   platforms = get_platforms()
 }

@@ -83,3 +83,21 @@ class UpdateExampleItemRequest(BaseModel):
     title: str | None = Field(default=None, description="Updated title.")
     body: str | None = Field(default=None, description="Updated body text.")
     tags: list[str] | None = Field(default=None, description="Replacement tag list.")
+
+
+class CreateExampleMiddlewareConfigRequest(BaseModel):
+    """Request body for creating an :class:`~nemo_example_plugin.middleware_config.ExampleMiddlewareConfig`."""
+
+    name: str
+    blocked_keywords: list[str] = []
+    block_message: str = "Your request contains content that is not permitted."
+
+
+class UpdateExampleMiddlewareConfigRequest(BaseModel):
+    """Request body for partially updating an existing config (PATCH semantics).
+
+    Omitted fields retain their current values.
+    """
+
+    blocked_keywords: list[str] | None = None
+    block_message: str | None = None

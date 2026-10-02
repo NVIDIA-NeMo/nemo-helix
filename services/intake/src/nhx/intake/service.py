@@ -131,18 +131,15 @@ class IntakeService(Service[IntakeConfig]):
                 )
 
         self.clickhouse_client = ClickHouseSpanClient(settings)
-        # Start the background denormalizer. It needs a service-principal entity client (no request
-        # context) to write onto Evaluation entities; skip it if the entity client can't be built.
-        entity_client = self.dependency_provider.get_entity_client(as_service=self.name)
-        if entity_client is not None:
-            self.denormalizer = EvaluationDenormalizer(
-                rollup_repository=ClickHouseEvaluationRollupRepository(ClickHouseExecutor(self.clickhouse_client)),
-                entity_client=entity_client,
-                interval_seconds=cfg.denormalization_interval_seconds,
-            )
-            self.denormalizer.start()
-        else:
-            logger.warning("Entity client unavailable; evaluation denormalizer not started")
+        # Start the background denormalizer with a service-principal entity client; startup should fail
+        # if the platform cannot build the client for token exchange or trusted-header auth.
+        entity_client = self.dependency_provider.get_service_entity_client(self.name)
+        self.denormalizer = EvaluationDenormalizer(
+            rollup_repository=ClickHouseEvaluationRollupRepository(ClickHouseExecutor(self.clickhouse_client)),
+            entity_client=entity_client,
+            interval_seconds=cfg.denormalization_interval_seconds,
+        )
+        self.denormalizer.start()
         self._ready = True
 
     async def on_shutdown(self) -> None:

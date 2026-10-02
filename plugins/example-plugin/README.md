@@ -8,7 +8,7 @@ The `nemo-example-plugin` is a reference implementation that demonstrates NeMo H
 ## What this demonstrates
 
 - **NemoService** — full entity-backed CRUD for `ExampleItem` entities, with `NemoFilter` (deepObject query syntax), `NemoListResponse` pagination, entity objects returned directly as responses, and complete error handling (404/409)
-- **NemoCLI** — minimal CLI implementation with one `hello` command
+- **NemoCLI** — the reference pattern for plugin CLI commands: a `hello` command plus `middleware-configs` CRUD on a typed client from the `nemo` CLI state, with the shared `--workspace` / `--output-format` options, table output, and `-f code`
 - **Plugin SDK mounting** — `client.example.hello(...)` via a `nemo.sdk` entry point
 - **NemoJob** — `SayHelloJob` registered under `"example.say-hello"`, showing the entry-point key convention
 - **NemoController** — `ExampleController` showing config loading in `on_startup()` and the reconcile loop pattern
@@ -57,13 +57,14 @@ Tests run entirely without a platform — the entity client is replaced with an 
 | File | What it shows |
 |---|---|
 | `service.py` | `NemoService` with 5-operation CRUD; `NemoFilter` with deepObject syntax; `NemoListResponse` pagination; `PaginationData` conversion from `PaginationInfo`; 404/409 error handlers on every route |
-| `cli.py` | `NemoCLI` minimal implementation; `get_cli()` returning a single-command Typer app |
+| `cli.py` | `NemoCLI` reference pattern: `create_typer_app` groups, `cli_state(ctx).typed_client(ExampleClient)`, shared output options, `format_output`, `-f code`, `@handle_errors` |
+| `client.py` | Typed `ExampleClient` / `AsyncExampleClient` over the endpoints in `types/endpoints.py`; used by the CLI and mounted by `sdk.py` |
 | `entities.py` | `NemoEntity` subclass with `entity_type="example_item"`; plugin-scoped naming |
 | `schema.py` | `NemoListResponse[ExampleItem]` type alias; `NemoFilter` subclass with `extra="forbid"`; request body models |
 | `config.py` | `NemoConfig` with two typed fields; `plugin_name` and `plugin_description` ClassVars |
 | `controller.py` | `NemoController` minimal implementation; `on_startup()` loading config; `interval_seconds` as `@property` |
 | `core.py` | Pure business logic with no platform dependency; service and CLI are thin wrappers around this |
-| `sdk.py` | Exports a `NemoPluginSDKResources` instance for sync/async resources mounted as `client.example` |
+| `sdk.py` | Exports a `NemoPluginSDKResources` instance mounting the `client.py` clients as `client.example` |
 | `seed_job.py` | `NemoSeedJob` implementation used by platform seed discovery |
 | `jobs/say_hello.py` | `NemoJob` minimal implementation; `name = "say-hello"` (suffix only, not full key) |
 | `middleware_config.py` | `NemoEntity` subclass for middleware config; `entity_type="example_middleware_config"` scoped to this plugin |

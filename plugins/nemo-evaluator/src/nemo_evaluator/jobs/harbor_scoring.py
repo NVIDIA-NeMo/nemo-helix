@@ -5,7 +5,7 @@
 
 from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evaluator.jobs.metric_resolution import require_resolved_model_refs, to_runtime_metrics
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import normalize_harbor_instruction
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import normalize_harbor_instruction
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
 

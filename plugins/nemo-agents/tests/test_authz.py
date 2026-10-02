@@ -156,10 +156,10 @@ def test_job_factory_binding() -> None:
     delete = contrib.endpoints[f"{collection}/{{name}}"]["delete"]
     assert delete.permissions == ["agents.suite.delete"]
 
-    # Every job-factory permission for all five collections is declared.
+    # Every job-factory permission for all six job collections is declared.
     expected_job_perms = {
         f"agents.{sub}.{verb}"
-        for sub in ("evaluate", "suite", "optimize-skills", "analyze", "optimize")
+        for sub in ("evaluate", "execute", "suite", "optimize-skills", "analyze", "package")
         for verb in ("create", "list", "read", "delete", "cancel")
     }
     assert expected_job_perms <= set(contrib.permissions)

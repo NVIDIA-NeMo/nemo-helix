@@ -9,31 +9,32 @@ import json
 from typing import Annotated, Any, Literal
 
 import typer
-from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
-from nemo_helix_ext.cli.core.code_generator import handle_code_generation
-from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_ext.cli.core.errors import handle_errors
-from nemo_helix_ext.cli.core.formatters import (
-    Column,
-    check_output_columns_with_format,
-    format_output,
-    validate_stream_output_format,
-)
-from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_helix_ext.cli.core.pagination import PaginationType, collect_offset_pages, warn_if_more_pages
-from nemo_helix_ext.cli.core.stdin_utils import (
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_input import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_helix_ext.cli.core.types import (
+from nemo_helix_plugin.cli_kwargs import build_kwargs, merge_filter_dict
+from nemo_helix_plugin.cli_options import (
     EntityOutputFormatOption,
     ListOutputFormatOption,
     NoTruncateOption,
     OutputColumnsOption,
     StreamOutputOption,
 )
+from nemo_helix_plugin.cli_output import (
+    Column,
+    check_output_columns_with_format,
+    format_output,
+    validate_stream_output_format,
+)
+from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
+from nemo_helix_plugin.cli_state import cli_state
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import (
     CreateGuardrailConfigRequest,
@@ -145,7 +146,7 @@ def create_configs(
     # --input-data may carry exist_ok as a JSON/YAML string; parse it like the server would.
     resolved_exist_ok = _BOOL.validate_python(input_payload.get("exist_ok", False))
 
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(workspace=resolved_workspace, body=body, exist_ok=resolved_exist_ok or None)
@@ -174,7 +175,7 @@ def delete_configs(
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
     """Delete a guardrail config."""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     state.typed_client(GuardrailClient).delete_guardrail_config(name=name, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
@@ -217,7 +218,7 @@ def list_configs(
     """List available guardrail configs.
 
     Lists guardrail configs for a specific workspace."""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
 
@@ -271,7 +272,7 @@ def retrieve_configs(
     output_format: EntityOutputFormatOption = None,
 ) -> None:
     """Get info about a guardrail configuration."""
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(name=name, workspace=workspace)
@@ -340,7 +341,7 @@ def update_configs(
     )
     resolved_workspace = input_payload.get("workspace")
 
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = build_kwargs(name=name, workspace=resolved_workspace, body=body)

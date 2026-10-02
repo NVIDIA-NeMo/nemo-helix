@@ -44,7 +44,9 @@ from nemo_agents_plugin.telemetry.intake_export import (
     supports_intake_atif_export,
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
-from nemo_deployments_plugin.auth_proxy import auth_proxy_port
+from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
+from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
+from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import (
     ConfigFile,
     Container,
@@ -59,11 +61,9 @@ from nemo_deployments_plugin.entities import (
     VolumeMount,
     WorkloadIdentitySpec,
 )
-from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
-from nemo_helix_plugin.auth.workload_identity import (
-    get_workload_identity_token_audience,
-    is_workload_identity_token_exchange_enabled,
-)
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth.workload_identity import get_workload_identity_token_audience
+from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
@@ -71,6 +71,7 @@ from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -357,16 +358,18 @@ def executor_backend(name: str | None) -> str | None:
     the deployments plugin's own ``default_executor``, so resolving it here is what
     makes the mode check see the executor that will actually run.
     """
-    from nemo_deployments_plugin.config import DeploymentsConfig
+    entry = _executor_entry(_resolve_executor_name(name))
+    return entry.backend if entry else None
 
-    config = DeploymentsConfig.get()
-    resolved = name or config.default_executor
-    if not resolved:
+
+def _resolve_executor_name(name: str | None) -> str | None:
+    return name or DeploymentsConfig.get().default_executor
+
+
+def _executor_entry(name: str | None) -> ExecutorConfigEntry | None:
+    if not name:
         return None
-    for entry in config.executors:
-        if entry.name == resolved:
-            return entry.backend
-    return None
+    return next((entry for entry in DeploymentsConfig.get().executors if entry.name == name), None)
 
 
 def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) -> None:
@@ -381,12 +384,51 @@ def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) ->
     backend = executor_backend(executor)
     if backend is None or backend == mode:
         return
+    raise _backend_mismatch(executor, backend, mode)
+
+
+def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) -> ValueError:
     alternative = f", or deploy with deployment_mode {backend!r}" if backend in CONTAINER_DEPLOYMENT_MODES else ""
-    raise ValueError(
+    return ValueError(
         f"deployment_mode {mode!r} resolved to executor {executor!r}, which runs on "
-        f"{backend!r}. Set 'deployments.{mode}_executor' to an executor whose backend "
+        f"{backend!r}. Set 'agents.deployments.{mode}_executor' to an executor whose backend "
         f"is {mode!r}{alternative}."
     )
+
+
+def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
+    """Refuse a mode that could not run, before a deployment is persisted for it."""
+    if mode == "subprocess":
+        return
+    executor = _resolve_executor_name(executor_for_mode(config, mode))
+    entry = _executor_entry(executor)
+    if entry is None:
+        if executor:
+            raise ValueError(
+                f"deployment_mode {mode!r} resolved to executor {executor!r}, which is not listed "
+                "in 'deployments.executors'."
+            )
+        raise ValueError(
+            f"deployment_mode {mode!r} has no executor. Set 'agents.deployments.{mode}_executor' or "
+            "'agents.deployments.default_executor'."
+        )
+    if entry.backend != mode:
+        raise _backend_mismatch(entry.name, entry.backend, mode)
+    if mode == "docker":
+        try:
+            docker_host = DockerExecutorConfig.model_validate(entry.config).docker_host
+        except ValidationError as exc:
+            logger.debug("Docker executor %r has invalid config: %s", entry.name, exc)
+            raise ValueError(f"Docker executor {entry.name!r} has an invalid configuration.") from exc
+        try:
+            require_docker(docker_host=docker_host)
+        except CapabilityUnavailableError as exc:
+            logger.debug("Docker executor %r is unavailable: %s", entry.name, exc)
+            # The probe result is cached per process, as the deployments plugin's executor registry is.
+            raise ValueError(
+                f"The Docker daemon for executor {entry.name!r} was unreachable when last checked. "
+                "Start Docker, then restart the platform."
+            ) from exc
 
 
 _HTTP_PROTOCOLS = frozenset({"http", "https"})
@@ -646,32 +688,24 @@ class DeploymentsRunnerBackend(RunnerBackend):
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
 
-        # When platform auth is enabled, the agent carries no platform credential,
-        # so route its inference calls through a loopback auth-proxy sidecar (the
-        # deployments plugin compiles the sidecar from the auth_proxy flags). The
-        # agent targets the sidecar on localhost; the sidecar forwards to the
-        # platform with a service-principal identity header.
-        #
-        # The sidecar also delegates to the deployment's creator via on-behalf-of
-        # (when known) so the running agent's platform access is scoped to what the
-        # creator can reach — the workspace(s) they have access to — rather than the
-        # agents service principal's full (ServiceSystem) reach.
-        auth_proxy_identity: str | None = None
-        auth_proxy_on_behalf_of: str | None = None
+        # The deployments plugin owns auth-proxy/workload-identity mode selection;
+        # the agent backend only applies the resulting plan to URL rewriting and
+        # DeploymentConfig generation.
+        auth_plan = plan_deployment_auth(
+            service_identity=_AUTH_PROXY_IDENTITY,
+            on_behalf_of=created_by or None,
+            auth_context=auth_context,
+            workload_name=name,
+            workload_label="Agent deployment",
+        )
+        if auth_plan.error is not None:
+            logger.error("Refusing to deploy agent %r: %s", name, auth_plan.error)
+            return DeploymentInfo(name=name, status="failed", error=auth_plan.error)
+        if auth_plan.warning is not None:
+            logger.warning(auth_plan.warning)
+
         is_fabric = _is_fabric_agent_config(config)
-        if platform_auth_enabled():
-            auth_proxy_identity = _AUTH_PROXY_IDENTITY
-            auth_proxy_on_behalf_of = created_by or None
-            if not auth_proxy_on_behalf_of:
-                logger.warning(
-                    "Deployment %r has no creator principal; the agent will run as the "
-                    "unscoped %s service principal without on-behalf-of delegation.",
-                    name,
-                    _AUTH_PROXY_IDENTITY,
-                )
-            rewrite_target = f"http://127.0.0.1:{auth_proxy_port()}"
-        else:
-            rewrite_target = gateway
+        rewrite_target = auth_plan.auth_proxy_base_url or gateway
 
         if is_fabric:
             # Wire the trajectory export before the rebase below, so the
@@ -729,13 +763,13 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 mode=deployment_mode,
                 plugin_wheels_init_image=self._config.plugin_wheels_init_image,
                 labels=deployment_labels,
-                auth_proxy_identity=auth_proxy_identity,
-                auth_proxy_on_behalf_of=auth_proxy_on_behalf_of,
+                auth_proxy_identity=auth_plan.auth_proxy_identity,
+                auth_proxy_on_behalf_of=auth_plan.auth_proxy_on_behalf_of,
                 config_files=staged_config_files,
                 resources=resources,
                 secrets=secrets,
                 use_image_entrypoint=use_image_entrypoint,
-                workload_identity_enabled=auth_context is not None and is_workload_identity_token_exchange_enabled(),
+                workload_identity_enabled=auth_plan.workload_identity_enabled,
             )
         except ReservedSecretEnvVarError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)

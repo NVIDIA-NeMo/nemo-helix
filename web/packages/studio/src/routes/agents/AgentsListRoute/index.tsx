@@ -63,7 +63,7 @@ export const AgentsListRoute: FC = () => {
           slotDescription="View and manage AI agents and their deployments."
           slotActions={
             <Button color="brand" onClick={() => setNewAgentOpen(true)}>
-              New Agent
+              Register Agent
             </Button>
           }
         />

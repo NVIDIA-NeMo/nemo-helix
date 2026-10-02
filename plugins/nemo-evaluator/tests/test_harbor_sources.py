@@ -89,7 +89,7 @@ def test_canonical_tasks_reject_invalid_snapshots(case, error):
         other["id"] = "TASK"
         tasks.append(other)
     elif case == "target":
-        target = {"kind": "fabric", "config": {}}
+        target = {"kind": "fabric", "source": {"config": {}}}
     elif case == "metric_ref":
         tasks[0]["spec"]["metrics"] = ["default/metric"]
     elif case == "empty":
@@ -217,7 +217,7 @@ async def test_bounded_resolution_accepts_custom_concurrency():
     assert peak == 3
 
 
-@pytest.mark.parametrize("target", [None, {"kind": "harbor"}, {"kind": "fabric", "config": {}}])
+@pytest.mark.parametrize("target", [None, {"kind": "harbor"}, {"kind": "fabric", "source": {"config": {}}}])
 @pytest.mark.parametrize("branch", ["taskset", "inline", "refs"])
 def test_homogeneous_input_branches_round_trip(target, branch):
     """Verify JSON round trips preserve taskset references, inline tasks, and direct task references as distinct
@@ -240,7 +240,7 @@ def test_homogeneous_input_branches_round_trip(target, branch):
         assert type(restored.tasks[0]) is type(tasks[0])
 
 
-@pytest.mark.parametrize("target", [None, {"kind": "harbor"}, {"kind": "fabric", "config": {}}])
+@pytest.mark.parametrize("target", [None, {"kind": "harbor"}, {"kind": "fabric", "source": {"config": {}}}])
 @pytest.mark.parametrize("shape", ["empty", "inline-first", "ref-first"])
 def test_input_rejects_empty_and_mixed_lists(target, shape):
     """Reject empty or mixed task selections consistently for Python inputs and serialized JSON."""
@@ -317,7 +317,7 @@ def test_online_preparation_uses_ordered_verified_members(tmp_path, monkeypatch,
     from nemo_evaluator.harbor.preparation import prepare_stored_harbor_tasks
     from nemo_evaluator.harbor.tasks import StoredHarborTask
     from nemo_evaluator.jobs.agent_spec import ResolvedTask
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_archive import NativeTask
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.archive import NativeTask
     from nemo_helix_plugin.client.client import NemoClient
 
     snapshots = []

@@ -337,7 +337,7 @@ Unsloth:
 
 | Action | Command |
 |--------|---------|
-| Submit | `nemo customization unsloth submit <job.json> --workspace default [--profile P] [--cluster C]` |
+| Submit | `nemo customization unsloth submit <job.json> --workspace default [--profile P]` |
 | Status | `nemo jobs get-status unsloth-<job-id>` |
 | Live schema | `nemo customization unsloth explain` |
 

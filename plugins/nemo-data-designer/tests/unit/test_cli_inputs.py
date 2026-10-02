@@ -26,8 +26,6 @@ def test_create_cli_override_supports_root_generated_callback(monkeypatch: pytes
         options: list[str],
         options_file: Path | None,
         profile: str | None,
-        cluster: str | None,
-        base_url: str | None,
         workspace: str,
         config: object | None,
         config_file: object | None,
@@ -40,8 +38,6 @@ def test_create_cli_override_supports_root_generated_callback(monkeypatch: pytes
                 "options": options,
                 "options_file": options_file,
                 "profile": profile,
-                "cluster": cluster,
-                "base_url": base_url,
                 "workspace": workspace,
                 "config": config,
                 "config_file": config_file,
@@ -69,8 +65,6 @@ def test_create_cli_override_supports_root_generated_callback(monkeypatch: pytes
         num_records=7,
         workspace="team-a",
         profile="training",
-        cluster="local",
-        base_url="http://nemo.test",
         options=["backend.key=value"],
         options_file=Path("options.yaml"),
     )
@@ -84,8 +78,6 @@ def test_create_cli_override_supports_root_generated_callback(monkeypatch: pytes
         "options": ["backend.key=value"],
         "options_file": Path("options.yaml"),
         "profile": "training",
-        "cluster": "local",
-        "base_url": "http://nemo.test",
         "workspace": "team-a",
         "config": None,
         "config_file": None,
@@ -104,8 +96,6 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
         options: list[str],
         options_file: Path | None,
         profile: str | None,
-        cluster: str | None,
-        base_url: str | None,
         workspace: str,
         config: object | None,
         config_file: object | None,
@@ -117,8 +107,6 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
                 "options": options,
                 "options_file": options_file,
                 "profile": profile,
-                "cluster": cluster,
-                "base_url": base_url,
                 "workspace": workspace,
                 "config": config,
                 "config_file": config_file,
@@ -131,9 +119,8 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
     @group.command("explain")
     def explain(
         profile: str | None = typer.Option(None, "--profile"),
-        cluster: str | None = typer.Option(None, "--cluster"),
     ) -> None:
-        captured.update({"explain_profile": profile, "explain_cluster": cluster})
+        captured.update({"explain_profile": profile})
 
     @contextlib.contextmanager
     def fake_spec_from_builder(config_source: str, num_records: int) -> Iterator[str]:
@@ -158,10 +145,6 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
             "team-a",
             "--profile",
             "training",
-            "--cluster",
-            "local",
-            "--base-url",
-            "http://nemo.test",
             "-o",
             "backend.key=value",
         ],
@@ -176,8 +159,6 @@ def test_create_cli_override_accepts_config_before_options(monkeypatch: pytest.M
         "options": ["backend.key=value"],
         "options_file": None,
         "profile": "training",
-        "cluster": "local",
-        "base_url": "http://nemo.test",
         "workspace": "team-a",
         "config": None,
         "config_file": None,
@@ -198,15 +179,14 @@ def test_create_cli_override_preserves_explain_callback() -> None:
     @group.command("explain")
     def explain(
         profile: str | None = typer.Option(None, "--profile"),
-        cluster: str | None = typer.Option(None, "--cluster"),
     ) -> None:
-        captured.update({"profile": profile, "cluster": cluster})
+        captured.update({"profile": profile})
 
     inputs.apply_create_cli_overrides(group)
     app = typer.Typer()
     app.add_typer(group, name="create")
 
-    result = CliRunner().invoke(app, ["create", "explain", "--profile", "research", "--cluster", "ignored"])
+    result = CliRunner().invoke(app, ["create", "explain", "--profile", "research"])
 
     assert result.exit_code == 0, result.output
-    assert captured == {"profile": "research", "cluster": "ignored"}
+    assert captured == {"profile": "research"}

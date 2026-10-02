@@ -25,6 +25,7 @@ from nemo_evaluator.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
+    JobEnvSecretResolver,
     _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
@@ -32,8 +33,11 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentEvalSpec,
     AgentEvalTaskInput,
     AgentTarget,
+    FabricConfigSource,
     FabricRunnerTarget,
     GymRunnerTarget,
+    HarborBuiltinAgentSource,
+    HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
     ResolvedTask,
@@ -62,7 +66,8 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
     SandboxedGymAgentTaskRunner,
     SandboxedGymRuntimeConfig,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTarget,
@@ -133,7 +138,9 @@ def _task_spec() -> ResolvedTask:
 def _runner_target(model: str | None = None) -> FabricRunnerTarget:
     """A minimal agent-runner target, for tests about runners in general rather than a specific one."""
     return FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}, model=model
+        )
     )
 
 
@@ -157,7 +164,7 @@ def test_cli_agent_evaluate_uses_flat_submit_without_local_run() -> None:
     assert result.exit_code == 0
     output = result.output
     assert "--spec" in output
-    assert "--base-url" in output
+    assert "--base-url" not in output
     assert "--profile" in output
     assert "Run locally, in-process." not in result.output
     assert "explain" in output
@@ -433,8 +440,10 @@ def _agent() -> Agent:
 def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     fabric_target = FabricRunnerTarget(
-        config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-        model="openai/gpt-5.4",
+        source=FabricConfigSource(
+            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+            model="openai/gpt-5.4",
+        )
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(fabric_target, ctx)
     assert isinstance(target, FabricAgentRuntime)
@@ -451,10 +460,10 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     ctx = _job_context(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-resolved-by-the-service")
     harbor_target = HarborRunnerTarget(
-        agent_name="oracle",
-        agent_model_name="openai/gpt-5.4",
+        source=HarborBuiltinAgentSource(name="oracle", model_name="openai/gpt-5.4"),
         agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"max_turns": 3}},
         env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
+        env_vars={"FABRIC_LOG": "debug"},
         n_attempts=2,
         n_concurrent_trials=8,
         max_retries=1,
@@ -471,8 +480,13 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
         "fabric_adapter_id": "nvidia.fabric.codex",
         "fabric_harness_settings": {"max_turns": 3},
     }
-    # Only the name travels; the runtime hands Harbor a `${OPENAI_API_KEY}` template it expands itself.
-    assert target._config.agent_env_from_host == ["OPENAI_API_KEY"]
+    assert target._config.env_secrets == {"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")}
+    assert target._config.env_vars == {"FABRIC_LOG": "debug"}
+    # The service injected the secret under its key, so Harbor gets a `${OPENAI_API_KEY}` template.
+    assert isinstance(target._secret_resolver, JobEnvSecretResolver)
+    assert harbor_env_templates(target._config.env_secrets, target._secret_resolver) == {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+    }
     assert target._config.n_attempts == 2
     assert target._config.reward_key == "score"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
@@ -607,20 +621,42 @@ def test_runner_target_is_accepted(tmp_path: Path) -> None:
 
 
 def test_harbor_runner_target_is_accepted() -> None:
-    spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle"))
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget())
     assert isinstance(spec.target, HarborRunnerTarget)
 
 
-def test_resolve_target_refuses_harbor_env_secret_missing_from_environment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(("ref", "workspace"), [("my-workspace/openai-key", "my-workspace"), ("openai-key", "dev")])
+def test_harbor_env_secret_missing_from_job_environment_names_the_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref: str, workspace: str
 ) -> None:
-    """An unresolved `env_secrets` entry fails by name here, not inside a Docker trial as a bare auth error."""
+    """An unresolved `env_secrets` entry fails by name before Docker starts, not inside a trial as an auth error.
+
+    The runner raises when it builds the templates, at the start of each execution; target resolution
+    no longer checks. A bare ref points at the job's workspace.
+    """
     ctx = _job_context(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")})
+    harbor_target = HarborRunnerTarget(env_secrets={"OPENAI_API_KEY": SecretRef(root=ref)})
+    runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
+    assert isinstance(runner, HarborAgentTaskRunner) and runner._config is not None
 
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        AgentEvalJob._resolve_target(harbor_target, ctx)
+    with pytest.raises(ValueError) as excinfo:
+        harbor_env_templates(runner._config.env_secrets, runner._secret_resolver)
+    assert str(excinfo.value) == (
+        f"env_secrets['OPENAI_API_KEY'] -> secret {ref!r} was not injected into this job's environment. "
+        f"Check the secret exists in workspace {workspace!r}: nemo secrets get openai-key --workspace {workspace}"
+    )
+
+
+def test_job_env_secret_resolver_reads_only_injected_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    ref = SecretRef(root="my-workspace/openai-key")
+    resolver = JobEnvSecretResolver(workspace="dev")
+    monkeypatch.setenv("MY_WORKSPACE_OPENAI_KEY", "never-read")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("LLM_API_KEY", "injected")
+
+    assert resolver.find_env_name(ref, "OPENAI_API_KEY") is None, "an empty value counts as missing"
+    assert resolver.find_env_name(ref, "LLM_API_KEY") == "LLM_API_KEY"
 
 
 def test_harbor_target_refuses_plaintext_credentials_in_agent_kwargs() -> None:
@@ -644,7 +680,8 @@ def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=HarborRunnerTarget(
-            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent", agent_kwargs=agent_kwargs
+            source=HarborImportedAgentSource(import_path="nemo_fabric.integrations.harbor:FabricAgent"),
+            agent_kwargs=agent_kwargs,
         ),
     )
 
@@ -1003,7 +1040,7 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
     """Compile the minimal Harbor submission every backend-guard test makes."""
     compiled = await AgentEvalJob.compile(
         workspace="default",
-        spec=AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget(agent_name="oracle")),
+        spec=AgentEvalSpec(tasks=[_task_spec()], target=HarborRunnerTarget()),
         entity_client=object(),
         job_name=None,
         async_sdk=async_sdk,
@@ -1016,7 +1053,11 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
     ("target", "expected_kind", "expected_endpoint_name", "expected_image_name", "expected_entrypoint"),
     [
         (
-            FabricRunnerTarget(config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}),
+            FabricRunnerTarget(
+                source=FabricConfigSource(
+                    config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+                )
+            ),
             "fabric",
             None,
             "nhx-tasks",
@@ -1724,7 +1765,7 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         ),
         AgentTarget(agent=_agent(), params=RunConfigOnline()),
         _runner_target("openai/gpt-5.4"),
-        HarborRunnerTarget(agent_name="oracle"),
+        HarborRunnerTarget(),
         GymRunnerTarget(
             agent="simple_agent",
             agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
@@ -2036,7 +2077,7 @@ async def test_compile_resolves_harbor_runner_env_secrets(mocker: MockerFixture)
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
         target=HarborRunnerTarget(
-            agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
+            source=HarborImportedAgentSource(import_path="nemo_fabric.integrations.harbor:FabricAgent"),
             agent_kwargs={"fabric_adapter_id": "nvidia.fabric.codex"},
             env_secrets={"OPENAI_API_KEY": SecretRef(root="my-workspace/openai-key")},
         ),
@@ -2092,7 +2133,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
         None,
         ModelTarget(model=Model(url="http://model.test", name="test")),
         AgentTarget(agent=_agent()),
-        FabricRunnerTarget(config={}),
+        FabricRunnerTarget(source=FabricConfigSource(config={})),
         HarborRunnerTarget(),
     ],
 )
