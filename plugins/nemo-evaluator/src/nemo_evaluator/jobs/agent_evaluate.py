@@ -70,6 +70,7 @@ from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskK
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
+from nemo_evaluator.jobs.run_outcome import STATUS_DETAILS_KEY, agent_eval_outcome, report_run_outcome
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.task_refs import (
@@ -740,6 +741,11 @@ class _AgentEvalJobBase(NemoJob):
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
         ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
 
+        outcome = agent_eval_outcome(result)
+        report_run_outcome(outcome, ctx=ctx, async_client=async_client)
+        if outcome.failed:
+            logger.error(outcome.message)
+
         # Persist the queryable result record (aggregates + coverage); the full bundle (trials) lives
         # in the fileset referenced by `artifact`. Best-effort: the authoritative output (bundle +
         # summary artifacts) is already saved above, so a persistence failure must not fail an
@@ -754,28 +760,33 @@ class _AgentEvalJobBase(NemoJob):
                 exc_info=True,
             )
 
-        output = {"status": "completed", "artifact": artifact.model_dump()}
+        output: dict[str, object] = {
+            "status": "failed" if outcome.failed else "completed",
+            "artifact": artifact.model_dump(),
+            STATUS_DETAILS_KEY: outcome.details(),
+        }
+        if outcome.failed:
+            output["reason"] = outcome.message
 
         # Publication runs last, after the bundle and the queryable record are both durable, so a
-        # failed publish costs a re-publish rather than a re-run. It is also the only step here that
-        # can fail the job (when `required`), which is why nothing depends on its result.
+        # failed publish costs a re-publish rather than a re-run. Nothing depends on its result.
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
             intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
-            outcome = publish_agent_eval_result(
+            publication_outcome = publish_agent_eval_result(
                 result,
                 spec=publication,
                 target=spec.target,
                 workspace=ctx.workspace,
                 intake=intake,
             )
-            output["publication"] = outcome.model_dump(exclude_none=True)
+            output["publication"] = publication_outcome.model_dump(exclude_none=True)
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
         snapshot = (
             registered_agent_files(spec.target)
-            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget))
+            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget)) and not outcome.failed
             else None
         )
         if snapshot is not None:
