@@ -136,7 +136,7 @@ class FabricRunnerTarget(BaseModel):
     is gone — fold any overlay into the config.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["fabric"] = "fabric"
     source: FabricSource = Field(
