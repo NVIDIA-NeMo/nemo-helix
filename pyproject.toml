@@ -342,7 +342,7 @@ constraint-dependencies = [
   "starlette>=1.3.1",
   "urllib3>=2.7.0",
   "uv>=0.10.10",
-  "wandb>=0.29.0",
+  "wandb>=0.30.0",
 ]
 
 override-dependencies = [
@@ -371,7 +371,7 @@ override-dependencies = [
   "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
   "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
   "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High); overrides vendored sdk/python/nemo-helix <3 constraint
-  "wandb>=0.29.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
+  "wandb>=0.30.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
   "litellm>=1.83.10",         # CVE-2026-42208 (Critical SQL injection), CVE-2026-40217, and 5 other High CVEs

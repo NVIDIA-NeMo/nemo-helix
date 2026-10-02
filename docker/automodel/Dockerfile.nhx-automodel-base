@@ -137,7 +137,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "sqlparse>=0.6.0,<0.7" \
     "grpcio>=1.81.1,<2" \
     "thrift>=0.24.0" \
-    "wandb>=0.29.0"
+    "wandb>=0.30.0"
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
