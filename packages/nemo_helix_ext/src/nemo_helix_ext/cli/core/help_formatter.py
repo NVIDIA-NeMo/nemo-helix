@@ -573,13 +573,18 @@ class NhxGroup(NhxErrorHandlingMixin, TyperGroup):
     def _format_active_context_line(self) -> str | None:
         """Format the current context/workspace for root help."""
         from nemo_helix_ext.config.config import get_context
+        from nemo_helix_ext.config.urls import display_url
 
         try:
             display_context = get_context()
         except Exception:
             return None
 
-        return f"Active context: {display_context.context_name} (workspace: {display_context.workspace})"
+        platform_url = display_url(str(display_context.cluster.base_url))
+        return (
+            f"Active context: {display_context.context_name} "
+            f"(workspace: {display_context.workspace}, platform: {platform_url})"
+        )
 
     def command(self, *args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Command] | Command:  # pyright: ignore [reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]
         """Override command decorator to use NhxCommand."""
