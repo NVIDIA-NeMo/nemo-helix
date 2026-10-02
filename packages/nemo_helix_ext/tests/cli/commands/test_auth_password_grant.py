@@ -19,6 +19,8 @@ def _mock_oidc_config() -> SimpleNamespace:
         issuer="https://idp.example.com",
         client_id="test-client",
         cli_client_id=None,
+        token_endpoint_auth_method="none",
+        clients=(),
         bearer_token_source="access_token",
         token_endpoint="https://idp.example.com/token",
         device_authorization_endpoint="https://idp.example.com/device",

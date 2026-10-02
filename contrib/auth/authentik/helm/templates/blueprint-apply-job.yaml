@@ -53,13 +53,21 @@ spec:
           args:
             - apply_blueprint
             - /blueprints/mounted/cm-authentik-nemo-blueprint/nemo.yaml
-          {{- with (index $globalValues "env") }}
           env:
+          {{- with (index $globalValues "env") }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+            - name: NHX_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "blueprintApplyJob.oidcSecretName is required" .Values.blueprintApplyJob.oidcSecretName }}
+                  key: {{ required "blueprintApplyJob.oidcClientSecretKey is required" .Values.blueprintApplyJob.oidcClientSecretKey }}
           envFrom:
             - secretRef:
                 name: {{ $secretName }}
+          {{- with (index $globalValues "envFrom") }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: authentik-nemo-blueprint
               mountPath: /blueprints/mounted/cm-authentik-nemo-blueprint

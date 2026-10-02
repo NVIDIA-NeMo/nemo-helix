@@ -30,9 +30,10 @@ before API/controller pods are restarted. Client secrets stay in Kubernetes
 Secrets rather than being written into the ConfigMap.
 
 All credentials and generated secrets in this example are for local development
-only. The chart generates local Secrets for the ZITADEL master key, demo user
-password, embedded PostgreSQL passwords, and NeMo Helix placeholder NGC key.
-Do not copy those Secrets into non-local deployments.
+only. The runner precreates the ZITADEL master-key, workload-signing, and
+gateway-TLS Secrets. The chart still generates local demo-user, embedded
+PostgreSQL, and placeholder NGC Secrets. Do not copy those Secrets into
+non-local deployments.
 
 ## Prerequisites
 

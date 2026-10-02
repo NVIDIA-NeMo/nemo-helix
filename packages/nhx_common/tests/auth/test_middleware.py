@@ -190,6 +190,118 @@ def create_test_app_with_platform_routes(auth_config: AuthConfig) -> FastAPI:
     return app
 
 
+def confidential_auth_config(auth_config: AuthConfig) -> AuthConfig:
+    return auth_config.model_copy(
+        update={
+            "oidc": auth_config.oidc.model_copy(
+                update={
+                    "token_endpoint_auth_method": "client_secret_basic",
+                    "client_secret_env_var": "NHX_OIDC_CLIENT_SECRET",
+                    "session_encryption_key_env_var": "NHX_AUTH_SESSION_ENCRYPTION_KEY",
+                    "authorization_endpoint": "https://sso.example.com/authorize",
+                    "token_endpoint": "https://sso.example.com/token",
+                }
+            )
+        }
+    )
+
+
+class TestWebSessionCookie:
+    def test_active_session_propagates_account_context(self, auth_config_enabled: AuthConfig) -> None:
+        app = FastAPI()
+        session_requests: list[httpx.Request] = []
+
+        def session_handler(request: httpx.Request) -> httpx.Response:
+            session_requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "user-1",
+                    "email": "user@example.com",
+                    "groups": ["nemo-users"],
+                    "account_id": "account-1",
+                    "authz_aliases": ["user-1", "user@example.com"],
+                },
+            )
+
+        session_client = httpx.AsyncClient(transport=httpx.MockTransport(session_handler))
+
+        @app.get("/whoami")
+        async def whoami(auth_client: AuthClient = Depends(get_auth_client)):
+            principal = auth_client.principal
+            return {
+                "id": principal.id,
+                "email": principal.email,
+                "groups": principal.groups,
+                "account_id": principal.account_id,
+                "authz_aliases": principal.authz_aliases,
+            }
+
+        Configuration.set_override(confidential_auth_config(auth_config_enabled))
+        app.add_middleware(
+            AuthorizationMiddleware,
+            service_name="test-service",
+            http_client=session_client,
+        )
+
+        with patch.object(
+            AuthClient,
+            "authorize_request",
+            new=AsyncMock(return_value=AuthorizationResult(allowed=True)),
+        ):
+            response = TestClient(app).get("/whoami", cookies={"nhx_session": "session-handle"})
+        asyncio.run(session_client.aclose())
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "id": "user-1",
+            "email": "user@example.com",
+            "groups": ["nemo-users"],
+            "account_id": "account-1",
+            "authz_aliases": ["user-1", "user@example.com"],
+        }
+        assert len(session_requests) == 1
+        assert session_requests[0].url.path == "/apis/auth/v2/session"
+
+    def test_mutation_requires_requested_by_header(self, auth_config_enabled: AuthConfig) -> None:
+        app = FastAPI()
+
+        @app.post("/mutate")
+        async def mutate():
+            return {"status": "ok"}
+
+        Configuration.set_override(confidential_auth_config(auth_config_enabled))
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
+
+        response = TestClient(app).post("/mutate", cookies={"nhx_session": "session-handle"})
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Missing X-NHX-Requested-By"}
+
+    def test_malformed_session_response_is_rejected(self, auth_config_enabled: AuthConfig) -> None:
+        app = FastAPI()
+        session_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=b"not-json"))
+        )
+
+        @app.get("/whoami")
+        async def whoami():
+            return {"status": "ok"}
+
+        Configuration.set_override(confidential_auth_config(auth_config_enabled))
+        app.add_middleware(
+            AuthorizationMiddleware,
+            service_name="test-service",
+            http_client=session_client,
+        )
+
+        response = TestClient(app).get("/whoami", cookies={"nhx_session": "session-handle"})
+        asyncio.run(session_client.aclose())
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Missing session"}
+
+
 class TestHealthEndpointsBypass:
     """Tests for health endpoints bypassing authentication."""
 

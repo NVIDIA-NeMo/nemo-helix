@@ -156,12 +156,27 @@ ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
 
 @dataclass(frozen=True)
+class AdvertisedOidcClient:
+    """One user-login client from auth discovery."""
+
+    name: str
+    client_id: str
+    token_endpoint_auth_method: str
+    default: bool
+
+
+@dataclass(frozen=True)
 class NHXOIDCConfig:
     """OIDC configuration discovered from the NeMo Helix."""
 
     auth_enabled: bool
     issuer: str | None = None
     client_id: str | None = None
+    token_endpoint_auth_method: str = "none"
+    public_client_id: str | None = None
+    login_url: str | None = None
+    cli_login_url: str | None = None
+    clients: tuple[AdvertisedOidcClient, ...] = ()
     token_endpoint: str | None = None
     device_authorization_endpoint: str | None = None
     default_scopes: str = DEFAULT_OAUTH_SCOPES
@@ -176,6 +191,44 @@ class NHXOIDCConfig:
     device_authorization_requires_device_id: bool = False
     device_authorization_display_name: str | None = None
     device_token_request_includes_scope: bool = True
+
+
+def refresh_target(config: NHXOIDCConfig, token_broker_url: str | None) -> tuple[str, str]:
+    """Return the token endpoint and client id for a stored login.
+
+    Brokered confidential logins refresh at the auth service, which holds the
+    client secret. A public device-flow login refreshes at the IdP with the
+    advertised public client when the platform client is confidential.
+    """
+    if token_broker_url:
+        return token_broker_url, config.client_id or config.public_client_id or ""
+    client_id = config.cli_client_id or config.client_id or ""
+    if config.token_endpoint_auth_method == "client_secret_basic" and config.public_client_id:
+        client_id = config.public_client_id
+    return config.token_endpoint or "", client_id
+
+
+def _parse_advertised_clients(raw: object) -> tuple[AdvertisedOidcClient, ...]:
+    if not isinstance(raw, list):
+        return ()
+    clients: list[AdvertisedOidcClient] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        client_id = item.get("client_id")
+        method = item.get("token_endpoint_auth_method", "none")
+        if not isinstance(name, str) or not isinstance(client_id, str) or not isinstance(method, str):
+            continue
+        clients.append(
+            AdvertisedOidcClient(
+                name=name,
+                client_id=client_id,
+                token_endpoint_auth_method=method,
+                default=item.get("default") is True,
+            )
+        )
+    return tuple(clients)
 
 
 def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
@@ -193,6 +246,11 @@ def discover_nhx_config(base_url: str, timeout: float = 10.0) -> NHXOIDCConfig:
         auth_enabled=data.get("auth_enabled", False),
         issuer=oidc.get("issuer"),
         client_id=oidc.get("client_id"),
+        token_endpoint_auth_method=oidc.get("token_endpoint_auth_method", "none"),
+        public_client_id=oidc.get("public_client_id"),
+        login_url=oidc.get("login_url"),
+        cli_login_url=oidc.get("cli_login_url"),
+        clients=_parse_advertised_clients(oidc.get("clients")),
         cli_client_id=oidc.get("cli_client_id"),
         bearer_token_source=_parse_bearer_token_source(oidc.get("bearer_token_source", "access_token")),
         token_endpoint=oidc.get("token_endpoint"),

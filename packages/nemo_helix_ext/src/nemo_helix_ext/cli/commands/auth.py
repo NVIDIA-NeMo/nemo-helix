@@ -39,6 +39,8 @@ from nemo_helix_ext.auth.helpers import (
     generate_unsigned_jwt,
     is_unsigned_jwt,
     normalize_scope_prefix,
+    refresh_target,
+    select_advertised_client,
     validate_requested_scopes_granted,
 )
 from nemo_helix_ext.auth.token_provider import OIDCTokenProvider, TokenPersistenceError, TokenSet
@@ -247,8 +249,8 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     except (httpx.HTTPError, ValueError):
         return exp_dt > now
 
-    client_id = nhx_config.cli_client_id or nhx_config.client_id
-    if not client_id or not nhx_config.token_endpoint:
+    token_endpoint, client_id = refresh_target(nhx_config, context.user.token_broker_url)
+    if not client_id or not token_endpoint:
         return exp_dt > now
 
     effective_scope = build_effective_scope(nhx_config.default_scopes, nhx_config.scope_prefix)
@@ -256,7 +258,7 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
     try:
         provider = _config_backed_token_provider(
             context_name=context.context_name,
-            token_endpoint=nhx_config.token_endpoint,
+            token_endpoint=token_endpoint,
             client_id=client_id,
             access_token=context.user.token.get_secret_value(),
             refresh_token=context.user.refresh_token.get_secret_value(),
@@ -291,6 +293,7 @@ def _login_with_oidc(
     username: str | None = None,
     password: str | None = None,
     selected_context: str | None = None,
+    oidc_client: str | None = None,
 ) -> bool:
     """Authenticate the selected context using the cluster's OIDC configuration.
 
@@ -319,6 +322,51 @@ def _login_with_oidc(
         console.print("You can use the API without authentication.")
         return False
 
+    try:
+        selected_client = select_advertised_client(oidc_config, oidc_client)
+    except ValueError as exc:
+        raise AuthError(str(exc)) from exc
+    if selected_client.token_endpoint_auth_method == "client_secret_basic":
+        login_username = username or os.environ.get("NHX_OIDC_USERNAME")
+        login_password = password or os.environ.get("NHX_OIDC_PASSWORD")
+        if login_username or login_password:
+            raise AuthError(
+                "Password grant is not available for the confidential platform client. "
+                "Use browser login: nemo auth login"
+            )
+        from nemo_helix_ext.auth.confidential_login import login_with_confidential_broker
+
+        if oidc_config.cli_login_url is None:
+            raise AuthError("This cluster did not advertise a confidential CLI login URL.")
+        token_payload = login_with_confidential_broker(
+            cli_login_url=oidc_config.cli_login_url,
+            open_browser=not no_browser,
+            certificate_authority=certificate_authority,
+        )
+
+        token = token_payload["access_token"]
+        if not isinstance(token, str):
+            raise AuthError("Confidential login did not return an access token.")
+        refresh_token = token_payload.get("refresh_token")
+        expires_in = token_payload.get("expires_in")
+        tokens = TokenSet.from_access_token(
+            token,
+            refresh_token if isinstance(refresh_token, str) else None,
+            expires_in=expires_in if isinstance(expires_in, int) else None,
+        )
+        config_params: ConfigParams = {
+            "access_token": token,
+            "expires_at": tokens.expires_at,
+            "token_broker_url": f"{base_url}/apis/auth/v2/cli/token",
+        }
+        if isinstance(refresh_token, str):
+            config_params["refresh_token"] = refresh_token
+        if selected_context is not None:
+            config_params["current_context"] = context.context_name
+        Config.write(config_params, context_name=context.context_name)
+        console.print("\n[bold green]Authentication successful![/]")
+        return True
+
     if not oidc_config.token_endpoint:
         raise AuthError(
             "This cluster does not have OIDC token endpoint configured.\n"
@@ -329,7 +377,7 @@ def _login_with_oidc(
     login_username = username or os.environ.get("NHX_OIDC_USERNAME")
     login_password = password or os.environ.get("NHX_OIDC_PASSWORD")
     use_password_grant = bool(login_username and login_password)
-    client_id = oidc_config.cli_client_id or oidc_config.client_id
+    client_id = selected_client.client_id if oidc_client else oidc_config.cli_client_id or oidc_config.client_id
     bearer_token_source = oidc_config.bearer_token_source
 
     if use_password_grant:
@@ -576,6 +624,10 @@ def login(
             rich_help_panel="Unsigned Token Options",
         ),
     ] = None,
+    oidc_client: Annotated[
+        str | None,
+        typer.Option("--oidc-client", hidden=True),
+    ] = None,
 ) -> None:
     """Authenticate with the NeMo Helix cluster.
 
@@ -692,6 +744,7 @@ def login(
         username=username,
         password=password,
         selected_context=selected_context,
+        oidc_client=oidc_client,
     ):
         raise typer.Exit(0)
 
@@ -857,8 +910,8 @@ def refresh(ctx: typer.Context) -> None:
     except httpx.HTTPError as e:
         raise AuthError(f"Failed to discover auth configuration: {e}") from e
 
-    client_id = oidc_config.cli_client_id or oidc_config.client_id
-    if not client_id or not oidc_config.token_endpoint:
+    token_endpoint, client_id = refresh_target(oidc_config, context.user.token_broker_url)
+    if not client_id or not token_endpoint:
         raise AuthError("OIDC not configured on cluster.")
 
     effective_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
@@ -867,7 +920,7 @@ def refresh(ctx: typer.Context) -> None:
 
     provider = _config_backed_token_provider(
         context_name=context.context_name,
-        token_endpoint=oidc_config.token_endpoint,
+        token_endpoint=token_endpoint,
         client_id=client_id,
         access_token=context.user.token.get_secret_value(),
         refresh_token=context.user.refresh_token.get_secret_value(),

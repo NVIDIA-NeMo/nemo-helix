@@ -32,6 +32,50 @@ def test_oidc_user_auth_compatibility_accepts_provider_overrides() -> None:
     assert config.device_token_request_includes_scope is False
 
 
+def test_oidc_platform_client_defaults_to_public() -> None:
+    config = OIDCConfig()
+
+    assert config.token_endpoint_auth_method == "none"
+    assert config.client_secret_env_var is None
+    assert config.public_client_id is None
+
+
+def test_oidc_confidential_platform_client_requires_env_var_names() -> None:
+    config = OIDCConfig(
+        client_id="nemo-helix-user",
+        token_endpoint_auth_method="client_secret_basic",
+        client_secret_env_var="NHX_OIDC_CLIENT_SECRET",
+        session_encryption_key_env_var="NHX_AUTH_SESSION_ENCRYPTION_KEY",
+        public_client_id="nemo-helix-cli",
+    )
+
+    assert config.client_id == "nemo-helix-user"
+    assert config.public_client_id == "nemo-helix-cli"
+
+
+def test_oidc_confidential_platform_client_rejects_missing_secret_env_var() -> None:
+    with pytest.raises(ValidationError, match="client_secret_env_var"):
+        OIDCConfig(
+            token_endpoint_auth_method="client_secret_basic",
+            session_encryption_key_env_var="NHX_AUTH_SESSION_ENCRYPTION_KEY",
+        )
+
+
+def test_oidc_rejects_inline_client_secret() -> None:
+    with pytest.raises(ValidationError, match="client_secret_env_var"):
+        OIDCConfig(client_secret="super-secret")  # type: ignore[call-arg]
+
+
+def test_oidc_rejects_inline_session_encryption_key() -> None:
+    with pytest.raises(ValidationError, match="session_encryption_key_env_var"):
+        OIDCConfig(session_encryption_key="key")  # type: ignore[call-arg]
+
+
+def test_oidc_public_client_must_differ_from_platform_client() -> None:
+    with pytest.raises(ValidationError, match="public_client_id"):
+        OIDCConfig(client_id="same", public_client_id="same")
+
+
 def test_oidc_bearer_token_source_rejects_unknown_values() -> None:
     with pytest.raises(ValidationError, match="bearer_token_source"):
         OIDCConfig(bearer_token_source="refresh_token")  # type: ignore[arg-type]

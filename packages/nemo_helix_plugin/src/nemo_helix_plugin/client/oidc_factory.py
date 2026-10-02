@@ -27,6 +27,7 @@ from nemo_helix_plugin.client.oidc import (
     WorkloadTokenExchangeProvider,
     _discover_oidc_client_settings,
     build_effective_scope,
+    refresh_target,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,7 @@ def resolve_oidc_provider(
     access_token: str,
     refresh_token: str | None,
     expires_at: float | None,
+    token_broker_url: str | None = None,
     config_exists: bool,
     config_path: Path,
     explicit_access_token: bool = False,
@@ -168,8 +170,7 @@ def resolve_oidc_provider(
     oidc_config = _discover_oidc_client_settings(base_url)
     tokens = TokenSet.from_access_token(access_token, refresh_token, expires_at=expires_at)
 
-    token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
+    token_endpoint, client_id = refresh_target(oidc_config, token_broker_url)
     refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     if refresh_token and (not token_endpoint or not client_id):

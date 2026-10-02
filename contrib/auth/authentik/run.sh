@@ -45,6 +45,7 @@ K8S_EXPORT_KUBECONFIG_SET="false"
 K8S_NGC_EXISTING_SECRET="${NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET:-}"
 K8S_IMAGE_PULL_SECRET="${NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET:-}"
 AUTHENTIK_WORKSPACE="${NHX_AUTHENTIK_WORKSPACE:-authentik-demo}"
+K8S_CLUSTER_DOMAIN="${NHX_AUTHENTIK_K8S_CLUSTER_DOMAIN:-cluster.local}"
 
 diagnostics_dir() {
     local mode="$1"
@@ -410,6 +411,14 @@ workload_token_private_key_file() {
     printf "%s/.generated/workload-token-private-key.pem" "${AUTHENTIK_ROOT}"
 }
 
+authentik_env_file() {
+    printf "%s/.generated/authentik.env" "${AUTHENTIK_ROOT}"
+}
+
+user_oidc_env_file() {
+    printf "%s/.generated/user-oidc.env" "${AUTHENTIK_ROOT}"
+}
+
 gateway_tls_dir() {
     local configured="${AUTHENTIK_GATEWAY_TLS_DIR:-./.generated/gateway-tls}"
     if [[ "${configured}" = /* ]]; then
@@ -593,6 +602,97 @@ ensure_workload_token_private_key() {
     echo "Generated workload token signing key: ${output}"
 }
 
+write_generated_env_file() {
+    local output="$1"
+    shift
+    local output_dir
+    local temporary
+
+    output_dir="$(dirname -- "${output}")"
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write generated secret environment file %q\n" "${output}"
+        printf "+ chmod 600 %q\n" "${output}"
+        return
+    fi
+
+    umask 077
+    mkdir -p "${output_dir}"
+    temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    printf "%s\n" "$@" >"${temporary}"
+    chmod 600 "${temporary}"
+    mv -f "${temporary}" "${output}"
+}
+
+generated_env_has_values() {
+    local input="$1"
+    shift
+    local name
+
+    (
+        set -a
+        unset "$@"
+        # shellcheck source=/dev/null
+        source "${input}"
+        for name in "$@"; do
+            [[ -n "${!name:-}" ]] || exit 1
+        done
+    )
+}
+
+ensure_authentik_secret_files() {
+    local internal_env
+    local oidc_env
+    local secret_key
+    local client_secret
+    local session_key
+
+    internal_env="$(authentik_env_file)"
+    oidc_env="$(user_oidc_env_file)"
+    if [[ -f "${internal_env}" ]] && ! generated_env_has_values "${internal_env}" AUTHENTIK_SECRET_KEY; then
+        fail "Generated Authentik secret file is invalid; replace it explicitly: ${internal_env}"
+    fi
+    if [[ ! -f "${internal_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${internal_env}"
+        else
+            secret_key="$(openssl rand -hex 32)"
+            write_generated_env_file "${internal_env}" "AUTHENTIK_SECRET_KEY=${secret_key}"
+        fi
+        echo "Generated Authentik internal secret file: ${internal_env}"
+    else
+        echo "Using Authentik internal secret file: ${internal_env}"
+    fi
+
+    if [[ -f "${oidc_env}" ]] && ! generated_env_has_values \
+        "${oidc_env}" NHX_OIDC_CLIENT_SECRET NHX_AUTH_SESSION_ENCRYPTION_KEY; then
+        fail "Generated user OIDC secret file is invalid; replace it explicitly: ${oidc_env}"
+    fi
+    if [[ ! -f "${oidc_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${oidc_env}"
+        else
+            client_secret="$(openssl rand -hex 32)"
+            session_key="$(openssl rand -hex 32)"
+            write_generated_env_file "${oidc_env}" \
+                "NHX_OIDC_CLIENT_SECRET=${client_secret}" \
+                "NHX_AUTH_SESSION_ENCRYPTION_KEY=${session_key}"
+        fi
+        echo "Generated user OIDC secret file: ${oidc_env}"
+    else
+        echo "Using user OIDC secret file: ${oidc_env}"
+    fi
+}
+
+load_compose_generated_secrets() {
+    set -a
+    # shellcheck source=/dev/null
+    source "$(authentik_env_file)"
+    # shellcheck source=/dev/null
+    source "$(user_oidc_env_file)"
+    set +a
+}
+
 render_blueprint() {
     local source="${AUTHENTIK_ROOT}/helm/files/blueprints/nemo.yaml"
     local output_dir
@@ -631,6 +731,7 @@ run_with_compose_env_in_dir() {
         return
     fi
 
+    load_compose_generated_secrets
     (
         cd "${dir}" &&
             IMAGE_REGISTRY="${IMAGE_REGISTRY}" \
@@ -656,6 +757,7 @@ run_with_reuse_compose_env_in_dir() {
         return
     fi
 
+    load_compose_generated_secrets
     (
         cd "${dir}" &&
             IMAGE_REGISTRY="${IMAGE_REGISTRY}" \
@@ -750,6 +852,7 @@ prepare_local() {
     render_blueprint
     ensure_workload_token_private_key
     ensure_gateway_tls_certificate
+    ensure_authentik_secret_files
 }
 
 compose_up() {
@@ -862,6 +965,104 @@ k8s_port_forward_pid_file_for_cluster() {
 k8s_port_forward_log_file_for_cluster() {
     local cluster_name="$1"
     printf "%s/port-forward.log" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_dir_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/gateway-tls" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_cert_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_key_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.key" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_ca_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/ca.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_matches_runtime() {
+    local cluster_name="$1"
+    local cert
+    local sans
+    local expected
+
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    [[ -f "${cert}" && -f "$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")" && -f "$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")" ]] || return 1
+    openssl x509 -in "${cert}" -checkend 0 -noout >/dev/null 2>&1 || return 1
+    sans="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null)"
+    for expected in \
+        localhost \
+        nemo-helix-envoy \
+        "nemo-helix-envoy.${HELM_NAMESPACE}" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}"; do
+        [[ "${sans}" == *"DNS:${expected}"* ]] || return 1
+    done
+    [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
+}
+
+ensure_k8s_gateway_tls_certificate() {
+    local cluster_name="$1"
+    local output_dir
+    local cert
+    local key
+    local ca
+    local openssl_config
+
+    output_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    key="$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")"
+    ca="$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")"
+    openssl_config="${output_dir}/openssl.cnf"
+
+    if [[ "${DRY_RUN}" != "true" ]] && k8s_gateway_tls_matches_runtime "${cluster_name}"; then
+        echo "Using Kubernetes gateway TLS certificate: ${cert}"
+        return
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write Kubernetes gateway TLS config %q\n" "${openssl_config}"
+        printf "+ openssl req -x509 -newkey rsa:2048 -nodes -keyout %q -out %q -days 365 -sha256 -config %q -extensions v3_req\n" "${key}" "${cert}" "${openssl_config}"
+        printf "+ cp %q %q\n" "${cert}" "${ca}"
+        return
+    fi
+
+    mkdir -p "${output_dir}"
+    cat >"${openssl_config}" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+
+[v3_req]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = nemo-helix-envoy
+DNS.3 = nemo-helix-envoy.${HELM_NAMESPACE}
+DNS.4 = nemo-helix-envoy.${HELM_NAMESPACE}.svc
+DNS.5 = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+IP.1 = 127.0.0.1
+EOF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "${key}" -out "${cert}" -days 365 -sha256 -config "${openssl_config}" -extensions v3_req >/dev/null 2>&1
+    cp "${cert}" "${ca}"
+    chmod 600 "${key}"
+    chmod 644 "${cert}" "${ca}"
+    echo "Generated Kubernetes gateway TLS certificate: ${cert}"
 }
 
 k8s_context_for_cluster() {
@@ -1011,6 +1212,58 @@ k8s_kubectl_command() {
     run_command kubectl --kubeconfig "${kubeconfig}" --context "${context}" "$@"
 }
 
+k8s_ensure_namespace() {
+    local context="$1"
+    local kubeconfig="$2"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q create namespace %q --dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" create namespace "${HELM_NAMESPACE}" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_reconcile_secret() {
+    local context="$1"
+    local kubeconfig="$2"
+    local secret_name="$3"
+    shift 3
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q -n %q create secret generic %q " \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${secret_name}"
+        quote_args "$@"
+        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
+        create secret generic "${secret_name}" "$@" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_prepare_secrets() {
+    local cluster_name="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local tls_dir
+
+    ensure_k8s_gateway_tls_certificate "${cluster_name}"
+    tls_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    k8s_ensure_namespace "${context}" "${kubeconfig}"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key \
+        "--from-file=private-key.pem=$(workload_token_private_key_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-envoy-tls \
+        "--from-file=tls.crt=${tls_dir}/tls.crt" \
+        "--from-file=tls.key=${tls_dir}/tls.key" \
+        "--from-file=ca.crt=${tls_dir}/ca.crt"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-user-oidc \
+        "--from-env-file=$(user_oidc_env_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-authentik-secret-key \
+        "--from-env-file=$(authentik_env_file)"
+}
+
 k8s_helm_install() {
     local cluster_name="$1"
     local context="$2"
@@ -1018,14 +1271,11 @@ k8s_helm_install() {
     local image
     local registry
     local tag
-    local workload_token_private_key
     local -a args
 
     image="$(image_ref)"
     registry="${image%/nhx-api:*}"
     tag="${image##*:}"
-    workload_token_private_key="$(workload_token_private_key_file)"
-
     run_in_repo helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
     run_in_repo helm repo add authentik https://charts.goauthentik.io --force-update
     run_in_repo helm dependency build k8s/helm
@@ -1059,8 +1309,6 @@ k8s_helm_install() {
         "nemo-helix.platformConfig.auth.access_keys.enabled=true"
         --set-string
         "nemo-helix.authentikPublicGateway.port=${K8S_GATEWAY_PORT}"
-        --set-file
-        "workloadTokenSigningKey.privateKeyPem=${workload_token_private_key}"
     )
     if [[ -n "${K8S_NGC_EXISTING_SECRET}" ]]; then
         args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")
@@ -1234,6 +1482,7 @@ k8s_up() {
 
     validate_k8s_runtime
     ensure_workload_token_private_key
+    ensure_authentik_secret_files
     cluster_name="${K8S_CLUSTER_NAME:-${REUSE_K8S_CLUSTER_NAME}}"
     K8S_CLUSTER_NAME="${cluster_name}"
     context="$(k8s_context_for_cluster "${K8S_RUNTIME}" "${cluster_name}")"
@@ -1254,6 +1503,7 @@ k8s_up() {
         k8s_update_default_kubeconfig "${cluster_name}" "${context}"
     fi
     k8s_load_image "${cluster_name}"
+    k8s_prepare_secrets "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_helm_install "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_wait_for_authentik "${context}" "${kubeconfig}"
     k8s_write_ca_bundle "${context}" "${kubeconfig}" "${ca_bundle}"
@@ -1418,7 +1668,10 @@ run_tests() {
     local status
 
     validate_test_lifecycle
-    ensure_workload_token_private_key
+    prepare_local
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        load_compose_generated_secrets
+    fi
     if [[ "${TEST_LIFECYCLE}" == "reuse" ]]; then
         compose_project_name="${REUSE_COMPOSE_PROJECT_NAME}"
         compose_gateway_port="${REUSE_COMPOSE_GATEWAY_PORT}"
@@ -1437,6 +1690,9 @@ run_tests() {
         run_pytest_with_diagnostics "${diagnostics}" \
             env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
             "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=<redacted>" \
+            "AUTHENTIK_SECRET_KEY=<redacted>" \
+            "NHX_OIDC_CLIENT_SECRET=<redacted>" \
+            "NHX_AUTH_SESSION_ENCRYPTION_KEY=<redacted>" \
             "E2E_SERVICES_LOG_DIR=${diagnostics}" \
             "NHX_E2E_COMPOSE_LIFECYCLE=${TEST_LIFECYCLE}" \
             "NHX_AUTHENTIK_COMPOSE_PROJECT_NAME=${compose_project_name}" \
@@ -1451,6 +1707,9 @@ run_tests() {
         env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" \
         "BAKE_TAG=${BAKE_TAG}" \
         "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=${workload_identity_password}" \
+        "AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}" \
+        "NHX_OIDC_CLIENT_SECRET=${NHX_OIDC_CLIENT_SECRET}" \
+        "NHX_AUTH_SESSION_ENCRYPTION_KEY=${NHX_AUTH_SESSION_ENCRYPTION_KEY}" \
         "E2E_SERVICES_LOG_DIR=${diagnostics}" \
         "NHX_E2E_COMPOSE_LIFECYCLE=${TEST_LIFECYCLE}" \
         "NHX_AUTHENTIK_COMPOSE_PROJECT_NAME=${compose_project_name}" \
@@ -1465,11 +1724,15 @@ run_tests() {
 run_k8s_tests() {
     local diagnostics
     local k8s_diagnostics
+    local prepared_cluster_name
     local workload_token_private_key
     local status
 
     validate_k8s_runtime
     ensure_workload_token_private_key
+    ensure_authentik_secret_files
+    prepared_cluster_name="${K8S_CLUSTER_NAME:-test}"
+    ensure_k8s_gateway_tls_certificate "${prepared_cluster_name}"
     workload_token_private_key="$(workload_token_private_key_file)"
     diagnostics="$(prepare_diagnostics_dir kubernetes)"
     write_diagnostics_metadata kubernetes "${diagnostics}"
@@ -1505,6 +1768,9 @@ run_k8s_tests() {
             "NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
             "NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
             "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+            "NHX_AUTHENTIK_K8S_GATEWAY_TLS_DIR=$(k8s_gateway_tls_dir_for_cluster "${prepared_cluster_name}")" \
+            "NHX_AUTHENTIK_K8S_AUTHENTIK_ENV_FILE=$(authentik_env_file)" \
+            "NHX_AUTHENTIK_K8S_USER_OIDC_ENV_FILE=$(user_oidc_env_file)" \
             uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
         return
     fi
@@ -1526,6 +1792,9 @@ run_k8s_tests() {
         "NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
         "NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
         "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+        "NHX_AUTHENTIK_K8S_GATEWAY_TLS_DIR=$(k8s_gateway_tls_dir_for_cluster "${prepared_cluster_name}")" \
+        "NHX_AUTHENTIK_K8S_AUTHENTIK_ENV_FILE=$(authentik_env_file)" \
+        "NHX_AUTHENTIK_K8S_USER_OIDC_ENV_FILE=$(user_oidc_env_file)" \
         uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
     status="$?"
     echo "Auth-idp Kubernetes diagnostics: ${diagnostics}"

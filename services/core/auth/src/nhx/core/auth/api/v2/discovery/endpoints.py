@@ -23,6 +23,15 @@ _idp_discovery_cache: dict | None = None
 _idp_discovery_cache_time: float = 0.0
 
 
+class OidcAdvertisedClient(BaseModel):
+    """One user-login OAuth client advertised by this deployment."""
+
+    name: Literal["platform", "public"]
+    client_id: str
+    token_endpoint_auth_method: Literal["none", "client_secret_basic"]
+    default: bool
+
+
 class OIDCDiscoveryResponse(BaseModel):
     """OIDC discovery response for CLI/SDK."""
 
@@ -32,6 +41,11 @@ class OIDCDiscoveryResponse(BaseModel):
     device_authorization_endpoint: str | None = None
     userinfo_endpoint: str | None = None
     client_id: str
+    token_endpoint_auth_method: Literal["none", "client_secret_basic"] = "none"
+    public_client_id: str | None = None
+    login_url: str | None = None
+    cli_login_url: str | None = None
+    clients: list[OidcAdvertisedClient] = []
     cli_client_id: str | None = None
     bearer_token_source: Literal["access_token", "id_token"] = "access_token"
     device_authorization_requires_device_id: bool = False
@@ -120,7 +134,12 @@ need to authenticate with this NeMo Helix deployment.
   - `token_endpoint`: Token exchange endpoint
   - `device_authorization_endpoint`: Device flow authorization endpoint (for CLI)
   - `userinfo_endpoint`: UserInfo endpoint
-  - `client_id`: OAuth client ID to use
+  - `client_id`: Platform OAuth client ID. This is the default login client.
+  - `token_endpoint_auth_method`: `none` or `client_secret_basic` for the platform client
+  - `public_client_id`: Optional extra public client. Present only when configured.
+  - `clients`: User-login clients that are configured. The default entry is the platform client.
+  - `login_url`: Studio login URL when the platform client uses client_secret_basic
+  - `cli_login_url`: CLI login URL when the platform client uses client_secret_basic
   - `cli_client_id`: Optional OAuth client ID dedicated to interactive CLI authentication
   - `bearer_token_source`: Token response field clients send to NeMo Helix APIs
   - `device_authorization_requires_device_id`: Whether CLI device requests must include a generated `device_id`
@@ -140,6 +159,28 @@ async def get_auth_discovery_endpoint(request: Request) -> AuthDiscoveryResponse
     return await get_auth_discovery(request)
 
 
+def _advertised_clients(oidc) -> list[OidcAdvertisedClient]:
+    """Return the user-login clients this deployment has configured."""
+    clients = [
+        OidcAdvertisedClient(
+            name="platform",
+            client_id=oidc.client_id,
+            token_endpoint_auth_method=oidc.token_endpoint_auth_method,
+            default=True,
+        )
+    ]
+    if oidc.public_client_id:
+        clients.append(
+            OidcAdvertisedClient(
+                name="public",
+                client_id=oidc.public_client_id,
+                token_endpoint_auth_method="none",
+                default=False,
+            )
+        )
+    return clients
+
+
 async def get_auth_discovery(request: Request | None = None) -> AuthDiscoveryResponse:
     """Return auth configuration for CLI/SDK discovery.
 
@@ -152,6 +193,14 @@ async def get_auth_discovery(request: Request | None = None) -> AuthDiscoveryRes
     if config.oidc.enabled and config.oidc.issuer:
         discovery = await _fetch_idp_discovery(config.oidc.issuer, config.oidc.discovery_cache_ttl)
 
+        clients = _advertised_clients(config.oidc)
+        login_url = None
+        cli_login_url = None
+        if config.oidc.token_endpoint_auth_method == "client_secret_basic":
+            base = str(request.base_url).rstrip("/") if request is not None else ""
+            login_url = f"{base}/apis/auth/v2/login"
+            cli_login_url = f"{base}/apis/auth/v2/cli/login"
+
         oidc = OIDCDiscoveryResponse(
             issuer=config.oidc.issuer,
             authorization_endpoint=config.oidc.authorization_endpoint or discovery.get("authorization_endpoint"),
@@ -161,6 +210,11 @@ async def get_auth_discovery(request: Request | None = None) -> AuthDiscoveryRes
             ),
             userinfo_endpoint=config.oidc.userinfo_endpoint or discovery.get("userinfo_endpoint"),
             client_id=config.oidc.client_id,
+            token_endpoint_auth_method=config.oidc.token_endpoint_auth_method,
+            public_client_id=config.oidc.public_client_id,
+            login_url=login_url,
+            cli_login_url=cli_login_url,
+            clients=clients,
             cli_client_id=config.oidc.cli_client_id,
             bearer_token_source=config.oidc.bearer_token_source,
             device_authorization_requires_device_id=config.oidc.device_authorization_requires_device_id,

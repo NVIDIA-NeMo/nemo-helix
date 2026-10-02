@@ -81,33 +81,6 @@ decide whether to reuse existing keys or generate first-install values.
 {{- end -}}
 {{- end -}}
 
-{{- define "nemo-helix-authentik.workloadTokenSigningKey.secretName" -}}
-{{- required "workloadTokenSigningKey.secretName is required" .Values.workloadTokenSigningKey.secretName -}}
-{{- end -}}
-
-{{- define "nemo-helix-authentik.workloadTokenSigningKey.key" -}}
-{{- required "workloadTokenSigningKey.key is required" .Values.workloadTokenSigningKey.key -}}
-{{- end -}}
-
-{{/*
-Resolve the workload token signing private key. Prefer an explicitly supplied
-value, preserve an existing Secret key across upgrades, then generate one for
-first install.
-*/}}
-{{- define "nemo-helix-authentik.workloadTokenSigningKey.privateKeyPem" -}}
-{{- $secretName := include "nemo-helix-authentik.workloadTokenSigningKey.secretName" . -}}
-{{- $secretKey := include "nemo-helix-authentik.workloadTokenSigningKey.key" . -}}
-{{- $privateKeyPem := .Values.workloadTokenSigningKey.privateKeyPem | default "" -}}
-{{- $existingData := include "nemo-helix-authentik.existingSecretData" (dict "root" . "secretName" $secretName) | fromJson -}}
-{{- if $privateKeyPem -}}
-{{- $privateKeyPem -}}
-{{- else if hasKey $existingData $secretKey -}}
-{{- index $existingData $secretKey | b64dec -}}
-{{- else -}}
-{{- genPrivateKey "rsa" -}}
-{{- end -}}
-{{- end -}}
-
 {{/*
 Resolve a shared PostgreSQL password once. The initdb script only provisions
 roles when the data directory is empty, so existing Secret data must remain the

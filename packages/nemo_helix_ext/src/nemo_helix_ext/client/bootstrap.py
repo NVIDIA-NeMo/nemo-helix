@@ -64,7 +64,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.types import RetryPolicy
 
-from nemo_helix_ext.auth.helpers import NHXOIDCConfig, build_effective_scope, discover_nhx_config
+from nemo_helix_ext.auth.helpers import NHXOIDCConfig, build_effective_scope, discover_nhx_config, refresh_target
 from nemo_helix_ext.auth.token_provider import (
     OIDCTokenProvider,
     TokenSet,
@@ -553,8 +553,7 @@ def resolve_bootstrap(
         expires_at=resolved.user.expires_at,
     )
 
-    token_endpoint = oidc_config.token_endpoint or ""
-    client_id = oidc_config.cli_client_id or oidc_config.client_id or ""
+    token_endpoint, client_id = refresh_target(oidc_config, resolved.user.token_broker_url)
     refresh_scope = build_effective_scope(oidc_config.default_scopes, oidc_config.scope_prefix)
 
     # Only share the provider (and enable persistence/locking) when reading

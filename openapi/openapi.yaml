@@ -66,10 +66,16 @@ paths:
         \ OIDC issuer URL\n  - `authorization_endpoint`: Authorization endpoint for\
         \ browser-based flows\n  - `token_endpoint`: Token exchange endpoint\n  -\
         \ `device_authorization_endpoint`: Device flow authorization endpoint (for\
-        \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: OAuth\
-        \ client ID to use\n  - `cli_client_id`: Optional OAuth client ID dedicated\
-        \ to interactive CLI authentication\n  - `bearer_token_source`: Token response\
-        \ field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
+        \ CLI)\n  - `userinfo_endpoint`: UserInfo endpoint\n  - `client_id`: Platform\
+        \ OAuth client ID. This is the default login client.\n  - `token_endpoint_auth_method`:\
+        \ `none` or `client_secret_basic` for the platform client\n  - `public_client_id`:\
+        \ Optional extra public client. Present only when configured.\n  - `clients`:\
+        \ User-login clients that are configured. The default entry is the platform\
+        \ client.\n  - `login_url`: Studio login URL when the platform client uses\
+        \ client_secret_basic\n  - `cli_login_url`: CLI login URL when the platform\
+        \ client uses client_secret_basic\n  - `cli_client_id`: Optional OAuth client\
+        \ ID dedicated to interactive CLI authentication\n  - `bearer_token_source`:\
+        \ Token response field clients send to NeMo Helix APIs\n  - `device_authorization_requires_device_id`:\
         \ Whether CLI device requests must include a generated `device_id`\n  - `device_authorization_display_name`:\
         \ Optional device name shown during device authorization\n  - `device_token_request_includes_scope`:\
         \ Whether CLI device token requests include the requested scopes\n  - `default_scopes`:\
@@ -493,6 +499,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/cli/login:
+    post:
+      tags:
+      - Authentication
+      summary: Start Cli Login
+      operationId: start_cli_login_apis_auth_v2_cli_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliLoginStart'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Start Cli Login Apis Auth V2 Cli Login Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/cli/login/{transaction_id}:
+    get:
+      tags:
+      - Authentication
+      summary: Continue Cli Login
+      operationId: continue_cli_login_apis_auth_v2_cli_login__transaction_id__get
+      parameters:
+      - name: transaction_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Transaction Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/cli/token:
+    post:
+      tags:
+      - Authentication
+      summary: Cli Token
+      operationId: cli_token_apis_auth_v2_cli_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CliTokenRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  anyOf:
+                  - type: string
+                  - type: integer
+                type: object
+                title: Response Cli Token Apis Auth V2 Cli Token Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/auth/v2/iam/role-bindings:
     get:
       tags:
@@ -653,6 +742,85 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login:
+    get:
+      tags:
+      - Authentication
+      summary: Start Login
+      operationId: start_login_apis_auth_v2_login_get
+      parameters:
+      - name: return_to
+        in: query
+        required: false
+        schema:
+          type: string
+          default: /
+          title: Return To
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/login/callback:
+    get:
+      tags:
+      - Authentication
+      summary: Login Callback
+      operationId: login_callback_apis_auth_v2_login_callback_get
+      parameters:
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Code
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+          title: State
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/auth/v2/logout:
+    post:
+      tags:
+      - Authentication
+      summary: Logout
+      operationId: logout_apis_auth_v2_logout_post
+      responses:
+        '204':
+          description: Successful Response
+  /apis/auth/v2/session:
+    get:
+      tags:
+      - Authentication
+      summary: Session
+      operationId: session_apis_auth_v2_session_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSessionResponse'
   /apis/entities/v2/entities/{id}:
     get:
       tags:
@@ -10249,6 +10417,30 @@ components:
       - policy
       title: ClavataRailOptions
       description: Configuration data for the Clavata API
+    CliLoginStart:
+      properties:
+        redirect_uri:
+          type: string
+          title: Redirect Uri
+      type: object
+      required:
+      - redirect_uri
+      title: CliLoginStart
+    CliTokenRequest:
+      properties:
+        grant_type:
+          type: string
+          title: Grant Type
+        code:
+          title: Code
+          type: string
+        refresh_token:
+          title: Refresh Token
+          type: string
+      type: object
+      required:
+      - grant_type
+      title: CliTokenRequest
     ColumnLayout:
       properties:
         order:
@@ -17690,6 +17882,28 @@ components:
         client_id:
           type: string
           title: Client Id
+        token_endpoint_auth_method:
+          type: string
+          enum:
+          - none
+          - client_secret_basic
+          title: Token Endpoint Auth Method
+          default: none
+        public_client_id:
+          title: Public Client Id
+          type: string
+        login_url:
+          title: Login Url
+          type: string
+        cli_login_url:
+          title: Cli Login Url
+          type: string
+        clients:
+          items:
+            $ref: '#/components/schemas/OidcAdvertisedClient'
+          type: array
+          title: Clients
+          default: []
         cli_client_id:
           title: Cli Client Id
           type: string
@@ -17740,6 +17954,34 @@ components:
       - client_id
       title: OIDCDiscoveryResponse
       description: OIDC discovery response for CLI/SDK.
+    OidcAdvertisedClient:
+      properties:
+        name:
+          type: string
+          enum:
+          - platform
+          - public
+          title: Name
+        client_id:
+          type: string
+          title: Client Id
+        token_endpoint_auth_method:
+          type: string
+          enum:
+          - none
+          - client_secret_basic
+          title: Token Endpoint Auth Method
+        default:
+          type: boolean
+          title: Default
+      type: object
+      required:
+      - name
+      - client_id
+      - token_endpoint_auth_method
+      - default
+      title: OidcAdvertisedClient
+      description: One user-login OAuth client advertised by this deployment.
     OpenAIListModelsResp:
       properties:
         data:
@@ -20953,6 +21195,34 @@ components:
       type: object
       title: VolcanoJobExecutionProfileConfig
       description: Configuration for Volcano Job Execution Profile
+    WebSessionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        email:
+          title: Email
+          type: string
+        groups:
+          items:
+            type: string
+          type: array
+          title: Groups
+        account_id:
+          type: string
+          title: Account Id
+        authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Authz Aliases
+      type: object
+      required:
+      - id
+      - groups
+      - account_id
+      - authz_aliases
+      title: WebSessionResponse
     WorkloadTokenExchangeErrorResponse:
       properties:
         error:

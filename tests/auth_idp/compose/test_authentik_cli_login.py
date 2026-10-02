@@ -21,7 +21,9 @@ def test_authentik_discovery_exposes_gateway_reachable_device_flow(authentik_sta
     oidc = discover_nhx_config(authentik_stack.gateway_base_url)
 
     assert oidc.auth_enabled is True
-    assert oidc.client_id == "nemo-helix-cli"
+    assert oidc.client_id == "nemo-helix-user"
+    assert oidc.public_client_id == "nemo-helix-cli"
+    assert oidc.token_endpoint_auth_method == "client_secret_basic"
     assert oidc.token_endpoint == f"{authentik_stack.gateway_base_url}/application/o/token/"
     assert oidc.device_authorization_endpoint == f"{authentik_stack.gateway_base_url}/application/o/device/"
     assert oidc.default_scopes == "openid email offline_access groups"
@@ -29,7 +31,7 @@ def test_authentik_discovery_exposes_gateway_reachable_device_flow(authentik_sta
     response = httpx.post(
         oidc.device_authorization_endpoint,
         data={
-            "client_id": oidc.client_id,
+            "client_id": oidc.public_client_id,
             "scope": oidc.default_scopes,
         },
         timeout=30.0,

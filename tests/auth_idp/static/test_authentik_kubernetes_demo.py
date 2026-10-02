@@ -154,6 +154,8 @@ def test_authentik_prepare_local_creates_shared_generated_inputs() -> None:
     assert "helm/files/blueprints/nemo.yaml" in output
     assert "contrib/auth/authentik/.generated/workload-token-private-key.pem" in output
     assert "contrib/auth/authentik/.generated/gateway-tls" in output
+    assert "contrib/auth/authentik/.generated/authentik.env" in output
+    assert "contrib/auth/authentik/.generated/user-oidc.env" in output
     assert "docker compose up" not in output
 
 
@@ -180,17 +182,21 @@ def test_authentik_user_startup_docs_use_manual_runtime_steps() -> None:
     assert '--principal "$AUTHENTIK_WORKLOAD_GROUP"' in tutorial
     assert "contrib/auth/authentik/run.sh prepare-local" in tutorial
     assert "cd contrib/auth/authentik/compose" not in tutorial
-    assert "docker compose -f contrib/auth/authentik/compose/docker-compose.yml up" in tutorial
-    assert "docker compose -f contrib/auth/authentik/compose/docker-compose.yml down -v" in tutorial
-    assert (
-        "--set-file workloadTokenSigningKey.privateKeyPem="
-        "contrib/auth/authentik/.generated/workload-token-private-key.pem"
-    ) in tutorial
+    assert "--env-file contrib/auth/authentik/.generated/authentik.env" in tutorial
+    assert "--env-file contrib/auth/authentik/.generated/user-oidc.env" in tutorial
+    assert "-f contrib/auth/authentik/compose/docker-compose.yml up" in tutorial
+    assert "-f contrib/auth/authentik/compose/docker-compose.yml down -v" in tutorial
+    assert "create secret generic nemo-workload-token-signing-key" in tutorial
+    assert "create secret generic nemo-helix-envoy-tls" in tutorial
+    assert "create secret generic nemo-helix-user-oidc" in tutorial
+    assert "create secret generic nemo-authentik-secret-key" in tutorial
+    assert "--set-file workloadTokenSigningKey.privateKeyPem" not in tutorial
     assert "contrib/auth/authentik/run.sh compose" not in tutorial
     assert "contrib/auth/authentik/run.sh k8s" not in tutorial
     assert "run.sh" not in compose_readme
     assert "run.sh" not in kubernetes_readme
-    assert "docker compose up" in compose_readme
+    assert "docker compose" in compose_readme
+    assert "--env-file ../.generated/authentik.env" in compose_readme
     assert "nemo-helix-authentik" in compose_readme
     assert "helm --kube-context" in kubernetes_readme
     assert "(implementation-details.md)" in compose_readme
@@ -339,6 +345,8 @@ def test_authentik_umbrella_values_use_latest_authentik_chart_without_image_tag_
             }
         },
     } in authentik_values["global"]["env"]
+    assert authentik_values["global"]["envFrom"] == [{"secretRef": {"name": "nemo-authentik-secret-key"}}]
+    assert "existingSecret" not in authentik_values["authentik"]
     assert authentik_values["authentik"]["postgresql"] == {
         "host": "shared-postgresql",
         "name": "authentik",
@@ -1032,10 +1040,15 @@ def test_authentik_umbrella_values_configure_nemo_envoy_as_the_only_edge_proxy()
     }
     assert nemo_values["platformConfig"]["auth"]["access_keys"] == {"enabled": False}
     oidc = nemo_values["platformConfig"]["auth"]["oidc"]
-    assert oidc["issuer"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-cli/"
+    assert oidc["issuer"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-user/"
     assert oidc["additional_issuers"][0] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo/"
-    assert oidc["additional_issuers"][1] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-cli/"
-    assert oidc["additional_issuers"][2] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo/"
+    assert oidc["additional_issuers"][1] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-cli/"
+    assert oidc["additional_issuers"][2] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-user/"
+    assert oidc["additional_issuers"][3] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo-cli/"
+    assert oidc["additional_issuers"][4] == f"{PUBLIC_GATEWAY_URL_TEMPLATE}/application/o/nemo/"
+    assert oidc["client_id"] == "nemo-helix-user"
+    assert oidc["public_client_id"] == "nemo-helix-cli"
+    assert oidc["token_endpoint_auth_method"] == "client_secret_basic"
     assert oidc["workload_token_endpoint"] == f"{ENVOY_SERVICE_URL_TEMPLATE}/apis/auth/token"
     assert oidc["workload_subject_jwks_uri"] == f"{AUTHENTIK_SERVICE_URL_TEMPLATE}/application/o/nemo-workload/jwks/"
     assert oidc["workload_subject_issuers"] == [
@@ -1111,7 +1124,7 @@ def test_authentik_umbrella_values_mount_workload_token_signing_key_as_file() ->
     assert signing_key["secretName"] == "nemo-workload-token-signing-key"
     assert signing_key["key"] == "private-key.pem"
     assert signing_key["mountPath"] == "/etc/nhx/workload-token"
-    assert signing_key["privateKeyPem"] == ""
+    assert "privateKeyPem" not in signing_key
     assert token_signing["private_key_file"] == "/etc/nhx/workload-token/private-key.pem"
     assert nemo_values["api"]["env"]["NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE"] == (
         "/etc/nhx/workload-token/private-key.pem"
@@ -1620,15 +1633,16 @@ def test_authentik_kubernetes_runner_skips_build_only_for_explicit_image() -> No
 def test_authentik_kubernetes_runtime_uses_provisioned_signing_key_file() -> None:
     run_sh = (AUTHENTIK_DIR / "run.sh").read_text(encoding="utf-8")
     runtime_impl = Path("tests/auth_idp/runtime_kubernetes.py").read_text(encoding="utf-8")
-    helpers = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
 
     assert "ensure_workload_token_private_key" in run_sh
+    assert "k8s_prepare_secrets" in run_sh
+    assert 'k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key' in run_sh
     assert "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE" in run_sh
     assert "WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV" in runtime_impl
-    assert '"--set-file"' in runtime_impl
-    assert "workloadTokenSigningKey.privateKeyPem=" in runtime_impl
-    assert "workloadTokenSigningKey.privateKeyPem" in helpers
-    assert 'genPrivateKey "rsa"' in helpers
+    assert "_prepare_precreated_secrets" in runtime_impl
+    assert '"--set-file"' not in runtime_impl
+    assert "workloadTokenSigningKey.privateKeyPem=" not in runtime_impl
+    assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
 
 
 def test_authentik_kubernetes_live_test_uses_workload_client_audience_for_subject_token() -> None:
@@ -1732,29 +1746,15 @@ def test_authentik_umbrella_values_configure_workload_token_tls() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
     tls_values = values["workloadTokenTls"]
     nemo_values = values["nemo-helix"]
-    tls_template = (HELM_DIR / "templates" / "workload-token-tls.yaml").read_text(encoding="utf-8")
-    helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
 
-    assert tls_values["create"] is True
     assert tls_values["secretName"] == "nemo-helix-envoy-tls"
-    assert tls_values["durationDays"] == 365
     assert tls_values["mountPath"] == "/etc/nhx/workload-token-tls"
     assert tls_values["caBundleFile"] == "/etc/nhx/workload-token-ca/ca.crt"
-    assert tls_values["dnsNames"] == ["localhost"]
-    assert "127.0.0.1" in tls_values["ipAddresses"]
-    assert "selfSignedIssuerName" not in tls_values
-    assert "caIssuerName" not in tls_values
-    assert "caSecretName" not in tls_values
-    assert "type: kubernetes.io/tls" in tls_template
-    assert 'define "nemo-helix-authentik.serviceDnsNames"' in helpers_template
-    assert 'include "nemo-helix-authentik.serviceDnsNames"' in tls_template
-    assert ".Values.integration.nemoHelix.envoyServiceName" in tls_template
-    assert "$nemoHelixValues.envoyProxy.serviceNamespace" in tls_template
-    assert 'include "nemo-helix-authentik.existingSecretData"' in tls_template
-    assert "genSignedCert" in tls_template
-    assert "kind: Issuer" not in tls_template
-    assert "kind: Certificate" not in tls_template
-    assert "cert-manager.io/v1" not in tls_template
+    assert "create" not in tls_values
+    assert "durationDays" not in tls_values
+    assert "dnsNames" not in tls_values
+    assert "ipAddresses" not in tls_values
+    assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert nemo_values["envoyProxy"]["extraVolumes"] == [
         {"name": "tmp", "emptyDir": {}},
         {"name": "workload-token-tls", "secret": {"secretName": "nemo-helix-envoy-tls"}},

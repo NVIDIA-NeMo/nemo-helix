@@ -13,6 +13,7 @@ import {
   type TraceDatasetFrame,
 } from '@nemo/sdk/generated/anonymizer/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { withWebSessionRequest } from '@studio/providers/auth/webSessionRequest';
 import { asRecord } from '@studio/util/guards';
 import { readLineDelimitedStream } from '@studio/util/lineStream';
 
@@ -114,16 +115,19 @@ export const streamAnonymizerPreview = async (
   signal: AbortSignal,
   onFrame: (frame: PreviewFrame) => void
 ): Promise<void> => {
-  const response = await fetch(`${PLATFORM_BASE_URL}${previewPath(workspace)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      'X-Source': 'NeMo Studio',
-    },
-    body: JSON.stringify(request),
-    signal,
-  });
+  const response = await fetch(
+    `${PLATFORM_BASE_URL}${previewPath(workspace)}`,
+    withWebSessionRequest({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        'X-Source': 'NeMo Studio',
+      },
+      body: JSON.stringify(request),
+      signal,
+    })
+  );
 
   if (!response.ok) {
     const body = await response.text();

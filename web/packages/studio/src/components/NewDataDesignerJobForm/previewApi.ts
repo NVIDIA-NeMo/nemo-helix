@@ -3,6 +3,7 @@
 
 import type { DataDesignerConfig } from '@nemo/sdk/generated/data-designer/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { withWebSessionRequest } from '@studio/providers/auth/webSessionRequest';
 import { readLineDelimitedStream } from '@studio/util/lineStream';
 
 /** Request body for the data designer preview stream endpoint */
@@ -63,16 +64,19 @@ export async function streamPreview(
   signal: AbortSignal,
   onLine: (line: string) => void
 ): Promise<void> {
-  const response = await fetch(`${PLATFORM_BASE_URL}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      'X-Source': 'NeMo Studio',
-    },
-    body: JSON.stringify(requestBody),
-    signal,
-  });
+  const response = await fetch(
+    `${PLATFORM_BASE_URL}${path}`,
+    withWebSessionRequest({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        'X-Source': 'NeMo Studio',
+      },
+      body: JSON.stringify(requestBody),
+      signal,
+    })
+  );
 
   if (!response.ok) {
     const text = await response.text();

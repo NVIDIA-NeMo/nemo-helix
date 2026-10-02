@@ -471,6 +471,8 @@ navigation:
             contents:
               - page: OIDC Setup
                 path: ../../auth/authentication/oidc.mdx
+              - page: Confidential OIDC Client
+                path: ../../auth/authentication/confidential-client.mdx
               - page: Using Authentication
                 path: ../../auth/authentication/using-authentication.mdx
               - section: Providers

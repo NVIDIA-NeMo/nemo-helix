@@ -2,26 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 workloadTokenSigningKey:
-  create: true
   secretName: &workloadTokenSigningKeySecretName nemo-workload-token-signing-key
   key: private-key.pem
   mountPath: &workloadTokenSigningKeyMountPath /etc/nhx/workload-token
-  privateKeyPem: ""
 
 workloadTokenTls:
-  create: true
   secretName: &workloadTokenTlsSecretName nemo-helix-envoy-tls
   mountPath: &workloadTokenTlsMountPath /etc/nhx/workload-token-tls
   caBundleMountPath: &workloadTokenTlsCaBundleMountPath /etc/nhx/workload-token-ca
   caBundleFile: &workloadTokenTlsCaBundleFile /etc/nhx/workload-token-ca/ca.crt
-  durationDays: 3650
-  ipAddresses:
-    - 127.0.0.1
-  dnsNames: []
 
 zitadelSecrets:
   masterkey:
-    create: true
     secretName: &zitadelMasterkeySecretName zitadel-masterkey
     key: masterkey
   demo:
@@ -238,6 +230,18 @@ nemo-helix:
             name: *zitadelSeedStateSecretName
             key: nemo_client_secret
             optional: true
+      NHX_OIDC_CLIENT_SECRET:
+        valueFrom:
+          secretKeyRef:
+            name: *zitadelSeedStateSecretName
+            key: user_login_client_secret
+            optional: true
+      NHX_AUTH_SESSION_ENCRYPTION_KEY:
+        valueFrom:
+          secretKeyRef:
+            name: *zitadelSeedStateSecretName
+            key: session_encryption_key
+            optional: true
       SSL_CERT_FILE: *workloadTokenTlsCaBundleFile
       REQUESTS_CA_BUNDLE: *workloadTokenTlsCaBundleFile
     extraVolumes:
@@ -343,7 +347,12 @@ nemo-helix:
         issuer: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}'
         additional_issuers:
           - '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "zitadel" "scheme" "http" "port" 8080) }}'
-        client_id: "__ZITADEL_NEMO_CLIENT_ID__"
+        client_id: "__ZITADEL_USER_LOGIN_CLIENT_ID__"
+        token_endpoint_auth_method: client_secret_basic
+        client_secret_env_var: NHX_OIDC_CLIENT_SECRET
+        session_encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
+        public_client_id: "__ZITADEL_NEMO_CLIENT_ID__"
+        login_redirect_uri: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/apis/auth/v2/login/callback'
         token_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
         device_authorization_endpoint: '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/device_authorization'
         jwks_uri: '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/keys'

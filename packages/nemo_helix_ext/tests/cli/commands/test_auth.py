@@ -46,6 +46,8 @@ def _mock_oidc_config() -> SimpleNamespace:
         issuer="https://idp.example.com",
         client_id="test-client",
         cli_client_id=None,
+        token_endpoint_auth_method="none",
+        clients=(),
         bearer_token_source="access_token",
         token_endpoint="https://idp.example.com/token",
         device_authorization_endpoint="https://idp.example.com/device",
@@ -327,6 +329,7 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
         return SimpleNamespace(
             client_id="test-client-id",
             cli_client_id="test-cli-client-id",
+            token_endpoint_auth_method="none",
             bearer_token_source="id_token",
             token_endpoint="https://idp.example.com/token",
             default_scopes="openid profile email",
@@ -453,6 +456,7 @@ def test_ensure_valid_token_refreshes_expired_opaque_token_from_config(
         lambda *_args, **_kwargs: SimpleNamespace(
             client_id="web-client",
             cli_client_id="cli-client",
+            token_endpoint_auth_method="none",
             bearer_token_source="access_token",
             token_endpoint="https://idp.example.com/token",
             default_scopes="openid profile email",
@@ -536,6 +540,7 @@ def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
         lambda *_args, **_kwargs: SimpleNamespace(
             client_id="web-client",
             cli_client_id="cli-client",
+            token_endpoint_auth_method="none",
             bearer_token_source="access_token",
             token_endpoint="https://idp.example.com/token",
             default_scopes="openid profile email",
@@ -578,6 +583,7 @@ def test_ensure_valid_token_propagates_rotated_token_persistence_failure(
         lambda *_args, **_kwargs: SimpleNamespace(
             client_id="web-client",
             cli_client_id="cli-client",
+            token_endpoint_auth_method="none",
             bearer_token_source="access_token",
             token_endpoint="https://idp.example.com/token",
             default_scopes="openid profile email",
@@ -1380,6 +1386,8 @@ def test_auth_login_passes_device_compatibility_settings(
             issuer="https://idp.example.com",
             client_id="web-client",
             cli_client_id="cli-client",
+            token_endpoint_auth_method="none",
+            clients=(),
             bearer_token_source="id_token",
             token_endpoint="https://idp.example.com/token",
             device_authorization_endpoint="https://idp.example.com/device",

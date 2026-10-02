@@ -449,6 +449,36 @@ authz:
       post:
         permissions: []
         scopes: []
+    # Confidential login broker. Callers have no platform token yet; the handlers
+    # authenticate the browser session cookie or the one-time CLI code themselves.
+    /apis/auth/v2/cli/login:
+      post:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/cli/login/{transaction_id}:
+      get:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/cli/token:
+      post:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/login:
+      get:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/login/callback:
+      get:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/logout:
+      post:
+        permissions: []
+        scopes: []
+    /apis/auth/v2/session:
+      get:
+        permissions: []
+        scopes: []
     # These scopes gate the caller's own access-key token, not RBAC.
     # `permissions: []` is intentional: these routes are self-service, ownership-checked
     # in the handler, not RBAC-gated.

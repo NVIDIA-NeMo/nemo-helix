@@ -234,6 +234,17 @@ def poll_device_token(
     )
 
 
+def advertised_device_client_id(oidc: object) -> str:
+    """Return the public device-flow client when one is advertised."""
+    public_client_id = getattr(oidc, "public_client_id", None)
+    if isinstance(public_client_id, str) and public_client_id:
+        return public_client_id
+    client_id = getattr(oidc, "client_id", None)
+    if not isinstance(client_id, str) or not client_id:
+        raise AssertionError("discovery did not advertise a device-flow client")
+    return client_id
+
+
 def authenticate_authentik_device_flow(
     *,
     gateway_base_url: str,

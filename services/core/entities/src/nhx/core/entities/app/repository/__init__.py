@@ -7,6 +7,12 @@ Provides abstract interfaces and implementations for database operations.
 """
 
 from nhx.core.entities.app.database import create_async_engine_for_entities
+from nhx.core.entities.app.repository.account_credential import (
+    AccountCredentialConflictError,
+    AccountCredentialRecord,
+    AccountCredentialStore,
+    credential_lookup_hash,
+)
 from nhx.core.entities.app.repository.account_identity import (
     AccountIdentityConflictError,
     AccountIdentityRecord,
@@ -110,6 +116,9 @@ __all__ = [
     "AccountIdentityRecord",
     "AccountIdentityStore",
     "AccountIdentityUnavailableError",
+    "AccountCredentialConflictError",
+    "AccountCredentialRecord",
+    "AccountCredentialStore",
     "EntityRepositoryInterface",
     "SQLAlchemyWorkspaceRepository",
     "SQLAlchemyEntityRepository",
@@ -119,4 +128,5 @@ __all__ = [
     "get_async_session_maker",
     "initialize_async_engine",
     "ping_database",
+    "credential_lookup_hash",
 ]

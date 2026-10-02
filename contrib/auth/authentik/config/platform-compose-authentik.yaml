@@ -23,12 +23,19 @@ auth:
     enabled: true
   oidc:
     enabled: true
-    issuer: "http://authentik-server:9000/application/o/nemo-cli/"
+    issuer: "http://authentik-server:9000/application/o/nemo-user/"
     additional_issuers:
       - "http://authentik-server:9000/application/o/nemo/"
+      - "http://authentik-server:9000/application/o/nemo-cli/"
+      - "https://127.0.0.1:18080/application/o/nemo-user/"
       - "https://127.0.0.1:18080/application/o/nemo-cli/"
       - "https://127.0.0.1:18080/application/o/nemo/"
-    client_id: "nemo-helix-cli"
+    login_redirect_uri: "https://127.0.0.1:18080/apis/auth/v2/login/callback"
+    client_id: "nemo-helix-user"
+    token_endpoint_auth_method: client_secret_basic
+    client_secret_env_var: NHX_OIDC_CLIENT_SECRET
+    session_encryption_key_env_var: NHX_AUTH_SESSION_ENCRYPTION_KEY
+    public_client_id: "nemo-helix-cli"
     token_endpoint: "https://127.0.0.1:18080/application/o/token/"
     device_authorization_endpoint: "https://127.0.0.1:18080/application/o/device/"
     workload_token_exchange_enabled: true
