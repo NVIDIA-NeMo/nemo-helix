@@ -4,13 +4,13 @@
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import type { QuickstartAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/quickstartContent';
+import type { QuickstartSampleAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/quickstartSampleContent';
 import { ChevronRight } from 'lucide-react';
 import type { FC } from 'react';
 import { Link } from 'react-router';
 
-interface QuickstartAgentRowProps {
-  agent: QuickstartAgent;
+interface QuickstartSampleAgentRowProps {
+  agent: QuickstartSampleAgent;
   href: string;
 }
 
@@ -18,10 +18,10 @@ interface QuickstartAgentRowProps {
  * The provisioned sample agent, as one full-row link: a single tab stop with a single
  * accessible name. Giving the chevron its own link would nest two links in the row.
  */
-export const QuickstartAgentRow: FC<QuickstartAgentRowProps> = ({ agent, href }) => (
+export const QuickstartSampleAgentRow: FC<QuickstartSampleAgentRowProps> = ({ agent, href }) => (
   <Link
     to={href}
-    data-testid="quickstart-agent-row"
+    data-testid="quickstart-sample-agent-row"
     // The borders are load-bearing: surface-base, -raised and -overlay are all the same
     // white in the light theme, so without them the row and chip vanish into the Panel.
     className="flex w-full items-center gap-density-lg rounded-lg border border-base bg-surface-raised p-density-lg no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -40,7 +40,7 @@ export const QuickstartAgentRow: FC<QuickstartAgentRowProps> = ({ agent, href })
           description reachable once it is clipped. */}
       <Text
         kind="body/regular/md"
-        data-testid="quickstart-agent-description"
+        data-testid="quickstart-sample-agent-description"
         className="block truncate text-secondary"
         title={agent.description}
       >
@@ -48,7 +48,7 @@ export const QuickstartAgentRow: FC<QuickstartAgentRowProps> = ({ agent, href })
       </Text>
     </Stack>
 
-    <StatusBadge status={agent.status} />
+    <StatusBadge status={agent.status} label={agent.statusLabel} />
     <ChevronRight className="size-4 shrink-0 text-secondary" aria-hidden="true" />
   </Link>
 );

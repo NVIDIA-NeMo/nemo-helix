@@ -36,7 +36,7 @@ def _platform(
     default_headers: Mapping[str, str] | None = None,
 ) -> NeMoHelix:
     return NeMoHelix(
-        base_url="http://test",
+        base_url="https://test",
         workspace=workspace,
         default_headers=default_headers,
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
@@ -46,7 +46,7 @@ def _platform(
 
 def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoHelix:
     return AsyncNeMoHelix(
-        base_url="http://test",
+        base_url="https://test",
         workspace=workspace,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
         max_retries=0,
@@ -168,6 +168,16 @@ def test_deployments_create_rejects_image_entrypoint_for_subprocess() -> None:
 
     with pytest.raises(ValueError, match="use_image_entrypoint"):
         client.deployments.create(agent="calc", use_image_entrypoint=True)
+
+
+def test_deployments_create_rejects_image_entrypoint_for_openshell() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST image entrypoint mode for openshell")
+
+    client = AgentsResource(_platform(handler))
+
+    with pytest.raises(ValueError, match="use_image_entrypoint"):
+        client.deployments.create(agent="calc", deployment_mode="openshell", use_image_entrypoint=True)
 
 
 def test_invoke_sends_session_id_as_header() -> None:

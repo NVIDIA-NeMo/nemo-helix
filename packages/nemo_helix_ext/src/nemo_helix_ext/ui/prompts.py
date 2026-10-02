@@ -17,7 +17,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Literal, TypeVar, overload
 
-from nhx.common.entities.constants import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
+from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from prompt_toolkit import PromptSession, prompt
 from prompt_toolkit.application import Application
 from prompt_toolkit.document import Document

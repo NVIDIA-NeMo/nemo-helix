@@ -57,6 +57,42 @@ async def test_async_loading_cache_serializes_concurrent_misses() -> None:
     assert load_count == 1
 
 
+def test_async_loading_cache_state_is_scoped_to_event_loop_after_contention() -> None:
+    cache: AsyncLoadingCache[str, str] = AsyncLoadingCache()
+    load_count = 0
+
+    async def load_with_waiter() -> None:
+        nonlocal load_count
+        loader_started = asyncio.Event()
+        release_loader = asyncio.Event()
+
+        async def load() -> str:
+            nonlocal load_count
+            load_count += 1
+            loader_started.set()
+            await release_loader.wait()
+            return "loaded"
+
+        first = asyncio.create_task(cache.get_or_load("key", load))
+        await loader_started.wait()
+        second = asyncio.create_task(cache.get_or_load("key", load))
+        await asyncio.sleep(0)
+        release_loader.set()
+
+        assert await first == "loaded"
+        assert await second == "loaded"
+
+    async def load_from_new_loop() -> str:
+        nonlocal load_count
+        load_count += 1
+        return "new-loop"
+
+    asyncio.run(load_with_waiter())
+
+    assert asyncio.run(cache.get_or_load("key", load_from_new_loop)) == "new-loop"
+    assert load_count == 2
+
+
 async def test_async_loading_cache_does_not_cache_loader_failure() -> None:
     cache: AsyncLoadingCache[str, str] = AsyncLoadingCache()
     load_count = 0

@@ -14,7 +14,7 @@ from nhx.common.service.dependencies import (
     get_sync_sdk_client,
 )
 from nhx.common.service.deptree import CircularDependencyError, resolve_service_loading_order
-from nhx.common.service.headers import build_downstream_service_headers
+from nhx.common.service.headers import build_downstream_service_headers, build_downstream_service_headers_async
 
 __all__ = [
     "CircularDependencyError",
@@ -22,6 +22,7 @@ __all__ = [
     "Service",
     "RouterConfig",
     "build_downstream_service_headers",
+    "build_downstream_service_headers_async",
     "get_entity_client",
     "get_nemo_client",
     "get_platform_config",

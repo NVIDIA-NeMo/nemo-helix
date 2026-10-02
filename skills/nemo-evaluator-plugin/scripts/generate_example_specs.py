@@ -158,16 +158,50 @@ def build_fabric_agent_eval_spec() -> dict[str, Any]:
         ],
         "target": {
             "kind": "fabric",
-            "config": {
-                "metadata": {"name": "readme-fabric-smoke"},
-                "harness": {"adapter_id": "nvidia.fabric.codex"},
+            "source": {
+                "config": {
+                    "metadata": {"name": "readme-fabric-smoke"},
+                    "harness": {"adapter_id": "nvidia.fabric.codex"},
+                },
+                "model": "<provider>/<model>",
             },
-            "model": "<provider>/<model>",
             "capture_trajectory": False,
         },
         "max_concurrent_tasks": 1,
         "fail_fast": True,
         "labels": {"benchmark": "readme-fabric-smoke"},
+    }
+
+
+def build_registered_agent_eval_spec() -> dict[str, Any]:
+    """Return a one-task durable spec that evaluates an agent registered with ``nemo agents create``."""
+    return {
+        "tasks": [
+            {
+                "id": "multiply-17-3",
+                "intent": "Multiply two integers and return only the number.",
+                "inputs": {"instruction": "What is 17 * 3? Reply with only the number."},
+                "reference": {"expected": "51"},
+                "metrics": [
+                    _bundle(
+                        ExactMatchMetric(
+                            reference="{{reference.expected}}",
+                            candidate="{{sample.output_text | trim}}",
+                        )
+                    )
+                ],
+            }
+        ],
+        # A registered agent as the source: resolved at submit into the config a deployment of this agent
+        # would run. The agent must already exist (`nemo agents create -n calculator-agent -c agent.yaml`).
+        "target": {
+            "kind": "fabric",
+            "source": {"agent": "calculator-agent"},
+            "capture_trajectory": True,
+        },
+        "max_concurrent_tasks": 1,
+        "fail_fast": True,
+        "labels": {"benchmark": "registered-agent-smoke"},
     }
 
 
@@ -204,6 +238,7 @@ SPEC_BUILDERS: dict[str, SpecBuilder] = {
 AGENT_SPEC_BUILDERS: dict[str, SpecBuilder] = {
     "fabric_agent_eval.json": build_fabric_agent_eval_spec,
     "gym_agent_eval.json": build_gym_agent_eval_spec,
+    "registered_agent_eval.json": build_registered_agent_eval_spec,
 }
 
 

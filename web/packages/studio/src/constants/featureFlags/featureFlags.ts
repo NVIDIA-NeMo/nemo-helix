@@ -59,7 +59,7 @@ export const flagDefinitions = {
     true
   ),
   agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
-  agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', false),
+  agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', true),
   agentsEnabled: previewFlag('VITE_FF_AGENTS_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
   baseModelsEnabled: previewFlag('VITE_FF_BASE_MODELS_ENABLED', true),
@@ -81,7 +81,7 @@ export const flagDefinitions = {
   jobsEnabled: previewFlag('VITE_FF_JOBS_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED'),
   modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
-  modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', false),
+  modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
   pluginsEnabled: previewFlag('VITE_FF_PLUGINS_ENABLED', true),

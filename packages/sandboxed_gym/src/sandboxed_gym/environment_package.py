@@ -11,19 +11,24 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 #: Package identity file at the FileSet root. Submit and the Gym host both key off this name.
 ENVIRONMENT_MANIFEST_FILENAME = "nemo-environment.yaml"
 NATIVE_V1_FORMAT = "native-v1"
 WHEELS_V1_FORMAT = "wheels-v1"
+ADAPTER_WHEELS_V1_FORMAT = "adapter-wheels-v1"
+#: Harnesses the training image ships. An adapter package selects one; it does not vendor the agent.
+IMAGE_ADAPTER_ALLOWLIST: dict[str, str] = {
+    "verifiers_agent": "responses_api_agents/verifiers_agent",
+}
 #: Flat directory of ``.whl`` files that wheels-v1 installs with ``--no-index --find-links``.
 WHEELS_V1_SUBDIR = "wheels"
 #: Subdirectory for a custom Gym agent.
 CUSTOM_AGENT_SUBDIR = "responses_api_agents"
 #: Subdirectory for a custom Gym resources server.
 CUSTOM_RESOURCES_SERVER_SUBDIR = "resources_servers"
-#: Operator-owned Gym model configs. A customer FileSet that ships this tree is rejected.
+#: Gym model configs. A native-v1 ``config_paths`` entry may name one; other files in this tree are rejected.
 OPERATOR_MODEL_SUBDIR = "responses_api_models"
 
 
@@ -36,6 +41,7 @@ class EnvironmentFormat(StrEnum):
 
     NATIVE_V1 = NATIVE_V1_FORMAT
     WHEELS_V1 = WHEELS_V1_FORMAT
+    ADAPTER_WHEELS_V1 = ADAPTER_WHEELS_V1_FORMAT
 
 
 class EnvironmentMetadata(BaseModel):
@@ -90,8 +96,12 @@ class NativeV1Manifest(_ManifestBase):
     @field_validator("config_paths")
     @classmethod
     def _under_gym_component_directories(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        """Keep native-v1 configs inside Gym's agent/resources-server trees, not the model tree."""
-        allowed = (f"{CUSTOM_AGENT_SUBDIR}/", f"{CUSTOM_RESOURCES_SERVER_SUBDIR}/")
+        """Keep native-v1 configs under a Gym server tree."""
+        allowed = (
+            f"{CUSTOM_AGENT_SUBDIR}/",
+            f"{CUSTOM_RESOURCES_SERVER_SUBDIR}/",
+            f"{OPERATOR_MODEL_SUBDIR}/",
+        )
         for value in values:
             if not value.startswith(allowed):
                 raise ValueError(f"native-v1 config_paths must be under {allowed}: {value!r}")
@@ -104,7 +114,39 @@ class WheelsV1Manifest(_ManifestBase):
     format: Literal[EnvironmentFormat.WHEELS_V1] = EnvironmentFormat.WHEELS_V1
 
 
-EnvironmentManifest = Annotated[NativeV1Manifest | WheelsV1Manifest, Field(discriminator="format")]
+class AdapterRef(BaseModel):
+    """Agent harness an adapter-wheels-v1 package runs on, supplied by the training image."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    agent: str = Field(min_length=1, max_length=255)
+    agent_type: Literal["responses_api_agents"] = "responses_api_agents"
+    image_config_root: str | None = Field(default=None, max_length=512)
+
+
+class AdapterWheelsV1Manifest(_ManifestBase):
+    """A wheelhouse plus a config that selects an agent already built into the image."""
+
+    format: Literal[EnvironmentFormat.ADAPTER_WHEELS_V1] = EnvironmentFormat.ADAPTER_WHEELS_V1
+    adapter: AdapterRef
+
+    @model_validator(mode="after")
+    def _adapter_contract(self) -> "AdapterWheelsV1Manifest":
+        for value in self.config_paths:
+            if not value.startswith("configs/"):
+                raise ValueError(f"adapter-wheels-v1 config_paths should live under configs/: {value!r}")
+        if self.adapter.agent not in IMAGE_ADAPTER_ALLOWLIST:
+            supported = ", ".join(sorted(IMAGE_ADAPTER_ALLOWLIST))
+            raise ValueError(
+                f"adapter.agent {self.adapter.agent!r} is not built into the training image. Supported: {supported}"
+            )
+        return self
+
+
+EnvironmentManifest = Annotated[
+    NativeV1Manifest | WheelsV1Manifest | AdapterWheelsV1Manifest,
+    Field(discriminator="format"),
+]
 _ENVIRONMENT_MANIFEST_ADAPTER = TypeAdapter(EnvironmentManifest)
 
 
@@ -131,7 +173,22 @@ class WheelsV1Package:
     wheel_files: tuple[Path, ...]
 
 
-EnvironmentPackage = NativeV1Package | WheelsV1Package
+@dataclass(frozen=True)
+class AdapterWheelsV1Package:
+    """Validated adapter package: image agent, package config, and a vendored wheelhouse."""
+
+    root: Path
+    manifest: AdapterWheelsV1Manifest
+    config_paths: tuple[Path, ...]
+    wheelhouse_path: Path
+    wheel_files: tuple[Path, ...]
+
+
+EnvironmentPackage = NativeV1Package | WheelsV1Package | AdapterWheelsV1Package
+
+
+def _vendors_wheels(manifest: EnvironmentManifest) -> bool:
+    return isinstance(manifest, (WheelsV1Manifest, AdapterWheelsV1Manifest))
 
 
 def parse_environment_manifest(raw_yaml: bytes | str) -> EnvironmentManifest:
@@ -168,9 +225,11 @@ def validate_environment_manifest_against_listing(
     """Validate package rules decidable from a remote FileSet listing."""
     entries = {path.removeprefix("./") for path in paths}
 
-    # Model YAML is operator-owned (image + VirtualModel). A customer copy would silently
-    # shadow it through Gym extra-root discovery, so refuse it at submit.
-    customer_model_files = sorted(path for path in entries if path.startswith(f"{OPERATOR_MODEL_SUBDIR}/"))
+    # A declared config_path may name a model config. Any other file in that tree is rejected.
+    declared_configs = set(manifest.config_paths)
+    customer_model_files = sorted(
+        path for path in entries if path.startswith(f"{OPERATOR_MODEL_SUBDIR}/") and path not in declared_configs
+    )
     if customer_model_files:
         raise EnvironmentPackageError(
             f"Custom {OPERATOR_MODEL_SUBDIR} directory is not supported; model configuration is operator-owned: "
@@ -193,7 +252,7 @@ def validate_environment_manifest_against_listing(
             f"The `config_paths` field references files that are not in the package: {', '.join(missing_configs)}"
         )
 
-    if not isinstance(manifest, WheelsV1Manifest):
+    if not _vendors_wheels(manifest):
         return
 
     # wheels-v1 installs with ``--find-links wheels/``. Nested dirs and non-wheels would be
@@ -207,7 +266,7 @@ def validate_environment_manifest_against_listing(
 
     if not wheel_entries:
         raise EnvironmentPackageError(
-            f"A {WHEELS_V1_FORMAT} package installs environment dependencies from a non-empty "
+            f"A {manifest.format.value} package installs environment dependencies from a non-empty "
             f"{WHEELS_V1_SUBDIR}/ directory"
         )
 
@@ -394,7 +453,7 @@ def validate_environment_package_layout(
             raise EnvironmentPackageError(f"config symlinks are not allowed: {relative_path}")
         _resolve_contained_file(root, relative_path)
 
-    if isinstance(manifest, WheelsV1Manifest):
+    if _vendors_wheels(manifest):
         unresolved_wheelhouse = root / WHEELS_V1_SUBDIR
         if unresolved_wheelhouse.is_symlink():
             raise EnvironmentPackageError(f"wheelhouse symlinks are not allowed: {WHEELS_V1_SUBDIR}")
@@ -409,7 +468,7 @@ def validate_environment_package_layout(
         (path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()),
     )
 
-    if isinstance(manifest, WheelsV1Manifest):
+    if _vendors_wheels(manifest):
         duplicates = duplicate_wheel_distributions(root / WHEELS_V1_SUBDIR)
         if duplicates:
             details = ", ".join(f"{name} ({', '.join(versions)})" for name, versions in sorted(duplicates.items()))
@@ -420,7 +479,7 @@ def validate_environment_package_layout(
 
 
 def load_environment_package(environment_root: str | Path) -> EnvironmentPackage:
-    """Validate one mutually exclusive native-v1 or wheels-v1 package."""
+    """Validate one native-v1, wheels-v1, or adapter-wheels-v1 package."""
     root = _validated_root(environment_root)
     manifest = load_environment_manifest(root)
     validate_environment_package_layout(root, manifest)
@@ -430,6 +489,14 @@ def load_environment_package(environment_root: str | Path) -> EnvironmentPackage
 
     wheelhouse_path = (root / WHEELS_V1_SUBDIR).resolve()
     wheel_files = tuple(path.resolve() for path in sorted(wheelhouse_path.glob("*.whl")))
+    if isinstance(manifest, AdapterWheelsV1Manifest):
+        return AdapterWheelsV1Package(
+            root=root,
+            manifest=manifest,
+            config_paths=config_paths,
+            wheelhouse_path=wheelhouse_path,
+            wheel_files=wheel_files,
+        )
     return WheelsV1Package(
         root=root,
         manifest=manifest,

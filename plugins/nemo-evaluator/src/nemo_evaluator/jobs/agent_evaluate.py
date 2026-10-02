@@ -34,6 +34,10 @@ from nemo_evaluator.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     compile_agent_eval_job,
 )
+from nemo_evaluator.jobs.agent_files_snapshot import (
+    discard_registered_agent_files,
+    discard_registered_agent_files_sync,
+)
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
     AgentEvalSpec,
@@ -44,8 +48,10 @@ from nemo_evaluator.jobs.agent_spec import (
     ModelTarget,
     ResolvedTask,
     Target,
+    registered_agent_files,
     validate_task_collection,
 )
+from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.jobs.gym_environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
     GymEnvironmentPackageError,
@@ -62,6 +68,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
+from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
@@ -301,6 +308,30 @@ class JobEnvSecretResolver:
         )
 
 
+def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
+    """Check the service resolved every ``env_secrets`` entry into this job's environment."""
+    missing = sorted(name for name in target.env_secrets if name not in os.environ)
+    if missing:
+        raise ValueError(
+            f"`env_secrets` entries {missing} were not resolved into this job's environment, so the Fabric "
+            "harness cannot read them."
+        )
+
+
+def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: JobContext) -> Path | None:
+    """Where the preceding staging step put a registered agent's Ethos files, once it is verified present."""
+    fileset = registered_agent_files(target)
+    if fileset is None:
+        return None
+    staged = ctx.storage.persistent / ENVIRONMENT_STORAGE_DIR
+    if not staged.is_dir():
+        raise ValueError(
+            f"registered agent files {fileset.root!r} were not staged at {staged}; the stage-environment "
+            "step did not run or did not complete"
+        )
+    return staged
+
+
 class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
@@ -339,12 +370,24 @@ class _AgentEvalJobBase(NemoJob):
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
         resolved_tasks = await map_with_limited_concurrency(lambda task: snapshot_task(task, ctx), loaded_tasks)
         validate_task_collection(resolved_tasks)
-        validate_execution_support(resolved_tasks, target=submit_spec.target, adapters=ctx.adapters)
-        target = submit_spec.target
-        if isinstance(target, GymRunnerTarget):
-            target = await prepare_gym_submission(resolved_tasks, target, ctx)
-        validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
-        return AgentEvalSpec(tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"}))
+        target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
+        try:
+            validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
+            if isinstance(target, GymRunnerTarget):
+                target = await prepare_gym_submission(resolved_tasks, target, ctx)
+            validate_scoring(resolved_tasks, target=target, trials=submit_spec.trials, adapters=ctx.adapters)
+            return AgentEvalSpec(
+                tasks=resolved_tasks, target=target, **submit_spec.model_dump(exclude={"tasks", "target"})
+            )
+        except Exception:
+            # Resolution may have snapshotted the agent's files; a submission that fails after that owns no job
+            # to clean the snapshot up, so it goes here.
+            snapshot = (
+                registered_agent_files(target) if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) else None
+            )
+            if snapshot is not None:
+                await discard_registered_agent_files(client_from_platform(async_sdk, AsyncFilesClient), snapshot)
+            raise
 
     @classmethod
     async def compile(
@@ -529,12 +572,15 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, AgentTarget):
             return target.agent, None, target.params or RunConfigOnline()
         if isinstance(target, FabricRunnerTarget):
+            _require_fabric_env_secrets_resolved(target)
+            assert target.config is not None  # canonical spec guarantees resolution ran
             fabric_runtime = FabricAgentRuntime(
-                config=target.config,
+                config=expand_mcp_secret_env(target.config, os.environ),
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
+                base_dir=_staged_agent_files(target, ctx),
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
@@ -594,13 +640,17 @@ class _AgentEvalJobBase(NemoJob):
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
+            agent_kwargs = dict(target.agent_kwargs)
+            staged = _staged_agent_files(target, ctx)
+            if staged is not None:
+                agent_kwargs["fabric_config_bundle"] = str(staged)
             harbor_runtime = HarborAgentTaskRunner(
                 config=HarborRuntimeConfig(
                     jobs_dir=ctx.storage.persistent / "harbor",
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
-                    agent_kwargs=target.agent_kwargs,
+                    agent_kwargs=agent_kwargs,
                     env_secrets=target.env_secrets,
                     env_vars=target.env_vars,
                     n_attempts=target.n_attempts,
@@ -609,6 +659,8 @@ class _AgentEvalJobBase(NemoJob):
                     artifacts=target.artifacts,
                     trace_dir=target.trace_dir,
                     reward_key=target.reward_key,
+                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                    agent_timeout_multiplier=target.agent_timeout_multiplier,
                 ),
                 secret_resolver=JobEnvSecretResolver(workspace=ctx.workspace),
             )
@@ -718,6 +770,16 @@ class _AgentEvalJobBase(NemoJob):
                 intake=intake,
             )
             output["publication"] = outcome.model_dump(exclude_none=True)
+
+        # The run is complete and its bundle durable; the files snapshot taken at submit has served its
+        # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
+        snapshot = (
+            registered_agent_files(spec.target)
+            if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget))
+            else None
+        )
+        if snapshot is not None:
+            discard_registered_agent_files_sync(platform_client, snapshot)
 
         return output
 

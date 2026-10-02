@@ -5,12 +5,12 @@ import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { Meta, StoryContext, StoryObj } from '@storybook/react';
 import {
-  QuickstartPanel,
-  type QuickstartAgent,
-} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel';
+  QuickstartSamplePanel,
+  type QuickstartSampleAgent,
+} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
 import type { ComponentType } from 'react';
 
-const SAMPLE_AGENT: QuickstartAgent = {
+const SAMPLE_AGENT: QuickstartSampleAgent = {
   name: 'email-security-triage',
   description: 'Triages inbound email for phishing, spoofing, and social-engineering signals.',
   status: 'Running',
@@ -31,16 +31,13 @@ const panelDecorator = [
 ];
 
 const meta = {
-  component: QuickstartPanel,
-  title: 'Routes/WorkspaceDashboardHomeRoute/QuickstartPanel',
+  component: QuickstartSamplePanel,
+  title: 'Routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel',
   decorators: panelDecorator,
   args: {
     workspace: DEFAULT_WORKSPACE,
     agent: SAMPLE_AGENT,
     defaultView: 'studio',
-    // Supplying these is what makes the second action on steps 3 and 4 appear.
-    onRunEvaluation: () => {},
-    onOptimize: () => {},
     onSwitchWorkspace: () => {},
   },
   argTypes: {
@@ -51,7 +48,7 @@ const meta = {
       description: 'Initial tab. The panel is uncontrolled, so this only seeds the first render.',
     },
   },
-} satisfies Meta<typeof QuickstartPanel>;
+} satisfies Meta<typeof QuickstartSamplePanel>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -81,7 +78,7 @@ export const NoSampleAgent: Story = {
       <Text kind="body/regular/sm" className="text-secondary">
         Dashboard content above the Quickstart panel.
       </Text>
-      <QuickstartPanel {...args} />
+      <QuickstartSamplePanel {...args} />
       <Text kind="body/regular/sm" className="text-secondary">
         Dashboard content below — these two lines should sit flush, with nothing between.
       </Text>

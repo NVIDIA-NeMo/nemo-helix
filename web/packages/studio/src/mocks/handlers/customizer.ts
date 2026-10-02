@@ -9,6 +9,10 @@ import { http, HttpResponse } from 'msw';
  * (`/apis/jobs/v2/.../jobs/:name`); cancel goes to the per-backend customization collection.
  */
 export const customizerHandlers = [
+  // Empty by default; a suite that needs templates overrides this with server.use().
+  http.get(`${PLATFORM_BASE_URL}/apis/customization/v2/workspaces/:workspace/job-templates`, () =>
+    HttpResponse.json({ data: [], object: 'list' })
+  ),
   // Generic single-job read used by the customization details page (useJobsGetJob).
   // Only answer for KNOWN customization jobs; fall through for any other job so this
   // handler doesn't shadow the generic JobDetailRoute (which also uses this endpoint).

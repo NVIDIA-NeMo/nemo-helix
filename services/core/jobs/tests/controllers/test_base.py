@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from urllib.parse import urlunsplit
 
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.config import HelixConfig
 from nhx.common.jobs.constants import EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nhx.common.jobs.schemas import HelixJobStatus
@@ -586,8 +587,8 @@ def _make_task(status: str = "active", updated_at: datetime.datetime | None = No
     return task
 
 
-def _make_backend(mock_sdk: MagicMock | None = None) -> MockKubernetesCPUJobBackend:
-    sdk = mock_sdk or MagicMock()
+def _make_backend(mock_sdk: NemoClient | None = None) -> MockKubernetesCPUJobBackend:
+    sdk = mock_sdk or NemoClient(base_url="http://localhost:8000")
     return MockKubernetesCPUJobBackend(nhx_sdk=sdk, execution_profile_config=MagicMock(), profile_name="default")
 
 

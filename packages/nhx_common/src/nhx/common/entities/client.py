@@ -22,11 +22,13 @@ from nemo_helix_plugin.entities import ListResponse as ListResponse
 from nemo_helix_plugin.entities import PaginationInfo as PaginationInfo
 from nemo_helix_plugin.entities import SyncEntityClient as _PluginSyncEntityClient
 from nemo_helix_plugin.entities import parse_qualified_name as parse_qualified_name
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
+from nhx.common.auth.headers import AUTHENTICATION_CONTEXT_HEADERS
+from nhx.common.config import get_auth_config
+from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 
 
 def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str, str]:
-    from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
-
     headers: dict[str, str] = {
         "X-NHX-Principal-Id": f"service:{service_name}",
         "X-NHX-Actor-Account-Id": "",
@@ -44,6 +46,64 @@ def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str
     return headers
 
 
+def _service_workload_token_headers(existing_headers: dict[str, str], *, internal: bool) -> dict[str, str]:
+    headers = {
+        name: value for name, value in existing_headers.items() if name.lower() not in AUTHENTICATION_CONTEXT_HEADERS
+    }
+    if internal:
+        headers.update(MARK_INTERNAL_REQUEST_HEADERS)
+    return headers
+
+
+def _uses_service_workload_token() -> bool:
+    config = get_auth_config()
+    return bool(config.enabled and config.oidc.workload_token_exchange_enabled)
+
+
+def _async_client_as_service(
+    client: AsyncEntitiesClient,
+    service_name: str,
+    *,
+    internal: bool,
+) -> AsyncEntitiesClient:
+    from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+
+    config = get_auth_config()
+    return client.__class__(
+        base_url=client.base_url,
+        workspace=client.workspace,
+        auth=ServiceWorkloadAccessTokenProvider(config, service_name),
+        default_headers=_service_workload_token_headers(client.default_headers, internal=internal) or None,
+        timeout=client._timeout,
+        retry=client._retry,
+        http_client=client._http,
+        owns_http_client=False,
+        client_runtime=client.nemo_client_runtime,
+    )
+
+
+def _sync_client_as_service(
+    client: EntitiesClient,
+    service_name: str,
+    *,
+    internal: bool,
+) -> EntitiesClient:
+    from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
+
+    config = get_auth_config()
+    return client.__class__(
+        base_url=client.base_url,
+        workspace=client.workspace,
+        auth=ServiceWorkloadAccessTokenProvider(config, service_name),
+        default_headers=_service_workload_token_headers(client.default_headers, internal=internal) or None,
+        timeout=client._timeout,
+        retry=client._retry,
+        http_client=client._http,
+        owns_http_client=False,
+        client_runtime=client.nemo_client_runtime,
+    )
+
+
 class EntityClient(_PluginEntityClient):
     """Extended entity client with platform-specific capabilities.
 
@@ -55,9 +115,9 @@ class EntityClient(_PluginEntityClient):
         """Return a copy with service principal credentials baked in.
 
         Use this for background tasks, startup code, or permission elevation
-        where you need service-level access. The returned client has service
-        principal headers (X-NHX-Principal-Id: service:<name>) baked into its
-        underlying SDK, so all requests are authenticated as the service.
+        where you need service-level access. In trusted-header mode the
+        returned client has service principal headers baked in; in workload
+        token-exchange mode it attaches a service bearer token per request.
 
         Args:
             service_name: The service name (e.g., "auth", "evaluator")
@@ -66,6 +126,10 @@ class EntityClient(_PluginEntityClient):
         Returns:
             A new EntityClient backed by an SDK with service principal headers.
         """
+        if _uses_service_workload_token():
+            service_client = _async_client_as_service(self._client, service_name, internal=internal)
+            return EntityClient(service_client)
+
         # with_options merges headers into the client's defaults and shares the
         # underlying httpx transport (connection pool, auth), so this is cheap.
         # It clones via copy.copy, so the platform URL resolver carries over and
@@ -79,5 +143,9 @@ class SyncEntityClient(_PluginSyncEntityClient):
 
     def as_service(self, service_name: str, *, internal: bool = False) -> "SyncEntityClient":
         """Return a copy with service principal credentials baked in."""
+        if _uses_service_workload_token():
+            service_client = _sync_client_as_service(self._client, service_name, internal=internal)
+            return SyncEntityClient(service_client)
+
         service_client = self._client.with_options(headers=_service_principal_headers(service_name, internal=internal))
         return SyncEntityClient(service_client)

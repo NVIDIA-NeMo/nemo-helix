@@ -3019,6 +3019,15 @@ components:
       title: AgentOutput
       description: Captured final output from the evaluated agent, model, or imported
         baseline for a trial.
+    AgentRef:
+      type: string
+      pattern: ^[\w\-.]+(/[\w\-.]+)?$
+      title: AgentRef
+      description: "Reference to an agent registered on the platform (format: ``workspace/name``\
+        \ or ``name``).\n\nNames an ``Agent`` entity (``nemo agents create``) so an\
+        \ evaluation can run it without repeating\nits configuration. Same shape as\
+        \ :class:`MetricRef`: a bare name resolves in the job workspace.\nAgents carry\
+        \ no revision fragment \u2014 the entity is looked up as it is at submit time."
     AgentTarget:
       properties:
         kind:
@@ -3437,6 +3446,85 @@ components:
           type: string
       title: DatetimeFilter
       type: object
+    EnvironmentSpecInline:
+      properties:
+        description:
+          type: string
+          title: Description
+          description: Human-readable description.
+          default: ''
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Plaintext, non-secret env vars.
+        secrets:
+          additionalProperties:
+            type: string
+          type: object
+          title: Secrets
+          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+        model_provider_override:
+          allOf:
+          - $ref: '#/components/schemas/ModelProviderOverride'
+          description: Set only to point at a non-IGW external model provider.
+        provider:
+          type: string
+          title: Provider
+          description: local | docker | opensandbox | k8s.
+          default: local
+        workspace_path:
+          title: Workspace Path
+          description: Workspace path visible to the harness.
+          type: string
+        artifacts_path:
+          title: Artifacts Path
+          description: Provider-specific artifact output location.
+          type: string
+        control_location:
+          title: Control Location
+          description: external_control | in_env_control.
+          type: string
+        ownership:
+          title: Ownership
+          description: caller_owned | fabric_owned.
+          type: string
+        connection:
+          additionalProperties: true
+          type: object
+          title: Connection
+          description: Provider connection metadata (server url, cred ref, namespace).
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+          description: Consumer-provided passthrough metadata.
+        settings:
+          additionalProperties: true
+          type: object
+          title: Settings
+          description: Provider-specific settings.
+        mcp:
+          additionalProperties:
+            $ref: '#/components/schemas/McpFulfillment'
+          type: object
+          title: Mcp
+          description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
+            MCP dependency.
+      type: object
+      title: EnvironmentSpecInline
+      description: 'Inline environment spec - the dependencies and configuration an
+        agent reaches.
+
+
+        This is the fulfillment half of a request/fulfill split: the Agent declares
+
+        the dependencies it needs; the EnvironmentSpec provides concrete endpoints
+
+        and secret references. It compiles into the agent.yaml / FabricConfig and
+
+        the injected process environment.'
     EvaluateInputSpec:
       properties:
         dataset:
@@ -3950,13 +4038,8 @@ components:
       - kind
       title: EvidenceDescriptor
       description: Descriptor for a candidate trace, source, or artifact.
-    FabricRunnerTarget:
+    FabricConfigSource:
       properties:
-        kind:
-          type: string
-          const: fabric
-          title: Kind
-          default: fabric
         config:
           additionalProperties: true
           type: object
@@ -3969,6 +4052,34 @@ components:
           description: Optional ``provider/model`` slug applied as the config's default
             model; the harness default is used when omitted.
           type: string
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      title: FabricConfigSource
+      description: 'An agent described inline: one complete Fabric ``agent.yaml``
+        as a JSON-shaped mapping.'
+    FabricRunnerTarget:
+      properties:
+        kind:
+          type: string
+          const: fabric
+          title: Kind
+          default: fabric
+        source:
+          anyOf:
+          - $ref: '#/components/schemas/FabricConfigSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
+          title: Source
+          description: 'The agent to run: an inline `config` (with an optional `model`),
+            or a registered `agent` (with an optional `environment`).'
+        resolved_config:
+          title: Resolved Config
+          description: 'Set by submit-time resolution of a registered `agent`, never
+            by the submitter: the Fabric config the agent resolved to, which is what
+            the job runs.'
+          additionalProperties: true
+          type: object
         timeout_s:
           type: integer
           minimum: 1.0
@@ -3981,18 +4092,32 @@ components:
           description: Capture the agent trajectory as ATIF via NeMo Relay and attach
             it to trial evidence. Requires the NeMo Relay gateway in the run environment.
           default: true
+        env_secrets:
+          additionalProperties:
+            $ref: '#/components/schemas/SecretRef'
+          type: object
+          title: Env Secrets
+          description: 'Environment variables for the Fabric harness, sourced from
+            the secrets service, as {ENV_NAME: secret-ref}. The reference travels
+            in the spec; the service resolves it into the job''s environment at compile
+            time, where the harness reads it by name (e.g. a model `api_key_env` or
+            an MCP server''s `env`). No credential is stored on the spec or the run
+            bundle.'
       additionalProperties: false
       type: object
       required:
-      - config
+      - source
       title: FabricRunnerTarget
       description: "Generate trials by driving an agent harness through the NeMo Fabric\
         \ runtime.\n\nFabric is harness-agnostic: the harness (Codex, Hermes, ...)\
-        \ is selected by the supplied\nconfig's ``harness.adapter_id`` and is never\
-        \ inferred from ``model``. ``model`` is applied as the\nconfig's default model\
-        \ when given.\n\nA run is described by exactly one complete ``config``. Fabric\
-        \ 0.1.0rc2 removed profile overlays,\nso the former ``profiles`` field is\
-        \ gone \u2014 fold any overlay you were passing into ``config``."
+        \ is selected by the config's\n``harness.adapter_id`` and is never inferred\
+        \ from a model. The config comes from ``source``: given\ninline, or resolved\
+        \ at submit from a registered platform agent with the same resolution a deployment\n\
+        gets (environment merge, Inference Gateway binding, translation of the platform\
+        \ ``agent.yaml``). A\nresolved registered agent's config is carried as ``resolved_config``\
+        \ next to its source, so the job\nnever looks the agent up. Fabric 0.1.0rc2\
+        \ removed profile overlays, so the former ``profiles`` field\nis gone \u2014\
+        \ fold any overlay into the config."
     FieldMapping:
       properties:
         input:
@@ -4352,9 +4477,15 @@ components:
           anyOf:
           - $ref: '#/components/schemas/HarborBuiltinAgentSource'
           - $ref: '#/components/schemas/HarborImportedAgentSource'
+          - $ref: '#/components/schemas/RegisteredAgentSource'
           title: Source
-          description: 'The agent Harbor runs in each task container: a built-in agent
-            by `name`, or your own by `import_path`.'
+          description: "The agent Harbor runs in each task container: a built-in agent\
+            \ by `name`, your own by `import_path`, or a registered platform `agent`\
+            \ (with an optional `environment`). A registered agent is resolved at\
+            \ submit into the SDK's installed Fabric agent with the agent's translated\
+            \ config in `agent_kwargs.fabric_config`, so it runs as registered \u2014\
+            \ identity, skills, MCP servers, and telemetry included \u2014 and stays,\
+            \ qualified, as the run's provenance."
         agent_kwargs:
           additionalProperties:
             $ref: '#/components/schemas/JsonValue'
@@ -4419,6 +4550,18 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        agent_setup_timeout_multiplier:
+          title: Agent Setup Timeout Multiplier
+          description: Harbor agent-setup timeout multiplier. An agent that installs
+            itself into the task container (a Fabric harness, a registered agent)
+            needs several times Harbor's default, which is tuned for prebuilt agents.
+          type: number
+          exclusiveMinimum: 0.0
+        agent_timeout_multiplier:
+          title: Agent Timeout Multiplier
+          description: Harbor agent-phase timeout multiplier, applied to every trial.
+          type: number
+          exclusiveMinimum: 0.0
       additionalProperties: false
       type: object
       title: HarborRunnerTarget
@@ -4926,6 +5069,38 @@ components:
         \ can supply the dataset identity\n``evaluations.create`` requires."
     JsonValue:
       title: JsonValue
+    McpFulfillment:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: Endpoint the environment provides for this MCP server.
+        env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Env
+          description: Non-secret env for the MCP server.
+        secrets:
+          additionalProperties:
+            type: string
+          type: object
+          title: Secrets
+          description: ENV_NAME -> Secrets-service ref, merged into the MCP server
+            env at compile.
+      type: object
+      required:
+      - url
+      title: McpFulfillment
+      description: 'EnvironmentSpec-side fulfillment for one MCP server the Agent
+        declares.
+
+
+        The Agent DECLARES an MCP dependency by name; the EnvironmentSpec PROVIDES
+
+        the url + env + secrets for that same name. Matched by server-name key at
+
+        compile time; ``secrets`` are merged into the server''s ``env``.'
     MetadataItem:
       properties:
         key:
@@ -5231,6 +5406,34 @@ components:
       - name
       title: Model
       description: Model definition for use without persisting to the Models API.
+    ModelProviderOverride:
+      properties:
+        base_url:
+          type: string
+          title: Base Url
+          description: External model-provider endpoint.
+        api_key:
+          title: Api Key
+          description: Secrets-service ref for the provider API key (only needed for
+            external providers).
+          type: string
+        provider:
+          title: Provider
+          description: Provider selector (e.g. "openai", "anthropic").
+          type: string
+      type: object
+      required:
+      - base_url
+      title: ModelProviderOverride
+      description: 'Exceptional external model-provider override.
+
+
+        Null in the normal case: model selection is on the Agent and the provider
+
+        URL is the Inference Gateway (auto-injected). Set ONLY to point the agent
+        at
+
+        a non-IGW external provider endpoint.'
     ModelRef:
       type: string
       pattern: ^[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}/[a-z](?:[a-z0-9@.+_]|-[a-z0-9@.+_]){1,62}$
@@ -5521,6 +5724,41 @@ components:
       type: object
       title: ReasoningParams
       description: Custom settings that control the model's reasoning behavior.
+    RegisteredAgentSource:
+      properties:
+        agent:
+          allOf:
+          - $ref: '#/components/schemas/AgentRef'
+          description: 'The registered agent to run: `workspace/name`, or `name` in
+            the submission workspace. Rewritten to the qualified form at submit. The
+            agent runs fresh for every trial; an existing deployment is never called.'
+        environment:
+          allOf:
+          - $ref: '#/components/schemas/EnvironmentSpecInline'
+          description: 'Environment to evaluate the agent in, merged onto its config
+            exactly as a deployment would: MCP fulfilments (url/env/secrets) for servers
+            the agent declares, process env, secret refs, and Fabric environment settings.'
+        files:
+          allOf:
+          - $ref: '#/components/schemas/FilesetRef'
+          description: 'Set at submit, never by the submitter: a job-owned snapshot
+            of the agent''s Ethos FileSet, taken when the agent was resolved so a
+            re-registration while the job is queued cannot change the files it runs
+            with. Present only when the resolved config refers to files by relative
+            path.'
+      additionalProperties: false
+      type: object
+      required:
+      - agent
+      title: RegisteredAgentSource
+      description: 'An agent registered on the platform (``nemo agents create``),
+        resolved at submit.
+
+
+        The model is part of what the agent is, so there is no model override; what
+        an evaluation shapes is
+
+        the ``environment`` the agent runs in.'
     ResolvedEvaluatorTaskDefinition:
       properties:
         kind:

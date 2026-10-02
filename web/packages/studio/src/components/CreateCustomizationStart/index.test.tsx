@@ -43,13 +43,12 @@ const serveRows = (rows: () => Promise<Record<string, unknown>[]>) => {
 const serveDefaultRows = () =>
   serveRows(() => Promise.resolve(Array.from({ length: ROW_SUPPLY }, () => ({ ...HF_ROW }))));
 
-const renderStart = (onContinue: Mock = vi.fn()) => {
+const renderStart = (onContinue: Mock = vi.fn()) =>
   render(
     <TestProviders>
       <CreateCustomizationStart workspace={DEFAULT_WORKSPACE} onContinue={onContinue} />
     </TestProviders>
   );
-};
 
 const continueButton = () => screen.getByRole('button', { name: /continue/i });
 
@@ -171,6 +170,47 @@ describe('CreateCustomizationStart', () => {
       expect(dataset.sourceFilesetName).not.toBe(dataset.name);
     });
 
+    /**
+     * Setup runs long enough that walking away part-way through is realistic, and nothing
+     * stops it. The promise resolves either way and `onContinue` navigates, so a finished
+     * setup must not pull a user who has already left back to the form.
+     */
+    it('does not continue when the picker unmounts part-way through setup', async () => {
+      let releaseRows: () => void = () => {};
+      serveRows(
+        () =>
+          new Promise((resolve) => {
+            releaseRows = () => resolve(Array.from({ length: ROW_SUPPLY }, () => ({ ...HF_ROW })));
+          })
+      );
+
+      // The uploads are the last thing setup does before handing values over, so seeing
+      // both is proof the run carried on to completion after the unmount.
+      let uploads = 0;
+      server.use(
+        http.put(`${FILESETS_URL}/:name/-/:path`, () => {
+          uploads += 1;
+          return HttpResponse.json({ path: 'ok' });
+        })
+      );
+
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      const { unmount } = renderStart(onContinue);
+
+      await user.click(screen.getByText('Start from a template'));
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+      await user.click(continueButton());
+
+      // Leave only once setup is genuinely in flight, blocked on the dataset read.
+      await waitFor(() => expect(rowsOptions).toHaveBeenCalled());
+      unmount();
+      releaseRows();
+
+      await waitFor(() => expect(uploads).toBe(2), { timeout: 10_000 });
+      expect(onContinue).not.toHaveBeenCalled();
+    });
+
     it('reports a failed dataset read and does not continue', async () => {
       serveRows(() => Promise.reject(new Error('No dataset file matched the recipe pattern.')));
       const user = userEvent.setup();
@@ -256,6 +296,121 @@ describe('CreateCustomizationStart', () => {
         { timeout: 10_000 }
       );
       expect(onContinue).not.toHaveBeenCalledWith({ optionId: 'scratch' });
+    });
+  });
+
+  describe('saved templates', () => {
+    const SAVED = {
+      id: 'tpl-1',
+      name: 'my-sft-recipe',
+      workspace: DEFAULT_WORKSPACE,
+      backend: 'automodel',
+      description: 'Saved from last week',
+      config: {
+        model: `${DEFAULT_WORKSPACE}/base-model`,
+        dataset: { training: `${DEFAULT_WORKSPACE}/data` },
+        training: { training_type: 'sft', finetuning_type: 'lora', max_seq_length: 2048 },
+        parallelism: { num_nodes: 1 },
+      },
+    };
+
+    const serveSaved = (templates: unknown[]) =>
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/customization/v2/workspaces/:workspace/job-templates`,
+          () => HttpResponse.json({ data: templates, object: 'list' })
+        )
+      );
+
+    it('offers saved templates beside the curated recipes', async () => {
+      serveSaved([SAVED]);
+      renderStart();
+
+      expect(await screen.findByText('my-sft-recipe')).toBeInTheDocument();
+      expect(screen.getByText('Saved templates')).toBeInTheDocument();
+      // An addition, not a swap.
+      expect(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title)).toBeInTheDocument();
+    });
+
+    it('hands a saved template over without provisioning anything', async () => {
+      serveSaved([SAVED]);
+      const user = userEvent.setup();
+      const onContinue = vi.fn();
+      renderStart(onContinue);
+
+      await user.click(await screen.findByText('my-sft-recipe'));
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      await waitFor(() =>
+        expect(onContinue).toHaveBeenCalledWith(expect.objectContaining({ optionId: 'template' }))
+      );
+      const [[selection]] = onContinue.mock.calls;
+      expect(selection.initialValues.automodel.model).toBe(`${DEFAULT_WORKSPACE}/base-model`);
+    });
+
+    it('offers Delete only once a saved template is picked', async () => {
+      serveSaved([SAVED]);
+      const user = userEvent.setup();
+      renderStart();
+
+      await screen.findByText('my-sft-recipe');
+      expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+
+      await user.click(screen.getByText('my-sft-recipe'));
+
+      expect(await screen.findByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('leaves the curated recipes undeletable', async () => {
+      serveSaved([SAVED]);
+      const user = userEvent.setup();
+      renderStart();
+
+      await user.click(screen.getByText(CUSTOMIZATION_TEMPLATES[0].title));
+
+      // Curated recipes are code, not entities.
+      expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    });
+
+    it('leaves out a template whose backend the form has no arm for', async () => {
+      // Served alongside a good one: waiting for that proves the list arrived, so the
+      // absence below is the filter working rather than the fetch not having landed.
+      serveSaved([SAVED, { ...SAVED, id: 'tpl-2', name: 'broken-one', backend: 'something-else' }]);
+      renderStart();
+
+      expect(await screen.findByText('my-sft-recipe')).toBeInTheDocument();
+      expect(screen.queryByText('broken-one')).not.toBeInTheDocument();
+    });
+
+    it('reaches templates past the first page', async () => {
+      // The endpoint defaults to 20 per page, so a 21st template would otherwise be
+      // unreachable — neither selectable nor deletable.
+      const onPage = {
+        1: { ...SAVED, name: 'page-one' },
+        2: { ...SAVED, id: 'tpl-2', name: 'page-two' },
+      };
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/customization/v2/workspaces/:workspace/job-templates`,
+          ({ request }) => {
+            const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
+            return HttpResponse.json({
+              data: page <= 2 ? [onPage[page as 1 | 2]] : [],
+              pagination: {
+                page,
+                page_size: 1,
+                current_page_size: 1,
+                total_pages: 2,
+                total_results: 2,
+              },
+            });
+          }
+        )
+      );
+      renderStart();
+
+      expect(await screen.findByText('page-two')).toBeInTheDocument();
+      expect(screen.getByText('page-one')).toBeInTheDocument();
     });
   });
 });

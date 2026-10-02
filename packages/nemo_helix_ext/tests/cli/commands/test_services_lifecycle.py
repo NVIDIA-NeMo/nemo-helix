@@ -17,6 +17,7 @@ Coverage:
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import socket
@@ -35,8 +36,8 @@ from nemo_helix_ext.local.process import (
     format_port_conflict,
     instance_dir,
     is_instance_alive,
-    is_port_bindable,
     list_instances,
+    port_bind_error,
     prune_instances,
     read_descriptor,
     remove_instance,
@@ -628,13 +629,63 @@ class TestInstanceCleanup:
 class TestPortAvailability:
     """Unit tests for port bind preflight helpers."""
 
-    def test_is_port_bindable_false_when_port_in_use(self) -> None:
+    def test_port_bind_error_reports_addr_in_use(self) -> None:
         port = _find_free_port()
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("127.0.0.1", port))
             sock.listen(1)
-            assert is_port_bindable("127.0.0.1", port) is False
+            err = port_bind_error("127.0.0.1", port)
+        assert err is not None
+        assert err.errno == errno.EADDRINUSE
+
+    def test_port_bind_error_none_when_free(self) -> None:
+        assert port_bind_error("127.0.0.1", _find_free_port()) is None
+
+    @pytest.mark.parametrize("denied_errno", [errno.EPERM, errno.EACCES])
+    def test_check_port_returns_not_permitted_when_bind_denied(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, denied_errno: int
+    ) -> None:
+        """A sandbox denying bind(2) must not be reported as a port conflict."""
+
+        def _deny(self: socket.socket, address: object) -> None:
+            raise OSError(denied_errno, os.strerror(denied_errno))
+
+        monkeypatch.setattr(socket.socket, "bind", _deny)
+        conflict = check_port_available_for_start("127.0.0.1", 8080, "scope-8080", base_dir=tmp_path / "state")
+        assert conflict is not None
+        assert conflict.kind == "not_permitted"
+        assert conflict.port == 8080
+
+        text = "\n".join(format_port_conflict(conflict))
+        assert "not a port conflict" in text
+        assert "sandbox" in text
+        assert "lsof" not in text
+        assert "--port" not in text
+
+    def test_not_permitted_on_privileged_port_suggests_higher_port(self) -> None:
+        lines = format_port_conflict(PortConflict(kind="not_permitted", port=80, host="127.0.0.1"))
+        text = "\n".join(lines)
+        assert "below 1024" in text
+        assert "--port" in text
+        assert "sandbox" not in text
+
+    def test_port_bind_error_prefers_permission_error_across_families(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When one family is denied and another is busy, report the denial."""
+        infos = [
+            (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 8080, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 8080)),
+        ]
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: infos)
+
+        def _bind(self: socket.socket, address: object) -> None:
+            code = errno.EADDRINUSE if self.family == socket.AF_INET6 else errno.EPERM
+            raise OSError(code, os.strerror(code))
+
+        monkeypatch.setattr(socket.socket, "bind", _bind)
+        err = port_bind_error("localhost", 8080)
+        assert err is not None
+        assert err.errno == errno.EPERM
 
     def test_check_port_returns_foreign_when_blocked_without_nemo_instance(self, tmp_path: Path) -> None:
         base_dir = tmp_path / "state"

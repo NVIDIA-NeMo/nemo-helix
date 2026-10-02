@@ -13,8 +13,7 @@ from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -327,7 +326,7 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
 
     def __init__(
         self,
-        nhx_sdk: NeMoHelix,
+        nhx_sdk: SyncHelixClient,
         execution_profile_config: ExecutionProfileConfigT,
         profile_name: str,
     ):

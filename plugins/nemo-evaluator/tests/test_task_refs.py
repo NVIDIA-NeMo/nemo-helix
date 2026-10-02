@@ -733,7 +733,7 @@ async def test_expansion_rejects_a_task_whose_runner_the_target_cannot_run(entit
 
 async def test_incompatible_target_error_names_requested_target(entity_store):
     """Verify rejecting a stored Harbor task for a Fabric run identifies the requested target in the error."""
-    from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget
+    from nemo_evaluator.jobs.agent_spec import FabricConfigSource, FabricRunnerTarget
 
     task = TaskEntity(
         name="checkout",
@@ -761,11 +761,19 @@ async def test_incompatible_target_error_names_requested_target(entity_store):
             )
             for item in loaded
         ]
-        validate_execution_support(snapshots, target=FabricRunnerTarget(config={}), adapters=KIND_ADAPTERS)
+        validate_execution_support(
+            snapshots, target=FabricRunnerTarget(source=FabricConfigSource(config={})), adapters=KIND_ADAPTERS
+        )
 
 
 def _direct_target(kind):
-    from nemo_evaluator.jobs.agent_spec import AgentTarget, FabricRunnerTarget, GymRunnerTarget, ModelTarget
+    from nemo_evaluator.jobs.agent_spec import (
+        AgentTarget,
+        FabricConfigSource,
+        FabricRunnerTarget,
+        GymRunnerTarget,
+        ModelTarget,
+    )
     from nemo_evaluator_sdk.values import GenericAgent, Model
 
     return {
@@ -774,7 +782,9 @@ def _direct_target(kind):
             agent=GenericAgent(name="test", url="http://localhost/agent", body={}, response_path="$.output")
         ),
         "fabric": lambda: FabricRunnerTarget(
-            config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+            source=FabricConfigSource(
+                config={"metadata": {"name": "test"}, "harness": {"adapter_id": "nvidia.fabric.codex"}}
+            )
         ),
         "gym": lambda: GymRunnerTarget(agent="simple_agent", resources_server="mcqa", agent_config="simple.yaml"),
         "offline": lambda: None,

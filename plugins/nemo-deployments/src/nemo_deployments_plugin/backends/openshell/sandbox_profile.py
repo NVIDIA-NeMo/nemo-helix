@@ -22,9 +22,9 @@ from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
 PROFILE = SandboxImageProfile(
     name="openshell",
     description=(
-        "OpenShell sandbox supervisor: non-root 'sandbox' user, iproute2 for "
-        "network-namespace setup, nftables for full policy enforcement, and a "
-        "glibc >= 2.39 base image."
+        "OpenShell sandbox supervisor: non-root 'sandbox' user that can write the "
+        "image WORKDIR, iproute2 for network-namespace setup, nftables for full "
+        "policy enforcement, and a glibc >= 2.39 base image."
     ),
     apt_packages=("iproute2", "nftables"),
     users=(
@@ -36,4 +36,7 @@ PROFILE = SandboxImageProfile(
             shell="/bin/bash",
         ),
     ),
+    # The docker driver runs the sandbox in the image WORKDIR and the supervisor refuses
+    # to start unless the sandbox identity can create entries there.
+    workdir_group="sandbox",
 )

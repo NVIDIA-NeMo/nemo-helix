@@ -39,12 +39,12 @@ dependencies = [
   "ragas==0.4.3",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.7.3,<0.8",
+  "nemo-relay>=0.9.3,<0.10",
   # Fabric's typed config surface (FabricConfig/RuntimeConfig/ModelConfig/the relay models) — what the
   # agent-eval runtimes compose against. The metapackage includes nemo-fabric-runtime; the harness
   # adapters are the weight (codex ~299 MB, claude ~231 MB) and stay in the `fabric` extra below, so
   # only *resolving and running* a harness pulls them.
-  "nemo-fabric>=0.3.0,<0.4.0",
+  "nemo-fabric>=0.4.0,<0.5.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -95,8 +95,8 @@ nemo-helix = [
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
-  "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+  "nemo-fabric[claude,codex]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 
 [build-system]

@@ -66,6 +66,10 @@ class DeploymentsRunnerConfig(BaseModel):
         default=None,
         description="Named executor for deployment_mode=k8s. Falls back to default_executor.",
     )
+    openshell_executor: str | None = Field(
+        default=None,
+        description="Named executor for deployment_mode=openshell. Falls back to default_executor.",
+    )
     default_image: str = Field(
         default="",
         description="Default container image when CreateDeploymentRequest.image is omitted.",
@@ -78,8 +82,9 @@ class DeploymentsRunnerConfig(BaseModel):
         default=None,
         description=(
             "Platform base URL baked into deployed agents as their inference endpoint, used verbatim "
-            "for both docker and k8s. When unset, the deploy path derives a container-reachable URL: "
-            "docker rewrites loopback hosts to host.docker.internal; k8s uses k8s_internal_base_url."
+            "for every container mode. When unset, the deploy path derives a container-reachable URL: "
+            "docker rewrites loopback hosts to host.docker.internal; k8s uses k8s_internal_base_url; "
+            "openshell uses the executor's platform_egress host and port."
         ),
     )
     k8s_internal_base_url: str | None = Field(
@@ -103,8 +108,9 @@ class DeploymentsRunnerConfig(BaseModel):
             "Path inside the container where the NAT workflow config is placed for nat-workflow-v1 "
             "deployments. Fabric deployments use agent.yaml in the same directory. Must be writable "
             "by every runtime user this image can run as: the plain-docker container user and the "
-            "openshell sandbox user (uid 999, which cannot write the image's /workspace). /tmp is "
-            "the writable intersection; k8s mounts it read-only there via a ConfigMap subPath."
+            "openshell sandbox user (which cannot write the image's /workspace contents, owned by "
+            "the agent user). /tmp is the writable intersection; k8s mounts it read-only there via "
+            "a ConfigMap subPath."
         ),
     )
 
@@ -144,7 +150,7 @@ class AgentsConfig(NemoConfig):
     )
     deployments: DeploymentsRunnerConfig = Field(
         default_factory=DeploymentsRunnerConfig,
-        description="Container-mode (docker/k8s) settings for the deployments-plugin runner.",
+        description="Container-mode (docker/k8s/openshell) settings for the deployments-plugin runner.",
     )
     jobs: AgentJobsConfig = Field(
         default_factory=AgentJobsConfig,

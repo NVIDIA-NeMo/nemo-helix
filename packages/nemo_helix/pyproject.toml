@@ -288,29 +288,29 @@ nemo-agents-plugin = [
   "python-on-whales>=0.60",
   "anthropic>=0.88.0",
   "rich>=13.7.1",
-  "nemo-fabric[relay,streaming]>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+  "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-claude = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-codex = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-deepagents = [
   "nemo-helix[nemo-agents-plugin]",
-  "nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0",
+  "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -377,6 +377,7 @@ nemo-deployments-plugin = [
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
   "filesets",
+  "nemo-agents-plugin",
   "nemo-evaluator-sdk[harbor]",
   "nemo-helix-plugin",
   "pydantic>=2.12.0",
@@ -399,8 +400,8 @@ nemo-evaluator-sdk = [
   "ragas==0.4.3",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.7.3,<0.8",
-  "nemo-fabric>=0.3.0,<0.4.0",
+  "nemo-relay>=0.9.3,<0.10",
+  "nemo-fabric>=0.4.0,<0.5.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -474,10 +475,10 @@ nemo-insights-plugin = [
   "fastapi>=0.115",
   "httpx",
   "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
-  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
+  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
   "nemo-helix-plugin",
-  "nemo-relay>=0.7,<0.8",
+  "nemo-relay>=0.9.3,<0.10",
   "nooa>=0.0.9",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",

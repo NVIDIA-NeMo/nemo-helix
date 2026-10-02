@@ -126,6 +126,30 @@ def test_view_redacts_secrets(config_file: Path):
     assert "secret-key-123" not in result.stdout
 
 
+def test_view_redacts_base_url_credentials_but_save_keeps_them(tmp_path: Path, monkeypatch):
+    full_url = "https://s3cr3t-userinfo@api.example.com/nhx?token=abc123"
+    config_data = {
+        "current_context": "remote",
+        "clusters": [{"name": "remote", "base_url": full_url}],
+        "users": [{"name": "remote", "type": "no-auth"}],
+        "contexts": [{"name": "remote", "cluster": "remote", "user": "remote", "workspace": "default"}],
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(config_data))
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_path))
+
+    result = runner.invoke(app, "config view --output-format json")
+    assert_exit_code(result, 0)
+    assert '"base_url": "https://api.example.com/nhx"' in result.stdout
+    assert "s3cr3t-userinfo" not in result.stdout
+    assert "abc123" not in result.stdout
+
+    result = runner.invoke(app, "config use-context remote")
+    assert_exit_code(result, 0)
+    saved = yaml.safe_load(config_path.read_text())
+    assert saved["clusters"][0]["base_url"] == full_url
+
+
 def test_use_context(config_file: Path):
     result = runner.invoke(app, "config use-context production")
     assert_exit_code(result, 0)

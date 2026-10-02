@@ -12,37 +12,37 @@ import {
 } from '@nvidia/foundations-react-core';
 import { AGENTS_ENABLED } from '@studio/constants/environment';
 import { getAgentDetailRoute } from '@studio/routes/utils';
-import { QuickstartAgentRow } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/QuickstartAgentRow';
+import { QuickstartSampleAgentRow } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSampleAgentRow';
 import {
-  buildQuickstartSteps,
-  type QuickstartAgent,
-  type QuickstartFeatures,
-  type QuickstartStep,
-  type QuickstartView,
-} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/quickstartContent';
-import { QuickstartStepRow } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/QuickstartStepRow';
+  buildQuickstartSampleSteps,
+  type QuickstartSampleAgent,
+  type QuickstartSampleFeatures,
+  type QuickstartSampleStep,
+  type QuickstartSampleView,
+} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/quickstartSampleContent';
+import { QuickstartSampleStepRow } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/QuickstartSampleStepRow';
 import { useState, type FC } from 'react';
 
 export type {
-  QuickstartAction,
-  QuickstartAgent,
-  QuickstartFeatures,
-  QuickstartStep,
-  QuickstartView,
-} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartPanel/quickstartContent';
+  QuickstartSampleAction,
+  QuickstartSampleAgent,
+  QuickstartSampleFeatures,
+  QuickstartSampleStep,
+  QuickstartSampleView,
+} from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel/quickstartSampleContent';
 
 /**
  * Each flag defaults to the live value. Override in Storybook or a test to see how the
  * panel degrades as the destinations behind individual steps stop being registered.
  */
-export interface QuickstartPanelProps extends QuickstartFeatures {
+export interface QuickstartSamplePanelProps extends QuickstartSampleFeatures {
   workspace: string;
   /** Absent means no sample agent is installed, and the section is hidden entirely. */
-  agent?: QuickstartAgent;
-  steps?: readonly QuickstartStep[];
+  agent?: QuickstartSampleAgent;
+  steps?: readonly QuickstartSampleStep[];
   /** Seeds the tab on first render; the panel owns the selection from then on. */
-  defaultView?: QuickstartView;
-  onViewChange?: (view: QuickstartView) => void;
+  defaultView?: QuickstartSampleView;
+  onViewChange?: (view: QuickstartSampleView) => void;
   footerText?: string;
   footerActionLabel?: string;
   /**
@@ -50,12 +50,6 @@ export interface QuickstartPanelProps extends QuickstartFeatures {
    * the caller's. Without this the footer is not rendered at all.
    */
   onSwitchWorkspace?: () => void;
-  /**
-   * Opens the Run Evaluation modal. Without a handler the step shows only "View results"
-   * rather than a second button pointing at the same place.
-   */
-  onRunEvaluation?: () => void;
-  onOptimize?: () => void;
   /**
    * Every step but one points into the agents route group, as does the agent row itself,
    * so without it there is no panel left to render.
@@ -67,7 +61,7 @@ export interface QuickstartPanelProps extends QuickstartFeatures {
  * Onboarding panel for the sandbox dashboard: the sample agent, then four things to do
  * with it, as Studio actions or CLI commands. Presentational; the heading lives on the route.
  */
-export const QuickstartPanel: FC<QuickstartPanelProps> = ({
+export const QuickstartSamplePanel: FC<QuickstartSamplePanelProps> = ({
   workspace,
   agent,
   steps,
@@ -76,13 +70,11 @@ export const QuickstartPanel: FC<QuickstartPanelProps> = ({
   footerText = 'Ready to start with your own assets?',
   footerActionLabel = 'Switch to Shared Workspace',
   onSwitchWorkspace,
-  onRunEvaluation,
-  onOptimize,
   agentsEnabled = AGENTS_ENABLED,
   intakeEnabled,
   agentOptimizationsEnabled,
 }) => {
-  const [view, setView] = useState<QuickstartView>(defaultView);
+  const [view, setView] = useState<QuickstartSampleView>(defaultView);
 
   if (!agent || !agentsEnabled) {
     return null;
@@ -90,11 +82,9 @@ export const QuickstartPanel: FC<QuickstartPanelProps> = ({
 
   const resolvedSteps =
     steps ??
-    buildQuickstartSteps({
+    buildQuickstartSampleSteps({
       workspace,
       agent,
-      onRunEvaluation,
-      onOptimize,
       intakeEnabled,
       agentOptimizationsEnabled,
     });
@@ -106,7 +96,7 @@ export const QuickstartPanel: FC<QuickstartPanelProps> = ({
   }
 
   const handleViewChange = (next: string) => {
-    const nextView: QuickstartView = next === 'cli' ? 'cli' : 'studio';
+    const nextView: QuickstartSampleView = next === 'cli' ? 'cli' : 'studio';
     setView(nextView);
     onViewChange?.(nextView);
   };
@@ -116,7 +106,10 @@ export const QuickstartPanel: FC<QuickstartPanelProps> = ({
       {/* `.nv-panel-content` is not a flex column, so the gap has to come from here. */}
       <Stack gap="density-2xl" className="w-full">
         <Stack gap="density-xl" className="w-full">
-          <QuickstartAgentRow agent={agent} href={getAgentDetailRoute(workspace, agent.name)} />
+          <QuickstartSampleAgentRow
+            agent={agent}
+            href={getAgentDetailRoute(workspace, agent.name)}
+          />
 
           <SegmentedControl
             size="small"
@@ -135,7 +128,7 @@ export const QuickstartPanel: FC<QuickstartPanelProps> = ({
           <ul role="list" className="flex w-full flex-col">
             {resolvedSteps.map((step, index) => (
               <li key={step.id} className="w-full">
-                <QuickstartStepRow
+                <QuickstartSampleStepRow
                   step={step}
                   view={view}
                   isLast={index === resolvedSteps.length - 1}

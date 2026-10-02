@@ -128,7 +128,7 @@ The `client_id` in NeMo Helix config doesn't match the application in your IdP.
 
 **Diagnosis**:
 
-1. Check that the gateway calls `/apis/auth/authenticate` with the original `Authorization` header before forwarding protected requests.
+1. Check that the gateway calls `/apis/auth/ext-authz` with the original `Authorization` header before forwarding protected requests.
 
 2. Check that the gateway forwards the trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers returned by the auth service on successful authentication.
 

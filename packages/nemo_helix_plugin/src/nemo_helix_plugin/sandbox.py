@@ -62,3 +62,9 @@ class SandboxImageProfile:
     description: str = ""
     apt_packages: tuple[str, ...] = ()
     users: tuple[SandboxUser, ...] = ()
+    workdir_group: str | None = None
+    """Group granted write on the image WORKDIR directory itself (not its contents).
+
+    For runtimes whose supervisor requires the workload identity to be able to
+    create entries in the WORKDIR. ``None`` leaves the WORKDIR permissions alone.
+    """

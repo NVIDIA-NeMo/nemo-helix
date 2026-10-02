@@ -9,7 +9,7 @@ Two images for the **nhx-automodel** customization backend, plus the shared **`n
 
 | Image | Dockerfile | Role |
 |-------|------------|------|
-| `nhx-automodel-base` | `docker/automodel/Dockerfile.nhx-automodel-base` | PyTorch 26.05 + Automodel + `mamba-ssm` / `causal-conv1d` wheels |
+| `nhx-automodel-base` | `docker/automodel/Dockerfile.nhx-automodel-base` | PyTorch 26.07 + Automodel + `mamba-ssm` / `causal-conv1d` / `magi-attention` wheels |
 | `nhx-customizer-tasks` | `docker/Dockerfile.nhx-customizer-tasks` | Shared CPU tasks (`file_io`, `model_entity`, `model_spec`, LoRA sidecar) |
 | `nhx-automodel-training` | `docker/automodel/Dockerfile.nhx-automodel-training` | Training (`nhx.automodel.tasks.training`) and retrieval mining (`nhx.automodel.tasks.retrieval_mine`) |
 
@@ -27,7 +27,7 @@ Bake file: **`docker-bake.hcl`** at the NeMo Helix repo root (`context = "."`). 
 
 ## Prerequisites
 
-1. **CUDA extension wheels** (`causal-conv1d-wheel`, `mamba-ssm-wheel`) - built from this directory or pulled from NGC. The wheel Dockerfile and uv locks live under `docker/locks/` (ported from `nhx`).
+1. **CUDA extension wheels** (`causal-conv1d-wheel`, `mamba-ssm-wheel`, `magi-attention-wheel`) - built from this directory or pulled from NGC. The wheel Dockerfile and uv locks live under `docker/locks/` (ported from `nhx`).
 
 2. **Base image tag** - after building the base, set `BASE_TAG_AUTOMODEL` (or push to `BASE_REGISTRY`) before building tasks/training.
 
@@ -82,7 +82,7 @@ Override registry: `export WHEELS_REGISTRY=...` and `export IMAGE_REGISTRY=...` 
 
 ## Tasks / training runtime (platform glue)
 
-**Base (`nhx-automodel-base`):** NGC PyTorch 26.05, Automodel `uv sync --locked`, pinned `transformers`/`torch`.
+**Base (`nhx-automodel-base`):** NGC PyTorch 26.07, Automodel `uv sync --locked`, pinned `transformers`/`torch`.
 
 **Media dependencies:** The base syncs only the Automodel extras text training needs (`extra`, `delta-databricks`). Since r0.6.0, Automodel keeps `opencv-python-headless` and FFmpeg-bearing wheels (`av`, `imageio-ffmpeg`, `decord`) in the opt-in `vlm-media` / `diffusion-media` extras, so they are not installed. Earlier releases needed a local cherry-pick (`3d98f6e3.diff`) to get the same result.
 

@@ -246,10 +246,19 @@ def _ranking_payload(
 
 
 def _effective_status_code(response: httpx.Response) -> int:
-    """Recover an upstream status wrapped by Inference Gateway as HTTP 502."""
-    if response.status_code != 502:
+    """Recover an upstream status that Inference Gateway wrapped in its own error response.
+
+    Current gateways wrap an upstream 401/403/404 as HTTP 424 whose detail contains
+    "rejected the request ... with HTTP status <code>". A 424 without that marker (for example
+    an unresolved provider secret) is the gateway's own failure and is returned unchanged.
+    Older gateways wrapped upstream errors as HTTP 502 "Backend returned <code>".
+    """
+    if response.status_code == 424:
+        match = re.search(r"rejected the request.*?with HTTP status (\d{3})", response.text)
+    elif response.status_code == 502:
+        match = re.search(r"Backend returned (\d{3})", response.text)
+    else:
         return response.status_code
-    match = re.search(r"Backend returned (\d{3})", response.text)
     return int(match.group(1)) if match else response.status_code
 
 

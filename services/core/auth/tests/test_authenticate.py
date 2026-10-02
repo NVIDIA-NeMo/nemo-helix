@@ -432,7 +432,7 @@ def test_authenticate_delegated_workload_access_token_returns_resolved_principal
     _assert_no_principal_response_headers(response)
 
 
-def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers(tmp_path):
+def test_ext_authz_delegated_workload_access_token_returns_no_trusted_headers_in_token_exchange_mode(tmp_path):
     private_key_file = tmp_path / "private.pem"
     private_key_file.write_bytes(_private_key_pem())
     config = AuthConfig(
@@ -477,14 +477,7 @@ def test_ext_authz_delegated_workload_access_token_returns_obo_principal_headers
 
     assert response.status_code == 200
     assert response.content == b""
-    assert response.headers["X-NHX-Principal-Id"] == "system:serviceaccount:nemo:job"
-    assert response.headers["X-NHX-Principal-Groups"] == "system:serviceaccounts,nemo-jobs"
-    assert response.headers["X-NHX-Actor-Aliases"] == "system:serviceaccount:nemo:job"
-    assert response.headers["X-NHX-Principal-On-Behalf-Of"] == "submitter@example.com"
-    assert response.headers["X-NHX-Principal-On-Behalf-Of-Email"] == "submitter@example.com"
-    assert response.headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "workspace-editors"
-    assert response.headers["X-NHX-Subject-Aliases"] == "submitter@example.com"
-    assert response.headers["X-NHX-Scopes"] == "openid email groups"
+    _assert_no_principal_response_headers(response)
 
 
 def test_authenticate_workload_subject_token_uses_resolver_callback(tmp_path):

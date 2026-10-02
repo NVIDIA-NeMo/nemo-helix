@@ -28,7 +28,7 @@
 #
 # Usage:
 #   script/dev-install-fabric.sh                                # version matching the installed bindings
-#   NEMO_RELAY_VERSION=0.7.3 script/dev-install-fabric.sh        # pin a specific gateway release
+#   NEMO_RELAY_VERSION=0.9.3 script/dev-install-fabric.sh        # pin a specific gateway release
 set -euo pipefail
 
 VENV_PY=".venv/bin/python"

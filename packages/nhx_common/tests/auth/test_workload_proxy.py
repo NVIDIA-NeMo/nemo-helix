@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -16,6 +17,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.auth import StaticToken, TokenProviderAuth
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nhx.common.auth.principal_identifier import InvalidPrincipalIdentifier
 from nhx.common.auth.workload_proxy import main as workload_proxy_main
 from nhx.common.auth.workload_proxy.main import build_app
@@ -62,6 +64,11 @@ def test_proxy_requires_exactly_one_auth_mode() -> None:
         build_app(base_url="https://platform.test", principal="agents", auth=httpx.BasicAuth("a", "b"))
     with pytest.raises(ValueError, match="on_behalf_of"):
         build_app(base_url="https://platform.test", auth=httpx.BasicAuth("a", "b"), on_behalf_of="user")
+
+
+def test_transport_auth_rejects_remote_cleartext_upstream() -> None:
+    with pytest.raises(ValueError, match="cleartext remote endpoint"):
+        build_app(base_url="http://nemo-helix-api:8080", auth=TokenProviderAuth(StaticToken("workload-token")))
 
 
 @respx.mock
@@ -172,6 +179,52 @@ def test_forward_omits_on_behalf_of_when_not_configured() -> None:
 
     sent = route.calls.last.request
     assert "x-nhx-principal-on-behalf-of" not in {k.lower() for k in sent.headers}
+
+
+@respx.mock
+@pytest.mark.parametrize("upstream", ["https://nemo-helix-api:8080", "http://127.0.0.1:15001"])
+def test_forward_uses_workload_identity_bearer_for_secure_or_loopback_upstream(
+    monkeypatch: pytest.MonkeyPatch, upstream: str
+) -> None:
+    token_file = Path("/var/run/secrets/nemo-helix/workload/token")
+    route = respx.get(f"{upstream}/apis/entities/v2/workspaces").mock(return_value=httpx.Response(200, json={}))
+    monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(token_file))
+    with patch(
+        "nhx.common.auth.workload_proxy.main.resolve_workload_exchange_provider",
+        return_value=StaticToken("exchanged-token"),
+    ) as provider_factory:
+        app = build_app(base_url=upstream, principal="agents", on_behalf_of="user:alice")
+    client = TestClient(app)
+
+    client.get(
+        "/apis/entities/v2/workspaces",
+        headers={
+            "authorization": "Bearer inbound-ignored",
+            "x-nhx-principal-id": "service:attacker",
+            "x-nhx-principal-on-behalf-of": "user:attacker",
+            "x-nhx-scopes": "platform:write",
+        },
+    )
+
+    provider_factory.assert_called_once_with(base_url=upstream, subject_token_file=token_file)
+    sent = route.calls.last.request
+    sent_keys = {key.lower() for key in sent.headers}
+    assert sent.headers["authorization"] == "Bearer exchanged-token"
+    assert "x-nhx-principal-id" not in sent_keys
+    assert "x-nhx-actor-aliases" not in sent_keys
+    assert "x-nhx-principal-on-behalf-of" not in sent_keys
+    assert "x-nhx-scopes" not in sent_keys
+
+
+def test_workload_identity_bearer_rejects_remote_cleartext_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    token_file = Path("/var/run/secrets/nemo-helix/workload/token")
+    monkeypatch.setenv(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, str(token_file))
+
+    with patch("nhx.common.auth.workload_proxy.main.resolve_workload_exchange_provider") as provider_factory:
+        with pytest.raises(ValueError, match="cleartext remote endpoint"):
+            build_app(base_url="http://nemo-helix-api:8080", principal="agents", on_behalf_of="user:alice")
+
+    provider_factory.assert_not_called()
 
 
 @respx.mock

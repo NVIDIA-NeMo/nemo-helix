@@ -10,7 +10,7 @@
 # container by docker-compose.yml and loaded via OPENSHELL_GATEWAY_CONFIG.
 
 [openshell]
-version = 1
+version = 2
 
 [openshell.gateway]
 # NOTE: the main bind is set by docker-compose.yml's `command:` override, not
@@ -19,7 +19,7 @@ version = 1
 # health_bind_address has no baked flag, so it is honored from this file.
 health_bind_address = "127.0.0.1:17671"
 log_level = "info"
-compute_drivers = ["docker"]
+compute_driver = "docker"
 disable_tls = true
 
 [openshell.gateway.auth]
@@ -42,12 +42,17 @@ ttl_secs = 3600
 [openshell.drivers.docker]
 # Default image for `openshell sandbox create` without --from.
 default_image = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
-# Supervisor image the openshell-sandbox binary is extracted from on first
-# start. Cached to XDG_DATA_HOME and reused on restart (no manual extract).
-supervisor_image = "ghcr.io/nvidia/openshell/supervisor:latest"
-image_pull_policy = "IfNotPresent"
-sandbox_namespace = "openshell"
-# Sandbox callback address. The Docker driver keeps only the scheme and swaps
-# in host.openshell.internal + the gateway bind port, so the gateway must be
-# published on 17670 on the host (see docker-compose.yml).
-grpc_endpoint = "http://host.openshell.internal:17670"
+# Runtime and supervisor images must come from the same OpenShell release as the
+# gateway image in docker-compose.yml; a mismatched supervisor exits at startup.
+# The supervisor binary is extracted on first start, cached to XDG_DATA_HOME, and
+# reused on restart (no manual extract).
+sandbox_runtime_image = "ghcr.io/nvidia/openshell/sandbox:0.1.2"
+supervisor_image = "ghcr.io/nvidia/openshell/supervisor:0.1.2"
+image_pull_policy = "if_not_present"
+sandbox_label = "openshell"
+app_armor_profile = "Unconfined"
+# grpc_endpoint is left unset: the docker supervisor runs on the host network and
+# the driver derives its callback as http://127.0.0.1:<gateway bind port>, so the
+# gateway must be published on the same port on host loopback (see
+# docker-compose.yml). A host name such as host.openshell.internal does not
+# resolve on the host network and leaves every sandbox unable to call home.

@@ -588,7 +588,11 @@ Exit 1 with the specific violation on failure. The same checks run again at subm
 The converter can do both FileSets in one step:
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+# The uploader resolves its target through the active config context
+# (~/.config/nhx/config.yaml) before falling back to NHX_BASE_URL, so a configured
+# remote is used as-is. Do NOT export a localhost fallback here — it would override
+# that remote. Set NHX_BASE_URL explicitly only to force a specific platform for this
+# shell.
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --upload --workspace default

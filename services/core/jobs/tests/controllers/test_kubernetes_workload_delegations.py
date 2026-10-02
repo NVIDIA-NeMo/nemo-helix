@@ -122,6 +122,45 @@ def test_manager_registers_pod_uid_bound_delegation(test_step_pending_with_auth_
     assert delegation.expires_at > datetime.datetime.now(datetime.timezone.utc)
 
 
+def test_manager_initial_pod_wait_retries_until_pod_delegation_is_registered(test_step_pending_with_auth_context):
+    core_v1 = MagicMock()
+    core_v1.list_namespaced_pod.side_effect = [
+        client.V1PodList(items=[]),
+        client.V1PodList(items=[_pod("pod-uid-123")]),
+    ]
+    register = MagicMock()
+    manager = _manager(core_v1=core_v1, register=register)
+    clock = 0.0
+    sleeps: list[float] = []
+
+    def monotonic() -> float:
+        return clock
+
+    def sleep(seconds: float) -> None:
+        nonlocal clock
+        sleeps.append(seconds)
+        clock += seconds
+
+    with patch(
+        "nhx.core.jobs.controllers.backends.kubernetes.workload_delegations."
+        "is_workload_identity_token_exchange_enabled",
+        return_value=True,
+    ):
+        registered = manager.ensure_for_target_after_initial_pod_wait(
+            test_step_pending_with_auth_context,
+            _target(),
+            timeout_seconds=1.0,
+            interval_seconds=0.25,
+            monotonic=monotonic,
+            sleep=sleep,
+        )
+
+    assert registered is True
+    assert sleeps == [0.25]
+    assert core_v1.list_namespaced_pod.call_count == 2
+    register.assert_called_once()
+
+
 def test_manager_skips_work_when_step_has_no_auth_context(test_step_pending):
     core_v1 = MagicMock()
     register = MagicMock()

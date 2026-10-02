@@ -85,15 +85,20 @@ class _StubExecuteJobs:
 class _StubModels:
     """Model Entity lookups the create path makes before recording a run."""
 
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(self, error: Exception | None = None, backend_formats: dict[str, str | None] | None = None) -> None:
         self.retrieved: list[tuple[str, str]] = []
         self._error = error
+        self._backend_formats = backend_formats or {}
 
     async def retrieve(self, name: str, *, workspace: str) -> object:
         self.retrieved.append((workspace, name))
         if self._error is not None:
             raise self._error
-        return object()
+        return SimpleNamespace(
+            workspace=workspace,
+            name=name,
+            backend_format=self._backend_formats.get(f"{workspace}/{name}"),
+        )
 
 
 class _TypedResponse:
@@ -484,6 +489,38 @@ async def test_an_unreachable_models_service_is_not_reported_as_a_bad_request() 
 
     assert excinfo.value.status_code == 503
     assert entities.created == []
+
+
+@pytest.mark.parametrize("backend_format", [None, "OPENAI_CHAT", "ANTHROPIC_MESSAGES"])
+async def test_a_model_the_analyst_can_call_is_accepted(backend_format: str | None) -> None:
+    """An unset backend format is accepted because the Analyst treats it as OPENAI_CHAT."""
+    jobs = _StubExecuteJobs()
+    models = _StubModels(backend_formats={DEFAULT_MODEL: backend_format, FAST_MODEL: backend_format})
+
+    response = await create_analysis_run("default", _request(), _client(jobs, models), _entities(_StubEntities()))
+
+    assert response.job is not None
+    assert len(jobs.calls) == 1
+
+
+@pytest.mark.parametrize("field", ["default_model", "fast_model"])
+async def test_a_model_the_analyst_cannot_call_is_rejected_before_anything_is_recorded(field: str) -> None:
+    """The job would only fail once the Analyst built its model clients, so reject it at submit time."""
+    jobs = _StubExecuteJobs()
+    entities = _StubEntities()
+    ref = DEFAULT_MODEL if field == "default_model" else FAST_MODEL
+    models = _StubModels(backend_formats={ref: "OPENAI_RESPONSES"})
+
+    with pytest.raises(HTTPException) as excinfo:
+        await create_analysis_run("default", _request(), _client(jobs, models), _entities(entities))
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == (
+        f"{field}: Model '{ref}' has unsupported backend format 'OPENAI_RESPONSES'; "
+        "expected OPENAI_CHAT or ANTHROPIC_MESSAGES"
+    )
+    assert entities.created == []
+    assert jobs.calls == []
 
 
 async def test_nothing_is_submitted_when_the_run_cannot_be_recorded() -> None:

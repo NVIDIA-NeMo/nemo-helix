@@ -31,7 +31,7 @@ describe('AgentDetailRoute with the optimizations flag off', () => {
   it('falls back to the default tab for a stale ?tab=optimizations link', async () => {
     renderDetail('?tab=optimizations');
 
-    expect(await screen.findByRole('tab', { name: 'Deployments' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Overview' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
