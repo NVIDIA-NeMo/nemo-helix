@@ -178,8 +178,12 @@ runs:
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           scaled-evals:
             - 'plugins/_temporary-scaled-evals/**'
+            - 'packages/filesets/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            - 'packages/nhx_testing/**'
+            - 'services/core/files/**'
+            - 'services/core/secrets/**'
           e2e:
             - 'e2e/**'
           docs:
