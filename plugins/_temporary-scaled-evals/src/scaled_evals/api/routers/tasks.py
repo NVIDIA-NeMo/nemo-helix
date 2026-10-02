@@ -336,6 +336,9 @@ def finalize_task(
             "invalid_request",
             "image_digest can only be supplied with image_ref when reusing a signed image",
         )
+
+    # The verifier image (for tasks whose verifier runs in its own sandbox) follows the same
+    # rules as the agent image: a digest needs a ref, and the image must be prebuilt.
     verifier_image = body.verifier_image_ref if body else None
     if body and body.verifier_image_digest and verifier_image is None:
         raise _http_error(
@@ -350,6 +353,7 @@ def finalize_task(
             "invalid_request",
             "verifier_image_ref can only be supplied with image_ref when reusing a signed image",
         )
+
     if (
         prebuilt_image is None
         and not settings.image_builder_service_url
@@ -396,12 +400,14 @@ def finalize_task(
         build_payload = {"image_ref": normalized_ref}
         if body.image_digest:
             build_payload["expected_digest"] = body.image_digest
+
+        # Check the verifier image's registry identity the same way, and hand it to the build
+        # job so it is stored on the revision next to the agent image.
         if verifier_image is not None:
             try:
                 normalized_verifier_ref = validate_task_image_request(verifier_image, body.verifier_image_digest)
             except TaskImageIdentityError as exc:
                 raise _http_error(422, "invalid_verifier_image", str(exc)) from exc
-
             build_payload["verifier_image_ref"] = normalized_verifier_ref
             if body.verifier_image_digest:
                 build_payload["verifier_expected_digest"] = body.verifier_image_digest

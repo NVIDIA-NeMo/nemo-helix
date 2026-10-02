@@ -210,14 +210,19 @@ def _verifier_mode(verifier: Any) -> str | None:
 
 def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
     """True when any verify pass of the task runs in its own sandbox, as Harbor 0.20 resolves it."""
+    # Harbor's default is "shared": the verifier runs inside the agent's sandbox.
     task_mode = _verifier_mode(document.get("verifier")) or "shared"
+
     steps = document.get("steps") or []
     if not steps:
         return task_mode == "separate"
-    return any(
-        (_verifier_mode(step.get("verifier") if isinstance(step, Mapping) else None) or task_mode) == "separate"
-        for step in steps
-    )
+
+    # Multi-step task: each step verifies on its own, using its own mode if set, else the task's.
+    for step in steps:
+        step_verifier = step.get("verifier") if isinstance(step, Mapping) else None
+        if (_verifier_mode(step_verifier) or task_mode) == "separate":
+            return True
+    return False
 
 
 def preflight_staged_task(
@@ -274,6 +279,8 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
     # tomlkit keeps the rest of the author's task.toml (comments, ordering) as-is.
     task_toml = task_dir / "task.toml"
     document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
+
+    # Agent image: always bound, creating [environment] if the task has none.
     environment = document.get("environment")
     if environment is None:
         environment = tomlkit.table()
@@ -282,15 +289,19 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
         raise ValueError(f"task [environment] must be a TOML table: {task_toml}")
     environment["docker_image"] = image_ref
 
+    # Verifier image: only for a verifier that runs in its own sandbox. A shared verifier
+    # runs inside the agent sandbox, so there is nothing to bind.
     verifier_bound = verifier_image_ref is not None and uses_separate_verifier(document)
     if verifier_bound:
         verifier = document.get("verifier")
         if not isinstance(verifier, MutableMapping):
             raise ValueError(f"task [verifier] must be a TOML table: {task_toml}")
+
         verifier_environment = verifier.get("environment")
         if verifier_environment is None:
-            # Harbor would verify in a copy of [environment]. Keep that copy, so the verifier
-            # gets the task's resources and network mode, and change only the image.
+            # Without [verifier.environment], Harbor verifies in a copy of [environment].
+            # Make that copy explicit, so the verifier keeps the task's resources and
+            # network mode and only the image changes.
             verifier_environment = tomlkit.table()
             plain = environment.unwrap() if isinstance(environment, Table | InlineTable) else dict(environment)
             for key, value in plain.items():
@@ -298,6 +309,8 @@ def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str |
             verifier["environment"] = verifier_environment
         if not isinstance(verifier_environment, MutableMapping):
             raise ValueError(f"task [verifier.environment] must be a TOML table: {task_toml}")
+
+        # Replace any image the task file names: only the platform's image was verified and pinned.
         verifier_environment["docker_image"] = verifier_image_ref
 
     # Write to a temporary file and swap it in, so a crash never leaves a half-written task.toml.
@@ -491,12 +504,16 @@ def make_harbor_opensandbox_submitter(
         )
 
         # OpenSandbox can't build images, so point task.toml at the images recorded at finalize.
+        # Both are pinned to their recorded digests.
         task_image_ref = _task_image_ref_for_sandbox(spec)
         verifier_image_ref = (
             _image_ref_for_sandbox(spec.verifier_image_ref, spec.verifier_image_digest)
             if spec.verifier_image_ref
             else None
         )
+
+        # A shared-verifier task never uses the verifier image, even if the revision has one.
+        # Clear it so provenance doesn't claim a verifier image that wasn't used.
         if not bind_task_image(task_dir, task_image_ref, verifier_image_ref=verifier_image_ref):
             verifier_image_ref = None
 
