@@ -7344,6 +7344,7 @@ paths:
         required: false
         schema:
           type: integer
+          minimum: 1
           description: Page number.
           default: 1
           title: Page
@@ -7353,6 +7354,8 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 1000
+          minimum: 1
           description: Page size.
           default: 100
           title: Page Size
@@ -7377,7 +7380,8 @@ paths:
           $ref: '#/components/schemas/ModelEntityFilter'
         description: 'Narrow the models counted into each family, using the same filters
           as List Models: name, project, workspace, base_model, adapters, finetuning_type,
-          prompt, lora_enabled, model_providers, description, created_at, and updated_at.'
+          prompt, lora_enabled, description, fileset, family, model_providers, created_at,
+          and updated_at.'
       responses:
         '200':
           description: Return the model architecture families and how many models

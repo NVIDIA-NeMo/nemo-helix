@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -233,14 +233,14 @@ async def list_models(
         filter_description=(
             "Narrow the models counted into each family, using the same filters as List Models: name, "
             "project, workspace, base_model, adapters, finetuning_type, prompt, lora_enabled, "
-            "model_providers, description, created_at, and updated_at."
+            "description, fileset, family, model_providers, created_at, and updated_at."
         ),
     ),
 )
 async def list_model_families(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    page: int = Query(default=1, ge=1, description="Page number."),
+    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
     sort: ModelFamilySort = Query(
         default=ModelFamilySort.NAME_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -265,8 +265,17 @@ async def list_model_families(
             page_size=page_size,
             sort=sort,
         )
+    except HTTPException:
+        raise
     except InvalidFilterError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NemoHTTPError as e:
+        if e.status_code >= 500:
+            logger.exception("Failed to list model families")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model families"
+            ) from e
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     except Exception:
         logger.exception("Failed to list model families")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model families")

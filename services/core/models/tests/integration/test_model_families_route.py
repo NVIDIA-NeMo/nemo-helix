@@ -141,3 +141,16 @@ def test_rejects_a_nested_provider_filter(test_clients: ClientContext):
     response = test_clients.test_client.get(FAMILIES_PATH, params={"filter": nested})
 
     assert response.status_code == 400, response.text
+
+
+def test_rejects_out_of_range_pagination(test_clients: ClientContext):
+    for params in ({"page_size": "0"}, {"page_size": "1001"}, {"page": "0"}):
+        response = test_clients.test_client.get(FAMILIES_PATH, params=params)
+
+        assert response.status_code == 422, (params, response.text)
+
+
+def test_passes_through_an_entity_store_client_error(test_clients: ClientContext):
+    response = test_clients.test_client.get(f"/apis/models/v2/workspaces/{_uid('missing')}/model-families")
+
+    assert 400 <= response.status_code < 500, response.text

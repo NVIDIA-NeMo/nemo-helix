@@ -348,12 +348,7 @@ class ModelEntityService:
         return list(model_ids)
 
     async def _apply_cross_entity_filters(self, workspace: str, parsed_filter: ParsedFilter) -> bool:
-        """Resolve filters that are not plain fields of the Model entity and merge them into ``parsed_filter``.
-
-        Returns False when the resolved filters can match no model, so callers can skip the query.
-        """
-        # lora_enabled is a cross-entity filter: it is resolved against ModelDeploymentConfig and
-        # merged back into the operation tree.
+        """Returns False when the resolved filters can match no model."""
         lora_enabled = parsed_filter.remove("lora_enabled")
 
         # Could be lifted by walking the tree and substituting each occurrence with the resolved condition.

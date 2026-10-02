@@ -426,13 +426,16 @@ def _get_entity_type(entity_class: EntityTypeLike) -> str:
     return str(entity_class.__entity_type__)
 
 
+def _count_by_data_field(field: str) -> str:
+    if field.startswith("data.") or not all(part.isidentifier() for part in field.split(".")):
+        raise ValueError(f"Field '{field}' is not an entity data field path such as 'spec.family' (no 'data.' prefix)")
+    return f"data.{field}"
+
+
 def _count_by_filter_dict(
-    field: str,
     filter_operation: FilterOperation | None,
     filter_obj: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if not all(part.isidentifier() for part in field.split(".")):
-        raise ValueError(f"Field '{field}' is not an entity data field")
     if filter_operation is not None and filter_obj:
         raise ValueError("count_by: pass either filter_operation or filter_obj, not both.")
     if filter_operation is not None:
@@ -688,13 +691,14 @@ class EntityClient:
         ``field`` may be nested, such as ``spec.family``. ``filter_operation`` and ``filter_obj`` are
         mutually exclusive.
         """
-        filter_dict = _count_by_filter_dict(field, filter_operation, filter_obj)
+        count_by_field = _count_by_data_field(field)
+        filter_dict = _count_by_filter_dict(filter_operation, filter_obj)
 
         # Only the grouped tallies are wanted, so ask for the smallest possible page.
         query_params: ListEntitiesQueryParams = {
             "page": 1,
             "page_size": 1,
-            "count_by": f"data.{field}",
+            "count_by": count_by_field,
         }
         if filter_dict:
             query_params["filter"] = json.dumps(filter_dict)
@@ -1199,12 +1203,13 @@ class SyncEntityClient:
         ``field`` may be nested, such as ``spec.family``. ``filter_operation`` and ``filter_obj`` are
         mutually exclusive.
         """
-        filter_dict = _count_by_filter_dict(field, filter_operation, filter_obj)
+        count_by_field = _count_by_data_field(field)
+        filter_dict = _count_by_filter_dict(filter_operation, filter_obj)
 
         query_params: ListEntitiesQueryParams = {
             "page": 1,
             "page_size": 1,
-            "count_by": f"data.{field}",
+            "count_by": count_by_field,
         }
         if filter_dict:
             query_params["filter"] = json.dumps(filter_dict)

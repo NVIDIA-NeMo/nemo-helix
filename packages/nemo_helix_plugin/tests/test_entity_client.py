@@ -133,7 +133,10 @@ async def test_count_by_raises_http_error_rather_than_missing_counts(
         await client.count_by(ExperimentGroup, "insight_id")
 
 
-@pytest.mark.parametrize("field", ["", "spec.", ".spec", "spec..family", "not-valid", "spec.not-valid"])
+@pytest.mark.parametrize(
+    "field",
+    ["", "spec.", ".spec", "spec..family", "not-valid", "spec.not-valid", "data.insight_id", "data.spec.family"],
+)
 @pytest.mark.asyncio
 async def test_count_by_rejects_malformed_field(field: str) -> None:
     mock_api = Mock()
