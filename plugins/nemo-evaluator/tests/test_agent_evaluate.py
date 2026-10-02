@@ -1802,6 +1802,21 @@ def test_fabric_target_rejects_invalid_secret_environment_at_submit(
             FabricRunnerTarget(source=FabricConfigSource(config=config), env_secrets={"KEY": SecretRef("ws/key")})
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_fabric_target_validation_error_does_not_echo_rejected_secret(registered: bool) -> None:
+    """Reject credential collisions without printing either inline or resolved Fabric config values."""
+    config = {"environment": {"env": {"KEY": "LEAKME"}}}
+    target: dict[str, Any] = {"env_secrets": {"KEY": "ws/key"}}
+    if registered:
+        target["source"] = {"agent": "ws/agent"}
+        target["resolved_config"] = config
+    else:
+        target["source"] = {"config": config}
+    with pytest.raises(ValidationError, match="also provided by env_secrets") as excinfo:
+        FabricRunnerTarget.model_validate(target)
+    assert "LEAKME" not in str(excinfo.value)
+
+
 async def test_compile_injects_target_api_key_secret() -> None:
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
