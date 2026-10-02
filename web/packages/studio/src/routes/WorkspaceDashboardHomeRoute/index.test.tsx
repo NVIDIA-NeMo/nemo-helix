@@ -92,6 +92,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
     vi.mocked(useModelsListModels).mockReturnValue(queryResult(0));
     vi.mocked(useAgentsGetAgent).mockReturnValue({
       data: { name: SAMPLE_AGENT_NAME, description: 'Sample email triage agent.' },
+      isFetched: true,
     } as never);
     vi.mocked(useAgentsListDeployments).mockReturnValue({
       data: {
@@ -175,7 +176,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
       expect(screen.getByText('Quickstart')).toBeInTheDocument();
       expect(
         screen.getByText(
-          'A complete sample workload, already run end to end. Inspect what shipped, or run any step yourself.'
+          'A sample workload with an agent and dataset already loaded. Inspect what shipped, or run any step yourself.'
         )
       ).toBeInTheDocument();
       expect(screen.getByText(SAMPLE_AGENT_NAME)).toBeInTheDocument();
@@ -227,16 +228,28 @@ describe('WorkspaceDashboardHomeRoute', () => {
 
       expect(await screen.findByText('Agents')).toBeInTheDocument();
       expect(screen.queryByTestId('quickstart-sample-agent-row')).not.toBeInTheDocument();
+      // Nor the regular Quickstart, which would flash and then swap out.
+      expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
     });
 
-    it('renders no quickstart at all when the sample agent is missing', async () => {
-      vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined } as never);
+    it('shows neither Quickstart while the sample agent is still loading', async () => {
+      vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined, isFetched: false } as never);
 
       renderRoute(SAMPLE_WORKSPACE);
 
       expect(await screen.findByText('Agents')).toBeInTheDocument();
       expect(screen.queryByText('Quickstart')).not.toBeInTheDocument();
-      expect(screen.queryByText('Connect an Agent')).not.toBeInTheDocument();
+    });
+
+    it('falls back to the regular Quickstart when there is no sample agent to show', async () => {
+      // Settled without data: a 404 from a hand-made `sample` workspace, a 403, or a 5xx.
+      vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined, isFetched: true } as never);
+
+      renderRoute(SAMPLE_WORKSPACE);
+
+      expect(await screen.findByText('Connect an Agent')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Dismiss Quickstart' })).toBeInTheDocument();
+      expect(screen.queryByTestId('quickstart-sample-agent-row')).not.toBeInTheDocument();
     });
   });
 });

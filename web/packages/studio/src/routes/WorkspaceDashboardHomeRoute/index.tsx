@@ -20,16 +20,14 @@ import { TriangleAlert } from 'lucide-react';
 import { useRef, type FC } from 'react';
 import { useNavigate } from 'react-router';
 
-const SANDBOX_WORKSPACE = 'sample';
-
 export const WorkspaceDashboardHomeRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const getStartedRef = useRef<HTMLDivElement>(null);
   const isSampleWorkspace = workspace === SAMPLE_WORKSPACE;
-  // The panel returns null without an agent or with agents disabled, so gating the fetch on
-  // AGENTS_ENABLED also keeps the heading below from outliving it.
-  const sampleAgent = useSampleQuickstartAgent(workspace, isSampleWorkspace && AGENTS_ENABLED);
+  // The panel returns null with agents disabled, so gating the fetch on AGENTS_ENABLED sends
+  // that case to the regular Quickstart rather than leaving the heading below with no panel.
+  const sample = useSampleQuickstartAgent(workspace, isSampleWorkspace && AGENTS_ENABLED);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Dashboard' }],
@@ -37,7 +35,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
 
   return (
     <GradientBackground>
-      {workspace === SANDBOX_WORKSPACE && (
+      {isSampleWorkspace && (
         <Banner kind="global" status="warning" slotIcon={<TriangleAlert role="img" aria-hidden />}>
           Sample Sandbox. This sandbox can be reset at any time with nemo CLI.
         </Banner>
@@ -52,25 +50,25 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
             tabIndex={-1}
           >
             <StatTileRow workspace={workspace} />
-            {isSampleWorkspace ? (
-              sampleAgent && (
-                <Stack gap="density-lg">
-                  <Text kind="title/md">Quickstart</Text>
-                  <Text kind="body/regular/sm" className="text-secondary">
-                    A complete sample workload, already run end to end. Inspect what shipped, or run
-                    any step yourself.
-                  </Text>
-                  <QuickstartSamplePanel
-                    workspace={workspace}
-                    agent={sampleAgent}
-                    // `default` is the workspace every user shares; the sample is a sandbox.
-                    onSwitchWorkspace={() =>
-                      navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE))
-                    }
-                  />
-                </Stack>
-              )
-            ) : (
+            {sample.state === 'ready' && (
+              <Stack gap="density-lg">
+                <Text kind="title/md">Quickstart</Text>
+                <Text kind="body/regular/sm" className="text-secondary">
+                  A sample workload with an agent and dataset already loaded. Inspect what shipped,
+                  or run any step yourself.
+                </Text>
+                <QuickstartSamplePanel
+                  workspace={workspace}
+                  agent={sample.agent}
+                  // `default` is the workspace every user shares; the sample is a sandbox.
+                  onSwitchWorkspace={() =>
+                    navigate(getWorkspaceDetailsDefaultRoute(DEFAULT_WORKSPACE))
+                  }
+                />
+              </Stack>
+            )}
+            {/* Not while loading: it would flash, then swap for the sample panel. */}
+            {sample.state === 'unavailable' && (
               <QuickstartSection
                 workspace={workspace}
                 onDismiss={() => getStartedRef.current?.focus()}

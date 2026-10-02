@@ -28,8 +28,8 @@ const deployment = (suffix: string, status: string) => ({
   status,
 });
 
-const mockAgent = (data: unknown) =>
-  vi.mocked(useAgentsGetAgent).mockReturnValue({ data } as never);
+const mockAgent = (data: unknown, isFetched = true) =>
+  vi.mocked(useAgentsGetAgent).mockReturnValue({ data, isFetched } as never);
 
 const mockDeployments = (deployments: unknown[], isFetched = true) =>
   vi.mocked(useAgentsListDeployments).mockReturnValue({
@@ -37,8 +37,13 @@ const mockDeployments = (deployments: unknown[], isFetched = true) =>
     isFetched,
   } as never);
 
-const sampleAgentFromHook = () =>
+const sampleStateFromHook = () =>
   renderHook(() => useSampleQuickstartAgent(SAMPLE_WORKSPACE, true)).result.current;
+
+const sampleAgentFromHook = () => {
+  const sample = sampleStateFromHook();
+  return sample.state === 'ready' ? sample.agent : undefined;
+};
 
 /** The `query` options the hook handed to a mocked SDK hook on its last render. */
 const lastQueryOptions = (hook: typeof useAgentsGetAgent | typeof useAgentsListDeployments) => {
@@ -93,31 +98,52 @@ describe('useSampleQuickstartAgent', () => {
         deploymentName: undefined,
       });
     });
+
+    it('shows "Unknown", not "No deployments", when the deployments fetch failed', () => {
+      // Errored with no prior success: fetched, but there is no response to read.
+      vi.mocked(useAgentsListDeployments).mockReturnValue({
+        data: undefined,
+        isFetched: true,
+      } as never);
+
+      expect(sampleAgentFromHook()).toMatchObject({
+        status: 'unknown',
+        statusLabel: undefined,
+        deploymentName: undefined,
+      });
+    });
   });
 
   describe('loading', () => {
     it('holds back until the first deployments response', () => {
       mockDeployments([], false);
 
-      expect(sampleAgentFromHook()).toBeUndefined();
+      expect(sampleStateFromHook()).toEqual({ state: 'loading' });
     });
 
     it('does not ask for deployments until the agent exists', () => {
-      mockAgent(undefined);
+      mockAgent(undefined, false);
 
-      expect(sampleAgentFromHook()).toBeUndefined();
+      expect(sampleStateFromHook()).toEqual({ state: 'loading' });
       expect(lastQueryOptions(useAgentsListDeployments).enabled).toBe(false);
     });
 
-    it('fetches nothing when disabled', () => {
-      renderHook(() => useSampleQuickstartAgent('some-workspace', false));
+    it('fetches nothing when disabled, and reports the sample unavailable', () => {
+      const { result } = renderHook(() => useSampleQuickstartAgent('some-workspace', false));
 
+      expect(result.current).toEqual({ state: 'unavailable' });
       expect(lastQueryOptions(useAgentsGetAgent).enabled).toBe(false);
       expect(lastQueryOptions(useAgentsListDeployments).enabled).toBe(false);
     });
   });
 
   describe('a missing agent', () => {
+    it('is unavailable once the lookup settles without one (404, 403, 5xx alike)', () => {
+      mockAgent(undefined, true);
+
+      expect(sampleStateFromHook()).toEqual({ state: 'unavailable' });
+    });
+
     it('is not retried: a 404 is an answer, not a transient failure', () => {
       sampleAgentFromHook();
       const retry = lastQueryOptions(useAgentsGetAgent).retry as (

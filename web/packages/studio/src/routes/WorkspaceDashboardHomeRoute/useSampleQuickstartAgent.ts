@@ -20,22 +20,33 @@ const TRANSITIONAL_STATUSES = new Set(['pending', 'starting', 'deleting']);
 const ROUTABLE_SOON_STATUSES = new Set(['pending', 'starting']);
 
 /**
- * The sample agent `nemo setup` provisions, shaped for the QuickstartSamplePanel. Undefined while
- * loading, when disabled, or when the agent is missing, all of which hide the panel.
+ * `unavailable` is everything that is not a sample to show: disabled, missing (a workspace
+ * someone named `sample` by hand, or an incomplete `nemo setup`), forbidden, or failing.
+ * The dashboard falls back to the regular Quickstart for all of them; only `loading` shows neither.
  */
+export type SampleQuickstartAgentState =
+  | { readonly state: 'loading' }
+  | { readonly state: 'unavailable' }
+  | { readonly state: 'ready'; readonly agent: QuickstartSampleAgent };
+
+/** The sample agent `nemo setup` provisions, shaped for the QuickstartSamplePanel. */
 export const useSampleQuickstartAgent = (
   workspace: string,
   enabled: boolean
-): QuickstartSampleAgent | undefined => {
-  const { data: agent } = useAgentsGetAgent(workspace, SAMPLE_AGENT_NAME, {
-    query: {
-      enabled,
-      // A missing agent is an answer, not a transient failure. Keep looking while it is absent:
-      // a re-run of `nemo setup` creates it, and the panel should appear without a reload.
-      retry: (failureCount, error) => !isNotFoundError(error) && failureCount < 3,
-      refetchInterval: (query) => (query.state.data ? false : JOB_POLLING_INTERVAL_LONG),
-    },
-  });
+): SampleQuickstartAgentState => {
+  const { data: agent, isFetched: isAgentFetched } = useAgentsGetAgent(
+    workspace,
+    SAMPLE_AGENT_NAME,
+    {
+      query: {
+        enabled,
+        // A missing agent is an answer, not a transient failure. Keep looking while it is absent:
+        // a re-run of `nemo setup` creates it, and the panel should appear without a reload.
+        retry: (failureCount, error) => !isNotFoundError(error) && failureCount < 3,
+        refetchInterval: (query) => (query.state.data ? false : JOB_POLLING_INTERVAL_LONG),
+      },
+    }
+  );
 
   const { data: deploymentsResponse, isFetched: isDeploymentsFetched } = useAgentsListDeployments(
     workspace,
@@ -55,11 +66,14 @@ export const useSampleQuickstartAgent = (
     }
   );
 
-  return useMemo(() => {
+  return useMemo((): SampleQuickstartAgentState => {
+    if (!enabled) return { state: 'unavailable' };
+    // `isFetched`, not `isPending`: a query that errored without data goes back to pending on
+    // every poll, which would swap the dashboard between Quickstarts each time.
+    if (!agent) return { state: isAgentFetched ? 'unavailable' : 'loading' };
     // Held back until the first deployments response, rather than flashing "Unknown" and a
-    // placeholder command. `isFetched`, not `isPending`: a query that errored without data goes
-    // back to pending on every poll, which would unmount the panel each time.
-    if (!enabled || !agent || !isDeploymentsFetched) return undefined;
+    // placeholder command.
+    if (!isDeploymentsFetched) return { state: 'loading' };
 
     const deployments = (deploymentsResponse?.data ?? []).filter(
       (d) => d.agent === SAMPLE_AGENT_NAME
@@ -72,11 +86,16 @@ export const useSampleQuickstartAgent = (
     const shown = reachable ?? deployments[0];
 
     return {
-      name: agent.name ?? SAMPLE_AGENT_NAME,
-      description: agent.description ?? '',
-      status: shown?.status ?? 'unknown',
-      statusLabel: deployments.length === 0 ? 'No deployments' : undefined,
-      deploymentName: reachable?.name,
+      state: 'ready',
+      agent: {
+        name: agent.name ?? SAMPLE_AGENT_NAME,
+        description: agent.description ?? '',
+        status: shown?.status ?? 'unknown',
+        // Fetched with no response means every attempt failed, not that there are none: that
+        // falls through to "Unknown". Not `isError`, which clears on each poll's refetch.
+        statusLabel: deploymentsResponse && deployments.length === 0 ? 'No deployments' : undefined,
+        deploymentName: reachable?.name,
+      },
     };
-  }, [enabled, agent, isDeploymentsFetched, deploymentsResponse]);
+  }, [enabled, agent, isAgentFetched, isDeploymentsFetched, deploymentsResponse]);
 };
