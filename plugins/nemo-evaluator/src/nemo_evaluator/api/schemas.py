@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, TypeAlias
+from typing import Annotated, ClassVar, TypeAlias
 
 from nemo_evaluator.api.fields import (
     LATEST_TAG as LATEST_TAG,
@@ -68,13 +70,15 @@ from nemo_evaluator.api.fields import (
 )
 from nemo_evaluator.api.task_definitions.evaluator import EvaluatorTaskDefinition as EvaluatorTaskDefinition
 from nemo_evaluator.api.task_definitions.harbor import HarborTaskDefinition as HarborTaskDefinition
+from nemo_evaluator.content_hash import DIGEST_PATTERN
 from nemo_evaluator.shared.metric_bundles.bundles import (
     BundledMetricOutputSpec,
 )
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
+from nemo_helix_plugin.filter_ops import ElemMatchScalar, validate_elem_match_criteria
 from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
@@ -112,6 +116,132 @@ class DataFilter(Filter):
             return op
 
         return _walk(operation)
+
+
+_METADATA_FIELD = "metadata"
+_METADATA_PREFIX = f"{_METADATA_FIELD}."
+
+#: Stored ref arrays a filter matches by ``workspace/name``; unqualified filter refs take the route's workspace.
+_REF_ARRAY_FIELDS = frozenset({"data.spec.metrics", "data.tasks"})
+_REF_MATCH_OPERATORS = frozenset({FilterOperator.CONTAINS, FilterOperator.CONTAINS_PREFIX})
+
+
+def _one_or_any(op: ComparisonOperation, match: Callable[[object], FilterOperation]) -> FilterOperation:
+    if op.operator == FilterOperator.EQ:
+        return match(op.value)
+    if op.operator == FilterOperator.IN and isinstance(op.value, list) and op.value:
+        return LogicalOperation(operator=FilterOperator.OR, operations=[match(value) for value in op.value])
+    raise ValueError(f"'{op.field}' supports only $eq and a non-empty $in")
+
+
+def _string_operand(field: str, value: object) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"'{field}' filters take a non-empty string")
+    return value
+
+
+def _metadata_pair_match(key: str, value: object) -> ComparisonOperation:
+    if not key:
+        raise ValueError("metadata filters need a key, e.g. 'metadata.<key>'")
+    criteria = validate_elem_match_criteria({"key": key, "value": value})
+    return ComparisonOperation(operator=FilterOperator.ELEM_MATCH, field=f"data.{_METADATA_FIELD}", value=criteria)
+
+
+def _has_tag(value: object) -> FilterOperation:
+    return ComparisonOperation(operator=FilterOperator.HAS_KEY, field="data.tags", value=_string_operand("tags", value))
+
+
+def _uses_metric(value: object) -> FilterOperation:
+    ref = _string_operand("metrics", value)
+    return ComparisonOperation(operator=FilterOperator.CONTAINS, field="data.spec.metrics", value=ref)
+
+
+def _has_member(value: object) -> FilterOperation:
+    ref = _string_operand("tasks", value)
+    if REF_FRAGMENT_SEPARATOR not in ref:
+        return ComparisonOperation(
+            operator=FilterOperator.CONTAINS_PREFIX, field="data.tasks", value=f"{ref}{REF_FRAGMENT_SEPARATOR}"
+        )
+    if not re.fullmatch(DIGEST_PATTERN, ref.split(REF_FRAGMENT_SEPARATOR, 1)[1]):
+        raise ValueError(
+            "'tasks' filters match a member at any revision ('workspace/name') or at one pinned digest "
+            "('workspace/name#<digest>'); stored members are pinned by digest, so a tag fragment never matches"
+        )
+    return ComparisonOperation(operator=FilterOperator.CONTAINS, field="data.tasks", value=ref)
+
+
+def _operator_operands(value: object) -> list[tuple[str, object]]:
+    if isinstance(value, dict) and value and all(str(key).startswith("$") for key in value):
+        return [(str(operator), operand) for operator, operand in value.items()]
+    return [(FilterOperator.EQ.value, value)]
+
+
+def _translate_metadata_comparison(op: ComparisonOperation) -> FilterOperation:
+    if op.field == _METADATA_FIELD:
+        if op.operator != FilterOperator.EQ or not isinstance(op.value, dict) or not op.value:
+            raise ValueError("'metadata' filters take key/value pairs, e.g. 'metadata.<key>' or 'metadata[<key>]'")
+        pairs: list[FilterOperation] = [
+            _translate_metadata_comparison(
+                ComparisonOperation(operator=FilterOperator(operator), field=f"{_METADATA_PREFIX}{key}", value=operand)
+            )
+            for key, value in op.value.items()
+            for operator, operand in _operator_operands(value)
+        ]
+        return pairs[0] if len(pairs) == 1 else LogicalOperation(operator=FilterOperator.AND, operations=pairs)
+    key = op.field.removeprefix(_METADATA_PREFIX)
+    return _one_or_any(op, lambda value: _metadata_pair_match(key, value))
+
+
+def qualify_ref_filters(operation: FilterOperation | None, workspace: str) -> FilterOperation | None:
+    """Qualify bare ``name`` refs in metric and member filters with ``workspace``."""
+    if isinstance(operation, ComparisonOperation):
+        if (
+            operation.field in _REF_ARRAY_FIELDS
+            and operation.operator in _REF_MATCH_OPERATORS
+            and isinstance(operation.value, str)
+            and "/" not in operation.value.split(REF_FRAGMENT_SEPARATOR, 1)[0]
+        ):
+            return operation.model_copy(update={"value": f"{workspace}/{operation.value}"})
+        return operation
+    if isinstance(operation, LogicalOperation):
+        return operation.model_copy(
+            update={"operations": [qualify_ref_filters(child, workspace) for child in operation.operations]}
+        )
+    return operation
+
+
+class RecordFilter(DataFilter):
+    """A ``DataFilter`` for revisioned records: metadata pairs, revision tags, and per-model value matchers."""
+
+    metadata: dict[str, ElemMatchScalar] | None = Field(
+        None,
+        description="Filter by metadata annotations: `metadata.<key>` (or `metadata[<key>]`) matches records "
+        "whose metadata has that key with that value. Supports `$eq` and `$in`.",
+    )
+    tags: str | None = Field(
+        None,
+        description="Filter by revision tag: matches records carrying the tag, e.g. `stable`. Supports `$eq` and `$in`.",
+    )
+
+    _VALUE_MATCHERS: ClassVar[dict[str, Callable[[object], FilterOperation]]] = {"tags": _has_tag}
+
+    @classmethod
+    def _get_entity_namespace_map(cls) -> dict[str, str]:
+        return {_METADATA_FIELD: f"data.{_METADATA_FIELD}"}
+
+    @classmethod
+    def translate_operation(cls, operation: FilterOperation) -> FilterOperation:
+        def _walk(op: FilterOperation) -> FilterOperation:
+            if isinstance(op, ComparisonOperation):
+                if op.field == _METADATA_FIELD or op.field.startswith(_METADATA_PREFIX):
+                    return _translate_metadata_comparison(op)
+                if op.field in cls._VALUE_MATCHERS:
+                    return _one_or_any(op, cls._VALUE_MATCHERS[op.field])
+            if isinstance(op, LogicalOperation):
+                return op.model_copy(update={"operations": [_walk(child) for child in op.operations]})
+            return op
+
+        return super().translate_operation(_walk(operation))
 
 
 class Metric(BaseModel):
@@ -283,13 +413,34 @@ class TaskSort(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
-class TaskFilter(Filter):
-    """Filter for task queries (top-level entity columns only; custom-field filtering is a follow-up)."""
+class TaskFilter(RecordFilter):
+    """Filter for task queries."""
 
     workspace: str | None = Field(None, description="Filter by workspace.")
     name: str | None = Field(None, description="Filter by name.")
+    kind: str | None = Field(None, description="Filter by task kind (the runner that executes it), e.g. `harbor`.")
+    intent: str | None = Field(None, description="Filter by an evaluator task's intent, e.g. `$like` for text search.")
+    native_task_id: str | None = Field(None, description="Filter by a Harbor task's native task id.")
+    metrics: str | None = Field(
+        None,
+        description="Filter by metric: matches tasks that use the metric `workspace/name`. Supports `$eq` and `$in`.",
+    )
     created_at: DatetimeFilter | None = Field(None, description="Filter by creation date.")
     updated_at: DatetimeFilter | None = Field(None, description="Filter by update date.")
+
+    _VALUE_MATCHERS: ClassVar[dict[str, Callable[[object], FilterOperation]]] = {
+        **RecordFilter._VALUE_MATCHERS,
+        "metrics": _uses_metric,
+    }
+
+    @classmethod
+    def _get_entity_field_map(cls) -> dict[str, str]:
+        return {
+            **super()._get_entity_field_map(),
+            "kind": "data.spec.kind",
+            "intent": "data.spec.intent",
+            "native_task_id": "data.spec.native_task_id",
+        }
 
 
 class Taskset(BaseModel):
@@ -393,10 +544,21 @@ class TasksetSort(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
-class TasksetFilter(Filter):
-    """Filter for taskset queries (top-level entity columns only; custom-field filtering is a follow-up)."""
+class TasksetFilter(RecordFilter):
+    """Filter for taskset queries."""
 
     workspace: str | None = Field(None, description="Filter by workspace.")
     name: str | None = Field(None, description="Filter by name.")
+    description: str | None = Field(None, description="Filter by description, e.g. `$like` for text search.")
+    tasks: str | None = Field(
+        None,
+        description="Filter by member task: `workspace/name` matches it at any revision, `workspace/name#<digest>` "
+        "at that pinned revision. Supports `$eq` and `$in`.",
+    )
+
+    _VALUE_MATCHERS: ClassVar[dict[str, Callable[[object], FilterOperation]]] = {
+        **RecordFilter._VALUE_MATCHERS,
+        "tasks": _has_member,
+    }
     created_at: DatetimeFilter | None = Field(None, description="Filter by creation date.")
     updated_at: DatetimeFilter | None = Field(None, description="Filter by update date.")
