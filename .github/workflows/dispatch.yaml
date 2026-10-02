@@ -28,6 +28,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          CI_LEGACY_DISPATCH_REF: ${{ vars.CI_LEGACY_DISPATCH_REF }}
         with:
           github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
           script: |
