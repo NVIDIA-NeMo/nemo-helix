@@ -62,6 +62,7 @@ import {
   validateAgentEntries,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -93,6 +94,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
   const [tab, setTab] = useState<NewAgentTab>('upload');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
 
@@ -182,6 +184,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
+    setSecretModalOpen(false);
+    setEditSecretName(null);
     setTab('upload');
     setTracedAgent('');
     onClose();
@@ -453,6 +457,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                 ensureOptionValue={watchedSecretKey || undefined}
                 useControllerProps={{ control, name: 'secretKey' }}
                 onRequestNewSecret={() => setSecretModalOpen(true)}
+                onRequestEditSecret={setEditSecretName}
                 triggerPlaceholder=""
                 formFieldProps={{
                   slotLabel: 'Access token secret',
@@ -519,6 +524,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
             setValue('secretKey', secretName, { shouldValidate: true });
             setSecretModalOpen(false);
           }}
+        />
+      ) : null}
+      {editSecretName ? (
+        <EditSecretModal
+          workspace={workspace}
+          name={editSecretName}
+          open
+          onClose={() => setEditSecretName(null)}
         />
       ) : null}
     </>

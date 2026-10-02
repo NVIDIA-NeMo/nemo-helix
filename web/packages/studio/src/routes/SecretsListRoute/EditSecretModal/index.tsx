@@ -19,9 +19,10 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   getSecretsListSecretsQueryKey,
+  useSecretsGetSecret,
   useSecretsUpdateSecret,
 } from '@nemo/sdk/generated/platform/secrets';
-import { FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
+import { Flex, FormField, Spinner, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
@@ -37,10 +38,60 @@ type EditSecretFormData = z.infer<typeof editSecretFormSchema>;
 
 interface EditSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
+  /** Name of the secret to edit. The record is fetched so the description defaults to the stored one. */
+  name: string;
+}
+
+/**
+ * Callers reach this from a secrets table row and from the secret picker inside other forms, and
+ * only the table has the full record. Fetching by name keeps one contract for both, and keeps a
+ * stale description from a cached list page out of a field that overwrites the stored one on save.
+ */
+export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, name, open, onClose }) => {
+  const {
+    data: secret,
+    error,
+    isLoading,
+  } = useSecretsGetSecret(workspace, name, { query: { enabled: open && Boolean(name) } });
+
+  // Remounts per secret so the form's defaults are the ones it was opened with.
+  if (secret) {
+    return (
+      <EditSecretForm
+        key={`${workspace}/${name}`}
+        workspace={workspace}
+        secret={secret}
+        open={open}
+        onClose={onClose}
+      />
+    );
+  }
+
+  return (
+    <FormModal
+      open={open}
+      onClose={onClose}
+      title="Edit Secret"
+      submitButtonText="Save"
+      onSubmit={(event) => event.preventDefault()}
+      submitDisabled
+      errorText={error ? getErrorMessage(error) : undefined}
+    >
+      {isLoading ? (
+        <Flex align="center" justify="center" className="py-8">
+          <Spinner aria-label={`Loading ${name}`} />
+        </Flex>
+      ) : null}
+    </FormModal>
+  );
+};
+
+interface EditSecretFormProps extends Pick<FormModalProps, 'open' | 'onClose'> {
+  workspace: string;
   secret: HelixSecretResponse;
 }
 
-export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, open, onClose }) => {
+const EditSecretForm: FC<EditSecretFormProps> = ({ workspace, secret, open, onClose }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
 
