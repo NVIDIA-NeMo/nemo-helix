@@ -2246,4 +2246,5 @@ async def test_compile_registered_gym_agent_stages_its_package_before_evaluation
     package = config["gym_registered_agent"]
     assert package["agent"] == "dev/calc" and package["resolved_config"] == target.resolved_config
     assert package["requirements"][0].startswith("nemo-fabric[deepagents,relay]==")
-    assert package["constraints"] == ["openai<=2.7.2"]  # Gym 0.5.0's cap, matching the host image the config pins
+    assert "constraints" not in package  # the host image's pins ship with the plugin, not with the spec
+    assert package["requirements"] == [package["requirements"][0]]  # the extra alone; the host lock pins companions

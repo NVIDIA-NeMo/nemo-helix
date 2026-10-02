@@ -250,8 +250,7 @@ def _staged_fileset(spec: AgentEvalSpec) -> EnvironmentStageSpec | None:
                 gym_registered_agent=GymRegisteredAgentPackageSpec(
                     agent=target.source.agent,
                     resolved_config=agent_config,
-                    requirements=fabric_harness_requirements(agent_config["harness"]["adapter_id"]),
-                    constraints=list(config.sandbox_gym_wheel_constraints),
+                    requirements=fabric_harness_requirements(agent_config["harness"]["adapter_id"], companions=False),
                 ),
             )
         return EnvironmentStageSpec(environment=target.environment) if target.environment is not None else None
