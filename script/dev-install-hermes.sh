@@ -30,6 +30,10 @@ if [[ -z "${fabric_version}" ]]; then
   exit 1
 fi
 
+if [[ -x "${HERMES_PY}" ]] && ! "${HERMES_PY}" -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 14))'; then
+  echo "${HERMES_VENV} was not created with Python 3.14. Remove it and rerun this script." >&2
+  exit 1
+fi
 if [[ ! -x "${HERMES_PY}" ]]; then
   uv --no-config venv --python 3.14 "${HERMES_VENV}"
 fi
