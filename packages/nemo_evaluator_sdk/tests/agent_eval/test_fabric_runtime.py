@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
 import sys
 import tempfile
+import threading
 import types
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -1305,12 +1307,21 @@ async def test_codex_trials_each_run_in_their_own_codex_home(tmp_path: Path, mon
     base_auth = _base_auth()
     base_auth.parent.mkdir()
     base_auth.write_text('{"tokens": {}}', encoding="utf-8")
+    base_mcp_login = base_auth.parent / ".credentials.json"
+    base_mcp_login.write_text("{}", encoding="utf-8")
     during_run: list[dict[str, Any]] = []
 
     def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
         home = _codex_home_of(agent)
-        auth = home / "auth.json"
-        during_run.append({"home": home, "is_dir": home.is_dir(), "link": auth.is_symlink() and auth.resolve()})
+        auth, mcp_login = home / "auth.json", home / ".credentials.json"
+        during_run.append(
+            {
+                "home": home,
+                "is_dir": home.is_dir(),
+                "link": auth.is_symlink() and auth.resolve(),
+                "mcp_link": mcp_login.is_symlink() and mcp_login.resolve(),
+            }
+        )
         return _FakeResult(status="succeeded", output={"response": "ok"})
 
     _install_fake_fabric(monkeypatch, handler)
@@ -1326,6 +1337,7 @@ async def test_codex_trials_each_run_in_their_own_codex_home(tmp_path: Path, mon
     for entry in during_run:
         assert entry["is_dir"]
         assert entry["link"] == base_auth.resolve()
+        assert entry["mcp_link"] == base_mcp_login.resolve()
         assert work_root not in entry["home"].parents
         assert not entry["home"].exists()
     assert base_auth.read_text(encoding="utf-8") == '{"tokens": {}}'
@@ -1448,9 +1460,110 @@ def test_codex_home_links_a_relative_base_home_by_absolute_path(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CODEX_HOME", ".codex")
 
-    home = fabric_runtime._make_codex_home()
+    home, _env = fabric_runtime._make_codex_home()
 
     link = home / "auth.json"
     assert Path(os.readlink(link)) == tmp_path / ".codex" / "auth.json"
     assert link.read_text(encoding="utf-8") == "{}"
     fabric_runtime._remove_codex_home(home)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", ["keyring", "auto"])
+async def test_a_keyring_login_keeps_the_base_codex_home_and_isolates_only_the_state_db(
+    store: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex keys a keyring login by the canonical CODEX_HOME, so a trial must keep the base home to find
+    it; a separate CODEX_SQLITE_HOME still prevents the concurrent cold-start race on Codex's state DB.
+    ``auto`` reads the keyring before ``auth.json``, so a linked file could be a stale login.
+    """
+    base = _base_auth().parent
+    base.mkdir()
+    (base / "config.toml").write_text(f'cli_auth_credentials_store = "{store}"\n', encoding="utf-8")
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    during_run: list[dict[str, Any]] = []
+
+    def handler(agent: Any, kwargs: dict[str, Any]) -> _FakeResult:
+        env = agent.environment.env
+        state_home = Path(env["CODEX_SQLITE_HOME"])
+        during_run.append({"env": dict(env), "state_home": state_home, "contents": list(state_home.iterdir())})
+        return _FakeResult(status="succeeded", output={"response": "ok"})
+
+    _install_fake_fabric(monkeypatch, handler)
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    trials = await runtime.run_tasks([_TASK])
+
+    assert trials[0].status == "completed"
+    [entry] = during_run
+    assert "CODEX_HOME" not in entry["env"]
+    assert entry["contents"] == []
+    assert not entry["state_home"].exists()
+
+
+@pytest.mark.parametrize(
+    "config_toml",
+    ['cli_auth_credentials_store = "file"\n', "not = valid = toml\n"],
+    ids=["file-store", "unreadable-config"],
+)
+def test_a_file_login_gets_its_own_codex_home(config_toml: str) -> None:
+    base = _base_auth().parent
+    base.mkdir()
+    (base / "config.toml").write_text(config_toml, encoding="utf-8")
+
+    home, env = fabric_runtime._make_codex_home()
+
+    assert env == {"CODEX_HOME": str(home), "CODEX_SQLITE_HOME": str(home)}
+    fabric_runtime._remove_codex_home(home)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_during_codex_home_removal_waits_for_the_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling ``run_tasks`` while a trial's Codex home is being removed must not abandon the
+    removal, which would leave the home (and its login link) in the temp dir, nor skip stopping the
+    trial's trace receiver."""
+    removal_started, release_removal = threading.Event(), threading.Event()
+    removed: list[Path] = []
+    stopped_receivers: list[Path] = []
+
+    class _RecordingReceiver:
+        endpoint = "http://127.0.0.1:1/v1/traces"
+
+        def __init__(self, out_dir: Path) -> None:
+            self.out_dir = out_dir
+
+        def __enter__(self) -> _RecordingReceiver:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            stopped_receivers.append(self.out_dir)
+
+    monkeypatch.setattr(fabric_runtime, "OTLPReceiver", _RecordingReceiver)
+    real_remove = fabric_runtime._remove_codex_home
+
+    def gated_remove(home: Path) -> None:
+        removal_started.set()
+        release_removal.wait()
+        real_remove(home)
+        removed.append(home)
+
+    monkeypatch.setattr(fabric_runtime, "_remove_codex_home", gated_remove)
+    _install_fake_fabric(monkeypatch, lambda agent, kwargs: _FakeResult(status="succeeded", output={"response": "ok"}))
+    runtime = fabric_runtime.FabricAgentRuntime(config=_CONFIG, work_root=tmp_path / "fabric")
+
+    run = asyncio.ensure_future(runtime.run_tasks([_TASK]))
+    try:
+        assert await asyncio.to_thread(removal_started.wait, 30)
+        run.cancel()
+        for _ in range(5):
+            await asyncio.sleep(0)
+        assert not run.done()
+    finally:
+        release_removal.set()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    assert len(removed) == 1
+    assert not removed[0].exists()
+    assert len(stopped_receivers) == 1

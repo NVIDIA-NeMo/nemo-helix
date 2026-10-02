@@ -44,6 +44,7 @@ import os
 import shutil
 import tempfile
 import time
+import tomllib
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -128,6 +129,8 @@ _SKILL_PROBE_PATH = "nemo-eval-skill-capability-probe"
 _WORKSPACE_EVIDENCE_KEY = "workspace"
 _WORKSPACE_EVIDENCE_KIND = "filesystem"
 _CODEX_HOME_PREFIX = "nemo-eval-codex-home-"
+_CODEX_LOGIN_FILES = ("auth.json", ".credentials.json")
+_CODEX_KEYRING_STORE_MODES = frozenset({"keyring", "auto"})
 
 
 class FabricAgentRuntime:
@@ -170,6 +173,7 @@ class FabricAgentRuntime:
         self._base_dir = Path(base_dir).expanduser() if base_dir is not None else None
         self._work_root = Path(work_root).expanduser() if work_root is not None else None
         self._timeout_s = timeout_s
+        self._logged_shared_codex_home = False
         self._capture_trajectory = capture_trajectory
         self._trajectory_extra = dict(trajectory_extra) if trajectory_extra else None
         self._runtime_name = runtime_name
@@ -230,7 +234,7 @@ class FabricAgentRuntime:
         adapter_id = harness.get("adapter_id") if isinstance(harness, Mapping) else None
         return str(adapter_id) if adapter_id is not None else ""
 
-    def _isolates_codex_home(self, agent_config: FabricConfig) -> bool:
+    def _require_codex_home_isolation(self, agent_config: FabricConfig) -> bool:
         if not is_codex_adapter(self._adapter_id()):
             return False
         environment = agent_config.environment
@@ -400,6 +404,7 @@ class FabricAgentRuntime:
         run = _common.TaskRun(workspace_dir=workspace_dir, relay_dir=evidence_dir / _RELAY_SUBDIR)
         trace_receiver: OTLPReceiver | None = None
         codex_home: Path | None = None
+        codex_env: dict[str, str] | None = None
         try:
             # Inside the guarded block: a port it cannot bind costs this trial its trace, like any
             # other per-task failure, rather than aborting every task in the gather.
@@ -424,9 +429,16 @@ class FabricAgentRuntime:
                 run.skill_provenances = installation.provenances
                 skill_paths = installation.skill_paths
 
-            if self._isolates_codex_home(agent_config):
+            if self._require_codex_home_isolation(agent_config):
                 # Not offloaded: an await before ``codex_home`` is set would let a cancellation leak it.
-                codex_home = _make_codex_home()
+                codex_home, codex_env = _make_codex_home()
+                if "CODEX_HOME" not in codex_env and not self._logged_shared_codex_home:
+                    self._logged_shared_codex_home = True
+                    logger.info(
+                        "The base Codex login is in the OS keyring, so Codex trials share %s and get only "
+                        "their own SQLite state.",
+                        _base_codex_home(),
+                    )
 
             # ``add_skill_path`` appends, so config-declared skills survive.
             task_config = self._compose_config(
@@ -435,7 +447,7 @@ class FabricAgentRuntime:
                 workspace_dir,
                 task=task,
                 trace_receiver=trace_receiver,
-                codex_home=codex_home,
+                codex_env=codex_env,
             )
             for skill_path in skill_paths:
                 task_config.add_skill_path(skill_path)
@@ -453,8 +465,6 @@ class FabricAgentRuntime:
         except Exception as exc:  # noqa: BLE001 - a task failure must not abort the whole run
             run.error = exc
         finally:
-            if codex_home is not None:
-                await asyncio.to_thread(_remove_codex_home, codex_home)
             if trace_receiver is not None:
                 # Stopped before the fold, and both before the trial reads the evidence: the
                 # spans arrive on the exporter's own schedule, and a trace folded before the last
@@ -466,6 +476,10 @@ class FabricAgentRuntime:
                     fold_exports(traces_dir(evidence_dir))
                 except Exception as exc:  # noqa: BLE001 - any fold failure costs the trace, not the trial
                     logger.warning("Could not fold the OTLP trace for task %s: %s", task.id, exc)
+            if codex_home is not None:
+                cancellation = await _remove_codex_home_to_completion(codex_home)
+                if cancellation is not None:
+                    raise cancellation
         return run
 
     async def _finish_task(
@@ -622,7 +636,7 @@ class FabricAgentRuntime:
         workspace_dir: Path,
         task: AgentEvalTask,
         trace_receiver: OTLPReceiver | None = None,
-        codex_home: Path | None = None,
+        codex_env: dict[str, str] | None = None,
     ) -> FabricConfig:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
@@ -638,12 +652,8 @@ class FabricAgentRuntime:
         environment = cfg.environment or EnvironmentConfig(provider="local")
         environment.provider = environment.provider or "local"
         environment.workspace = str(workspace_dir.resolve())
-        if codex_home is not None:
-            environment.env = {
-                **(environment.env or {}),
-                "CODEX_HOME": str(codex_home),
-                "CODEX_SQLITE_HOME": str(codex_home),
-            }
+        if codex_env:
+            environment.env = {**(environment.env or {}), **codex_env}
         cfg.environment = environment
 
         # Apply the model as the config's default (mirrors nemo_fabric.integrations.harbor).
@@ -702,16 +712,28 @@ def _base_codex_home() -> Path:
     return Path(configured).expanduser().absolute() if configured else Path.home() / ".codex"
 
 
-def _make_codex_home() -> Path:
-    home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
+def _base_login_in_keyring(base: Path) -> bool:
     try:
-        auth = _base_codex_home() / "auth.json"
-        if auth.is_file():
-            (home / "auth.json").symlink_to(auth)
+        config = tomllib.loads((base / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return config.get("cli_auth_credentials_store") in _CODEX_KEYRING_STORE_MODES
+
+
+def _make_codex_home() -> tuple[Path, dict[str, str]]:
+    """Create a trial's throwaway Codex home; return it with the env that points Codex at it."""
+    base = _base_codex_home()
+    home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
+    if _base_login_in_keyring(base):
+        return home, {"CODEX_SQLITE_HOME": str(home)}
+    try:
+        for name in _CODEX_LOGIN_FILES:
+            if (base / name).is_file():
+                (home / name).symlink_to(base / name)
     except BaseException:
-        shutil.rmtree(home, ignore_errors=True)
+        _remove_codex_home(home)
         raise
-    return home
+    return home, {"CODEX_HOME": str(home), "CODEX_SQLITE_HOME": str(home)}
 
 
 _CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
@@ -724,6 +746,20 @@ def _remove_codex_home(home: Path) -> None:
         if not home.exists():
             return
     logger.warning("Could not fully remove the Codex home %s; Codex was still writing to it.", home)
+
+
+async def _remove_codex_home_to_completion(home: Path) -> asyncio.CancelledError | None:
+    """Remove ``home`` even if the caller is cancelled meanwhile; return that cancellation to re-raise."""
+    removal = asyncio.ensure_future(asyncio.to_thread(_remove_codex_home, home))
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            await asyncio.shield(removal)
+            return cancellation
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
+            if removal.done():
+                return cancellation
 
 
 def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
