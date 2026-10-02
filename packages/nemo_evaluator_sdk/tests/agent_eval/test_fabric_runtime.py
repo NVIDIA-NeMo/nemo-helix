@@ -1496,7 +1496,7 @@ async def test_a_keyring_login_keeps_the_base_codex_home_and_isolates_only_the_s
 
     assert trials[0].status == "completed"
     [entry] = during_run
-    assert "CODEX_HOME" not in entry["env"]
+    assert entry["env"]["CODEX_HOME"] == str(base)
     assert entry["contents"] == []
     assert not entry["state_home"].exists()
 
@@ -1567,3 +1567,19 @@ async def test_cancelling_during_codex_home_removal_waits_for_the_removal(
     assert len(removed) == 1
     assert not removed[0].exists()
     assert len(stopped_receivers) == 1
+
+
+def test_a_relative_keyring_base_home_is_passed_on_as_an_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Codex process runs in the trial workspace, so an inherited relative CODEX_HOME would resolve
+    there and look up a different keyring entry from the one the login was stored under."""
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "config.toml").write_text('cli_auth_credentials_store = "keyring"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CODEX_HOME", ".codex")
+
+    home, env = fabric_runtime._make_codex_home()
+
+    assert env["CODEX_HOME"] == str(tmp_path / ".codex")
+    fabric_runtime._remove_codex_home(home)

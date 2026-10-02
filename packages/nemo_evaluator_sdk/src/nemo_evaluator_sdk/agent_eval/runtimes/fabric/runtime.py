@@ -432,7 +432,7 @@ class FabricAgentRuntime:
             if self._require_codex_home_isolation(agent_config):
                 # Not offloaded: an await before ``codex_home`` is set would let a cancellation leak it.
                 codex_home, codex_env = _make_codex_home()
-                if "CODEX_HOME" not in codex_env and not self._logged_shared_codex_home:
+                if codex_env["CODEX_HOME"] != str(codex_home) and not self._logged_shared_codex_home:
                     self._logged_shared_codex_home = True
                     logger.info(
                         "The base Codex login is in the OS keyring, so Codex trials share %s and get only "
@@ -725,7 +725,7 @@ def _make_codex_home() -> tuple[Path, dict[str, str]]:
     base = _base_codex_home()
     home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
     if _base_login_in_keyring(base):
-        return home, {"CODEX_SQLITE_HOME": str(home)}
+        return home, {"CODEX_HOME": str(base), "CODEX_SQLITE_HOME": str(home)}
     try:
         for name in _CODEX_LOGIN_FILES:
             if (base / name).is_file():
