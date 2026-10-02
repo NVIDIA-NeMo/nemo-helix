@@ -5,7 +5,12 @@ from pathlib import Path
 
 import httpx
 import pytest
-from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
+from nemo_evaluator.jobs.environment_stage import (
+    AGENT_FILES_STAGING_DIR,
+    ENVIRONMENT_STAGING_DIR,
+    ENVIRONMENT_STORAGE_DIR,
+    EnvironmentStageJob,
+)
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -225,3 +230,40 @@ def test_stage_spec_needs_something_to_stage() -> None:
         EnvironmentStageSpec()
     with pytest.raises(ValueError, match="agent_files"):
         EnvironmentStageSpec(environment="ws/env", agent_files="ws/ethos")
+
+
+def test_a_failed_package_write_leaves_no_scratch_copy_of_the_agent_files(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """The Ethos files land in a scratch dir before they are copied into the package; a failure must not keep them."""
+    ctx = _context(tmp_path)
+    task_client = _task_client(mocker)
+
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        Path(destination, "skills", "a").mkdir(parents=True)
+        Path(destination, "skills", "a", "SKILL.md").write_text("# a")
+
+    mocker.patch("nemo_evaluator.jobs.environment_stage._download_fileset_contents", side_effect=download_contents)
+    mocker.patch(
+        "nemo_evaluator.jobs.gym_registered_agent_package.download_wheels",
+        side_effect=RuntimeError("wheelhouse download failed for ['nemo-fabric[deepagents,relay]==0.3.0']"),
+    )
+
+    with pytest.raises(RuntimeError, match="wheelhouse download failed"):
+        EnvironmentStageJob().run(
+            {
+                "agent_files": "dev/calc-ethos",
+                "gym_registered_agent": {
+                    "agent": "dev/calc",
+                    "resolved_config": {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
+                    "requirements": ["nemo-fabric[deepagents,relay]==0.3.0"],
+                },
+            },
+            ctx=ctx,
+            client=task_client,
+        )
+
+    persistent = ctx.storage.persistent
+    assert not (persistent / AGENT_FILES_STAGING_DIR).exists()
+    assert not (persistent / ENVIRONMENT_STAGING_DIR).exists()
+    assert not (persistent / ENVIRONMENT_STORAGE_DIR).exists()

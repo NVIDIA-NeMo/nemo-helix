@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import tempfile
-from asyncio import Semaphore
+from asyncio import Semaphore, wait_for
 from copy import deepcopy
 from pathlib import Path
 from time import time
@@ -139,6 +139,8 @@ def _content_text(content: Any) -> str:
 
 
 def _extract_request_input(body_input: Any) -> tuple[Any, Optional[str]]:
+    if body_input is None:
+        return "", None
     if isinstance(body_input, str):
         return body_input, None
     messages: list[dict[str, Any]] = []
@@ -356,14 +358,17 @@ class NeMoRegisteredAgent(SimpleResponsesAPIAgent):
                 skills=_skill_paths(skills_path),
                 environ=dict(os.environ),
             )
-            result = await Fabric().run(
-                FabricConfig.from_mapping(composed),
-                base_dir=self.config.fabric_config_base_dir or workspace,
-                request=RunRequest(
-                    input=request_input,
-                    request_id=rollout_id or f"request-{uuid4().hex}",
-                    context={"nemo_gym_rollout_id": rollout_id} if rollout_id else {},
+            result = await wait_for(
+                Fabric().run(
+                    FabricConfig.from_mapping(composed),
+                    base_dir=self.config.fabric_config_base_dir or workspace,
+                    request=RunRequest(
+                        input=request_input,
+                        request_id=rollout_id or f"request-{uuid4().hex}",
+                        context={"nemo_gym_rollout_id": rollout_id} if rollout_id else {},
+                    ),
                 ),
+                timeout=self.config.timeout,
             )
         result_mapping = result.to_mapping()
         if result.status != "succeeded":

@@ -51,6 +51,7 @@ from nemo_evaluator.jobs.agent_spec import (
 from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
+    has_staged_environment,
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
 )
@@ -287,7 +288,8 @@ class _AgentEvalJobBase(NemoJob):
     ) -> HelixJobSpec:
         execution_profile: BaseExecutionProfile | None = None
         if isinstance(canonical_spec.target, GymRunnerTarget):
-            evaluator_config = get_config() if canonical_spec.target.environment is not None else None
+            staged = has_staged_environment(canonical_spec.target)
+            evaluator_config = get_config() if staged else None
             require_pvc_storage = (
                 evaluator_config is not None and evaluator_config.sandbox_host_provider == "opensandbox"
             )
@@ -296,7 +298,7 @@ class _AgentEvalJobBase(NemoJob):
                 profile=profile or "default",
                 require_pvc_storage=require_pvc_storage,
             )
-            if canonical_spec.target.environment is not None:
+            if staged:
                 assert evaluator_config is not None
                 try:
                     require_fileset_environment_sandboxed(canonical_spec.target, evaluator_config)

@@ -99,28 +99,28 @@ class EnvironmentStageJob(NemoJob):
         staging.mkdir(parents=True)
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
+        files_dir = ctx.storage.persistent / AGENT_FILES_STAGING_DIR if agent_files is not None else None
         try:
             if environment is not None:
                 _download_fileset_contents(
                     client=client, destination=staging, fileset=environment[1], workspace=environment[0]
                 )
             if spec.gym_registered_agent is not None:
-                files_dir = None
-                if agent_files is not None:
-                    files_dir = ctx.storage.persistent / AGENT_FILES_STAGING_DIR
+                if files_dir is not None and agent_files is not None:
                     _remove_path(files_dir)
                     files_dir.mkdir(parents=True)
                     _download_fileset_contents(
                         client=client, destination=files_dir, fileset=agent_files[1], workspace=agent_files[0]
                     )
                 write_registered_agent_package(staging, spec.gym_registered_agent, agent_files=files_dir)
-                if files_dir is not None:
-                    _remove_path(files_dir)
             _remove_path(destination)
             staging.rename(destination)
         except Exception:
             _remove_path(staging)
             raise
+        finally:
+            if files_dir is not None:
+                _remove_path(files_dir)
 
         return {
             "status": "completed",
