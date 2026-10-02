@@ -55,7 +55,6 @@ describe('WorkspaceDropdown', () => {
     renderDropdown();
     await waitFor(() => expect(initialListRequest).toHaveBeenCalled());
 
-    // Created outside the dropdown, e.g. from the CLI or another tab
     mockWorkspacesList([NEW_WORKSPACE, DEFAULT_WORKSPACE]);
     await user.click(await screen.findByRole('button', { name: 'Select workspace' }));
 
@@ -81,7 +80,6 @@ describe('WorkspaceDropdown', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Select workspace' }));
 
-    // Listed under both "Recent Workspaces" and "Workspaces"
     expect(await screen.findAllByRole('menuitem', { name: NEW_WORKSPACE })).toHaveLength(2);
     expect(JSON.parse(window.localStorage.getItem(WORKSPACE_DROPDOWN_RECENT_KEY) ?? '[]')).toEqual([
       NEW_WORKSPACE,

@@ -66,8 +66,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
     },
     {
       query: {
-        // Always enable when there's an active workspace route or dropdown is open.
-        // The query stays mounted, so the list is refetched whenever the dropdown opens.
+        // Always enable when there's an active workspace route or dropdown is open
         enabled: open || !mostRecentWorkspace || !!activeWorkspaceName,
         staleTime: 5_000,
       },
@@ -180,12 +179,8 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
         onOpenChange={(open) => {
           setOpen(open);
           if (open) {
-            // Workspaces can be created outside this dropdown (CLI, other tabs, the assistant)
             void refetch();
-            // Preload so "New Workspace" opens without waiting on the chunk
-            loadWorkspaceCreateModal().catch(() => {
-              // The lazy component re-imports on render and surfaces any error there
-            });
+            loadWorkspaceCreateModal().catch(() => undefined);
           } else {
             setFilter('');
           }
@@ -269,9 +264,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
         </DropdownContent>
       </DropdownRoot>
 
-      {/* Scoped boundary so loading the modal doesn't fall back to RootLayout's full-page loader.
-          Kept mounted so the transition in onSelect waits for the module instead of committing
-          the fallback, which React throttles before revealing the modal. */}
+      {/* Kept mounted so the transition in onSelect waits for the lazy modal instead of showing a fallback */}
       <Suspense fallback={null}>
         {isModalOpen && (
           <WorkspaceCreateModal
