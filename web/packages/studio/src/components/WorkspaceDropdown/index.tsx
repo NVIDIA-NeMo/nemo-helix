@@ -56,6 +56,7 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
     data: workspacesResponse,
     isPending,
     isError,
+    refetch,
   } = useEntitiesListWorkspaces(
     {
       page: 1,
@@ -63,8 +64,8 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
     },
     {
       query: {
-        // Always enable when there's an active workspace route or dropdown is open
-        // Cache invalidation from WorkspaceCreateModal will trigger refetch automatically
+        // Always enable when there's an active workspace route or dropdown is open.
+        // The query stays mounted, so the list is refetched whenever the dropdown opens.
         enabled: open || !mostRecentWorkspace || !!activeWorkspaceName,
         staleTime: 5_000,
       },
@@ -176,7 +177,10 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
       <DropdownRoot
         onOpenChange={(open) => {
           setOpen(open);
-          if (!open) {
+          if (open) {
+            // Workspaces can be created outside this dropdown (CLI, other tabs, the assistant)
+            void refetch();
+          } else {
             setFilter('');
           }
         }}
@@ -259,7 +263,13 @@ export const WorkspaceDropdown: FC<Props> = ({ onValueChange }) => {
         </DropdownContent>
       </DropdownRoot>
 
-      {isModalOpen && <WorkspaceCreateModal open={isModalOpen} onClose={closeModal} />}
+      {isModalOpen && (
+        <WorkspaceCreateModal
+          open={isModalOpen}
+          onClose={closeModal}
+          onCreate={(workspace) => addRecentWorkspace(workspace.name)}
+        />
+      )}
     </>
   );
 };
