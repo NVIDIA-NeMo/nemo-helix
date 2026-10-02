@@ -180,6 +180,10 @@ runs:
             - 'plugins/_temporary-scaled-evals/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
+            - 'packages/filesets/src/filesets/resources.py'
+            - 'packages/nhx_testing/src/nhx/testing/**'
+            - 'services/core/files/src/nhx/core/files/service.py'
+            - 'services/core/secrets/src/nhx/core/secrets/service.py'
           e2e:
             - 'e2e/**'
           docs:
