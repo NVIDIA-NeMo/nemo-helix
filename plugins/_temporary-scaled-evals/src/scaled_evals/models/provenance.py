@@ -605,15 +605,6 @@ def _opensandbox_sandbox(row: Mapping[str, Any]) -> dict[str, str]:
         fields["applied_policy_sha256s"] = ",".join(
             sorted({str(item["policy_sha256"]) for item in applied if item.get("policy_sha256")})
         )
-
-    # The last ownership-selector cleanup. "unrecorded" means teardown never wrote a report.
-    if "opensandbox_cleanup" in row:
-        cleanup = _mapping(row.get("opensandbox_cleanup"))
-        fields["cleanup_status"] = cleanup.get("status") or "unrecorded"
-        if cleanup.get("status"):
-            fields["cleanup_killed_sandboxes"] = len(cleanup.get("killed") or [])
-            fields["cleanup_remaining_sandboxes"] = ",".join(str(item) for item in cleanup.get("remaining") or [])
-            fields["cleanup_error"] = cleanup.get("error")
     return {key: str(value) for key, value in fields.items() if value not in (None, "")}
 
 

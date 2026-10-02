@@ -219,42 +219,6 @@ def test_opensandbox_provenance_warns_when_only_default_action_was_verified(tmp_
     assert any("default action only" in warning for warning in isolation.warnings)
 
 
-def test_opensandbox_provenance_records_the_cleanup_report(tmp_path) -> None:  # noqa: ANN001
-    cleanup = {
-        "status": "failed",
-        "exit_code": 1,
-        "killed": ["sb-1", "sb-2"],
-        "failed": [],
-        "remaining": ["sb-3"],
-        "error": None,
-    }
-    manifest = build_run_provenance_manifest(
-        _opensandbox_row(opensandbox_cleanup=cleanup),
-        status="failed",
-        artifact_prefix="evaluations/ev_test123/artifacts/",
-        artifact_root=tmp_path,
-    )
-
-    sandbox = manifest.runtime.sandbox
-    assert sandbox["cleanup_status"] == "failed"
-    assert sandbox["cleanup_killed_sandboxes"] == "2"
-    assert sandbox["cleanup_remaining_sandboxes"] == "sb-3"
-    assert "cleanup_error" not in sandbox
-
-
-@pytest.mark.parametrize(("cleanup", "expected"), [(None, None), ({}, "unrecorded")])
-def test_opensandbox_provenance_marks_a_missing_cleanup_report(tmp_path, cleanup, expected) -> None:  # noqa: ANN001
-    overrides = {} if cleanup is None else {"opensandbox_cleanup": cleanup}
-    manifest = build_run_provenance_manifest(
-        _opensandbox_row(**overrides),
-        status="succeeded",
-        artifact_prefix="evaluations/ev_test123/artifacts/",
-        artifact_root=tmp_path,
-    )
-
-    assert manifest.runtime.sandbox.get("cleanup_status") == expected
-
-
 @pytest.mark.parametrize("applied", [None, []])
 def test_opensandbox_provenance_is_unverified_without_applied_egress(tmp_path, applied) -> None:  # noqa: ANN001
     overrides = {} if applied is None else {"opensandbox_applied_egress": applied}

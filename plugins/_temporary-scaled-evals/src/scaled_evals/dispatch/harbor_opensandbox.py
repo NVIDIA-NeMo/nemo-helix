@@ -81,8 +81,6 @@ LOG = logging.getLogger(__name__)
 NEMO_OPENSANDBOX_IMPORT_PATH = "scaled_evals.harbor_opensandbox_environment:NemoOpenSandboxEnvironment"
 # Run-level artifact of per-sandbox egress records, read back by the evidence builder for provenance.
 APPLIED_EGRESS_SUMMARY_FILENAME = "scaled-evals-applied-egress.json"
-# Run-level artifact with the outcome of the last ownership-selector cleanup, read back the same way.
-CLEANUP_REPORT_FILENAME = "scaled-evals-opensandbox-cleanup.json"
 # Evaluation network policies this runtime accepts.
 SUPPORTED_NETWORK_POLICIES = ("default_deny",)
 # Module the terminator runs, with the Harbor runner's interpreter, to kill an evaluation's sandboxes.
@@ -518,12 +516,6 @@ def write_applied_egress_summary(job_dir: Path) -> None:
     (job_dir / APPLIED_EGRESS_SUMMARY_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 
-def write_cleanup_report(job_dir: Path, report: Mapping[str, Any]) -> None:
-    """Write the last cleanup's outcome as a run artifact the evidence builder reads into provenance."""
-    job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / CLEANUP_REPORT_FILENAME).write_text(json.dumps(dict(report), indent=2, sort_keys=True) + "\n")
-
-
 def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
     """Read Harbor's status like ``sandbox_k8s``, and write the applied-egress summary once the run ends."""
     read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
@@ -574,9 +566,6 @@ def make_harbor_opensandbox_terminator(
         except (OSError, ValueError, KeyError, RuntimeError) as exc:
             failures.append(f"harbor runner termination failed: {exc}")
 
-        # Overwritten below once cleanup runs; stays an error if it never gets that far.
-        cleanup_report: dict[str, Any] = {"status": "failed", "error": "cleanup did not run"}
-
         selector = dict(handle.raw.get("ownership") or {})
         try:
             # Only kill sandboxes labelled with this deployment and this evaluation. A handle whose
@@ -606,38 +595,22 @@ def make_harbor_opensandbox_terminator(
                     argv += ["--selector", f"{key}={value}"]
 
             # The process timeout gives the module a minute beyond its own wait for sandboxes to die.
-            # Its JSON report lists what it killed; on a non-zero exit it also says why: an error,
-            # or the sandboxes still live.
+            # On a non-zero exit its JSON report says why: an error, or the sandboxes still live.
             env = connection_env(os.environ if environ is None else environ, env_file)
             completed = cleanup_runner(argv, env, timeout_s + 60)
-            report = _parse_cleanup_report(completed.stdout)
-            cleanup_report = {
-                "status": "clean" if completed.returncode == 0 else "failed",
-                "exit_code": completed.returncode,
-                "killed": report.get("killed", []),
-                "failed": report.get("failed", []),
-                "remaining": report.get("remaining", []),
-                "error": report.get("error"),
-            }
             if completed.returncode != 0:
+                report = _parse_cleanup_report(completed.stdout)
                 detail = report.get("error") or f"sandboxes still live: {report.get('remaining')}"
                 failures.append(f"OpenSandbox cleanup failed: {detail}")
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
             failures.append(f"OpenSandbox cleanup failed: {exc}")
-            cleanup_report = {"status": "failed", "error": str(exc)}
 
-        # Write both run artifacts on every teardown, success included, so every evaluation has a
-        # cleanup record. The egress summary is also written here because a cancelled run never
-        # reaches a terminal phase in the status reader. A failed write is logged, not raised.
+        # Also write the summary here: a cancelled run never reaches a terminal phase in the status reader.
         job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
         try:
             write_applied_egress_summary(job_dir)
         except OSError as exc:
             LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
-        try:
-            write_cleanup_report(job_dir, cleanup_report)
-        except OSError as exc:
-            LOG.warning("harbor_opensandbox cleanup report for %s failed: %s", handle.external_id, exc)
 
         if failures:
             raise RuntimeError("; ".join(failures))
