@@ -165,14 +165,20 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget, GymRunnerTarget, HarborRunnerTarget, RegisteredAgentSource
 
 on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
 in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
+in_gym = GymRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"), resources_server="mcqa")
 ```
 
 On Harbor the resolved agent runs as the SDK's installed Fabric agent with its
 config in `agent_kwargs.fabric_config`; a registered source has no `model_name`.
+On Gym the staging step assembles a `wheels-v1` environment package (the platform's
+`nemo_registered_agent` component, the resolved config as an agent instance, the
+agent's Ethos files, a wheelhouse with the Fabric harness) that only the sandboxed
+Gym host runs; `policy_*` Hydra settings default to the agent's default model, and a
+user `target.environment` FileSet must itself be `wheels-v1`.
 
 There is no model override — a different model is a different registered
 agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the

@@ -108,6 +108,14 @@ def _agent() -> Agent:
             ),
             ("gym", "simple_agent", None),
         ),
+        (
+            GymRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                resources_server="mcqa",
+                resolved_config={"harness": {"adapter_id": "x"}},
+            ),
+            ("gym", "calculator-agent", None),  # not the shared platform component name
+        ),
         (HarborRunnerTarget(), ("harbor", "oracle", None)),
         (
             HarborRunnerTarget(source=HarborImportedAgentSource(import_path="wrapper:Agent")),

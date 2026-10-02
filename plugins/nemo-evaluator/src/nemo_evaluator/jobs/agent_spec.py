@@ -13,6 +13,7 @@ each other.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
@@ -379,7 +380,25 @@ class GymAgentSource(BaseModel):
     )
 
 
+#: What Gym collects rollouts with. A registered platform agent runs through the component the staging
+#: step writes into the environment package, so the shapes share no required key.
+GymSource: TypeAlias = GymAgentSource | RegisteredAgentSource
+
+#: The Gym agent component the staging step writes into the environment package for a registered agent.
+REGISTERED_AGENT_GYM_COMPONENT = "nemo_registered_agent"
+
 _LEGACY_GYM_AGENT_FIELDS = {"agent": "component", "agent_config": "config", "agent_ref_name": "instance"}
+
+
+def registered_agent_gym_instance(agent: AgentRef) -> str:
+    """The Gym agent instance a registered agent is registered under: its name, made a Hydra key."""
+    name = agent.root.rpartition("/")[2]
+    return "registered_" + re.sub(r"[^a-z0-9_]", "_", name.lower())
+
+
+def registered_agent_gym_config_path(agent: AgentRef) -> str:
+    """Package-relative path of the agent-instance config the staging step generates."""
+    return f"responses_api_agents/{REGISTERED_AGENT_GYM_COMPONENT}/configs/{registered_agent_gym_instance(agent)}.yaml"
 
 
 class GymRunnerTarget(BaseModel):
@@ -399,9 +418,17 @@ class GymRunnerTarget(BaseModel):
         description="Environment FileSet containing a native-v1 or wheels-v1 Gym package. "
         "The complete FileSet is staged read-only; file fragments are not supported.",
     )
-    source: GymAgentSource = Field(
-        description="The agent Gym collects rollouts with: a `component`, its `config`, and optionally the "
-        "`instance` the package registers it under.",
+    source: GymSource = Field(
+        description="The agent Gym collects rollouts with: a Gym agent by `component` (with its `config` and "
+        "optionally the `instance` the package registers it under), or a registered platform `agent` (with an "
+        "optional `environment`). A registered agent is resolved at submit into `resolved_config`; the job's "
+        "staging step turns that into an environment package running the platform's Gym agent component, so "
+        "the agent runs as registered — identity, skills, MCP servers — with its model on Gym's policy server.",
+    )
+    resolved_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Set by submit-time resolution of a registered `agent`, never by the submitter: the Fabric "
+        "config the agent resolved to, which the staging step writes into the Gym environment package.",
     )
     resources_server: str = Field(
         description="Resources-server (environment) name, e.g. 'mcqa' (--resources-server).",
@@ -496,8 +523,14 @@ class GymRunnerTarget(BaseModel):
 
     @model_validator(mode="after")
     def _require_builtin_agent_config_without_environment(self) -> Self:
-        if self.environment is None and self.agent_config is None:
+        if isinstance(self.source, GymAgentSource) and self.environment is None and self.source.config is None:
             raise ValueError("`source.config` is required when no environment FileSet is supplied")
+        return self
+
+    @model_validator(mode="after")
+    def _resolved_config_belongs_to_a_registered_agent(self) -> Self:
+        if self.resolved_config is not None and not isinstance(self.source, RegisteredAgentSource):
+            raise ValueError("`resolved_config` is the resolution of a registered `agent`; a Gym agent needs none")
         return self
 
     @model_validator(mode="after")
@@ -509,17 +542,23 @@ class GymRunnerTarget(BaseModel):
 
     @property
     def agent(self) -> str:
-        """The Gym agent component (`--agent`)."""
+        """The Gym agent component (`--agent`); the platform's component for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return REGISTERED_AGENT_GYM_COMPONENT
         return self.source.component
 
     @property
     def agent_config(self) -> str | None:
-        """The repo-relative agent config (`--config`), if the source names one."""
+        """The package-relative agent config (`--config`); generated at staging for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return registered_agent_gym_config_path(self.source.agent)
         return self.source.config
 
     @property
     def agent_ref_name(self) -> str | None:
-        """The Gym agent instance, when it differs from the component."""
+        """The Gym agent instance, when it differs from the component; always set for a registered agent."""
+        if isinstance(self.source, RegisteredAgentSource):
+            return registered_agent_gym_instance(self.source.agent)
         return self.source.instance
 
 
@@ -559,17 +598,17 @@ Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
 
 
 def registered_agent_source(target: Target | None) -> RegisteredAgentSource | None:
-    """The registered agent a Fabric or Harbor target runs, if it runs one."""
-    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and isinstance(
+    """The registered agent a Fabric, Harbor or Gym target runs, if it runs one."""
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget)) and isinstance(
         target.source, RegisteredAgentSource
     ):
         return target.source
     return None
 
 
-def registered_agent_config(target: FabricRunnerTarget | HarborRunnerTarget) -> dict[str, Any] | None:
-    """The Fabric config a registered agent resolved to: Fabric carries it whole, Harbor inside ``agent_kwargs``."""
-    if isinstance(target, FabricRunnerTarget):
+def registered_agent_config(target: FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget) -> dict[str, Any] | None:
+    """The Fabric config a registered agent resolved to: Fabric and Gym carry it whole, Harbor inside ``agent_kwargs``."""
+    if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)):
         return target.resolved_config
     config = target.agent_kwargs.get("fabric_config")
     return config if isinstance(config, dict) else None
@@ -588,7 +627,7 @@ def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
     return bool(skills.get("paths") or discovery.get("local_paths"))
 
 
-def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget) -> FilesetRef | None:
+def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget) -> FilesetRef | None:
     """The FileSet a registered agent's files are staged from: the snapshot resolution took, if it took one."""
     source = registered_agent_source(target)
     return source.files if source is not None else None
@@ -616,6 +655,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
             return registered_agent_name(target), None
         return target.agent_import_path or target.agent_name, target.agent_model_name
     if isinstance(target, GymRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            return registered_agent_name(target), None
         return target.agent, None
     if isinstance(target, ModelTarget):
         return None, target.model.name
@@ -816,7 +857,7 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
     @model_validator(mode="after")
     def _reject_resolution_outputs_on_submit(self) -> Self:
         target = self.target
-        if isinstance(target, FabricRunnerTarget) and target.resolved_config is not None:
+        if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)) and target.resolved_config is not None:
             raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
         source = registered_agent_source(target)
         if source is not None and source.files is not None:
@@ -838,7 +879,10 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
     @model_validator(mode="after")
     def _reject_unresolved_registered_agent(self) -> Self:
         target = self.target
-        if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and registered_agent_source(target) is not None:
+        if (
+            isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget))
+            and registered_agent_source(target) is not None
+        ):
             if registered_agent_config(target) is None:
                 raise ValueError(
                     f"AgentEvalSpec {target.kind} target names registered agent {registered_agent_name(target)!r} but "

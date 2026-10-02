@@ -18,11 +18,13 @@ from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_compiler import _secret_refs, compile_agent_eval_job
 from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
+    REGISTERED_AGENT_GYM_COMPONENT,
     REGISTERED_AGENT_HARBOR_IMPORT_PATH,
     AgentEvalInputSpec,
     AgentEvalSpec,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymRunnerTarget,
     HarborBuiltinAgentSource,
     HarborImportedAgentSource,
     HarborRunnerTarget,
@@ -34,6 +36,7 @@ from nemo_evaluator.jobs.agent_spec import (
 )
 from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evaluator.jobs.fabric_harness_packages import FABRIC_ADAPTER_EXTRAS
+from nemo_evaluator.jobs.gym_sandbox import SandboxUnavailableError
 from nemo_evaluator.jobs.registered_agent_resolution import resolve_registered_agent
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
@@ -643,6 +646,85 @@ def test_staged_harbor_agent_files_become_the_fabric_config_bundle(tmp_path: Pat
         "stage-environment",
         "agent-evaluate",
     ]
+
+
+# --- Gym ---------------------------------------------------------------------------------------------
+
+
+def _gym_by_agent(agent: AgentRef = _AGENT, **kwargs: Any) -> GymRunnerTarget:
+    kwargs.setdefault("resources_server", "mcqa")
+    return GymRunnerTarget(source=RegisteredAgentSource(agent=agent), **kwargs)
+
+
+async def test_gym_target_by_agent_resolves_the_config_and_points_the_policy_server_at_its_model(
+    mocker: MockerFixture,
+) -> None:
+    """The same resolution Fabric gets, plus Gym's `policy_*` settings derived from the agent's default model."""
+    _platform(mocker, _agent())
+
+    resolved = await _resolve(_gym_by_agent(hydra_params={"model": {"temperature": 0.1}}))
+    on_fabric = await _resolve(_by_agent())
+
+    assert isinstance(resolved, GymRunnerTarget) and isinstance(resolved.source, RegisteredAgentSource)
+    assert resolved.source.agent == AgentRef(root="dev/calculator-agent")
+    assert isinstance(on_fabric, FabricRunnerTarget)
+    assert resolved.resolved_config == on_fabric.resolved_config
+    default = resolved.resolved_config["models"]["default"]
+    assert resolved.hydra_params == {
+        "model": {"temperature": 0.1},
+        "policy_base_url": default["base_url"],
+        "policy_model_name": default["model"],
+        "policy_api_key": "not-used",
+    }
+    assert resolved.env_secrets == on_fabric.env_secrets
+    assert resolved.agent == REGISTERED_AGENT_GYM_COMPONENT
+    assert resolved.agent_ref_name == "registered_calculator_agent"
+    assert await _resolve(resolved) == resolved  # already resolved: left alone
+
+
+async def test_a_submitter_supplied_policy_setting_wins_over_the_derived_one(mocker: MockerFixture) -> None:
+    _platform(mocker, _agent())
+    resolved = await _resolve(_gym_by_agent(hydra_params={"policy_api_key": "from-the-spec"}))
+    assert isinstance(resolved, GymRunnerTarget)
+    assert resolved.hydra_params["policy_api_key"] == "from-the-spec"
+    assert resolved.hydra_params["policy_model_name"] == resolved.resolved_config["models"]["default"]["model"]
+
+
+def test_a_registered_gym_agent_refuses_colocated_execution(tmp_path: Path) -> None:
+    """Colocated Gym ignores the staged package, so it would run stock components as the registered agent."""
+    target = _gym_by_agent(AgentRef(root="dev/calc"), resolved_config={"harness": {"adapter_id": "x"}})
+    with pytest.raises(SandboxUnavailableError, match="registered agent runs from the environment package"):
+        AgentEvalJob._resolve_target(target, _job_context(tmp_path))
+
+
+async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixture) -> None:
+    """Submission compiles after resolving; a refusal there has no job to clean up after, so compile does."""
+    from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+
+    files = mocker.Mock()
+    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch.object(
+        AgentEvalJob, "_execution_profile", side_effect=HelixJobCompilationError("no such execution profile")
+    )
+    target = _gym_by_agent(
+        AgentRef(root="dev/calc"),
+        resolved_config={"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
+    ).model_copy(
+        update={
+            "source": RegisteredAgentSource(
+                agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+            )
+        }
+    )
+    spec = AgentEvalSpec.model_validate({"tasks": [_RESOLVED_TASK], "target": target.model_dump(mode="json")})
+
+    with pytest.raises(HelixJobCompilationError, match="no such execution profile"):
+        await AgentEvalJob.compile(
+            workspace="dev", spec=spec, entity_client=None, job_name=None, async_sdk=_async_platform()
+        )
+
+    files.delete_fileset.assert_awaited_once_with(workspace="dev", name="agent-files-0123abcd4567")
 
 
 # --- Spec boundary -------------------------------------------------------------------------------------

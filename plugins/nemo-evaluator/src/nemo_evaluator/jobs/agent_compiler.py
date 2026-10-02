@@ -17,7 +17,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from nemo_evaluator.config import config, platform_config
-from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalSpec,
     AgentTarget,
@@ -25,9 +24,13 @@ from nemo_evaluator.jobs.agent_spec import (
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
+    registered_agent_config,
     registered_agent_files,
 )
 from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
+from nemo_evaluator.jobs.fabric_harness_packages import fabric_harness_requirements
+from nemo_evaluator.jobs.gym_registered_agent_package import GymRegisteredAgentPackageSpec
 from nemo_evaluator.jobs.gym_sandbox import GYM_SANDBOX_PLAN_ENVVAR, SandboxPlan, resolve_sandbox_plan
 from nemo_evaluator.jobs.secret_env import build_task_environment
 from nemo_helix_plugin.jobs.api_factory import (
@@ -230,28 +233,41 @@ def _environment(spec: AgentEvalSpec, *, sandbox_plan: SandboxPlan | None) -> li
     return environment
 
 
-def _staged_fileset(spec: AgentEvalSpec) -> FilesetRef | None:
-    """The FileSet the evaluation step needs on job storage before it starts, if any.
+def _staged_fileset(spec: AgentEvalSpec) -> EnvironmentStageSpec | None:
+    """What the evaluation step needs on job storage before it starts, if anything.
 
-    A Gym target stages its environment package; a Fabric or Harbor target running a registered agent
-    stages that agent's Ethos files (skills and prompts its config refers to by relative path).
+    A Gym target stages its environment package, plus, for a registered agent, that agent's Ethos files
+    and the generated package that runs it; a Fabric or Harbor target running a registered agent stages
+    the agent's Ethos files (skills and prompts its config refers to by relative path).
     """
-    if isinstance(spec.target, GymRunnerTarget):
-        return spec.target.environment
-    if isinstance(spec.target, (FabricRunnerTarget, HarborRunnerTarget)):
-        return registered_agent_files(spec.target)
+    target = spec.target
+    if isinstance(target, GymRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            agent_config = registered_agent_config(target) or {}
+            return EnvironmentStageSpec(
+                environment=target.environment,
+                agent_files=registered_agent_files(target),
+                gym_registered_agent=GymRegisteredAgentPackageSpec(
+                    agent=target.source.agent,
+                    resolved_config=agent_config,
+                    requirements=fabric_harness_requirements(agent_config["harness"]["adapter_id"], companions=False),
+                ),
+            )
+        return EnvironmentStageSpec(environment=target.environment) if target.environment is not None else None
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)):
+        files = registered_agent_files(target)
+        return EnvironmentStageSpec(environment=files) if files is not None else None
     return None
 
 
 def _environment_stage_step(
-    fileset: FilesetRef,
+    stage_spec: EnvironmentStageSpec,
     profile: str | None,
     *,
     use_subprocess: bool,
 ) -> HelixJobStep:
-    """Download a FileSet into the job PVC before evaluation."""
+    """Stage FileSets, and a registered Gym agent's package, into the job PVC before evaluation."""
     image = get_qualified_image(AGENT_EVAL_IMAGE)
-    stage_spec = EnvironmentStageSpec(environment=fileset)
     return HelixJobStep(
         name=ENVIRONMENT_STAGE_STEP_NAME,
         executor=_executor(
@@ -261,7 +277,7 @@ def _environment_stage_step(
             command=ENVIRONMENT_STAGE_COMMAND,
             use_subprocess=use_subprocess,
         ),
-        config=stage_spec.model_dump(mode="json"),
+        config=stage_spec.model_dump(mode="json", exclude_none=True),
         environment=build_task_environment(()),
     )
 
