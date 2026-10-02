@@ -38,6 +38,7 @@ import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimi
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import {
+  ACTION_SEARCH_PARAM,
   type AgentDetailTab,
   DEFAULT_TAB,
   isAgentDetailTab,
@@ -79,6 +80,7 @@ export const AgentDetailRoute: FC = () => {
   const {
     agent,
     isAgentLoading,
+    isAgentPending,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,
@@ -156,6 +158,26 @@ export const AgentDetailRoute: FC = () => {
   );
 
   const canRunEvaluation = !!agentName && canDeploy;
+
+  const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);
+  // Waits for the agent query to settle so both modals are gated on a real agent, then strips the
+  // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
+  // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
+  useEffect(() => {
+    if (!actionFromUrl || isAgentPending) return;
+    if (actionFromUrl === 'run-evaluation' && canRunEvaluation) setSubmitEvalOpen(true);
+    if (actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && agent) {
+      setLaunchOptimizeOpen(true);
+    }
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete(ACTION_SEARCH_PARAM);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [actionFromUrl, isAgentPending, canRunEvaluation, agent, setSearchParams]);
 
   const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
   const statusPillLabel =
