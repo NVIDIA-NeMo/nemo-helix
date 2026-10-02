@@ -91,7 +91,10 @@ async function resolveReleasePlan({
         "A pinned nightly source must be an exact 40-character SHA.",
       );
     }
-    if (!sourceSha && dryRun) {
+    if (
+      !sourceSha &&
+      (dryRun || /^refs\/heads\/release\/\d+\.\d+$/.test(context.ref ?? ""))
+    ) {
       sourceSha = context.sha;
     } else if (!sourceSha) {
       sourceSha = await getCommit(context.payload.repository.default_branch);
