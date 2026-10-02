@@ -215,11 +215,12 @@ For a durable job that uses components already installed in `nhx-gym-tasks`,
 submit the validated live runner as shown above or build a `GymRunnerTarget`:
 
 ```python
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 
 target = GymRunnerTarget(
-    agent="simple_agent",
-    agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+    source=GymAgentSource(
+        component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    ),
     resources_server="mcqa",
     num_repeats=1,
     concurrency=4,
@@ -249,27 +250,29 @@ compiles them into two ordered Jobs steps:
 
 ```python
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import GymAgentSource, GymRunnerTarget
 
 target = GymRunnerTarget(
     environment=FilesetRef(root="default/my-gym-environment"),
-    agent="simple_agent",
-    agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+    source=GymAgentSource(
+        component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+    ),
     resources_server="custom_greeting",
     env_secrets={"MODEL_API_KEY": "default/my-model-api-key"},
 )
 ```
 
-`agent_config` can be omitted when the FileSet declares the selected agent.
-Set `agent_ref_name` when the package registers that agent under a different
-instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
+`source.config` can be omitted when the FileSet declares the selected agent.
+Set `source.instance` when the package registers that agent under a different
+instance name than its component. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
 From a live runner, `client.evaluator.submit(tasks=..., target=runner,
 placement=GymPlacement(...))` builds this target without rebuilding it by hand.
 `env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
 from your environment); `environment` and `agent_ref_name` live on the
-`GymPlacement`, because only a deployment can honor them.
+`GymPlacement`, because only a deployment can honor them, and the submission
+folds them into the target's `environment` and `source.instance`.
 
 `max_concurrent_tasks` limits tasks evaluated concurrently. Target-specific
 settings such as inference parallelism or Harbor

@@ -13,6 +13,7 @@ from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
     FabricConfigSource,
     FabricRunnerTarget,
+    GymAgentSource,
     GymRunnerTarget,
     HarborRunnerTarget,
     ModelTarget,
@@ -43,7 +44,7 @@ from pydantic import BaseModel, field_serializer
         ModelTarget(model=Model(url="http://model.test", name="test")),
         AgentTarget(agent=GenericAgent(url="http://agent.test", name="test", body={}, response_path="$.answer")),
         FabricRunnerTarget(source=FabricConfigSource(config={})),
-        GymRunnerTarget(agent="simple_agent", agent_config="config.yaml", resources_server="mcqa"),
+        GymRunnerTarget(source=GymAgentSource(component="simple_agent", config="config.yaml"), resources_server="mcqa"),
         HarborRunnerTarget(),
     ],
 )

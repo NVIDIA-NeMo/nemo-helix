@@ -352,6 +352,36 @@ class HarborRunnerTarget(BaseModel):
         return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
 
 
+class GymAgentSource(BaseModel):
+    """A Gym agent, selected the way ``gym`` selects one: a component, its config, and the instance.
+
+    The keys are Gym's words rather than the target's former ``agent`` / ``agent_config`` /
+    ``agent_ref_name``: a sibling source member names a platform agent under ``agent``, and the union's
+    members must share no required key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: str = Field(description="Gym agent component to collect rollouts with, e.g. `simple_agent` (--agent).")
+    config: str | None = Field(
+        default=None,
+        description="Repo-relative agent config passed to `gym env start` (--config). Required without an "
+        "environment FileSet; with a FileSet it is used only when the package does not declare the selected "
+        "instance.",
+    )
+    instance: str | None = Field(
+        default=None,
+        description="Gym agent *instance*, as distinct from the `component` it configures. Defaults to "
+        "`component`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an instance "
+        "of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` families of theirs. "
+        "It keys the resources-server binding, decides whether an environment package declares the agent, and is "
+        "stamped as each row's `agent_ref`. Requires sandboxed execution.",
+    )
+
+
+_LEGACY_GYM_AGENT_FIELDS = {"agent": "component", "agent_config": "config", "agent_ref_name": "instance"}
+
+
 class GymRunnerTarget(BaseModel):
     """Generate trials by driving a NeMo Gym environment through the SDK's :class:`GymAgentTaskRunner`.
 
@@ -369,11 +399,9 @@ class GymRunnerTarget(BaseModel):
         description="Environment FileSet containing a native-v1 or wheels-v1 Gym package. "
         "The complete FileSet is staged read-only; file fragments are not supported.",
     )
-    agent: str = Field(description="Agent name to collect rollouts with, e.g. 'simple_agent'.")
-    agent_config: str | None = Field(
-        default=None,
-        description="Repo-relative built-in agent config. Required without an environment FileSet; "
-        "with a FileSet it is used only when the package does not declare the selected agent instance.",
+    source: GymAgentSource = Field(
+        description="The agent Gym collects rollouts with: a `component`, its `config`, and optionally the "
+        "`instance` the package registers it under.",
     )
     resources_server: str = Field(
         description="Resources-server (environment) name, e.g. 'mcqa' (--resources-server).",
@@ -401,14 +429,6 @@ class GymRunnerTarget(BaseModel):
         "configurable only this way — `wmt_translation` reads `WMT_TRANSLATION_COMET_PY_CACHE` for its "
         "model-cache root and defaults to a container-only path — and a job spec has no ambient "
         "environment to inherit from, so whatever the environment needs has to travel in the spec.",
-    )
-    agent_ref_name: str | None = Field(
-        default=None,
-        description="Gym agent *instance*, as distinct from the `agent` component it configures. Defaults "
-        "to `agent`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an "
-        "instance of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` "
-        "families of theirs. It keys the resources-server binding, decides whether an environment package "
-        "declares the agent, and is stamped as each row's `agent_ref`. Requires sandboxed execution.",
     )
     env_secrets: dict[str, SecretRef] = Field(
         default_factory=dict,
@@ -455,10 +475,29 @@ class GymRunnerTarget(BaseModel):
             raise ValueError("environment FileSet references must not include a file fragment")
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_agent_fields(cls, data: Any) -> Any:
+        """Accept the pre-``source`` flat fields for one release. Deprecated since 0.8; remove in 0.9."""
+        if not isinstance(data, dict) or "source" in data or not any(k in data for k in _LEGACY_GYM_AGENT_FIELDS):
+            return data
+        lifted = {key: value for key, value in data.items() if key not in _LEGACY_GYM_AGENT_FIELDS}
+        lifted["source"] = {
+            new_key: data[old_key]
+            for old_key, new_key in _LEGACY_GYM_AGENT_FIELDS.items()
+            if data.get(old_key) is not None
+        }
+        logger.warning(
+            "GymRunnerTarget: top-level `agent` / `agent_config` / `agent_ref_name` are deprecated; select the "
+            "agent under `source` as `component` / `config` / `instance`. This shape stops being accepted in the "
+            "release after 0.8."
+        )
+        return lifted
+
     @model_validator(mode="after")
     def _require_builtin_agent_config_without_environment(self) -> Self:
         if self.environment is None and self.agent_config is None:
-            raise ValueError("The agent_config field is required when no environment FileSet is supplied")
+            raise ValueError("`source.config` is required when no environment FileSet is supplied")
         return self
 
     @model_validator(mode="after")
@@ -467,6 +506,21 @@ class GymRunnerTarget(BaseModel):
         if overlap:
             raise ValueError(f"{overlap} appear in both env_vars and env_secrets; name each variable once")
         return self
+
+    @property
+    def agent(self) -> str:
+        """The Gym agent component (`--agent`)."""
+        return self.source.component
+
+    @property
+    def agent_config(self) -> str | None:
+        """The repo-relative agent config (`--config`), if the source names one."""
+        return self.source.config
+
+    @property
+    def agent_ref_name(self) -> str | None:
+        """The Gym agent instance, when it differs from the component."""
+        return self.source.instance
 
 
 class GymPlacement(BaseModel):
