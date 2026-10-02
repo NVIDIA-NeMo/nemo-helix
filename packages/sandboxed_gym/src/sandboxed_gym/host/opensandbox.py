@@ -47,8 +47,9 @@ def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]
     if cpu is not None and str(cpu) != "":
         limits["cpu"] = str(cpu)
     memory = resources.get("memory")
-    if memory is None and resources.get("memory_mib") is not None:
-        memory = f"{resources['memory_mib']}Mi"
+    memory_mib = resources.get("memory_mib")
+    if (memory is None or str(memory) == "") and memory_mib is not None and str(memory_mib) != "":
+        memory = f"{memory_mib}Mi"
     if memory is not None and str(memory) != "":
         limits["memory"] = str(memory)
     return limits
