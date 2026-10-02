@@ -80,6 +80,32 @@ async def test_real_relay_accepts_results_and_emits_tool_events(result):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [{"answer": 42}, ["intercepted"], None])
+async def test_relay_interceptor_can_return_result_without_running_callback(payload):
+    manager = EventManager()
+    ctx = ExecutePythonContext(code="original", params={"tool_call_id": "call-1"})
+
+    async def execute(context):
+        pytest.fail("Short-circuited tool must not execute")
+
+    async def intercept(context, next_call):
+        assert context.tool_call_id == "call-1"
+        return nemo_relay.ToolExecutionInterceptOutcome(payload)
+
+    name = "helix-nooa-compat-short-circuit"
+    nemo_relay.intercepts.register_tool_execution(name, 0, intercept)
+    try:
+        async with relay_compat.relay_scope(manager, "intercepted"):
+            actual = await manager.run_middleware(MIDDLEWARE_EXECUTE_PYTHON, ctx, execute)
+            assert actual is ctx
+            assert isinstance(actual.result, ExecutionResult)
+            assert actual.result.returned_value == payload
+    finally:
+        nemo_relay.intercepts.deregister_tool_execution(name)
+    assert not any(manager._middleware.values())
+
+
+@pytest.mark.asyncio
 async def test_relay_guardrail_still_blocks_execution():
     manager = EventManager()
 

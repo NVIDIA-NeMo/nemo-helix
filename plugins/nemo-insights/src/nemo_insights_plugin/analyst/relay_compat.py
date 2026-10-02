@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import nemo_relay
 from nemo_relay import Json, ScopeHandle, ToolExecutionResult
 from nooa import nemo_relay_middleware
-from nooa.events import _NO_RETURN
+from nooa.events import _NO_RETURN, ExecutionResult
 from nooa.runtime.event_manager import EventManager
 from nooa.runtime.middleware import (
     MIDDLEWARE_AGENT_CALL,
@@ -27,7 +27,7 @@ from nooa.runtime.middleware import (
 
 
 async def _tool_middleware(ctx: ExecutePythonContext, nxt: ExecutePythonNext) -> ExecutePythonContext:
-    """Preserve NOOA's result selection and return its original execution context."""
+    """Preserve NOOA's result selection and accept Relay interceptor results."""
     args = {"code": ctx.code, **{key: ctx.params[key] for key in ("tool_call_id", "timeout") if key in ctx.params}}
     codec = nemo_relay.typed.BestEffortAnyCodec()
     captured_ctx: ExecutePythonContext | None = None
@@ -53,10 +53,15 @@ async def _tool_middleware(ctx: ExecutePythonContext, nxt: ExecutePythonNext) ->
                 value = result.stdout or None
         return ToolExecutionResult(codec.to_json(value))
 
-    await nemo_relay.tools.execute("execute_python", args, execute)
-    if captured_ctx is None:
-        raise RuntimeError("NeMo Relay guardrail blocked code execution before running.")
-    return captured_ctx
+    relay_result = await nemo_relay.tools.execute(
+        "execute_python", args, execute, tool_call_id=ctx.params.get("tool_call_id")
+    )
+    if captured_ctx is not None:
+        return captured_ctx
+    if isinstance(relay_result, ToolExecutionResult):
+        ctx.result = ExecutionResult(returned_value=relay_result.result)
+        return ctx
+    raise RuntimeError("NeMo Relay guardrail blocked code execution before running.")
 
 
 def install_nemo_relay_compat(event_manager: EventManager) -> Callable[[], None]:
