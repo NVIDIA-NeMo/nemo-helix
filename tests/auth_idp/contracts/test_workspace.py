@@ -3,12 +3,12 @@
 
 import httpx
 import pytest
+from nemo_helix_ext.auth.helpers import select_advertised_client
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import discover_runtime_nhx_config, jwt_claims, require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import with_url_origin
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, TokenSet
 
 pytestmark = [
@@ -43,18 +43,15 @@ def _interactive_user_access_token(auth_idp_case: AuthIdpCase, auth_idp_runtime:
     require_capability(auth_idp_case, "device_flow")
 
     oidc = discover_runtime_nhx_config(auth_idp_runtime)
-    assert oidc.client_id
-    assert oidc.device_authorization_endpoint
-    assert oidc.token_endpoint
+    public_client = select_advertised_client(oidc, "public")
+    assert public_client.device_authorization_endpoint
+    assert public_client.token_endpoint
     tls_config = runtime_tls_config(auth_idp_runtime)
     token_response = auth_idp_runtime.authenticate_device_flow(
-        device_authorization_endpoint=with_url_origin(
-            oidc.device_authorization_endpoint,
-            auth_idp_runtime.gateway_base_url,
-        ),
-        token_endpoint=with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url),
-        client_id=oidc.client_id,
-        scope=oidc.default_scopes,
+        device_authorization_endpoint=public_client.device_authorization_endpoint,
+        token_endpoint=public_client.token_endpoint,
+        client_id=public_client.client_id,
+        scope=public_client.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,
         tls_config=tls_config,

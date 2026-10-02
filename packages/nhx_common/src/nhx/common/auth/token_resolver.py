@@ -34,6 +34,21 @@ def _direct_principal_from_claims(claims: TokenClaims) -> Principal:
 
 def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
     if claims.actor is None:
+        account_id = claims.raw_claims.get("nhx_actor_account_id")
+        aliases = claims.raw_claims.get("nhx_actor_aliases")
+        if (
+            isinstance(account_id, str)
+            and account_id
+            and isinstance(aliases, list)
+            and all(isinstance(alias, str) for alias in aliases)
+        ):
+            return Principal(
+                id=claims.subject,
+                account_id=account_id,
+                email=claims.email,
+                groups=claims.groups,
+                authz_aliases=[alias for alias in aliases if isinstance(alias, str)],
+            )
         return _direct_principal_from_claims(claims)
     return Principal(
         id=claims.actor.subject,

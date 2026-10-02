@@ -95,17 +95,23 @@ data:
     INTERACTIVE_USER_LAST_NAME = os.environ["INTERACTIVE_USER_LAST_NAME"]
     INTERACTIVE_USER_EMAIL = os.environ["INTERACTIVE_USER_EMAIL"]
     INTERACTIVE_USER_PASSWORD = os.environ["INTERACTIVE_USER_PASSWORD"]
+    SESSION_ENCRYPTION_KEY = os.environ["SESSION_ENCRYPTION_KEY"]
     ACTION_NAME = os.environ["ACTION_NAME"]
     PROJECT_NAME = "NeMo Helix"
     API_APP_NAME = "nemo-helix-api"
     CLI_APP_NAME = "nemo-helix-cli"
+    USER_LOGIN_APP_NAME = "nemo-helix-user"
+    USER_LOGIN_REDIRECT_URI = ZITADEL_PUBLIC_URL + "/apis/auth/v2/login/callback"
     REQUEST_TIMEOUT_SECONDS = 15
     WAIT_TIMEOUT_SECONDS = int(os.environ.get("WAIT_TIMEOUT_SECONDS", "600"))
     REQUIRED_STATE_KEYS = {
         "project_id",
         "nemo_client_id",
         "nemo_client_secret",
-        "cli_client_id",
+        "public_client_id",
+        "user_login_client_id",
+        "user_login_client_secret",
+        "session_encryption_key",
         "interactive_user_id",
         "interactive_user_password",
         "setup_user_id",
@@ -218,14 +224,25 @@ data:
 
 
     def _migrate_state(pat, state):
-        missing = REQUIRED_STATE_KEYS - state.keys()
-        if missing == {"interactive_user_password"}:
-            migrated = dict(state)
+        migrated = dict(state)
+        changed = False
+        if "public_client_id" not in migrated and "cli_client_id" in migrated:
+            migrated["public_client_id"] = migrated["cli_client_id"]
+            changed = True
+        if "interactive_user_password" not in migrated:
             migrated["interactive_user_id"] = _create_interactive_user(pat)
             migrated["interactive_user_password"] = INTERACTIVE_USER_PASSWORD
+            changed = True
+        if "user_login_client_secret" not in migrated:
+            user_app = _ensure_user_login_app(pat, migrated["project_id"])
+            migrated["user_login_client_id"] = user_app["clientId"]
+            migrated["user_login_client_secret"] = user_app["clientSecret"]
+            migrated["session_encryption_key"] = SESSION_ENCRYPTION_KEY
+            changed = True
+        if changed:
             _upsert_secret(STATE_SECRET_NAME, migrated)
-            print("migrated legacy ZITADEL seed state in {}".format(STATE_SECRET_NAME), flush=True)
-            return migrated
+            print("migrated ZITADEL seed state in {}".format(STATE_SECRET_NAME), flush=True)
+            state = migrated
         return _validate_complete_state(state)
 
 
@@ -421,6 +438,54 @@ data:
             return {"appId": app["id"], "clientId": app["oidcConfig"]["clientId"]}
 
 
+    def _ensure_user_login_app(pat, project_id):
+        body = {
+            "name": USER_LOGIN_APP_NAME,
+            "redirectUris": [USER_LOGIN_REDIRECT_URI],
+            "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+            "grantTypes": [
+                "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
+                "OIDC_GRANT_TYPE_REFRESH_TOKEN",
+            ],
+            "appType": "OIDC_APP_TYPE_WEB",
+            "authMethodType": "OIDC_AUTH_METHOD_TYPE_BASIC",
+            "postLogoutRedirectUris": [ZITADEL_PUBLIC_URL],
+            "version": "OIDC_VERSION_1_0",
+            "devMode": True,
+            "accessTokenType": "OIDC_TOKEN_TYPE_BEARER",
+            "accessTokenRoleAssertion": True,
+            "idTokenRoleAssertion": True,
+            "idTokenUserinfoAssertion": True,
+        }
+        try:
+            return _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/apps/oidc".format(project_id),
+                pat,
+                body,
+            )
+        except RequestFailed as exc:
+            if exc.status != 409:
+                raise
+            app = _first_matching(_search_apps(pat, project_id), "name", USER_LOGIN_APP_NAME)
+            if app is None:
+                raise
+            secret = _zitadel_request(
+                "POST",
+                "/management/v1/projects/{}/apps/{}/oidc_config/_generate_client_secret".format(
+                    project_id,
+                    app["id"],
+                ),
+                pat,
+                {},
+            )
+            return {
+                "appId": app["id"],
+                "clientId": app["oidcConfig"]["clientId"],
+                "clientSecret": secret["clientSecret"],
+            }
+
+
     def _create_machine_user(pat, user_id, name, description):
         try:
             _zitadel_request(
@@ -570,6 +635,7 @@ data:
         _ensure_project_role(pat, project_id)
         api_app = _ensure_api_app(pat, project_id)
         cli_app = _ensure_cli_app(pat, project_id)
+        user_login_app = _ensure_user_login_app(pat, project_id)
         setup = _create_machine_user(pat, SETUP_USER_ID, SETUP_USER_NAME, "NeMo Helix setup test identity")
         workload = _create_machine_user(
             pat,
@@ -612,7 +678,10 @@ data:
             "project_id": project_id,
             "nemo_client_id": api_app["clientId"],
             "nemo_client_secret": api_app["clientSecret"],
-            "cli_client_id": cli_app["clientId"],
+            "public_client_id": cli_app["clientId"],
+            "user_login_client_id": user_login_app["clientId"],
+            "user_login_client_secret": user_login_app["clientSecret"],
+            "session_encryption_key": SESSION_ENCRYPTION_KEY,
             "interactive_user_id": interactive_user_id,
             "interactive_user_password": INTERACTIVE_USER_PASSWORD,
             "setup_user_id": setup["user_id"],
@@ -635,7 +704,8 @@ data:
         if not config:
             raise RuntimeError("configmap {}/{} has no config.yaml".format(NAMESPACE, NEMO_CONFIGMAP_NAME))
         replacements = {
-            "__ZITADEL_NEMO_CLIENT_ID__": json.dumps(state["cli_client_id"]),
+            "__ZITADEL_NEMO_CLIENT_ID__": json.dumps(state["public_client_id"]),
+            "__ZITADEL_USER_LOGIN_CLIENT_ID__": json.dumps(state["user_login_client_id"]),
             "__ZITADEL_INTROSPECTION_CLIENT_ID__": json.dumps(state["nemo_client_id"]),
             "__ZITADEL_PROJECT_ID__": state["project_id"],
         }
@@ -774,6 +844,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.zitadelSecrets.demo.secretName | quote }}
                   key: {{ .Values.zitadelSecrets.demo.interactiveUserPasswordKey | quote }}
+            - name: SESSION_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.zitadelSecrets.prepared.secretName | quote }}
+                  key: NHX_AUTH_SESSION_ENCRYPTION_KEY
             - name: ACTION_NAME
               value: {{ .Values.zitadelDemo.actionName | quote }}
             - name: WAIT_TIMEOUT_SECONDS

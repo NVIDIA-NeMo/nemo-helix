@@ -22,7 +22,7 @@ from nhx.common import client_factory as cf
 from nhx.common.auth import Principal, auth_client_context
 from nhx.common.auth.client import AuthClient
 from nhx.common.config import AuthConfig, Configuration
-from nhx.common.config.base import OIDCConfig
+from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig
 from nhx.common.observability.otel import scoped_otel_headers
 from nhx.common.platform_endpoint import _AsyncHelixEndpointRoutingTransport, _SyncHelixEndpointRoutingTransport
 
@@ -31,8 +31,10 @@ def _auth_config_with_token_exchange() -> AuthConfig:
     return AuthConfig(
         enabled=True,
         oidc=OIDCConfig(
-            workload_token_exchange_enabled=True,
-            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            workload=OIDCWorkloadConfig(
+                client_id="nemo-helix-workload",
+                token_private_key_file="/tmp/test-workload-token-private-key.pem",
+            ),
         ),
     )
 

@@ -55,6 +55,8 @@ share local keys:
 - `.generated/workload-token-private-key.pem`
 - `.generated/gateway-tls/tls.crt`
 - `.generated/gateway-tls/tls.key`
+- `.generated/authentik.env`
+- `.generated/user-oidc.env`
 
 The workload-token private key is mounted into `nemo` at
 `/var/run/secrets/nemo-helix/workload-token-signing/private-key.pem`.
@@ -68,6 +70,11 @@ The gateway TLS files are copied into the `gateway-tls` named volume by
 `gateway-tls-init`. The `gateway` service uses that volume to serve HTTPS, and
 the `nemo` service mounts the same volume read-only so Python HTTP clients
 inside NeMo Helix trust the demo gateway certificate.
+
+The two generated environment files provide Authentik's internal secret key,
+the confidential OIDC client secret, and NeMo's session-encryption key. Pass
+both files to direct `docker compose` commands with `--env-file`; the provider
+runner loads them automatically.
 
 All generated keys and certificates in this example are for local development
 only.

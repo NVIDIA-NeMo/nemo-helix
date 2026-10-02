@@ -103,6 +103,12 @@ and deeper Studio agent-onboarding and Customizer workflows.
   access-key creation, stable account identity resolution, a ZITADEL
   Kubernetes identity provider reference, and configurable CLI device-flow and
   Studio bearer-token behavior.
+- OIDC configuration now separates public, confidential, and workload client
+  profiles. The CLI supports brokered confidential login without receiving the
+  client secret or provider refresh token. Public CLI clients can opt into the
+  same encrypted server-side session store without becoming confidential, and
+  `platform.advertised_base_url` lets discovery publish the gateway origin when
+  services connect internally.
 - `nemo chat` uses the default model chosen during `nemo setup` (or
   `NEMO_DEFAULT_MODEL`) when no `--model` is given, and `nemo setup` creates a
   sample workspace and agent as part of the setup flow.
@@ -132,6 +138,14 @@ If you are updating pinned chart or image references from an earlier release,
 see the upgrade steps below.
 
 ## Upgrade from v0.6.x
+
+OIDC client configuration and auth discovery are intentionally breaking in
+this release. Move flat interactive fields under `auth.oidc.public_client` or
+`auth.oidc.confidential_client`, move workload fields under
+`auth.oidc.workload`, and upgrade the server and bundled CLI/SDK together. See
+[OIDC Setup](/documentation/access-control/authentication/oidc-setup#breaking-configuration-migration)
+for the complete field mapping. There is no compatibility translation for the
+old schema.
 
 From an existing local checkout:
 

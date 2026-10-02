@@ -3,6 +3,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -53,6 +54,18 @@ def _gateway_port_from_script_output(output: str) -> str:
     return match.group(1)
 
 
+def _workflow_job_block(workflow: str, job_name: str) -> str:
+    lines = workflow.splitlines()
+    start = next(index for index, line in enumerate(lines) if line == f"  {job_name}:")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.startswith("  ") and not line.startswith("    ") and line.endswith(":"):
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
 def test_zitadel_manifest_declares_kubernetes_only_runtime() -> None:
     manifest = _load_yaml(ZITADEL_DIR / "manifest.yaml")
 
@@ -81,9 +94,10 @@ def test_zitadel_kubernetes_runner_is_provider_specific() -> None:
 
     assert "NHX_ZITADEL_K8S_HELM_RELEASE" in run_sh
     assert 'K8S_RUNTIME="${NHX_ZITADEL_K8S_RUNTIME:-kind}"' in run_sh
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in run_sh
-    assert "--auth-idp-runtime zitadel-kubernetes" in run_sh
-    assert "-m auth_idp_runtime" in run_sh
+    assert "tests/auth_idp/contracts" in run_sh
+    assert "--auth-idp-context" in run_sh
+    assert "--run-e2e" in run_sh
+    assert "deployment_context.py" in run_sh
     assert "--runtime RUNTIME" in run_sh
     assert "--reuse" in run_sh
     assert "--skip-image-load" in run_sh
@@ -93,10 +107,39 @@ def test_zitadel_kubernetes_runner_is_provider_specific() -> None:
     assert "helm dependency build contrib/auth/zitadel/helm" in run_sh
     assert "nemo-helix.zitadelPublicGateway.port=${K8S_GATEWAY_PORT}" in run_sh
     assert "zitadel nemo-helix-api nemo-helix-core-controller nemo-helix-envoy" in run_sh
-    assert "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE" in run_sh
     assert "NHX_AUTHENTIK" not in run_sh
     assert "compose" not in run_sh
     assert "render-blueprint" not in run_sh
+
+
+def test_zitadel_kubernetes_runtime_is_in_auth_idp_ci_matrix() -> None:
+    workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
+    job = _workflow_job_block(workflow, "python-auth-idp-e2e-test")
+
+    assert "runtime: authentik-compose" in job
+    assert "runtime: authentik-kubernetes" in job
+    assert "runtime: zitadel-kubernetes" in job
+    assert "provider: zitadel" in job
+    assert "namespace: nemo-zitadel" in job
+    assert "NHX_ZITADEL_K8S_RUNTIME: kind" in job
+    assert (
+        "NHX_ZITADEL_K8S_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.runtime }}" in job
+    )
+    assert 'NHX_ZITADEL_K8S_REUSE_CLUSTER: "1"' in job
+    assert "NHX_ZITADEL_K8S_JUNIT_XML: report-auth-idp-${{ matrix.runtime }}.xml" in job
+    assert "helm repo add zitadel https://charts.zitadel.com --force-update" in job
+    assert "helm dependency build contrib/auth/zitadel/helm" in job
+    assert "helm lint --strict contrib/auth/zitadel/helm" in job
+    assert "helm show chart zitadel --repo https://charts.zitadel.com --version 10.0.6" in job
+    assert 'kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}"' in job
+
+    workflow_document = _load_yaml(Path(".github/workflows/ci.yaml"))
+    commands = {
+        entry["runtime"]: entry["command"]
+        for entry in workflow_document["jobs"]["python-auth-idp-e2e-test"]["strategy"]["matrix"]["include"]
+        if entry.get("provider") == "zitadel"
+    }
+    assert commands == {"zitadel-kubernetes": "test k8s --runtime kind --gateway-port 18084"}
 
 
 def test_zitadel_runner_rejects_non_kubernetes_targets() -> None:
@@ -151,7 +194,7 @@ def test_zitadel_kubernetes_up_key_derives_managed_instance_names() -> None:
     assert "run.sh down k8s --key dev" in output
 
 
-def test_zitadel_kubernetes_test_action_runs_contract_pytest() -> None:
+def test_zitadel_kubernetes_test_action_runs_host_contracts() -> None:
     output = _run_zitadel_script(
         "test",
         "k8s",
@@ -159,12 +202,20 @@ def test_zitadel_kubernetes_test_action_runs_contract_pytest() -> None:
         env={"NHX_ZITADEL_K8S_GATEWAY_PORT": "19084"},
     )
 
-    assert "NHX_ZITADEL_K8S_HELM_WAIT_TIMEOUT=20m" in output
-    assert "NHX_ZITADEL_K8S_NAMESPACE=nemo-zitadel" in output
-    assert "NHX_ZITADEL_K8S_GATEWAY_PORT=19084" in output
-    assert "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=" in output
-    assert "uv run --frozen pytest tests/auth_idp/contracts" in output
-    assert "--auth-idp-runtime zitadel-kubernetes" in output
+    assert "--timeout 20m" in output
+    assert "port-forward svc/nemo-helix-envoy 19084:8080" in output
+    assert "uv run --frozen nemo config set" in output
+    assert "tests/auth_idp/contracts" in output
+    assert "--auth-idp-context" in output
+
+
+def test_zitadel_kubernetes_test_action_uses_k3d_compatible_fresh_cluster_name() -> None:
+    output = _run_zitadel_script("test", "k8s", "--dry-run", "--runtime", "k3d")
+    match = re.search(r"\bk3d cluster create ([a-z0-9-]+)\b", output)
+
+    assert match is not None, output
+    assert match.group(1).startswith("nhx-zt-e2e-")
+    assert len(match.group(1)) <= 32
 
 
 def test_zitadel_kubernetes_runner_builds_with_direct_buildx_bake() -> None:
@@ -186,6 +237,16 @@ def test_zitadel_down_cleans_kubernetes_resources(tmp_path: Path) -> None:
     assert "kind delete cluster --name nhx-zitadel-reuse" in output
     assert "port-forward.pid" in output
     assert "nemo config delete-context zitadel-k8s --prune-orphans" in output
+
+
+def test_zitadel_kubernetes_port_forward_cleanup_uses_saved_namespace() -> None:
+    run_sh = (ZITADEL_DIR / "run.sh").read_text(encoding="utf-8")
+
+    assert "k8s_port_forward_namespace_file_for_cluster" in run_sh
+    assert 'expected_namespace="$(<"${namespace_file}")"' in run_sh
+    assert 'k8s_port_forward_pid_is_running "${pid}" "${K8S_GATEWAY_PORT}"' in run_sh
+    assert '"${expected_namespace}"; then' in run_sh
+    assert 'rm -f "${pid_file}" "${namespace_file}"' in run_sh
 
 
 def test_zitadel_down_key_cleans_derived_kubernetes_context(tmp_path: Path) -> None:
@@ -247,7 +308,10 @@ def test_zitadel_chart_declares_expected_dependencies() -> None:
 
 def test_zitadel_values_use_introspection_for_opaque_tokens() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
+    assert "studio" in values["nemo-helix"]["api"]["services"]
     oidc = values["nemo-helix"]["platformConfig"]["auth"]["oidc"]
+    public_client = oidc["public_client"]
+    confidential_client = oidc["confidential_client"]
 
     assert oidc["introspect_opaque_tokens"] is True
     assert (
@@ -258,7 +322,22 @@ def test_zitadel_values_use_introspection_for_opaque_tokens() -> None:
         oidc["introspection_endpoint"]
         == '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
     )
-    assert oidc["client_id"] == "__ZITADEL_NEMO_CLIENT_ID__"
+    assert public_client["client_id"] == "__ZITADEL_NEMO_CLIENT_ID__"
+    assert public_client["server_side_sessions"] is False
+    assert public_client["authorization_endpoint"] == (
+        '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/authorize'
+    )
+    assert public_client["token_endpoint"] == '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/token'
+    assert confidential_client["client_id"] == "__ZITADEL_USER_LOGIN_CLIENT_ID__"
+    assert confidential_client["authorization_endpoint"] == (
+        '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oauth/v2/authorize'
+    )
+    assert confidential_client["token_endpoint"] == (
+        '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/token'
+    )
+    assert confidential_client["client_secret_env_var"] == "NHX_OIDC_CLIENT_SECRET"
+    assert oidc["server_sessions"] == {"encryption_key_env_var": "NHX_AUTH_SESSION_ENCRYPTION_KEY"}
+    assert "client_secret" not in confidential_client
     assert oidc["introspection_client_id"] == "__ZITADEL_INTROSPECTION_CLIENT_ID__"
     assert oidc["introspection_client_secret_env_var"] == "NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
     assert "introspection_client_secret" not in oidc
@@ -273,7 +352,8 @@ def test_zitadel_values_use_introspection_for_opaque_tokens() -> None:
     }
     assert oidc["resolve_opaque_tokens_via_userinfo"] is False
     assert oidc["userinfo_endpoint"] == '{{ include "nemo-helix-zitadel.publicGatewayUrl" . }}/oidc/v1/userinfo'
-    assert "__ZITADEL_PROJECT_ID__" in oidc["default_scopes"]
+    assert "__ZITADEL_PROJECT_ID__" in public_client["default_scopes"]
+    assert "__ZITADEL_PROJECT_ID__" in confidential_client["default_scopes"]
 
 
 def test_zitadel_values_route_internal_bearer_clients_through_tls_envoy() -> None:
@@ -338,8 +418,10 @@ def test_zitadel_envoy_strips_trusted_headers_and_checks_zitadel_discovery() -> 
     assert 'string.format(\'{"status":"not_ready","nemo":"%s","zitadel":"%s"}\'' in envoy_template
     assert 'prefix: "/.well-known/nemo-helix/"' in envoy_template
     assert 'path: "/apis/auth/discovery"' in envoy_template
+    assert 'regex: "^/apis/auth/v2/(login(/callback)?|authorize(/[^/]+)?|token|logout|session)$"' in envoy_template
     assert 'path: "/apis/auth/authenticate"' in envoy_template
     assert 'path_prefix: "/apis/auth/ext-authz"' in envoy_template
+    assert "direct_response:\n                            status: 404" in envoy_template
     assert 'path: "/apis/auth/jwks"' in envoy_template
     assert 'path: "/apis/auth/token"' in envoy_template
     assert "host_rewrite_literal: {{ $publicGatewayAuthority | quote }}" in envoy_template
@@ -387,8 +469,10 @@ def test_zitadel_chart_seeds_generated_clients_and_patches_nemo_config() -> None
     assert values["zitadelDemo"]["interactiveUser"]["email"] == "nemo-user@example.com"
     assert "password" not in values["zitadelDemo"]["interactiveUser"]
     assert '"interactive_user_password": INTERACTIVE_USER_PASSWORD' in seed_template
-    assert 'missing == {"interactive_user_password"}' in seed_template
-    assert "migrated legacy ZITADEL seed state" in seed_template
+    assert "interactive_user_password" in seed_template
+    assert "migrated ZITADEL seed state" in seed_template
+    assert "USER_LOGIN_APP_NAME" in seed_template
+    assert "__ZITADEL_USER_LOGIN_CLIENT_ID__" in seed_template
     assert "valueFrom:" in seed_template
     assert "secretKeyRef:" in seed_template
     assert "zitadelSecrets.demo.secretName" in seed_template
@@ -401,36 +485,54 @@ def test_zitadel_chart_seeds_generated_clients_and_patches_nemo_config() -> None
     assert "nemo-helix.nvidia.com/zitadel-seeded-at" in seed_template
 
 
-def test_zitadel_values_use_generated_secrets_for_sensitive_defaults() -> None:
-    values = _load_yaml(HELM_DIR / "values.yaml")
-    generated_secrets = (HELM_DIR / "templates" / "generated-secrets.yaml").read_text(encoding="utf-8")
+def test_zitadel_seed_migrates_legacy_cli_client_id_independently() -> None:
+    seed_template = (HELM_DIR / "templates" / "seed-job.yaml").read_text(encoding="utf-8")
+    migration = seed_template.split("    def _migrate_state", maxsplit=1)[1].split(
+        "    def _upsert_secret", maxsplit=1
+    )[0]
 
+    legacy_client_migration = 'if "public_client_id" not in migrated and "cli_client_id" in migrated:'
+    confidential_migration = 'if "user_login_client_secret" not in migrated:'
+    assert legacy_client_migration in migration
+    assert 'migrated["public_client_id"] = migrated["cli_client_id"]' in migration
+    assert migration.index(legacy_client_migration) < migration.index(confidential_migration)
+
+
+def test_zitadel_seed_does_not_overwrite_existing_public_client_id() -> None:
+    seed_template = (HELM_DIR / "templates" / "seed-job.yaml").read_text(encoding="utf-8")
+    migration = seed_template.split("    def _migrate_state", maxsplit=1)[1].split(
+        "    def _upsert_secret", maxsplit=1
+    )[0]
+
+    assert migration.count('migrated["public_client_id"] = migrated["cli_client_id"]') == 1
+    assert 'if "public_client_id" not in migrated and "cli_client_id" in migrated:' in migration
+
+
+def test_zitadel_values_reference_precreated_secrets_for_sensitive_defaults() -> None:
+    values = _load_yaml(HELM_DIR / "values.yaml")
+
+    assert values["zitadelSecrets"]["prepared"] == {"secretName": "nemo-zitadel-prepared"}
     assert values["zitadelSecrets"]["masterkey"] == {
-        "create": True,
         "secretName": "zitadel-masterkey",
         "key": "masterkey",
     }
     assert values["zitadelSecrets"]["demo"] == {
-        "create": True,
-        "secretName": "nemo-zitadel-demo-credentials",
-        "interactiveUserPasswordKey": "interactive-user-password",
+        "secretName": "nemo-zitadel-prepared",
+        "interactiveUserPasswordKey": "ZITADEL_INTERACTIVE_USER_PASSWORD",
     }
     assert values["zitadelSecrets"]["postgresql"] == {
-        "create": True,
-        "secretName": "zitadel-postgresql",
-        "adminPasswordKey": "postgres-password",
-        "userPasswordKey": "password",
-        "dsnKey": "dsn",
+        "secretName": "nemo-zitadel-prepared",
+        "adminPasswordKey": "ZITADEL_POSTGRES_ADMIN_PASSWORD",
+        "userPasswordKey": "ZITADEL_POSTGRES_USER_PASSWORD",
+        "dsnKey": "ZITADEL_POSTGRES_DSN",
     }
     assert values["nemoHelixSecrets"]["ngc"] == {
-        "create": True,
-        "secretName": "nemo-helix-ngc-api",
+        "secretName": "nemo-zitadel-prepared",
         "key": "NGC_API_KEY",
     }
     assert values["nemoHelixSecrets"]["postgresql"] == {
-        "create": True,
-        "secretName": "nemo-helix-postgres",
-        "passwordKey": "password",
+        "secretName": "nemo-zitadel-prepared",
+        "passwordKey": "NEMO_POSTGRES_PASSWORD",
     }
     assert values["zitadel"]["zitadel"]["masterkey"] == ""
     assert values["zitadel"]["zitadel"]["masterkeySecretName"] == "zitadel-masterkey"
@@ -441,8 +543,8 @@ def test_zitadel_values_use_generated_secrets_for_sensitive_defaults() -> None:
             "name": "ZITADEL_DATABASE_POSTGRES_DSN",
             "valueFrom": {
                 "secretKeyRef": {
-                    "name": "zitadel-postgresql",
-                    "key": "dsn",
+                    "name": "nemo-zitadel-prepared",
+                    "key": "ZITADEL_POSTGRES_DSN",
                 },
             },
         },
@@ -450,22 +552,66 @@ def test_zitadel_values_use_generated_secrets_for_sensitive_defaults() -> None:
     assert values["zitadel"]["postgresql"]["fullnameOverride"] == "zitadel-postgresql"
     assert "password" not in values["zitadel"]["postgresql"]["auth"]
     assert "postgresPassword" not in values["zitadel"]["postgresql"]["auth"]
-    assert values["zitadel"]["postgresql"]["auth"]["existingSecret"] == "zitadel-postgresql"
+    assert values["zitadel"]["postgresql"]["auth"]["existingSecret"] == "nemo-zitadel-prepared"
     assert values["zitadel"]["postgresql"]["auth"]["secretKeys"] == {
-        "adminPasswordKey": "postgres-password",
-        "userPasswordKey": "password",
+        "adminPasswordKey": "ZITADEL_POSTGRES_ADMIN_PASSWORD",
+        "userPasswordKey": "ZITADEL_POSTGRES_USER_PASSWORD",
     }
-    assert values["nemo-helix"]["existingSecret"] == "nemo-helix-ngc-api"
+    assert values["nemo-helix"]["existingSecret"] == "nemo-zitadel-prepared"
     assert values["nemo-helix"]["ngcAPIKey"] == ""
-    assert values["nemo-helix"]["postgresql"]["auth"]["existingSecret"] == "nemo-helix-postgres"
-    assert "nemo-helix-zitadel.secretValue" in generated_secrets
-    assert "randAlphaNum 32" in generated_secrets
-    assert "randAlphaNum 20" in generated_secrets
-    assert "zitadelSecrets.demo.interactiveUserPasswordKey" in generated_secrets
-    assert "host=zitadel-postgresql" in generated_secrets
-    assert "$adminPassword" in generated_secrets
-    assert "dbname=zitadel sslmode=disable" in generated_secrets
-    assert '"helm.sh/hook": pre-install,pre-upgrade' in generated_secrets
+    assert values["nemo-helix"]["postgresql"]["auth"]["existingSecret"] == "nemo-zitadel-prepared"
+    assert values["nemo-helix"]["postgresql"]["auth"]["existingSecretPasswordKey"] == "NEMO_POSTGRES_PASSWORD"
+    assert values["nemo-helix"]["secrets"]["defaultEncryptionKey"]["existingSecret"] == {
+        "name": "nemo-zitadel-prepared",
+        "key": "NHX_SECRETS_DEFAULT_ENCRYPTION_KEY",
+    }
+    assert not (HELM_DIR / "templates" / "generated-secrets.yaml").exists()
+    assert "randAlphaNum" not in (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
+
+
+def test_helix_embedded_postgresql_honors_precreated_secret_password_key() -> None:
+    if shutil.which("helm") is None:
+        pytest.skip("helm is required to render the NeMo Helix chart")
+
+    completed = subprocess.run(
+        [
+            "helm",
+            "template",
+            "nemo",
+            "k8s/helm",
+            "--set",
+            "postgresql.auth.existingSecret=prepared",
+            "--set",
+            "postgresql.auth.existingSecretPasswordKey=NEMO_POSTGRES_PASSWORD",
+            "--show-only",
+            "templates/api/api-deployment.yaml",
+            "--show-only",
+            "templates/core/controller-deployment.yaml",
+            "--show-only",
+            "templates/postgres/postgres-statefulset.yaml",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=ZITADEL_SCRIPT_TIMEOUT_SECONDS,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    documents = [document for document in yaml.safe_load_all(completed.stdout) if document]
+    password_secret_refs = []
+    for document in documents:
+        container = document["spec"]["template"]["spec"]["containers"][0]
+        password_secret_refs.extend(
+            env["valueFrom"]["secretKeyRef"]
+            for env in container["env"]
+            if env["name"] in {"DATABASE_PASSWORD", "POSTGRES_PASSWORD"}
+        )
+
+    assert password_secret_refs == [
+        {"name": "prepared", "key": "NEMO_POSTGRES_PASSWORD"},
+        {"name": "prepared", "key": "NEMO_POSTGRES_PASSWORD"},
+        {"name": "prepared", "key": "NEMO_POSTGRES_PASSWORD"},
+    ]
 
 
 def test_zitadel_demo_files_avoid_empty_password_placeholders() -> None:
@@ -477,17 +623,12 @@ def test_zitadel_demo_files_avoid_empty_password_placeholders() -> None:
     assert 'postgresPassword: ""' not in values
 
 
-def test_zitadel_chart_creates_workload_token_secrets_and_tokenreview_rbac() -> None:
+def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenreview_rbac() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
-    signing_template = (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").read_text(encoding="utf-8")
-    helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
-    tls_template = (HELM_DIR / "templates" / "workload-token-tls.yaml").read_text(encoding="utf-8")
     tokenreview_template = (HELM_DIR / "templates" / "tokenreview-rbac.yaml").read_text(encoding="utf-8")
 
-    assert values["workloadTokenSigningKey"]["create"] is True
     assert values["workloadTokenSigningKey"]["secretName"] == "nemo-workload-token-signing-key"
     assert values["workloadTokenSigningKey"]["key"] == "private-key.pem"
-    assert values["workloadTokenTls"]["create"] is True
     assert values["workloadTokenTls"]["secretName"] == "nemo-helix-envoy-tls"
     assert values["nemo-helix"]["api"]["env"]["SSL_CERT_FILE"] == "/etc/nhx/workload-token-ca/ca.crt"
     assert values["nemo-helix"]["api"]["env"]["REQUESTS_CA_BUNDLE"] == "/etc/nhx/workload-token-ca/ca.crt"
@@ -509,8 +650,7 @@ def test_zitadel_chart_creates_workload_token_secrets_and_tokenreview_rbac() -> 
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
     assert workload_config["storage"] == jobs_config["executor_defaults"]["kubernetes_job"]["storage"]
-    assert "nemo-helix-zitadel.workloadTokenSigningKey.privateKeyPem" in signing_template
-    assert 'genPrivateKey "rsa"' in helpers_template
-    assert "genSignedCert" in tls_template
+    assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
+    assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert 'resources: ["tokenreviews"]' in tokenreview_template
     assert 'verbs: ["create"]' in tokenreview_template

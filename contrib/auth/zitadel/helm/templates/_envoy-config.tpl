@@ -79,6 +79,20 @@ static_resources:
                                 value: https
                               append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
+                            safe_regex:
+                              regex: "^/apis/auth/v2/(login(/callback)?|authorize(/[^/]+)?|token|logout|session)$"
+                          route:
+                            cluster: nemo
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                          request_headers_to_add:
+                            - header:
+                                key: x-forwarded-proto
+                                value: https
+                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                        - match:
                             path: "/apis/auth/authenticate"
                           route:
                             cluster: nemo
@@ -93,17 +107,12 @@ static_resources:
                               append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
                             prefix: "/apis/auth/ext-authz"
-                          route:
-                            cluster: nemo
+                          direct_response:
+                            status: 404
                           typed_per_filter_config:
                             envoy.filters.http.ext_authz:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
                               disabled: true
-                          request_headers_to_add:
-                            - header:
-                                key: x-forwarded-proto
-                                value: https
-                              append_action: OVERWRITE_IF_EXISTS_OR_ADD
                         - match:
                             path: "/apis/auth/jwks"
                           route:
@@ -262,9 +271,15 @@ static_resources:
                           cluster: nemo
                           timeout: 5s
                         path_prefix: "/apis/auth/ext-authz"
+                        authorization_request:
+                          allowed_headers:
+                            patterns:
+                              - exact: cookie
+                              - exact: x-source
                         authorization_response:
                           allowed_upstream_headers:
                             patterns:
+                              - exact: authorization
                               - exact: x-nhx-principal-id
                               - exact: x-nhx-principal-email
                               - exact: x-nhx-principal-groups

@@ -851,6 +851,50 @@ class TestConfigWrite:
         assert user.refresh_token is not None
         assert user.refresh_token.get_secret_value() == "test-refresh-123"
 
+    def test_replacing_access_token_preserves_broker_url_when_omitted(self, tmp_path: Path):
+        config_path = tmp_path / "config.yaml"
+        Config.write(
+            {
+                "base_url": "http://test.example.com",
+                "access_token": "old-token",
+                "token_broker_url": "https://test.example.com/apis/auth/v2/token?client=public",
+            },
+            context_name="default",
+            config_path=config_path,
+        )
+
+        config = Config.write(
+            {"access_token": "new-token"},
+            context_name="default",
+            config_path=config_path,
+        )
+
+        user = config.get_config_file().users[0]
+        assert isinstance(user, OAuthUser)
+        assert user.token_broker_url == "https://test.example.com/apis/auth/v2/token?client=public"
+
+    def test_replacing_access_token_clears_broker_url_when_explicit(self, tmp_path: Path):
+        config_path = tmp_path / "config.yaml"
+        Config.write(
+            {
+                "base_url": "http://test.example.com",
+                "access_token": "old-token",
+                "token_broker_url": "https://test.example.com/apis/auth/v2/token?client=public",
+            },
+            context_name="default",
+            config_path=config_path,
+        )
+
+        config = Config.write(
+            {"access_token": "new-token", "token_broker_url": None},
+            context_name="default",
+            config_path=config_path,
+        )
+
+        user = config.get_config_file().users[0]
+        assert isinstance(user, OAuthUser)
+        assert user.token_broker_url is None
+
     def test_write_without_access_token_creates_noauth_user(self, tmp_path: Path):
         """Test that write() creates NoAuthUser when no access_token provided."""
         config_path = tmp_path / "config.yaml"

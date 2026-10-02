@@ -11,7 +11,7 @@ dependencies (sqlalchemy, etc.) or internal platform logic.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
 
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES as LOOPBACK_ADDRESSES
 from nemo_helix_plugin.config import NHX_CONFIG_FILE_PATH_DEFAULT as NHX_CONFIG_FILE_PATH_DEFAULT
@@ -68,8 +68,104 @@ class HelixConfig(_PluginHelixConfig):
 Configuration.register_platform_config_class(HelixConfig)
 
 
+class OIDCPublicClientConfig(BaseSettings):
+    """Public OIDC client used by browser and device-based applications."""
+
+    client_id: str
+    server_side_sessions: bool = False
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    device_authorization_endpoint: str | None = None
+    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
+    default_scopes: str = "openid profile email offline_access"
+    scope_prefix: str | None = None
+    device_authorization_requires_device_id: bool = False
+    device_authorization_display_name: str | None = None
+    device_token_request_includes_scope: bool = True
+
+
+class OIDCConfidentialClientConfig(BaseSettings):
+    """Confidential OIDC client whose secret is held by the auth service."""
+
+    client_id: str
+    client_secret_env_var: str
+    login_redirect_uri: str
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
+    default_scopes: str = "openid profile email offline_access"
+    scope_prefix: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_session_key_field(cls, values: object) -> object:
+        if isinstance(values, dict) and "session_encryption_key_env_var" in values:
+            raise ValueError(
+                "Removed auth.oidc.confidential_client.session_encryption_key_env_var; "
+                "use auth.oidc.server_sessions.encryption_key_env_var"
+            )
+        return values
+
+
+class OIDCServerSessionsConfig(BaseSettings):
+    """Shared encryption configuration for server-managed OIDC sessions."""
+
+    encryption_key_env_var: str
+
+
+class OIDCWorkloadConfig(BaseSettings):
+    """OIDC workload identity token-exchange client."""
+
+    client_id: str
+    token_endpoint: str | None = None
+    audience: str | None = None
+    scope: str | None = None
+    token_issuer: str | None = None
+    token_ttl_seconds: int = Field(default=300, ge=1)
+    token_key_id: str | None = None
+    token_private_key_file: str | None = None
+    allowed_audiences: list[str] = Field(default_factory=list)
+    subject_jwks_uri: str | None = None
+    subject_issuers: list[str] = Field(default_factory=list)
+    subject_jwks_cache_ttl_seconds: int = Field(default=3600, ge=0)
+    kubernetes_token_review_enabled: bool = False
+
+
 class OIDCConfig(BaseSettings):
-    """OIDC Identity Provider configuration for native token validation."""
+    """OIDC identity-provider and client-profile configuration."""
+
+    _REMOVED_CLIENT_FIELDS: ClassVar[dict[str, str]] = {
+        "client_id": "public_client.client_id or confidential_client.client_id",
+        "client_authentication": "public_client or confidential_client",
+        "client_secret_env_var": "confidential_client.client_secret_env_var",
+        "session_encryption_key_env_var": "server_sessions.encryption_key_env_var",
+        "login_redirect_uri": "confidential_client.login_redirect_uri",
+        "public_client_id": "public_client.client_id",
+        "user_login_client_id": "public_client.client_id",
+        "bearer_token_source": "public_client.bearer_token_source or confidential_client.bearer_token_source",
+        "authorization_endpoint": "public_client.authorization_endpoint or confidential_client.authorization_endpoint",
+        "token_endpoint": "public_client.token_endpoint or confidential_client.token_endpoint",
+        "device_authorization_endpoint": "public_client.device_authorization_endpoint",
+        "device_authorization_requires_device_id": "public_client.device_authorization_requires_device_id",
+        "device_authorization_display_name": "public_client.device_authorization_display_name",
+        "device_token_request_includes_scope": "public_client.device_token_request_includes_scope",
+        "default_scopes": "public_client.default_scopes or confidential_client.default_scopes",
+        "scope_prefix": "public_client.scope_prefix or confidential_client.scope_prefix",
+        "workload_token_exchange_enabled": "workload",
+        "workload_client_id": "workload.client_id",
+        "workload_token_endpoint": "workload.token_endpoint",
+        "workload_audience": "workload.audience",
+        "workload_scope": "workload.scope",
+        "workload_token_issuer": "workload.token_issuer",
+        "workload_token_ttl_seconds": "workload.token_ttl_seconds",
+        "workload_token_key_id": "workload.token_key_id",
+        "workload_token_private_key_file": "workload.token_private_key_file",
+        "workload_allowed_audiences": "workload.allowed_audiences",
+        "workload_subject_jwks_uri": "workload.subject_jwks_uri",
+        "workload_subject_issuers": "workload.subject_issuers",
+        "workload_subject_jwks_cache_ttl_seconds": "workload.subject_jwks_cache_ttl_seconds",
+        "workload_kubernetes_token_review_enabled": "workload.kubernetes_token_review_enabled",
+    }
 
     enabled: bool = Field(
         default=False,
@@ -89,55 +185,10 @@ class OIDCConfig(BaseSettings):
         "(https://sts.windows.net/{tenant}/) while endpoints use v2.0.",
     )
 
-    client_id: str = Field(
-        default="",
-        description="OAuth client ID for this NeMo Helix deployment and its default interactive login flows.",
-    )
-
-    cli_client_id: str | None = Field(
-        default=None,
-        description="OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.",
-    )
-
-    bearer_token_source: Literal["access_token", "id_token"] = Field(
-        default="access_token",
-        description="Token returned by the identity provider that clients send to NeMo Helix APIs. "
-        "Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider "
-        "documents its signed ID token as the backend bearer.",
-    )
-
-    # Optional: Override endpoints if not using standard discovery
-    authorization_endpoint: str | None = Field(
-        default=None,
-        description="Override authorization endpoint (defaults to discovery).",
-    )
-
-    token_endpoint: str | None = Field(
-        default=None,
-        description="Override token endpoint (defaults to discovery).",
-    )
-
-    device_authorization_endpoint: str | None = Field(
-        default=None,
-        description="Override device authorization endpoint (defaults to discovery).",
-    )
-
-    device_authorization_requires_device_id: bool = Field(
-        default=False,
-        description="Include a stable, locally generated device_id parameter in CLI device authorization requests. "
-        "Enable only for identity providers that require this extension.",
-    )
-
-    device_authorization_display_name: str | None = Field(
-        default=None,
-        description="Optional display_name sent with CLI device authorization requests.",
-    )
-
-    device_token_request_includes_scope: bool = Field(
-        default=True,
-        description="Include the requested scope in CLI device-flow token polling requests. "
-        "Disable for identity providers whose token endpoint rejects this extension.",
-    )
+    public_client: OIDCPublicClientConfig | None = None
+    confidential_client: OIDCConfidentialClientConfig | None = None
+    server_sessions: OIDCServerSessionsConfig | None = None
+    workload: OIDCWorkloadConfig | None = None
 
     jwks_uri: str | None = Field(
         default=None,
@@ -160,7 +211,10 @@ class OIDCConfig(BaseSettings):
 
     introspection_client_id: str | None = Field(
         default=None,
-        description="Client ID used to authenticate RFC 7662 introspection requests. Defaults to client_id when unset.",
+        description=(
+            "Client ID used to authenticate RFC 7662 introspection requests. Defaults to the confidential client ID, "
+            "then the public client ID, when unset."
+        ),
     )
 
     introspection_client_secret_env_var: str | None = Field(
@@ -173,13 +227,47 @@ class OIDCConfig(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_inline_introspection_client_secret(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "introspection_client_secret" in data:
+    def reject_removed_client_fields(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        removed = sorted(cls._REMOVED_CLIENT_FIELDS.keys() & values.keys())
+        if not removed:
+            return values
+        migrations = ", ".join(f"{name} -> {cls._REMOVED_CLIENT_FIELDS[name]}" for name in removed)
+        raise ValueError(f"Removed auth.oidc fields must use explicit client profiles: {migrations}")
+
+    @model_validator(mode="after")
+    def validate_interactive_clients(self) -> Self:
+        sessions_required = self.confidential_client is not None or (
+            self.public_client is not None and self.public_client.server_side_sessions
+        )
+        if sessions_required and self.server_sessions is None:
             raise ValueError(
-                "auth.oidc.introspection_client_secret is not supported; set "
-                "auth.oidc.introspection_client_secret_env_var to the name of an environment variable instead"
+                "auth.oidc.server_sessions.encryption_key_env_var is required for server-side OIDC sessions"
             )
-        return data
+        if (
+            self.public_client is not None
+            and self.confidential_client is not None
+            and self.public_client.client_id == self.confidential_client.client_id
+        ):
+            raise ValueError("auth.oidc public_client and confidential_client must use different client_id values")
+        prefixes = {
+            client.scope_prefix
+            for client in (self.public_client, self.confidential_client)
+            if client is not None and client.scope_prefix is not None
+        }
+        if len(prefixes) > 1:
+            raise ValueError("auth.oidc public_client and confidential_client must use the same scope_prefix")
+        return self
+
+    @property
+    def effective_scope_prefix(self) -> str | None:
+        """Return the shared scope prefix used to normalize validated tokens."""
+        if self.confidential_client is not None and self.confidential_client.scope_prefix is not None:
+            return self.confidential_client.scope_prefix
+        if self.public_client is not None:
+            return self.public_client.scope_prefix
+        return None
 
     resolve_opaque_tokens_via_userinfo: bool = Field(
         default=False,
@@ -222,117 +310,6 @@ class OIDCConfig(BaseSettings):
     subject_claim: str = Field(
         default="sub",
         description="JWT claim to use as principal ID (maps to X-NHX-Principal-Id). Set explicitly for your IdP.",
-    )
-
-    # Scope configuration
-    default_scopes: str = Field(
-        default="openid profile email offline_access",
-        description="Space-separated OAuth scopes to request during authentication. "
-        "Include short NeMo Helix API scopes such as 'platform:read platform:write' only when the "
-        "IdP application exposes them. If the IdP requires resource-qualified API scope names, set "
-        "scope_prefix instead of putting qualified values here.",
-    )
-
-    workload_token_exchange_enabled: bool = Field(
-        default=False,
-        description="Enable SDK workload identity token exchange using NHX_WORKLOAD_IDENTITY_TOKEN_FILE subject tokens.",
-    )
-
-    workload_client_id: str | None = Field(
-        default=None,
-        description="OAuth client ID to use for workload identity token exchange. Defaults to client_id when unset.",
-    )
-
-    workload_token_endpoint: str | None = Field(
-        default=None,
-        description="OAuth token endpoint to use for workload identity token exchange. Defaults to token_endpoint.",
-    )
-
-    workload_audience: str | None = Field(
-        default=None,
-        description="RFC 8693 audience requested for workload identity token exchange.",
-    )
-
-    workload_scope: str | None = Field(
-        default=None,
-        description="Space-separated OAuth scopes requested for workload identity token exchange.",
-    )
-
-    workload_token_issuer: str | None = Field(
-        default=None,
-        description=(
-            "Issuer to stamp on workload identity access tokens minted by the NeMo auth service. "
-            "Defaults to the platform auth endpoint origin serving the token exchange request."
-        ),
-    )
-
-    workload_token_ttl_seconds: int = Field(
-        default=300,
-        ge=1,
-        description="Lifetime in seconds for workload identity access tokens minted by the NeMo auth service.",
-    )
-
-    workload_token_key_id: str | None = Field(
-        default=None,
-        description=(
-            "Workload-specific JWT key id advertised by the NeMo auth service workload identity JWKS endpoint. "
-            "When unset, workload token exchange uses auth.token_signing.key_id."
-        ),
-    )
-
-    workload_token_private_key_file: str | None = Field(
-        default=None,
-        description=(
-            "Path to a PEM-encoded RSA private key used by the NeMo auth service to sign workload identity "
-            "access tokens. Intended for mounted shared secrets."
-        ),
-    )
-
-    workload_allowed_audiences: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Additional RFC 8693 audience values accepted by the NeMo auth service workload token exchange endpoint. "
-            "The configured workload_audience is always accepted."
-        ),
-    )
-
-    workload_subject_jwks_uri: str | None = Field(
-        default=None,
-        description=(
-            "JWKS URI used by the NeMo auth service to validate JWT subject tokens for workload token exchange. "
-            "Leave unset when only Kubernetes TokenReview subject validation is enabled."
-        ),
-    )
-
-    workload_subject_issuers: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Allowed JWT subject token issuers for workload token exchange. "
-            "Required when workload_subject_jwks_uri is set."
-        ),
-    )
-
-    workload_subject_jwks_cache_ttl_seconds: int = Field(
-        default=3600,
-        ge=0,
-        description=("TTL in seconds for caching workload subject JWKS responses. Set to 0 to disable caching."),
-    )
-
-    workload_kubernetes_token_review_enabled: bool = Field(
-        default=False,
-        description=(
-            "Allow the NeMo auth service workload token exchange endpoint to validate Kubernetes projected "
-            "service account subject tokens using the TokenReview API."
-        ),
-    )
-
-    scope_prefix: str | None = Field(
-        default=None,
-        description="Optional provider prefix for NeMo Helix API scopes. Clients prepend it to short "
-        "API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. "
-        "For example, if IdP scopes use 'api://my-app/models:read', set prefix to "
-        "'api://my-app/' so NeMo Helix normalizes the value to 'models:read'. "
-        "If not set, scopes are used as-is.",
     )
 
     discovery_cache_ttl: int = Field(
@@ -428,14 +405,14 @@ class AccessKeyConfig(BaseSettings):
     )
 
     @staticmethod
-    def _parse_nullable_expiry(value: Any) -> Any:
+    def _parse_nullable_expiry(value: object) -> object:
         if isinstance(value, str) and value.strip().lower() in {"", "none", "null"}:
             return None
         return value
 
     @field_validator("accepted_formats", mode="before")
     @classmethod
-    def parse_accepted_formats(cls, value: Any) -> Any:
+    def parse_accepted_formats(cls, value: object) -> object:
         if not isinstance(value, str):
             return value
 
@@ -443,7 +420,7 @@ class AccessKeyConfig(BaseSettings):
 
     @field_validator("default_expires_in_seconds", "max_expires_in_seconds", mode="before")
     @classmethod
-    def parse_nullable_expiry(cls, value: Any) -> Any:
+    def parse_nullable_expiry(cls, value: object) -> object:
         return cls._parse_nullable_expiry(value)
 
     @model_validator(mode="after")
@@ -545,21 +522,22 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
 
     @model_validator(mode="after")
     def validate_workload_token_signing_config(self) -> Self:
-        if not self.oidc.workload_token_exchange_enabled:
+        workload = self.oidc.workload
+        if workload is None:
             return self
 
-        key_id = self.oidc.workload_token_key_id or self.token_signing.key_id
+        key_id = workload.token_key_id or self.token_signing.key_id
         if not key_id or not key_id.strip():
             raise ValueError(
-                "auth.oidc.workload_token_key_id or auth.token_signing.key_id must be configured "
-                "when auth.oidc.workload_token_exchange_enabled is true"
+                "auth.oidc.workload.token_key_id or auth.token_signing.key_id must be configured "
+                "when auth.oidc.workload is configured"
             )
-        workload_private_key_file = self._normalized_private_key_file(self.oidc.workload_token_private_key_file)
+        workload_private_key_file = self._normalized_private_key_file(workload.token_private_key_file)
         access_key_private_key_file = self._normalized_private_key_file(self.token_signing.private_key_file)
         if not workload_private_key_file and not access_key_private_key_file:
             raise ValueError(
-                "auth.oidc.workload_token_private_key_file or auth.token_signing.private_key_file must be "
-                "configured when auth.oidc.workload_token_exchange_enabled is true"
+                "auth.oidc.workload.token_private_key_file or auth.token_signing.private_key_file must be "
+                "configured when auth.oidc.workload is configured"
             )
         if (
             self.access_keys.enabled
@@ -569,8 +547,8 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
             and key_id.strip() == self.token_signing.key_id.strip()
         ):
             raise ValueError(
-                "auth.oidc.workload_token_key_id must be distinct from auth.token_signing.key_id "
-                "when auth.oidc.workload_token_private_key_file differs from "
+                "auth.oidc.workload.token_key_id must be distinct from auth.token_signing.key_id "
+                "when auth.oidc.workload.token_private_key_file differs from "
                 "auth.token_signing.private_key_file and Scoped Access Keys are enabled"
             )
         return self

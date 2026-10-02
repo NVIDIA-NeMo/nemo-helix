@@ -348,8 +348,12 @@ nemo-common.database.secret-name chooses between externalDatabase and the embedd
 nemo-common.database.password-key chooses between externalDatabase and the embedded postgresql existing secret key values
 */}}
 {{- define "nemo-common.postgresql.password-key" -}}
-{{- if or .Values.postgresql.enabled (not .Values.externalDatabase.existingSecret) -}}
+{{- if .Values.postgresql.enabled -}}
+{{- if .Values.postgresql.auth.existingSecret -}}
+{{- print (.Values.postgresql.auth.existingSecretPasswordKey | default "password") -}}
+{{- else -}}
 {{- print "password" -}}
+{{- end -}}
 {{- else -}}
 {{- print .Values.externalDatabase.existingSecretPasswordKey -}}
 {{- end -}}

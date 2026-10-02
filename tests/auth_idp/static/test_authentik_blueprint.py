@@ -150,6 +150,18 @@ def test_authentik_blueprint_reads_workload_identity_password_from_env() -> None
     assert legacy_secret not in token_keys
 
 
+def test_authentik_blueprint_reads_confidential_callback_from_deployment_environment() -> None:
+    blueprint = _load_blueprint()
+    user_provider = _entry_by_id(blueprint, "nemo-user-provider")
+
+    assert _attrs(user_provider)["redirect_uris"] == [
+        {
+            "url": TaggedYamlValue("!Env", "NHX_OIDC_LOGIN_REDIRECT_URI"),
+            "matching_mode": "strict",
+        }
+    ]
+
+
 def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     blueprint_text = BLUEPRINT.read_text(encoding="utf-8")
     blueprint = _load_blueprint()
@@ -166,7 +178,7 @@ def test_authentik_blueprint_declares_e2e_setup_identity_as_test_only() -> None:
     setup_token_attrs = _attrs(setup_token)
     assert setup_token_attrs["intent"] == "app_password"
     assert setup_token_attrs["user"] == TaggedYamlValue("!KeyOf", "nemo-setup")
-    assert setup_token_attrs["key"] == "nemo-setup-token-secret-dev"
+    assert setup_token_attrs["key"] == TaggedYamlValue("!Env", "AUTHENTIK_SETUP_PASSWORD")
 
 
 def test_authentik_blueprint_has_single_canonical_source() -> None:

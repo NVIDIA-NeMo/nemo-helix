@@ -27,9 +27,12 @@ REUSE_COMPOSE_GATEWAY_PORT="${NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT:-}"
 REUSE_COMPOSE_GATEWAY_TLS_VOLUME="${NHX_AUTHENTIK_COMPOSE_GATEWAY_TLS_VOLUME:-}"
 REUSE_COMPOSE_WORKLOAD_NETWORK_NAME="${NHX_AUTHENTIK_COMPOSE_WORKLOAD_NETWORK_NAME:-}"
 REUSE_K8S_CLUSTER_NAME="${NHX_AUTHENTIK_K8S_REUSE_CLUSTER_NAME:-}"
+DEFAULT_COMPOSE_GATEWAY_PORT="18080"
 DEFAULT_K8S_GATEWAY_PORT="18082"
 K8S_GATEWAY_PORT="${NHX_AUTHENTIK_K8S_GATEWAY_PORT:-}"
+GATEWAY_PORT_SET="false"
 K8S_JUNIT_XML="${NHX_AUTHENTIK_K8S_JUNIT_XML:-report-auth-idp-kubernetes.xml}"
+COMPOSE_JUNIT_XML="${NHX_AUTHENTIK_COMPOSE_JUNIT_XML:-report-auth-idp-authentik-compose.xml}"
 HELM_NAMESPACE="${HELM_NAMESPACE:-${NHX_AUTHENTIK_K8S_NAMESPACE:-nemo-authentik}}"
 HELM_RELEASE="${HELM_RELEASE:-${NHX_AUTHENTIK_K8S_HELM_RELEASE:-authentik-demo}}"
 HELM_WAIT_TIMEOUT="${HELM_WAIT_TIMEOUT:-${NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT:-20m}}"
@@ -45,6 +48,7 @@ K8S_EXPORT_KUBECONFIG_SET="false"
 K8S_NGC_EXISTING_SECRET="${NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET:-}"
 K8S_IMAGE_PULL_SECRET="${NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET:-}"
 AUTHENTIK_WORKSPACE="${NHX_AUTHENTIK_WORKSPACE:-authentik-demo}"
+K8S_CLUSTER_DOMAIN="${NHX_AUTHENTIK_K8S_CLUSTER_DOMAIN:-cluster.local}"
 
 diagnostics_dir() {
     local mode="$1"
@@ -96,19 +100,47 @@ write_diagnostics_metadata() {
     } >"${output}/run-metadata.txt"
 }
 
-choose_free_tcp_port() {
-    python3 -c 'import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])'
-}
-
 validate_k8s_gateway_port() {
     if [[ ! "${K8S_GATEWAY_PORT}" =~ ^[0-9]+$ ]]; then
         die "NHX_AUTHENTIK_K8S_GATEWAY_PORT must be an integer TCP port"
     fi
     if ((K8S_GATEWAY_PORT < 1 || K8S_GATEWAY_PORT > 65535)); then
         die "NHX_AUTHENTIK_K8S_GATEWAY_PORT must be between 1 and 65535"
+    fi
+}
+
+validate_gateway_port() {
+    local port="$1"
+    local source="$2"
+
+    if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
+        die "${source} must be an integer TCP port"
+    fi
+    if ((port < 1 || port > 65535)); then
+        die "${source} must be between 1 and 65535"
+    fi
+}
+
+tcp_port_is_listening() {
+    local port="$1"
+
+    python3 - "${port}" <<'PY'
+import socket
+import sys
+
+with socket.socket() as sock:
+    sock.settimeout(0.25)
+    raise SystemExit(0 if sock.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
+PY
+}
+
+describe_tcp_port_owner() {
+    local port="$1"
+
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true
+    elif command -v ss >/dev/null 2>&1; then
+        ss -ltnp "sport = :${port}" 2>/dev/null || true
     fi
 }
 
@@ -120,18 +152,7 @@ configure_k8s_gateway_port() {
         return
     fi
     if [[ -z "${K8S_GATEWAY_PORT}" ]]; then
-        case "${ACTION}" in
-            up)
-                if [[ -n "${INSTANCE_KEY}" ]]; then
-                    K8S_GATEWAY_PORT="$(choose_free_tcp_port)"
-                else
-                    K8S_GATEWAY_PORT="${DEFAULT_K8S_GATEWAY_PORT}"
-                fi
-                ;;
-            test)
-                K8S_GATEWAY_PORT="$(choose_free_tcp_port)"
-                ;;
-        esac
+        K8S_GATEWAY_PORT="${DEFAULT_K8S_GATEWAY_PORT}"
     fi
     validate_k8s_gateway_port
 }
@@ -171,17 +192,16 @@ Image options:
                          Expected format: <registry>/nhx-api:<tag>
 
 Test options:
+  --gateway-port PORT    Publish or forward the HTTPS gateway on this host port.
+                         Overrides the provider-specific environment variable.
+                         Defaults: compose 18080, k8s 18082.
   --reuse                Reuse a deterministic test environment.
-                         For compose, use Compose project authentik-e2e-reuse
-                         on gateway port 18083.
+                         For compose, use Compose project authentik-e2e-reuse.
                          For k8s, use cluster nhx-authentik-reuse with
                          the selected runtime, creating it if needed and
                          keeping it after the run. The up actions use these
                          reusable resources by default.
-                         The k8s up action uses gateway port 18082 by default
-                         to avoid the tutorial's 18081 port. The k8s test
-                         action chooses a free local port by default. Override
-                         either with NHX_AUTHENTIK_K8S_GATEWAY_PORT.
+                         Kubernetes uses gateway port 18082 by default.
   --platform PLATFORM    Platform for the default local test image build.
                          Applies to compose and k8s.
                          Default: current machine architecture.
@@ -308,11 +328,7 @@ configure_instance_defaults() {
     fi
 
     if [[ -z "${REUSE_COMPOSE_GATEWAY_PORT}" ]]; then
-        if [[ "${ACTION}" == "up" && "${TARGET}" == "compose" && -n "${INSTANCE_KEY}" ]]; then
-            REUSE_COMPOSE_GATEWAY_PORT="$(choose_free_tcp_port)"
-        else
-            REUSE_COMPOSE_GATEWAY_PORT="18083"
-        fi
+        REUSE_COMPOSE_GATEWAY_PORT="${DEFAULT_COMPOSE_GATEWAY_PORT}"
     fi
 
     if [[ -z "${REUSE_COMPOSE_GATEWAY_TLS_VOLUME}" ]]; then
@@ -408,6 +424,30 @@ blueprint_output_dir() {
 
 workload_token_private_key_file() {
     printf "%s/.generated/workload-token-private-key.pem" "${AUTHENTIK_ROOT}"
+}
+
+authentik_env_file() {
+    printf "%s/.generated/authentik.env" "${AUTHENTIK_ROOT}"
+}
+
+user_oidc_env_file() {
+    printf "%s/.generated/user-oidc.env" "${AUTHENTIK_ROOT}"
+}
+
+auth_idp_e2e_env_file() {
+    printf "%s/.generated/auth-idp-e2e.env" "${AUTHENTIK_ROOT}"
+}
+
+postgres_env_file() {
+    printf "%s/.generated/postgres.env" "${AUTHENTIK_ROOT}"
+}
+
+helix_platform_env_file() {
+    printf "%s/.generated/helix-platform.env" "${AUTHENTIK_ROOT}"
+}
+
+compose_e2e_config_file() {
+    printf "%s/.generated/platform-compose-authentik-e2e.yaml" "${AUTHENTIK_ROOT}"
 }
 
 gateway_tls_dir() {
@@ -508,6 +548,21 @@ remove_lifecycle_state_file() {
     rm -f "${state_file}"
 }
 
+gateway_tls_matches_runtime() {
+    local cert
+    local key
+    local sans
+
+    cert="$(gateway_tls_cert_file)"
+    key="$(gateway_tls_key_file)"
+    [[ -f "${cert}" && -f "${key}" ]] || return 1
+    openssl x509 -in "${cert}" -checkend 0 -noout >/dev/null 2>&1 || return 1
+    sans="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null)"
+    [[ "${sans}" == *"DNS:localhost"* ]] || return 1
+    [[ "${sans}" == *"DNS:nemo-gateway"* ]] || return 1
+    [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
+}
+
 ensure_gateway_tls_certificate() {
     local output_dir
     local cert
@@ -519,7 +574,7 @@ ensure_gateway_tls_certificate() {
     key="$(gateway_tls_key_file)"
     openssl_config="${output_dir}/openssl.cnf"
 
-    if [[ -f "${cert}" && -f "${key}" ]]; then
+    if [[ "${DRY_RUN}" != "true" ]] && gateway_tls_matches_runtime; then
         echo "Using gateway TLS certificate: ${cert}"
         return
     fi
@@ -593,6 +648,219 @@ ensure_workload_token_private_key() {
     echo "Generated workload token signing key: ${output}"
 }
 
+write_generated_env_file() {
+    local output="$1"
+    shift
+    local output_dir
+    local temporary
+
+    output_dir="$(dirname -- "${output}")"
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write generated secret environment file %q\n" "${output}"
+        printf "+ chmod 600 %q\n" "${output}"
+        return
+    fi
+
+    umask 077
+    mkdir -p "${output_dir}"
+    temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    printf "%s\n" "$@" >"${temporary}"
+    chmod 600 "${temporary}"
+    mv -f "${temporary}" "${output}"
+}
+
+append_generated_env_file() {
+    local output="$1"
+    shift
+    local temporary
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ add missing generated values to %q\n" "${output}"
+        return
+    fi
+    umask 077
+    temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    cat "${output}" >"${temporary}"
+    printf "%s\n" "$@" >>"${temporary}"
+    chmod 600 "${temporary}"
+    mv -f "${temporary}" "${output}"
+}
+
+generated_env_has_value() {
+    local input="$1"
+    local name="$2"
+
+    grep -q "^${name}=." "${input}"
+}
+
+generated_env_has_values() {
+    local input="$1"
+    shift
+    local name
+
+    (
+        set -a
+        unset "$@"
+        # shellcheck source=/dev/null
+        source "${input}"
+        for name in "$@"; do
+            [[ -n "${!name:-}" ]] || exit 1
+        done
+    )
+}
+
+ensure_authentik_secret_files() {
+    local e2e_env
+    local internal_env
+    local oidc_env
+    local secret_key
+    local client_secret
+    local session_key
+    local workload_identity_password
+    local bootstrap_password
+    local bootstrap_token
+    local interactive_user_password
+    local setup_client_secret
+    local setup_password
+    local postgres_password
+    local authentik_postgres_password
+    local nemo_postgres_password
+    local default_encryption_key
+    local ngc_api_key
+    local postgres_env
+    local platform_env
+
+    internal_env="$(authentik_env_file)"
+    oidc_env="$(user_oidc_env_file)"
+    e2e_env="$(auth_idp_e2e_env_file)"
+    if [[ ! -f "${internal_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${internal_env}"
+        else
+            secret_key="$(openssl rand -hex 32)"
+            bootstrap_password="Nemo$(openssl rand -hex 12)1!"
+            bootstrap_token="$(openssl rand -hex 32)"
+            write_generated_env_file "${internal_env}" \
+                "AUTHENTIK_SECRET_KEY=${secret_key}" \
+                "AUTHENTIK_BOOTSTRAP_PASSWORD=${bootstrap_password}" \
+                "AUTHENTIK_BOOTSTRAP_TOKEN=${bootstrap_token}"
+        fi
+        echo "Generated Authentik internal secret file: ${internal_env}"
+    else
+        generated_env_has_value "${internal_env}" AUTHENTIK_SECRET_KEY || fail "Generated Authentik secret file is invalid: ${internal_env}"
+        if ! generated_env_has_value "${internal_env}" AUTHENTIK_BOOTSTRAP_PASSWORD; then
+            append_generated_env_file "${internal_env}" "AUTHENTIK_BOOTSTRAP_PASSWORD=Nemo$(openssl rand -hex 12)1!"
+        fi
+        if ! generated_env_has_value "${internal_env}" AUTHENTIK_BOOTSTRAP_TOKEN; then
+            append_generated_env_file "${internal_env}" "AUTHENTIK_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)"
+        fi
+        echo "Using Authentik internal secret file: ${internal_env}"
+    fi
+
+    if [[ -f "${oidc_env}" ]] && ! generated_env_has_values \
+        "${oidc_env}" NHX_OIDC_CLIENT_SECRET NHX_AUTH_SESSION_ENCRYPTION_KEY; then
+        fail "Generated user OIDC secret file is invalid; replace it explicitly: ${oidc_env}"
+    fi
+    if [[ ! -f "${oidc_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${oidc_env}"
+        else
+            client_secret="$(openssl rand -hex 32)"
+            session_key="$(openssl rand -hex 32)"
+            write_generated_env_file "${oidc_env}" \
+                "NHX_OIDC_CLIENT_SECRET=${client_secret}" \
+                "NHX_AUTH_SESSION_ENCRYPTION_KEY=${session_key}"
+        fi
+        echo "Generated user OIDC secret file: ${oidc_env}"
+    else
+        echo "Using user OIDC secret file: ${oidc_env}"
+    fi
+
+    if [[ ! -f "${e2e_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${e2e_env}"
+        else
+            workload_identity_password="$(openssl rand -hex 32)"
+            interactive_user_password="Nemo$(openssl rand -hex 12)1!"
+            setup_client_secret="$(openssl rand -hex 32)"
+            setup_password="$(openssl rand -hex 32)"
+            write_generated_env_file "${e2e_env}" \
+                "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=${workload_identity_password}" \
+                "AUTHENTIK_INTERACTIVE_USER_PASSWORD=${interactive_user_password}" \
+                "AUTHENTIK_SETUP_CLIENT_SECRET=${setup_client_secret}" \
+                "AUTHENTIK_SETUP_PASSWORD=${setup_password}"
+        fi
+        echo "Generated auth-idp E2E secret file: ${e2e_env}"
+    else
+        generated_env_has_value "${e2e_env}" AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD || fail "Generated auth-idp E2E secret file is invalid: ${e2e_env}"
+        if ! generated_env_has_value "${e2e_env}" AUTHENTIK_INTERACTIVE_USER_PASSWORD; then
+            append_generated_env_file "${e2e_env}" "AUTHENTIK_INTERACTIVE_USER_PASSWORD=Nemo$(openssl rand -hex 12)1!"
+        fi
+        if ! generated_env_has_value "${e2e_env}" AUTHENTIK_SETUP_CLIENT_SECRET; then
+            append_generated_env_file "${e2e_env}" "AUTHENTIK_SETUP_CLIENT_SECRET=$(openssl rand -hex 32)"
+        fi
+        if ! generated_env_has_value "${e2e_env}" AUTHENTIK_SETUP_PASSWORD; then
+            append_generated_env_file "${e2e_env}" "AUTHENTIK_SETUP_PASSWORD=$(openssl rand -hex 32)"
+        fi
+        echo "Using auth-idp E2E secret file: ${e2e_env}"
+    fi
+
+    postgres_env="$(postgres_env_file)"
+    if [[ ! -f "${postgres_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${postgres_env}"
+        else
+            postgres_password="$(openssl rand -hex 32)"
+            authentik_postgres_password="$(openssl rand -hex 32)"
+            nemo_postgres_password="$(openssl rand -hex 32)"
+            write_generated_env_file "${postgres_env}" \
+                "PG_PASS=${postgres_password}" \
+                "POSTGRES_PASSWORD=${postgres_password}" \
+                "AUTHENTIK_POSTGRES_PASSWORD=${authentik_postgres_password}" \
+                "NEMO_POSTGRES_PASSWORD=${nemo_postgres_password}"
+        fi
+        echo "Generated PostgreSQL secret file: ${postgres_env}"
+    elif ! generated_env_has_values "${postgres_env}" PG_PASS POSTGRES_PASSWORD AUTHENTIK_POSTGRES_PASSWORD NEMO_POSTGRES_PASSWORD; then
+        fail "Generated PostgreSQL secret file is invalid; replace it explicitly: ${postgres_env}"
+    else
+        echo "Using PostgreSQL secret file: ${postgres_env}"
+    fi
+
+    platform_env="$(helix_platform_env_file)"
+    if [[ ! -f "${platform_env}" ]]; then
+        if [[ "${DRY_RUN}" == "true" ]]; then
+            write_generated_env_file "${platform_env}"
+        else
+            default_encryption_key="$(openssl rand -base64 32 | tr -d '\n')"
+            ngc_api_key="$(openssl rand -hex 32)"
+            write_generated_env_file "${platform_env}" \
+                "NHX_SECRETS_DEFAULT_ENCRYPTION_KEY=${default_encryption_key}" \
+                "NGC_API_KEY=${ngc_api_key}"
+        fi
+        echo "Generated NeMo Helix platform secret file: ${platform_env}"
+    elif ! generated_env_has_values "${platform_env}" NHX_SECRETS_DEFAULT_ENCRYPTION_KEY NGC_API_KEY; then
+        fail "Generated NeMo Helix platform secret file is invalid; replace it explicitly: ${platform_env}"
+    else
+        echo "Using NeMo Helix platform secret file: ${platform_env}"
+    fi
+}
+
+load_compose_generated_secrets() {
+    set -a
+    # shellcheck source=/dev/null
+    source "$(authentik_env_file)"
+    # shellcheck source=/dev/null
+    source "$(user_oidc_env_file)"
+    # shellcheck source=/dev/null
+    source "$(auth_idp_e2e_env_file)"
+    # shellcheck source=/dev/null
+    source "$(postgres_env_file)"
+    # shellcheck source=/dev/null
+    source "$(helix_platform_env_file)"
+    set +a
+}
+
 render_blueprint() {
     local source="${AUTHENTIK_ROOT}/helm/files/blueprints/nemo.yaml"
     local output_dir
@@ -617,7 +885,7 @@ render_blueprint() {
 }
 
 authentik_workload_identity_password() {
-    printf "%s" "${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-e2e}"
+    printf "%s" "${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}"
 }
 
 run_with_compose_env_in_dir() {
@@ -631,6 +899,7 @@ run_with_compose_env_in_dir() {
         return
     fi
 
+    load_compose_generated_secrets
     (
         cd "${dir}" &&
             IMAGE_REGISTRY="${IMAGE_REGISTRY}" \
@@ -656,6 +925,7 @@ run_with_reuse_compose_env_in_dir() {
         return
     fi
 
+    load_compose_generated_secrets
     (
         cd "${dir}" &&
             IMAGE_REGISTRY="${IMAGE_REGISTRY}" \
@@ -665,6 +935,7 @@ run_with_reuse_compose_env_in_dir() {
                 AUTHENTIK_GATEWAY_PORT="${REUSE_COMPOSE_GATEWAY_PORT}" \
                 AUTHENTIK_GATEWAY_TLS_VOLUME="${REUSE_COMPOSE_GATEWAY_TLS_VOLUME}" \
                 AUTHENTIK_WORKLOAD_NETWORK_NAME="${REUSE_COMPOSE_WORKLOAD_NETWORK_NAME}" \
+                NEMO_COMPOSE_CONFIG_PATH="$(compose_e2e_config_file)" \
                 "$@"
     )
 }
@@ -750,6 +1021,25 @@ prepare_local() {
     render_blueprint
     ensure_workload_token_private_key
     ensure_gateway_tls_certificate
+    ensure_authentik_secret_files
+}
+
+render_compose_e2e_config() {
+    local output
+
+    output="$(compose_e2e_config_file)"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        mkdir -p "$(dirname "${output}")"
+    fi
+    run_in_repo uv run --frozen python tests/auth_idp/prepare_compose_config.py \
+        "${AUTHENTIK_ROOT}/config/platform-compose-authentik.yaml" \
+        "${output}" \
+        --workload-network "${REUSE_COMPOSE_WORKLOAD_NETWORK_NAME}" \
+        --gateway-tls-volume "${REUSE_COMPOSE_GATEWAY_TLS_VOLUME}" \
+        --gateway-port "${REUSE_COMPOSE_GATEWAY_PORT}"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        echo "Rendered Authentik Compose E2E config: ${output}"
+    fi
 }
 
 compose_up() {
@@ -757,8 +1047,10 @@ compose_up() {
     local ca_bundle
     local context_name
 
-    TEST_LIFECYCLE="reuse"
+    validate_gateway_port "${REUSE_COMPOSE_GATEWAY_PORT}" "NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT"
+    assert_compose_gateway_port_available
     prepare_local
+    render_compose_e2e_config
     ca_bundle="$(gateway_tls_cert_file)"
     context_name="$(compose_context_name)"
     if [[ "${IMAGE_SELECTED}" == "true" ]]; then
@@ -770,6 +1062,7 @@ compose_up() {
     run_with_reuse_compose_env_in_dir "${COMPOSE_DIR}" docker compose up -d
     wait_for_https_ready "${gateway_url}/health/gateway/ready" "${ca_bundle}"
     register_nemo_context "${context_name}" "${gateway_url}" "${ca_bundle}"
+    write_compose_deployment_context "${gateway_url}" "${ca_bundle}"
     write_lifecycle_state compose "${REUSE_COMPOSE_PROJECT_NAME}" \
         "target=compose" \
         "instance_key=${INSTANCE_KEY}" \
@@ -788,6 +1081,30 @@ compose_up() {
     echo "Compose project: ${REUSE_COMPOSE_PROJECT_NAME}"
     echo "Lifecycle state: $(lifecycle_state_file compose "${REUSE_COMPOSE_PROJECT_NAME}")"
     echo "Stop it with: ${SCRIPT_DIR}/run.sh down compose$(key_option_suffix)"
+}
+
+assert_compose_gateway_port_available() {
+    local state_file
+    local state_port
+    local state_url
+    local expected_url="https://127.0.0.1:${REUSE_COMPOSE_GATEWAY_PORT}"
+
+    if [[ "${DRY_RUN}" == "true" ]] || ! tcp_port_is_listening "${REUSE_COMPOSE_GATEWAY_PORT}"; then
+        return
+    fi
+    state_file="$(lifecycle_state_file compose "${REUSE_COMPOSE_PROJECT_NAME}")"
+    if [[ -f "${state_file}" ]]; then
+        state_port="$(read_lifecycle_field "${state_file}" compose_gateway_port)"
+        state_url="$(read_lifecycle_field "${state_file}" gateway_url)"
+        if [[ "${state_port}" == "${REUSE_COMPOSE_GATEWAY_PORT}" && "${state_url}" == "${expected_url}" ]] &&
+            [[ -n "$(run_with_reuse_compose_env_in_dir "${COMPOSE_DIR}" docker compose ps -q gateway)" ]]; then
+            echo "Using gateway port owned by Authentik Compose project ${REUSE_COMPOSE_PROJECT_NAME}: ${REUSE_COMPOSE_GATEWAY_PORT}"
+            return
+        fi
+    fi
+    echo "Gateway port ${REUSE_COMPOSE_GATEWAY_PORT} is already occupied:" >&2
+    describe_tcp_port_owner "${REUSE_COMPOSE_GATEWAY_PORT}" >&2
+    fail "choose another --gateway-port or stop the owning process"
 }
 
 compose_down() {
@@ -862,6 +1179,109 @@ k8s_port_forward_pid_file_for_cluster() {
 k8s_port_forward_log_file_for_cluster() {
     local cluster_name="$1"
     printf "%s/port-forward.log" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_port_forward_namespace_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/port-forward.namespace" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_dir_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/gateway-tls" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_cert_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_key_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.key" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_ca_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/ca.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_matches_runtime() {
+    local cluster_name="$1"
+    local cert
+    local sans
+    local expected
+
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    [[ -f "${cert}" && -f "$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")" && -f "$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")" ]] || return 1
+    openssl x509 -in "${cert}" -checkend 0 -noout >/dev/null 2>&1 || return 1
+    sans="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null)"
+    for expected in \
+        localhost \
+        nemo-helix-envoy \
+        "nemo-helix-envoy.${HELM_NAMESPACE}" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}"; do
+        [[ "${sans}" == *"DNS:${expected}"* ]] || return 1
+    done
+    [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
+}
+
+ensure_k8s_gateway_tls_certificate() {
+    local cluster_name="$1"
+    local output_dir
+    local cert
+    local key
+    local ca
+    local openssl_config
+
+    output_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    key="$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")"
+    ca="$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")"
+    openssl_config="${output_dir}/openssl.cnf"
+
+    if [[ "${DRY_RUN}" != "true" ]] && k8s_gateway_tls_matches_runtime "${cluster_name}"; then
+        echo "Using Kubernetes gateway TLS certificate: ${cert}"
+        return
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write Kubernetes gateway TLS config %q\n" "${openssl_config}"
+        printf "+ openssl req -x509 -newkey rsa:2048 -nodes -keyout %q -out %q -days 365 -sha256 -config %q -extensions v3_req\n" "${key}" "${cert}" "${openssl_config}"
+        printf "+ cp %q %q\n" "${cert}" "${ca}"
+        return
+    fi
+
+    mkdir -p "${output_dir}"
+    cat >"${openssl_config}" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+
+[v3_req]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = nemo-helix-envoy
+DNS.3 = nemo-helix-envoy.${HELM_NAMESPACE}
+DNS.4 = nemo-helix-envoy.${HELM_NAMESPACE}.svc
+DNS.5 = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+IP.1 = 127.0.0.1
+EOF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "${key}" -out "${cert}" -days 365 -sha256 -config "${openssl_config}" -extensions v3_req >/dev/null 2>&1
+    cp "${cert}" "${ca}"
+    chmod 600 "${key}"
+    chmod 644 "${cert}" "${ca}"
+    echo "Generated Kubernetes gateway TLS certificate: ${cert}"
 }
 
 k8s_context_for_cluster() {
@@ -977,6 +1397,20 @@ k8s_ensure_cluster() {
     k8s_create_cluster "${cluster_name}" "${kubeconfig}"
 }
 
+k8s_load_image_ref() {
+    local cluster_name="$1"
+    local image="$2"
+
+    case "${K8S_RUNTIME}" in
+        kind)
+            run_command kind load docker-image "${image}" --name "${cluster_name}"
+            ;;
+        k3d)
+            run_command k3d image import "${image}" -c "${cluster_name}"
+            ;;
+    esac
+}
+
 k8s_load_image() {
     local cluster_name="$1"
 
@@ -985,14 +1419,7 @@ k8s_load_image() {
         return
     fi
 
-    case "${K8S_RUNTIME}" in
-        kind)
-            run_command kind load docker-image "$(image_ref)" --name "${cluster_name}"
-            ;;
-        k3d)
-            run_command k3d image import "$(image_ref)" -c "${cluster_name}"
-            ;;
-    esac
+    k8s_load_image_ref "${cluster_name}" "$(image_ref)"
 }
 
 k8s_helm_command() {
@@ -1011,6 +1438,64 @@ k8s_kubectl_command() {
     run_command kubectl --kubeconfig "${kubeconfig}" --context "${context}" "$@"
 }
 
+k8s_ensure_namespace() {
+    local context="$1"
+    local kubeconfig="$2"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q create namespace %q --dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" create namespace "${HELM_NAMESPACE}" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_reconcile_secret() {
+    local context="$1"
+    local kubeconfig="$2"
+    local secret_name="$3"
+    shift 3
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q -n %q create secret generic %q " \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${secret_name}"
+        quote_args "$@"
+        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
+        create secret generic "${secret_name}" "$@" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_prepare_secrets() {
+    local cluster_name="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local tls_dir
+
+    ensure_k8s_gateway_tls_certificate "${cluster_name}"
+    tls_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    k8s_ensure_namespace "${context}" "${kubeconfig}"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key \
+        "--from-file=private-key.pem=$(workload_token_private_key_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-envoy-tls \
+        "--from-file=tls.crt=${tls_dir}/tls.crt" \
+        "--from-file=tls.key=${tls_dir}/tls.key" \
+        "--from-file=ca.crt=${tls_dir}/ca.crt"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-user-oidc \
+        "--from-env-file=$(user_oidc_env_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-authentik-secret-key \
+        "--from-env-file=$(authentik_env_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-auth-idp-e2e \
+        "--from-env-file=$(auth_idp_e2e_env_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" shared-postgresql \
+        "--from-env-file=$(postgres_env_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-authentik-platform \
+        "--from-env-file=$(helix_platform_env_file)"
+}
+
 k8s_helm_install() {
     local cluster_name="$1"
     local context="$2"
@@ -1018,14 +1503,11 @@ k8s_helm_install() {
     local image
     local registry
     local tag
-    local workload_token_private_key
     local -a args
 
     image="$(image_ref)"
     registry="${image%/nhx-api:*}"
     tag="${image##*:}"
-    workload_token_private_key="$(workload_token_private_key_file)"
-
     run_in_repo helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
     run_in_repo helm repo add authentik https://charts.goauthentik.io --force-update
     run_in_repo helm dependency build k8s/helm
@@ -1059,8 +1541,6 @@ k8s_helm_install() {
         "nemo-helix.platformConfig.auth.access_keys.enabled=true"
         --set-string
         "nemo-helix.authentikPublicGateway.port=${K8S_GATEWAY_PORT}"
-        --set-file
-        "workloadTokenSigningKey.privateKeyPem=${workload_token_private_key}"
     )
     if [[ -n "${K8S_NGC_EXISTING_SECRET}" ]]; then
         args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")
@@ -1068,7 +1548,6 @@ k8s_helm_install() {
     if [[ -n "${K8S_IMAGE_PULL_SECRET}" ]]; then
         args+=(--set-string "nemo-helix.imagePullSecrets[0].name=${K8S_IMAGE_PULL_SECRET}")
     fi
-
     echo "Installing Authentik Kubernetes demo into ${cluster_name}/${HELM_NAMESPACE}"
     k8s_helm_command "${context}" "${kubeconfig}" "${args[@]}"
 }
@@ -1118,9 +1597,12 @@ k8s_write_ca_bundle() {
 stop_k8s_port_forward_for_cluster() {
     local cluster_name="$1"
     local pid_file
+    local namespace_file
+    local expected_namespace
     local pid
 
     pid_file="$(k8s_port_forward_pid_file_for_cluster "${cluster_name}")"
+    namespace_file="$(k8s_port_forward_namespace_file_for_cluster "${cluster_name}")"
     if [[ "${DRY_RUN}" == "true" ]]; then
         printf "+ stop Kubernetes gateway port-forward recorded in %q if running\n" "${pid_file}"
         return
@@ -1129,18 +1611,28 @@ stop_k8s_port_forward_for_cluster() {
         return
     fi
 
+    expected_namespace="${HELM_NAMESPACE}"
+    if [[ -f "${namespace_file}" ]]; then
+        expected_namespace="$(<"${namespace_file}")"
+    fi
     pid="$(<"${pid_file}")"
-    if k8s_port_forward_pid_is_running "${pid}"; then
+    if k8s_port_forward_pid_is_running \
+        "${pid}" \
+        "${K8S_GATEWAY_PORT}" \
+        "$(k8s_context_for_cluster "${K8S_RUNTIME}" "${cluster_name}")" \
+        "${expected_namespace}"; then
         echo "Stopping Kubernetes gateway port-forward: ${pid}"
         kill "${pid}" 2>/dev/null || true
         wait "${pid}" 2>/dev/null || true
     fi
-    rm -f "${pid_file}"
+    rm -f "${pid_file}" "${namespace_file}"
 }
 
 k8s_port_forward_pid_is_running() {
     local pid="$1"
     local expected_port="${2:-}"
+    local expected_context="${3:-}"
+    local expected_namespace="${4:-}"
     local args
 
     [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
@@ -1151,6 +1643,35 @@ k8s_port_forward_pid_is_running() {
     [[ "${args}" == *"svc/nemo-helix-envoy"* ]] || return 1
     if [[ -n "${expected_port}" ]]; then
         [[ " ${args} " == *" ${expected_port}:8080 "* ]] || return 1
+    fi
+    if [[ -n "${expected_context}" ]]; then
+        [[ " ${args} " == *" --context ${expected_context} "* ]] || return 1
+    fi
+    if [[ -n "${expected_namespace}" ]]; then
+        [[ " ${args} " == *" -n ${expected_namespace} "* ]] || return 1
+    fi
+}
+
+k8s_assert_gateway_port_available() {
+    local cluster_name="$1"
+    local context="$2"
+    local pid_file
+    local pid=""
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        return
+    fi
+    pid_file="$(k8s_port_forward_pid_file_for_cluster "${cluster_name}")"
+    if [[ -f "${pid_file}" ]]; then
+        pid="$(<"${pid_file}")"
+    fi
+    if k8s_port_forward_pid_is_running "${pid}" "${K8S_GATEWAY_PORT}" "${context}" "${HELM_NAMESPACE}"; then
+        return
+    fi
+    if tcp_port_is_listening "${K8S_GATEWAY_PORT}"; then
+        echo "Gateway port ${K8S_GATEWAY_PORT} is already occupied:" >&2
+        describe_tcp_port_owner "${K8S_GATEWAY_PORT}" >&2
+        fail "choose another --gateway-port or stop the owning process"
     fi
 }
 
@@ -1179,7 +1700,7 @@ k8s_wait_for_port_forward_ready() {
         return
     fi
     show_k8s_port_forward_log_tail "${log_file}"
-    fail "timed out waiting for Kubernetes gateway port-forward readiness"
+    return 1
 }
 
 k8s_start_port_forward() {
@@ -1189,11 +1710,13 @@ k8s_start_port_forward() {
     local ca_bundle="$4"
     local pid_file
     local log_file
+    local namespace_file
     local pid=""
     local gateway_url="https://127.0.0.1:${K8S_GATEWAY_PORT}"
 
     pid_file="$(k8s_port_forward_pid_file_for_cluster "${cluster_name}")"
     log_file="$(k8s_port_forward_log_file_for_cluster "${cluster_name}")"
+    namespace_file="$(k8s_port_forward_namespace_file_for_cluster "${cluster_name}")"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         printf "+ nohup "
@@ -1201,6 +1724,7 @@ k8s_start_port_forward() {
             -n "${HELM_NAMESPACE}" port-forward svc/nemo-helix-envoy "${K8S_GATEWAY_PORT}:8080"
         printf "> %q 2>&1 &\n" "${log_file}"
         printf "+ write %q\n" "${pid_file}"
+        printf "+ write %q\n" "${namespace_file}"
         wait_for_https_ready "${gateway_url}/health/gateway/ready" "${ca_bundle}" 30
         return
     fi
@@ -1208,20 +1732,32 @@ k8s_start_port_forward() {
     if [[ -f "${pid_file}" ]]; then
         pid="$(<"${pid_file}")"
     fi
-    if k8s_port_forward_pid_is_running "${pid}" "${K8S_GATEWAY_PORT}"; then
+    if k8s_port_forward_pid_is_running "${pid}" "${K8S_GATEWAY_PORT}" "${context}" "${HELM_NAMESPACE}"; then
         echo "Using existing Kubernetes gateway port-forward: ${pid}"
-        k8s_wait_for_port_forward_ready "${gateway_url}" "${ca_bundle}" "${log_file}"
+        printf "%s\n" "${HELM_NAMESPACE}" >"${namespace_file}.tmp"
+        mv -f "${namespace_file}.tmp" "${namespace_file}"
+        if ! k8s_wait_for_port_forward_ready "${gateway_url}" "${ca_bundle}" "${log_file}"; then
+            stop_k8s_port_forward_for_cluster "${cluster_name}"
+            fail "existing Kubernetes gateway port-forward did not become ready"
+        fi
         return
     fi
     if [[ -n "${pid}" ]]; then
         stop_k8s_port_forward_for_cluster "${cluster_name}"
     fi
 
+    : >"${log_file}"
     nohup kubectl --kubeconfig "${kubeconfig}" --context "${context}" \
         -n "${HELM_NAMESPACE}" port-forward svc/nemo-helix-envoy "${K8S_GATEWAY_PORT}:8080" \
         >"${log_file}" 2>&1 &
-    printf "%s\n" "$!" >"${pid_file}"
-    k8s_wait_for_port_forward_ready "${gateway_url}" "${ca_bundle}" "${log_file}"
+    printf "%s\n" "$!" >"${pid_file}.tmp"
+    mv -f "${pid_file}.tmp" "${pid_file}"
+    printf "%s\n" "${HELM_NAMESPACE}" >"${namespace_file}.tmp"
+    mv -f "${namespace_file}.tmp" "${namespace_file}"
+    if ! k8s_wait_for_port_forward_ready "${gateway_url}" "${ca_bundle}" "${log_file}"; then
+        stop_k8s_port_forward_for_cluster "${cluster_name}"
+        fail "new Kubernetes gateway port-forward did not become ready"
+    fi
 }
 
 k8s_up() {
@@ -1234,12 +1770,14 @@ k8s_up() {
 
     validate_k8s_runtime
     ensure_workload_token_private_key
+    ensure_authentik_secret_files
     cluster_name="${K8S_CLUSTER_NAME:-${REUSE_K8S_CLUSTER_NAME}}"
     K8S_CLUSTER_NAME="${cluster_name}"
     context="$(k8s_context_for_cluster "${K8S_RUNTIME}" "${cluster_name}")"
     nemo_context="$(k8s_context_name)"
     kubeconfig="$(k8s_kubeconfig_file_for_cluster "${cluster_name}")"
     ca_bundle="$(k8s_ca_bundle_file_for_cluster "${cluster_name}")"
+    k8s_assert_gateway_port_available "${cluster_name}" "${context}"
 
     if [[ "${IMAGE_SELECTED}" == "true" ]]; then
         echo "Using prebuilt auth-idp Kubernetes image: $(image_ref)"
@@ -1254,11 +1792,13 @@ k8s_up() {
         k8s_update_default_kubeconfig "${cluster_name}" "${context}"
     fi
     k8s_load_image "${cluster_name}"
+    k8s_prepare_secrets "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_helm_install "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_wait_for_authentik "${context}" "${kubeconfig}"
     k8s_write_ca_bundle "${context}" "${kubeconfig}" "${ca_bundle}"
     k8s_start_port_forward "${cluster_name}" "${context}" "${kubeconfig}" "${ca_bundle}"
     register_nemo_context "${nemo_context}" "${gateway_url}" "${ca_bundle}"
+    write_k8s_deployment_context "${cluster_name}" "${context}" "${kubeconfig}" "${gateway_url}" "${ca_bundle}"
     write_lifecycle_state k8s "${K8S_RUNTIME}-${cluster_name}" \
         "target=k8s" \
         "instance_key=${INSTANCE_KEY}" \
@@ -1406,128 +1946,190 @@ run_pytest_with_diagnostics() {
         exit "${status}"
     )
     status="$?"
-    set -e
     return "${status}"
 }
 
+compose_deployment_context_file() {
+    printf "%s/.generated/contexts/%s.json" "${AUTHENTIK_ROOT}" "${REUSE_COMPOSE_PROJECT_NAME}"
+}
+
+k8s_deployment_context_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/deployment-context.json" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_workload_token_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/workload-token" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+write_compose_deployment_context() {
+    local gateway_url="$1"
+    local ca_bundle="$2"
+
+    run_in_repo uv run --frozen python tests/auth_idp/deployment_context.py \
+        --output "$(compose_deployment_context_file)" \
+        --provider authentik \
+        --runtime compose \
+        --runtime-id authentik-compose \
+        --gateway-url "${gateway_url}" \
+        --workload-gateway-url "https://nemo-gateway:8080" \
+        --deployment-ca-file "/etc/nhx/gateway-tls/tls.crt" \
+        --ca-bundle "${ca_bundle}" \
+        --provider-manifest "${AUTHENTIK_ROOT}/manifest.yaml" \
+        --credential-env-file "$(auth_idp_e2e_env_file)"
+}
+
+write_k8s_workload_token() {
+    local cluster_name="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local output
+    local temporary
+
+    output="$(k8s_workload_token_file_for_cluster "${cluster_name}")"
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q -n %q create token default --audience nemo-helix-workload --duration 1h > %q\n" \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${output}"
+        return
+    fi
+    umask 077
+    temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
+        create token default --audience nemo-helix-workload --duration 1h >"${temporary}"
+    chmod 600 "${temporary}"
+    mv -f "${temporary}" "${output}"
+}
+
+write_k8s_deployment_context() {
+    local cluster_name="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local gateway_url="$4"
+    local ca_bundle="$5"
+
+    write_k8s_workload_token "${cluster_name}" "${context}" "${kubeconfig}"
+    run_in_repo uv run --frozen python tests/auth_idp/deployment_context.py \
+        --output "$(k8s_deployment_context_file_for_cluster "${cluster_name}")" \
+        --provider authentik \
+        --runtime "${K8S_RUNTIME}" \
+        --runtime-id authentik-kubernetes \
+        --gateway-url "${gateway_url}" \
+        --workload-gateway-url "https://nemo-helix-envoy.${HELM_NAMESPACE}.svc.cluster.local:8080" \
+        --deployment-ca-file "/etc/nhx/workload-token-ca/ca.crt" \
+        --ca-bundle "${ca_bundle}" \
+        --provider-manifest "${AUTHENTIK_ROOT}/manifest.yaml" \
+        --namespace "${HELM_NAMESPACE}" \
+        --credential-env-file "$(auth_idp_e2e_env_file)" \
+        --workload-token-file "$(k8s_workload_token_file_for_cluster "${cluster_name}")" \
+        --port-forward-pid-file "$(k8s_port_forward_pid_file_for_cluster "${cluster_name}")" \
+        --port-forward-log-file "$(k8s_port_forward_log_file_for_cluster "${cluster_name}")" \
+        --kubernetes-context "${context}"
+}
+
+run_host_contracts() {
+    local diagnostics="$1"
+    local context_file="$2"
+    local junit_xml="$3"
+
+    run_pytest_with_diagnostics "${diagnostics}" \
+        uv run --frozen pytest \
+        -c pytest.ini \
+        tests/auth_idp/contracts \
+        -v \
+        -m auth_idp_runtime \
+        --run-e2e \
+        --auth-idp-context "${context_file}" \
+        --junitxml="${junit_xml}"
+}
+
 run_tests() {
-    local workload_identity_password="${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-e2e}"
     local diagnostics
-    local compose_project_name=""
-    local compose_gateway_port=""
-    local status
+    local junit_xml
+    local requested_lifecycle="${TEST_LIFECYCLE}"
+    local status=0
 
     validate_test_lifecycle
-    ensure_workload_token_private_key
-    if [[ "${TEST_LIFECYCLE}" == "reuse" ]]; then
-        compose_project_name="${REUSE_COMPOSE_PROJECT_NAME}"
-        compose_gateway_port="${REUSE_COMPOSE_GATEWAY_PORT}"
+    if [[ "${TEST_LIFECYCLE}" == "fresh" ]]; then
+        REUSE_COMPOSE_PROJECT_NAME="authentik-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
+        REUSE_COMPOSE_GATEWAY_TLS_VOLUME="${REUSE_COMPOSE_PROJECT_NAME}-gateway-tls"
+        REUSE_COMPOSE_WORKLOAD_NETWORK_NAME="${REUSE_COMPOSE_PROJECT_NAME}-workload"
     fi
     diagnostics="$(prepare_diagnostics_dir compose)"
     write_diagnostics_metadata compose "${diagnostics}"
+    junit_xml="${COMPOSE_JUNIT_XML}"
+    if [[ "${junit_xml}" != /* ]]; then
+        junit_xml="${REPO_ROOT}/${junit_xml}"
+    fi
     echo "Auth-idp Compose diagnostics: ${diagnostics}"
 
-    if [[ "${IMAGE_SELECTED}" == "true" ]]; then
-        echo "Using prebuilt auth-idp test image: $(image_ref)"
-    else
-        build_default_test_image
-    fi
-
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        run_pytest_with_diagnostics "${diagnostics}" \
-            env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
-            "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=<redacted>" \
-            "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-            "NHX_E2E_COMPOSE_LIFECYCLE=${TEST_LIFECYCLE}" \
-            "NHX_AUTHENTIK_COMPOSE_PROJECT_NAME=${compose_project_name}" \
-            "NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT=${compose_gateway_port}" \
-            "NHX_CLIENT_SSL_CERT_FILE=$(gateway_tls_cert_file)" \
-            uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-compose -m auth_idp_runtime
-        return
-    fi
-
     echo "Writing Authentik Compose diagnostics to: ${diagnostics}"
-    run_pytest_with_diagnostics "${diagnostics}" \
-        env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" \
-        "BAKE_TAG=${BAKE_TAG}" \
-        "AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD=${workload_identity_password}" \
-        "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-        "NHX_E2E_COMPOSE_LIFECYCLE=${TEST_LIFECYCLE}" \
-        "NHX_AUTHENTIK_COMPOSE_PROJECT_NAME=${compose_project_name}" \
-        "NHX_AUTHENTIK_COMPOSE_GATEWAY_PORT=${compose_gateway_port}" \
-        "NHX_CLIENT_SSL_CERT_FILE=$(gateway_tls_cert_file)" \
-        uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-compose -m auth_idp_runtime
+    set +e
+    (set -e; compose_up)
     status="$?"
+    if [[ "${status}" -eq 0 ]]; then
+        run_host_contracts "${diagnostics}" "$(compose_deployment_context_file)" "${junit_xml}"
+        status="$?"
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        run_with_reuse_compose_env_in_dir "${COMPOSE_DIR}" docker compose logs --no-color
+    else
+        run_with_reuse_compose_env_in_dir "${COMPOSE_DIR}" docker compose \
+            logs --no-color \
+            >"${diagnostics}/compose.log" 2>&1 || true
+    fi
+    if [[ "${requested_lifecycle}" == "fresh" ]]; then
+        run_with_reuse_compose_env_in_dir "${COMPOSE_DIR}" docker compose \
+            down -v --remove-orphans || true
+        remove_lifecycle_state_file "$(lifecycle_state_file compose "${REUSE_COMPOSE_PROJECT_NAME}")"
+        delete_nemo_context "$(compose_context_name)"
+    fi
+    set -e
     echo "Auth-idp Compose diagnostics: ${diagnostics}"
     return "${status}"
 }
 
 run_k8s_tests() {
     local diagnostics
-    local k8s_diagnostics
-    local workload_token_private_key
-    local status
+    local cluster_name
+    local context
+    local kubeconfig
+    local status=0
 
     validate_k8s_runtime
-    ensure_workload_token_private_key
-    workload_token_private_key="$(workload_token_private_key_file)"
+    if [[ "${K8S_REUSE_CLUSTER}" != "1" && -z "${K8S_CLUSTER_NAME}" ]]; then
+        if [[ "${K8S_RUNTIME}" == "k3d" ]]; then
+            K8S_CLUSTER_NAME="nhx-ak-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
+        else
+            K8S_CLUSTER_NAME="nhx-authentik-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
+        fi
+    fi
+    cluster_name="${K8S_CLUSTER_NAME:-${REUSE_K8S_CLUSTER_NAME}}"
+    K8S_CLUSTER_NAME="${cluster_name}"
+    context="$(k8s_context_for_cluster "${K8S_RUNTIME}" "${cluster_name}")"
+    kubeconfig="$(k8s_kubeconfig_file_for_cluster "${cluster_name}")"
     diagnostics="$(prepare_diagnostics_dir kubernetes)"
     write_diagnostics_metadata kubernetes "${diagnostics}"
     echo "Auth-idp Kubernetes diagnostics: ${diagnostics}"
 
-    if [[ "${IMAGE_SELECTED}" == "true" ]]; then
-        echo "Using prebuilt auth-idp Kubernetes test image: $(image_ref)"
-    elif [[ "${K8S_REUSE_CLUSTER}" == "1" && "${K8S_SKIP_IMAGE_LOAD}" == "1" ]]; then
-        echo "Reusing Kubernetes cluster without rebuilding or loading image: $(image_ref)"
-    else
-        build_default_test_image
-    fi
-
-    k8s_diagnostics="${diagnostics}/kubernetes"
-    if [[ "${DRY_RUN}" != "true" ]]; then
-        mkdir -p "${k8s_diagnostics}"
-    fi
-
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        run_pytest_with_diagnostics "${diagnostics}" \
-            env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
-            "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-            "NHX_AUTHENTIK_K8S_LOG_DIR=${k8s_diagnostics}" \
-            "NHX_AUTHENTIK_K8S_HELM_RELEASE=${HELM_RELEASE}" \
-            "NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
-            "NHX_AUTHENTIK_K8S_NAMESPACE=${HELM_NAMESPACE}" \
-            "NHX_AUTHENTIK_K8S_RUNTIME=${K8S_RUNTIME}" \
-            "NHX_AUTHENTIK_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
-            "NHX_AUTHENTIK_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
-            "NHX_AUTHENTIK_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
-            "NHX_AUTHENTIK_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
-            "NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
-            "NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
-            "NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
-            "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
-            uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
-        return
-    fi
-
-    echo "Writing Authentik Kubernetes diagnostics to: ${diagnostics}"
-    run_pytest_with_diagnostics "${diagnostics}" \
-        env "IMAGE_REGISTRY=${IMAGE_REGISTRY}" "BAKE_TAG=${BAKE_TAG}" \
-        "E2E_SERVICES_LOG_DIR=${diagnostics}" \
-        "NHX_AUTHENTIK_K8S_LOG_DIR=${k8s_diagnostics}" \
-        "NHX_AUTHENTIK_K8S_HELM_RELEASE=${HELM_RELEASE}" \
-        "NHX_AUTHENTIK_K8S_HELM_WAIT_TIMEOUT=${HELM_WAIT_TIMEOUT}" \
-        "NHX_AUTHENTIK_K8S_NAMESPACE=${HELM_NAMESPACE}" \
-        "NHX_AUTHENTIK_K8S_RUNTIME=${K8S_RUNTIME}" \
-        "NHX_AUTHENTIK_K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" \
-        "NHX_AUTHENTIK_K8S_GATEWAY_PORT=${K8S_GATEWAY_PORT}" \
-        "NHX_AUTHENTIK_K8S_KEEP_CLUSTER=${K8S_KEEP_CLUSTER}" \
-        "NHX_AUTHENTIK_K8S_REUSE_CLUSTER=${K8S_REUSE_CLUSTER}" \
-        "NHX_AUTHENTIK_K8S_SKIP_IMAGE_LOAD=${K8S_SKIP_IMAGE_LOAD}" \
-        "NHX_AUTHENTIK_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
-        "NHX_AUTHENTIK_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
-        "NHX_AUTHENTIK_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
-        uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime authentik-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
+    set +e
+    (set -e; k8s_up)
     status="$?"
+    if [[ "${status}" -eq 0 ]]; then
+        run_host_contracts "${diagnostics}" "$(k8s_deployment_context_file_for_cluster "${cluster_name}")" "${K8S_JUNIT_XML}"
+        status="$?"
+    fi
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        cp "$(k8s_port_forward_log_file_for_cluster "${cluster_name}")" "${diagnostics}/port-forward.log" 2>/dev/null || true
+    fi
+    set -e
+
+    if [[ "${K8S_KEEP_CLUSTER}" != "1" ]]; then
+        stop_k8s_port_forward_for_cluster "${cluster_name}" || true
+        delete_reuse_k8s_cluster || true
+        delete_nemo_context "$(k8s_context_name)"
+        remove_lifecycle_state_file "$(lifecycle_state_file k8s "${K8S_RUNTIME}-${cluster_name}")"
+    fi
     echo "Auth-idp Kubernetes diagnostics: ${diagnostics}"
     return "${status}"
 }
@@ -1605,6 +2207,19 @@ while [[ $# -gt 0 ]]; do
             REUSE_SET="true"
             shift
             ;;
+        --gateway-port)
+            [[ $# -ge 2 ]] || die "--gateway-port requires a value"
+            REUSE_COMPOSE_GATEWAY_PORT="$2"
+            K8S_GATEWAY_PORT="$2"
+            GATEWAY_PORT_SET="true"
+            shift 2
+            ;;
+        --gateway-port=*)
+            REUSE_COMPOSE_GATEWAY_PORT="${1#*=}"
+            K8S_GATEWAY_PORT="${1#*=}"
+            GATEWAY_PORT_SET="true"
+            shift
+            ;;
         --skip-image-load)
             K8S_SKIP_IMAGE_LOAD="1"
             K8S_SKIP_IMAGE_LOAD_SET="true"
@@ -1653,6 +2268,10 @@ if [[ -n "${INSTANCE_KEY}" &&
     "${ACTION}" != "down" &&
     "${ACTION}" != "clean" ]]; then
     die "--key is only valid with up, down, or clean"
+fi
+
+if [[ "${GATEWAY_PORT_SET}" == "true" && "${ACTION}" != "up" && "${ACTION}" != "test" ]]; then
+    die "--gateway-port is only valid with up or test"
 fi
 
 configure_instance_defaults
