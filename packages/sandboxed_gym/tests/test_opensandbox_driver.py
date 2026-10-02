@@ -287,14 +287,40 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
     assert captured["resource_requests"] == {"cpu": "500m"}
 
 
+class _FakeSandbox:
+    def __init__(self, sandbox_id: str, connection_config: object) -> None:
+        self.sandbox_id = sandbox_id
+        self.connection_config = connection_config
+        self.closed = False
+
+    async def close(self) -> None:
+        self.closed = True
+
+
 def _create_capturing_connection_config(captured: dict[str, object]):
     async def create(image: str, **kwargs: object) -> object:
-        from types import SimpleNamespace
-
         captured["connection_config"] = kwargs["connection_config"]
-        return SimpleNamespace(sandbox_id="sb-1")
+        created = _FakeSandbox("sb-1", kwargs["connection_config"])
+        captured["created"] = created
+        return created
 
     return staticmethod(create)
+
+
+def _connect_capturing_connection_config(captured: dict[str, object]):
+    async def connect(sandbox_id: str, **kwargs: object) -> object:
+        captured["connect_kwargs"] = kwargs
+        reattached = _FakeSandbox(sandbox_id, kwargs["connection_config"])
+        captured["reattached"] = reattached
+        return reattached
+
+    return staticmethod(connect)
+
+
+def _patch_sdk(monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]) -> None:
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+    monkeypatch.setattr(Sandbox, "connect", _connect_capturing_connection_config(captured))
 
 
 @requires_opensandbox
@@ -305,9 +331,8 @@ async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatc
     image pull is cut off client-side and the sandbox it just created is destroyed. The headroom
     is for the response itself: the server answers only once the pod is Running.
     """
-    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
     captured: dict[str, object] = {}
-    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+    _patch_sdk(monkeypatch, captured)
 
     await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
 
@@ -315,10 +340,63 @@ async def test_create_keeps_its_request_open_for_the_whole_ready_wait(monkeypatc
 
 
 @requires_opensandbox
-async def test_an_operator_request_timeout_is_used_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
-    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+async def test_the_long_create_timeout_does_not_outlive_the_create_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every later SDK client is built from the sandbox's connection.
+
+    Left as created, exec, file and destroy calls against a stalled control plane would wait the
+    whole ready wait instead of the configured request timeout.
+    """
     captured: dict[str, object] = {}
-    monkeypatch.setattr(Sandbox, "create", _create_capturing_connection_config(captured))
+    _patch_sdk(monkeypatch, captured)
+
+    handle = await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    assert handle.raw is captured["reattached"]
+    assert handle.sandbox_id == "sb-1"
+    connect_kwargs = cast(Mapping[str, object], captured["connect_kwargs"])
+    assert getattr(connect_kwargs["connection_config"], "request_timeout").total_seconds() == 30
+    assert connect_kwargs["skip_health_check"] is True
+    assert cast(_FakeSandbox, captured["created"]).closed is True
+
+
+@requires_opensandbox
+async def test_a_failed_reattach_keeps_the_created_sandbox(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A sandbox that took minutes to create is worth more than a tighter timeout on its later calls."""
+    captured: dict[str, object] = {}
+    _patch_sdk(monkeypatch, captured)
+    Sandbox = getattr(importlib.import_module("opensandbox"), "Sandbox")
+
+    async def refuse(sandbox_id: str, **kwargs: object) -> object:
+        raise RuntimeError("endpoint lookup failed")
+
+    monkeypatch.setattr(Sandbox, "connect", staticmethod(refuse))
+
+    handle = await OpenSandboxDriver().create(SandboxSpec(image="img:1", ready_timeout_s=900))
+
+    assert handle.raw is captured["created"]
+    assert cast(_FakeSandbox, captured["created"]).closed is False
+    assert "keeps its create-time request timeout" in caplog.text
+
+
+@requires_opensandbox
+async def test_an_operator_connection_is_not_reattached(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    _patch_sdk(monkeypatch, captured)
+
+    handle = await OpenSandboxDriver(connection={"request_timeout_s": 120}).create(
+        SandboxSpec(image="img:1", ready_timeout_s=900)
+    )
+
+    assert handle.raw is captured["created"]
+    assert "connect_kwargs" not in captured
+
+
+@requires_opensandbox
+async def test_an_operator_request_timeout_is_used_as_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    _patch_sdk(monkeypatch, captured)
 
     driver = OpenSandboxDriver(connection={"request_timeout_s": 120})
     await driver.create(SandboxSpec(image="img:1", ready_timeout_s=900))

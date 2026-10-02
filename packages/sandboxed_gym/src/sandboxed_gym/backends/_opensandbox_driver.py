@@ -234,6 +234,8 @@ class OpenSandboxDriver:
                 connection_config=create_connection_config,
             )
             sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
+            if create_connection_config is not self._connection_config:
+                sandbox = await self._reattach_under_base_connection(sandbox, sandbox_id)
             if spec.workdir:
                 self._workdirs[sandbox_id] = spec.workdir
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
@@ -259,6 +261,24 @@ class OpenSandboxDriver:
                     f"boot). Set connection.request_timeout_s to at least the server's sandbox_create_timeout_seconds."
                 ) from exc
             raise
+
+    async def _reattach_under_base_connection(self, created: Sandbox, sandbox_id: str) -> Sandbox:
+        """Swap the create-time connection for the configured one once the sandbox exists."""
+        from opensandbox import Sandbox
+
+        try:
+            reattached = await Sandbox.connect(
+                sandbox_id, connection_config=self._connection_config, skip_health_check=True
+            )
+        except Exception:
+            LOGGER.warning(
+                "sandbox %s keeps its create-time request timeout: reattaching under the configured connection failed",
+                sandbox_id,
+                exc_info=True,
+            )
+            return created
+        await created.close()
+        return reattached
 
     def _sandbox(self, handle: SandboxHandle) -> Sandbox:
         return handle.raw  # ty: ignore[invalid-return-type] - provider-owned opaque state
