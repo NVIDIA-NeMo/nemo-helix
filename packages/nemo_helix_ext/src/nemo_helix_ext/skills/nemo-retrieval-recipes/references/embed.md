@@ -87,14 +87,51 @@ the trailing slash):
   "training": {
     "recipe": "bi_encoder",
     "training_type": "sft",
-    "finetuning_type": "lora_merged",
-    "retrieval": {"export": {"primary": "hf"}}
+    "finetuning_type": "all_weights",
+    "execution_profile": "gpu",
+    "max_seq_length": 512,
+    "precision": "bf16",
+    "attn_implementation": "flash_attention_2",
+    "retrieval": {
+      "train_n_passages": 5,
+      "query_max_length": 512,
+      "passage_max_length": 512,
+      "query_prefix": "query: ",
+      "passage_prefix": "passage: ",
+      "do_distributed_inbatch_negative": false,
+      "export": {"primary": "hf"}
+    }
   },
+  "schedule": {
+    "epochs": 3,
+    "seed": 42,
+    "validation_split": 0.01,
+    "val_check_interval": 0.25,
+    "checkpoint_selection": "both"
+  },
+  "batch": {"global_batch_size": 128, "micro_batch_size": 8},
+  "optimizer": {
+    "optimizer": "auto",
+    "learning_rate": 2.5e-5,
+    "min_learning_rate": 1.25e-5,
+    "warmup_steps": 432,
+    "weight_decay": 0.01,
+    "lr_decay_style": "cosine"
+  },
+  "parallelism": {"num_nodes": 1, "num_gpus_per_node": 4, "tensor_parallel_size": 1},
   "output": {"name": "nemotron-3-embed-1b-tuned"}
 }
 ```
 
-Leave batch/LR unset to take Nemotron retrieval defaults. Do not set `max_steps` with `epochs`.
+Do not set `max_steps` with `epochs`.
+
+Validated on the frozen 20,909-query NVDocs split (`default/retrieval-nvdocs-stage1-qrel-deduped`), best and last the same checkpoint:
+
+| | nDCG@10 | Recall@10 | Recall@100 | MAP@10 |
+|---|---|---|---|---|
+| Base | 0.5671 | 0.6375 | 0.8238 | 0.4787 |
+| Tuned | 0.6318 | 0.7124 | 0.8958 | 0.5413 |
+| Uplift | +0.0647 (+11.4%) | +0.0748 (+11.7%) | +0.0720 (+8.7%) | +0.0627 (+13.1%) |
 Pass the full Stage 1 result path, not only the job fileset name. The trailing
 slash stages `training.jsonl` at the local dataset root; wrapped `train.json`
 and mining caches remain under `additional/`.

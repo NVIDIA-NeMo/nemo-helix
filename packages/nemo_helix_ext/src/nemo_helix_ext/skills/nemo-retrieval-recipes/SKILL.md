@@ -111,6 +111,9 @@ Keep `query: ` / `passage: ` prefixes for embed and
 Report absolute and relative nDCG@10, Recall@10, and Recall@100 on the same frozen
 eval set. Prefer at least 100 queries; warn below 50. Treat 15% relative nDCG@10
 and Recall@10 uplift as an indicative embed target, not a hard small-corpus gate.
+The validated NVDocs bi-encoder recipe in `references/embed.md` scores nDCG@10
+0.6318 and Recall@10 0.7124 on the 20,909-query split (+11.4% and +11.7% versus
+the untuned base).
 
 References: `references/sdg.md` (Stage 0+1 corpus and generation control),
 `references/embed.md`, `references/rerank.md`, `references/deploy.md`
