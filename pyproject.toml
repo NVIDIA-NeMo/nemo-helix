@@ -322,13 +322,14 @@ constraint-dependencies = [
   "mcp>=1.28.1",
   "mlflow-skinny>=3.15.0,<3.16.0",
   "msgpack>=1.2.1",
-  "nemo-fabric-adapter-contract>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-common>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0",
-  "nemo-fabric-runtime>=0.3.0,<0.4.0",
+  "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0",
+  "nemo-fabric-collector>=0.4.0,<0.5.0",
+  "nemo-fabric-runtime>=0.4.0,<0.5.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
   "pillow>=12.3.0",
@@ -751,16 +752,14 @@ include = [
 invalid-argument-type = "ignore"
 invalid-return-type = "ignore"
 
-# The platform venv pins nemo-relay 0.7.3 (the Fabric adapters cap it at <0.8), but this BYO
-# example image installs nemo-relay >= 0.8, whose typed API is incompatible with 0.7.3's
-# (`ToolExecutionResult` wrapper, `tool_call_id`). ty type-checks the example against the venv's
-# 0.7.3 and reports the 0.8 surface as missing. Scoped to the one file and the two rules the
-# version skew produces; expires when the Fabric cap lifts and the venv moves to >= 0.8.
+# `BestEffortAnyCodec` is `Codec[object]` and `Codec` is invariant, so ty cannot bind `TArgs` for a
+# `tool_execute` call whose `func` takes `dict[str, Any]` while the codec is typed `object`. The call
+# is correct at runtime (the codec accepts any value). Scoped to the one example file and the one
+# rule the invariance produces.
 [[tool.ty.overrides]]
 include = [
   "plugins/nemo-agent-hardener/examples/other-victim/agent.py",
 ]
 
 [tool.ty.overrides.rules]
-unresolved-attribute = "ignore"
 no-matching-overload = "ignore"

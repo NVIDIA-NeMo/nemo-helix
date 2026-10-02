@@ -112,7 +112,7 @@
     },
     {
       "type": "markdown",
-      "source": "\n**GPU Requirements:**\n- 1B models: 1 GPU (24GB+ VRAM)\n- 3B models: 1-2 GPUs  \n- 8B models: 2-4 GPUs\n- 70B models: 8+ GPUs \n\nAdjust `num_gpus_per_node` based on your model size.",
+      "source": "\n**GPU Requirements:**\n- 1B models: 1 GPU (24GB+ VRAM)\n- 3B models: 1-2 GPUs\n- 8B models: 2-4 GPUs\n- 70B models: 8+ GPUs\n\nAdjust `num_gpus_per_node` based on your model size.",
       "source_html": "<p><strong>GPU Requirements:</strong></p>\n<ul>\n<li>1B models: 1 GPU (24GB+ VRAM)</li>\n<li>3B models: 1-2 GPUs</li>\n<li>8B models: 2-4 GPUs</li>\n<li>70B models: 8+ GPUs</li>\n</ul>\n<p>Adjust <code>num_gpus_per_node</code> based on your model size.</p>\n"
     },
     {

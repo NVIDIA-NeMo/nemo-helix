@@ -22,9 +22,9 @@ WORKDIR /workspace
 
 # The Fabric entrypoint, its DeepAgents adapter, and the MCP SDK the tool server uses.
 #
-# nemo-relay is pinned <0.8 because the Fabric adapters cap it there. That is also why the uploaded
-# plugins.toml uses observability schema 3: 0.7.3 rejects 4 outright, and a rejected schema fails the
-# whole plugin initialize() — taking the guardrail component in the same file down with it.
+# nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10. Keep the
+# uploaded plugins.toml on a schema this Relay accepts: a rejected schema fails the whole plugin
+# initialize() — taking the guardrail component in the same file down with it.
 #
 # No `RUN --mount=type=cache`: OpenShell builds through the Docker Engine API's classic builder,
 # which rejects BuildKit-only syntax. Agent Hardener strips these flags anyway; not writing them is one
@@ -38,7 +38,7 @@ RUN python -m venv /workspace/.venv \
       "nemo-helix[nemo-agents-plugin]" \
       "nemo-fabric" \
       "nemo-fabric-adapters-deepagents" \
-      "nemo-relay>=0.7.2,<0.8" \
+      "nemo-relay>=0.9.3,<0.10" \
       "mcp[cli]"
 
 COPY agent.yaml /workspace/agent.yaml

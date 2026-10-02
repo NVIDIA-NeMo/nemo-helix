@@ -5,7 +5,7 @@
 
 Translates the :class:`~nemo_agents_plugin.runner.backend.RunnerBackend` interface into
 nemo-deployments ``Deployment`` / ``DeploymentConfig`` entity operations. The deployments
-controller reconciles those entities onto a configured executor (docker or k8s).
+controller reconciles those entities onto a configured executor (docker, k8s, or openshell).
 
 Long-running only (``restart_policy=Always``). Finite / run-to-completion belongs to
 AgentRun (Razvan RFCs), not AgentDeployment.
@@ -31,6 +31,7 @@ from nemo_agents_plugin.entities import (
     DeploymentMode,
     DeploymentStatus,
     Endpoint,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
 from nemo_agents_plugin.runner.backend import DeploymentInfo, ExternalLog, LogLocation, RunnerBackend
@@ -45,6 +46,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
+from nemo_deployments_plugin.backends.openshell.config import OpenShellExecutorConfig
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.deployment_auth import plan_deployment_auth
 from nemo_deployments_plugin.entities import (
@@ -82,6 +84,10 @@ _PLUGIN_WHEELS_MOUNT = "/opt/nemo/plugin-wheels"
 _NAT_CONFIG_ENV = "NAT_CONFIG_PATH"
 _AGENT_CONFIG_PATH_ENV = "AGENT_CONFIG_PATH"
 _FABRIC_SERVER_MODULE = "nemo_agents_plugin.fabric.server"
+# Venv the packaged agent image installs into (container/template.py). OpenShell
+# launches the serve command through a login shell that can reset PATH, so the
+# openshell command names its executables by absolute path.
+_AGENT_IMAGE_VENV_BIN = "/workspace/.venv/bin"
 _AUTH_PROXY_IDENTITY = "agents"
 
 # Env var names the backend generates on the agent container. A secret env var
@@ -121,7 +127,9 @@ _STATUS_MAP: dict[str, DeploymentStatus] = {
     "READY": "running",
     "SUCCEEDED": "failed",  # Always agents should not terminate successfully
     "FAILED": "failed",
-    "LOST": "failed",
+    # LOST is non-terminal: drift recovery is bringing the workload back. "failed" is
+    # terminal to the agents controller and would abandon a deployment that recovers.
+    "LOST": "starting",
     "UNKNOWN": "starting",
     "DELETING": "deleting",
 }
@@ -142,18 +150,22 @@ def resolve_agent_gateway_url(
     mode: DeploymentMode,
     override: str | None = None,
     internal_base_url: str | None = None,
+    platform_egress_url: str | None = None,
 ) -> str:
     """Return the platform base URL an agent should call, reachable from its container.
 
     An explicit *override* wins for any mode. Otherwise ``k8s`` uses
-    *internal_base_url* (the in-cluster API Service DNS) and ``docker`` rewrites a
-    loopback *base_url* to ``host.docker.internal``, passing other hosts through.
+    *internal_base_url* (the in-cluster API Service DNS), ``openshell`` uses
+    *platform_egress_url* (the executor's ``platform_egress`` host and port), and
+    ``docker`` rewrites a loopback *base_url* to ``host.docker.internal``, passing
+    other hosts through.
 
-    Only ``docker`` and ``k8s`` are supported; ``subprocess`` deployments are
-    served by a different backend.
+    Only container modes are supported; ``subprocess`` deployments are served by
+    a different backend.
 
     Raises:
-        UnreachableGatewayURLError: k8s mode with no *internal_base_url* or *override*.
+        UnreachableGatewayURLError: k8s mode with no *internal_base_url*, or
+            openshell mode with no *platform_egress_url*, and no *override*.
         ValueError: *mode* is not a container deployment mode.
     """
     if mode not in CONTAINER_DEPLOYMENT_MODES:
@@ -173,6 +185,16 @@ def resolve_agent_gateway_url(
             f"{base_url!r} is not usable from an agent pod and no internal API Service URL is set. "
             "Set NEMO_INTERNAL_BASE_URL / NHX_INTERNAL_BASE_URL (or deployments.k8s_internal_base_url), "
             "or deployments.gateway_url_override."
+        )
+
+    if mode == "openshell":
+        if platform_egress_url:
+            return platform_egress_url.rstrip("/")
+        raise UnreachableGatewayURLError(
+            "No sandbox-reachable inference base URL for openshell deployment: the openshell "
+            "executor has no platform_egress, so the sandbox has no direct route to the platform. "
+            "Set a platform_egress block on the openshell executor (deployments.executors[].config), "
+            "or set deployments.gateway_url_override."
         )
 
     parts = urlsplit(base_url.rstrip("/"))
@@ -286,6 +308,19 @@ class ReservedSecretEnvVarError(ValueError):
     """A secret env var name collides with a platform-generated container env var."""
 
 
+class ImageEntrypointUnsupportedError(ValueError):
+    """``use_image_entrypoint`` was requested for a mode whose substrate ignores the entrypoint."""
+
+
+def image_entrypoint_unsupported_message(mode: str) -> str:
+    """Return the user-facing error for ``use_image_entrypoint`` on *mode*."""
+    return (
+        f"use_image_entrypoint is not supported for deployment_mode {mode!r}: the OpenShell sandbox "
+        "supervisor does not run the image ENTRYPOINT/CMD, so the platform must inject the serve "
+        "command. Deploy without use_image_entrypoint, or use deployment_mode 'docker' or 'k8s'."
+    )
+
+
 def _secret_env_vars(
     secrets: dict[str, str] | None,
     *,
@@ -327,6 +362,13 @@ def _fabric_config_mount_path(config_mount_path: str) -> str:
     return f"{parent}/{AGENT_CONFIG_FILENAME}"
 
 
+def _serve_executable(name: str, *, mode: DeploymentMode) -> str:
+    """Return *name* as the serve command's executable for *mode*."""
+    if mode == "openshell":
+        return f"{_AGENT_IMAGE_VENV_BIN}/{name}"
+    return name
+
+
 def _fabric_server_cli_args(*, config_path: str, port: int) -> list[str]:
     # If this launch path forwards an idle-timeout override, the gateway must
     # use the same deployment-sourced value when computing ``expires_at``.
@@ -348,6 +390,8 @@ def executor_for_mode(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> 
         return config.docker_executor or config.default_executor
     if mode == "k8s":
         return config.k8s_executor or config.default_executor
+    if mode == "openshell":
+        return config.openshell_executor or config.default_executor
     return config.default_executor
 
 
@@ -370,6 +414,22 @@ def _executor_entry(name: str | None) -> ExecutorConfigEntry | None:
     if not name:
         return None
     return next((entry for entry in DeploymentsConfig.get().executors if entry.name == name), None)
+
+
+def openshell_platform_egress_url(executor: str | None) -> str | None:
+    """Return the platform URL a sandbox on openshell *executor* reaches, or None.
+
+    Built from the executor's ``platform_egress`` host and port, the one platform
+    route its sandbox policy allows. None when the executor is not an openshell
+    executor or grants no platform egress (``platform_egress: null``).
+    """
+    entry = _executor_entry(_resolve_executor_name(executor))
+    if entry is None or entry.backend != "openshell":
+        return None
+    egress = OpenShellExecutorConfig.model_validate(entry.config).platform_egress
+    if egress is None:
+        return None
+    return f"http://{egress.host}:{egress.port}"
 
 
 def require_executor_matches_mode(executor: str | None, mode: DeploymentMode) -> None:
@@ -482,9 +542,11 @@ def build_deployment_config(
     NAT workflow configs start ``nat start fastapi`` with workflow YAML at
     *config_mount_path*. Fabric configs start
     ``python -m nemo_agents_plugin.fabric.server`` with ``agent.yaml`` beside the
-    NAT config directory. When ``use_image_entrypoint`` is true, the generated
+    NAT config directory. ``openshell`` names the executable by its absolute path
+    in the agent image venv. When ``use_image_entrypoint`` is true, the generated
     DeploymentConfig leaves command/args empty so the image ENTRYPOINT/CMD runs
-    instead. Docker mode materializes config from env because the docker backend
+    instead; ``openshell`` rejects that because its sandbox supervisor ignores the
+    entrypoint. Docker mode materializes config from env because the docker backend
     ignores ``config_files``; k8s mounts ``config_files`` via ConfigMap subPath.
     The main container binds ``0.0.0.0`` and exposes a readiness probe on
     ``/health``.
@@ -496,7 +558,13 @@ def build_deployment_config(
     build the Inference Gateway URL. It is also exported as ``NHX_BASE_URL`` so
     SDK calls from inside the agent use the same platform instead of falling
     back to a baked or host CLI context.
+
+    Raises:
+        ImageEntrypointUnsupportedError: *use_image_entrypoint* with a *mode* that
+            cannot run the image entrypoint.
     """
+    if use_image_entrypoint and not supports_image_entrypoint(mode):
+        raise ImageEntrypointUnsupportedError(image_entrypoint_unsupported_message(mode))
     is_fabric = _is_fabric_agent_config(agent_config)
     config_yaml = yaml.safe_dump(agent_config, sort_keys=False)
     config_path = _fabric_config_mount_path(config_mount_path) if is_fabric else config_mount_path
@@ -553,10 +621,10 @@ def build_deployment_config(
         server_args = []
         env.append(EnvVar(name="PORT", value=str(port)))
     elif is_fabric:
-        server_command = ["python"]
+        server_command = [_serve_executable("python", mode=mode)]
         server_args = _fabric_server_cli_args(config_path=config_path, port=port)
     else:
-        server_command = ["nat", "start", "fastapi"]
+        server_command = [_serve_executable("nat", mode=mode), "start", "fastapi"]
         server_args = [
             "--config_file",
             config_path,
@@ -657,9 +725,14 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 status="failed",
                 error=f"DeploymentsRunnerBackend does not support deployment_mode={deployment_mode!r}.",
             )
+        if use_image_entrypoint and not supports_image_entrypoint(deployment_mode):
+            error = image_entrypoint_unsupported_message(deployment_mode)
+            logger.error("Refusing to deploy agent %r: %s", name, error)
+            return DeploymentInfo(name=name, status="failed", error=error)
 
+        executor = executor_for_mode(self._config, deployment_mode)
         try:
-            require_executor_matches_mode(executor_for_mode(self._config, deployment_mode), deployment_mode)
+            require_executor_matches_mode(executor, deployment_mode)
         except ValueError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
@@ -683,6 +756,9 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 mode=deployment_mode,
                 override=self._config.gateway_url_override,
                 internal_base_url=internal_base_url,
+                platform_egress_url=(
+                    openshell_platform_egress_url(executor) if deployment_mode == "openshell" else None
+                ),
             )
         except UnreachableGatewayURLError as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
@@ -771,7 +847,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 use_image_entrypoint=use_image_entrypoint,
                 workload_identity_enabled=auth_plan.workload_identity_enabled,
             )
-        except ReservedSecretEnvVarError as exc:
+        except (ReservedSecretEnvVarError, ImageEntrypointUnsupportedError) as exc:
             logger.error("Refusing to deploy agent %r: %s", name, exc)
             return DeploymentInfo(name=name, status="failed", error=str(exc))
         await entities.create(deployment_config)
@@ -780,7 +856,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
                 name=name,
                 workspace=workspace,
                 deployment_config=name,
-                executor=executor_for_mode(self._config, deployment_mode),
+                executor=executor,
                 desired_state="READY",
                 status="PENDING",
             ).with_auth_context(auth_context)
@@ -882,7 +958,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
 
     async def health_check(self, endpoint: str) -> bool:
         # Container modes trust the deployments-plugin readiness projection; the
-        # agents controller should not call this for docker/k8s. Kept for ABC parity.
+        # agents controller should not call this for container modes. Kept for ABC parity.
         del endpoint
         return False
 

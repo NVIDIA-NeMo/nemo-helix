@@ -23,7 +23,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import
 )
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
-_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
+_PACKAGE = "nemo-fabric[deepagents,relay]==0.4.0"
 _CONFIG: dict[str, Any] = {
     "metadata": {"name": "hello-world"},
     "harness": {"adapter_id": _DEEPAGENTS},
@@ -160,6 +160,26 @@ async def test_install_provisions_curl_uv_and_the_fabric_venv_in_order(tmp_path:
     # The venv's python, never the image's: that is what makes an arbitrary task image workable.
     assert f"uv pip install --python /tmp/nemo-fabric-venv/bin/python '{_PACKAGE}'" in install
     assert environment.commands.index((prepare, "root")) < environment.commands.index((install, None))
+
+
+async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> None:
+    """A harness's companions can be pinned next to Fabric; a quoted specifier with a marker stays whole."""
+    agent = _agent(
+        tmp_path,
+        fabric_package="""nemo-fabric[deepagents,relay]==0.3.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
+    )
+    environment = _RecordingEnvironment()
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    install = _ran(environment, "astral.sh/uv")
+    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.3.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+
+
+async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:
+    agent = _agent(tmp_path, fabric_package="   ")
+    with pytest.raises(ValueError, match="at least one requirement"):
+        await agent.install(cast(BaseEnvironment, _RecordingEnvironment()))
 
 
 async def test_the_uv_installer_is_pinned_to_a_release(tmp_path: Path) -> None:

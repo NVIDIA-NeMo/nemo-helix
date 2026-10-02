@@ -224,9 +224,15 @@ class HarborImportedAgentSource(BaseModel):
     model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
 
 
-#: What Harbor runs in each task container. The shapes share no required field, so a document is exactly
-#: one of them.
-HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource
+#: What Harbor runs in each task container. The three shapes share no required field, so a document is
+#: exactly one of them.
+HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource | RegisteredAgentSource
+
+#: The SDK's installed Fabric agent, which a registered agent runs as: it brings its own Python, so any
+#: task image works.
+REGISTERED_AGENT_HARBOR_IMPORT_PATH = (
+    "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
+)
 
 _LEGACY_HARBOR_AGENT_FIELDS = ("agent_name", "agent_import_path", "agent_model_name")
 
@@ -247,8 +253,11 @@ class HarborRunnerTarget(BaseModel):
     kind: Literal["harbor"] = "harbor"
     source: HarborAgentSource = Field(
         default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
-        description="The agent Harbor runs in each task container: a built-in agent by `name`, or your own by "
-        "`import_path`.",
+        description="The agent Harbor runs in each task container: a built-in agent by `name`, your own by "
+        "`import_path`, or a registered platform `agent` (with an optional `environment`). A registered agent is "
+        "resolved at submit into the SDK's installed Fabric agent with the agent's translated config in "
+        "`agent_kwargs.fabric_config`, so it runs as registered — identity, skills, MCP servers, and telemetry "
+        "included — and stays, qualified, as the run's provenance.",
     )
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
@@ -280,6 +289,16 @@ class HarborRunnerTarget(BaseModel):
     )
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
+    )
+    agent_setup_timeout_multiplier: float | None = Field(
+        default=None,
+        gt=0,
+        description="Harbor agent-setup timeout multiplier. An agent that installs itself into the task container "
+        "(a Fabric harness, a registered agent) needs several times Harbor's default, which is tuned for prebuilt "
+        "agents.",
+    )
+    agent_timeout_multiplier: float | None = Field(
+        default=None, gt=0, description="Harbor agent-phase timeout multiplier, applied to every trial."
     )
 
     @model_validator(mode="before")
@@ -320,13 +339,17 @@ class HarborRunnerTarget(BaseModel):
 
     @property
     def agent_import_path(self) -> str | None:
-        """The Harbor agent class to import, if the source names one."""
-        return self.source.import_path if isinstance(self.source, HarborImportedAgentSource) else None
+        """The Harbor agent class to import; a registered agent runs as the installed Fabric agent."""
+        if isinstance(self.source, HarborImportedAgentSource):
+            return self.source.import_path
+        if isinstance(self.source, RegisteredAgentSource):
+            return REGISTERED_AGENT_HARBOR_IMPORT_PATH
+        return None
 
     @property
     def agent_model_name(self) -> str | None:
-        """The model slug handed to the agent."""
-        return self.source.model_name
+        """The model slug handed to a built-in or imported agent."""
+        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
 
 
 class GymRunnerTarget(BaseModel):
@@ -481,11 +504,27 @@ AgentRunnerTarget: TypeAlias = FabricRunnerTarget | GymRunnerTarget | HarborRunn
 Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
 
 
-def registered_agent_name(target: Target | None) -> str | None:
-    """The bare name of the registered agent a Fabric target names, if any."""
-    if isinstance(target, FabricRunnerTarget) and isinstance(target.source, RegisteredAgentSource):
-        return target.source.agent.root.rpartition("/")[2]
+def registered_agent_source(target: Target | None) -> RegisteredAgentSource | None:
+    """The registered agent a Fabric or Harbor target runs, if it runs one."""
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and isinstance(
+        target.source, RegisteredAgentSource
+    ):
+        return target.source
     return None
+
+
+def registered_agent_config(target: FabricRunnerTarget | HarborRunnerTarget) -> dict[str, Any] | None:
+    """The Fabric config a registered agent resolved to: Fabric carries it whole, Harbor inside ``agent_kwargs``."""
+    if isinstance(target, FabricRunnerTarget):
+        return target.resolved_config
+    config = target.agent_kwargs.get("fabric_config")
+    return config if isinstance(config, dict) else None
+
+
+def registered_agent_name(target: Target | None) -> str | None:
+    """The bare name of the registered agent a Fabric or Harbor target names, if any."""
+    source = registered_agent_source(target)
+    return source.agent.root.rpartition("/")[2] if source is not None else None
 
 
 def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
@@ -495,10 +534,10 @@ def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
     return bool(skills.get("paths") or discovery.get("local_paths"))
 
 
-def registered_agent_files(target: FabricRunnerTarget) -> FilesetRef | None:
+def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget) -> FilesetRef | None:
     """The FileSet a registered agent's files are staged from: the snapshot resolution took, if it took one."""
-    source = target.source
-    return source.files if isinstance(source, RegisteredAgentSource) else None
+    source = registered_agent_source(target)
+    return source.files if source is not None else None
 
 
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
@@ -519,6 +558,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     if isinstance(target, AgentTarget):
         return target.agent.name, None
     if isinstance(target, HarborRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            return registered_agent_name(target), None
         return target.agent_import_path or target.agent_name, target.agent_model_name
     if isinstance(target, GymRunnerTarget):
         return target.agent, None
@@ -720,11 +761,16 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
 
     @model_validator(mode="after")
     def _reject_resolution_outputs_on_submit(self) -> Self:
-        if isinstance(self.target, FabricRunnerTarget):
-            if self.target.resolved_config is not None:
-                raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
-            if isinstance(self.target.source, RegisteredAgentSource) and self.target.source.files is not None:
-                raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
+        target = self.target
+        if isinstance(target, FabricRunnerTarget) and target.resolved_config is not None:
+            raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
+        source = registered_agent_source(target)
+        if source is not None and source.files is not None:
+            raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
+        if isinstance(target, HarborRunnerTarget) and source is not None and "fabric_config" in target.agent_kwargs:
+            raise ValueError(
+                "`agent_kwargs.fabric_config` is derived from the registered `agent`; pass one or the other"
+            )
         return self
 
 
@@ -737,11 +783,15 @@ class AgentEvalSpec(_AgentEvalSpecCommon):
 
     @model_validator(mode="after")
     def _reject_unresolved_registered_agent(self) -> Self:
-        if isinstance(self.target, FabricRunnerTarget) and self.target.config is None:
-            raise ValueError(
-                f"AgentEvalSpec Fabric target names registered agent {registered_agent_name(self.target)!r} but has "
-                "no `resolved_config`; it must be resolved before run"
-            )
+        target = self.target
+        if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and registered_agent_source(target) is not None:
+            if registered_agent_config(target) is None:
+                raise ValueError(
+                    f"AgentEvalSpec {target.kind} target names registered agent {registered_agent_name(target)!r} but "
+                    "carries no resolved config; it must be resolved before run"
+                )
+        elif isinstance(target, FabricRunnerTarget) and target.config is None:
+            raise ValueError("AgentEvalSpec Fabric target has no config")
         return self
 
     @model_validator(mode="after")

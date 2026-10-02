@@ -92,7 +92,8 @@ def _agent_target_fields(target: Target | None) -> tuple[str | None, str | None,
     if isinstance(target, GymRunnerTarget):
         return "gym", target.agent, None
     if isinstance(target, HarborRunnerTarget):
-        return "harbor", target.agent_import_path or target.agent_name, None
+        # A registered agent runs as the shared installed-Fabric import path; its own name is the identity.
+        return "harbor", registered_agent_name(target) or target.agent_import_path or target.agent_name, None
     return None, None, None
 
 

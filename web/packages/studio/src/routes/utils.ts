@@ -35,6 +35,7 @@ import {
   SETTINGS_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
+import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
@@ -415,8 +416,17 @@ export const getEvaluationSessionTraceDetailRoute = (
   return `${path}?${searchParams.toString()}`;
 };
 
-export const getNewCustomizationJobRoute = (workspace: string, options?: { model?: string }) => {
-  const basePath = generatePath(ROUTES.workspace.newCustomizationJob, { workspace });
+/** The "how do you want to start?" selection page. */
+export const getNewCustomizationJobRoute = (workspace: string) => {
+  return generatePath(ROUTES.workspace.newCustomizationJob, { workspace });
+};
+
+/**
+ * The full fine-tuning form. `model` preselects a base model, for entry points that
+ * already know which one the user means.
+ */
+export const getNewCustomizationFormRoute = (workspace: string, options?: { model?: string }) => {
+  const basePath = generatePath(ROUTES.workspace.newCustomizationJobScratch, { workspace });
   if (options?.model) {
     return `${basePath}?${QUERY_PARAMETERS.model}=${encodeURIComponent(options.model)}`;
   }
@@ -668,6 +678,16 @@ export const getAgentEvaluationsTabRoute = (workspace: string, agentName: string
 
 export const getAgentOptimizationsTabRoute = (workspace: string, agentName: string) => {
   return `${getAgentDetailRoute(workspace, agentName)}?tab=optimizations`;
+};
+
+/** The Evaluations tab with the Run Evaluation modal open on arrival. */
+export const getAgentRunEvaluationRoute = (workspace: string, agentName: string) => {
+  return `${getAgentEvaluationsTabRoute(workspace, agentName)}&${ACTION_SEARCH_PARAM}=run-evaluation`;
+};
+
+/** The Optimizations tab with the Optimize agent modal open on arrival. */
+export const getAgentOptimizeRoute = (workspace: string, agentName: string) => {
+  return `${getAgentOptimizationsTabRoute(workspace, agentName)}&${ACTION_SEARCH_PARAM}=optimize`;
 };
 
 export const getAgentOptimizationDetailRoute = (workspace: string, optimizeJobName: string) => {

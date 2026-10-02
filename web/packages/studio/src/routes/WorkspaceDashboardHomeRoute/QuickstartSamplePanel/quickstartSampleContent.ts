@@ -7,17 +7,21 @@ import {
   getAgentDetailRoute,
   getAgentEvaluationsTabRoute,
   getAgentOptimizationsTabRoute,
+  getAgentOptimizeRoute,
+  getAgentRunEvaluationRoute,
   getIntakeTracesRoute,
 } from '@studio/routes/utils';
 import { MessagesSquare, type LucideIcon } from 'lucide-react';
 
-export type QuickstartView = 'studio' | 'cli';
+export type QuickstartSampleView = 'studio' | 'cli';
 
-export interface QuickstartAgent {
+export interface QuickstartSampleAgent {
   readonly name: string;
   readonly description: string;
   /** Looked up in `badgeStatus` (lowercased); anything unmapped renders as "Unknown". */
   readonly status: string;
+  /** Overrides the badge text, for states with no status of their own (e.g. no deployments). */
+  readonly statusLabel?: string;
   /**
    * Not the agent name: absent an explicit `--name`, deployments are `${agent}-${8 hex}`.
    * Omitted leaves a placeholder in the command rather than a name that would 404.
@@ -25,24 +29,25 @@ export interface QuickstartAgent {
   readonly deploymentName?: string;
 }
 
-export interface QuickstartAction {
+export interface QuickstartSampleAction {
   readonly label: string;
-  readonly href?: string;
-  /** For affordances that are modals on the agent page rather than routes. */
-  readonly onClick?: () => void;
+  /** Modals on the agent page are reached through its `?action=` param, so this is always a route. */
+  readonly href: string;
 }
 
-interface QuickstartStepCopy {
+interface QuickstartSampleStepCopy {
   readonly title: string;
   readonly description: string;
 }
 
-export interface QuickstartStep {
+export interface QuickstartSampleStep {
   readonly id: string;
   readonly icon: LucideIcon;
-  readonly studio: QuickstartStepCopy & { readonly actions: readonly QuickstartAction[] };
+  readonly studio: QuickstartSampleStepCopy & {
+    readonly actions: readonly QuickstartSampleAction[];
+  };
   /** Carries its own copy: step 1 is "Chat with the agent" here, "Try the agent" in Studio. */
-  readonly cli: QuickstartStepCopy & { readonly commands: readonly string[] };
+  readonly cli: QuickstartSampleStepCopy & { readonly commands: readonly string[] };
 }
 
 /**
@@ -51,27 +56,25 @@ export interface QuickstartStep {
  */
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+/** One `--key value` per line, joined with `\` continuations so long commands stay readable. */
+const continued = (command: string, ...args: string[]): string =>
+  [command, ...args].join(' \\\n  ');
+
 /**
  * A step whose destination is not registered is dropped outright rather than rendered as a
  * dead link. Both views drop together: the two carry the same steps in the same order, and a
  * step that Studio cannot reach is not one to hand someone a CLI command for either.
  */
-export interface QuickstartFeatures {
+export interface QuickstartSampleFeatures {
   /** `getIntakeTracesRoute` — the whole intake group is registered behind this. */
   readonly intakeEnabled?: boolean;
   /** Gates the agent page's Optimizations tab, which is where step 4 points. */
   readonly agentOptimizationsEnabled?: boolean;
 }
 
-export interface BuildQuickstartStepsOptions extends QuickstartFeatures {
+export interface BuildQuickstartSampleStepsOptions extends QuickstartSampleFeatures {
   readonly workspace: string;
-  readonly agent: QuickstartAgent;
-  /**
-   * Opens the Run Evaluation modal — component state, not a route. Without a handler the
-   * action is dropped rather than duplicating where "View results" already points.
-   */
-  readonly onRunEvaluation?: () => void;
-  readonly onOptimize?: () => void;
+  readonly agent: QuickstartSampleAgent;
 }
 
 /**
@@ -83,18 +86,19 @@ export interface BuildQuickstartStepsOptions extends QuickstartFeatures {
  * Evaluations tab, which `AgentDetailRoute` renders unconditionally — `EVALUATOR_ENABLED` gates
  * the standalone evaluator routes this panel never links to.
  */
-export const buildQuickstartSteps = ({
+export const buildQuickstartSampleSteps = ({
   workspace,
   agent,
-  onRunEvaluation,
-  onOptimize,
   intakeEnabled = INTAKE_ENABLED,
   agentOptimizationsEnabled = AGENT_OPTIMIZATIONS_ENABLED,
-}: BuildQuickstartStepsOptions): readonly QuickstartStep[] => {
+}: BuildQuickstartSampleStepsOptions): readonly QuickstartSampleStep[] => {
   const ws = shellQuote(workspace);
   const deployment = agent.deploymentName
     ? shellQuote(agent.deploymentName)
     : "'<agent-deployment>'";
+  const agentName = shellQuote(agent.name);
+  const optimizeFilesetName = `${agent.name}-optimize`;
+  const optimizeFileset = shellQuote(optimizeFilesetName);
 
   return [
     {
@@ -114,7 +118,14 @@ export const buildQuickstartSteps = ({
         title: 'Chat with the agent',
         description: 'Chat with the sample agent to see how it responds.',
         commands: [
-          `nemo agents chat --agent-deployment ${deployment} --input "Hello agent!" --workspace ${ws}`,
+          // Single quotes, not double: interactive zsh (the macOS default) and bash 3.2 read
+          // `!"` as history expansion, so a double-quoted "Hello agent!" never runs on paste.
+          continued(
+            'nemo agents chat',
+            `--agent-deployment ${deployment}`,
+            "--input 'Hello agent!'",
+            `--workspace ${ws}`
+          ),
         ],
       },
     },
@@ -149,7 +160,8 @@ export const buildQuickstartSteps = ({
         description: 'Run your own evaluation or view results from a sample evaluation run.',
         actions: [
           { label: 'View results', href: getAgentEvaluationsTabRoute(workspace, agent.name) },
-          ...(onRunEvaluation ? [{ label: 'Run Evaluation', onClick: onRunEvaluation }] : []),
+          // The modal lives on the agent page, which opens it from `?action=` on arrival.
+          { label: 'Run Evaluation', href: getAgentRunEvaluationRoute(workspace, agent.name) },
         ],
       },
       cli: {
@@ -157,7 +169,9 @@ export const buildQuickstartSteps = ({
         description: 'Run your own evaluation or view results from a sample evaluation run.',
         // There is no `submit` subcommand; nemo-evaluator has a regression test
         // asserting that form never ships again. Matches EntityEmptyState/registry.ts.
-        commands: [`nemo evaluator evaluate --spec-file '<spec>.json' --workspace ${ws}`],
+        commands: [
+          continued('nemo evaluator evaluate', "--spec-file '<spec>.json'", `--workspace ${ws}`),
+        ],
       },
     },
     ...(agentOptimizationsEnabled
@@ -173,17 +187,32 @@ export const buildQuickstartSteps = ({
                   label: 'View results',
                   href: getAgentOptimizationsTabRoute(workspace, agent.name),
                 },
-                ...(onOptimize ? [{ label: 'Optimize', onClick: onOptimize }] : []),
+                { label: 'Optimize', href: getAgentOptimizeRoute(workspace, agent.name) },
               ],
             },
             cli: {
               title: 'Optimize',
               description: 'Run your own optimization or view the sample study.',
-              // Drives a coding-agent loop on the user's checkout, so `--agent` and
-              // `--evals` are required local paths — but the run is still a platform
-              // submission, so it is scoped by `--workspace` like the rest.
+              // `run-strategy` with `legacy` is what Studio's Optimize submits, so a CLI study
+              // lands on the same Optimizations tab. The sample ships no optimize bundle, so
+              // staging one stays a placeholder; `run-strategy` reads it from the fileset.
               commands: [
-                `nemo agents optimize-skills --agent '<agent-dir>' --evals '<evals-dir>' --workspace ${ws}`,
+                continued(
+                  'nemo agents optimize prepare-fileset',
+                  "--source '<bundle-dir>'",
+                  "--optimize-config 'optimize.yaml'",
+                  `--fileset ${optimizeFileset}`,
+                  `--agent ${agentName}`,
+                  `--workspace ${ws}`
+                ),
+                continued(
+                  'nemo agents optimize run-strategy',
+                  '--strategy legacy',
+                  `--agent ${agentName}`,
+                  `--optimize-config-fileset ${shellQuote(`${workspace}/${optimizeFilesetName}`)}`,
+                  "--optimize-config 'optimize.yaml'",
+                  `--workspace ${ws}`
+                ),
               ],
             },
           },

@@ -26,7 +26,7 @@ def mock_entities() -> AsyncMock:
 def mock_stub() -> MagicMock:
     stub = MagicMock()
     # read_status re-derives endpoints via ListServices; default to none.
-    stub.ListServices.return_value = MagicMock(services=[])
+    stub.ListServices.return_value = MagicMock(services=[], next_page_token="")
     return stub
 
 

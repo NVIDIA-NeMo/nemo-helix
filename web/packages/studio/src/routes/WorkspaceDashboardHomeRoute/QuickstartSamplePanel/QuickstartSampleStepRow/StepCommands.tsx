@@ -17,7 +17,8 @@ export const StepCommands: FC<StepCommandsProps> = ({ commands, title }) => (
     language="bash"
     collapsible
     defaultOpen
-    value={commands.join('\n')}
+    // A blank line between commands, so a step with several reads as separate commands.
+    value={commands.join('\n\n')}
     // The actions row is justify-end, so an auto margin pins the prompt left and
     // leaves copy/expand on the right. Decorative, so it stays out of the a11y tree.
     slotActions={

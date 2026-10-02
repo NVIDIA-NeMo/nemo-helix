@@ -29,6 +29,14 @@ requires_openshell = pytest.mark.skipif(
     reason="openshell extra not installed (platform-restricted wheel)",
 )
 
+
+def _enum(name: str) -> int:
+    """A sandbox proto enum value, imported lazily so the module loads without openshell."""
+    from openshell._proto import sandbox_pb2  # ty: ignore[unresolved-import]
+
+    return getattr(sandbox_pb2, name)
+
+
 _FULL = {
     "version": 1,
     "filesystem_policy": {
@@ -73,7 +81,7 @@ def test_build_sandbox_policy_full() -> None:
     assert rule.name == "nemo-igw"
     assert rule.endpoints[0].host == "host.docker.internal"
     assert rule.endpoints[0].port == 8080
-    assert rule.endpoints[0].access == "full"
+    assert rule.endpoints[0].access == _enum("NETWORK_ACCESS_PRESET_FULL")
     assert [b.path for b in rule.binaries] == ["/usr/bin/curl", "/workspace/.venv/bin/python3.13"]
 
 
@@ -171,9 +179,9 @@ def test_platform_egress_tls_omitted_when_empty() -> None:
 
     secure = generate_policy_dict(
         filesystem=SandboxFilesystem(),
-        egress=HelixEgress(host="h", port=443, tls="terminate"),
+        egress=HelixEgress(host="h", port=443, tls="skip"),
     )
-    assert secure["network_policies"][PLATFORM_EGRESS_KEY]["endpoints"][0]["tls"] == "terminate"
+    assert secure["network_policies"][PLATFORM_EGRESS_KEY]["endpoints"][0]["tls"] == "skip"
 
 
 @requires_openshell
@@ -194,14 +202,14 @@ def test_load_sandbox_policy_reads_yaml(tmp_path: Path) -> None:
 def test_network_rule_defaults_enforcement_to_enforce() -> None:
     # a loaded/override rule that omits `enforcement` must block (proto default is audit).
     policy = build_sandbox_policy({"network_policies": {"r": {"endpoints": [{"host": "h", "port": 8080}]}}})
-    assert policy.network_policies["r"].endpoints[0].enforcement == "enforce"
+    assert policy.network_policies["r"].endpoints[0].enforcement == _enum("NETWORK_ENFORCEMENT_MODE_ENFORCE")
 
 
 @requires_openshell
 def test_build_sandbox_policy_full_keeps_explicit_enforcement() -> None:
     # explicit enforcement is preserved (regression guard for the new default).
     policy = build_sandbox_policy(_FULL)
-    assert policy.network_policies["igw"].endpoints[0].enforcement == "enforce"
+    assert policy.network_policies["igw"].endpoints[0].enforcement == _enum("NETWORK_ENFORCEMENT_MODE_ENFORCE")
 
 
 def test_normalize_loaded_policy_injects_sandbox_process_when_absent() -> None:
@@ -292,6 +300,28 @@ def test_build_sandbox_policy_rejects_bad_landlock_value() -> None:
 def test_build_sandbox_policy_rejects_bad_enforcement_value() -> None:
     with pytest.raises(ValueError, match="enforcement"):
         build_sandbox_policy({"network_policies": {"r": {"endpoints": [{"host": "h", "enforcement": "off"}]}}})
+
+
+@requires_openshell
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("access", "read-only", "NETWORK_ACCESS_PRESET_READ_ONLY"),
+        ("access", "read-write", "NETWORK_ACCESS_PRESET_READ_WRITE"),
+        ("tls", "skip", "NETWORK_TLS_MODE_SKIP"),
+        ("enforcement", "audit", "NETWORK_ENFORCEMENT_MODE_AUDIT"),
+    ],
+)
+def test_build_sandbox_policy_maps_yaml_strings_to_proto_enums(field: str, value: str, expected: str) -> None:
+    policy = build_sandbox_policy({"network_policies": {"r": {"endpoints": [{"host": "h", field: value}]}}})
+    assert getattr(policy.network_policies["r"].endpoints[0], field) == _enum(expected)
+
+
+@requires_openshell
+@pytest.mark.parametrize(("field", "value"), [("access", "bogus"), ("tls", "terminate"), ("tls", "passthrough")])
+def test_build_sandbox_policy_rejects_unknown_enum_strings(field: str, value: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        build_sandbox_policy({"network_policies": {"r": {"endpoints": [{"host": "h", field: value}]}}})
 
 
 @requires_openshell

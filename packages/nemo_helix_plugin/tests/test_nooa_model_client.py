@@ -194,6 +194,36 @@ async def test_resolve_model_clients_uses_anthropic_route_shape(monkeypatch):
     )
 
 
+async def test_resolve_model_clients_treats_unset_backend_format_as_openai_chat(monkeypatch):
+    """An unset backend format routes as OPENAI_CHAT, as Inference Gateway does."""
+    model_entity = _model_entity(
+        workspace="default",
+        name="nemotron",
+        backend_format=None,
+    )
+    models = {("default", "nemotron"): model_entity}
+    ctx, client = _patch_models_client(models)
+    client.get_model_entity_route_openai_url.return_value = "http://platform/model/nemotron/-/v1"
+    factory = MagicMock(return_value=MagicMock())
+    with ctx:
+        monkeypatch.setattr(nooa_model_client, "CompletionClient", factory)
+
+        await resolve_model_clients(
+            MagicMock(),
+            ConfiguredModelRefs(default="default/nemotron", fast="default/nemotron"),
+        )
+
+    factory.assert_called_once_with(
+        "openai/nemotron",
+        api_base="http://platform/model/nemotron/-/v1",
+        api_key="not-needed",
+        base_model="openai/nemotron",
+        extra_headers={"accept-encoding": "identity"},
+        drop_params=True,
+        _skip_responses_api_bridge=True,
+    )
+
+
 async def test_resolve_model_clients_rejects_unsupported_backend_format():
     model_entity = _model_entity(
         workspace="default",
