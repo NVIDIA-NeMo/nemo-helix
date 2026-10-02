@@ -20,7 +20,11 @@ Both modes lay evidence out the same way — ``fabric_result.json``, ``workspace
 ``traces/`` under one per-task dir — and map it through one trial-building step, so a metric sees the
 same ``result``, ``trace`` and ``workspace`` evidence whichever mode produced the trial.
 
-Per-task settings (workspace, model, trajectory capture) are composed onto a copy of the supplied
+Model overrides and secret bindings are prepared before any task in one ``run_tasks(tasks, config)``
+call starts. A setup error then stops the whole evaluation before tasks or image building, rather
+than failing individual trials. Each new call resolves references again: sandbox tasks use the values
+read during setup, while host adapters read values later through the selected environment-variable
+names. Per-task settings (workspace and trajectory capture) are composed onto a copy of the prepared
 config. Fabric removed profile overlays in 0.1.0rc2, so a run is described by exactly one complete
 typed config, and the evaluator-owned per-task settings are authoritative simply by being applied last.
 
@@ -49,6 +53,11 @@ from uuid import uuid4
 
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import (
+    host_fabric_config,
+    model_fabric_config,
+    validate_fabric_env,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_receiver import OTLPReceiver
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import (
@@ -69,6 +78,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     workspace_rooted_skills,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
+from nemo_evaluator_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrial,
@@ -78,7 +88,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.agent_eval.workspace_seeds import SEED_FILES_INPUT_KEY, seed_workspace
-from nemo_evaluator_sdk.resolver_protocols import SecretResolver
+from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import (
@@ -136,7 +146,8 @@ class FabricAgentRuntime:
     ``examples/fabric_harness_runtimes.py`` for full Codex and Hermes config examples.
 
     Pass ``sandbox=`` to run each task inside a sandbox from that provider instead of on the host.
-    ``image`` and ``secrets`` only apply there; ``base_dir`` only applies on the host.
+    ``image`` only applies there; ``base_dir`` only applies on the host. ``env_secrets`` works in
+    both modes; local lookup uses :class:`LocalSecretResolver` unless ``secret_resolver`` is supplied.
     """
 
     def __init__(
@@ -153,16 +164,15 @@ class FabricAgentRuntime:
         skills: Sequence[AgentSkill] | None = None,
         sandbox: SandboxProvider | None = None,
         image: str | None = None,
-        secrets: Mapping[str, SecretRef] | None = None,
+        env_secrets: Mapping[str, SecretRef] | None = None,
+        secret_resolver: EnvSecretSource | None = None,
     ) -> None:
         if sandbox is None:
             if image is not None:
                 raise ValueError("image= selects the sandbox image; pass sandbox=<SandboxProvider> with it")
-            if secrets:
-                raise ValueError("secrets= are injected into a sandbox; pass sandbox=<SandboxProvider> with them")
         elif base_dir is not None:
             raise ValueError("base_dir is not supported in sandbox mode: the config is seeded into /in")
-        self._config = _common.to_mapping(config)
+        self._config = copy.deepcopy(_common.to_mapping(config))
         self._model = model
         self._base_dir = Path(base_dir).expanduser() if base_dir is not None else None
         self._work_root = Path(work_root).expanduser() if work_root is not None else None
@@ -175,12 +185,14 @@ class FabricAgentRuntime:
         # Optional prebuilt image: the trial runs inside it, so it must contain the Fabric CLI + adapter.
         # None -> stock harness-agnostic image built on first run.
         self._image = image
-        # ``secrets`` maps the env-var name a Fabric harness reads its credential from (declared by the
-        # adapter's ``requirements.env``) to a SecretRef. The runner only *declares* them; the resolver
-        # is owned by the orchestrator (see ``resolve_secrets``), mirroring ``MetricWithSecrets``.
-        self._secrets = dict(secrets or {})
-        self._resolved_env: dict[str, str] = {}
-        self._secrets_resolved = False
+        self._env_secrets = dict(env_secrets or {})
+        self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
+        validate_fabric_env(self._config, self._env_secrets)
+        if self._env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
+            raise TypeError(
+                f"{type(self._secret_resolver).__name__} can't name an env var holding a secret. Fabric env_secrets "
+                "need an env-backed resolver (LocalSecretResolver locally; the platform supplies its own)."
+            )
 
     def with_skills(self, skills: Sequence[AgentSkill]) -> FabricAgentRuntime:
         """Return a copy of this runtime with ``skills`` *added* to its skill set; ``self`` is not modified.
@@ -205,22 +217,6 @@ class FabricAgentRuntime:
         """
         return self.with_skills([skill])
 
-    async def resolve_secrets(self, secret_resolver: SecretResolver) -> None:
-        """Resolve declared ``SecretRef``\\ s to values, keyed by the env var each harness reads.
-
-        Mirrors ``MetricWithSecrets.resolve_secrets``: the resolver is owned by the orchestrator (the
-        AgentEvaluator / execution backend), not the runner. Call before :meth:`run_tasks`; a standalone
-        ``run_tasks`` falls back to local env resolution when this was not called.
-        """
-        env: dict[str, str] = {}
-        for env_var, secret_ref in self._secrets.items():
-            value = await secret_resolver.resolve_secret(secret_ref)
-            if value is None:
-                raise ValueError(f"could not resolve secret {secret_ref.root!r} for env var {env_var!r}")
-            env[env_var] = value
-        self._resolved_env = env
-        self._secrets_resolved = True
-
     def _adapter_id(self) -> str:
         """Harness adapter selected by the Fabric config (empty when unset)."""
         harness = self._config.get("harness")
@@ -228,12 +224,11 @@ class FabricAgentRuntime:
         return str(adapter_id) if adapter_id is not None else ""
 
     def _effective_model(self) -> str | None:
-        """The model a run will actually use, mirroring :meth:`_compose_config`'s precedence.
+        """Report the explicit model override or configured default model in run metadata.
 
-        ``_compose_config`` only overwrites the config's default model when ``self._model`` is set, so
-        a model supplied purely through ``config`` is what runs. Reporting ``self._model`` alone would
-        record ``None`` for those runs, giving two runs with *different* models identical provenance —
-        the one thing this metadata exists to prevent.
+        ``model_fabric_config`` applies a non-empty override during shared host or sandbox setup.
+        Otherwise, report the model from ``config['models']['default']``. Recording only the override
+        would lose the configured model's identity when the caller omits the ``model`` argument.
         """
         if self._model:
             return self._model
@@ -245,7 +240,7 @@ class FabricAgentRuntime:
     def runner_info(self) -> RunnerInfo:
         """Identify this runner and the Fabric settings that shape its results.
 
-        Records the sandbox provider's name only — never ``self._secrets``, which is persisted nowhere.
+        Records the sandbox provider and secret references, never credential values.
         """
         return RunnerInfo(
             name=self._runtime_name,
@@ -260,6 +255,7 @@ class FabricAgentRuntime:
                 "capture_trajectory": self._capture_trajectory,
                 "sandbox": self._sandbox.name if self._sandbox is not None else None,
                 "image": self._image,
+                "env_secrets": {name: ref.root for name, ref in self._env_secrets.items()},
             },
         )
 
@@ -268,6 +264,11 @@ class FabricAgentRuntime:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> Sequence[AgentEvalTrial]:
+        """Run all supplied tasks as one evaluation, validating shared settings before execution.
+
+        Resolve secret bindings and the model override once for this call; each task gets its own
+        workspace and config copy. A shared configuration error raises before any task starts.
+        """
         resolved_config = config or AgentEvalRunConfig()
         # Assign a run id once per run so two runs (e.g. an A/B baseline vs. skilled variant) written
         # under the same work_root/output_dir land in distinct, non-colliding evidence trees. Callers
@@ -325,7 +326,9 @@ class FabricAgentRuntime:
             from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
         except ImportError as exc:
             raise RuntimeError(_MISSING_FABRIC_MSG) from exc
-        agent_config = FabricConfig.from_mapping(self._config)
+        agent_config = FabricConfig.from_mapping(
+            host_fabric_config(self._config, self._env_secrets, self._secret_resolver, model=self._model)
+        )
         # Fail fast (once) if trajectory capture is requested but the nemo-relay gateway isn't
         # importable, rather than failing every task the same way inside the per-task guard.
         if self._capture_trajectory:
@@ -338,18 +341,16 @@ class FabricAgentRuntime:
         return Fabric(), agent_config
 
     async def _open_sandbox(self, provider: SandboxProvider) -> SandboxExecution:
+        agent_config = model_fabric_config(self._config, model=self._model)
+        env = env_secret_values(self._env_secrets, self._secret_resolver)
         if self._image is None:
             # Build-if-missing; a first build compiles nemo-fabric (minutes), so keep it off the event loop.
             self._image = await asyncio.to_thread(ensure_fabric_image)
-        if self._secrets and not self._secrets_resolved:
-            # No orchestrator resolved our secrets (standalone run) — fall back to local env resolution.
-            await self.resolve_secrets(LocalSecretResolver())
         return SandboxExecution(
-            config=self._config,
+            config=agent_config,
             provider=provider,
             image=self._image,
-            env=self._resolved_env,
-            model=self._model,
+            env=env,
             timeout_s=self._timeout_s,
             capture_trajectory=self._capture_trajectory,
             trajectory_extra=self._trajectory_extra,
@@ -616,9 +617,9 @@ class FabricAgentRuntime:
     ) -> FabricConfig:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
-        from nemo_fabric import EnvironmentConfig, ModelConfig  # ty: ignore[unresolved-import]
+        from nemo_fabric import EnvironmentConfig  # ty: ignore[unresolved-import]
 
-        # Copy the base config and apply this task's workspace, model, and trajectory settings directly
+        # Copy the prepared base config and apply this task's workspace and trajectory settings directly
         # onto it. These land last, so they override anything the supplied config declared.
         cfg = agent_config.model_copy(deep=True)
 
@@ -629,11 +630,6 @@ class FabricAgentRuntime:
         environment.provider = environment.provider or "local"
         environment.workspace = str(workspace_dir.resolve())
         cfg.environment = environment
-
-        # Apply the model as the config's default (mirrors nemo_fabric.integrations.harbor).
-        if self._model:
-            provider = self._model.split("/", maxsplit=1)[0] if "/" in self._model else "openai"
-            cfg.models["default"] = ModelConfig(provider=provider, model=self._model)
 
         if self._capture_trajectory:
             # Enable Relay's ATIF/ATOF file exporter under this task's durable evidence dir, and pin the

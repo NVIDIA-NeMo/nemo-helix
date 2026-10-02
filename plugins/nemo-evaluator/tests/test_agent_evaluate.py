@@ -41,6 +41,7 @@ from nemo_evaluator.jobs.agent_spec import (
     HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
     ResolvedTask,
     Target,
 )
@@ -1751,6 +1752,71 @@ async def test_compile_non_harbor_target_does_not_resolve_execution_profiles(moc
     assert cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)["target"]["kind"] == "fabric"
 
 
+async def test_compile_resolves_fabric_runner_env_secrets() -> None:
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(config={"harness": {"adapter_id": "nvidia.fabric.codex"}}),
+        env_secrets={"NVIDIA_API_KEY": SecretRef("my-workspace/nvidia-key")},
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    step = HelixJobSpec.model_validate(compiled).steps[0]
+    secrets = {env.name: env.from_secret.name for env in step.environment or [] if env.from_secret}
+    assert secrets == {"NVIDIA_API_KEY": "my-workspace/nvidia-key"}
+    assert cast(dict[str, Any], step.config)["target"]["env_secrets"] == {"NVIDIA_API_KEY": "my-workspace/nvidia-key"}
+
+
+def test_fabric_worker_uses_the_job_env_secret_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "test-key")
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(config={"harness": {"adapter_id": "nvidia.fabric.codex"}}),
+        env_secrets={"NVIDIA_API_KEY": SecretRef("my-workspace/nvidia-key")},
+    )
+    runtime, _, _ = AgentEvalJob._resolve_target(target, _job_context(tmp_path))
+    assert isinstance(runtime, FabricAgentRuntime)
+    assert runtime._env_secrets == target.env_secrets
+    assert isinstance(runtime._secret_resolver, JobEnvSecretSource)
+
+
+@pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.parametrize(
+    "config,field",
+    [
+        ({"environment": {"env": {"KEY": "override"}}}, "KEY"),
+        ({"environment": "local"}, "config.environment"),
+        ({"environment": {"env": []}}, "config.environment.env"),
+    ],
+)
+def test_fabric_target_rejects_invalid_secret_environment_at_submit(
+    config: dict[str, Any], field: str, registered: bool
+) -> None:
+    with pytest.raises(ValidationError, match=field):
+        if registered:
+            FabricRunnerTarget(
+                source=RegisteredAgentSource(agent="ws/agent"),
+                resolved_config=config,
+                env_secrets={"KEY": SecretRef("ws/key")},
+            )
+        else:
+            FabricRunnerTarget(source=FabricConfigSource(config=config), env_secrets={"KEY": SecretRef("ws/key")})
+
+
+@pytest.mark.parametrize("registered", [False, True])
+def test_fabric_target_validation_error_does_not_echo_rejected_secret(registered: bool) -> None:
+    """Reject credential collisions without printing either inline or resolved Fabric config values."""
+    config = {"environment": {"env": {"KEY": "LEAKME"}}}
+    target: dict[str, Any] = {"env_secrets": {"KEY": "ws/key"}}
+    if registered:
+        target["source"] = {"agent": "ws/agent"}
+        target["resolved_config"] = config
+    else:
+        target["source"] = {"config": config}
+    with pytest.raises(ValidationError, match="also provided by env_secrets") as excinfo:
+        FabricRunnerTarget.model_validate(target)
+    assert "LEAKME" not in str(excinfo.value)
+
+
 async def test_compile_injects_target_api_key_secret() -> None:
     spec = AgentEvalSpec(
         tasks=[_task_spec()],
@@ -1792,7 +1858,7 @@ async def test_compile_rejects_reserved_secret_env_name() -> None:
         )
 
 
-@pytest.mark.parametrize("source", ["gym", "harbor", "metric"])
+@pytest.mark.parametrize("source", ["gym", "harbor", "fabric", "metric"])
 async def test_compile_rejects_sandbox_plan_secret_name_from_all_sources(source: str, mocker: MockerFixture) -> None:
     name = GYM_SANDBOX_PLAN_ENVVAR
     task = _task_spec()
@@ -1803,6 +1869,8 @@ async def test_compile_rejects_sandbox_plan_secret_name_from_all_sources(source:
         )
     elif source == "harbor":
         target = HarborRunnerTarget(env_secrets={name: SecretRef("ws/x")})
+    elif source == "fabric":
+        target = FabricRunnerTarget(source=FabricConfigSource(config={}), env_secrets={name: SecretRef("ws/x")})
     else:
         target = HarborRunnerTarget()
         metric = task.spec.metrics[0].model_copy(update={"secrets": {name: SecretRef("ws/x")}})
