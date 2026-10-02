@@ -295,35 +295,12 @@ print(f"Output adapter: {OUTPUT_NAME}")
 
 ### 7. Track Training Progress
 
-Poll job status until it completes. Progress (step/max_steps) is shown when available.
+Poll until the job finishes. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
 
 ```python
-from IPython.display import clear_output
+from nemo_helix_ext.quickstart import wait_for_training
 
-time_check = max_wait_time_checker(3600, "Customization Job")
-while True:
-    time_check()
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
-    clear_output(wait=True)
-    print(f"Job Status: {status.status}")
-    step = max_steps = training_phase = None
-    for job_step in status.steps or []:
-        if job_step.name == "training":
-            for task in job_step.tasks or []:
-                d = task.status_details or {}
-                step, max_steps = d.get("step"), d.get("max_steps")
-                training_phase = d.get("phase")
-                break
-            break
-    if step is not None and max_steps is not None:
-        print(f"Training: Step {step}/{max_steps} ({100 * step / max_steps:.1f}%)")
-        if training_phase:
-            print(f"Phase: {training_phase}")
-    if status.status in ("completed", "failed", "cancelled", "error"):
-        print(f"\nJob finished: {status.status}")
-        break
-    time.sleep(10)
-
+status = wait_for_training(client, job.job.name, timeout_seconds=3600)
 assert status.status == "completed"
 
 ```
@@ -348,7 +325,8 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        # Fully qualified so runtimes that reject short names (for example OpenShift) can pull the image.
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
         "additional_args": ["--max-lora-rank", "32"],
     },
@@ -370,7 +348,7 @@ print(f"Deployment status: {deployment.status}")
 
 ### 9. Monitor Deployment Until Ready
 
-Wait for the deployment to reach RUNNING/READY before sending inference requests.
+Wait for the deployment to reach RUNNING/READY before sending inference requests. Image pull and weight load often take 10–20 minutes, and the status stays PENDING until the server is ready.
 
 ```python
 TIMEOUT_MINUTES = 30

@@ -377,7 +377,8 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        # Fully qualified so runtimes that reject short names (for example OpenShift) can pull the image.
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
         "additional_args": ["--max-lora-rank", "32"],
     },

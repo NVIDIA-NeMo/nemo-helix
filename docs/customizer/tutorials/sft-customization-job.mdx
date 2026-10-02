@@ -411,52 +411,13 @@ print(f"Output model: {OUTPUT_NAME}")
 
 ### 7. Track Training Progress
 
+Poll until the job finishes. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
+
 ```python
-import time
-from IPython.display import clear_output
+from nemo_helix_ext.quickstart import wait_for_training
 
-# Poll job status every 10 seconds until completed
-while True:
-    status = client.jobs.get_status(
-        name=job.job.name,
-        workspace="default"
-    )
+wait_for_training(client, job.job.name)
 
-    clear_output(wait=True)
-    print(f"Job Status: {status.model_dump_json(indent=2)}")
-
-    # Extract training progress from nested steps structure
-    step: int | None = None
-    max_steps: int | None = None
-    training_phase: str | None = None
-
-    for job_step in status.steps or []:
-        if job_step.name == "training":
-            for task in job_step.tasks or []:
-                task_details = task.status_details or {}
-                step = task_details.get("step")
-                max_steps = task_details.get("max_steps")
-                training_phase = task_details.get("phase")
-                break
-            break
-
-    if step is not None and max_steps is not None:
-        progress_pct = (step / max_steps) * 100
-        print(f"Training Progress: Step {step}/{max_steps} ({progress_pct:.1f}%)")
-        if training_phase:
-            print(f"Training Phase: {training_phase}")
-    else:
-        print("Training step not started yet or progress info not available")
-
-    # Exit loop when job reaches a terminal status
-    if status.status in ("completed", "failed", "cancelled", "error"):
-        print(f"\nJob finished with status: {status.status}")
-        break
-
-    time.sleep(10)
-
-if status.status != "completed":
-    raise RuntimeError(f"Training job finished with status: {status.status}")
 ```
 
 **Interpreting SFT Training Metrics:**
@@ -498,7 +459,8 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        # Fully qualified so runtimes that reject short names (for example OpenShift) can pull the image.
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
     },
 )
@@ -542,7 +504,8 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 2,
-        "image_name": "vllm/vllm-openai",
+        # Fully qualified so runtimes that reject short names (for example OpenShift) can pull the image.
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
     },
 )
@@ -695,7 +658,7 @@ For detailed information on all available hyperparameters, recommended values, a
 - Check job logs: `client.jobs.get_logs(name=job.job.name, workspace="default")`
 - Check deployment status: `client.inference.deployments.retrieve(name=deployment.name, workspace="default")`
 - Ensure sufficient GPU resources for `executor_config={"gpu": 1, ...}`
-- Verify the deployment config matches this tutorial: `engine="vllm"` with `vllm/vllm-openai:v0.22.1`
+- Verify the deployment config matches this tutorial: `engine="vllm"` with `docker.io/vllm/vllm-openai:v0.22.1`
 
 
 ## Next Steps

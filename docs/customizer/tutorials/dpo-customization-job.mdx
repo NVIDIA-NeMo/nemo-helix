@@ -245,37 +245,14 @@ print(f"Output model: {OUTPUT_NAME}")
 
 ### 7. Track Training Progress
 
-The DPO job runs four steps: download -> **dpo-training** (Ray) -> upload -> model-entity. We poll the top-level job status and surface the training step's progress.
+The DPO job runs four steps: download -> **dpo-training** (Ray) -> upload -> model-entity. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
 
 ```python
-from IPython.display import clear_output
+from nemo_helix_ext.quickstart import wait_for_training
 
-check = max_wait_time_checker(7200, "DPO job")
-while True:
-    check()
-    status = sdk.jobs.get_status(name=job.job.name, workspace="default")
-    clear_output(wait=True)
-    print(f"Job Status: {status.status}")
-
-    step = max_steps = phase = None
-    for job_step in status.steps or []:
-        if job_step.name == "dpo-training":
-            for task in job_step.tasks or []:
-                d = task.status_details or {}
-                step, max_steps, phase = d.get("step"), d.get("max_steps"), d.get("phase")
-                break
-            break
-    if step is not None and max_steps:
-        print(f"Training: Step {step}/{max_steps} ({100 * step / max_steps:.1f}%)")
-        if phase:
-            print(f"Phase: {phase}")
-
-    if status.status in ("completed", "failed", "cancelled", "error"):
-        print(f"\nJob finished: {status.status}")
-        break
-    time.sleep(15)
-
+status = wait_for_training(sdk, job.job.name, timeout_seconds=7200, poll_interval=15)
 assert status.status == "completed"
+
 ```
 
 **Interpreting DPO training metrics** (in `status_details.metrics`):
@@ -307,13 +284,15 @@ deployment_config = sdk.inference.deployment_configs.create(
     name=DEPLOYMENT_CONFIG_NAME,
     engine="vllm",
     model_spec={"model_namespace": "default", "model_name": OUTPUT_NAME},
-    executor_config={"gpu": 1, "image_name": "vllm/vllm-openai", "image_tag": "v0.22.1"},
+    # Fully qualified so runtimes that reject short names (for example OpenShift) can pull the image.
+    executor_config={"gpu": 1, "image_name": "docker.io/vllm/vllm-openai", "image_tag": "v0.22.1"},
 )
 
 deployment = sdk.inference.deployments.create(
     workspace="default", name=DEPLOYMENT_NAME, config=deployment_config.name
 )
 print(f"Deployment name: {deployment.name}")
+
 ```
 
 ```python
