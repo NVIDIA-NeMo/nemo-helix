@@ -377,7 +377,7 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
         "additional_args": ["--max-lora-rank", "32"],
     },
