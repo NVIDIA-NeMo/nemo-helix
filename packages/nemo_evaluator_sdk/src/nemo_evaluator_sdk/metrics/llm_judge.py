@@ -257,9 +257,13 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
         return any(isinstance(hook, InferenceStructuredOutput) and not hook.resolved for hook in self._preprocess_hooks)
 
     def _structured_output_needs_chat(self) -> bool:
-        """Whether structured output adds request parameters that only the probed chat endpoint accepts."""
+        """Whether structured output adds ``response_format``, which only the chat endpoint accepts.
+
+        Guided JSON travels in ``extra_body`` and text completions accept it, so those modes keep the
+        prompt there along with any completion-only options such as ``echo``.
+        """
         return any(
-            isinstance(hook, InferenceStructuredOutput) and hook.mode != StructuredOutputMode.UNSUPPORTED
+            isinstance(hook, InferenceStructuredOutput) and hook.mode == StructuredOutputMode.OPENAI_RESPONSE_FORMAT
             for hook in self._preprocess_hooks
         )
 
@@ -337,8 +341,7 @@ class LLMJudgeMetric(HooksBase, LLMJudge):
             )
         request = render_request(self.prompt_template, context=context)
         if "prompt" in request and "messages" not in request and self._structured_output_needs_chat():
-            # Preflight probed the chat endpoint, so send the prompt there rather than to text
-            # completions, which reject response_format.
+            # Text completions reject response_format, so send the prompt to chat instead.
             request["messages"] = [{"role": "user", "content": request.pop("prompt")}]
         _serialize_message_contents(request)
 

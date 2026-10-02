@@ -1354,6 +1354,24 @@ class TestGenerateStructuredOutput:
         assert "messages" not in request
         assert request["prompt"].endswith("Rate this answer: Paris")
 
+    @pytest.mark.parametrize("mode", [StructuredOutputMode.ROOT_GUIDED_JSON, StructuredOutputMode.NVEXT_GUIDED_JSON])
+    def test_render_request_keeps_prompt_and_completion_options_with_guided_json(self, mode):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RubricScore(name="quality", rubric=[Rubric(label="good", value=1), Rubric(label="bad", value=0)])],
+            prompt_template={"prompt": "Rate this answer: {{ item.answer }}", "echo": False},
+        )
+        for hook in metric._preprocess_hooks:
+            if isinstance(hook, InferenceStructuredOutput):
+                hook.set_mode(mode)
+
+        request = metric._render_request({"answer": "Paris"}, {})
+
+        assert "messages" not in request
+        assert request["prompt"].endswith("Rate this answer: Paris")
+        assert request["echo"] is False
+        assert "guided_json" in json.dumps(request["extra_body"])
+
 
 # =============================================================================
 # Hooks
