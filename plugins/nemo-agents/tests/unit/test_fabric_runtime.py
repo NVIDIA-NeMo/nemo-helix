@@ -593,9 +593,18 @@ class TestInvokeFabricRuntime:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert getattr(fabric_request, "relay_session_root", None) is None
         assert result.status == "succeeded"
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
+
+    async def test_forwards_the_relay_session_root(self) -> None:
+        fake_runtime = _FakeRuntime()
+        request = FabricInvocationRequest(input="hi", relay_session_root="018f47a4-0000-7d94-8e61-9f0f89b5d312")
+
+        await invoke_fabric_runtime(cast(Any, fake_runtime), request)
+
+        assert fake_runtime.invoke_requests[0].relay_session_root == "018f47a4-0000-7d94-8e61-9f0f89b5d312"
 
     async def test_wraps_timeout_without_stopping_runtime(self) -> None:
         fake_runtime = _FakeRuntime(invoke_delay=1.0)
