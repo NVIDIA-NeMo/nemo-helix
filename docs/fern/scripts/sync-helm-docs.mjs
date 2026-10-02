@@ -23,11 +23,13 @@ const README = resolve(repoRoot, "k8s", "helm", "README.md");
 const VALUES = resolve(repoRoot, "k8s", "helm", "values.yaml");
 const OUTPUT = resolve(repoRoot, "docs", "helm", "index.mdx");
 
-const FRONTMATTER = `---
-title: "NeMo Helix Helm Chart"
+function frontmatter(chartName) {
+  return `---
+title: "${chartName}"
 description: ""
 ---
 `;
+}
 
 const DROP_LINE =
   /^Documentation can be found at: https:\/\/docs\.nvidia\.com\/nemo-platform\.\s*$/;
@@ -97,14 +99,16 @@ function extractIntro(readme) {
   return out.join("\n");
 }
 
-export function buildHelmReferenceMdx(readme, valuesYaml) {
+export function buildHelmReferenceMdx(readme, valuesYaml, chartName = "NeMo Helix Helm Chart") {
   return (
-    FRONTMATTER +
+    frontmatter(chartName) +
     "\n" +
     extractIntro(readme) +
     "\n\n" +
     "## Values\n\n" +
-    "The following is the complete `values.yaml` for the NeMo Helix Helm Chart.\n" +
+    "The following is the complete `values.yaml` for the " +
+    chartName +
+    ".\n" +
     "All configuration options are documented inline with comments.\n\n" +
     "```yaml wordWrap\n" +
     valuesYaml.trimEnd() +

@@ -9,7 +9,7 @@ description: ""
 
 Learn how to use NeMo Helix to align a model with **DPO** (Direct Preference Optimization) on a preference dataset. For each prompt, DPO trains on a *chosen* (preferred) and a *rejected* response so the model prefers the chosen style — no separate reward model required.
 
-This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
+This tutorial uses the `rl` customization backend (powered by [NVIDIA NeMo-RL](https://github.com/NVIDIA-NeMo/RL)), which runs DPO on a **Ray** cluster. Unlike the [SFT](/documentation/customizer-reference/tutorials/sft-customization-job) and [LoRA](/documentation/customizer-reference/tutorials/lora-customization-job) tutorials (Docker GPU jobs), `rl` requires a **Kubernetes-backed** NeMo Helix deployment. DPO here is **full-weight** (no LoRA/adapter); the output is a full model entity.
 
 **Time to complete:** approximately 45-60 minutes. Job duration increases with model and dataset size.
 
@@ -28,7 +28,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Helix deployment deployment server URL. By default `http://localhost:8080` is used; set `NMP_BASE_URL` to override:
+The SDK needs the server URL for your NeMo Helix deployment. By default `http://localhost:8080` is used; set `NMP_BASE_URL` to override:
 
 ```sh
 export NMP_BASE_URL=<YOUR_NMP_BASE_URL>

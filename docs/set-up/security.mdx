@@ -11,13 +11,13 @@ This page provides security guidelines and best practices for deploying and mana
 
 ## Security Considerations
 
-- The NeMo Helix does not impose rate limits. You must implement a rate-limiting strategy to restrict access to your application.
-- The NeMo Helix does not have an internal notion of a user. To restrict authorization to specific endpoints or users, implement an external mechanism such as an Envoy proxy.
+- NeMo Helix does not impose rate limits. You must implement a rate-limiting strategy to restrict access to your application.
+- NeMo Helix does not have an internal notion of a user. To restrict authorization to specific endpoints or users, implement an external mechanism such as an Envoy proxy.
 - The NeMo Data Store microservice does not provide object-class-specific access controls. All items reside within a single access control boundary.
-- The NeMo Helix, by design, can access all content in the NeMo Data Store microservice, including LoRA adapters, training data, evaluation data, and evaluation results.
+- NeMo Helix, by design, can access all content in the NeMo Data Store microservice, including LoRA adapters, training data, evaluation data, and evaluation results.
  This access is required for model evaluation.
  Carefully weigh the risk of data exposure from serving customized models directly to production against the overhead of a separate deployment.
-- The NeMo Helix is not intended to be internet-facing. Deploy them as the logic (middle) tier in a three-tier architecture.
+- NeMo Helix is not intended to be internet-facing. Deploy it as the logic (middle) tier in a three-tier architecture.
 - You are responsible for securing access to any application using the microservices. This includes:
  - Implementing an authentication layer between users and your application
  - Applying required authorization controls

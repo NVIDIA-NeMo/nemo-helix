@@ -279,7 +279,11 @@ function materializeGeneratedDocs(release, outputRoot) {
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(
     outputPath,
-    buildHelmReferenceMdx(git(["show", helmReadmeRef]), git(["show", helmValuesRef])),
+    buildHelmReferenceMdx(
+      git(["show", helmReadmeRef]),
+      git(["show", helmValuesRef]),
+      "NeMo Platform Helm Chart",
+    ),
   );
 }
 

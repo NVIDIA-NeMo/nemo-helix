@@ -189,7 +189,7 @@ These three layers are independent. NeMo Helix sends telemetry only when you hav
 
 ### Bundled Plugins
 
-NeMo Helix ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for NeMo tools that share this telemetry system. The config file setting and the `--no-telemetry` flag apply to the CLI.
+NeMo Helix ships with plugins that emit their own anonymous usage telemetry. The `NEMO_TELEMETRY_ENABLED` environment variable is the recommended single off switch: set it to `false` to disable telemetry for the CLI and for bundled plugins that share this telemetry system. The config file setting and the `--no-telemetry` flag control CLI telemetry only.
 
 ### First-Run Notice
 
