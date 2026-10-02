@@ -298,15 +298,15 @@ def format_port_conflict(err: PortConflict) -> list[str]:
     Message text depends on ``err.kind`` (foreign process, NeMo instance, or denied bind).
     """
     if err.kind == "not_permitted":
-        where = f"{err.host}:{err.port}" if err.host else f"port {err.port}"
+        address = f"{err.host}:{err.port}" if err.host else f"port {err.port}"
         if err.port < _PRIVILEGED_PORT_CEILING:
             return [
-                f"Not permitted to listen on {where} (EPERM/EACCES).",
+                f"Not permitted to listen on {address} (EPERM/EACCES).",
                 f"Ports below {_PRIVILEGED_PORT_CEILING} need elevated privileges. Choose a higher port:",
                 f"nemo services run --port {SUGGESTED_ALT_PORT}",
             ]
         return [
-            f"Not permitted to listen on {where} (EPERM/EACCES). This is not a port conflict.",
+            f"Not permitted to listen on {address} (EPERM/EACCES). This is not a port conflict.",
             "The OS denied this process a listening socket, which usually means it runs inside a",
             "sandbox (for example a coding agent's shell). Another port will fail the same way.",
             "Start the platform from a shell or service manager outside the sandbox.",
