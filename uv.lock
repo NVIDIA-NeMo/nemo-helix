@@ -104,14 +104,14 @@ constraints = [
     { name = "mlflow-skinny", specifier = ">=3.15.0,<3.16.0" },
     { name = "msgpack", specifier = ">=1.2.1" },
     { name = "nbconvert", specifier = ">=7.17.1" },
-    { name = "nemo-fabric-adapter-contract", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-collector", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-runtime", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric-adapter-contract", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-collector", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-runtime", specifier = ">=0.4.0,<0.5.0" },
     { name = "nltk", specifier = ">=3.10.3" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "postcss", specifier = ">=8.5.10" },
@@ -4297,14 +4297,14 @@ requires-dist = [
     { name = "nemo-agent-config-example-email-security-triage", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agents-plugin", extras = ["claude", "codex", "deepagents"], marker = "extra == 'all'", editable = "plugins/nemo-agents" },
     { name = "nemo-deployments-plugin", editable = "plugins/nemo-deployments" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", extras = ["harness"], marker = "extra == 'claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", extras = ["harness"], marker = "extra == 'codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", extras = ["harness"], marker = "extra == 'deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", extras = ["harness"], marker = "extra == 'claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", extras = ["harness"], marker = "extra == 'codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", extras = ["harness"], marker = "extra == 'deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nvidia-nat-atif", specifier = ">=1.9.0a20260811,<1.10" },
@@ -4739,9 +4739,9 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.3.5" },
-    { name = "nemo-fabric", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["claude", "codex"], marker = "extra == 'fabric'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'fabric'", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["claude", "codex"], marker = "extra == 'fabric'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'fabric'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix-sdk", marker = "extra == 'nemo-helix'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-relay", specifier = ">=0.9.3,<0.10" },
     { name = "nemo-sandboxed-gym", editable = "packages/sandboxed_gym" },
@@ -4766,13 +4766,13 @@ dev = [
 
 [[package]]
 name = "nemo-fabric"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/4d/813c65071639182254517f2557af62d8940940a0418d1b5075acc8114e73/nemo_fabric-0.4.0rc1-py3-none-any.whl", hash = "sha256:c1a57078bb20f85eda69d423da705c143684bca3640ec60c16e0afc878b14f0e", size = 8032, upload-time = "2026-09-30T17:50:54.119Z" },
+    { url = "https://files.pythonhosted.org/packages/48/d7/38140b74c1bb34fc3cd08a34c326c6b0435053abaf88dd85046804080dd3/nemo_fabric-0.4.0-py3-none-any.whl", hash = "sha256:1bc96589bff0b3bb66630c476578a4a03357c27efaddbf75df16a7cefd2c0eb8", size = 7993, upload-time = "2026-10-02T00:32:46.685Z" },
 ]
 
 [package.optional-dependencies]
@@ -4791,15 +4791,15 @@ streaming = [
 
 [[package]]
 name = "nemo-fabric-adapter-contract"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/9a/00bf2733ae35a0bba814b2b1118330bd8172e69eed757433152bca06ee3b/nemo_fabric_adapter_contract-0.4.0rc1-py3-none-any.whl", hash = "sha256:ab959853dde0dc780843842316b5e62cae015fe56aba8cb8d219dd3c64023c80", size = 15846, upload-time = "2026-09-30T17:50:45.359Z" },
+    { url = "https://files.pythonhosted.org/packages/24/93/9de0e78ae4d2363ac23d253e62997af4ba0d248c312ced59fd404be5c1cb/nemo_fabric_adapter_contract-0.4.0-py3-none-any.whl", hash = "sha256:36b235be49ed981d0549231effce7440bd1e1987a02e2beda2c9930347b0cd7a", size = 15805, upload-time = "2026-10-02T00:32:39.135Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapters-claude"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4807,7 +4807,7 @@ dependencies = [
     { name = "tomli-w", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/be/cf3550e368e80bcc78f1d25ec433ea3b050c8ed71c2867fb715c65286bc8/nemo_fabric_adapters_claude-0.4.0rc1-py3-none-any.whl", hash = "sha256:2423c7206eac7d8d8520c12fa98d8daa52c9bf486fa78c8ec0cbea482ed73601", size = 18716, upload-time = "2026-09-30T17:50:47.79Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/9f/6231e1f3c362bb2a05a8d494974c047160aa1ac4b976ab22e13791023fe3/nemo_fabric_adapters_claude-0.4.0-py3-none-any.whl", hash = "sha256:a98cca199bb47794e64c33bfa5ea6c8722c2551a7270679997c6e05333554b40", size = 18675, upload-time = "2026-10-02T00:32:39.34Z" },
 ]
 
 [package.optional-dependencies]
@@ -4818,7 +4818,7 @@ harness = [
 
 [[package]]
 name = "nemo-fabric-adapters-codex"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4826,7 +4826,7 @@ dependencies = [
     { name = "tomli-w", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/6a/3902e5663ce894df80f5a84ff89ed69d7762d623603bc4dbed2fe2649544/nemo_fabric_adapters_codex-0.4.0rc1-py3-none-any.whl", hash = "sha256:deb8a016e911d665f2074e1f910e170199e94eefb910d6a18f05cffb15b96e89", size = 19968, upload-time = "2026-09-30T17:50:32.373Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/1b/88e930076f1c8769ad1281bf4c1bd5196eed9950796c33f11cdb3f74a9dc/nemo_fabric_adapters_codex-0.4.0-py3-none-any.whl", hash = "sha256:41c49718a224ee78c09ffb0d9df0f68a4668bfbd92a3b43f2bfa3dd73d77377f", size = 19924, upload-time = "2026-10-02T00:32:25.875Z" },
 ]
 
 [package.optional-dependencies]
@@ -4837,18 +4837,18 @@ harness = [
 
 [[package]]
 name = "nemo-fabric-adapters-common"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/2f/bf2832727dbb6dfaaf821f847b3bd9973f84df024926bfbbb6ae41342651/nemo_fabric_adapters_common-0.4.0rc1-py3-none-any.whl", hash = "sha256:8e00edc0eea4b8bb2995a0702272c07637d1430fb8ce2c11abda055ea4553235", size = 27590, upload-time = "2026-09-30T17:50:37.044Z" },
+    { url = "https://files.pythonhosted.org/packages/75/09/d5d0e80cde7528bcce05215f56f84d379b94ee7eb3bb8ebc7bca47f29fe3/nemo_fabric_adapters_common-0.4.0-py3-none-any.whl", hash = "sha256:f607eba1f6e998667f9fae38b446cda32980a1ac814b2542ca4cc4b6307f6408", size = 27552, upload-time = "2026-10-02T00:32:46.758Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-adapters-deepagents"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-mcp-adapters", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4858,7 +4858,7 @@ dependencies = [
     { name = "nemo-fabric-adapters-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/ff/c72278fe53019aedb4627c4b783f2e412189ae7dde5a69b1d94f6c1663bc/nemo_fabric_adapters_deepagents-0.4.0rc1-py3-none-any.whl", hash = "sha256:29157e219f996c52262b4f40996c60927d8e8d0fe6f0b42034d8d3a1bc8f729c", size = 22643, upload-time = "2026-09-30T17:50:36.459Z" },
+    { url = "https://files.pythonhosted.org/packages/15/cf/cc7db71d4ad9a335370a1c520d1a6ab7e98fb8f6978a98c8e40706564139/nemo_fabric_adapters_deepagents-0.4.0-py3-none-any.whl", hash = "sha256:6f9e2032fce8c36df70d31e34a080571d6a7ae5af7faff87d9b2e9c92cc43ac0", size = 22604, upload-time = "2026-10-02T00:32:39.934Z" },
 ]
 
 [package.optional-dependencies]
@@ -4870,31 +4870,31 @@ harness = [
 
 [[package]]
 name = "nemo-fabric-adapters-hermes"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "nemo-fabric-adapter-contract", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-fabric-adapters-common", marker = "(python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/4a/fbe6cdca7b3dce5a0b4d5c0dcc0b2e3a8ce791c09f15ee550eacce28742b/nemo_fabric_adapters_hermes-0.4.0rc1-py3-none-any.whl", hash = "sha256:7e25b37fd77410a15a3b45e6dbb42d8574cf074ec47ad9800bf6df734c38e22c", size = 18339, upload-time = "2026-09-30T17:50:50.154Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/81/6260977c58896f61776a6084b277d3bb6bc43485799cdad3431e97e8dcce/nemo_fabric_adapters_hermes-0.4.0-py3-none-any.whl", hash = "sha256:07d8acbeb6db3db9c2f5a9043d374e43704643158df59617ac395346eb6e4144", size = 18297, upload-time = "2026-10-02T00:32:26.629Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-collector"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "starlette", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/12/eea17b7111fc73a0e0f4f0d7b83a2db90fb1db4da159762bc7d9dbe13f28/nemo_fabric_collector-0.4.0rc1-py3-none-any.whl", hash = "sha256:f7093fef01325af3fbfba37a2b42693f45b769a0ec1f54baf6e814a7609c9ffb", size = 18381, upload-time = "2026-09-30T17:50:28.215Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/ca/536d2192d411dea9e9a11de56f76e7846994ed31b73639df4c41b6cc4a26/nemo_fabric_collector-0.4.0-py3-none-any.whl", hash = "sha256:e4021a7b1ecf4a3c66106709a5c49b1dc4e97f66cd71dca46f1400872fa8de21", size = 18336, upload-time = "2026-10-02T00:32:30.714Z" },
 ]
 
 [[package]]
 name = "nemo-fabric-runtime"
-version = "0.4.0rc1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -4902,9 +4902,9 @@ dependencies = [
     { name = "typing-extensions", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/c2/c684295a108b4d8462eb51acde9837764efa385191e5a7e049c560edf902/nemo_fabric_runtime-0.4.0rc1-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:bbc3b8028db2eef151dbbdbc55b84831faa4337d10be41dfd57a430a1cd0a3c4", size = 2856619, upload-time = "2026-09-30T17:50:33.737Z" },
-    { url = "https://files.pythonhosted.org/packages/d4/81/9c99377298c72b1a8f4c39ba894e4c5d0d5299837001c4d10438cf56a8f9/nemo_fabric_runtime-0.4.0rc1-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:dc9e6d1eeb9e575f467c5ce5335ccd861ba7b011c5813e6f86d87b57441ee386", size = 2734052, upload-time = "2026-09-30T17:50:56.222Z" },
-    { url = "https://files.pythonhosted.org/packages/91/b1/2ab145ecc1eb0aafa2d4e5fee21ade2d0d0d7951152ce6ee0a16f1c14d14/nemo_fabric_runtime-0.4.0rc1-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:03e9f531205c3a84a32848a7e453b77f74ecc5f29f7d7839c9a57dd72b8a13d8", size = 2932643, upload-time = "2026-09-30T17:51:20.475Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/8f/0a8c995b963f0c39e4db2d4150dd6b6979c18ee7c57e75722e9d9b1483cd/nemo_fabric_runtime-0.4.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:9a168640e5d692eed56765f26a3173da8be93cececa7556f97da578cdecbde25", size = 2872239, upload-time = "2026-10-02T00:32:19.031Z" },
+    { url = "https://files.pythonhosted.org/packages/05/0b/7f712e27d82f70bc9a0c4776b3d7baa3c838f1a987bba770f1acbd574c9b/nemo_fabric_runtime-0.4.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:225eebe8be32dfe0c4519b7bf78983ca82df6953f87ddcc70f92b3d794e2584a", size = 2736467, upload-time = "2026-10-02T00:32:44.189Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/f6/6f14adc511d325b4c079f4d5c1f0e2a30deb045b575d6a4c78e9b6fb9073/nemo_fabric_runtime-0.4.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2e7160512c84c948b5731ea46f11e98662b835187ea1d8f899a531b90e3a8438", size = 2941708, upload-time = "2026-10-02T00:33:11.808Z" },
 ]
 
 [package.optional-dependencies]
@@ -6192,54 +6192,54 @@ requires-dist = [
     { name = "nemo-evaluator-sdk", extras = ["harbor"], marker = "extra == 'nemo-evaluator-plugin'", editable = "packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", extras = ["harbor"], marker = "extra == 'plugins'", editable = "packages/nemo_evaluator_sdk" },
     { name = "nemo-evaluator-sdk", extras = ["harbor"], marker = "extra == 'services'", editable = "packages/nemo_evaluator_sdk" },
-    { name = "nemo-fabric", marker = "extra == 'harbor'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapter-contract", marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapter-contract", marker = "extra == 'nemo-insights-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapter-contract", marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapter-contract", marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-claude", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-codex", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", marker = "extra == 'nemo-insights-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'services'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-deepagents", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'all'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-claude'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-codex'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-deepagents'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric", marker = "extra == 'harbor'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric", extras = ["relay", "streaming"], marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapter-contract", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-claude", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-codex", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", marker = "extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-deepagents", extras = ["harness"], marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'all'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-claude'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-codex'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'plugins'", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-hermes", marker = "python_full_version < '3.14' and extra == 'services'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix-ext", editable = "packages/nemo_helix_ext" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-plugin", marker = "extra == 'all'", editable = "packages/nemo_helix_plugin" },
@@ -6888,7 +6888,7 @@ requires-dist = [
     { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
     { name = "lark", specifier = ">=1.1.0" },
-    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix-sdk", editable = "sdk/python/nemo-helix" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.9.3,<0.10" },
     { name = "ngcsdk", marker = "extra == 'nemo-helix-sdk'", specifier = ">=4.8.2" },
@@ -7003,7 +7003,7 @@ requires-dist = [
     { name = "jsonschema", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=4.23.0" },
     { name = "langchain-nvidia-ai-endpoints", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.3.5" },
-    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.9.3,<0.10" },
     { name = "nemo-sandboxed-gym", marker = "extra == 'nemo-evaluator-sdk'", editable = "packages/sandboxed_gym" },
@@ -7125,8 +7125,8 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx" },
     { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "nemo-fabric-adapter-contract", specifier = "==0.4.0rc1" },
-    { name = "nemo-fabric-adapters-common", specifier = "==0.4.0rc1" },
+    { name = "nemo-fabric-adapter-contract", specifier = ">=0.4.0,<0.5.0" },
+    { name = "nemo-fabric-adapters-common", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-relay", specifier = ">=0.9.3,<0.10" },
