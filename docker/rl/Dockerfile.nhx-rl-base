@@ -323,7 +323,7 @@ uv pip install --python /opt/nemo_rl_venv/bin/python "opensandbox>=0.1.9" "tenac
 uv pip install --python /opt/nemo_rl_venv/bin/python \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
-    "wandb>=0.29.0"
+    "wandb>=0.30.0"
 
 # NeMo-Gym and nemo-sandboxed-gym in the BASE venv, for the DRIVER - not duplicates of the
 # nemo_gym extra above. `spinup_nemo_gym_actor` runs in the driver process and, on the sandboxed
@@ -492,7 +492,7 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
         uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
     fi
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
-        uv pip install --python "${py}" --upgrade-package wandb "wandb>=0.29.0"
+        uv pip install --python "${py}" --upgrade-package wandb "wandb>=0.30.0"
     fi
     # Full mlflow needs cryptography<50 and an exact-version skinny; this image uses skinny
     # plus cryptography>=50. pynvml is a deprecated shim; nvidia-ml-py still provides the
