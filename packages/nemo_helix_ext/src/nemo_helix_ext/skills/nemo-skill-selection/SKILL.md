@@ -89,7 +89,8 @@ Before handing off, find out which platform the CLI points at. `nemo setup` can 
 
 ```bash
 # 0. Which platform does the active context use? Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT.
-#    Prints "no-config" when there is no CLI install or config file yet.
+#    With no config file at the default path, this resolves to http://localhost:8080.
+#    Prints "no-config" only when there is no CLI install, or NHX_CONFIG_FILE names a missing file.
 if [ -x .venv/bin/python ]; then
   NHX_URL=$(.venv/bin/python -c '
 from nemo_helix_ext.config.config import get_context

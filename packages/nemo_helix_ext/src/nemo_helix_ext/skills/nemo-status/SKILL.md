@@ -45,7 +45,8 @@ Confirm the CLI is installed. If `.venv/bin/nemo` is missing, route to `nemo-set
 1. **Check platform up-status first; gate everything else on it.** Start by resolving which platform the active CLI context points at. `nemo setup` can connect to a remote cluster, so do not assume `localhost:8080`:
 
 ```bash
-# Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT; falls back to the local default only when no config file exists.
+# Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT. Resolves to http://localhost:8080 when there is no config
+# file at the default path; the except branch covers NHX_CONFIG_FILE naming a missing file.
 NHX_URL=$(.venv/bin/python -c '
 from nemo_helix_ext.config.config import get_context
 try:
