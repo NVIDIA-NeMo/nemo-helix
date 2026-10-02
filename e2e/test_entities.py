@@ -395,6 +395,7 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
     The SQL differs per dialect (SQLite ``json_each`` vs PostgreSQL ``json_array_elements``) and the
     Kubernetes e2e deploys PostgreSQL, so this is the CI check for the PostgreSQL branch. The
     non-array row matters there: expanding an object raises on PostgreSQL unless it is guarded.
+    Scalar elements must be skipped on both: SQLite raises on them, PostgreSQL reads them as null.
     """
     prefix = _unique_name("elem-match")
     owner = _unique_name("owner")
@@ -407,6 +408,7 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
         },
         f"{prefix}-split": {"metadata": [{"key": "owner", "value": "someone-else"}, {"key": "suite", "value": owner}]},
         f"{prefix}-object": {"metadata": {"key": "owner", "value": owner}},
+        f"{prefix}-scalars": {"metadata": ["red", 3, None]},
         f"{prefix}-none": {},
     }
 
@@ -427,7 +429,13 @@ def test_entity_elem_match_filter(entity_store_client: EntitiesClient, workspace
 
         owner_is_mine = {"data.metadata": {"$elemMatch": {"key": "owner", "value": owner}}}
         assert names_matching(owner_is_mine) == {f"{prefix}-match"}
-        assert names_matching({"$not": owner_is_mine}) == {f"{prefix}-split", f"{prefix}-object", f"{prefix}-none"}
+        assert names_matching({"$not": owner_is_mine}) == {
+            f"{prefix}-split",
+            f"{prefix}-object",
+            f"{prefix}-scalars",
+            f"{prefix}-none",
+        }
+        assert names_matching({"data.metadata": {"$elemMatch": {"value": None}}}) == set()
         assert names_matching({"data.metadata": {"$elemMatch": {"key": "verified", "value": True}}}) == {
             f"{prefix}-match"
         }

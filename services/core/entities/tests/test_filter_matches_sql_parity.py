@@ -99,7 +99,12 @@ SEED = [
             "meta": {"key": "owner", "value": "alice"},
         },
     ),
-    dict(id=5, name=None, data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"]}),
+    # Scalar elements only: $elemMatch must skip them, even for a null criterion.
+    dict(
+        id=5,
+        name=None,
+        data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"], "meta": ["red", 3, None, True]},
+    ),
 ]
 
 
@@ -210,10 +215,11 @@ def test_matches_matches_sql(db, label, op):
         ({"key": "level", "value": 3}, {2}),
         ({"key": "owner", "value": None}, {3}),
         ({"key": "team", "value": "alice"}, {3}),
+        ({"value": None}, {3}),
     ],
 )
 def test_elem_match_requires_one_element_to_satisfy_every_criterion(db, criteria, expected_ids):
-    """Each criterion must hold on the same element, and a non-array field (row 4) never matches."""
+    """Each criterion must hold on the same object element; non-arrays (row 4) and scalar elements (row 5) never match."""
     condition = C(FilterOperator.ELEM_MATCH, "data.meta", criteria).apply(
         SQLAlchemyFilterRepository(FakeEntity, dialect_name="sqlite")
     )

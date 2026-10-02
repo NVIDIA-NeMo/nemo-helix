@@ -272,9 +272,14 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if not is_json:
             raise ValueError(f"$elemMatch requires a JSON array field, got non-JSON field '{field}'")
         elements = self._array_elements(array, FilterOperator.ELEM_MATCH)
-        element = type_coerce(elements.c.value, JSON)
+        if self._dialect_name == "sqlite":
+            is_object = elements.c.type == "object"
+        else:
+            is_object = func.json_typeof(elements.c.value) == "object"
+        # SQLite may extract before checking the type, and raises on a scalar; NULL scalars out first.
+        element = type_coerce(case((is_object, elements.c.value)), JSON)
         matches = [self._json_eq(element[key], value) for key, value in criteria.items()]
-        return select(literal(1)).select_from(elements).where(*matches).exists()
+        return select(literal(1)).select_from(elements).where(is_object, *matches).exists()
 
     def and_op(self, operations: List[Any]) -> Any:
         """Logical AND."""
