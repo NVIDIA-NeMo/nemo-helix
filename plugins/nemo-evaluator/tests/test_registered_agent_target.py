@@ -499,6 +499,36 @@ async def test_harbor_caller_may_pin_the_fabric_package(mocker: MockerFixture) -
     assert resolved.agent_kwargs["fabric_package"] == "nemo-fabric[deepagents]==9.9.9"
 
 
+async def test_a_non_string_fabric_package_override_is_rejected_not_replaced(mocker: MockerFixture) -> None:
+    """A list where a requirement string belongs used to be swapped for the derived default without a word."""
+    _platform(mocker, _agent())
+
+    with pytest.raises(
+        ValueError, match="`agent_kwargs.fabric_package` must be a requirement string or null, not list"
+    ):
+        await _resolve(_harbor_by_agent(agent_kwargs={"fabric_package": ["nemo-fabric[deepagents]"]}))
+
+
+async def test_a_harbor_fill_that_fails_after_the_snapshot_discards_it(mocker: MockerFixture) -> None:
+    """Resolution owns the snapshot until a resolved target exists, so its own failures roll it back."""
+    config = _calculator_config()
+    config["skills"] = {"paths": ["skills/arithmetic"]}
+    config["default_harness"] = "mystery"
+    config["harnesses"] = {"mystery": {"kind": "deepagents", "settings": {}}}
+    files = _platform(mocker, _agent(config), ethos_fileset=True).files
+    mocker.patch(
+        "nemo_evaluator.jobs.registered_agent_resolution.fabric_harness_package",
+        side_effect=ValueError("no known Fabric package extra installs harness 'x'"),
+    )
+
+    with pytest.raises(ValueError, match="no known Fabric package extra"):
+        await _resolve(_harbor_by_agent())
+
+    files.create_fileset.assert_awaited_once()
+    deleted = files.delete_fileset.await_args.kwargs
+    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
+
+
 async def test_harbor_environment_secrets_join_the_targets_own(mocker: MockerFixture) -> None:
     _platform(mocker, _agent())
     environment = EnvironmentSpecInline(secrets={"CALC_TOKEN": "dev/calc-token"})
