@@ -48,7 +48,13 @@ def _exact_match_metric() -> dict[str, Any]:
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
 
 
-def _build_app() -> FastAPI:
+def _build_app(concurrency: int = 64) -> FastAPI:
+    """Build the route's app with its own concurrency cap.
+
+    Each app gets a fresh semaphore, so tests neither contend over one shared cap nor have to
+    rebind a module attribute. The default is wide enough that tests which are not about the cap
+    never trip it.
+    """
     app = FastAPI()
     app.include_router(live_routes.router, prefix="/v2/workspaces/{workspace}")
 
@@ -67,18 +73,14 @@ def _build_app() -> FastAPI:
     app.dependency_overrides[get_nemo_client] = lambda: AsyncSecretsClient(
         base_url="http://secrets.invalid", workspace="default"
     )
+    sem = asyncio.Semaphore(concurrency)
+    app.dependency_overrides[live_routes.get_live_semaphore] = lambda: sem
     return app
 
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     yield TestClient(_build_app())
-
-
-@pytest.fixture
-def unbounded_concurrency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remove the concurrency cap so tests that aren't about it don't trip it."""
-    monkeypatch.setattr(live_routes, "_SEMAPHORE", asyncio.Semaphore(64))
 
 
 def _chat_response(text: str) -> dict[str, Any]:
@@ -217,9 +219,7 @@ def test_timeout_returns_an_error_rather_than_hanging(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_slow_scoring_does_not_block_the_event_loop(
-    monkeypatch: pytest.MonkeyPatch, unbounded_concurrency: None
-) -> None:
+async def test_slow_scoring_does_not_block_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
     """An unrelated cheap endpoint stays responsive for the whole of a live evaluation.
 
     This is the check that catches ``Evaluator().run_sync(...)``: run_sync spawns a worker thread
@@ -281,7 +281,6 @@ async def test_slow_scoring_does_not_block_the_event_loop(
 @pytest.mark.asyncio
 async def test_excess_concurrency_is_rejected_not_fanned_out(monkeypatch: pytest.MonkeyPatch) -> None:
     """Past the cap, extra live tests are refused rather than queued into more inference calls."""
-    monkeypatch.setattr(live_routes, "_SEMAPHORE", asyncio.Semaphore(1))
     in_flight = 0
     peak = 0
 
@@ -304,7 +303,7 @@ async def test_excess_concurrency_is_rejected_not_fanned_out(monkeypatch: pytest
         "target": {"url": "http://models.test/v1/chat/completions", "name": "test-model"},
         "prompt_template": {"messages": [{"role": "user", "content": "{{item.question}}"}]},
     }
-    transport = httpx.ASGITransport(app=_build_app())
+    transport = httpx.ASGITransport(app=_build_app(concurrency=1))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         responses = await asyncio.gather(*(client.post(_BASE, json=body, timeout=30.0) for _ in range(3)))
 

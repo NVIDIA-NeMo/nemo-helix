@@ -77,6 +77,16 @@ MAX_CONCURRENT = 4
 _SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT)
 
 
+def get_live_semaphore() -> asyncio.Semaphore:
+    """Provide the process-wide cap on concurrent live evaluations.
+
+    A dependency rather than a direct module lookup so a caller -- a test, most of all -- can
+    substitute its own cap through ``app.dependency_overrides`` instead of rebinding this module's
+    attribute, which is shared by every test in the process.
+    """
+    return _SEMAPHORE
+
+
 class LiveScoreRequest(BaseModel):
     """One row, the metrics to score it with, and an optional model to generate it.
 
@@ -176,6 +186,7 @@ async def run_live_evaluation(
     request: LiveScoreRequest,
     entity_client: EntityClient = Depends(get_entity_client),
     async_client: AsyncNemoClient = Depends(get_nemo_client),
+    semaphore: asyncio.Semaphore = Depends(get_live_semaphore),
 ) -> LiveScoreResponse:
     """Run a synchronous evaluation on a single dataset row.
 
@@ -203,12 +214,12 @@ async def run_live_evaluation(
     Past the concurrency cap the request is rejected with 429 rather than queued; past the overall
     time limit it fails with 504.
     """
-    if _SEMAPHORE.locked():
+    if semaphore.locked():
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many live evaluations are already running. Retry in a moment.",
         )
-    async with _SEMAPHORE:
+    async with semaphore:
         try:
             # Reference resolution reaches the entity store, Files and Models, so it is bounded by
             # the same timeout as scoring; outside it a slow lookup would hold a slot indefinitely.
