@@ -729,6 +729,176 @@ def test_atif_mapping_keeps_tool_error_on_tool_span() -> None:
     assert tool.status == SpanStatus.ERROR
 
 
+@pytest.mark.parametrize(
+    ("tool_name", "content"),
+    [
+        ("bash", "Exit code 0\n[error] is a line returned by a successful diagnostic command."),
+        ("read", "## Overview\nThe report quotes a test log line marked [ERROR]."),
+    ],
+)
+def test_atif_mapping_does_not_treat_returned_content_as_tool_error(tool_name: str, content: str) -> None:
+    trajectory = AtifTrajectory.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "session_id": "trace-session-id",
+            "agent": {"name": "sample-agent", "version": "1.0.0"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "using a tool",
+                    "tool_calls": [{"tool_call_id": "call-1", "function_name": tool_name}],
+                    "observation": {"results": [{"source_call_id": "call-1", "content": content}]},
+                }
+            ],
+        }
+    )
+
+    spans = trajectory_to_spans(
+        workspace="default",
+        trajectory=trajectory,
+        ingested_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+    )
+
+    tool = next(span for span in spans if span.kind == SpanKind.TOOL)
+    assert tool.status == SpanStatus.SUCCESS
+
+
+def test_atif_mapping_respects_explicit_success_over_error_text() -> None:
+    trajectory = AtifTrajectory.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "session_id": "trace-session-id",
+            "agent": {"name": "sample-agent", "version": "1.0.0"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "using a tool",
+                    "tool_calls": [{"tool_call_id": "call-1", "function_name": "read"}],
+                    "observation": {"results": [{"source_call_id": "call-1", "content": "[error] in file"}]},
+                    "extra": {"tool_result_is_error": False},
+                }
+            ],
+        }
+    )
+
+    spans = trajectory_to_spans(
+        workspace="default",
+        trajectory=trajectory,
+        ingested_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+    )
+
+    tool = next(span for span in spans if span.kind == SpanKind.TOOL)
+    assert tool.status == SpanStatus.SUCCESS
+
+
+@pytest.mark.parametrize(
+    ("content", "extra", "expected_status"),
+    [
+        ("plain failure", {"tool_result_metadata": {"is_error": True}}, SpanStatus.ERROR),
+        ("[error] in file", {"tool_result_metadata": {"is_error": False}}, SpanStatus.SUCCESS),
+        ("plain failure", {"tool_result_is_error": True}, SpanStatus.ERROR),
+        ("[error] in file", {"tool_result_is_error": False}, SpanStatus.SUCCESS),
+        (
+            "plain failure",
+            {"tool_result_metadata": {"is_error": True}, "tool_result_is_error": False},
+            SpanStatus.ERROR,
+        ),
+        (
+            "[error] in file",
+            {"tool_result_metadata": {"is_error": False}, "tool_result_is_error": True},
+            SpanStatus.SUCCESS,
+        ),
+        ("plain output", {"tool_result_metadata": {"is_error": 1}}, SpanStatus.SUCCESS),
+        ("[ERROR] failed", {"tool_result_metadata": {"is_error": "false"}}, SpanStatus.ERROR),
+        ("[error] failed", {}, SpanStatus.ERROR),
+        ("  [ERROR] failed", {}, SpanStatus.ERROR),
+        ("Exit code 1\n[error] failed", {}, SpanStatus.ERROR),
+        ("Exit code -9\n[ERROR] killed", {}, SpanStatus.ERROR),
+        ("Exit code 0\n[error] returned diagnostic text", {}, SpanStatus.SUCCESS),
+        ("Exit code invalid\nreturned diagnostic [error] text", {}, SpanStatus.SUCCESS),
+    ],
+)
+def test_atif_mapping_tool_result_error_metadata_and_fallback(
+    content: str, extra: dict[str, Any], expected_status: SpanStatus
+) -> None:
+    trajectory = AtifTrajectory.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "session_id": "trace-session-id",
+            "agent": {"name": "sample-agent", "version": "1.0.0"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "using a tool",
+                    "tool_calls": [{"tool_call_id": "call-1", "function_name": "read"}],
+                    "observation": {"results": [{"source_call_id": "call-1", "content": content}]},
+                    "extra": extra,
+                }
+            ],
+        }
+    )
+    spans = trajectory_to_spans(
+        workspace="default",
+        trajectory=trajectory,
+        ingested_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+    )
+    tool = next(span for span in spans if span.kind == SpanKind.TOOL)
+    assert tool.status == expected_status
+    response = Span.from_domain(tool)
+    assert response.error_message == (content if expected_status == SpanStatus.ERROR else None)
+
+
+@pytest.mark.parametrize("is_error", [True, False])
+def test_atif_mapping_error_metadata_matches_only_its_tool_call(is_error: bool) -> None:
+    trajectory = AtifTrajectory.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "session_id": "trace-session-id",
+            "agent": {"name": "sample-agent", "version": "1.0.0"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "using two tools",
+                    "tool_calls": [
+                        {"tool_call_id": "call-a", "function_name": "read"},
+                        {"tool_call_id": "call-b", "function_name": "bash"},
+                    ],
+                    "observation": {
+                        "results": [
+                            {
+                                "source_call_id": "call-b",
+                                "content": "plain output" if is_error else "[error] actual failure",
+                            },
+                            {"source_call_id": "call-a", "content": "[error] returned file content"},
+                        ]
+                    },
+                    "extra": {
+                        "tool_result_is_error": True,
+                        "tool_result_metadata": {
+                            "is_error": is_error,
+                            "raw_tool_result": {"tool_use_id": "call-a"},
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    spans = trajectory_to_spans(
+        workspace="default",
+        trajectory=trajectory,
+        ingested_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+    )
+    statuses = {span.name: span.status for span in spans if span.kind == SpanKind.TOOL}
+    assert statuses == {
+        "read": SpanStatus.ERROR if is_error else SpanStatus.SUCCESS,
+        "bash": SpanStatus.SUCCESS if is_error else SpanStatus.ERROR,
+    }
+
+
 def test_atif_mapping_promotes_root_extra_error() -> None:
     trajectory = AtifTrajectory.model_validate(
         {

@@ -994,10 +994,28 @@ def _tool_result_is_error(step: AtifStep, result: AtifObservationResult | None) 
     metadata = _matched_tool_result_metadata(step, result)
     if metadata.get("is_error") is True:
         return True
-    if _step_extra_bool(step, "tool_result_is_error") and _is_only_observation_result(step, result):
-        return True
+    if metadata.get("is_error") is False:
+        return False
+    if _is_only_observation_result(step, result) and step.extra is not None:
+        tool_result_is_error = step.extra.get("tool_result_is_error")
+        if isinstance(tool_result_is_error, bool):
+            return tool_result_is_error
     content = _result_text(result)
-    return content is not None and "[error]" in content.lower()
+    if content is None:
+        return False
+    content = content.lstrip().lower()
+    if content.startswith("[error]"):
+        return True
+    # Older Harbor results include an exit code before their error marker.
+    # A marker inside returned file or command output is not a tool failure.
+    first_line, _, remainder = content.partition("\n")
+    if not first_line.startswith("exit code "):
+        return False
+    try:
+        exit_code = int(first_line.removeprefix("exit code "))
+    except ValueError:
+        return False
+    return exit_code != 0 and any(line.lstrip().startswith("[error]") for line in remainder.splitlines())
 
 
 def _tool_result_error_message(step: AtifStep, result: AtifObservationResult | None) -> str | None:
@@ -1042,11 +1060,6 @@ def _result_text(result: AtifObservationResult | None) -> str | None:
     if result is None or not isinstance(result.content, str):
         return None
     return result.content
-
-
-def _step_extra_bool(step: AtifStep, key: str) -> bool:
-    """Read a strictly true boolean from step extras."""
-    return step.extra is not None and step.extra.get(key) is True
 
 
 def _step_extra_dict(step: AtifStep, key: str) -> dict[str, Any]:
