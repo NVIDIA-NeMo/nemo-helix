@@ -1083,7 +1083,14 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     elif agent_shape == "agent_dir":
         agent_dir = tmp_path / "agent"
         agent_dir.mkdir()
-        (agent_dir / "harbor_wrapper.py").write_text("x = 1\n", encoding="utf-8")
+        (agent_dir / "harbor_wrapper.py").write_text(
+            "from harbor.agents.base import BaseAgent\nclass WrappedAgent(BaseAgent):\n"
+            "    @staticmethod\n    def name(): return 'fixture'\n"
+            "    def version(self): return '1'\n"
+            "    async def setup(self, environment): pass\n"
+            "    async def run(self, instruction, environment, context): pass\n",
+            encoding="utf-8",
+        )
         agent_options.update(agent_import_path="harbor_wrapper:WrappedAgent", agent_dir=agent_dir)
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="kwargs-job", **agent_options)
 

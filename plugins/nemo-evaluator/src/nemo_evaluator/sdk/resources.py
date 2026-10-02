@@ -52,6 +52,7 @@ from nemo_evaluator_sdk.values import (
     FieldMapping,
     Model,
     ModelRef,
+    SecretRef,
 )
 from nemo_platform_plugin.client.adapter import client_from_platform
 from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
@@ -134,6 +135,7 @@ class Evaluator:
         *,
         tasks: TasksetRef,
         target: AgentTaskRunner,
+        env_secrets: dict[str, SecretRef] | None = None,
     ) -> AgentEvaluatorJobResource: ...
 
     def submit(
@@ -147,6 +149,7 @@ class Evaluator:
         field_mapping: FieldMapping | None = None,
         prompt_template: str | dict[str, Any] | None = None,
         metric_bundle_packager: MetricBundlePackager | None = None,
+        env_secrets: dict[str, SecretRef] | None = None,
     ) -> EvaluatorJobResource | AgentEvaluatorJobResource:
         """Submit an evaluation job through the evaluator plugin executor.
 
@@ -182,7 +185,11 @@ class Evaluator:
                     "evaluation. A taskset evaluation is configured by the runner passed as "
                     "`target`, so supplying them here would have no effect."
                 )
-            return self._executor.submit_agent_eval(tasks=tasks, target=target)
+            return self._executor.submit_agent_eval(
+                tasks=tasks, target=target, **({"env_secrets": env_secrets} if env_secrets is not None else {})
+            )
+        if env_secrets is not None:
+            raise TypeError("env_secrets requires Harbor taskset submission")
         if metric is None or dataset is None:
             raise TypeError(
                 "submit() needs either `tasks` + `target` for a taskset evaluation, or `metric` + "

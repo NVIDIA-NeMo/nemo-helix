@@ -4319,6 +4319,34 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HarborAgentSource:
+      properties:
+        kind:
+          type: string
+          const: fileset-archive
+          title: Kind
+          default: fileset-archive
+        fileset_ref:
+          type: string
+          pattern: ^[\w\-.]+/[\w\-.]+#[\w\-./]+$
+          title: Fileset Ref
+        sha256:
+          type: string
+          maxLength: 64
+          minLength: 64
+          pattern: ^[0-9a-f]{64}$
+          title: Sha256
+        archive_format:
+          type: string
+          const: harbor-agent-tar-gzip-v1
+          title: Archive Format
+          default: harbor-agent-tar-gzip-v1
+      additionalProperties: false
+      type: object
+      required:
+      - fileset_ref
+      - sha256
+      title: HarborAgentSource
     HarborArchiveSource:
       properties:
         kind:
@@ -4365,8 +4393,8 @@ components:
         agent_import_path:
           title: Agent Import Path
           description: Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent');
-            overrides `agent_name`. The module must already be importable in the run
-            environment.
+            overrides `agent_name`. The module must be installed in the worker or
+            supplied by agent_source.
           type: string
         agent_model_name:
           title: Agent Model Name
@@ -4393,6 +4421,34 @@ components:
             and Harbor receives a `${ENV_NAME}` template it expands when the agent
             is created, so no credential is stored on the spec, the run bundle, or
             the job dir''s `config.json`.'
+        agent_source:
+          $ref: '#/components/schemas/HarborAgentSource'
+        agent_env:
+          additionalProperties:
+            type: string
+          type: object
+          title: Agent Env
+          description: Public non-secret agent environment.
+        timeout_multiplier:
+          title: Timeout Multiplier
+          type: number
+          exclusiveMinimum: 0.0
+        agent_timeout_multiplier:
+          title: Agent Timeout Multiplier
+          type: number
+          exclusiveMinimum: 0.0
+        verifier_timeout_multiplier:
+          title: Verifier Timeout Multiplier
+          type: number
+          exclusiveMinimum: 0.0
+        agent_setup_timeout_multiplier:
+          title: Agent Setup Timeout Multiplier
+          type: number
+          exclusiveMinimum: 0.0
+        environment_build_timeout_multiplier:
+          title: Environment Build Timeout Multiplier
+          type: number
+          exclusiveMinimum: 0.0
         n_attempts:
           type: integer
           minimum: 1.0

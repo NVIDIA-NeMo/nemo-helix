@@ -21,11 +21,13 @@ import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
 from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.harbor.agent_source import HarborAgentSource
 from nemo_evaluator.harbor.tasks import PinnedHarborSource
 from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import validate_agent_environment
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
@@ -121,7 +123,7 @@ class HarborRunnerTarget(BaseModel):
     agent_import_path: str | None = Field(
         default=None,
         description="Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent'); overrides `agent_name`. "
-        "The module must already be importable in the run environment.",
+        "The module must be installed in the worker or supplied by agent_source.",
     )
     agent_model_name: str | None = Field(default=None, description="Optional model slug passed to the Harbor agent.")
     agent_kwargs: dict[str, JsonValue] = Field(
@@ -137,6 +139,14 @@ class HarborRunnerTarget(BaseModel):
         "environment at compile time, and Harbor receives a `${ENV_NAME}` template it expands when the agent "
         "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`.",
     )
+    agent_source: HarborAgentSource | None = None
+    agent_env: dict[str, str] = Field(default_factory=dict, description="Public non-secret agent environment.")
+    timeout_multiplier: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    agent_timeout_multiplier: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    verifier_timeout_multiplier: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    agent_setup_timeout_multiplier: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    environment_build_timeout_multiplier: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
     max_retries: int = Field(default=0, ge=0, description="Harbor per-trial retry attempts on transient failures.")
@@ -151,6 +161,13 @@ class HarborRunnerTarget(BaseModel):
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> Self:
+        validate_agent_environment(self.agent_env, list(self.env_secrets))
+        if self.agent_source is not None and not self.agent_import_path:
+            raise ValueError("agent_source requires an explicit agent_import_path")
+        if self.agent_source is not None and self.agent_import_path:
+            from nemo_evaluator.harbor.agent_source import validate_import_path
+
+            validate_import_path(self.agent_import_path)
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
         return self
 

@@ -11,7 +11,8 @@ from typing import Any
 from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline, TasksetRef
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
+from nemo_evaluator.harbor.agent_source import publish_agent_source, validate_import_path
+from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, TargetSpec
 from nemo_evaluator.jobs.runner_targets import runner_to_target
 from nemo_evaluator.sdk.job_resources import (
@@ -28,6 +29,7 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
     MetricBundlePackagerPolicyError,
     bundle_metric,
 )
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
 from nemo_evaluator_sdk.datasets.loader import prepare_dataset_rows
 from nemo_evaluator_sdk.execution.config import resolve_params
@@ -41,11 +43,14 @@ from nemo_evaluator_sdk.values import (
     RunConfig,
     RunConfigOnline,
     RunConfigOnlineModel,
+    SecretRef,
 )
 from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_platform_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_platform_plugin.client.types import RetryPolicy
 from nemo_platform_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
 from nemo_platform_plugin.evaluator.types import SubmitAgentEvalJobRequest, SubmitEvaluateJobRequest
+from nemo_platform_plugin.files.client import FilesClient
 from nemo_platform_plugin.models.client import AsyncModelsClient, ModelsClient
 
 _DEFAULT_POLL_INTERVAL_SECONDS = 10.0
@@ -183,6 +188,7 @@ class _SyncEvaluatorPluginExecutor:
     ) -> None:
         """Store the sync service clients used for evaluator execution."""
         self._client = evaluator_client or EvaluatorClient.from_client(client)
+        self._files_client = FilesClient.from_client(client)
         self._models_client = ModelsClient.from_client(client)
         self._workspace = workspace
         self._poll_interval_seconds = poll_interval_seconds
@@ -235,8 +241,13 @@ class _SyncEvaluatorPluginExecutor:
         job — polling, status, and artifacts do not differ by what produced the trials.
         """
         resolved_workspace = self._client.resolve_workspace(workspace)
+        submission_client = (
+            self._client.with_retry(RetryPolicy(max_retries=0))
+            if isinstance(spec.target, HarborRunnerTarget)
+            else self._client
+        )
         payload = (
-            self._client.submit_agent_eval_job(
+            submission_client.submit_agent_eval_job(
                 workspace=resolved_workspace,
                 body=SubmitAgentEvalJobRequest(spec=spec.model_dump(mode="json")),
             )
@@ -264,6 +275,7 @@ class _SyncEvaluatorPluginExecutor:
         tasks: TasksetRef,
         target: AgentTaskRunner,
         wait_until_done: bool = False,
+        env_secrets: dict[str, SecretRef] | None = None,
     ) -> AgentEvaluatorJobResource:
         """Submit an agent evaluation over a stored taskset, run by ``target``.
 
@@ -273,12 +285,35 @@ class _SyncEvaluatorPluginExecutor:
         cannot silently run something other than what was tested.
         """
         resolved_workspace = self._client.require_workspace(self._workspace)
-        spec = AgentEvalInputSpec(tasks=tasks, target=runner_to_target(target))
-        return self.create_agent_eval(
-            spec=spec,
-            workspace=resolved_workspace,
-            wait_until_done=wait_until_done,
-        )
+        source = None
+        wire_target = runner_to_target(target, env_secrets=env_secrets)
+        spec = AgentEvalInputSpec(tasks=tasks, target=wire_target)
+        if isinstance(target, HarborAgentTaskRunner):
+            config = target.export_submission_config()
+            if config.agent_dir is not None:
+                assert config.agent_import_path is not None
+                validate_import_path(config.agent_import_path)
+                source = publish_agent_source(
+                    config.agent_dir,
+                    files_client=self._files_client,
+                    fileset_ref=f"{resolved_workspace}/harbor-agent-sources",
+                    jobs_dir=config.jobs_dir,
+                )
+                spec.target = type(wire_target).model_validate({**wire_target.model_dump(), "agent_source": source})
+        # A verified publication is retained even if job creation has an uncertain outcome.
+        # The helper logs its reusable reference before submission; never retry job creation here.
+        try:
+            return self.create_agent_eval(
+                spec=spec,
+                workspace=resolved_workspace,
+                wait_until_done=wait_until_done,
+            )
+        except Exception as exc:
+            if source is not None:
+                exc.add_note(
+                    f"Verified agent source retained for explicit reuse: {source.model_dump_json()}. Job creation may have succeeded; inspect job state before resubmitting."
+                )
+            raise
 
     def submit(
         self,

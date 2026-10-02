@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
@@ -79,7 +80,7 @@ from nemo_platform_plugin.client.errors import (
     PermissionDeniedError,
 )
 from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.files.client import AsyncFilesClient
+from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_platform_plugin.files.types import FilesetPurpose
 from nemo_platform_plugin.intake.client import AsyncIntakeClient
 from nemo_platform_plugin.job import NemoJob
@@ -95,6 +96,14 @@ from nemo_platform_plugin.jobs.execution_profiles import (
 from nemo_platform_plugin.jobs.spec import BaseExecutionProfile
 from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
 from pydantic import BaseModel
+
+
+def _require_agent_source_enabled() -> None:
+    if not get_config().harbor_agent_source_enabled:
+        raise ValueError(
+            "Uploaded Harbor source is disabled; an operator must enable harbor_agent_source_enabled for trusted subprocess execution"
+        )
+
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +313,18 @@ class AgentEvalJob(NemoJob):
             else AgentEvalInputSpec.model_validate_json(input_spec.model_dump_json())
         )
         entity_client = cast(EntityClient | None, entity_client)
+        if isinstance(submit_spec.target, HarborRunnerTarget) and submit_spec.target.agent_source is not None:
+            _require_agent_source_enabled()
+            if async_sdk is None:
+                raise ValueError("Agent source validation requires an authenticated platform client")
+            source = submit_spec.target.agent_source
+            source_workspace, name, path = parse_fileset_ref(source.fileset_ref, workspace_fallback=None)
+            files = client_from_platform(async_sdk, AsyncFilesClient)
+            listing = (
+                await files.list_files(workspace=source_workspace, name=name, query_params={"path": path})
+            ).data()
+            if path not in {item.path for item in listing.data}:
+                raise ValueError(f"Agent source object does not exist: {source.fileset_ref}")
         # Evaluator references expand before metric resolution. Stored Harbor sources stay
         # pinned in the canonical job and resolve into native tasks during worker preparation.
         task_inputs = await resolve_agent_eval_tasks(
@@ -399,6 +420,8 @@ class AgentEvalJob(NemoJob):
             use_subprocess=isinstance(execution_profile, SubprocessJobExecutionProfile),
         )
         if isinstance(canonical_spec.target, HarborRunnerTarget):
+            if canonical_spec.target.agent_source is not None:
+                _require_agent_source_enabled()
             step = next(iter(platform_spec["steps"]))
             executor = cast(dict[str, Any], step["executor"])
             step["executor"] = await cls._resolve_harbor_subprocess_executor(
@@ -533,7 +556,7 @@ class AgentEvalJob(NemoJob):
 
     @staticmethod
     def _resolve_target(
-        target: Target | None, ctx: JobContext
+        target: Target | None, ctx: JobContext, agent_dir: Path | None = None
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
@@ -603,6 +626,8 @@ class AgentEvalJob(NemoJob):
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
+            if target.agent_source is not None and agent_dir is None:
+                raise ValueError("agent_source must be prepared before runtime construction")
             harbor_runtime = HarborAgentTaskRunner(
                 config=HarborRuntimeConfig(
                     jobs_dir=ctx.storage.persistent / "harbor",
@@ -610,6 +635,13 @@ class AgentEvalJob(NemoJob):
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,
                     agent_kwargs=target.agent_kwargs,
+                    agent_dir=agent_dir,
+                    agent_env=target.agent_env,
+                    timeout_multiplier=target.timeout_multiplier,
+                    agent_timeout_multiplier=target.agent_timeout_multiplier,
+                    verifier_timeout_multiplier=target.verifier_timeout_multiplier,
+                    agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
+                    environment_build_timeout_multiplier=target.environment_build_timeout_multiplier,
                     agent_env_from_host=_harbor_agent_env_from_host(target),
                     n_attempts=target.n_attempts,
                     n_concurrent_trials=target.n_concurrent_trials,
@@ -654,18 +686,53 @@ class AgentEvalJob(NemoJob):
                 sdk=client,
                 async_sdk=async_client,
             )
-        target, prompt_template, params = self._resolve_target(spec.target, ctx)
-        run_config = AgentEvalRunConfig(
-            params=params,
-            prompt_template=prompt_template,
-            parallelism=spec.max_concurrent_tasks,
-            labels=spec.labels,
-            fail_fast=spec.fail_fast,
-        )
-        # Forward whichever identity is present, preferring async when both are — the same
-        # precedence the SDK-backed dataset resolver uses.
-        evaluator = self._build_evaluator(async_client or client, spec.target)
-        result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        from nemo_evaluator.harbor.agent_source import prepared_agent_source
+
+        preparation = nullcontext(None)
+        if isinstance(spec.target, HarborRunnerTarget) and spec.target.agent_source is not None:
+            _require_agent_source_enabled()
+            preparation = prepared_agent_source(
+                spec.target.agent_source,
+                parent=ctx.storage.persistent / "harbor-agent-inputs",
+                files_client=FilesClient.from_client(client) if client is not None else None,
+                async_sdk=async_client,
+            )
+        try:
+            with preparation as agent_dir:
+                target, prompt_template, params = self._resolve_target(spec.target, ctx, agent_dir)
+                run_config = AgentEvalRunConfig(
+                    params=params,
+                    prompt_template=prompt_template,
+                    parallelism=spec.max_concurrent_tasks,
+                    labels=spec.labels,
+                    fail_fast=spec.fail_fast,
+                )
+                # Forward whichever identity is present, preferring async when both are — the same
+                # precedence the SDK-backed dataset resolver uses.
+                evaluator = self._build_evaluator(async_client or client, spec.target)
+                result = evaluator.run_sync(tasks=tasks, trials=spec.trials, target=target, config=run_config)
+        except Exception as exc:
+            if isinstance(spec.target, HarborRunnerTarget) and spec.target.agent_source is not None:
+                exc.add_note(
+                    f"Harbor agent {spec.target.agent_import_path} from {spec.target.agent_source.fileset_ref}"
+                )
+            raise
+
+        if isinstance(spec.target, HarborRunnerTarget) and result.metadata.target is not None:
+            from importlib.metadata import version
+
+            provenance = result.metadata.target.config
+            provenance["harbor_version"] = version("harbor")
+            provenance["requested_agent_version"] = spec.target.agent_kwargs.get("version")
+            provenance["observed_agent_versions"] = sorted(
+                {
+                    trial.metadata["harbor_agent_version"]
+                    for trial in result.trials
+                    if isinstance(trial.metadata.get("harbor_agent_version"), str)
+                }
+            )
+            if spec.target.agent_source is not None:
+                provenance["agent_source"] = spec.target.agent_source.model_dump(mode="json")
 
         files = self._write_result_files(result, ctx.storage.persistent)
         artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)

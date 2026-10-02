@@ -17,6 +17,11 @@ class EvaluatorConfig(NemoConfig):
     plugin_name: ClassVar[str] = "evaluator"
     plugin_description: ClassVar[str] = "Configuration namespace for the evaluator plugin."
 
+    harbor_agent_source_enabled: bool = Field(
+        default=False,
+        description="Allow uploaded Harbor Python source in trusted subprocess jobs. This is host code execution, not a sandbox.",
+    )
+
     gym_tasks_image: str | None = Field(
         default=None,
         description=(

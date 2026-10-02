@@ -8,6 +8,8 @@ from pathlib import Path
 from nemo_evaluator.api.schemas import Task, TaskInput, TaskRef, Taskset, TasksetInput, TasksetRef
 from nemo_evaluator.api.task_definitions.harbor import HarborTaskDefinition, validate_archive_path
 from nemo_evaluator.entities import TaskEntity, TasksetEntity
+from nemo_evaluator.harbor.agent_source import AgentSourceOptions, HarborAgentSource, publish_agent_source
+from nemo_evaluator.harbor.agent_source import inspect_agent_source as inspect_agent_source
 from nemo_evaluator.harbor.archive import capture_task, private_directory, validate_native_task_inputs
 from nemo_evaluator.harbor.publication import publish_harbor_task_archive
 from nemo_evaluator.revisions import head_digest
@@ -347,3 +349,21 @@ def register_harbor_dataset(
     except Exception as exc:
         raise HarborUploadError("Dataset registration incomplete; completed members are retained", receipt) from exc
     return receipt
+
+
+def upload_harbor_agent(
+    root: str | Path,
+    *,
+    client: NemoClient,
+    fileset_ref: str,
+    options: AgentSourceOptions | None = None,
+    jobs_dir: Path | None = None,
+) -> HarborAgentSource:
+    """Publish reusable source without importing it or submitting a job."""
+    return publish_agent_source(
+        Path(root),
+        files_client=FilesClient.from_client(client),
+        fileset_ref=fileset_ref,
+        options=options,
+        jobs_dir=jobs_dir,
+    )

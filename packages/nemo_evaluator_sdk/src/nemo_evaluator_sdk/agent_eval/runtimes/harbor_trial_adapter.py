@@ -144,6 +144,10 @@ def _trial_from_harbor_result(
         **rewards.to_metadata(),
         "harbor_trial_dir": str(trial_dir),
     }
+    # Whitelist adapter-reported identity only; never copy arbitrary agent config or environment.
+    agent_info = data.get("agent_info")
+    if isinstance(agent_info, dict) and isinstance(agent_info.get("version"), str):
+        metadata["harbor_agent_version"] = agent_info["version"]
     measurements = _trial_measurements(data)
 
     is_complete = error is None and reward is not None

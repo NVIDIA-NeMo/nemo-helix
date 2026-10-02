@@ -308,3 +308,39 @@ def docker_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         env_vars={"NMP_CONFIG_FILE_PATH": str(config_path), DATA_DIR_ENVVAR: str(work_root / "data")},
     ) as base_url:
         yield base_url
+
+
+@pytest.fixture
+def harbor_agent_platform(request, tmp_path):
+    """An isolated platform with source explicitly enabled only for the uploaded-agent case."""
+    base_url = "http://localhost:8094"
+    config_path = _materialize_subprocess_config(tmp_path, base_url=base_url)
+    settings = yaml.safe_load(config_path.read_text())
+    settings["evaluator"] = {"harbor_agent_source_enabled": request.param == "uploaded"}
+    # Subprocess workers deliberately do not inherit PYTHONPATH or plugin settings.
+    # Explicit operator profile configuration keeps this worktree and the trust flag on both sides.
+    worker_env = {
+        "PYTHONPATH": os.pathsep.join(
+            str(REPO_ROOT / path)
+            for path in (
+                "plugins/nemo-evaluator/src",
+                "packages/nemo_evaluator_sdk/src",
+                "packages/nemo_platform_plugin/src",
+            )
+        ),
+        "NEMO_EVALUATOR_HARBOR_AGENT_SOURCE_ENABLED": str(request.param == "uploaded").lower(),
+    }
+    for profile in settings["jobs"]["executors"]:
+        profile["config"]["env"] = worker_env
+    settings["jobs"]["executor_defaults"]["subprocess"]["env"] = worker_env
+    config_path.write_text(yaml.safe_dump(settings))
+    with running_platform(
+        run_args=["--services", "entities,files,secrets,jobs,evaluator", "--controllers", "jobs"],
+        base_url=base_url,
+        env_vars={
+            "NMP_CONFIG_FILE_PATH": str(config_path),
+            DATA_DIR_ENVVAR: str(tmp_path / "data"),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+    ) as url:
+        yield url, request.param

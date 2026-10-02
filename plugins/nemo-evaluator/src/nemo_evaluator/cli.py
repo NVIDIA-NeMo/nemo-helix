@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import inspect
 import json
+from collections.abc import Callable
 from enum import Enum
+from pathlib import Path
 from types import UnionType
 from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 
@@ -15,6 +17,7 @@ import typer
 from nemo_evaluator_sdk.metrics.types import MetricVariants
 from nemo_evaluator_sdk.values.metrics import _RAGASBase
 from nemo_platform_plugin.cli import NemoCLI
+from nemo_platform_plugin.job import NemoJob
 from pydantic import BaseModel
 
 
@@ -87,6 +90,15 @@ class EvaluatorPluginCLI(NemoCLI):
     name: ClassVar[str] = "evaluator"
     description: ClassVar[str] = "Evaluator plugin commands."
 
+    def update_job_cli(self, job_cls: type[NemoJob], group: typer.Typer) -> None:
+        from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
+
+        if job_cls is not AgentEvalJob:
+            return
+        for command in group.registered_commands:
+            if command.name in {"submit", job_cls.name} and command.callback is not None:
+                command.callback = _with_agent_source(command.callback, job_cls)
+
     def get_cli(self) -> typer.Typer:
         app = typer.Typer(
             name=self.name,
@@ -131,3 +143,81 @@ class EvaluatorPluginCLI(NemoCLI):
             _echo_json(model_cls.model_json_schema())
 
         return app
+
+
+def _with_agent_source(callback: Callable[..., Any], job_cls: type[NemoJob]) -> Callable[..., Any]:
+    """Extend generated submission without changing its spec/flag precedence or transport."""
+    from nemo_platform_plugin import commands
+    from nemo_platform_plugin._spec_flags import UNSET, build_overlay, deep_merge, walk_spec_leaves
+
+    leaves = walk_spec_leaves(commands._job_input_schema(job_cls), reserved=commands._JOB_SUBMIT_RESERVED_FLAGS)
+
+    def submit(typer_ctx: typer.Context, **kwargs: Any) -> Any:
+        agent_dir = kwargs.pop("agent_dir", None)
+        if agent_dir is not None:
+            from nemo_evaluator.harbor.agent_source import publish_agent_source, validate_import_path
+            from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, HarborRunnerTarget
+            from nemo_platform_plugin.files.client import FilesClient
+
+            base = commands._load_spec(
+                str(kwargs["config"]) if kwargs.get("config") is not None else str(kwargs.get("spec", "{}")),
+                kwargs.get("config_file") if kwargs.get("config_file") is not None else kwargs.get("spec_file"),
+            )
+            spec = AgentEvalInputSpec.model_validate(
+                deep_merge(base, build_overlay(leaves, kwargs, unset_sentinel=UNSET))
+            )
+            if not isinstance(spec.target, HarborRunnerTarget) or not spec.target.agent_import_path:
+                raise typer.BadParameter("--agent-dir requires a Harbor target with agent_import_path")
+            if spec.target.agent_source is not None:
+                raise typer.BadParameter("--agent-dir conflicts with target.agent_source")
+            validate_import_path(spec.target.agent_import_path)
+            commands._merge_options_inputs(kwargs.get("options", []), kwargs.get("options_file"))
+            workspace = kwargs.get("workspace", "default")
+            client = FilesClient(
+                base_url=commands._resolve_submit_base_url(
+                    typer_ctx, base_url=kwargs.get("base_url"), cluster=kwargs.get("cluster")
+                ),
+                workspace=workspace,
+                default_headers=commands._resolve_submit_auth_headers(typer_ctx),
+            )
+            try:
+                spec.target.agent_source = publish_agent_source(
+                    Path(agent_dir), files_client=client, fileset_ref=f"{workspace}/harbor-agent-sources"
+                )
+            finally:
+                client.close()
+            typer.echo(
+                f"Verified agent source retained for reuse: {spec.target.agent_source.model_dump_json()}",
+                err=True,
+            )
+            kwargs["spec"] = spec.model_dump_json()
+            kwargs["config"] = None
+            kwargs["spec_file"] = None
+            kwargs["config_file"] = None
+            # The merged spec now owns all leaf values; avoid a second overlay undoing publication.
+            for leaf in leaves:
+                kwargs.pop(leaf.param_name, None)
+        try:
+            return callback(typer_ctx, **kwargs)
+        except Exception:
+            if agent_dir is not None:
+                typer.echo(
+                    "Job creation may have succeeded; inspect job state before resubmitting. "
+                    "The verified agent source above remains available for reuse.",
+                    err=True,
+                )
+            raise
+
+    parameters = list(inspect.signature(callback).parameters.values())
+    parameters.append(
+        inspect.Parameter(
+            "agent_dir",
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            annotation=Path | None,
+            default=typer.Option(
+                None, "--agent-dir", help="Capture custom Harbor source relative to the current directory."
+            ),
+        )
+    )
+    setattr(submit, "__signature__", inspect.Signature(parameters))
+    return submit

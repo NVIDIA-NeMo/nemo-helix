@@ -122,6 +122,19 @@ _DIGEST_CHUNK_BYTES = 1 << 20
 RunJob = Callable[[], Awaitable[None]]
 
 
+def validate_agent_environment(public: dict[str, str], secret_names: Sequence[str]) -> None:
+    """Reject ambiguous forwarding and ambient interpolation without reading host values."""
+    import re
+
+    for name in [*public, *secret_names]:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None:
+            raise ValueError(f"Invalid agent environment variable name: {name!r}")
+    if overlap := public.keys() & set(secret_names):
+        raise ValueError(f"agent_env overlaps secret environment names: {sorted(overlap)}")
+    if any("${" in value for value in public.values()):
+        raise ValueError("agent_env values cannot contain ${...} interpolation; use secret references")
+
+
 class HarborRuntimeConfig(BaseModel):
     """Declarative config for running a Harbor job natively through the SDK.
 
@@ -159,6 +172,7 @@ class HarborRuntimeConfig(BaseModel):
             "in ``agent_env_from_host`` regardless."
         ),
     )
+    agent_env: dict[str, str] = Field(default_factory=dict, description="Public non-secret agent environment.")
     agent_env_from_host: list[str] = Field(
         default_factory=list,
         description=(
@@ -177,17 +191,26 @@ class HarborRuntimeConfig(BaseModel):
         description="Container path of agent traces to collect as the 'traces' artifact (e.g. '/app/traces').",
     )
     max_retries: int = Field(default=0, ge=0, description="Harbor per-trial retry attempts on transient failures.")
-    timeout_multiplier: float | None = Field(default=None, description="Global Harbor timeout multiplier.")
-    agent_timeout_multiplier: float | None = Field(default=None, description="Agent-phase timeout multiplier.")
-    verifier_timeout_multiplier: float | None = Field(default=None, description="Verifier-phase timeout multiplier.")
-    agent_setup_timeout_multiplier: float | None = Field(default=None, description="Agent-setup timeout multiplier.")
+    timeout_multiplier: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, description="Global Harbor timeout multiplier."
+    )
+    agent_timeout_multiplier: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, description="Agent-phase timeout multiplier."
+    )
+    verifier_timeout_multiplier: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, description="Verifier-phase timeout multiplier."
+    )
+    agent_setup_timeout_multiplier: float | None = Field(
+        default=None, gt=0, allow_inf_nan=False, description="Agent-setup timeout multiplier."
+    )
     environment_build_timeout_multiplier: float | None = Field(
-        default=None, description="Environment-build timeout multiplier."
+        default=None, gt=0, allow_inf_nan=False, description="Environment-build timeout multiplier."
     )
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from Harbor's rewards mapping.")
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> HarborRuntimeConfig:
+        validate_agent_environment(self.agent_env, self.agent_env_from_host)
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
         return self
 
@@ -255,6 +278,15 @@ class HarborAgentTaskRunner:
         self._reward_key = config.reward_key if config is not None else reward_key
         validate_reward_key(self._reward_key)
 
+    def export_submission_config(self) -> HarborRuntimeConfig:
+        """Return a detached native configuration, rejecting process-local runner overrides."""
+        if self._config is None:
+            raise ValueError("Completed-job adaptation cannot be submitted; use a native HarborRuntimeConfig")
+        for name in ("dataset_path", "task_names", "job_dir", "run_job"):
+            if getattr(self, f"_{name}") is not None:
+                raise ValueError(f"{name} cannot be submitted; remove the override and use submitted tasks")
+        return HarborRuntimeConfig.model_validate(self._config.model_dump())
+
     def runner_info(self) -> RunnerInfo:
         """Identify this runner and the Harbor settings that shape its results.
 
@@ -271,6 +303,7 @@ class HarborAgentTaskRunner:
                 "agent_import_path": config.agent_import_path if config is not None else None,
                 "agent_model_name": config.agent_model_name if config is not None else None,
                 "agent_kwargs": redact_credentials(config.agent_kwargs) if config is not None else None,
+                "agent_env": dict(config.agent_env) if config is not None else None,
                 "agent_env_from_host": list(config.agent_env_from_host) if config is not None else None,
                 "effective_agent": _effective_harbor_agent(config),
                 "n_attempts": config.n_attempts if config is not None else None,
@@ -865,6 +898,7 @@ def _build_native_job(
         # First, ahead of the Harbor import and the force_rerun rmtree below. Not redundant with the
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
+        validate_agent_environment(config.agent_env, config.agent_env_from_host)
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="agent_env_from_host")
         try:
             from harbor.job import DatasetConfig, Job, JobConfig  # ty: ignore[unresolved-import,unused-ignore-comment]
@@ -951,7 +985,7 @@ def _build_native_job(
         agent_options: dict[str, Any] = {
             "model_name": config.agent_model_name,
             "kwargs": dict(config.agent_kwargs),
-            "env": {name: f"${{{name}}}" for name in config.agent_env_from_host},
+            "env": {**config.agent_env, **{name: f"${{{name}}}" for name in config.agent_env_from_host}},
         }
         if config.agent_import_path is None:
             await _create_and_run(AgentConfig(name=config.agent_name or "oracle", **agent_options))
@@ -964,6 +998,19 @@ def _build_native_job(
             with scoped_harbor_agent_import(
                 agent_dir, config.agent_import_path, exclude=excluded_roots
             ) as scoped_import:
+                from importlib import import_module
+                from inspect import isabstract
+
+                from harbor.agents.base import BaseAgent
+
+                module_name, class_name = scoped_import.split(":", 1)
+                agent_class = getattr(import_module(module_name), class_name)
+                if (
+                    not isinstance(agent_class, type)
+                    or not issubclass(agent_class, BaseAgent)
+                    or isabstract(agent_class)
+                ):
+                    raise TypeError(f"{config.agent_import_path} must resolve to a Harbor BaseAgent class")
                 await _create_and_run(AgentConfig(import_path=scoped_import, **agent_options))
         else:
             # Already-importable module (installed package): let Harbor import it directly.

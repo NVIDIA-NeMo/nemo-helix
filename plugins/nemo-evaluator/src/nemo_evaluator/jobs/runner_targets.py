@@ -21,15 +21,16 @@ dropping it would submit a job that runs something *different* from what was tes
 is worse than not submitting at all. Those cases raise :class:`UnsubmittableRunnerError` naming what
 could not travel.
 
-Only :class:`GymAgentTaskRunner` is supported today. The other shipped runners each need their own
-decisions about what survives translation, and are deliberately not guessed at here.
+Native Harbor and Gym runners are supported. Other runners require an explicit translation contract.
 """
 
 from __future__ import annotations
 
-from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import AgentRunnerTarget, GymRunnerTarget, HarborRunnerTarget
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborAgentTaskRunner
 from nemo_evaluator_sdk.agent_eval.trials import AgentTaskRunner
+from nemo_evaluator_sdk.values import SecretRef
 from pydantic_core import PydanticSerializationError
 
 
@@ -41,13 +42,38 @@ class UnsubmittableRunnerError(TypeError):
     """
 
 
-def runner_to_target(runner: AgentTaskRunner) -> AgentRunnerTarget:
+def runner_to_target(runner: AgentTaskRunner, *, env_secrets: dict[str, SecretRef] | None = None) -> AgentRunnerTarget:
     """The target spec that reproduces ``runner`` as a job.
 
     Raises:
         UnsubmittableRunnerError: If the runner has no wire form, or carries state that would be
             lost in translation.
     """
+    if isinstance(runner, HarborAgentTaskRunner):
+        try:
+            config = runner.export_submission_config()
+        except ValueError as exc:
+            raise UnsubmittableRunnerError(str(exc)) from exc
+        unsupported = {"job_name": config.job_name is not None, "force_rerun": config.force_rerun}
+        for field, supplied in unsupported.items():
+            if supplied:
+                raise UnsubmittableRunnerError(f"{field} cannot be submitted; remove local resume/rerun settings")
+        missing = set(config.agent_env_from_host) - (env_secrets or {}).keys()
+        if missing:
+            raise UnsubmittableRunnerError(
+                f"agent_env_from_host needs explicit env_secrets mappings for {sorted(missing)}"
+            )
+        omitted = {"jobs_dir", "agent_dir", "quiet", "job_name", "force_rerun", "agent_env_from_host"}
+        values = config.model_dump(exclude=omitted)
+        for field in values.keys() - HarborRunnerTarget.model_fields.keys():
+            if values[field] != type(config).model_fields[field].get_default(call_default_factory=True):
+                raise UnsubmittableRunnerError(f"Unsupported Harbor runtime field {field}; restore its default")
+        return HarborRunnerTarget(
+            **{key: value for key, value in values.items() if key in HarborRunnerTarget.model_fields},
+            env_secrets=env_secrets or {},
+        )
+    if env_secrets is not None:
+        raise UnsubmittableRunnerError("env_secrets is supported only for Harbor taskset submission")
     if isinstance(runner, GymAgentTaskRunner):
         return _gym_target(runner)
     raise UnsubmittableRunnerError(
