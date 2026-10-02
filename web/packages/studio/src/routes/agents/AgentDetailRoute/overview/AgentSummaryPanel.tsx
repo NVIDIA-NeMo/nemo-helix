@@ -48,6 +48,13 @@ export const AgentSummaryPanel: FC<AgentSummaryPanelProps> = ({ agent, modelName
         loading={!agent}
       />
       <KVPair
+        label="Description"
+        value={agent?.description}
+        size="narrow"
+        orientation="horizontal"
+        loading={!agent}
+      />
+      <KVPair
         label="Created"
         size="narrow"
         orientation="horizontal"
