@@ -18,6 +18,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,10 @@ DEFAULT_WHEEL_PYTHON_VERSION = "3.13"
 
 WheelDownloader = Callable[[Sequence[str], Sequence[str], Path, str, str | None], None]
 
+#: Upper bound on one wheelhouse download. The staging step has no step-level deadline of its own, so a
+#: stalled index must not hold the worker indefinitely; a healthy download takes well under a minute.
+WHEEL_DOWNLOAD_TIMEOUT_S = 20 * 60
+
 
 class GymRegisteredAgentPackageSpec(BaseModel):
     """What the staging step needs to assemble a registered agent's Gym package."""
@@ -57,11 +62,6 @@ class GymRegisteredAgentPackageSpec(BaseModel):
     requirements: list[str] = Field(
         min_length=1,
         description="Requirement specifiers for the wheelhouse: the Fabric harness extra and companions.",
-    )
-    constraints: list[str] = Field(
-        default_factory=list,
-        description="Version constraints the wheelhouse is resolved under: the pins of the Gym the host runs, so "
-        "the component and Gym's own servers resolve against one consistent set.",
     )
     wheel_python_version: str = Field(default=DEFAULT_WHEEL_PYTHON_VERSION)
     wheel_architecture: str | None = Field(
@@ -123,20 +123,56 @@ def download_wheels(
         constraints_file = destination.parent / ".wheel-constraints.txt"
         constraints_file.write_text("\n".join(constraints) + "\n", encoding="utf-8")
     command = wheel_download_command(requirements, constraints_file, destination, python_version, architecture)
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode != 0 and "No module named pip" in result.stderr:
-        # The task image's interpreter has no pip; uv brings one for the invocation.
-        result = subprocess.run(
-            ["uv", "run", "--no-project", "--with", "pip", "python", *command[1:]], capture_output=True, text=True
-        )
-    if constraints_file is not None:
-        constraints_file.unlink(missing_ok=True)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=WHEEL_DOWNLOAD_TIMEOUT_S)
+        if result.returncode != 0 and "No module named pip" in result.stderr:
+            # The task image's interpreter has no pip; uv brings one for the invocation.
+            result = subprocess.run(
+                ["uv", "run", "--no-project", "--with", "pip", "python", *command[1:]],
+                capture_output=True,
+                text=True,
+                timeout=WHEEL_DOWNLOAD_TIMEOUT_S,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"wheelhouse download for {list(requirements)} did not finish within {WHEEL_DOWNLOAD_TIMEOUT_S}s"
+        ) from exc
+    finally:
+        if constraints_file is not None:
+            constraints_file.unlink(missing_ok=True)
     if result.returncode != 0:
         raise RuntimeError(f"wheelhouse download failed for {list(requirements)}: {result.stderr.strip()[-2000:]}")
 
 
 def _component_source() -> str:
     return (importlib.resources.files("nemo_evaluator.gym_registered_agent") / "app.py").read_text(encoding="utf-8")
+
+
+#: A copy of the Gym host image's ``docker/locks/nhx-gym-host/uv.lock``, kept byte-identical by a test.
+HOST_LOCK_RESOURCE = "nhx-gym-host.uv.lock"
+
+
+def _host_lock_text() -> str:
+    return (importlib.resources.files("nemo_evaluator.gym_registered_agent") / HOST_LOCK_RESOURCE).read_text(
+        encoding="utf-8"
+    )
+
+
+def host_gym_constraints(lock_text: str | None = None) -> list[str]:
+    """Every distribution the sandboxed Gym host image has installed, pinned to its version.
+
+    The wheelhouse resolves under these so the harness installs into the host without moving anything
+    the host already has. Lock entries that are not distributions (the host's own virtual project, the
+    sandboxed-gym package it installs from source) carry no pin.
+    """
+    lock = tomllib.loads(lock_text if lock_text is not None else _host_lock_text())
+    pins = []
+    for package in lock.get("package", []):
+        source = package.get("source") or {}
+        if not package.get("version") or any(key in source for key in ("virtual", "directory", "editable")):
+            continue
+        pins.append(f"{package['name']}=={package['version']}")
+    return sorted(pins)
 
 
 def _merged_manifest(root: Path, config_path: str, agent_name: str) -> dict[str, Any]:
@@ -174,6 +210,12 @@ def write_registered_agent_package(
     instance = registered_agent_gym_instance(spec.agent)
     config_path = registered_agent_gym_config_path(spec.agent)
     component_dir = root / CUSTOM_AGENT_SUBDIR / REGISTERED_AGENT_GYM_COMPONENT
+    for taken in (component_dir, root / config_path):
+        if taken.exists():
+            raise ValueError(
+                f"the environment package already contains {taken.relative_to(root).as_posix()}; a registered "
+                f"agent's package cannot be added to one that ships its own `{REGISTERED_AGENT_GYM_COMPONENT}`"
+            )
     (component_dir / "configs").mkdir(parents=True, exist_ok=True)
     (component_dir / "app.py").write_text(_component_source(), encoding="utf-8")
     (component_dir / "requirements.txt").write_text("\n".join(spec.requirements) + "\n", encoding="utf-8")
@@ -198,7 +240,7 @@ def write_registered_agent_package(
     wheelhouse = root / WHEELHOUSE_SUBDIR
     wheelhouse.mkdir(exist_ok=True)
     (download or download_wheels)(
-        spec.requirements, spec.constraints, wheelhouse, spec.wheel_python_version, spec.wheel_architecture
+        spec.requirements, host_gym_constraints(), wheelhouse, spec.wheel_python_version, spec.wheel_architecture
     )
 
     manifest = _merged_manifest(root, config_path, spec.agent.root.rpartition("/")[2])

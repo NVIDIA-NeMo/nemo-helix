@@ -95,7 +95,6 @@ another.
 | `sandbox_episode_backend` | `opensandbox` | Provider for nested episode sandboxes requested by an environment. |
 | `sandbox_allow_insecure_memory_backend` | `false` | Second opt-in required for the non-isolating local memory backend. |
 | `sandbox_approved_images` | `[]` | Images allowed for nested episode sandboxes. Empty rejects every episode request. |
-| `sandbox_gym_wheel_constraints` | `["openai<=2.7.2"]` | Pins the wheelhouse of a registered agent's Gym package is resolved under. Keep them equal to the `nemo-gym` version in `sandbox_runtime_image`, or Gym's servers refuse the shared wheels. |
 
 Evaluator requires at least one entry across `sandbox_policy_base_urls` and
 `sandbox_egress_allow`. The OpenSandbox provider applies a deny-by-default policy and adds the

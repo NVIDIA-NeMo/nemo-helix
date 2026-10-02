@@ -111,12 +111,6 @@ class EvaluatorConfig(NemoConfig):
         "every episode create is refused, matching the broker's own closed default -- a run that needs "
         "episodes must be granted its images explicitly.",
     )
-    sandbox_gym_wheel_constraints: tuple[str, ...] = Field(
-        default=("openai<=2.7.2",),
-        description="Version constraints the wheelhouse of a registered agent's Gym package is resolved under, so "
-        "every component in the Gym host resolves against one consistent set. Must match the `nemo-gym` pinned in "
-        "`sandbox_runtime_image`: 0.5.0 caps `openai` at 2.7.2, 0.6.0 pins 2.44.0.",
-    )
 
 
 def get_config() -> EvaluatorConfig:
