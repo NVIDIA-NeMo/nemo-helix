@@ -2211,7 +2211,7 @@ async def test_parse_sse_empty_stream_yields_nothing():
 
 
 # ---------------------------------------------------------------------------
-# AIRCORE-???: response model-field rewrite (served_model_name -> entity ref)
+# Response model-field rewrite (served_model_name -> entity ref)
 # ---------------------------------------------------------------------------
 #
 # After proxying, the user-facing response body must surface the model entity

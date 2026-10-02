@@ -212,7 +212,7 @@ def test_registry_contains_openshell() -> None:
 
 async def test_load_deployment_config_wraps_an_entities_client_that_accepts_query_params() -> None:
     """init() must adapt the SDK with client_from_platform(AsyncEntitiesClient), not wrap the
-    raw generated AsyncEntitiesResource (AIRCORE-977).
+    raw generated AsyncEntitiesResource.
 
     NemoEntitiesClient.get() forwards a ``query_params`` kwarg. The generated resource does not
     accept it, so wrapping the resource made every first reconcile die with
@@ -1203,7 +1203,7 @@ def test_liveness_probe_is_pending_when_the_marker_is_unusable(tmp_path: Path, m
     assert _run_probe(tmp_path, pid=None, marker=marker) == _SERVE_PENDING_EXIT
 
 
-# --- AIRCORE-999: config_files are delivered into the sandbox, or fail loudly ---
+# --- config_files are delivered into the sandbox, or fail loudly ---
 
 
 async def test_delivers_config_file_before_launch_streaming_content_on_stdin(

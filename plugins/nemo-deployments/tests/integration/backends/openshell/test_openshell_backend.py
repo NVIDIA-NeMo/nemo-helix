@@ -121,7 +121,7 @@ async def test_openshell_roundtrip_serves_http() -> None:
 
 async def test_openshell_readiness_holds_until_bind() -> None:
     # The workload sleeps before it binds, so READY must not be published until the curl
-    # readiness probe can actually reach :8000. Regression guard for AIRCORE-998 (READY
+    # readiness probe can actually reach :8000. Regression guard (READY
     # published ahead of bind) that also exercises the real in-sandbox curl probe.
     backend, mock_entities = _make_backend()
     bind_delay = 15

@@ -36,7 +36,7 @@ property of ``status_details`` being a blob that is replaced wholesale, and
 capping points here only made that cheaper to leave unfixed; a point cap was
 tried and removed. The limiter below bounds how *often* a report goes, not how
 much it carries, and nothing here bounds a long run -- that ceiling belongs to
-the transport. See the AALGO-497 design note for the measurements and the
+the transport. See the design note for the measurements and the
 argument.
 
 Seeding

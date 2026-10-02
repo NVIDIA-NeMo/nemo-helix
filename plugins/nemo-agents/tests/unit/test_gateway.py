@@ -1078,7 +1078,7 @@ def _forwarded_request(httpx_mock: MagicMock) -> dict:
 
 
 class TestRequestModelStripping:
-    """The gateway routes by URL path; ``nat serve`` would otherwise forward ``model`` to IGW (AALGO-644)."""
+    """The gateway routes by URL path; ``nat serve`` would otherwise forward ``model`` to IGW."""
 
     _NAT_CONFIG = {"workflow": {"_type": "react_agent"}, "llms": {"llm": {"model_name": "meta/llama"}}}
     _FABRIC_CONFIG = {"config_format": NEMO_AGENTS_SPEC_CONFIG_FORMAT, "harness": {"model": "meta/llama"}}

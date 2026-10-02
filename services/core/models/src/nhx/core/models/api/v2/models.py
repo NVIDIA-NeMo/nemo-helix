@@ -315,7 +315,7 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
                 body=CreateHelixJobRequest(
                     source="models-system",
                     # ``task_spec`` is built from the api_factory ``*Param`` TypedDict
-                    # aliases (see AIRCORE-922); validate it into the plugin pydantic
+                    # aliases; validate it into the plugin pydantic
                     # ``HelixJobSpec`` the request model expects.
                     platform_spec=HelixJobSpecModel.model_validate(task_spec),
                     spec={},

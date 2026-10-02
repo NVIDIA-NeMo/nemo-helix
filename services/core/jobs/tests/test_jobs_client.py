@@ -74,7 +74,7 @@ async def test_get_execution_profiles_available_without_controller_ready_gate(
     """API must advertise merge-filtered profiles without a controller ready flag.
 
     Split topologies (API pod without controllers) previously 503'd forever when
-    readiness lived in controller-only process memory (AIRCORE-971).
+    readiness lived in controller-only process memory.
     """
     raw = await test_client.get("/apis/jobs/v2/execution-profiles")
     assert raw.status_code == 200

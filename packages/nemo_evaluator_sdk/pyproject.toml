@@ -92,7 +92,7 @@ nemo-helix = [
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
 #     The 0.4 adapter allows Python <3.15, but the lock reaches 3.14, so the marker below really does
 #     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
-#   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
+#   * deepagents is omitted to match plugins/nemo-agents (its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
   "nemo-fabric[claude,codex]>=0.4.0,<0.5.0",

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for NemoClient first-class auth support (AIRCORE-828)."""
+"""Tests for NemoClient first-class auth support."""
 
 from __future__ import annotations
 
