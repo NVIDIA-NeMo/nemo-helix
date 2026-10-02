@@ -3989,16 +3989,16 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `cancel`: Cancel a platform job.
+* `cancel`: Cancel a platform job by name or ID.
 * `create`: Create a new platform job.
-* `delete`: Delete a platform job.
+* `delete`: Delete a platform job by name or ID.
 * `get-logs`: Get paginated logs for a platform job.
 * `get-status`: Get the status of a platform job.
 * `list`: List platform jobs with filtering and pagination.
 * `list-execution-profiles`: Get all currently configured execution profiles.
-* `pause`: Pause a platform job.
-* `resume`: Resume a paused platform job.
-* `get`: Get a platform job by name.
+* `pause`: Pause a platform job by name or ID.
+* `resume`: Resume a paused platform job by name or ID.
+* `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
@@ -4008,7 +4008,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 #### nemo jobs cancel
 
-Cancel a platform job.
+Cancel a platform job by name or ID.
 
 **Usage:**
 
@@ -4018,7 +4018,7 @@ nemo jobs cancel [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4091,7 +4091,7 @@ nemo jobs create [OPTIONS] [NAME]
 
 #### nemo jobs delete
 
-Delete a platform job.
+Delete a platform job by name or ID.
 
 **Usage:**
 
@@ -4101,7 +4101,7 @@ nemo jobs delete [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4244,7 +4244,7 @@ nemo jobs list-execution-profiles [OPTIONS]
 
 #### nemo jobs pause
 
-Pause a platform job.
+Pause a platform job by name or ID.
 
 **Usage:**
 
@@ -4254,7 +4254,7 @@ nemo jobs pause [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4270,7 +4270,7 @@ nemo jobs pause [OPTIONS] NAME
 
 #### nemo jobs resume
 
-Resume a paused platform job.
+Resume a paused platform job by name or ID.
 
 **Usage:**
 
@@ -4280,7 +4280,7 @@ nemo jobs resume [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4296,7 +4296,7 @@ nemo jobs resume [OPTIONS] NAME
 
 #### nemo jobs get
 
-Get a platform job by name.
+Get a platform job by name or ID.
 
 **Usage:**
 
@@ -4306,7 +4306,7 @@ nemo jobs get [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
