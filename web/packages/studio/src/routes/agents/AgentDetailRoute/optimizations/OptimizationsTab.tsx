@@ -27,6 +27,7 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
 }) =>
   isCreating ? (
     <NewOptimizationForm
+      key={agentName}
       agentName={agentName}
       evals={evals}
       isEvalsPending={isEvalsPending}
