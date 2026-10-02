@@ -325,14 +325,14 @@ flowchart TD
  A[What's your goal?] --> B{Need maximum<br/>performance?}
  B -->|Yes| C{Have 4+ GPUs?}
  B -->|No| D[Choose LoRA]
- 
+
  C -->|Yes| E[Choose Full SFT]
  C -->|No| D
- 
+
  D --> F{Multiple<br/>use cases?}
  F -->|Yes| G[Train multiple<br/>LoRA adapters]
  F -->|No| H[Single LoRA<br/>adapter]
- 
+
  E --> I[New Model Entity<br/>with full weights]
  G --> J[Multiple adapters<br/>on same Model Entity]
  H --> J
@@ -443,14 +443,14 @@ Import and fine-tune private Hugging Face models.
 
 ## Key Takeaways
 
-✅ **Model Entities** contain model metadata and point to FileSet with checkpoint files 
-✅ **Adapters** (LoRA) are attached to Model Entities, not stored separately 
-✅ **FileSet** is where actual model/adapter files are stored 
-✅ **LoRA training** creates an adapter on the parent Model Entity 
-✅ **Full SFT training** creates a new Model Entity with full weights 
-✅ **Adapters are enabled by default** and automatically loaded by NIMs serving the base model 
-✅ **GPU requirements** vary significantly between LoRA and full fine-tuning 
-✅ **Custom Hugging Face models** can be imported via FileSet + Model Entity
+✅ **Model Entities** contain model metadata and point to FileSet with checkpoint files.
+✅ **Adapters** (LoRA) are attached to Model Entities, not stored separately.
+✅ **FileSet** is where actual model/adapter files are stored.
+✅ **LoRA training** creates an adapter on the parent Model Entity.
+✅ **Full SFT training** creates a new Model Entity with full weights.
+✅ **Adapters are enabled by default** and automatically loaded by NIMs serving the base model.
+✅ **GPU requirements** vary significantly between LoRA and full fine-tuning.
+✅ **Custom Hugging Face models** can be imported via FileSet + Model Entity.
 
 ### Quick Reference Commands
 
