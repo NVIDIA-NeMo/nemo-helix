@@ -165,7 +165,7 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget, HarborRunnerTarget
+from nemo_evaluator.jobs.agent_spec import FabricRunnerTarget, GymRunnerTarget, HarborRunnerTarget, RegisteredAgentSource
 
 on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
 in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
