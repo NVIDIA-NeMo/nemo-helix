@@ -1434,3 +1434,19 @@ def test_codex_home_is_removed_when_linking_the_login_fails(monkeypatch: pytest.
 
     assert list(Path(tempfile.gettempdir()).iterdir()) == []
     assert base_auth.exists()
+
+
+def test_codex_home_links_a_relative_base_home_by_absolute_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "auth.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CODEX_HOME", ".codex")
+
+    home = fabric_runtime._make_codex_home()
+
+    link = home / "auth.json"
+    assert Path(os.readlink(link)) == tmp_path / ".codex" / "auth.json"
+    assert link.read_text(encoding="utf-8") == "{}"
+    fabric_runtime._remove_codex_home(home)

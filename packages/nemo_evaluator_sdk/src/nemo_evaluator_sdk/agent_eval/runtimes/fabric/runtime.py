@@ -707,9 +707,13 @@ class FabricAgentRuntime:
 
 
 def _base_codex_home() -> Path:
-    """The Codex home this process would otherwise use: ``$CODEX_HOME`` when set, else ``~/.codex``."""
+    """The Codex home this process would otherwise use: ``$CODEX_HOME`` when set, else ``~/.codex``.
+
+    Absolute, because the trial's ``auth.json`` symlink points here from a temp dir and a relative
+    target would resolve against that dir instead of this process's working directory.
+    """
     configured = os.environ.get("CODEX_HOME")
-    return Path(configured).expanduser() if configured else Path.home() / ".codex"
+    return Path(configured).expanduser().absolute() if configured else Path.home() / ".codex"
 
 
 def _make_codex_home() -> Path:
