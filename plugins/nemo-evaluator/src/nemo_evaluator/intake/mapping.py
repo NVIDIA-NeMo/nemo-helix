@@ -9,7 +9,7 @@ the Experiments API expect. The Intake write-adapter tickets (D3/D4/D5) obtain
 their request shapes and field names *only* from here, so a later rename is a
 one-file change.
 
-Design constraints (see AALGO-289):
+Design constraints:
 
 * **Pure.** Every function reads SDK types and returns request params. No HTTP,
   no platform client, no imports from the Intake *service* (``nhx.intake.*``).
@@ -22,8 +22,8 @@ Design constraints (see AALGO-289):
   instead of drifting silently. We depend on the client SDK (already a plugin dependency),
   never on the Intake service package.
 * The well-known evidence-key constants (``initial_state``/``trace``/``logs``/
-  ``final_state``/``verifier_logs``) belong with the SDK evidence work (D1,
-  AALGO-281). Until D1 lands, this module references them as string literals so
+  ``final_state``/``verifier_logs``) belong with the SDK evidence work (D1).
+  Until D1 lands, this module references them as string literals so
   it stays unblocked.
 """
 

@@ -885,7 +885,7 @@ async def test_create_deployment_delivers_config_files_before_start(
 
     The server command reads its config at startup, so delivery after ``start``
     would race the process. Asserting the ordering is the point: dropping the
-    delivery entirely used to be silent (AIRCORE-999), and delivering it late
+    delivery entirely used to be silent, and delivering it late
     fails the same way.
     """
     mock_entities.get.return_value = config_files_config()

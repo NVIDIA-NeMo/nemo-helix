@@ -6,7 +6,7 @@
 Namespace defaults to ``default`` (present on any cluster, and where a kind admin
 kubeconfig has full rights). Point at a different namespace you control via
 ``NHX_K8S_ITEST_NAMESPACE`` — e.g. your dev-blue namespace, which only has the RBAC
-verbs the deploy chart's ``controller-role.yaml`` grants (see AIRCORE-757 Phase 6).
+verbs the deploy chart's ``controller-role.yaml`` grants.
 """
 
 from __future__ import annotations

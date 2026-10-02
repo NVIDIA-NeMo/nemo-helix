@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the agent-evaluation job (AALGO-297)."""
+"""Unit tests for the agent-evaluation job."""
 
 from __future__ import annotations
 
@@ -1903,7 +1903,7 @@ class TestAgentEvalTask:
 
 
 async def test_trial_error_survives_the_job_spec_wire_contract() -> None:
-    """AALGO-428: ``AgentEvalTrial.error`` is public API, not just an SDK-internal field.
+    """``AgentEvalTrial.error`` is public API, not just an SDK-internal field.
 
     Precomputed trials are accepted straight off the wire by ``AgentEvalInputSpec.trials``, and
     ``AgentEvalTrial`` forbids extras — so a typed error has to survive JSON round-tripping through

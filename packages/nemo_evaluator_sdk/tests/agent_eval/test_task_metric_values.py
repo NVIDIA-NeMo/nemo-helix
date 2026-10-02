@@ -699,7 +699,7 @@ def test_repeated_view_attempts_pair_signals_by_occurrence_and_retain_absent_sig
 
 
 def test_dead_trials_are_nameable_from_the_summary_alone() -> None:
-    # AALGO-428 needs to say *which* trial died to roll up exception types. Before records carried a
+    # The error rollup needs to say *which* trial died to roll up exception types. Before records carried a
     # trial id the summary could count dead trials but not name one; now it is a lookup key out to
     # trials.jsonl, where the error lives.
     tasks = [_task("task-a", _Metric("reward", MetricOutputSpec.continuous_score("score")))]

@@ -39,7 +39,7 @@ def require_container_runtime(backend_label: str, *, num_nodes: int = 1) -> None
     - **Docker** — the platform's local Docker GPU executor (single host),
       detected via :func:`~nemo_helix_plugin.capabilities.probe_docker`
       rather than treating ``Runtime.DOCKER`` / ``Runtime.NONE`` as the
-      capability signal (AIRCORE-971).
+      capability signal.
 
     Single-node jobs accept Kubernetes topology or a reachable Docker daemon.
     **Multi-node jobs** (``num_nodes > 1``) compile to a ``gpu_distributed``

@@ -544,8 +544,8 @@ class _AgentEvalJobBase(NemoJob):
         platformless in-process run has no identity to forward.
 
         NOTE: bearer-token auth for platform routes in an auth-enabled deployment is not yet
-        forwarded (the local/internal path relies on the ``X-NHX-*`` identity headers); see
-        AALGO-297 follow-ups.
+        forwarded (the local/internal path relies on the ``X-NHX-*`` identity headers); this is a
+        follow-up.
         """
         identity_headers: dict[str, str] = {}
         url = AgentEvalJob._endpoint_url(target)

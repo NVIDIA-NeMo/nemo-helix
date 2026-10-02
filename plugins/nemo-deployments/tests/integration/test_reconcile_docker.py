@@ -3,7 +3,7 @@
 
 """Integration tests for deployment reconciliation.
 
-Requires AIRCORE-756 DockerDeploymentBackend to be registered in BACKEND_CLASSES.
+Requires the DockerDeploymentBackend to be registered in BACKEND_CLASSES.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import docker
 pytestmark = [
     pytest.mark.skipif(
         "docker" not in BACKEND_CLASSES,
-        reason="Requires DockerDeploymentBackend (AIRCORE-756)",
+        reason="Requires DockerDeploymentBackend",
     ),
     skip_without_docker,
 ]

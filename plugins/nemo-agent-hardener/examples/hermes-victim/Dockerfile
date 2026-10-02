@@ -21,7 +21,7 @@ WORKDIR /workspace
 # nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10.
 #
 # `hermes-agent` is what provides the `hermes` CLI used below. It is deliberately NOT a platform
-# dependency — it pins a vulnerable requests (see TODO(AIRCORE-952) in plugins/nemo-agents) — and
+# dependency — it pins a vulnerable requests (see the TODO in plugins/nemo-agents) — and
 # `nemo-fabric-adapters-hermes` ships only the adapter, no binary. Without it the build dies with
 # `hermes: not found` (exit 127). Installing it *here* is the right trade: this is a throwaway
 # victim image, built to be attacked inside a sandbox, never shipped or served to anyone.

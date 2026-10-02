@@ -272,7 +272,7 @@ class ConflictResolver(Protocol):
 # Unknown parameters in an endpoint signature trigger a ``TypeError``
 # at decoration time.
 BLESSED_CLIENT_PARAMS: dict[str, type] = {
-    # Declared but not yet acted on by the client — see AIRCORE-866.
+    # Declared but not yet acted on by the client.
     "exist_ok": bool,
 }
 

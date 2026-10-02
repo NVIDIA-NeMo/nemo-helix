@@ -16,7 +16,7 @@ Models-specific ergonomics that used to live on the vendored Stainless
 
 The inference-gateway *readiness* probe (``wait_for_gateway``) lives one layer
 up in ``packages/models`` because it targets the separate inference-gateway
-service, not Models -- see that module and AIRCORE notes.
+service, not Models.
 
 Usage::
 

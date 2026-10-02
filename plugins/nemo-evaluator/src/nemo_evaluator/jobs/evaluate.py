@@ -370,7 +370,7 @@ class _EvaluateJobBase(NemoJob):
         ctx.results.save(RUN_METADATA_RESULT_NAME, result_files.run_metadata)
         ctx.results.save(ARTIFACTS_RESULT_NAME, result_files.artifacts_dir, ignore_patterns=RESULT_IGNORE_PATTERNS)
 
-        # TODO: Implement progress reporting hook in SDK - AALGO-149
+        # TODO: Implement progress reporting hook in SDK
         # self.report_progress(
         #     ctx,
         #     work_done=1,

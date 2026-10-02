@@ -1216,7 +1216,7 @@ def create_pod_template_spec(
     # `requires_persistent_storage: bool` on NemoJob or HelixJobStep),
     # rather than the current mechanism of passing a magic env var in the
     # step's environment list. This would make the contract between
-    # compile() and the runtime explicit. See AIRCORE-844 for context.
+    # compile() and the runtime explicit.
 
     if storage_config.additional_volume_mounts:
         volume_mounts.extend(mount.to_k8s() for mount in storage_config.additional_volume_mounts)

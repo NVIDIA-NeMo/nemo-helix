@@ -46,7 +46,7 @@ _BUILD_TIMEOUT_S = 900
 
 #: Adapter distributions baked into the (single, harness-agnostic) Fabric image, pinned to the same
 #: version as ``nemo-fabric``. Codex and claude are absent: they need their own CLIs, which this image
-#: does not provision (see AALGO-321).
+#: does not provision.
 _ADAPTER_DISTRIBUTIONS: tuple[str, ...] = ("nemo-fabric-adapters-hermes",)
 
 #: Requirements the harness needs that are not versioned with Fabric. ``hermes-agent`` is the harness
