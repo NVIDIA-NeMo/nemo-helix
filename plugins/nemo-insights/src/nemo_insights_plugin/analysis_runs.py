@@ -35,6 +35,7 @@ from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.nooa_model_client import supported_backend_format
 from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
@@ -279,7 +280,7 @@ async def _resolve_model_refs(
 
 
 async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
-    """Return ``<workspace>/<name>`` for an existing Model Entity, or raise 422."""
+    """Return ``<workspace>/<name>`` for an existing Model Entity the Analyst can call, or raise 422."""
     match ref.split("/"):
         case [name]:
             model_workspace = workspace
@@ -292,7 +293,7 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
             )
 
     try:
-        await client.get_model(name=name, workspace=model_workspace)
+        model_entity = (await client.get_model(name=name, workspace=model_workspace)).data()
     except NotFoundError as exc:
         raise HTTPException(
             status_code=422,
@@ -307,6 +308,12 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
         raise HTTPException(
             status_code=503, detail="Could not reach the Models service to validate the model refs."
         ) from exc
+    # The Analyst job would otherwise start and fail when it builds its model
+    # clients, after the run is recorded and a pod has been scheduled.
+    try:
+        supported_backend_format(model_entity)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field}: {exc}") from exc
     return f"{model_workspace}/{name}"
 
 
