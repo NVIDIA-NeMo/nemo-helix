@@ -165,7 +165,7 @@ So `num_repeats=2` over a 5-row dataset yields 5 tasks and 10 trials.
 | `concurrency` | no | concurrent rollouts during collection — tune to your model endpoint's limits |
 | `hydra_params` | no | parameters merged into Gym's Hydra config, e.g. `{"model": {"temperature": 0.7}}` |
 | `env_vars` | no | environment variables set on the `gym` invocation |
-| `env_secrets` | no | `{ENV_NAME: secret-ref}` for values that must not be written down — resolved locally from your environment, and by the platform for a submitted job |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` for values that must not be written down — local runs look for `MY_WORKSPACE_*` first, then the bare variable name; submitted jobs use platform secrets |
 | `reward_key` | no | key read from each rollout record (default `reward`) |
 | `startup_timeout_s` | no | max wait for `gym env start` readiness |
 | `collection_timeout_s` | no | max wait for collection; `None` is unbounded |
@@ -421,8 +421,10 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
 - **Custom environments require platform support.** Package the environment as a FileSet and use
   sandboxed execution; `environment` and `agent_ref_name` are `GymPlacement` fields supplied at
   submission, so a live `GymAgentTaskRunner` cannot carry them. `env_secrets` is *not* in that
-  group — it lives on `GymRuntimeConfig` and resolves locally from your environment, so it works
-  the same way in both places.
+  group — it lives on `GymRuntimeConfig`. Local runs look for the workspace-prefixed environment
+  variable first, then the bare name. Pass `secret_resolver=` to `GymAgentTaskRunner` for a custom
+  `EnvSecretSource` that names the environment variable holding each secret. Submitted jobs carry
+  only the references and resolve them with the platform's source.
 - **No retries and no re-run cache.** A failed rollout is not retried, and nothing is reused between
   runs: every run collects from scratch, and refuses to run into a directory that already holds Gym
   rollout output — rollouts, the failures sidecar, or model-call captures. (An existing empty

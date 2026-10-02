@@ -154,7 +154,7 @@ def filter_auth_headers(headers: dict[str, str] | None) -> dict[str, str] | None
 class Model(BaseModel):
     """Model definition for use without persisting to the Models API."""
 
-    model_config = ConfigDict(extra="forbid", json_schema_extra=_strip_internal_fields)
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, json_schema_extra=_strip_internal_fields)
 
     url: str = Field(description="URL of the model.")
     name: str = Field(description="Name of the model.")
