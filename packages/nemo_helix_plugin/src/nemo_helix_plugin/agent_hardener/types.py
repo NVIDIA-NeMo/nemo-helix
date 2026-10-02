@@ -201,7 +201,7 @@ class WarGameSpec(BaseModel):
     stop_after_synth: bool = False
     replay_hitlog_fileset: str | None = None
     benign_suite_fileset: str | None = None
-    port: int | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
     defenders: list[str] | None = None
     attack_intensity: str | None = None
     rounds: int | None = None
@@ -210,6 +210,13 @@ class WarGameSpec(BaseModel):
     defense_policy: str | None = None
     models: WarGameModels | None = None
     source_run: str | None = None
+
+    @model_validator(mode="after")
+    def _requires_exactly_one_source(self) -> "WarGameSpec":
+        """Reject missing or ambiguous target sources at the canonical API boundary."""
+        if bool(self.config) == bool(self.manifest_id):
+            raise ValueError("agent-hardener run requires exactly one of 'config' or 'manifest_id'.")
+        return self
 
 
 class SynthBenignSpec(BaseModel):
@@ -370,7 +377,7 @@ class ManifestInit(BaseModel):
         description="The author confirms NeMo Relay is attached (middleware + plugin.initialize()). Not "
         "knowable from the project; without Relay the victim emits no telemetry and cannot be scored.",
     )
-    port: int | None = Field(default=None, description="Victim port (defaults to 8000).")
+    port: int | None = Field(default=None, ge=1, le=65535, description="Victim port (defaults to 8000).")
     secrets: list[str] | None = Field(
         default=None,
         description="Env-var names the victim requires. Derived from the agent's own declarations "
@@ -433,7 +440,7 @@ class ManifestUpdate(BaseModel):
     benign_suite: list[BenignSuiteRow] | None = Field(
         default=None, description="Replace the cached benign suite (tool,payload,label,rationale,persona rows)."
     )
-    port: int | None = Field(default=None, description="Victim port the war-game will target.")
+    port: int | None = Field(default=None, ge=1, le=65535, description="Victim port the war-game will target.")
     egress: list[str] | None = Field(
         default=None, description="Allow-listed egress host[:port] entries the victim may reach."
     )

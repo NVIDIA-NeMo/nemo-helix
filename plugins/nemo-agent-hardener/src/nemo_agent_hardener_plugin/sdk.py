@@ -114,8 +114,8 @@ def _run_war_game(
     alongside ``config`` rather than silently dropped; ``rounds`` is an ``agent-hardener run`` argument and
     applies to both paths.
     """
-    if not (config or manifest_id):
-        raise ValueError("agent-hardener run requires a 'config' manifest path or a 'manifest_id'.")
+    if bool(config) == bool(manifest_id):
+        raise ValueError("agent-hardener run requires exactly one of 'config' or 'manifest_id'.")
     overlay = {"port": port, "defenders": defenders, "attack_intensity": attack_intensity}
     unsupported = sorted(key for key, value in overlay.items() if value is not None)
     if config and unsupported:

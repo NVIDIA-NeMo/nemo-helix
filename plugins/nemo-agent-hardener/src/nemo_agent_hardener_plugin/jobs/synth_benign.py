@@ -25,7 +25,13 @@ from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs.artifacts import _save_events_fileset
 from nemo_agent_hardener_plugin.jobs.errors import classify_exception
-from nemo_agent_hardener_plugin.jobs.execution import RunOutcome, _run_service_driven, run_synth_benign
+from nemo_agent_hardener_plugin.jobs.execution import (
+    RunOutcome,
+    _build_native_subprocess_env,
+    _reject_platform_auth_sources,
+    _run_service_driven,
+    run_synth_benign,
+)
 from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
@@ -48,6 +54,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
     """Synthesize and cache the benign request suite for a saved manifest (native TTY or Studio serve HITL)."""
 
     name = "synth"  # keeps the hand-written `nemo agent-hardener synth-benign` command unshadowed (cf. war-game/run)
+    job_collection_path = "/synth-benign/jobs"
     description = "Synthesize a saved manifest's benign request suite and cache it on the manifest."
     container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = SynthBenignSpec
@@ -116,12 +123,13 @@ class AgentHardenerSynthBenignJob(NemoJob):
 
         manifest_id = str(config["manifest_id"])
         manifest = _materialize_manifest(sdk, manifest_id, ctx)
-        env = _common.build_subprocess_env(plugin_config)
+        env = _build_native_subprocess_env(plugin_config)
         # Synthesis probes the live victim, so it needs the manifest's declared secrets. When no --env-file is
         # supplied (Studio never sends one), synthesize one from the operator env (as the war-game does).
         env_file = config.get("env_file")
         if not env_file:
             env_file = _common.materialize_victim_env_file(manifest, env, Path(manifest).parent)
+        _reject_platform_auth_sources(manifest, env_file)
         _common.check_victim_secrets(manifest, env, env_file)
 
         if config.get("driver") == "service":
