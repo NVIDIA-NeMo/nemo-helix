@@ -20,7 +20,7 @@ WORKDIR /app
 # the typed API (`nemo_relay.typed.tool_execute`) is the managed boundary this agent wires itself.
 RUN pip install --no-cache-dir \
       "openai>=1.60,<3" \
-      "nemo-relay>=0.8,<1.0" \
+      "nemo-relay>=0.9.3,<0.10" \
       "fastapi>=0.115,<1.0" \
       "uvicorn>=0.30,<1.0"
 
