@@ -291,12 +291,12 @@ def _handle(tmp_path: Path, **ownership_overrides: str) -> LaunchHandle:
     )
 
 
-def _write_applied(tmp_path: Path, trial: str, sha: str) -> None:
+def _write_applied(tmp_path: Path, trial: str, sha: str, *, sandbox_id: str | None = None, role: str = "agent") -> None:
     trial_dir = tmp_path / "harbor" / "jobs" / "ev_os1" / trial
-    trial_dir.mkdir(parents=True)
-    (trial_dir / backend.APPLIED_EGRESS_FILENAME).write_text(
-        json.dumps({"sandbox_id": f"sb-{trial}", "network_mode": "public", "policy_sha256": sha, "policy": {}})
-    )
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    sandbox_id = sandbox_id or f"sb-{trial}"
+    record = {"sandbox_id": sandbox_id, "role": role, "network_mode": "public", "policy_sha256": sha, "policy": {}}
+    (trial_dir / cleanup.applied_egress_filename(sandbox_id)).write_text(json.dumps(record))
 
 
 class _CleanupRecorder:
@@ -341,9 +341,34 @@ def test_terminator_runs_scoped_cleanup_in_harbor_venv_and_writes_applied_egress
     ]
     assert env["OPENSANDBOX_API_KEY"] == "k"
     assert _applied_summary(tmp_path)["sandboxes"] == [
-        {"trial": "trial-a", "sandbox_id": "sb-trial-a", "network_mode": "public", "policy_sha256": "1" * 64},
-        {"trial": "trial-b", "sandbox_id": "sb-trial-b", "network_mode": "public", "policy_sha256": "1" * 64},
+        {
+            "trial": "trial-a",
+            "sandbox_id": "sb-trial-a",
+            "role": "agent",
+            "network_mode": "public",
+            "policy_sha256": "1" * 64,
+        },
+        {
+            "trial": "trial-b",
+            "sandbox_id": "sb-trial-b",
+            "role": "agent",
+            "network_mode": "public",
+            "policy_sha256": "1" * 64,
+        },
     ]
+
+
+def test_applied_egress_keeps_both_sandboxes_of_a_separate_verifier_trial(tmp_path: Path) -> None:
+    _write_applied(tmp_path, "trial-a", "1" * 64, sandbox_id="sb-agent", role="agent")
+    _write_applied(tmp_path, "trial-a", "2" * 64, sandbox_id="sb-verifier", role="verifier")
+
+    records = backend.collect_applied_egress(tmp_path / "harbor" / "jobs" / "ev_os1")
+
+    assert sorted((item["sandbox_id"], item["role"], item["policy_sha256"]) for item in records) == [
+        ("sb-agent", "agent", "1" * 64),
+        ("sb-verifier", "verifier", "2" * 64),
+    ]
+    assert {item["trial"] for item in records} == {"trial-a"}
 
 
 def test_terminator_raises_and_still_writes_applied_egress_when_sandboxes_survive(tmp_path: Path) -> None:
