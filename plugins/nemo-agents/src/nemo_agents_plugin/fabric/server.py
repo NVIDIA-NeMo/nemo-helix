@@ -56,6 +56,7 @@ from starlette.types import Receive, Scope, Send
 logger = logging.getLogger(__name__)
 
 _FABRIC_STREAM_CLEANUP_TIMEOUT_SECONDS = 5.0
+_RELAY_SESSION_ROOT_NAMESPACE = uuid.UUID("551299d7-8557-477a-8a94-92000e5dad4c")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +93,13 @@ def _to_fabric_invocation_request(
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
+        relay_session_root=_relay_session_root(session_id) if session_id is not None else None,
     )
+
+
+def _relay_session_root(session_id: str) -> str:
+    """Return the Relay propagation root shared by every turn of one platform session."""
+    return str(uuid.uuid5(_RELAY_SESSION_ROOT_NAMESPACE, session_id))
 
 
 def _to_chat_completion_response(result: FabricRuntimeResult) -> ChatCompletionResponse:
