@@ -45,7 +45,7 @@ docker pull nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>
 docker pull nvcr.io/nvidia/nemo-helix/nhx-rl-training:<image-tag>
 ```
 
-Most users do not need to pull these images manually. NeMo Helix resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. Automodel and Unsloth images are used by the Docker job backend. Preload `nhx-rl-training` on the Kubernetes cluster that runs Ray. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
+Most users do not need to pull these images manually. NeMo Helix resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. Automodel and Unsloth images are used by the Docker job backend. For air-gapped or registry-restricted deployments, preload or mirror `nhx-rl-training` on the Kubernetes cluster that runs Ray. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
 
 ---
 
