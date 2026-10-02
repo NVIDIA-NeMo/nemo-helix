@@ -16,7 +16,7 @@ import pytest
 from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_compiler import _secret_refs, compile_agent_eval_job
-from nemo_evaluator.jobs.agent_evaluate import _FABRIC_ADAPTER_EXTRAS, AgentEvalJob, _resolve_registered_agent
+from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.jobs.agent_spec import (
     REGISTERED_AGENT_HARBOR_IMPORT_PATH,
     AgentEvalInputSpec,
@@ -33,6 +33,8 @@ from nemo_evaluator.jobs.agent_spec import (
     target_agent_identity,
 )
 from nemo_evaluator.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
+from nemo_evaluator.jobs.fabric_harness_packages import FABRIC_ADAPTER_EXTRAS
+from nemo_evaluator.jobs.registered_agent_resolution import resolve_registered_agent
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk import ExactMatchMetric
@@ -133,6 +135,7 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
     def by_class(_platform: object, client_cls: type) -> Any:
         return agents if client_cls.__name__ == "AsyncAgentsClient" else files
 
+    mocker.patch("nemo_evaluator.jobs.registered_agent_resolution.client_from_platform", side_effect=by_class)
     mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", side_effect=by_class)
     return agents
 
@@ -142,7 +145,7 @@ def _agent(config: dict[str, Any] | None = None, *, config_format: str = "nemo-a
 
 
 async def _resolve(target: FabricRunnerTarget | HarborRunnerTarget, workspace: str = "dev") -> Any:
-    return await _resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
+    return await resolve_registered_agent(target, workspace=workspace, async_sdk=_async_platform())
 
 
 # --- Fabric ------------------------------------------------------------------------------------------
@@ -282,10 +285,10 @@ async def test_the_published_agent_name_survives_resolution(mocker: MockerFixtur
 
 async def test_inline_targets_pass_through_untouched() -> None:
     target = FabricRunnerTarget(source=_INLINE)
-    assert await _resolve_registered_agent(target, workspace="dev", async_sdk=None) is target
+    assert await resolve_registered_agent(target, workspace="dev", async_sdk=None) is target
     resolved = _by_agent(AgentRef(root="dev/calc"), resolved_config={"harness": {"adapter_id": "x"}})
-    assert await _resolve_registered_agent(resolved, workspace="dev", async_sdk=None) is resolved
-    assert await _resolve_registered_agent(None, workspace="dev", async_sdk=None) is None
+    assert await resolve_registered_agent(resolved, workspace="dev", async_sdk=None) is resolved
+    assert await resolve_registered_agent(None, workspace="dev", async_sdk=None) is None
 
 
 # --- Environment overlay ------------------------------------------------------------------------------
@@ -465,7 +468,7 @@ async def test_harbor_target_by_agent_selects_the_installed_fabric_agent_with_th
 def test_every_harness_extra_the_resolver_names_exists_in_the_installed_fabric() -> None:
     """`pip install nemo-fabric[<extra>]` only warns on an unknown extra; the container would run without its harness."""
     provided = set(importlib.metadata.distribution("nemo-fabric").metadata.get_all("Provides-Extra") or [])
-    assert set(_FABRIC_ADAPTER_EXTRAS.values()) <= provided, set(_FABRIC_ADAPTER_EXTRAS.values()) - provided
+    assert set(FABRIC_ADAPTER_EXTRAS.values()) <= provided, set(FABRIC_ADAPTER_EXTRAS.values()) - provided
     assert "relay" in provided
 
 

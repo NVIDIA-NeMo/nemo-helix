@@ -14,7 +14,10 @@ agent-eval. This page runs the LangChain **deepagents** harness on a **Nemotron*
 
 Compared with the [Fabric runner](/documentation/evaluate-models/agent-eval/fabric-runner), which runs
 the harness on the host and scores with SDK metrics, this path trades the containerless loop for
-Harbor's isolation, retries, and verifier rewards. Both stay supported; pick by dataset shape.
+Harbor's isolation, retries, and verifier rewards. Both stay supported. Choose Harbor when your tasks are a
+Harbor task suite: each task ships its own container image and verifier, and the reward comes from that
+verifier. Choose the Fabric runner when your tasks are prompts or files you score yourself with SDK
+metrics, and a per-trial container would add nothing.
 
 <Warning>
 
@@ -307,7 +310,8 @@ in place of a built-in `name` or your own `import_path`:
 
 At submit time the service resolves the agent exactly as `nemo agents deploy` would — its models bound
 to the workspace's Inference Gateway, the optional `environment` merged on top — and fills the target
-in: the agent runs as the SDK's `FabricInstalledAgent` (so any task image works) and
+in: the agent runs as the SDK's `FabricInstalledAgent` (so the task image does not need Python
+preinstalled; the image requirements above still apply) and
 `agent_kwargs.fabric_config` carries the whole translated config, with `fabric_package` derived from
 the harness and pinned to the platform's Fabric version unless you set it. For the deepagents harness
 the pin also covers `mcp` and `langchain-mcp-adapters` at the platform's versions, because a clean
@@ -328,6 +332,32 @@ true of the Inference Gateway itself on a laptop, where the platform binds to `l
 `environment.model_provider_override.base_url` at the gateway through `host.docker.internal` for a
 local run. A registered agent carries no `model_name`: its model is part of what it is, and a different model
 is a different registered agent.
+
+```json
+{
+  "target": {
+    "kind": "harbor",
+    "source": {
+      "agent": "calculator-agent",
+      "environment": {
+        "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+        "env": {"CALC_MODE": "strict"},
+        "secrets": {"CALC_TOKEN": "calc-token"},
+        "model_provider_override": {
+          "base_url": "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+        }
+      }
+    },
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_kwargs": {"fabric_workspace": "/app"}
+  }
+}
+```
+
+`mcp.calculator.url` replaces the URL of the `calculator` server the agent declares; a server the agent does
+not declare is rejected. `env` is plain process environment, `secrets` binds an environment variable to a
+Secrets entry by name (the value never enters the spec), and `model_provider_override.base_url` is the
+laptop case described above.
 
 One limitation inside the task container: a secret bound to a **stdio** MCP server through
 `mcp.<name>.secrets` reaches the agent's environment but not the server itself. On the host Fabric

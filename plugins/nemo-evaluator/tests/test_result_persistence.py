@@ -110,6 +110,13 @@ def _agent() -> Agent:
             HarborRunnerTarget(source=HarborImportedAgentSource(import_path="wrapper:Agent")),
             ("harbor", "wrapper:Agent", None),
         ),
+        (
+            HarborRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                agent_kwargs={"fabric_config": {"harness": {"adapter_id": "x"}}},
+            ),
+            ("harbor", "calculator-agent", None),  # not the shared FabricInstalledAgent import path
+        ),
         (None, (None, None, None)),
     ],
 )
