@@ -108,7 +108,7 @@ _REGISTERED = {
 }
 
 
-def _compose(app, **overrides):
+def _compose_kwargs(**overrides):
     kwargs = dict(
         model_name="gym-policy-model",
         model_base_url="http://policy:5000/v1",
@@ -120,7 +120,11 @@ def _compose(app, **overrides):
         environ={},
     )
     kwargs.update(overrides)
-    return app.compose_fabric_config(_REGISTERED, **kwargs)
+    return kwargs
+
+
+def _compose(app, **overrides):
+    return app.compose_fabric_config(_REGISTERED, **_compose_kwargs(**overrides))
 
 
 def test_only_the_default_model_is_rebound_to_the_policy_server(app) -> None:
@@ -182,3 +186,14 @@ def test_fabric_messages_become_responses_items_ending_with_the_answer(app) -> N
 def test_a_request_without_input_runs_the_agent_on_an_empty_prompt(app) -> None:
     assert app._extract_request_input(None) == ("", None)
     assert app._extract_request_input("2+2?") == ("2+2?", None)
+
+
+def test_the_component_deadline_is_the_agents_task_budget_unless_the_agent_declares_one(app) -> None:
+    """Fabric clocks `runtime.timeout_seconds` on the invoke, so startup overhead never eats the agent's budget."""
+    composed = _compose(app, timeout_seconds=600)
+    assert composed["runtime"]["timeout_seconds"] == 600
+
+    declared = dict(_REGISTERED, runtime={"timeout_seconds": 90})
+    composed = app.compose_fabric_config(declared, **_compose_kwargs(timeout_seconds=600))
+    assert composed["runtime"]["timeout_seconds"] == 90
+    assert "timeout_seconds" not in _compose(app).get("runtime", {})  # no budget given, none invented

@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import tempfile
-from asyncio import Semaphore, wait_for
+from asyncio import Semaphore
 from copy import deepcopy
 from pathlib import Path
 from time import time
@@ -75,18 +75,22 @@ def compose_fabric_config(
     mcp_servers: dict[str, Any],
     skills: list[str],
     environ: dict[str, str],
+    timeout_seconds: Optional[float] = None,
 ) -> dict[str, Any]:
     """The registered agent's config, made runnable for one Gym rollout.
 
     Everything the agent is stays: identity, harness, instructions, tools, MCP servers, skills, the
     models other than the default. What changes is what Gym owns: the default model becomes the
     policy model server, the workspace is the rollout's, Gym's rollout MCP server and skills are
-    added, and a stdio MCP server's ``${NAME}`` env templates are filled from this process.
+    added, and a stdio MCP server's ``${NAME}`` env templates are filled from this process. An agent
+    that declares no ``runtime.timeout_seconds`` gets ``timeout_seconds`` as its task deadline.
     """
     config = deepcopy(registered)
     environment = config.setdefault("environment", {})
     environment["workspace"] = workspace
     environment.setdefault("env", {})[POLICY_MODEL_API_KEY_ENV] = model_api_key
+    if timeout_seconds is not None:
+        config.setdefault("runtime", {}).setdefault("timeout_seconds", timeout_seconds)
 
     models = config.setdefault("models", {})
     default = dict(models.get("default") or {})
@@ -290,6 +294,8 @@ class NeMoRegisteredAgentConfig(BaseResponsesAPIAgentConfig):
     model: str = "gym-policy-model"
     model_api_key: str = "local"  # pragma: allowlist secret
     concurrency: PositiveInt = 32
+    #: The agent's task deadline when its own config declares none; Fabric clocks it on the invoke,
+    #: so adapter startup and tool installation do not count against the agent.
     timeout: PositiveInt = 600
     system_prompt: Optional[str] = None
 
@@ -357,18 +363,16 @@ class NeMoRegisteredAgent(SimpleResponsesAPIAgent):
                 mcp_servers=mcp_servers or {},
                 skills=_skill_paths(skills_path),
                 environ=dict(os.environ),
+                timeout_seconds=self.config.timeout,
             )
-            result = await wait_for(
-                Fabric().run(
-                    FabricConfig.from_mapping(composed),
-                    base_dir=self.config.fabric_config_base_dir or workspace,
-                    request=RunRequest(
-                        input=request_input,
-                        request_id=rollout_id or f"request-{uuid4().hex}",
-                        context={"nemo_gym_rollout_id": rollout_id} if rollout_id else {},
-                    ),
+            result = await Fabric().run(
+                FabricConfig.from_mapping(composed),
+                base_dir=self.config.fabric_config_base_dir or workspace,
+                request=RunRequest(
+                    input=request_input,
+                    request_id=rollout_id or f"request-{uuid4().hex}",
+                    context={"nemo_gym_rollout_id": rollout_id} if rollout_id else {},
                 ),
-                timeout=self.config.timeout,
             )
         result_mapping = result.to_mapping()
         if result.status != "succeeded":

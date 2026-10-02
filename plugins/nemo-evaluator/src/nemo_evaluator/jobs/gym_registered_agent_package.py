@@ -184,8 +184,6 @@ def write_registered_agent_package(
         shutil.copytree(agent_files, files_dir, dirs_exist_ok=True)
         base_dir = f"{ENVIRONMENT_MOUNT_PATH}/{files_dir.relative_to(root).as_posix()}"
 
-    runtime = spec.resolved_config.get("runtime") or {}
-    timeout = runtime.get("timeout_seconds")
     component: dict[str, Any] = {
         "entrypoint": "app.py",
         "description": f"Registered platform agent {spec.agent.root}, run through NeMo Fabric.",
@@ -194,8 +192,6 @@ def write_registered_agent_package(
         "fabric_config": spec.resolved_config,
         "fabric_config_base_dir": base_dir,
     }
-    if isinstance(timeout, int) and timeout > 0:
-        component["timeout"] = timeout
     instance_config = {instance: {CUSTOM_AGENT_SUBDIR: {REGISTERED_AGENT_GYM_COMPONENT: component}}}
     (root / config_path).write_text(yaml.safe_dump(instance_config, sort_keys=False), encoding="utf-8")
 
