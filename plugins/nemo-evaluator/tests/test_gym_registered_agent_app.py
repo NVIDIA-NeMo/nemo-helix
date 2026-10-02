@@ -177,3 +177,8 @@ def test_fabric_messages_become_responses_items_ending_with_the_answer(app) -> N
     kinds = [type(item).__name__ for item in items]
     assert kinds == ["NeMoGymResponseFunctionToolCall", "NeMoGymFunctionCallOutput", "NeMoGymResponseOutputMessage"]
     assert items[0].arguments == '{"a": 2, "b": 2}' and items[1].call_id == "c1"
+
+
+def test_a_request_without_input_runs_the_agent_on_an_empty_prompt(app) -> None:
+    assert app._extract_request_input(None) == ("", None)
+    assert app._extract_request_input("2+2?") == ("2+2?", None)

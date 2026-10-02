@@ -1357,6 +1357,30 @@ async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(m
         )
 
 
+async def test_compile_rejects_a_registered_gym_agent_when_sandboxing_is_disabled(mocker: MockerFixture) -> None:
+    """A registered agent stages an environment tree with no `target.environment`; compile must still check it."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        return_value="registry.example/nhx-gym-tasks:test",
+    )
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+        resources_server="mcqa",
+        resolved_config={"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}},
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="registered agent's Gym package require sandboxed execution"):
+        await AgentEvalJob.compile(
+            workspace="dev",
+            spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
+            entity_client=object(),
+            job_name=None,
+            async_sdk=_async_sdk(),
+        )
+
+
 async def test_compile_rejects_mismatched_job_and_sandbox_storage_pvcs(mocker: MockerFixture) -> None:
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
