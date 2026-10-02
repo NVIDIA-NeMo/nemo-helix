@@ -333,6 +333,33 @@ class TestEvaluator:
         assert result.aggregate_scores.scores[0].mean == 0.5
         assert result.row_scores[0].sample["output_text"] == "blue"
 
+    def test_run_sync_field_mapping_binds_a_conversation_turn_by_index(self):
+        """A messages dataset binds through the mapping, so the metric template stays canonical.
+
+        This is the point of positional paths: the same ``{{reference}}`` template scores a flat
+        dataset and an OpenAI-messages one, with only the mapping differing.
+        """
+        evaluator = Evaluator()
+        conversation = [
+            {
+                "messages": [
+                    {"role": "system", "content": "be terse"},
+                    {"role": "user", "content": "capital of France?"},
+                    {"role": "assistant", "content": "Paris"},
+                ],
+                "prediction": "Paris",
+            }
+        ]
+
+        result = evaluator.run_sync(
+            metrics=[ExactMatchMetric(reference="{{reference}}")],
+            dataset=conversation,
+            field_mapping=FieldMapping(output="prediction", reference="messages[2].content"),
+        )
+
+        assert result.row_scores[0].item["reference"] == "Paris"
+        assert result.aggregate_scores.scores[0].mean == 1.0
+
     @pytest.mark.asyncio
     async def test_run_uses_sync_backend_adapter_thread_bridge(self, mocker: MockerFixture):
         expected = _empty_benchmark_result()

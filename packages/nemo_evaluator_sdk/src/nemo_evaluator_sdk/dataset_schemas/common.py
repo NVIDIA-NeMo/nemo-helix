@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from jsonschema.exceptions import SchemaError
@@ -12,6 +13,13 @@ from jsonschema.validators import validator_for
 
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 ARRAY_TOKEN = "[]"
+
+#: A positional array segment such as ``[2]``. Distinct from :data:`ARRAY_TOKEN`, which is a
+#: wildcard over an array of unknown length and resolves no concrete value.
+_INDEX_TOKEN = re.compile(r"^\[([0-9]+)\]$")
+
+#: Trailing bracket group on one dot segment, wildcard or positional.
+_BRACKET_SUFFIX = re.compile(r"\[[0-9]*\]$")
 
 
 class TemplateSchemaInferenceError(ValueError):
@@ -116,32 +124,47 @@ def split_path(path: str) -> list[str]:
     Examples:
         "messages[].content" -> ["messages", "[]", "content"]
         "messages[][].content" -> ["messages", "[]", "[]", "content"]
+        "messages[1].content" -> ["messages", "[1]", "content"]
+
+    A bracket group that is neither a wildcard nor a non-negative integer, such as ``a[x]``, is
+    left in the segment and treated as part of the key name.
     """
     if not path:
         return []
 
     parts: list[str] = []
     for segment in path.split("."):
-        array_depth = 0
-        while segment.endswith(ARRAY_TOKEN):
-            segment = segment[: -len(ARRAY_TOKEN)]
-            array_depth += 1
+        brackets: list[str] = []
+        while (match := _BRACKET_SUFFIX.search(segment)) is not None:
+            brackets.append(match.group(0))
+            segment = segment[: match.start()]
         if segment:
             parts.append(segment)
-        parts.extend([ARRAY_TOKEN] * array_depth)
+        parts.extend(reversed(brackets))
     return parts
 
 
 def get_value_at_path(data: dict[str, Any], path: str) -> Any:
     """Resolve a dotted path from an input row, returning ``_MISSING`` if absent.
 
-    Array tokens (``[]``) are not traversed against concrete row values and are
-    treated as unresolved for dataset-schema inference purposes.
+    A positional segment such as ``messages[1]`` indexes a list. Anything that does not resolve --
+    an out-of-range index, a non-list where an index was asked for, a missing key, or the ``[]``
+    wildcard, which names no single element -- yields ``_MISSING``.
     """
     current: Any = data
     for segment in split_path(path):
         if segment == ARRAY_TOKEN:
             return _MISSING
+        index_match = _INDEX_TOKEN.match(segment)
+        if index_match is not None:
+            # A list specifically, so that a string is never indexed character-wise.
+            if not isinstance(current, list):
+                return _MISSING
+            index = int(index_match.group(1))
+            if index >= len(current):
+                return _MISSING
+            current = current[index]
+            continue
         if not isinstance(current, dict) or segment not in current:
             return _MISSING
         current = current[segment]
@@ -158,7 +181,9 @@ def get_schema_at_path(schema: dict, path: str) -> tuple[dict | None, bool]:
     required = True
     for segment in split_path(path):
         current_kind = schema_kind(current)
-        if segment == ARRAY_TOKEN:
+        # A positional segment describes one element, so it resolves to the same item schema the
+        # wildcard does.
+        if segment == ARRAY_TOKEN or _INDEX_TOKEN.match(segment) is not None:
             if current_kind != "array":
                 return None, False
             items = current.get("items")

@@ -80,3 +80,85 @@ def test_schema_helpers_classify_common_types():
     assert schema_kind({"type": ["object", "null"]}) == "object"
     assert schema_kind({"type": ["array", "null"]}) == "array"
     assert display_path("") == "<root>"
+
+
+#: One table drives both the tokenizer and the FieldMapping grammar, so the two cannot drift apart.
+#: ``segments`` is ``None`` where the path is not a legal column mapping.
+PATH_CASES: list[tuple[str, list[str] | None]] = [
+    ("question", ["question"]),
+    ("a.b.c", ["a", "b", "c"]),
+    ("messages[1].content", ["messages", "[1]", "content"]),
+    ("messages[0]", ["messages", "[0]"]),
+    ("turns[0][2].text", ["turns", "[0]", "[2]", "text"]),
+    ("messages[].content", None),
+    ("messages[-1].content", None),
+    ("messages[x].content", None),
+    ("messages[1]content", None),
+    ("messages[", None),
+]
+
+
+@pytest.mark.parametrize(("path", "segments"), [(p, s) for p, s in PATH_CASES if s is not None])
+def test_split_path_tokenizes_positional_segments(path: str, segments: list[str]) -> None:
+    assert split_path(path) == segments
+
+
+def test_split_path_leaves_a_malformed_bracket_group_in_the_key() -> None:
+    """``[x]`` is not an index, so it stays part of the key rather than becoming a token."""
+    assert split_path("a[x].b") == ["a[x]", "b"]
+
+
+_ROW = {
+    "messages": [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+    ],
+    "name": "flat",
+    "nested": {"turns": [["a", "b"]]},
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("messages[0].content", "sys"),
+        ("messages[1].content", "hi"),
+        ("nested.turns[0][1]", "b"),
+        ("name", "flat"),
+    ],
+)
+def test_get_value_at_path_resolves_an_index(path: str, expected: str) -> None:
+    assert get_value_at_path(_ROW, path) == expected
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "messages[5].content",  # out of range
+        "name[0]",  # a string is not indexed character-wise
+        "messages[0].absent",  # missing key past an index
+        "messages[].content",  # the wildcard names no single element
+    ],
+)
+def test_get_value_at_path_returns_missing_when_an_index_does_not_resolve(path: str) -> None:
+    assert get_value_at_path(_ROW, path) is _MISSING
+
+
+def test_get_schema_at_path_resolves_an_index_to_the_item_schema() -> None:
+    """A positional segment describes one element, so it yields the same schema the wildcard does."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "messages": {
+                "type": "array",
+                "items": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]},
+            }
+        },
+        "required": ["messages"],
+    }
+
+    indexed, indexed_required = get_schema_at_path(schema, "messages[1].content")
+    wildcard, wildcard_required = get_schema_at_path(schema, "messages[].content")
+
+    assert indexed == {"type": "string"}
+    assert (indexed, indexed_required) == (wildcard, wildcard_required)

@@ -9,6 +9,10 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+#: Wildcard array segment. Declared here rather than imported from ``dataset_schemas.common``
+#: so this values module keeps no dependency on that package.
+_ARRAY_WILDCARD = "[]"
+
 _KNOWN_BINDING_FIELDS = (
     "input",
     "output",
@@ -20,7 +24,11 @@ _KNOWN_BINDING_FIELDS = (
     "tools",
 )
 
-_FIELD_MAPPING_PATH_PATTERN = r"^[^\[\]]*$"
+#: A dotted path, optionally with positional array segments: ``answer``, ``messages[1].content``,
+#: ``turns[0][2].text``. Bracket groups admit digits or nothing, so the wildcard ``[]`` parses
+#: here and is rejected by :meth:`FieldMapping.validate_supported_dataset_paths` with a message
+#: that can explain why. Anything else bracketed -- ``[-1]``, ``[x]``, ``a[1]b`` -- fails here.
+_FIELD_MAPPING_PATH_PATTERN = r"^[^\[\]]*(?:\[[0-9]*\](?:\.[^\[\]]*)?)*$"
 _FieldMappingPath = Annotated[str, Field(pattern=_FIELD_MAPPING_PATH_PATTERN, min_length=1)]
 
 
@@ -102,11 +110,13 @@ class FieldMapping(_FieldMappingBase):
 
     @model_validator(mode="after")
     def validate_supported_dataset_paths(self) -> Self:
+        """Reject the ``[]`` wildcard, which names no single element to bind a canonical field to."""
         unsupported = sorted(
-            canonical_name
-            for canonical_name, dataset_path in self.mapping().items()
-            if "[" in dataset_path or "]" in dataset_path
+            canonical_name for canonical_name, dataset_path in self.mapping().items() if _ARRAY_WILDCARD in dataset_path
         )
         if unsupported:
-            raise ValueError(f"array path segments are not supported for column mappings: {unsupported}")
+            raise ValueError(
+                f"wildcard array segments ({_ARRAY_WILDCARD}) are not supported for column mappings: "
+                f"{unsupported}. Use a positional index, such as messages[1].content."
+            )
         return self
