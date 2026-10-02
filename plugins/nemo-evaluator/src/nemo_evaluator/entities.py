@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from nemo_evaluator.api.schemas import (
+    AgentEvalResultSummary,
     PinnedTaskRefList,
     TaskDefinition,
     TaskMetadataList,
@@ -167,9 +168,8 @@ class _EvalResultCommon(BaseModel):
     because an offline run (precomputed trials) has no target, but the caller must still pass them.
 
     (``labels`` and a run ``status`` are intentionally absent: there's no labels source on the spec
-    yet, and persistence happens only on success — both would be schema defaults with no real data.
-    Add them when there's a source — labels alongside a spec ``labels`` field, status if/when partial
-    or failed runs are persisted.)
+    yet, and the job's own status already says whether the run failed — the per-record counts on the
+    concrete entities say how much of it did. Add labels alongside a spec ``labels`` field.)
     """
 
     job_id: str = Field(description="Identifier of the job run that produced this result (one result per run).")
@@ -189,11 +189,14 @@ class _EvalResultCommon(BaseModel):
 class AgentEvalResultEntity(_EvalResultCommon, EntityBase):
     """Persisted, queryable record of an ``AgentEvalJob`` run.
 
-    Carries only the shared record — its tasks are inline, so (unlike row-eval) it has no input ref
-    to record yet. Trials, per-metric coverage, and run counts live in the bundle's summary.
+    The queryable half of the bundle's ``summary.json``: ``scores`` plus ``summary``. Its tasks are
+    inline, so (unlike row-eval) it has no input ref to record yet.
     """
 
     __entity_type__: ClassVar[str] = "agent_eval_result"
+
+    # Nullable only for records persisted before the rollup was lifted here.
+    summary: AgentEvalResultSummary | None = Field(default=None, description="Run rollup from the bundle summary.")
 
 
 class EvaluateResultEntity(_EvalResultCommon, EntityBase):
@@ -211,6 +214,11 @@ class EvaluateResultEntity(_EvalResultCommon, EntityBase):
     metric_types: list[str] = Field(
         description="Runtime metric type names applied in the run (e.g. 'exact_match'). Not metric refs: "
         "by run time the submitted refs are resolved to inline bundles, so the originals aren't available."
+    )
+    # Nullable only for records persisted before these counts existed.
+    row_count: int | None = Field(default=None, ge=0, description="Dataset rows the run evaluated.")
+    error_row_count: int | None = Field(
+        default=None, ge=0, description="Rows where inference or a metric recorded an error."
     )
 
 
