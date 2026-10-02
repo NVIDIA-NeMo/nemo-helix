@@ -955,8 +955,7 @@ target "nhx-safe-synthesizer-tasks-docker" {
   cache-from = maybe_registry_cache_from("nhx-safe-synthesizer-tasks")
   tags       = sha_and_maybe_latest_tags("nhx-safe-synthesizer-tasks")
   output     = image_output()
-  #platforms  = get_platforms()
-  platforms  = ["linux/amd64"]
+  platforms  = get_platforms()
 }
 
 # Smoke test - built in parallel with nhx-safe-synthesizer-tasks-docker, never pushed.
@@ -971,7 +970,7 @@ target "nhx-safe-synthesizer-tasks-smoke-test" {
   }
   cache-from = maybe_registry_cache_from("nhx-safe-synthesizer-tasks")
   output     = ["type=cacheonly"]
-  platforms  = ["linux/amd64"]
+  platforms  = get_platforms()
 }
 
 # root
