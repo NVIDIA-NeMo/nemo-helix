@@ -87,7 +87,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRu
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
