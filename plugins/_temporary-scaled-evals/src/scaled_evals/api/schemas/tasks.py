@@ -61,6 +61,9 @@ class TaskDetail(Task):
     status: RevisionStatus | None = None
     image_ref: str | None = None
     image_digest: str | None = None
+    # Set only for tasks whose verifier runs in its own sandbox, built from tests/.
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
     build_error: str | None = None
     tarball_size_bytes: int | None = None
     tarball_sha256: str | None = None
@@ -96,6 +99,10 @@ class TaskFinalizeRequest(BaseModel):
     revision: int | None = Field(default=None, ge=1)
     image_ref: str | None = None
     image_digest: str | None = None
+    # Prebuilt image for a verifier that runs in its own sandbox ([verifier]
+    # environment_mode = "separate"). Only accepted together with image_ref.
+    verifier_image_ref: str | None = None
+    verifier_image_digest: str | None = None
     tarball_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 

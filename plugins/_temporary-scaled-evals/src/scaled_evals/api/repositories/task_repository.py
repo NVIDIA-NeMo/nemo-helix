@@ -285,8 +285,14 @@ class TaskRepository:
         exact_revision: bool = False,
         tarball_size_bytes: int | None = None,
         tenant_storage_quota_bytes: int | None = None,
+        verifier_image_ref: str | None = None,
+        verifier_image_digest: str | None = None,
     ) -> PrebuiltFinalizeResult | None:
-        """Atomically finalize the latest uploading revision with a prebuilt image."""
+        """Atomically finalize the latest uploading revision with a prebuilt image.
+
+        ``verifier_image_ref``/``verifier_image_digest`` name the separate verifier image, for tasks
+        whose verifier runs in its own sandbox; leave them unset otherwise.
+        """
         result: PrebuiltFinalizeResult | None = None
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
@@ -354,6 +360,7 @@ class TaskRepository:
                     """
                     UPDATE task_revisions
                     SET status = 'ready', image_ref = %s, image_digest = %s,
+                        verifier_image_ref = %s, verifier_image_digest = %s,
                         tarball_sha256 = COALESCE(%s, tarball_sha256), build_backend = NULL,
                         build_payload = '{}'::jsonb, build_credentials = '{}'::jsonb,
                         build_error = NULL, build_completed_at = NOW(),
@@ -361,7 +368,15 @@ class TaskRepository:
                         build_next_attempt_at = NULL
                     WHERE task_id = %s AND revision = %s AND status = 'uploading'
                     """,
-                    (image_ref, image_digest, tarball_sha256, task_id, row["revision"]),
+                    (
+                        image_ref,
+                        image_digest,
+                        verifier_image_ref,
+                        verifier_image_digest,
+                        tarball_sha256,
+                        task_id,
+                        row["revision"],
+                    ),
                 )
                 finalized = cur.rowcount == 1
                 if finalized:
@@ -600,12 +615,14 @@ class TaskRepository:
             cur.execute(
                 f"""
                 SELECT {", ".join(f"b.{c}" for c in TASK_COLUMNS.split(", "))},
-                       r.revision, r.status, r.image_ref, r.image_digest, r.build_error,
+                       r.revision, r.status, r.image_ref, r.image_digest,
+                       r.verifier_image_ref, r.verifier_image_digest, r.build_error,
                        r.tarball_size_bytes, r.tarball_sha256, r.tarball_object_key,
                        r.created_at AS revision_created_at
                 FROM tasks b
                 LEFT JOIN LATERAL (
-                    SELECT revision, status, image_ref, image_digest, build_error,
+                    SELECT revision, status, image_ref, image_digest,
+                           verifier_image_ref, verifier_image_digest, build_error,
                            tarball_size_bytes, tarball_sha256, tarball_object_key, created_at
                     FROM task_revisions
                     WHERE task_id = b.id

@@ -17,12 +17,16 @@ import yaml
 pytest.importorskip("scaled_evals")
 
 from scaled_evals import harbor_opensandbox_cleanup as cleanup
+from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.framework_versions import resolve_framework_runner
 from scaled_evals.api.settings import settings
 from scaled_evals.dispatch import harbor_opensandbox as backend
+from scaled_evals.dispatch import worker as dispatch_worker
+from scaled_evals.dispatch.runtime_backend import IncompatibleTaskError
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec
 
 DIGEST = "sha256:" + "a" * 64
+VERIFIER_DIGEST = "sha256:" + "b" * 64
 DEPLOYMENT = "dep-test"
 
 
@@ -105,6 +109,136 @@ def test_staged_preflight_accepts_task_narrowing(tmp_path: Path) -> None:
     _write_task(tmp_path, 'network_mode = "allowlist"\nallowed_hosts = ["pypi.org"]\n')
 
     backend.preflight_staged_task(tmp_path, ["pypi.org", "igw.example.internal"])
+
+
+SEPARATE_VERIFIER = '\n[verifier]\nenvironment_mode = "separate"\n'
+
+
+@pytest.mark.parametrize(
+    ("task_toml", "separate"),
+    [
+        ("[environment]\n", False),
+        ('[verifier]\nenvironment_mode = "shared"\n', False),
+        ('[verifier]\nenvironment_mode = "separate"\n', True),
+        ('[verifier.environment]\ndocker_image = "x"\n', True),
+        ('[verifier]\nenvironment_mode = "shared"\n[verifier.environment]\ncpus = 1\n', False),
+        ('[verifier]\nenvironment_mode = "separate"\n[[steps]]\nname = "a"\n', True),
+        ('[[steps]]\nname = "a"\n[steps.verifier]\nenvironment_mode = "separate"\n', True),
+        (
+            '[verifier]\nenvironment_mode = "separate"\n[[steps]]\n[steps.verifier]\nenvironment_mode = "shared"\n',
+            False,
+        ),
+    ],
+)
+def test_uses_separate_verifier_matches_harbor_resolution(task_toml: str, separate: bool) -> None:
+    assert backend.uses_separate_verifier(tomllib.loads(task_toml)) is separate
+
+
+@pytest.mark.parametrize(
+    "verifier",
+    [
+        {},
+        {"verifier_image_ref": "nvcr.io/org/task-verifier:v1"},
+        {"verifier_image_digest": VERIFIER_DIGEST},
+    ],
+)
+def test_staged_preflight_rejects_separate_verifier_without_pinned_image(
+    tmp_path: Path, verifier: dict[str, str]
+) -> None:
+    _write_task(tmp_path, SEPARATE_VERIFIER)
+
+    with pytest.raises(IncompatibleTaskError, match="verifier_image_digest"):
+        backend.preflight_staged_task(tmp_path, ["pypi.org"], **verifier)
+
+
+def test_staged_preflight_rejects_multistep_separate_verifier(tmp_path: Path) -> None:
+    _write_task(tmp_path, SEPARATE_VERIFIER + '\n[[steps]]\nname = "a"\n')
+
+    with pytest.raises(IncompatibleTaskError, match="multi-step"):
+        backend.preflight_staged_task(
+            tmp_path,
+            ["pypi.org"],
+            verifier_image_ref="nvcr.io/org/task-verifier:v1",
+            verifier_image_digest=VERIFIER_DIGEST,
+        )
+
+
+def test_staged_preflight_accepts_separate_verifier_with_pinned_image(tmp_path: Path) -> None:
+    _write_task(tmp_path, SEPARATE_VERIFIER)
+
+    backend.preflight_staged_task(
+        tmp_path,
+        ["pypi.org"],
+        verifier_image_ref="nvcr.io/org/task-verifier:v1",
+        verifier_image_digest=VERIFIER_DIGEST,
+    )
+
+
+def test_incompatible_task_is_a_task_failure_even_when_it_names_the_sandbox_runtime() -> None:
+    assert failure_category_for_code("IncompatibleTaskError") == "task"
+
+
+def test_launch_verifies_task_and_verifier_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    verified: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(dispatch_worker, "verify_stored_task_image", lambda ref, digest: verified.append((ref, digest)))
+
+    dispatch_worker.verify_launch_images(
+        _spec(verifier_image_ref="nvcr.io/org/task-verifier:v1", verifier_image_digest=VERIFIER_DIGEST)
+    )
+
+    assert verified == [("nvcr.io/org/task:v1", DIGEST), ("nvcr.io/org/task-verifier:v1", VERIFIER_DIGEST)]
+
+
+def test_launch_skips_verifier_check_without_verifier_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    verified: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(dispatch_worker, "verify_stored_task_image", lambda ref, digest: verified.append((ref, digest)))
+
+    dispatch_worker.verify_launch_images(_spec())
+
+    assert verified == [("nvcr.io/org/task:v1", DIGEST)]
+
+
+def test_bind_copies_environment_into_new_verifier_environment(tmp_path: Path) -> None:
+    _write_task(tmp_path, 'cpus = 2\nmemory_mb = 4096\nnetwork_mode = "allowlist"\n' + SEPARATE_VERIFIER)
+
+    bound = backend.bind_task_image(tmp_path, "task@sha256:a", verifier_image_ref="verifier@sha256:b")
+
+    assert bound is True
+    task = tomllib.loads((tmp_path / "task.toml").read_text())
+    assert task["environment"] == {
+        "cpus": 2,
+        "memory_mb": 4096,
+        "network_mode": "allowlist",
+        "docker_image": "task@sha256:a",
+    }
+    assert task["verifier"]["environment_mode"] == "separate"
+    assert task["verifier"]["environment"] == {
+        "cpus": 2,
+        "memory_mb": 4096,
+        "network_mode": "allowlist",
+        "docker_image": "verifier@sha256:b",
+    }
+
+
+def test_bind_replaces_image_the_task_names_for_its_verifier(tmp_path: Path) -> None:
+    _write_task(tmp_path, '\n[verifier.environment]\ndocker_image = "pack/verifier:latest"\ncpus = 1\n')
+
+    bound = backend.bind_task_image(tmp_path, "task@sha256:a", verifier_image_ref="verifier@sha256:b")
+
+    assert bound is True
+    task = tomllib.loads((tmp_path / "task.toml").read_text())
+    assert task["verifier"]["environment"] == {"docker_image": "verifier@sha256:b", "cpus": 1}
+
+
+def test_bind_leaves_shared_verifier_alone(tmp_path: Path) -> None:
+    _write_task(tmp_path, "cpus = 2\n")
+
+    bound = backend.bind_task_image(tmp_path, "task@sha256:a", verifier_image_ref="verifier@sha256:b")
+
+    assert bound is False
+    task = tomllib.loads((tmp_path / "task.toml").read_text())
+    assert "verifier" not in task
+    assert task["environment"]["docker_image"] == "task@sha256:a"
 
 
 def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
@@ -264,6 +398,40 @@ def test_submit_stages_binds_renders_and_spawns(tmp_path: Path, monkeypatch: pyt
     assert handle.raw["provenance"]["opensandbox_sdk_version"] == "0.1.16"
     assert handle.raw["provenance"]["harbor_version"] == "0.20.0"
     assert handle.raw["provenance"]["task_image_digest"] == DIGEST
+    assert handle.raw["provenance"]["verifier_image_ref"] is None
+    assert handle.raw["provenance"]["verifier_image_digest"] is None
+
+
+def test_submit_binds_pinned_verifier_image_and_records_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = _spec(verifier_image_ref="nvcr.io/org/task-verifier:v1", verifier_image_digest=VERIFIER_DIGEST)
+
+    handle, calls = _submit(tmp_path, monkeypatch, spec=spec, task_env=SEPARATE_VERIFIER)
+
+    assert len(calls) == 1
+    task = tomllib.loads((tmp_path / "work" / "ev_os1" / "hello-world" / "task.toml").read_text())
+    assert task["environment"]["docker_image"] == f"nvcr.io/org/task@{DIGEST}"
+    assert task["verifier"]["environment"]["docker_image"] == f"nvcr.io/org/task-verifier@{VERIFIER_DIGEST}"
+    assert handle.raw["provenance"]["verifier_image_ref"] == f"nvcr.io/org/task-verifier@{VERIFIER_DIGEST}"
+    assert handle.raw["provenance"]["verifier_image_digest"] == VERIFIER_DIGEST
+
+
+def test_submit_does_not_record_verifier_image_for_shared_verifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spec = _spec(verifier_image_ref="nvcr.io/org/task-verifier:v1", verifier_image_digest=VERIFIER_DIGEST)
+
+    handle, _calls = _submit(tmp_path, monkeypatch, spec=spec)
+
+    assert handle.raw["provenance"]["verifier_image_ref"] is None
+    assert handle.raw["provenance"]["verifier_image_digest"] is None
+
+
+def test_submit_rejects_separate_verifier_without_image_before_spawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(IncompatibleTaskError):
+        _submit(tmp_path, monkeypatch, task_env=SEPARATE_VERIFIER)
+    assert not (tmp_path / "work" / "ev_os1" / "harbor-config.yaml").exists()
 
 
 def test_submit_rejects_before_spawning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

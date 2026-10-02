@@ -32,6 +32,7 @@ from typing import Any
 
 import tomlkit
 import yaml
+from tomlkit.items import InlineTable, Table
 
 from scaled_evals.api.framework_versions import HARBOR_OPENSANDBOX_HARBOR_VERSION, HARBOR_OPENSANDBOX_RUNTIME
 from scaled_evals.api.settings import settings
@@ -39,6 +40,7 @@ from scaled_evals.dispatch.credentials import merged_env_file
 from scaled_evals.dispatch.paths import setting_evaluation_dir
 from scaled_evals.dispatch.runtime_backend import (
     CallableRuntimeBackend,
+    IncompatibleTaskError,
     RuntimeBackendCapabilities,
     RuntimeBackendRegistration,
 )
@@ -48,6 +50,7 @@ from scaled_evals.dispatch.sandbox_k8s import (
     _deep_merge_harbor_config,
     _harbor_result_path,
     _harbor_run_argv,
+    _image_ref_for_sandbox,
     _inject_extra_skills,
     _is_dataset_only_harbor_profile,
     _normalize_harbor_profile_config,
@@ -188,8 +191,42 @@ def preflight(spec: LaunchSpec) -> None:
         raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} does not support dataset-only Harbor profiles")
 
 
-def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
-    """Checks that need the staged task tree: compose, and task-declared egress."""
+def _verifier_mode(verifier: Any) -> str | None:
+    """Harbor's verifier mode for one ``[verifier]`` table, before inheritance; ``None`` if unset.
+
+    Mirrors ``harbor.models.task.verifier_mode._resolve_mode``: an explicit ``environment_mode``
+    wins, and a ``[verifier.environment]`` table on its own implies ``separate``.
+    """
+    if not isinstance(verifier, Mapping):
+        return None
+    mode = verifier.get("environment_mode")
+    if mode is not None:
+        return str(mode)
+    if verifier.get("environment") is not None:
+        return "separate"
+    return None
+
+
+def uses_separate_verifier(document: Mapping[str, Any]) -> bool:
+    """True when any verify pass of the task runs in its own sandbox, as Harbor 0.20 resolves it."""
+    task_mode = _verifier_mode(document.get("verifier")) or "shared"
+    steps = document.get("steps") or []
+    if not steps:
+        return task_mode == "separate"
+    return any(
+        (_verifier_mode(step.get("verifier") if isinstance(step, Mapping) else None) or task_mode) == "separate"
+        for step in steps
+    )
+
+
+def preflight_staged_task(
+    task_dir: Path,
+    trusted_hosts: Sequence[str],
+    *,
+    verifier_image_ref: str | None = None,
+    verifier_image_digest: str | None = None,
+) -> None:
+    """Checks that need the staged task tree: compose, the separate verifier image, and task-declared egress."""
     # Each trial gets exactly one sandbox, so multi-container (Compose) tasks can't run.
     for name in _COMPOSE_FILENAMES:
         if (task_dir / "environment" / name).exists() or (task_dir / name).exists():
@@ -198,10 +235,25 @@ def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
     task_toml = task_dir / "task.toml"
     if not task_toml.is_file():
         raise ValueError(f"staged task has no task.toml: {task_dir}")
+    document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
+
+    # A separate verifier runs from the image built from tests/, which the task revision must
+    # record. Without it Harbor would verify in a copy of the agent image, which has no tests.
+    if uses_separate_verifier(document):
+        if document.get("steps"):
+            raise IncompatibleTaskError(
+                f"{HARBOR_OPENSANDBOX_RUNTIME} does not support multi-step tasks with a separate verifier yet"
+            )
+        if not (verifier_image_ref and verifier_image_digest):
+            raise IncompatibleTaskError(
+                'the task runs its verifier separately ([verifier] environment_mode = "separate"), '
+                "but its revision has no verifier image with a recorded digest; finalize a new "
+                "revision with verifier_image_ref and verifier_image_digest for the image built from tests/"
+            )
 
     # A task may narrow egress to a subset of the operator allowlist, but asking for any other
     # host fails the evaluation instead of silently dropping it.
-    environment = tomlkit.parse(task_toml.read_text(encoding="utf-8")).get("environment") or {}
+    environment = document.get("environment") or {}
     if environment.get("network_mode") == "allowlist":
         requested = [str(host) for host in environment.get("allowed_hosts") or []]
         extra = sorted(set(requested) - set(trusted_hosts))
@@ -212,8 +264,12 @@ def preflight_staged_task(task_dir: Path, trusted_hosts: Sequence[str]) -> None:
             )
 
 
-def bind_task_image(task_dir: Path, image_ref: str) -> None:
-    """Point the staged task at its prebuilt image; OpenSandbox never builds images."""
+def bind_task_image(task_dir: Path, image_ref: str, *, verifier_image_ref: str | None = None) -> bool:
+    """Point the staged task at its prebuilt images; OpenSandbox never builds images.
+
+    ``verifier_image_ref`` is bound only when the task runs its verifier separately; any image the
+    task itself names for the verifier is replaced. Returns whether it was bound.
+    """
     # tomlkit keeps the rest of the author's task.toml (comments, ordering) as-is.
     task_toml = task_dir / "task.toml"
     document = tomlkit.parse(task_toml.read_text(encoding="utf-8"))
@@ -225,10 +281,29 @@ def bind_task_image(task_dir: Path, image_ref: str) -> None:
         raise ValueError(f"task [environment] must be a TOML table: {task_toml}")
     environment["docker_image"] = image_ref
 
+    verifier_bound = verifier_image_ref is not None and uses_separate_verifier(document)
+    if verifier_bound:
+        verifier = document.get("verifier")
+        if not isinstance(verifier, MutableMapping):
+            raise ValueError(f"task [verifier] must be a TOML table: {task_toml}")
+        verifier_environment = verifier.get("environment")
+        if verifier_environment is None:
+            # Harbor would verify in a copy of [environment]. Keep that copy, so the verifier
+            # gets the task's resources and network mode, and change only the image.
+            verifier_environment = tomlkit.table()
+            plain = environment.unwrap() if isinstance(environment, Table | InlineTable) else dict(environment)
+            for key, value in plain.items():
+                verifier_environment[key] = value
+            verifier["environment"] = verifier_environment
+        if not isinstance(verifier_environment, MutableMapping):
+            raise ValueError(f"task [verifier.environment] must be a TOML table: {task_toml}")
+        verifier_environment["docker_image"] = verifier_image_ref
+
     # Write to a temporary file and swap it in, so a crash never leaves a half-written task.toml.
     temporary = task_toml.with_suffix(".toml.tmp")
     temporary.write_text(tomlkit.dumps(document), encoding="utf-8")
     os.replace(temporary, task_toml)
+    return verifier_bound
 
 
 def _profile_overrides(profile_config: Mapping[str, Any]) -> dict[str, Any]:
@@ -390,9 +465,15 @@ def make_harbor_opensandbox_submitter(
         if not staged:
             raise ValueError(f"{HARBOR_OPENSANDBOX_RUNTIME} task pack contains no Harbor task tree")
 
-        # Checks that need the task files: no Compose tasks, and no task egress beyond the operator allowlist.
+        # Checks that need the task files: no Compose tasks, a verifier image for a separate
+        # verifier, and no task egress beyond the operator allowlist.
         trusted_hosts = trusted_allowed_hosts()
-        preflight_staged_task(task_dir, trusted_hosts)
+        preflight_staged_task(
+            task_dir,
+            trusted_hosts,
+            verifier_image_ref=spec.verifier_image_ref,
+            verifier_image_digest=spec.verifier_image_digest,
+        )
 
         # Apply the evaluation's task customizations, shared with sandbox_k8s: extra skill files,
         # instruction prefix/postfix, and the agent timeout floor. The skill list and final
@@ -408,9 +489,15 @@ def make_harbor_opensandbox_submitter(
             else None
         )
 
-        # OpenSandbox can't build images, so point task.toml at the task image built at upload time.
+        # OpenSandbox can't build images, so point task.toml at the images recorded at finalize.
         task_image_ref = _task_image_ref_for_sandbox(spec)
-        bind_task_image(task_dir, task_image_ref)
+        verifier_image_ref = (
+            _image_ref_for_sandbox(spec.verifier_image_ref, spec.verifier_image_digest)
+            if spec.verifier_image_ref
+            else None
+        )
+        if not bind_task_image(task_dir, task_image_ref, verifier_image_ref=verifier_image_ref):
+            verifier_image_ref = None
 
         # Render the Harbor config: the operator template plus the evaluation profile, with the
         # environment block (sandbox class, egress allowlist, ownership labels) set by this backend.
@@ -444,6 +531,8 @@ def make_harbor_opensandbox_submitter(
             "environment_import_path": NEMO_OPENSANDBOX_IMPORT_PATH,
             "task_image_ref": task_image_ref,
             "task_image_digest": spec.image_digest,
+            "verifier_image_ref": verifier_image_ref,
+            "verifier_image_digest": spec.verifier_image_digest if verifier_image_ref else None,
             "network_policy": spec.network_policy,
             "trusted_allowed_hosts": trusted_hosts,
             "egress_verification": settings.harbor_opensandbox_egress_verification,
