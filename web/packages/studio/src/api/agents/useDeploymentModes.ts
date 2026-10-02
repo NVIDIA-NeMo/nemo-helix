@@ -6,6 +6,8 @@ import {
   DeploymentModeAvailabilityMode,
   type DeploymentModeAvailabilityMode as DeploymentMode,
 } from '@nemo/sdk/generated/agents/schema/DeploymentModeAvailabilityMode';
+import type { DeploymentModeList } from '@nemo/sdk/generated/agents/schema/DeploymentModeList';
+import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 export { DeploymentModeAvailabilityMode };
@@ -24,9 +26,9 @@ export type DeploymentModes =
 
 export const useDeploymentModes = (
   workspace: string,
-  { enabled = true }: { enabled?: boolean } = {}
+  queryOptions?: Partial<UseQueryOptions<DeploymentModeList>>
 ): DeploymentModes => {
-  const { data, isError } = useAgentsListDeploymentModes(workspace, { query: { enabled } });
+  const { data, isError } = useAgentsListDeploymentModes(workspace, { query: queryOptions });
   return useMemo<DeploymentModes>(() => {
     if (data) {
       return {
