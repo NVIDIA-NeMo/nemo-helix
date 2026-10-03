@@ -132,7 +132,7 @@ describe('ModelDropdown', () => {
     const makeFilters = (overrides: Partial<ModelFilterControls> = {}): ModelFilterControls => ({
       values: {},
       onChange: vi.fn(),
-      providerOptions: [{ value: 'nvidia/build', label: 'build' }],
+      providerOptions: [{ value: 'default/nvidia-build', label: 'nvidia-build' }],
       familyOptions: [{ value: 'llama', label: 'llama' }],
       sizeOptions: MODEL_SIZE_OPTIONS,
       providersLoading: false,
