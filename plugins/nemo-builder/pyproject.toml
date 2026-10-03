@@ -11,6 +11,7 @@ dependencies = [
   "pydantic>=2.0.0",
   "cryptography>=42.0.0",
   "httpx>=0.27.0",
+  "kubernetes>=29.0.0",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,10 @@ nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true
 
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"
+
+[project.scripts]
+# compile.py emits `nhx-build <step>` as each job step's command.
+nhx-build = "nemo_builder_plugin.run.main:main"
 
 [build-system]
 requires = ["hatchling"]
