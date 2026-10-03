@@ -19,6 +19,15 @@ interface RequestOptions extends AxiosRequestConfig {
 axios.interceptors.request.use((config) => {
   Object.assign(config.headers, headers);
 
+  if (import.meta.env.VITE_OIDC_TOKEN_ENDPOINT_AUTH_METHOD === 'client_secret_basic') {
+    config.withCredentials = true;
+    const method = (config.method || 'get').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+      config.headers['X-NHX-Requested-By'] = '1';
+    }
+    return config;
+  }
+
   // If Authorization is already set (e.g. via axios.defaults in a Web Worker), skip OIDC lookup
   if (config.headers.Authorization) {
     return config;

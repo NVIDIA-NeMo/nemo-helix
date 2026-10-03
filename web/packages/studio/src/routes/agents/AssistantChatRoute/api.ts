@@ -3,6 +3,7 @@
 
 import { getStoredOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
 import { BASE_URL, PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { withWebSessionRequest } from '@studio/providers/auth/webSessionRequest';
 import {
   cleanAssistantArtifactText,
   createEmptyAssistantChatArtifacts,
@@ -44,17 +45,18 @@ const assistantApiUrl = (path: string): string =>
   `${PLATFORM_BASE_URL}${ASSISTANT_API_BASE_PATH}${path}`;
 
 const assistantFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const requestInit = withWebSessionRequest(init);
   const bearerToken = getStoredOidcBearerToken({
     authority: import.meta.env.VITE_AUTH_AUTHORITY,
     clientId: import.meta.env.VITE_AUTH_CLIENT_ID,
     configuredSource: import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE,
     storage: typeof localStorage === 'undefined' ? undefined : localStorage,
   });
-  if (!bearerToken) return fetch(input, init);
+  if (!bearerToken) return fetch(input, requestInit);
 
-  const headers = new Headers(init?.headers);
+  const headers = new Headers(requestInit?.headers);
   headers.set('Authorization', `Bearer ${bearerToken}`);
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...requestInit, headers });
 };
 
 const getStudioBaseUrl = (): string | undefined => {

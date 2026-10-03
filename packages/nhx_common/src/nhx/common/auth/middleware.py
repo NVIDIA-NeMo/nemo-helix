@@ -195,6 +195,12 @@ HEALTH_ENDPOINTS = {
     "/health/ready",
     "/metrics",
     "/apis/auth/discovery",  # Discovery endpoint for CLI/SDK
+    "/apis/auth/v2/login",
+    "/apis/auth/v2/login/callback",
+    "/apis/auth/v2/logout",
+    "/apis/auth/v2/session",
+    "/apis/auth/v2/cli/login",
+    "/apis/auth/v2/cli/token",
     "/apis/auth/authenticate",  # Direct bearer-token validation JSON API
     "/apis/auth/ext-authz",  # Envoy bearer-token validation callout
     "/apis/auth/jwks",  # NeMo-minted bearer-token signing keys
@@ -475,7 +481,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Skip authorization for health check endpoints
-        if path in HEALTH_ENDPOINTS:
+        if path in HEALTH_ENDPOINTS or path.startswith("/apis/auth/v2/cli/login/"):
             return await call_next(request)
 
         if request.method in ("GET", "HEAD") and path in PUBLIC_GET_PATHS:
@@ -529,6 +535,10 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=401, content={"detail": "Invalid bearer token"})
         if bearer_token is not None:
             return await self._handle_bearer_token_request(request, call_next, bearer_token)
+
+        session_response = await self._handle_session_cookie(request, call_next)
+        if session_response is not None:
+            return session_response
 
         # Perform authorization check with auth endpoint (allows PDP to decide for anonymous access)
         return await self._handle_auth_check(request, call_next)
@@ -658,6 +668,50 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         # Auth enabled - perform PDP check with the parsed principal headers. The HF-compatible
         # flow synthesizes these from its Bearer service token without mutating request.headers.
         return await self._handle_auth_check(request, call_next, headers_dict)
+
+    async def _handle_session_cookie(self, request: Request, call_next: Callable) -> Response | None:
+        """Resolve a Studio session cookie to a principal. Bearer requests never reach here."""
+        if self.config.oidc.token_endpoint_auth_method != "client_secret_basic":
+            return None
+        session_id = request.cookies.get("nhx_session")
+        if not session_id:
+            return None
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.headers.get("x-nhx-requested-by") != "1":
+            return JSONResponse(status_code=403, content={"detail": "Missing X-NHX-Requested-By"})
+        base = self.config.policy_decision_point_base_url.rstrip("/")
+        try:
+            response = await self._get_client(request).get(
+                f"{base}/apis/auth/v2/session",
+                cookies={"nhx_session": session_id},
+            )
+        except httpx.HTTPError:
+            return JSONResponse(status_code=401, content={"detail": "Missing session"})
+        if response.status_code != 200:
+            return JSONResponse(status_code=401, content={"detail": "Missing session"})
+        try:
+            body = response.json()
+        except ValueError:
+            return JSONResponse(status_code=401, content={"detail": "Missing session"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=401, content={"detail": "Missing session"})
+        principal_id = body.get("id")
+        if not isinstance(principal_id, str) or not principal_id:
+            return JSONResponse(status_code=401, content={"detail": "Missing session"})
+        headers = dict(request.headers)
+        headers["x-nhx-principal-id"] = principal_id
+        email = body.get("email")
+        if isinstance(email, str) and email:
+            headers["x-nhx-principal-email"] = email
+        groups = body.get("groups")
+        if isinstance(groups, list) and all(isinstance(group, str) for group in groups):
+            headers["x-nhx-principal-groups"] = ",".join(groups)
+        account_id = body.get("account_id")
+        if isinstance(account_id, str) and account_id:
+            headers["x-nhx-actor-account-id"] = account_id
+        aliases = body.get("authz_aliases")
+        if isinstance(aliases, list) and all(isinstance(alias, str) for alias in aliases):
+            headers["x-nhx-actor-aliases"] = ",".join(aliases)
+        return await self._handle_auth_check(request, call_next, headers)
 
     async def _handle_bearer_token_request(self, request: Request, call_next: Callable, token: str) -> Response:
         """Handle requests with Authorization: Bearer tokens through the shared resolver."""

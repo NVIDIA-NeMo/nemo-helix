@@ -94,6 +94,39 @@ class OIDCConfig(BaseSettings):
         description="OAuth client ID for this NeMo Helix deployment and its default interactive login flows.",
     )
 
+    token_endpoint_auth_method: Literal["none", "client_secret_basic"] = Field(
+        default="none",
+        description="How the platform client authenticates to the identity provider token endpoint. "
+        "'none' keeps the public authorization-code and device-code clients. "
+        "'client_secret_basic' makes the auth service exchange codes and refresh tokens "
+        "with RFC 6749 HTTP Basic client authentication. The secret is read from "
+        "client_secret_env_var and is never returned by discovery.",
+    )
+
+    client_secret_env_var: str | None = Field(
+        default=None,
+        description="Environment variable containing the platform client's confidential OAuth secret. "
+        "Required when token_endpoint_auth_method is client_secret_basic. Store only the variable name.",
+    )
+
+    session_encryption_key_env_var: str | None = Field(
+        default=None,
+        description="Environment variable containing the key used to encrypt brokered OIDC tokens at rest. "
+        "Required when token_endpoint_auth_method is client_secret_basic. Store only the variable name.",
+    )
+
+    login_redirect_uri: str | None = Field(
+        default=None,
+        description="Public redirect URI registered for the platform client's authorization-code flow. "
+        "When unset, the auth service derives it from the request base URL plus /apis/auth/v2/login/callback.",
+    )
+
+    public_client_id: str | None = Field(
+        default=None,
+        description="Optional additional public OAuth client ID advertised for device flow. "
+        "It is never the default login client. Default login remains client_id.",
+    )
+
     cli_client_id: str | None = Field(
         default=None,
         description="OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.",
@@ -179,7 +212,37 @@ class OIDCConfig(BaseSettings):
                 "auth.oidc.introspection_client_secret is not supported; set "
                 "auth.oidc.introspection_client_secret_env_var to the name of an environment variable instead"
             )
+        if isinstance(data, dict) and "client_secret" in data:
+            raise ValueError(
+                "auth.oidc.client_secret is not supported; set "
+                "auth.oidc.client_secret_env_var to the name of an environment variable instead"
+            )
+        if isinstance(data, dict) and "session_encryption_key" in data:
+            raise ValueError(
+                "auth.oidc.session_encryption_key is not supported; set "
+                "auth.oidc.session_encryption_key_env_var to the name of an environment variable instead"
+            )
         return data
+
+    @model_validator(mode="after")
+    def require_confidential_client_env_vars(self) -> Self:
+        if self.public_client_id and self.public_client_id == self.client_id:
+            raise ValueError("auth.oidc.public_client_id must be a different client than auth.oidc.client_id")
+        if self.token_endpoint_auth_method != "client_secret_basic":
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("client_secret_env_var", self.client_secret_env_var),
+                ("session_encryption_key_env_var", self.session_encryption_key_env_var),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "auth.oidc.token_endpoint_auth_method client_secret_basic requires " + " and ".join(missing)
+            )
+        return self
 
     resolve_opaque_tokens_via_userinfo: bool = Field(
         default=False,

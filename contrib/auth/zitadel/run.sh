@@ -38,6 +38,7 @@ K8S_EXPORT_KUBECONFIG_SET="false"
 K8S_NGC_EXISTING_SECRET="${NHX_ZITADEL_K8S_NGC_EXISTING_SECRET:-}"
 K8S_IMAGE_PULL_SECRET="${NHX_ZITADEL_K8S_IMAGE_PULL_SECRET:-}"
 ZITADEL_WORKSPACE="${NHX_ZITADEL_WORKSPACE:-zitadel-demo}"
+K8S_CLUSTER_DOMAIN="${NHX_ZITADEL_K8S_CLUSTER_DOMAIN:-cluster.local}"
 ZITADEL_PROVIDER_IMAGES=(
     "ghcr.io/zitadel/zitadel:v4.15.3"
     "docker.io/alpine/k8s:1.32.2"
@@ -327,6 +328,10 @@ workload_token_private_key_file() {
     printf "%s/.generated/workload-token-private-key.pem" "${ZITADEL_ROOT}"
 }
 
+zitadel_masterkey_file() {
+    printf "%s/.generated/zitadel-masterkey" "${ZITADEL_ROOT}"
+}
+
 lifecycle_state_dir() {
     local configured="${NEMO_ZITADEL_STATE_DIR:-./.generated/instances}"
     if [[ "${configured}" = /* ]]; then
@@ -437,6 +442,38 @@ ensure_workload_token_private_key() {
     echo "Generated workload token signing key: ${output}"
 }
 
+ensure_zitadel_masterkey() {
+    local generated
+    local output
+    local output_dir
+    local temporary
+
+    output="$(zitadel_masterkey_file)"
+    output_dir="$(dirname -- "${output}")"
+    if [[ -f "${output}" ]] && [[ "$(LC_ALL=C wc -c <"${output}" | tr -d ' ')" != "32" || ! "$(<"${output}")" =~ ^[[:xdigit:]]{32}$ ]]; then
+        fail "Generated ZITADEL master key is invalid; replace it explicitly: ${output}"
+    fi
+    if [[ -f "${output}" ]]; then
+        echo "Using ZITADEL master key: ${output}"
+        return
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write generated ZITADEL master key %q\n" "${output}"
+        printf "+ chmod 600 %q\n" "${output}"
+        return
+    fi
+
+    umask 077
+    mkdir -p "${output_dir}"
+    temporary="$(mktemp "${output}.tmp.XXXXXX")"
+    generated="$(openssl rand -hex 16)"
+    printf "%s" "${generated}" >"${temporary}"
+    chmod 600 "${temporary}"
+    mv -f "${temporary}" "${output}"
+    echo "Generated ZITADEL master key: ${output}"
+}
+
 run_in_repo() {
     if [[ "${DRY_RUN}" == "true" ]]; then
         print_command_in_dir "${REPO_ROOT}" "$@"
@@ -537,6 +574,104 @@ k8s_port_forward_pid_file_for_cluster() {
 k8s_port_forward_log_file_for_cluster() {
     local cluster_name="$1"
     printf "%s/port-forward.log" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_dir_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/gateway-tls" "$(k8s_state_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_cert_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_key_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/tls.key" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_ca_file_for_cluster() {
+    local cluster_name="$1"
+    printf "%s/ca.crt" "$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+}
+
+k8s_gateway_tls_matches_runtime() {
+    local cluster_name="$1"
+    local cert
+    local sans
+    local expected
+
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    [[ -f "${cert}" && -f "$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")" && -f "$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")" ]] || return 1
+    openssl x509 -in "${cert}" -checkend 0 -noout >/dev/null 2>&1 || return 1
+    sans="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null)"
+    for expected in \
+        localhost \
+        nemo-helix-envoy \
+        "nemo-helix-envoy.${HELM_NAMESPACE}" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc" \
+        "nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}"; do
+        [[ "${sans}" == *"DNS:${expected}"* ]] || return 1
+    done
+    [[ "${sans}" == *"IP Address:127.0.0.1"* ]]
+}
+
+ensure_k8s_gateway_tls_certificate() {
+    local cluster_name="$1"
+    local output_dir
+    local cert
+    local key
+    local ca
+    local openssl_config
+
+    output_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    cert="$(k8s_gateway_tls_cert_file_for_cluster "${cluster_name}")"
+    key="$(k8s_gateway_tls_key_file_for_cluster "${cluster_name}")"
+    ca="$(k8s_gateway_tls_ca_file_for_cluster "${cluster_name}")"
+    openssl_config="${output_dir}/openssl.cnf"
+
+    if [[ "${DRY_RUN}" != "true" ]] && k8s_gateway_tls_matches_runtime "${cluster_name}"; then
+        echo "Using Kubernetes gateway TLS certificate: ${cert}"
+        return
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ mkdir -p %q\n" "${output_dir}"
+        printf "+ write Kubernetes gateway TLS config %q\n" "${openssl_config}"
+        printf "+ openssl req -x509 -newkey rsa:2048 -nodes -keyout %q -out %q -days 365 -sha256 -config %q -extensions v3_req\n" "${key}" "${cert}" "${openssl_config}"
+        printf "+ cp %q %q\n" "${cert}" "${ca}"
+        return
+    fi
+
+    mkdir -p "${output_dir}"
+    cat >"${openssl_config}" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_req
+
+[dn]
+CN = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+
+[v3_req]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = nemo-helix-envoy
+DNS.3 = nemo-helix-envoy.${HELM_NAMESPACE}
+DNS.4 = nemo-helix-envoy.${HELM_NAMESPACE}.svc
+DNS.5 = nemo-helix-envoy.${HELM_NAMESPACE}.svc.${K8S_CLUSTER_DOMAIN}
+IP.1 = 127.0.0.1
+EOF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "${key}" -out "${cert}" -days 365 -sha256 -config "${openssl_config}" -extensions v3_req >/dev/null 2>&1
+    cp "${cert}" "${ca}"
+    chmod 600 "${key}"
+    chmod 644 "${cert}" "${ca}"
+    echo "Generated Kubernetes gateway TLS certificate: ${cert}"
 }
 
 k8s_context_for_cluster() {
@@ -723,6 +858,56 @@ k8s_kubectl_command() {
     run_command kubectl --kubeconfig "${kubeconfig}" --context "${context}" "$@"
 }
 
+k8s_ensure_namespace() {
+    local context="$1"
+    local kubeconfig="$2"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q create namespace %q --dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" create namespace "${HELM_NAMESPACE}" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_reconcile_secret() {
+    local context="$1"
+    local kubeconfig="$2"
+    local secret_name="$3"
+    shift 3
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        printf "+ kubectl --kubeconfig %q --context %q -n %q create secret generic %q " \
+            "${kubeconfig}" "${context}" "${HELM_NAMESPACE}" "${secret_name}"
+        quote_args "$@"
+        printf -- "--dry-run=client -o yaml | kubectl --kubeconfig %q --context %q apply -f -\n" "${kubeconfig}" "${context}"
+        return
+    fi
+    kubectl --kubeconfig "${kubeconfig}" --context "${context}" -n "${HELM_NAMESPACE}" \
+        create secret generic "${secret_name}" "$@" --dry-run=client -o yaml \
+        | kubectl --kubeconfig "${kubeconfig}" --context "${context}" apply -f -
+}
+
+k8s_prepare_secrets() {
+    local cluster_name="$1"
+    local context="$2"
+    local kubeconfig="$3"
+    local tls_dir
+
+    ensure_k8s_gateway_tls_certificate "${cluster_name}"
+    tls_dir="$(k8s_gateway_tls_dir_for_cluster "${cluster_name}")"
+    k8s_ensure_namespace "${context}" "${kubeconfig}"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-workload-token-signing-key \
+        "--from-file=private-key.pem=$(workload_token_private_key_file)"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" nemo-helix-envoy-tls \
+        "--from-file=tls.crt=${tls_dir}/tls.crt" \
+        "--from-file=tls.key=${tls_dir}/tls.key" \
+        "--from-file=ca.crt=${tls_dir}/ca.crt"
+    k8s_reconcile_secret "${context}" "${kubeconfig}" zitadel-masterkey \
+        "--from-file=masterkey=$(zitadel_masterkey_file)"
+}
+
 k8s_helm_install() {
     local cluster_name="$1"
     local context="$2"
@@ -730,14 +915,11 @@ k8s_helm_install() {
     local image
     local registry
     local tag
-    local workload_token_private_key
     local -a args
 
     image="$(image_ref)"
     registry="${image%/nhx-api:*}"
     tag="${image##*:}"
-    workload_token_private_key="$(workload_token_private_key_file)"
-
     run_in_repo helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
     run_in_repo helm repo add zitadel https://charts.zitadel.com --force-update
     run_in_repo helm dependency build k8s/helm
@@ -771,8 +953,6 @@ k8s_helm_install() {
         "nemo-helix.platformConfig.auth.access_keys.enabled=true"
         --set-string
         "nemo-helix.zitadelPublicGateway.port=${K8S_GATEWAY_PORT}"
-        --set-file
-        "workloadTokenSigningKey.privateKeyPem=${workload_token_private_key}"
     )
     if [[ -n "${K8S_NGC_EXISTING_SECRET}" ]]; then
         args+=(--set-string "nemo-helix.existingSecret=${K8S_NGC_EXISTING_SECRET}")
@@ -944,6 +1124,7 @@ k8s_up() {
 
     validate_k8s_runtime
     ensure_workload_token_private_key
+    ensure_zitadel_masterkey
     cluster_name="${K8S_CLUSTER_NAME:-${REUSE_K8S_CLUSTER_NAME}}"
     K8S_CLUSTER_NAME="${cluster_name}"
     context="$(k8s_context_for_cluster "${K8S_RUNTIME}" "${cluster_name}")"
@@ -965,6 +1146,7 @@ k8s_up() {
     fi
     k8s_load_image "${cluster_name}"
     k8s_load_provider_images "${cluster_name}"
+    k8s_prepare_secrets "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_helm_install "${cluster_name}" "${context}" "${kubeconfig}"
     k8s_wait_for_zitadel "${context}" "${kubeconfig}"
     k8s_write_ca_bundle "${context}" "${kubeconfig}" "${ca_bundle}"
@@ -1129,11 +1311,15 @@ run_pytest_with_diagnostics() {
 run_k8s_tests() {
     local diagnostics
     local k8s_diagnostics
+    local prepared_cluster_name
     local workload_token_private_key
     local status
 
     validate_k8s_runtime
     ensure_workload_token_private_key
+    ensure_zitadel_masterkey
+    prepared_cluster_name="${K8S_CLUSTER_NAME:-test}"
+    ensure_k8s_gateway_tls_certificate "${prepared_cluster_name}"
     workload_token_private_key="$(workload_token_private_key_file)"
     diagnostics="$(prepare_diagnostics_dir kubernetes)"
     write_diagnostics_metadata kubernetes "${diagnostics}"
@@ -1169,6 +1355,8 @@ run_k8s_tests() {
             "NHX_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
             "NHX_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
             "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+            "NHX_ZITADEL_K8S_GATEWAY_TLS_DIR=$(k8s_gateway_tls_dir_for_cluster "${prepared_cluster_name}")" \
+            "NHX_ZITADEL_K8S_MASTERKEY_FILE=$(zitadel_masterkey_file)" \
             uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime zitadel-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
         return
     fi
@@ -1190,6 +1378,8 @@ run_k8s_tests() {
         "NHX_ZITADEL_K8S_NGC_EXISTING_SECRET=${K8S_NGC_EXISTING_SECRET}" \
         "NHX_ZITADEL_K8S_IMAGE_PULL_SECRET=${K8S_IMAGE_PULL_SECRET}" \
         "NHX_ZITADEL_K8S_WORKLOAD_TOKEN_PRIVATE_KEY_FILE=${workload_token_private_key}" \
+        "NHX_ZITADEL_K8S_GATEWAY_TLS_DIR=$(k8s_gateway_tls_dir_for_cluster "${prepared_cluster_name}")" \
+        "NHX_ZITADEL_K8S_MASTERKEY_FILE=$(zitadel_masterkey_file)" \
         uv run --frozen pytest tests/auth_idp/contracts -v --auth-idp-runtime zitadel-kubernetes -m auth_idp_runtime --junitxml="${K8S_JUNIT_XML}"
     status="$?"
     echo "Auth-idp Kubernetes diagnostics: ${diagnostics}"

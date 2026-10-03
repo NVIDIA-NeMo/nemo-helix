@@ -258,7 +258,11 @@ def test_zitadel_values_use_introspection_for_opaque_tokens() -> None:
         oidc["introspection_endpoint"]
         == '{{ include "nemo-helix-zitadel.serviceUrl" (dict "root" . "serviceName" "nemo-helix-envoy" "namespace" .Values.envoyProxy.serviceNamespace "scheme" "https" "port" 8080) }}/oauth/v2/introspect'
     )
-    assert oidc["client_id"] == "__ZITADEL_NEMO_CLIENT_ID__"
+    assert oidc["client_id"] == "__ZITADEL_USER_LOGIN_CLIENT_ID__"
+    assert oidc["public_client_id"] == "__ZITADEL_NEMO_CLIENT_ID__"
+    assert oidc["token_endpoint_auth_method"] == "client_secret_basic"
+    assert oidc["client_secret_env_var"] == "NHX_OIDC_CLIENT_SECRET"
+    assert "client_secret" not in oidc
     assert oidc["introspection_client_id"] == "__ZITADEL_INTROSPECTION_CLIENT_ID__"
     assert oidc["introspection_client_secret_env_var"] == "NHX_AUTH_OIDC_INTROSPECTION_CLIENT_SECRET"
     assert "introspection_client_secret" not in oidc
@@ -387,8 +391,10 @@ def test_zitadel_chart_seeds_generated_clients_and_patches_nemo_config() -> None
     assert values["zitadelDemo"]["interactiveUser"]["email"] == "nemo-user@example.com"
     assert "password" not in values["zitadelDemo"]["interactiveUser"]
     assert '"interactive_user_password": INTERACTIVE_USER_PASSWORD' in seed_template
-    assert 'missing == {"interactive_user_password"}' in seed_template
-    assert "migrated legacy ZITADEL seed state" in seed_template
+    assert "interactive_user_password" in seed_template
+    assert "migrated ZITADEL seed state" in seed_template
+    assert "USER_LOGIN_APP_NAME" in seed_template
+    assert "__ZITADEL_USER_LOGIN_CLIENT_ID__" in seed_template
     assert "valueFrom:" in seed_template
     assert "secretKeyRef:" in seed_template
     assert "zitadelSecrets.demo.secretName" in seed_template
@@ -406,7 +412,6 @@ def test_zitadel_values_use_generated_secrets_for_sensitive_defaults() -> None:
     generated_secrets = (HELM_DIR / "templates" / "generated-secrets.yaml").read_text(encoding="utf-8")
 
     assert values["zitadelSecrets"]["masterkey"] == {
-        "create": True,
         "secretName": "zitadel-masterkey",
         "key": "masterkey",
     }
@@ -466,6 +471,7 @@ def test_zitadel_values_use_generated_secrets_for_sensitive_defaults() -> None:
     assert "$adminPassword" in generated_secrets
     assert "dbname=zitadel sslmode=disable" in generated_secrets
     assert '"helm.sh/hook": pre-install,pre-upgrade' in generated_secrets
+    assert "zitadelSecrets.masterkey" not in generated_secrets
 
 
 def test_zitadel_demo_files_avoid_empty_password_placeholders() -> None:
@@ -477,17 +483,12 @@ def test_zitadel_demo_files_avoid_empty_password_placeholders() -> None:
     assert 'postgresPassword: ""' not in values
 
 
-def test_zitadel_chart_creates_workload_token_secrets_and_tokenreview_rbac() -> None:
+def test_zitadel_chart_references_precreated_workload_token_secrets_and_tokenreview_rbac() -> None:
     values = _load_yaml(HELM_DIR / "values.yaml")
-    signing_template = (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").read_text(encoding="utf-8")
-    helpers_template = (HELM_DIR / "templates" / "_helpers.tpl").read_text(encoding="utf-8")
-    tls_template = (HELM_DIR / "templates" / "workload-token-tls.yaml").read_text(encoding="utf-8")
     tokenreview_template = (HELM_DIR / "templates" / "tokenreview-rbac.yaml").read_text(encoding="utf-8")
 
-    assert values["workloadTokenSigningKey"]["create"] is True
     assert values["workloadTokenSigningKey"]["secretName"] == "nemo-workload-token-signing-key"
     assert values["workloadTokenSigningKey"]["key"] == "private-key.pem"
-    assert values["workloadTokenTls"]["create"] is True
     assert values["workloadTokenTls"]["secretName"] == "nemo-helix-envoy-tls"
     assert values["nemo-helix"]["api"]["env"]["SSL_CERT_FILE"] == "/etc/nhx/workload-token-ca/ca.crt"
     assert values["nemo-helix"]["api"]["env"]["REQUESTS_CA_BUNDLE"] == "/etc/nhx/workload-token-ca/ca.crt"
@@ -509,8 +510,7 @@ def test_zitadel_chart_creates_workload_token_secrets_and_tokenreview_rbac() -> 
         "REQUESTS_CA_BUNDLE": "/etc/nhx/workload-token-ca/ca.crt",
     }
     assert workload_config["storage"] == jobs_config["executor_defaults"]["kubernetes_job"]["storage"]
-    assert "nemo-helix-zitadel.workloadTokenSigningKey.privateKeyPem" in signing_template
-    assert 'genPrivateKey "rsa"' in helpers_template
-    assert "genSignedCert" in tls_template
+    assert not (HELM_DIR / "templates" / "workload-token-signing-key-secret.yaml").exists()
+    assert not (HELM_DIR / "templates" / "workload-token-tls.yaml").exists()
     assert 'resources: ["tokenreviews"]' in tokenreview_template
     assert 'verbs: ["create"]' in tokenreview_template

@@ -53,7 +53,7 @@ class InMemoryAccessKeyRegistry:
         self.add_commits_before_error = False
         self.discarded = set()
 
-    async def add(self, key, *, owner_principal=None):
+    async def add(self, key, *, owner_principal=None, owner_account_id=None):
         if self.add_error is not None and not self.add_commits_before_error:
             raise self.add_error
         self.keys[key.jti] = key
@@ -83,7 +83,15 @@ class InMemoryAccessKeyRegistry:
             return key
         return None
 
-    async def list_for_principal(self, principal, *, page, page_size, include_service_accounts=False):
+    async def list_for_principal(
+        self,
+        principal,
+        *,
+        page,
+        page_size,
+        include_service_accounts=False,
+        owner_account_id=None,
+    ):
         from nemo_helix_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
 
         # Sort newest-first then by jti to match the real registry's `sort="-issued_at"`.

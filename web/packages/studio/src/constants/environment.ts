@@ -80,6 +80,7 @@ export const isLocalDevelopmentEnv = getEnvVar('VITE_IS_LOC_ENV')?.toLowerCase()
 
 // Vars used by the oidc provider
 export const AUTH_CLIENT_ID = getEnvVar('VITE_AUTH_CLIENT_ID');
+export const OIDC_TOKEN_ENDPOINT_AUTH_METHOD = getEnvVar('VITE_OIDC_TOKEN_ENDPOINT_AUTH_METHOD');
 export const AUTH_AUTHORITY = getEnvVar('VITE_AUTH_AUTHORITY');
 export const AUTH_BEARER_TOKEN_SOURCE = getEnvVar('VITE_AUTH_BEARER_TOKEN_SOURCE');
 export const AUTH_SCOPES = getEnvVar('VITE_AUTH_SCOPES');

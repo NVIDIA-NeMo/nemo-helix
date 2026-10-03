@@ -9,7 +9,7 @@ from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nhx.testing import grant_workspace_role
 
 from tests.auth_idp.common import jwt_claims, require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import with_url_origin
+from tests.auth_idp.device_flow import advertised_device_client_id, with_url_origin
 from tests.auth_idp.runtime_contract import AuthIdpCase, AuthIdpRuntime, TokenSet
 
 pytestmark = [
@@ -54,7 +54,7 @@ def _interactive_user_access_token(auth_idp_case: AuthIdpCase, auth_idp_runtime:
             auth_idp_runtime.gateway_base_url,
         ),
         token_endpoint=with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url),
-        client_id=oidc.client_id,
+        client_id=advertised_device_client_id(oidc),
         scope=oidc.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,

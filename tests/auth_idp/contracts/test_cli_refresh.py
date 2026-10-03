@@ -14,7 +14,7 @@ from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVV
 from typer.testing import CliRunner
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
-from tests.auth_idp.device_flow import with_url_origin
+from tests.auth_idp.device_flow import advertised_device_client_id, with_url_origin
 from tests.auth_idp.runtime_contract import JsonObject
 
 pytestmark = [
@@ -102,7 +102,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     token_response = auth_idp_runtime.authenticate_device_flow(
         device_authorization_endpoint=runtime_device_authorization_endpoint,
         token_endpoint=runtime_token_endpoint,
-        client_id=oidc.client_id,
+        client_id=advertised_device_client_id(oidc),
         scope=oidc.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,

@@ -9,7 +9,7 @@ x-authentik-env: &authentik-env
   AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
   AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
   AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS:-authentik}
-  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-dev-only}
+  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?run contrib/auth/authentik/run.sh prepare-local}
   AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-akadmin-dev}
   AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-bootstrap-token-dev}
   AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:-svc-nemo-token-secret-dev}
@@ -35,6 +35,8 @@ services:
       NHX_CONFIG_WARNINGS_DISABLED: "1"
       NHX_AUTH_POLICY_DECISION_POINT_BASE_URL: http://127.0.0.1:8080
       NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE: /var/run/secrets/nemo-helix/workload-token-signing/private-key.pem
+      NHX_OIDC_CLIENT_SECRET: ${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}
+      NHX_AUTH_SESSION_ENCRYPTION_KEY: ${NHX_AUTH_SESSION_ENCRYPTION_KEY:?run contrib/auth/authentik/run.sh prepare-local}
       NHX_SEED_ON_STARTUP: "true"
       NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED: "false"
       NHX_SECRETS_ALLOW_KEY_CREATION: "1"
@@ -184,7 +186,9 @@ services:
           attempt=$$((attempt + 1))
           sleep 2
         done
-    environment: *authentik-env
+    environment:
+      <<: *authentik-env
+      NHX_OIDC_CLIENT_SECRET: ${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}
     volumes:
       - ${AUTHENTIK_BLUEPRINT_DIR:-../helm/files/blueprints}:/blueprints/custom:ro
       - authentik-media:/media

@@ -6,6 +6,8 @@
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
 
+import { isConfidentialOidcClient, useWebSession } from './useWebSession';
+
 /** Millisecond timestamps exceed this; oidc-client-ts uses seconds since epoch. */
 const EXPIRY_SECONDS_VS_MS_THRESHOLD = 10_000_000_000;
 
@@ -43,8 +45,20 @@ export type AuthTokenStatus = {
  */
 export const useAuthTokenStatus = (): AuthTokenStatus => {
   const auth = useAuth();
+  const webSession = useWebSession();
 
   return useMemo(() => {
+    if (isConfidentialOidcClient) {
+      return {
+        isAuthenticated: webSession.isAuthenticated,
+        isLoading: webSession.isLoading,
+        isExpired: false,
+        isTokenActive: webSession.isAuthenticated,
+        activeScopes: [],
+        expiresAt: undefined,
+      };
+    }
+
     const user = auth.user;
     const isAuthenticated = auth.isAuthenticated && user != null;
     const expiresAtMs = normalizeOidcExpiresAtToMs(user?.expires_at);
@@ -64,5 +78,11 @@ export const useAuthTokenStatus = (): AuthTokenStatus => {
       activeScopes,
       expiresAt: expiresAtMs != null ? new Date(expiresAtMs) : undefined,
     };
-  }, [auth.isAuthenticated, auth.isLoading, auth.user]);
+  }, [
+    auth.isAuthenticated,
+    auth.isLoading,
+    auth.user,
+    webSession.isAuthenticated,
+    webSession.isLoading,
+  ]);
 };

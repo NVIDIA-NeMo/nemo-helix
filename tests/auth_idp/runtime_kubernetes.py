@@ -255,6 +255,28 @@ def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -
     return completed
 
 
+def _run_with_input(
+    args: list[str], input_text: str, *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        args,
+        cwd=REPO_ROOT,
+        text=True,
+        input=input_text,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+    )
+    if completed.returncode != 0:
+        command = " ".join(args)
+        stdout = completed.stdout[-4000:]
+        stderr = completed.stderr[-4000:]
+        raise AssertionError(
+            f"command failed ({completed.returncode}): {command}\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    return completed
+
+
 def _temporary_kubeconfig_path(cluster_name: str) -> Path:
     temp_file = tempfile.NamedTemporaryFile(
         prefix=f"nhx-{PROVIDER_NAME}-{cluster_name}-",
@@ -818,15 +840,83 @@ def _helm_upgrade_args(context: str, kubeconfig: Path | None = None) -> list[str
                 f"{settings.gateway_port_value_key}={gateway_port}",
             ]
         )
-    workload_token_private_key = os.environ.get(WORKLOAD_TOKEN_PRIVATE_KEY_FILE_ENV)
-    if workload_token_private_key:
-        args.extend(
-            [
-                "--set-file",
-                f"workloadTokenSigningKey.privateKeyPem={workload_token_private_key}",
-            ]
-        )
     return args
+
+
+def _required_prepared_path(settings: KubernetesProviderSettings, name: str) -> Path:
+    env_name = f"{settings.env_prefix}_{name}"
+    value = os.environ.get(env_name)
+    if not value:
+        raise RuntimeError(f"{env_name} is required; run the provider test through contrib/auth/{PROVIDER_NAME}/run.sh")
+    path = Path(value)
+    if not path.exists():
+        raise RuntimeError(f"{env_name} does not exist: {path}")
+    return path
+
+
+def _apply_manifest(context: str, manifest: str, kubeconfig: Path | None = None) -> None:
+    _run_with_input(_kubectl_command(context, ["apply", "-f", "-"], kubeconfig), manifest)
+
+
+def _reconcile_secret(
+    context: str,
+    name: str,
+    source_args: list[str],
+    kubeconfig: Path | None = None,
+) -> None:
+    rendered = _run(
+        _kubectl_command(
+            context,
+            ["-n", NAMESPACE, "create", "secret", "generic", name, *source_args, "--dry-run=client", "-o", "yaml"],
+            kubeconfig,
+        )
+    )
+    _apply_manifest(context, rendered.stdout, kubeconfig)
+
+
+def _prepare_precreated_secrets(context: str, kubeconfig: Path | None = None) -> None:
+    settings = _settings_for_provider(PROVIDER_NAME)
+    namespace_manifest = json.dumps({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": NAMESPACE}})
+    _apply_manifest(context, namespace_manifest, kubeconfig)
+
+    signing_key = _required_prepared_path(settings, "WORKLOAD_TOKEN_PRIVATE_KEY_FILE")
+    tls_dir = _required_prepared_path(settings, "GATEWAY_TLS_DIR")
+    _reconcile_secret(
+        context,
+        "nemo-workload-token-signing-key",
+        [f"--from-file=private-key.pem={signing_key}"],
+        kubeconfig,
+    )
+    _reconcile_secret(
+        context,
+        ENVOY_TLS_SECRET,
+        [
+            f"--from-file=tls.crt={tls_dir / 'tls.crt'}",
+            f"--from-file=tls.key={tls_dir / 'tls.key'}",
+            f"--from-file=ca.crt={tls_dir / 'ca.crt'}",
+        ],
+        kubeconfig,
+    )
+    if PROVIDER_NAME == "authentik":
+        _reconcile_secret(
+            context,
+            "nemo-authentik-secret-key",
+            [f"--from-env-file={_required_prepared_path(settings, 'AUTHENTIK_ENV_FILE')}"],
+            kubeconfig,
+        )
+        _reconcile_secret(
+            context,
+            "nemo-helix-user-oidc",
+            [f"--from-env-file={_required_prepared_path(settings, 'USER_OIDC_ENV_FILE')}"],
+            kubeconfig,
+        )
+    else:
+        _reconcile_secret(
+            context,
+            "zitadel-masterkey",
+            [f"--from-file=masterkey={_required_prepared_path(settings, 'MASTERKEY_FILE')}"],
+            kubeconfig,
+        )
 
 
 def _add_platform_helm_repositories() -> None:
@@ -843,6 +933,7 @@ def _add_platform_helm_repositories() -> None:
 
 def _helm_install_auth_idp_demo(context: str, kubeconfig: Path | None = None) -> None:
     _require_tool("helm")
+    _prepare_precreated_secrets(context, kubeconfig)
     _add_platform_helm_repositories()
     _run(["helm", "dependency", "build", "k8s/helm"], timeout=HELM_DEPENDENCY_TIMEOUT_SECONDS)
     _run(["helm", "dependency", "build", str(HELM_CHART)], timeout=HELM_DEPENDENCY_TIMEOUT_SECONDS)

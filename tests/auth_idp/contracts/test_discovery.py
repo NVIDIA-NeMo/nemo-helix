@@ -9,6 +9,7 @@ from nemo_helix_ext.auth.helpers import discover_nhx_config
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import (
+    advertised_device_client_id,
     url_origin,
     with_url_origin,
 )
@@ -63,7 +64,7 @@ def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, 
     response = httpx.post(
         device_authorization_endpoint,
         data={
-            "client_id": oidc.client_id,
+            "client_id": advertised_device_client_id(oidc),
             "scope": oidc.default_scopes,
         },
         timeout=30.0,
@@ -103,7 +104,7 @@ def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runt
     token_response = auth_idp_runtime.authenticate_device_flow(
         device_authorization_endpoint=device_authorization_endpoint,
         token_endpoint=token_endpoint,
-        client_id=oidc.client_id,
+        client_id=advertised_device_client_id(oidc),
         scope=oidc.default_scopes,
         username=auth_idp_case.provider.interactive_user_username,
         password=auth_idp_case.provider.interactive_user_password,
@@ -119,7 +120,7 @@ def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runt
         token_endpoint,
         data={
             "grant_type": "refresh_token",
-            "client_id": oidc.client_id,
+            "client_id": advertised_device_client_id(oidc),
             "refresh_token": refresh_token,
             "scope": oidc.default_scopes,
         },

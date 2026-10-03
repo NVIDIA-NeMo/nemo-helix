@@ -74,25 +74,3 @@ names:
 {{- .generated -}}
 {{- end -}}
 {{- end -}}
-
-{{- define "nemo-helix-zitadel.workloadTokenSigningKey.secretName" -}}
-{{- required "workloadTokenSigningKey.secretName is required" .Values.workloadTokenSigningKey.secretName -}}
-{{- end -}}
-
-{{- define "nemo-helix-zitadel.workloadTokenSigningKey.key" -}}
-{{- required "workloadTokenSigningKey.key is required" .Values.workloadTokenSigningKey.key -}}
-{{- end -}}
-
-{{- define "nemo-helix-zitadel.workloadTokenSigningKey.privateKeyPem" -}}
-{{- $secretName := include "nemo-helix-zitadel.workloadTokenSigningKey.secretName" . -}}
-{{- $secretKey := include "nemo-helix-zitadel.workloadTokenSigningKey.key" . -}}
-{{- $privateKeyPem := .Values.workloadTokenSigningKey.privateKeyPem | default "" -}}
-{{- $existingData := include "nemo-helix-zitadel.existingSecretData" (dict "root" . "secretName" $secretName) | fromJson -}}
-{{- if $privateKeyPem -}}
-{{- $privateKeyPem -}}
-{{- else if hasKey $existingData $secretKey -}}
-{{- index $existingData $secretKey | b64dec -}}
-{{- else -}}
-{{- genPrivateKey "rsa" -}}
-{{- end -}}
-{{- end -}}

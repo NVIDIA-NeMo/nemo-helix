@@ -32,8 +32,9 @@ From the repo root, prepare shared generated inputs once:
 contrib/auth/authentik/run.sh prepare-local
 ```
 
-This creates the shared workload-token signing key, gateway TLS material, and
-rendered Authentik blueprint under `contrib/auth/authentik/.generated`.
+This creates the shared workload-token signing key, gateway TLS material,
+Authentik internal key, confidential OIDC and session keys, and rendered
+blueprint under `contrib/auth/authentik/.generated`.
 
 ### Docker Compose
 
@@ -48,7 +49,10 @@ Prerequisites:
 Start Compose in one terminal:
 
 ```bash
-docker compose -f contrib/auth/authentik/compose/docker-compose.yml up
+docker compose \
+  --env-file contrib/auth/authentik/.generated/authentik.env \
+  --env-file contrib/auth/authentik/.generated/user-oidc.env \
+  -f contrib/auth/authentik/compose/docker-compose.yml up
 ```
 
 This starts NeMo, Authentik, and the local gateway with the default NeMo API
@@ -116,6 +120,60 @@ kubectl --context "${KUBE_CONTEXT}" create namespace "${NAMESPACE}" \
   kubectl --context "${KUBE_CONTEXT}" apply -f -
 ```
 
+Prepare the runtime-specific gateway certificate and reconcile the Secrets
+before Helm. Existing generated files are reused.
+
+```bash
+export AUTHENTIK_K8S_GENERATED_DIR="contrib/auth/authentik/.generated/k8s/${KIND_CLUSTER}"
+mkdir -p "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls"
+
+cat > "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/openssl.cnf" <<EOF
+[req]
+prompt = no
+distinguished_name = dn
+x509_extensions = v3_req
+[dn]
+CN = nemo-helix-envoy.${NAMESPACE}.svc.cluster.local
+[v3_req]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, digitalSignature, keyEncipherment, keyCertSign
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+DNS.2 = nemo-helix-envoy
+DNS.3 = nemo-helix-envoy.${NAMESPACE}
+DNS.4 = nemo-helix-envoy.${NAMESPACE}.svc
+DNS.5 = nemo-helix-envoy.${NAMESPACE}.svc.cluster.local
+IP.1 = 127.0.0.1
+EOF
+
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.key" \
+  -out "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.crt" \
+  -days 365 -sha256 \
+  -config "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/openssl.cnf" \
+  -extensions v3_req
+cp "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.crt" \
+  "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/ca.crt"
+chmod 600 "${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.key"
+
+kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" create secret generic nemo-workload-token-signing-key \
+  --from-file=private-key.pem=contrib/auth/authentik/.generated/workload-token-private-key.pem \
+  --dry-run=client -o yaml | kubectl --context "${KUBE_CONTEXT}" apply -f -
+kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" create secret generic nemo-helix-envoy-tls \
+  --from-file=tls.crt="${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.crt" \
+  --from-file=tls.key="${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/tls.key" \
+  --from-file=ca.crt="${AUTHENTIK_K8S_GENERATED_DIR}/gateway-tls/ca.crt" \
+  --dry-run=client -o yaml | kubectl --context "${KUBE_CONTEXT}" apply -f -
+kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" create secret generic nemo-helix-user-oidc \
+  --from-env-file=contrib/auth/authentik/.generated/user-oidc.env \
+  --dry-run=client -o yaml | kubectl --context "${KUBE_CONTEXT}" apply -f -
+kubectl --context "${KUBE_CONTEXT}" -n "${NAMESPACE}" create secret generic nemo-authentik-secret-key \
+  --from-env-file=contrib/auth/authentik/.generated/authentik.env \
+  --dry-run=client -o yaml | kubectl --context "${KUBE_CONTEXT}" apply -f -
+```
+
 Build the local NeMo Helix image and load it into kind:
 
 ```bash
@@ -145,8 +203,7 @@ helm --kube-context "${KUBE_CONTEXT}" upgrade --install "${HELM_RELEASE}" contri
   --set-string nemo-helix.core.image.tag="${BAKE_TAG}" \
   --set-string nemo-helix.platformConfig.platform.image_registry="${IMAGE_REGISTRY}" \
   --set-string nemo-helix.platformConfig.platform.image_tag="${BAKE_TAG}" \
-  --set nemo-helix.platformConfig.auth.access_keys.enabled=true \
-  --set-file workloadTokenSigningKey.privateKeyPem=contrib/auth/authentik/.generated/workload-token-private-key.pem
+  --set nemo-helix.platformConfig.auth.access_keys.enabled=true
 ```
 
 Wait for the main workloads:
@@ -460,7 +517,10 @@ Then clean up the runtime you chose.
 For Compose, stop the foreground process with `Ctrl-C`, then run:
 
 ```bash
-docker compose -f contrib/auth/authentik/compose/docker-compose.yml down -v
+docker compose \
+  --env-file contrib/auth/authentik/.generated/authentik.env \
+  --env-file contrib/auth/authentik/.generated/user-oidc.env \
+  -f contrib/auth/authentik/compose/docker-compose.yml down -v
 ```
 
 For Kubernetes:

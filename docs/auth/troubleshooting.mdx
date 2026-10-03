@@ -100,6 +100,8 @@ The `client_id` in NeMo Helix config doesn't match the application in your IdP.
 
 **Fix**: Verify `auth.oidc.client_id` matches the client ID in your IdP exactly.
 
+For Client Secret Basic failures, redirect mismatches, or a CLI that unexpectedly starts device flow, see [Confidential OIDC Client](/documentation/access-control/authentication/confidential-oidc-client#troubleshoot-login).
+
 ## "I Can't Delete a Workspace"
 
 **Cause**: The workspace contains resources, or you don't have the Admin role.
@@ -170,4 +172,5 @@ If these steps don't resolve the issue:
 - [Auth Configuration](/documentation/access-control/deployment) — Configuration reference.
 - [Security Model](/documentation/access-control/security-model) — Architecture and trust boundaries.
 - [OIDC Setup](/documentation/access-control/authentication/oidc-setup) — IdP configuration.
+- [Confidential OIDC Client](/documentation/access-control/authentication/confidential-oidc-client) — Client Secret Basic setup and troubleshooting.
 - [Gateway Integration](/documentation/access-control/deployment/gateway-integration) — Gateway auth and headers.

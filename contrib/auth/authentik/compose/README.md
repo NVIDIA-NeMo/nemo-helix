@@ -18,7 +18,10 @@ The Compose runtime starts with:
 
 ```bash
 cd contrib/auth/authentik/compose
-docker compose up
+docker compose \
+  --env-file ../.generated/authentik.env \
+  --env-file ../.generated/user-oidc.env \
+  up
 ```
 
 The Compose project name defaults to `nemo-helix-authentik`, so container,

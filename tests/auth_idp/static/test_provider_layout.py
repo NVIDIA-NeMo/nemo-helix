@@ -106,7 +106,10 @@ def test_authentik_compose_defaults_support_direct_docker_compose_start():
     assert blueprint_mount not in compose["services"]["authentik-worker"]["volumes"]
     blueprint_init = compose["services"]["authentik-blueprint-init"]
     assert blueprint_init["image"] == "ghcr.io/goauthentik/server:${AUTHENTIK_TAG:-2024.12}"
-    assert blueprint_init["environment"] == compose["x-authentik-env"]
+    assert blueprint_init["environment"] == {
+        **compose["x-authentik-env"],
+        "NHX_OIDC_CLIENT_SECRET": "${NHX_OIDC_CLIENT_SECRET:?run contrib/auth/authentik/run.sh prepare-local}",
+    }
     assert blueprint_mount in blueprint_init["volumes"]
     assert blueprint_init["depends_on"]["authentik-server"]["condition"] == "service_healthy"
     assert blueprint_init["depends_on"]["authentik-worker"]["condition"] == "service_healthy"

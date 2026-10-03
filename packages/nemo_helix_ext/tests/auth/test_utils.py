@@ -17,6 +17,7 @@ from nemo_helix_ext.auth.helpers import (
     generate_unsigned_jwt,
     is_unsigned_jwt,
     normalize_scope_prefix,
+    refresh_target,
     validate_requested_scopes_granted,
 )
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
@@ -276,3 +277,47 @@ class TestValidateRequestedScopesGranted:
                 granted_scopes=["openid", "platform:read"],
                 scope_prefix="api://nhx/",
             )
+
+
+def test_refresh_target_uses_broker_for_confidential_login() -> None:
+    config = NHXOIDCConfig(
+        auth_enabled=True,
+        client_id="confidential-client",
+        token_endpoint="https://idp.example.com/token",
+        token_endpoint_auth_method="client_secret_basic",
+        public_client_id="public-client",
+    )
+
+    endpoint, client_id = refresh_target(config, "https://nemo.example.com/apis/auth/v2/cli/token")
+
+    assert endpoint == "https://nemo.example.com/apis/auth/v2/cli/token"
+    assert client_id == "confidential-client"
+
+
+def test_refresh_target_uses_public_client_for_device_flow() -> None:
+    config = NHXOIDCConfig(
+        auth_enabled=True,
+        client_id="confidential-client",
+        token_endpoint="https://idp.example.com/token",
+        token_endpoint_auth_method="client_secret_basic",
+        public_client_id="public-client",
+    )
+
+    endpoint, client_id = refresh_target(config, None)
+
+    assert endpoint == "https://idp.example.com/token"
+    assert client_id == "public-client"
+
+
+def test_refresh_target_keeps_platform_client_when_public() -> None:
+    config = NHXOIDCConfig(
+        auth_enabled=True,
+        client_id="platform-client",
+        cli_client_id="cli-client",
+        token_endpoint="https://idp.example.com/token",
+    )
+
+    endpoint, client_id = refresh_target(config, None)
+
+    assert endpoint == "https://idp.example.com/token"
+    assert client_id == "cli-client"
