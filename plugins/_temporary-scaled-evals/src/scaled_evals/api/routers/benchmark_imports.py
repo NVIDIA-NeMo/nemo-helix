@@ -49,10 +49,10 @@ def _ensure_upload_fileset(object_key: str) -> None:
     ``503 object_store_unavailable`` (same error model as task create/revise + finalize) rather
     than an unhandled 500.
     """
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
 
     try:
-        s3.upload_target(object_key, ensure_fileset=True)
+        artifacts.upload_target(object_key, ensure_fileset=True)
     except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
         raise _http_error(
             503,
