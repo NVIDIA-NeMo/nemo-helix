@@ -76,6 +76,9 @@ outputs:
   auth-idp:
     description: "'true' if auth-idp tests or their containerized E2E harness inputs changed"
     value: ${{ steps.filter.outputs.auth-idp == 'true' }}
+  customization-auth:
+    description: "'true' if anything a customization job step touches on an auth-enabled cluster changed"
+    value: ${{ steps.filter.outputs.customization-auth == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.helm == 'true' }}
 
 runs:
   using: "composite"
@@ -243,6 +246,27 @@ runs:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
             - '.github/assets/ngc/**'
+          customization-auth:
+            - 'services/core/auth/**'
+            - 'services/core/files/**'
+            - 'services/core/jobs/**'
+            - 'services/core/models/**'
+            - 'services/automodel/**'
+            - 'services/unsloth/**'
+            - 'services/rl/**'
+            - 'packages/nhx_customization_common/**'
+            - 'packages/nemo_helix_plugin/src/**'
+            - 'plugins/nemo-customizer/**'
+            - 'plugins/nemo-automodel/**'
+            - 'plugins/nemo-unsloth/**'
+            - 'plugins/nemo-rl/**'
+            - 'e2e/test_customization_auth.py'
+            - 'e2e/conftest.py'
+            - 'e2e/services_pool*.py'
+            - 'e2e/k8s/**'
+            - '.github/actions/setup-kind-cluster/**'
+            - '.github/actions/changes/**'
+            - '.github/workflows/ci.yaml'
           auth-idp:
             - 'conftest.py'
             - 'pytest.ini'

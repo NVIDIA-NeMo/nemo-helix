@@ -5,7 +5,7 @@
     "max_seq_length": 2048
   },
   "dataset": {
-    "path": "/data/sample.jsonl",
+    "path": "default/sample-data",
     "text_field": "text"
   },
   "schedule": {
