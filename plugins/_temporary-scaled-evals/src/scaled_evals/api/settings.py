@@ -345,10 +345,6 @@ class Settings(BaseSettings):
     control_plane_admin_emails: str = ""
     control_plane_admin_groups: str = ""
     control_plane_admin_roles: str = ""
-    # Weighted sandbox-slot admission. Submissions may queue beyond these
-    # limits; dispatch only claims work when its requested parallelism fits.
-    control_plane_cluster_run_limit: int = 500
-    control_plane_per_user_run_limit: int = 50
 
     @field_validator("api_sse_max_connections")
     @classmethod

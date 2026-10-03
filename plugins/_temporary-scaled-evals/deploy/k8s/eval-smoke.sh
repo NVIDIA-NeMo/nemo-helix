@@ -37,14 +37,12 @@ WORK="$(mktemp -d)"
 # Long enough to observe a run and intervene, well inside the task's own 900s
 # agent timeout.
 SLOW_SECONDS="${SLOW_SECONDS:-240}"
-# Enough members to see a ramp and to exceed the member cap below, small enough
-# that one run fits in a coffee break.
+# Enough members to see a ramp, small enough that one run fits in a coffee break.
 MEMBERS="${MEMBERS:-10}"
-# The per-run cap sent with the request. Deliberately below MEMBERS so it binds.
-MEMBER_CAP="${MEMBER_CAP:-3}"
-# What in-flight count the run is asserted against. Separate from MEMBER_CAP so
-# the settings-level caps can be isolated: raise MEMBER_CAP out of the way and
-# set this to the limit under test, or the run cannot say which cap bound.
+# The per-run cap sent with the request. It is only enforced for members sharing
+# a managed Switchyard gateway, and this smoke uses none, so it must not bind.
+MEMBER_CAP="${MEMBER_CAP:-$MEMBERS}"
+# What in-flight count the run is asserted against.
 ASSERT_CAP="${ASSERT_CAP:-$MEMBER_CAP}"
 SCENARIO="${1:-happy}"
 
@@ -443,9 +441,8 @@ print(counts.get("succeeded", 0))' "$WORK/fanout.json")"
   [ "$settled" = "$MEMBERS" ] || fail "only $settled/$MEMBERS members succeeded"
   pass "all $MEMBERS members succeeded, cap held at $ASSERT_CAP, no status regressed"
 
-  # The caps gate the *claim*, and submission follows the claim, so a binding
-  # cap paces submissions by completions. Measuring the controller's drain rate
-  # under one measures the cap instead: run `MEMBER_CAP=$MEMBERS` for that.
+  # A binding cap paces submissions by completions, so the drain rate is only
+  # meaningful when the cap is out of the way.
   if [ "$ASSERT_CAP" -lt "$MEMBERS" ]; then
     note "submit rate not asserted: the cap of $ASSERT_CAP paced submissions (${per_min}/min)"
     return 0

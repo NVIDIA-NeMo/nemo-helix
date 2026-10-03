@@ -16,7 +16,6 @@ from scaled_evals.api.schemas.common import (
 from scaled_evals.api.schemas.evaluations import Evaluation
 from scaled_evals.api.schemas.tasks import Task
 from scaled_evals.api.schemas.users import CurrentUserResponse
-from scaled_evals.api.settings import settings
 from scaled_evals.api.tenancy import record_principal
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -36,10 +35,8 @@ def users_me(current: Principal, db: Db) -> CurrentUserResponse:
             "email": current.email,
             "teams": [],
             "quotas": {
-                "evaluations_active_max": settings.control_plane_per_user_run_limit,
                 "evaluations_active": usage["evaluations_active"],
                 "tasks_owned": usage["tasks_owned"],
-                "sandbox_slots_max": settings.control_plane_per_user_run_limit,
                 "sandbox_slots_active": usage["sandbox_slots_active"],
             },
             "principal": {

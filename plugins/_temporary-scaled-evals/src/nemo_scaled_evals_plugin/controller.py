@@ -397,8 +397,6 @@ class ScaledEvalsJobsController(NemoController):
             return EvaluationRepository(conn).claim_next(
                 claim_timeout=TaskBuildWorker.claim_timeout,
                 worker_id=self._worker_id,
-                cluster_slot_limit=settings.control_plane_cluster_run_limit,
-                per_user_slot_limit=settings.control_plane_per_user_run_limit,
             )
 
     def _load_evaluation(self, evaluation_id: str) -> dict[str, Any] | None:
