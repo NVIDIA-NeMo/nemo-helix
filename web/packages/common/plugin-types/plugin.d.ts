@@ -10419,6 +10419,8 @@ interface WorkspaceModelSelectCoreProps extends Omit<ModelSelectProps, keyof Mod
   /** Workspace to search. Nothing is fetched while this is null. */
   workspace: string | null;
   listModels: ListModels;
+  /** Fills the provider filter's options. */
+  listProviders?: ListProviders;
   /** Extra filters merged into the search request (e.g. `lora_enabled`). */
   filter?: ModelSearchFilter;
   /** Client-side predicate for conditions the API cannot express (e.g. "has a deployment"). */
