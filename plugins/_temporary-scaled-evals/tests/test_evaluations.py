@@ -1719,6 +1719,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
 
     v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: True)
 
     response = client.get(
         "/v1/evaluations/ev_test123/artifacts/trial/result.json",
@@ -1727,6 +1728,24 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
     assert response.status_code == 200
     assert response.content == b"artifact content"
     assert response.headers["content-disposition"] == 'attachment; filename="result.json"'
+
+
+def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: ANN001
+    conn = _conn_with_fetchone({"id": "ev_test123"})
+    _override_conn(conn)
+
+    @contextmanager
+    def stream_db() -> Iterator[Database]:
+        yield Database(conn)
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    # The object does not exist in the backing Files store; the route must map that
+    # to a clean 404 up front rather than a 200 with a stream that fails mid-iteration.
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
+
+    response = client.get("/v1/evaluations/ev_test123/artifacts/trial/result.json")
+
+    assert response.status_code == 404
 
 
 def test_get_archive_missing(monkeypatch) -> None:  # noqa: ANN001

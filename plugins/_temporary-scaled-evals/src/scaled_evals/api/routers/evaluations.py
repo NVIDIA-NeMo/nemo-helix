@@ -1031,6 +1031,11 @@ def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabase
     # exhaust the pool and stall unrelated requests.
     with database_factory() as db:
         _ensure_evaluation_exists(db, evaluation_id)
+    # stream_object is a lazy generator, so a missing object would only raise once
+    # the StreamingResponse is already iterating (a broken 200). Probe existence up
+    # front so a missing artifact maps to a clean 404.
+    if not artifacts.object_exists(object_key):
+        raise _http_error(404, "not_found", "not found")
     filename = path.rsplit("/", 1)[-1]
     return StreamingResponse(
         artifacts.stream_object(object_key),
