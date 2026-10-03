@@ -20,12 +20,17 @@ class _StatusLoop:
 
 
 class ProbeService(Service):
-    def __init__(self, name: str, *, ready: bool = True) -> None:
+    def __init__(self, name: str, *, ready: bool = True, readiness_message: str = "") -> None:
         super().__init__(name=name, module_name=f"nhx.{name}")
         self.ready = ready
+        self._readiness_message = readiness_message
 
     def get_routers(self) -> list[RouterConfig]:
         return []
+
+    @property
+    def readiness_message(self) -> str:
+        return self._readiness_message
 
     async def is_ready(self) -> bool:
         return self.ready
@@ -93,6 +98,16 @@ def test_status_remains_healthy_when_new_service_is_registered_after_it_is_ready
     assert response.json()["status"] == "healthy"
     assert response.json()["services"] == {"ready": ["entities", "models"], "not_ready": []}
     assert client.get("/health/ready").status_code == 200
+
+
+def test_status_includes_service_readiness_message() -> None:
+    message = "Docker daemon is unavailable. Start Docker Desktop on macOS/Windows or the Docker service on Linux."
+    client = _client_for([ProbeService("intake", ready=False, readiness_message=message)])
+
+    status_response = client.get("/status")
+
+    assert status_response.status_code == 200
+    assert status_response.json()["services"]["not_ready"] == [{"name": "intake", "message": message}]
 
 
 def test_registered_not_ready_service_degrades_status_and_blocks_readiness() -> None:
