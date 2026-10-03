@@ -24,9 +24,9 @@ import { useNavigate } from 'react-router';
 const agentName = 'react-agent';
 const workspace = workspace1.workspace;
 
-const renderDetail = () =>
+const renderDetail = (search = '') =>
   renderRoute(undefined, {
-    history: getAgentDetailRoute(workspace, agentName),
+    history: `${getAgentDetailRoute(workspace, agentName)}${search}`,
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
 
@@ -98,13 +98,11 @@ describe('AgentDetailRoute', () => {
     renderDetail();
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent(agentName);
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Deployments' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Evaluations' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Configuration' })).not.toBeInTheDocument();
+    const tabNames = ['Summary', 'Chat', 'Experiments and Evals', 'Optimization', 'Logs'];
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(tabNames.length);
+    tabs.forEach((tab, index) => expect(tab).toHaveAccessibleName(tabNames[index]));
+    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true');
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Run Evaluation' })).toHaveLength(2);
     });
@@ -112,24 +110,37 @@ describe('AgentDetailRoute', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('lands on the overview tab with trace statistics and the details panel', async () => {
+  it('lands on the summary tab with deployments, trace statistics, and the details panel', async () => {
     renderDetail();
 
     expect(await screen.findByText('Trace statistics')).toBeInTheDocument();
+    expect(screen.getByText('Deployments')).toBeInTheDocument();
     expect(screen.getByText('Agent ID')).toBeInTheDocument();
     expect(screen.getByText('Created')).toBeInTheDocument();
   });
 
-  it('narrows the header to a single primary action off the overview tab', async () => {
+  it('narrows the header to a single primary action off the summary tab', async () => {
     const user = userEvent.setup();
     renderDetail();
 
-    await user.click(await screen.findByRole('tab', { name: 'Details' }));
+    await user.click(await screen.findByRole('tab', { name: 'Chat' }));
 
     expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Evaluation' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
   });
+
+  it.each(['overview', 'details', 'deployments'])(
+    'lands an old ?tab=%s link on Summary',
+    async (oldTab) => {
+      renderDetail(`?tab=${oldTab}`);
+
+      expect(await screen.findByRole('tab', { name: 'Summary' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      );
+    }
+  );
 
   it('switches to the chat tab', async () => {
     const user = userEvent.setup();
@@ -146,8 +157,6 @@ describe('AgentDetailRoute', () => {
     renderDetail();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
-    // The tag lives in the packaging modal now; the trigger is what reports it is ready.
     await screen.findByText('Image ready');
     await user.click(screen.getByRole('button', { name: /Manage image/ }));
     const dialog = await screen.findByRole('dialog');
@@ -163,7 +172,6 @@ describe('AgentDetailRoute', () => {
     renderDetail();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
     await screen.findByText('Image ready');
     await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
 
@@ -171,22 +179,12 @@ describe('AgentDetailRoute', () => {
     expect(screen.queryByRole('textbox', { name: 'Container Image' })).not.toBeInTheDocument();
   });
 
-  it('shows the agent spec on the details tab and masks secrets', async () => {
-    const user = userEvent.setup();
+  it('shows the agent spec on the summary tab and masks secrets', async () => {
     renderDetail();
 
-    await user.click(await screen.findByRole('tab', { name: 'Details' }));
-
-    expect(screen.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true');
-    // Structured panels
-    expect(await screen.findByText('Summary')).toBeInTheDocument();
-    expect(screen.getByText('Workflow')).toBeInTheDocument();
-    expect(screen.getByText('Models')).toBeInTheDocument();
+    expect(await screen.findByText('Workflow')).toBeInTheDocument();
     expect(screen.getByText('Tools')).toBeInTheDocument();
-    // Config values surfaced from the spec
-    expect(screen.getByText('nat-workflow-v1')).toBeInTheDocument();
     expect(screen.getByText('react_agent')).toBeInTheDocument();
-    // The llm api_key is masked, never shown raw
     expect(screen.queryByText('not-used')).not.toBeInTheDocument();
     expect(screen.getByText('••••••••')).toBeInTheDocument();
   });
@@ -209,7 +207,8 @@ describe('AgentDetailRoute', () => {
 
     renderDetail();
 
-    const descriptionEl = await screen.findByText(description);
+    const header = await screen.findByTestId('nv-page-header-heading');
+    const descriptionEl = await within(header).findByText(description);
     expect(descriptionEl).toHaveClass('line-clamp-1');
     expect(descriptionEl).toHaveAttribute('title', description);
   });
@@ -221,7 +220,7 @@ describe('AgentDetailRoute', () => {
       expect(
         await screen.findByRole('dialog', { name: 'Run Agent Evaluation' })
       ).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
+      expect(screen.getByRole('tab', { name: 'Experiments and Evals' })).toHaveAttribute(
         'aria-selected',
         'true'
       );
@@ -256,7 +255,7 @@ describe('AgentDetailRoute', () => {
           `${getAgentDetailRoute(workspace, agentName)}?tab=evaluations`
         )
       );
-      expect(screen.getByRole('tab', { name: 'Evaluations' })).toHaveAttribute(
+      expect(screen.getByRole('tab', { name: 'Experiments and Evals' })).toHaveAttribute(
         'aria-selected',
         'true'
       );

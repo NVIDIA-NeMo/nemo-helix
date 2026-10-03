@@ -6,13 +6,13 @@ vi.hoisted(() => {
 });
 
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
+import { DeploymentsPanel } from '@studio/routes/agents/AgentDetailRoute/DeploymentsPanel';
 import { renderRoute, screen } from '@studio/tests/util/render';
 
-describe('DeploymentsTab without container deployments', () => {
+describe('DeploymentsPanel without container deployments', () => {
   it('keeps packaging out of the way, since there is nothing to deploy an image with', () => {
     renderRoute(
-      <DeploymentsTab
+      <DeploymentsPanel
         agentName="calculator-agent"
         deployments={[{ name: 'calc-dep', status: 'running' } as AgentDeployment]}
         isDeploymentsLoading={false}

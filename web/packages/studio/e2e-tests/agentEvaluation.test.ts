@@ -198,8 +198,8 @@ test.describe('Agent Evaluation', () => {
 
       // The tab lists deployments as flex entries rather than table rows, so this reads the
       // entry's own name and status badge instead of a row.
-      await page.getByRole('tab', { name: 'Deployments' }).click();
-      const deployments = page.getByRole('tabpanel', { name: 'Deployments' });
+      await page.getByRole('tab', { name: 'Summary' }).click();
+      const deployments = page.getByRole('tabpanel', { name: 'Summary' });
       await expect(deployments.getByText(new RegExp(`^${agentName}-`))).toBeVisible();
       await expect(deployments.getByText('Running')).toBeVisible();
     });

@@ -14,8 +14,7 @@ export interface WalkthroughState {
 
 export const deriveWalkthroughStep = (s: WalkthroughState): WalkthroughStep | null => {
   if (!s.active || s.dismissed || s.createDeploymentOpen) return null;
-  if (!s.hasDeployment)
-    return s.selectedTab === 'deployments' || s.selectedTab === 'overview' ? 'deploy' : null;
+  if (!s.hasDeployment) return s.selectedTab === 'summary' ? 'deploy' : null;
   if (s.selectedTab !== 'chat') return 'switch-to-chat';
   return s.hasHealthyDeployment ? 'chat' : 'wait';
 };

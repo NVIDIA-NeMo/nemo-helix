@@ -42,9 +42,9 @@ export interface AgentDetailCTAsProps {
 /**
  * Header actions for the agent detail page.
  *
- * Overview is the hub, so it shows the full set of actions with the tab's own next step as the
+ * Summary is the hub, so it shows the full set of actions with the tab's own next step as the
  * brand-colored button and the rest secondary. Every other tab is already scoped to one job, so it
- * shows only its primary action and leaves the rest to Overview. Optimize is the exception — it
+ * shows only its primary action and leaves the rest to Summary. Optimize is the exception — it
  * only appears on the tab that can render its form.
  */
 export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
@@ -88,7 +88,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   const primaryId = actions.some((action) => action.id === PRIMARY_ACTION_BY_TAB[tab])
     ? PRIMARY_ACTION_BY_TAB[tab]
     : 'deploy';
-  const showSecondaryActions = tab === 'overview';
+  const showSecondaryActions = tab === 'summary';
   const ordered = showSecondaryActions
     ? [
         ...actions.filter((action) => action.id !== primaryId),

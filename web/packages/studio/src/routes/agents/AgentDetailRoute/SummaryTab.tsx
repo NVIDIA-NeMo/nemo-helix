@@ -6,7 +6,12 @@ import { Flex, Stack } from '@nvidia/foundations-react-core';
 import { AgentTraceStatistics } from '@studio/components/AgentTraceStatistics';
 import type { TraceStatisticsRange } from '@studio/components/AgentTraceStatistics/types';
 import { bucketAdverbForRange } from '@studio/components/AgentTraceStatistics/utils';
-import { INTAKE_ENABLED, OPTIMIZER_ENABLED } from '@studio/constants/environment';
+import {
+  AGENT_OVERVIEW_ENABLED,
+  INTAKE_ENABLED,
+  OPTIMIZER_ENABLED,
+} from '@studio/constants/environment';
+import { AgentConfigPanels } from '@studio/routes/agents/AgentDetailRoute/AgentConfigPanels';
 import { AgentSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/overview/AgentSummaryPanel';
 import { GetStartedPanel } from '@studio/routes/agents/AgentDetailRoute/overview/GetStartedPanel';
 import { OpenInsightsPanel } from '@studio/routes/agents/AgentDetailRoute/overview/OpenInsightsPanel';
@@ -14,6 +19,7 @@ import { toRecentExperiments } from '@studio/routes/agents/AgentDetailRoute/over
 import { RecentExperimentsPanel } from '@studio/routes/agents/AgentDetailRoute/overview/RecentExperimentsPanel';
 import { useAgentTraceMetrics } from '@studio/routes/agents/AgentDetailRoute/overview/useAgentTraceMetrics';
 import { useOpenInsights } from '@studio/routes/agents/AgentDetailRoute/overview/useOpenInsights';
+import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import {
   getExperimentDetailRoute,
@@ -21,11 +27,14 @@ import {
   getOptimizerInsightRoute,
   getOptimizerRoute,
 } from '@studio/routes/utils';
-import { type FC, useMemo, useState } from 'react';
+import { type FC, type ReactNode, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-interface OverviewTabProps {
+const SHOW_ACTIVITY = AGENT_OVERVIEW_ENABLED && INTAKE_ENABLED;
+
+interface SummaryTabProps {
   workspace: string;
+  agentName?: string;
   agent?: Agent;
   modelNames: string[];
   /** The agent's published evaluations, which the experiment cards are rolled up from. */
@@ -35,17 +44,20 @@ interface OverviewTabProps {
   onRunAgent: () => void;
   /** Open the submit-evaluation modal from the experiments empty state. */
   onRunEvaluation?: () => void;
+  deploymentsPanel: ReactNode;
 }
 
-/** Landing view for an agent: how it has been running, next to what it is. */
-export const OverviewTab: FC<OverviewTabProps> = ({
+/** Landing view for an agent: its deployments and activity, next to what it is and how it's built. */
+export const SummaryTab: FC<SummaryTabProps> = ({
   workspace,
+  agentName,
   agent,
   modelNames,
   evals,
   isEvalsPending,
   onRunAgent,
   onRunEvaluation,
+  deploymentsPanel,
 }) => {
   const navigate = useNavigate();
   const [range, setRange] = useState<TraceStatisticsRange>('max');
@@ -59,7 +71,7 @@ export const OverviewTab: FC<OverviewTabProps> = ({
     workspace,
     agentName: agent?.name,
     range,
-    enabled: INTAKE_ENABLED,
+    enabled: SHOW_ACTIVITY,
   });
   const experiments = useMemo(() => toRecentExperiments(evals), [evals]);
   const awaitingTelemetry =
@@ -73,49 +85,51 @@ export const OverviewTab: FC<OverviewTabProps> = ({
     totalCount: insightCount,
     isPending: insightsPending,
     error: insightsError,
-  } = useOpenInsights({ workspace, agent: agent?.name, enabled: OPTIMIZER_ENABLED });
-
-  if (!INTAKE_ENABLED) {
-    return (
-      <div className="w-full pb-6">
-        <AgentSummaryPanel agent={agent} modelNames={modelNames} />
-      </div>
-    );
-  }
+  } = useOpenInsights({
+    workspace,
+    agent: agent?.name,
+    enabled: SHOW_ACTIVITY && OPTIMIZER_ENABLED,
+  });
 
   return (
     <Flex gap="density-2xl" align="start" wrap="wrap" className="w-full pb-6">
       <Stack gap="density-2xl" className="min-w-0 flex-1 basis-[32rem]">
-        {awaitingTelemetry ? (
-          <GetStartedPanel workspace={workspace} agentName={agent?.name} />
-        ) : (
-          <AgentTraceStatistics
-            summary={summary}
-            buckets={buckets}
-            range={range}
-            onRangeChange={setRange}
-            onViewTraces={() =>
-              navigate(getIntakeTracesRoute(workspace, { agentName: agent?.name }))
+        {deploymentsPanel}
+        {SHOW_ACTIVITY &&
+          (awaitingTelemetry ? (
+            <GetStartedPanel workspace={workspace} agentName={agent?.name} />
+          ) : (
+            <AgentTraceStatistics
+              summary={summary}
+              buckets={buckets}
+              range={range}
+              onRangeChange={setRange}
+              onViewTraces={() =>
+                navigate(getIntakeTracesRoute(workspace, { agentName: agent?.name }))
+              }
+              onRunAgent={onRunAgent}
+              isPending={isPending}
+              caption={bucketAdverbForRange(range)}
+              error={traceMetricsError}
+            />
+          ))}
+        {SHOW_ACTIVITY && (
+          <RecentExperimentsPanel
+            favorites={experiments.favorites}
+            experiments={experiments.recent}
+            isPending={isEvalsPending}
+            onOpenExperiment={(experiment) =>
+              experiment.name && navigate(getExperimentDetailRoute(workspace, experiment.name))
             }
-            onRunAgent={onRunAgent}
-            isPending={isPending}
-            caption={bucketAdverbForRange(range)}
-            error={traceMetricsError}
+            onRunEvaluation={onRunEvaluation}
           />
         )}
-        <RecentExperimentsPanel
-          favorites={experiments.favorites}
-          experiments={experiments.recent}
-          isPending={isEvalsPending}
-          onOpenExperiment={(experiment) =>
-            experiment.name && navigate(getExperimentDetailRoute(workspace, experiment.name))
-          }
-          onRunEvaluation={onRunEvaluation}
-        />
+        <AgentConfigPanels agent={agent} />
       </Stack>
       <Stack gap="density-2xl" className="w-full shrink-0 lg:w-90">
         <AgentSummaryPanel agent={agent} modelNames={modelNames} />
-        {OPTIMIZER_ENABLED && (
+        <SourcePanel workspace={workspace} agentName={agent?.name ?? agentName} />
+        {SHOW_ACTIVITY && OPTIMIZER_ENABLED && (
           <OpenInsightsPanel
             insights={insights}
             totalCount={insightCount}

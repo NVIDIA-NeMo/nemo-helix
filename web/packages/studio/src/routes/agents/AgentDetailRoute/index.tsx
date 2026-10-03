@@ -21,7 +21,7 @@ import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgen
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
-import { AGENT_OPTIMIZATIONS_ENABLED, AGENT_OVERVIEW_ENABLED } from '@studio/constants/environment';
+import { AGENT_OPTIMIZATIONS_ENABLED } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -29,19 +29,18 @@ import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsLis
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
-import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
-import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
+import { DeploymentsPanel } from '@studio/routes/agents/AgentDetailRoute/DeploymentsPanel';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
-import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
+import { SummaryTab } from '@studio/routes/agents/AgentDetailRoute/SummaryTab';
 import {
   ACTION_SEARCH_PARAM,
   type AgentDetailTab,
-  DEFAULT_TAB,
   isAgentDetailTab,
+  resolveAgentDetailTab,
   TAB_SEARCH_PARAM,
 } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
@@ -74,8 +73,7 @@ export const AgentDetailRoute: FC = () => {
   const tabsRef = useRef<HTMLDivElement>(null);
   const [walkthroughActive, setWalkthroughActive] = useState(false);
   const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
-  const tabFromUrl = searchParams.get(TAB_SEARCH_PARAM);
-  const selectedTab: AgentDetailTab = isAgentDetailTab(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+  const selectedTab: AgentDetailTab = resolveAgentDetailTab(searchParams.get(TAB_SEARCH_PARAM));
 
   const {
     agent,
@@ -205,7 +203,7 @@ export const AgentDetailRoute: FC = () => {
                 <StatusBadge status={status} label={statusPillLabel} />
                 {specSource ? (
                   <Link
-                    to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
+                    to={{ search: `?${TAB_SEARCH_PARAM}=summary`, hash: `#${SOURCE_PANEL_ID}` }}
                     className="contents"
                     aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
                   >
@@ -260,30 +258,49 @@ export const AgentDetailRoute: FC = () => {
           }}
         >
           <TabsList className="shrink-0" ref={tabsRef}>
-            {AGENT_OVERVIEW_ENABLED && <TabsTrigger value="overview">Overview</TabsTrigger>}
-            <TabsTrigger value="deployments">Deployments</TabsTrigger>
-            <TabsTrigger value="logs">Logs</TabsTrigger>
+            <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="chat">Chat</TabsTrigger>
-            <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
+            <TabsTrigger value="evaluations">Experiments and Evals</TabsTrigger>
             {AGENT_OPTIMIZATIONS_ENABLED && (
-              <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
+              <TabsTrigger value="optimizations">Optimization</TabsTrigger>
             )}
-            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="logs">Logs</TabsTrigger>
           </TabsList>
 
-          {AGENT_OVERVIEW_ENABLED && (
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
-              <OverviewTab
-                workspace={workspace}
-                agent={agent}
-                modelNames={modelNames}
-                evals={agentEvals}
-                isEvalsPending={isAgentEvalsPending}
-                onRunAgent={() => setSelectedTab('chat')}
-                onRunEvaluation={canRunEvaluation ? () => setSubmitEvalOpen(true) : undefined}
-              />
-            </TabsContent>
-          )}
+          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="summary">
+            <SummaryTab
+              workspace={workspace}
+              agentName={agentName}
+              agent={agent}
+              modelNames={modelNames}
+              evals={agentEvals}
+              isEvalsPending={isAgentEvalsPending}
+              onRunAgent={() => setSelectedTab('chat')}
+              onRunEvaluation={canRunEvaluation ? () => setSubmitEvalOpen(true) : undefined}
+              deploymentsPanel={
+                <DeploymentsPanel
+                  agentName={agentName}
+                  deployments={agentDeployments}
+                  isDeploymentsLoading={isDeploymentsLoading}
+                  isDeploying={isDeploying}
+                  onDeploy={() => setCreateDeploymentOpen(true)}
+                  onChat={switchToChat}
+                  onDelete={setDeleteDeploymentTarget}
+                  onViewLogs={viewLogs}
+                  canDeploy={canDeploy}
+                  specSource={specSource}
+                  workspace={workspace}
+                  canPackage={canPackage}
+                  isAgentLoading={isAgentLoading}
+                  onImageBuilt={(image) => {
+                    rememberBuiltImage(image);
+                    setCreateDeploymentOpen(true);
+                  }}
+                  onImageAvailable={rememberBuiltImage}
+                />
+              }
+            />
+          </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="evaluations">
             <EvaluationsTab
@@ -302,29 +319,6 @@ export const AgentDetailRoute: FC = () => {
               />
             </TabsContent>
           )}
-
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="deployments">
-            <DeploymentsTab
-              agentName={agentName}
-              deployments={agentDeployments}
-              isDeploymentsLoading={isDeploymentsLoading}
-              isDeploying={isDeploying}
-              onDeploy={() => setCreateDeploymentOpen(true)}
-              onChat={switchToChat}
-              onDelete={setDeleteDeploymentTarget}
-              onViewLogs={viewLogs}
-              canDeploy={canDeploy}
-              specSource={specSource}
-              workspace={workspace}
-              canPackage={canPackage}
-              isAgentLoading={isAgentLoading}
-              onImageBuilt={(image) => {
-                rememberBuiltImage(image);
-                setCreateDeploymentOpen(true);
-              }}
-              onImageAvailable={rememberBuiltImage}
-            />
-          </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="logs">
             <DeploymentLogsView
@@ -350,10 +344,6 @@ export const AgentDetailRoute: FC = () => {
                 canDeploy={canDeploy}
               />
             </div>
-          </TabsContent>
-
-          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="details">
-            <DetailsTab workspace={workspace} agentName={agentName} agent={agent} />
           </TabsContent>
         </TabsRoot>
       </Stack>

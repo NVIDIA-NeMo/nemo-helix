@@ -25,13 +25,13 @@ describe('AgentDetailRoute with the optimizations flag off', () => {
     renderDetail();
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent(agentName);
-    expect(screen.queryByRole('tab', { name: 'Optimizations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Optimization' })).not.toBeInTheDocument();
   });
 
   it('falls back to the default tab for a stale ?tab=optimizations link', async () => {
     renderDetail('?tab=optimizations');
 
-    expect(await screen.findByRole('tab', { name: 'Overview' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Summary' })).toHaveAttribute(
       'aria-selected',
       'true'
     );

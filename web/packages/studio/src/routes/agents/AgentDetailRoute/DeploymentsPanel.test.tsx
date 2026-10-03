@@ -3,7 +3,7 @@
 
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
-import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
+import { DeploymentsPanel } from '@studio/routes/agents/AgentDetailRoute/DeploymentsPanel';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
@@ -34,7 +34,7 @@ const deployment = (overrides: Partial<AgentDeployment> = {}): AgentDeployment =
 
 const renderTab = (deployments: AgentDeployment[], specSource?: AgentSpecSource) =>
   renderRoute(
-    <DeploymentsTab
+    <DeploymentsPanel
       agentName="calculator-agent"
       deployments={deployments}
       isDeploymentsLoading={false}
@@ -50,7 +50,7 @@ const renderTab = (deployments: AgentDeployment[], specSource?: AgentSpecSource)
     />
   );
 
-describe('DeploymentsTab staged commit', () => {
+describe('DeploymentsPanel staged commit', () => {
   it('links the staged commit to GitHub, opened away from Studio', () => {
     renderTab([deployment({ spec_revision: STAGED })], source(STAGED));
 
@@ -90,7 +90,7 @@ describe('DeploymentsTab staged commit', () => {
   });
 });
 
-describe('DeploymentsTab', () => {
+describe('DeploymentsPanel', () => {
   it('makes a long failure message readable instead of ellipsising it away', async () => {
     const user = userEvent.setup();
     renderTab([failedDeployment]);

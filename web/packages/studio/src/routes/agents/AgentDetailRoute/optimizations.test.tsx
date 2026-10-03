@@ -68,7 +68,7 @@ describe('AgentDetailRoute optimizations tab', () => {
   it('lists only this agent’s studies', async () => {
     renderDetail();
 
-    expect(await screen.findByRole('tab', { name: 'Optimizations' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Optimization' })).toHaveAttribute(
       'aria-selected',
       'true'
     );
@@ -265,7 +265,7 @@ describe('AgentDetailRoute optimizations tab', () => {
       renderArrivingToOptimize();
 
       expect(await screen.findByRole('dialog', { name: 'Optimize agent' })).toBeInTheDocument();
-      expect(screen.getByRole('tab', { name: 'Optimizations' })).toHaveAttribute(
+      expect(screen.getByRole('tab', { name: 'Optimization' })).toHaveAttribute(
         'aria-selected',
         'true'
       );

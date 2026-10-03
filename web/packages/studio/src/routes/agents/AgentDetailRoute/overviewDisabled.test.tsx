@@ -22,23 +22,11 @@ const renderDetail = (search = '') =>
   });
 
 describe('AgentDetailRoute with the overview flag off', () => {
-  it('hides the overview tab and lands on deployments', async () => {
+  it('keeps Summary but leaves out the activity panels', async () => {
     renderDetail();
 
-    expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent(agentName);
-    expect(screen.queryByRole('tab', { name: 'Overview' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Deployments' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-  });
-
-  it('falls back to deployments for a stale ?tab=overview link', async () => {
-    renderDetail('?tab=overview');
-
-    expect(await screen.findByRole('tab', { name: 'Deployments' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
+    expect(await screen.findByText('Deployments')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText('Trace statistics')).not.toBeInTheDocument();
   });
 });

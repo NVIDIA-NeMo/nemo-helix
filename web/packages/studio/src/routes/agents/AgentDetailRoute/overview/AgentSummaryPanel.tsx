@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
+import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { Stack, Text } from '@nvidia/foundations-react-core';
@@ -61,6 +62,14 @@ export const AgentSummaryPanel: FC<AgentSummaryPanelProps> = ({ agent, modelName
         value={agent?.updated_at ? <RelativeTime datetime={agent.updated_at} /> : null}
         loading={!agent}
       />
+      {agent?.description ? (
+        <Stack gap="1">
+          <Text kind="label/regular/sm" className="text-secondary">
+            Description
+          </Text>
+          <MarkdownContent content={agent.description} disableImages />
+        </Stack>
+      ) : null}
     </Stack>
   </DetailPanel>
 );
