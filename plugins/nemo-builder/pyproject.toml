@@ -8,9 +8,16 @@ requires-python = ">=3.11,<3.15"
 version = "0.1.0"
 dependencies = ["nemo-helix-plugin", "pydantic>=2.0.0", "cryptography>=42.0.0"]
 
+[project.optional-dependencies]
+# Only the API process needs the SDK, for a FastAPI dependency in service.py. No step imports it.
+service = ["nemo-helix"]
+
 [tool.uv.sources]
 nemo-helix = { path = "../../packages/nemo_helix", editable = true }
 nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+
+[project.entry-points."nemo.services"]
+builder = "nemo_builder_plugin.service:BuilderService"
 
 [build-system]
 requires = ["hatchling"]
