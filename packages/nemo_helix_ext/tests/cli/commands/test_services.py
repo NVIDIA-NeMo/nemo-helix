@@ -88,6 +88,14 @@ def test_services_help_lists_all_commands():
 
 
 @pytest.mark.parametrize("command", ["run", "start", "restart"])
+def test_controllers_help_points_at_status_keys(command: str) -> None:
+    result = runner.invoke(app, ["services", command, "--help"])
+
+    assert result.exit_code == 0
+    assert "GET /status controllers.status" in " ".join(result.stdout.split())
+
+
+@pytest.mark.parametrize("command", ["run", "start", "restart"])
 @pytest.mark.parametrize("timeout", ["0", "-1"])
 def test_services_reject_non_positive_keep_alive_timeout(command: str, timeout: str):
     with patch(f"{_CLI_MODULE}.stop_instance") as mock_stop:
