@@ -187,7 +187,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     () =>
       deploymentModeState.status === 'ready'
         ? OFFERED_ON_CREATE.filter((mode) => deploymentModeState.withoutImage.includes(mode))
-        : ['subprocess'],
+        : [],
     [deploymentModeState]
   );
   const isModesLoading = deploymentModeState.status === 'loading';
@@ -411,22 +411,24 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         : undefined;
 
   const busy = isPending || isCreatingTraced;
+  const awaitingDeployModes = Boolean(watchedDeploy) && isModesLoading;
 
-  const deployFields = canDeployOnCreate ? (
-    <Stack gap="density-md">
-      <ControlledCheckbox
-        useControllerProps={{ control, name: 'deploy' }}
-        slotLabel="Deploy after creating"
-      />
-      {watchedDeploy && deploymentModes.length > 1 ? (
-        <DeploymentModeSelect
-          useControllerProps={{ control, name: 'deploymentMode' }}
-          modes={deploymentModes}
-          loading={isModesLoading}
+  const deployFields =
+    canDeployOnCreate || isModesLoading ? (
+      <Stack gap="density-md">
+        <ControlledCheckbox
+          useControllerProps={{ control, name: 'deploy' }}
+          slotLabel="Deploy after creating"
         />
-      ) : null}
-    </Stack>
-  ) : null;
+        {watchedDeploy && deploymentModes.length > 1 ? (
+          <DeploymentModeSelect
+            useControllerProps={{ control, name: 'deploymentMode' }}
+            modes={deploymentModes}
+            loading={isModesLoading}
+          />
+        ) : null}
+      </Stack>
+    ) : null;
 
   return (
     <>
@@ -449,7 +451,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
         disabled={busy}
         loading={busy}
         submitDisabled={
-          onGitHubTab ? !repoSource : onTracesTab ? !tracedAgent : entries.length === 0
+          onGitHubTab
+            ? !repoSource || awaitingDeployModes
+            : onTracesTab
+              ? !tracedAgent
+              : entries.length === 0 || awaitingDeployModes
         }
         errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={

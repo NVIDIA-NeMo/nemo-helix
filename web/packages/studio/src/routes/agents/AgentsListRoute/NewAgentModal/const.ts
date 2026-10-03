@@ -51,8 +51,5 @@ export const uploadAgentFormSchema = z.object({
 
 export const UPLOAD_AGENT_FORM_DEFAULTS = {
   name: '',
-  repoUrl: '',
-  secretKey: '',
-  deploy: true,
-  deploymentMode: 'subprocess',
-} as const;
+  ...uploadAgentFormSchema.omit({ name: true }).parse({}),
+};

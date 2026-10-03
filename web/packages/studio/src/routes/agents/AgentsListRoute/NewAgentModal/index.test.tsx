@@ -853,6 +853,51 @@ describe('NewAgentModal deploy after create', () => {
     expect(deployments).toEqual([]);
   });
 
+  it('holds Register while the runtimes load', async () => {
+    let releaseModes = () => {};
+    const modesReleased = new Promise<void>((resolve) => {
+      releaseModes = resolve;
+    });
+    server.use(
+      http.get(DEPLOYMENT_MODES_URL, async () => {
+        await modesReleased;
+        return HttpResponse.json({
+          data: [{ mode: 'subprocess', enabled: true, requires_image: false }],
+        });
+      })
+    );
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    const register = within(dialog).getByRole('button', { name: 'Register' });
+    expect(register).toBeDisabled();
+
+    releaseModes();
+    await waitFor(() => expect(register).toBeEnabled());
+  });
+
+  it('creates without deploying when the runtimes cannot be read', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(DEPLOYMENT_MODES_URL, () => HttpResponse.json({}, { status: 403 })));
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await waitFor(() =>
+      expect(
+        within(dialog).queryByRole('checkbox', { name: 'Deploy after creating' })
+      ).not.toBeInTheDocument()
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
   it('offers only runtimes that can deploy an agent with no image yet', async () => {
     const user = userEvent.setup();
     serveModes({ enabled: true, requires_image: false });
