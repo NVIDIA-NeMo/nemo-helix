@@ -28,7 +28,7 @@ dependencies = [
 # no install cost.
 [project.optional-dependencies]
 integrations = [
-    "wandb>=0.29.0",
+    "wandb>=0.30.0",
     "mlflow-skinny>=3.15.0,<3.16.0",
 ]
 # Only pi-to-gym-conversion needs these, and it runs on an internet-capable host rather
