@@ -45,6 +45,9 @@ export const MODEL_SIZE_OPTIONS: ModelFilterOption[] = MODEL_SIZE_BUCKETS.map(
   ({ value, label }) => ({ value, label })
 );
 
+export const toModelSizeBucket = (value?: string): ModelSizeBucket | undefined =>
+  MODEL_SIZE_BUCKETS.find((bucket) => bucket.value === value)?.value;
+
 export const EMPTY_MODEL_FILTERS: ModelFilterValues = {};
 
 export const hasActiveModelFilters = (filters: ModelFilterValues): boolean =>

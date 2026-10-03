@@ -6,6 +6,7 @@ import {
   countActiveModelFilters,
   hasActiveModelFilters,
   matchesModelSize,
+  toModelSizeBucket,
   withSelectedOption,
 } from '@nemo/common/src/api/models/modelFilters';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
@@ -37,6 +38,16 @@ describe('matchesModelSize', () => {
   it('never matches a model with no recorded size', () => {
     expect(matchesModelSize(makeModel(), 'small')).toBe(false);
     expect(matchesModelSize(makeModel({ family: 'llama' }), 'xlarge')).toBe(false);
+  });
+});
+
+describe('toModelSizeBucket', () => {
+  it('passes a known bucket through', () => {
+    expect(toModelSizeBucket('large')).toBe('large');
+  });
+
+  it.each([undefined, '', 'huge'])('drops %j', (value) => {
+    expect(toModelSizeBucket(value)).toBeUndefined();
   });
 });
 
