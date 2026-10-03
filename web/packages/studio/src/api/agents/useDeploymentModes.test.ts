@@ -19,7 +19,11 @@ describe('useDeploymentModes', () => {
 
     expect(result.current).toEqual({ status: 'loading' });
     await waitFor(() =>
-      expect(result.current).toEqual({ status: 'ready', enabled: ['subprocess', 'k8s'] })
+      expect(result.current).toEqual({
+        status: 'ready',
+        enabled: ['subprocess', 'k8s'],
+        withoutImage: ['subprocess'],
+      })
     );
   });
 
@@ -49,19 +53,29 @@ describe('useDeploymentModes', () => {
     });
 
     await waitFor(() => expect(result.current.query.isError).toBe(true));
-    expect(result.current.modes).toEqual({ status: 'ready', enabled: ['subprocess', 'k8s'] });
+    expect(result.current.modes).toEqual({
+      status: 'ready',
+      enabled: ['subprocess', 'k8s'],
+      withoutImage: ['subprocess'],
+    });
   });
 });
 
 describe('enabledImageModes', () => {
   it('keeps the enabled container modes in preference order', () => {
     expect(
-      enabledImageModes({ status: 'ready', enabled: ['k8s', 'subprocess', 'docker'] })
+      enabledImageModes({
+        status: 'ready',
+        enabled: ['k8s', 'subprocess', 'docker'],
+        withoutImage: [],
+      })
     ).toEqual(['docker', 'k8s']);
   });
 
   it('is empty when only subprocess is enabled', () => {
-    expect(enabledImageModes({ status: 'ready', enabled: ['subprocess'] })).toEqual([]);
+    expect(
+      enabledImageModes({ status: 'ready', enabled: ['subprocess'], withoutImage: [] })
+    ).toEqual([]);
   });
 
   it('assumes every container mode until the modes are known', () => {

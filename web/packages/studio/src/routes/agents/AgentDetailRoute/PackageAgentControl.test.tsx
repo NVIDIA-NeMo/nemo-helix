@@ -16,7 +16,11 @@ const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/
 const jobUrl = `${jobsUrl}/:name`;
 const platform = vi.hoisted(() => ({
   buildsUnsupported: false,
-  modes: { status: 'ready', enabled: ['subprocess', 'docker'] } as DeploymentModes,
+  modes: {
+    status: 'ready',
+    enabled: ['subprocess', 'docker'],
+    withoutImage: [],
+  } as DeploymentModes,
 }));
 
 vi.mock('@studio/api/agents/useImageBuildsUnsupported', () => ({
@@ -30,7 +34,7 @@ vi.mock('@studio/api/agents/useDeploymentModes', async (importOriginal) => ({
 
 beforeEach(() => {
   platform.buildsUnsupported = false;
-  platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+  platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'], withoutImage: [] };
 });
 
 const renderControl = (props?: {
@@ -349,7 +353,7 @@ describe('PackageAgentControl', () => {
   describe('when the platform cannot build images', () => {
     beforeEach(() => {
       platform.buildsUnsupported = true;
-      platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'], withoutImage: [] };
     });
 
     const commandSnippets = async () => {
@@ -376,7 +380,7 @@ describe('PackageAgentControl', () => {
     });
 
     it('skips publishing and the registry for a Docker deployment', async () => {
-      platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'] };
+      platform.modes = { status: 'ready', enabled: ['subprocess', 'docker'], withoutImage: [] };
       await openControl();
 
       expect(await commandSnippets()).toEqual([
@@ -414,7 +418,7 @@ describe('PackageAgentControl', () => {
   });
 
   it('explains instead of hiding when no container deployment mode is enabled', async () => {
-    platform.modes = { status: 'ready', enabled: ['subprocess'] };
+    platform.modes = { status: 'ready', enabled: ['subprocess'], withoutImage: [] };
     await openControl();
     const dialog = screen.getByRole('dialog');
 
@@ -423,7 +427,7 @@ describe('PackageAgentControl', () => {
   });
 
   it('does not hand an image to a deployment the platform cannot run', async () => {
-    platform.modes = { status: 'ready', enabled: ['subprocess'] };
+    platform.modes = { status: 'ready', enabled: ['subprocess'], withoutImage: [] };
     mockRestoredJob('completed');
     await openControl({ onImageBuilt: vi.fn() });
 
@@ -432,7 +436,7 @@ describe('PackageAgentControl', () => {
   });
 
   it('names only the deployable modes', async () => {
-    platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'] };
+    platform.modes = { status: 'ready', enabled: ['subprocess', 'k8s'], withoutImage: [] };
     await openControl();
 
     expect(screen.getByText(/to deploy it with Kubernetes\./)).toBeInTheDocument();
