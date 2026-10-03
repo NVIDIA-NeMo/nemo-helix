@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.build.task_image_identity import (
     TaskImageIdentityError,
@@ -69,7 +69,7 @@ def _upload_for(object_key: str, *, ensure_fileset: bool = True) -> TaskUpload:
     # directly via the Files SDK. On the create/revise path the fileset is pre-created
     # (``ensure_fileset=True``) so the client's upload can't 404; on a read/detail path pass
     # ``ensure_fileset=False`` to just compute the coordinates without a live Files write.
-    target = s3.upload_target(object_key, ensure_fileset=ensure_fileset)
+    target = artifacts.upload_target(object_key, ensure_fileset=ensure_fileset)
     return TaskUpload(
         workspace=target.workspace,
         fileset=target.fileset,
@@ -117,7 +117,7 @@ def _validate_uploaded_task_pack(task_id: str, db: Db, *, expected_revision: int
         )
 
     try:
-        size_bytes = s3.object_size(revision.object_key)
+        size_bytes = artifacts.object_size(revision.object_key)
     except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
         raise _http_error(
             503,
@@ -138,7 +138,7 @@ def _validate_uploaded_task_pack(task_id: str, db: Db, *, expected_revision: int
 
     max_size = settings.task_pack_max_size_bytes
     if size_bytes > max_size:
-        s3.delete_object(revision.object_key)
+        artifacts.delete_object(revision.object_key)
         raise _http_error(
             413,
             "task_pack_too_large",
@@ -160,7 +160,7 @@ def _validate_uploaded_task_pack(task_id: str, db: Db, *, expected_revision: int
 
 def _raise_quota_exceeded(object_key: str, used_bytes: int, uploaded_bytes: int) -> None:
     quota = settings.task_pack_tenant_storage_quota_bytes
-    s3.delete_object(object_key)
+    artifacts.delete_object(object_key)
     raise _http_error(
         413,
         "tenant_storage_quota_exceeded",
@@ -189,7 +189,7 @@ def _reconcile_task_packs(
     repaired = 0
     for revision in revisions:
         try:
-            missing = not s3.object_exists(revision.object_key)
+            missing = not artifacts.object_exists(revision.object_key)
         except Exception as exc:  # noqa: BLE001 - any Files transport failure is a retryable 503
             raise _http_error(
                 503,

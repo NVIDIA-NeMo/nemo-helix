@@ -86,7 +86,7 @@ def test_reconcile_packs_repairs_missing_owner_revision(
         ]
     )
     _use_conn(conn)
-    monkeypatch.setattr("scaled_evals.api.routers.tasks.s3.object_exists", lambda _key: False)
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.object_exists", lambda _key: False)
 
     response = client.post("/v1/tasks/reconcile-packs?repair=true")
 
@@ -187,9 +187,9 @@ def _latest_revision_row(*, revision: int = 1, status: str = "uploading", object
 
 
 def _mock_task_pack_size(monkeypatch: pytest.MonkeyPatch, size_bytes: int | None) -> MagicMock:
-    monkeypatch.setattr("scaled_evals.api.routers.tasks.s3.object_size", lambda _key: size_bytes)
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.object_size", lambda _key: size_bytes)
     deleted = MagicMock()
-    monkeypatch.setattr("scaled_evals.api.routers.tasks.s3.delete_object", deleted)
+    monkeypatch.setattr("scaled_evals.api.routers.tasks.artifacts.delete_object", deleted)
     return deleted
 
 

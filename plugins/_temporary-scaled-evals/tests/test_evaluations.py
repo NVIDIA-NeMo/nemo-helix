@@ -198,9 +198,9 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
             "source_bytes": 42,
         }
 
-    monkeypatch.setattr("scaled_evals.dispatch.worker.s3.build_evaluation_archive", fake_build)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.artifacts.build_evaluation_archive", fake_build)
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.build_evaluation_archive_from_directory",
+        "scaled_evals.dispatch.worker.artifacts.build_evaluation_archive_from_directory",
         lambda evaluation_id, _root: fake_build(evaluation_id),
     )
 
@@ -209,11 +209,11 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
 def _disable_dispatch_artifact_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep dispatcher unit tests independent from local object-store state."""
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.sync_directory_to_prefix",
+        "scaled_evals.dispatch.worker.artifacts.sync_directory_to_prefix",
         lambda _root, _prefix: 0,
     )
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.replace_directory_at_prefix",
+        "scaled_evals.dispatch.worker.artifacts.replace_directory_at_prefix",
         lambda _root, _prefix: 0,
     )
 
@@ -338,7 +338,7 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
     checked: list[str] = []
     monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.object_exists",
+        "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
     conn = _conn_with_fetchone(
@@ -364,8 +364,8 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
 def test_create_409_when_ready_revision_pack_missing_local_rustfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "object_store_backend", "s3")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.object_exists", lambda _key: False)
+    monkeypatch.setattr(settings, "object_store_backend", "artifacts")
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
     conn = _conn_with_fetchone(
         {
             "status": "ready",
@@ -1666,7 +1666,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
             }
         ]
 
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", fake_list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", fake_list_objects)
 
     response = client.get("/v1/evaluations/ev_test123/artifacts", params={"prefix": "trial/"})
 
@@ -1690,7 +1690,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
 def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(None))
     list_objects = MagicMock(return_value=[])
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", list_objects)
 
     response = client.get("/v1/evaluations/ev_missing/artifacts")
 
@@ -1718,7 +1718,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
         yield b"artifact content"
 
     v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.stream_object", stream_object)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
 
     response = client.get(
         "/v1/evaluations/ev_test123/artifacts/trial/result.json",
@@ -1732,7 +1732,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
 def test_get_archive_missing(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(_archive_row()))
     presign = MagicMock(return_value="http://signed.example/archive")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.presign_get", presign)
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 

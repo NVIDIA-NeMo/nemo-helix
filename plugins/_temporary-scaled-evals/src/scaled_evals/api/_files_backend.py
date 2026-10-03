@@ -4,7 +4,7 @@
 """Files-service-backed artifact storage for scaled-evals.
 
 Replaces raw object storage (S3/GCS) with NeMo Helix **filesets**. The public
-``scaled_evals.api.s3`` module is a thin facade over this backend; every one of its
+``scaled_evals.api.artifacts`` module is a thin facade over this backend; every one of its
 existing function signatures is preserved so callers and the test suite are unchanged.
 
 Object keys map onto ``(fileset, path)`` as follows (see ``split_key``):

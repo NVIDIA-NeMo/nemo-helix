@@ -27,7 +27,7 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.build.errors import BuildError
 from scaled_evals.api.settings import settings
 
@@ -78,7 +78,7 @@ async def build_revision_image(task_id: str, revision: int, tarball_object_key: 
 
         # Download + extract the uploaded pack (Harbor task dirs + Dockerfile).
         _validate_tarball_size(tarball_object_key)
-        s3.download_object(tarball_object_key, str(tarball_path))
+        artifacts.download_object(tarball_object_key, str(tarball_path))
         _extract_tarball(tarball_path, context_dir)
 
         await _run_buildctl(context_dir, image_ref, metadata_path, tmp_path)
@@ -87,7 +87,7 @@ async def build_revision_image(task_id: str, revision: int, tarball_object_key: 
 
 
 def _validate_tarball_size(tarball_object_key: str) -> None:
-    size_bytes = s3.object_size(tarball_object_key)
+    size_bytes = artifacts.object_size(tarball_object_key)
     max_size = settings.task_pack_max_size_bytes
     if size_bytes is None:
         raise BuildError("task pack object has no Content-Length; refusing to build")
