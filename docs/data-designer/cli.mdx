@@ -26,7 +26,20 @@ def load_config_builder() -> dd.DataDesignerConfigBuilder:
     ]
 
     config_builder = dd.DataDesignerConfigBuilder(model_configs)
-    # Add columns, constraints, seed datasets, processors, and profilers here.
+    config_builder.add_column(
+        dd.SamplerColumnConfig(
+            name="sentiment",
+            sampler_type=dd.SamplerType.CATEGORY,
+            params=dd.CategorySamplerParams(values=["positive", "negative"]),
+        )
+    )
+    config_builder.add_column(
+        dd.LLMTextColumnConfig(
+            name="review",
+            prompt="Write one short " + "{0}{0} sentiment {1}{1}".format("{", "}") + " product review.",
+            model_alias="text",
+        )
+    )
     return config_builder
 ```
 
