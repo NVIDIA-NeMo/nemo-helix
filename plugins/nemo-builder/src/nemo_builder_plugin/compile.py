@@ -39,12 +39,19 @@ WORK_MOUNT = DEFAULT_JOB_STORAGE_PATH
 
 
 def _fetch_sources(plan: BuildPlan) -> list[ContextSource]:
-    whole_filesets = {image.source.fileset for image in plan.images if image.source.context_path is None}
+    whole_filesets = {
+        image.source.fileset
+        for image in plan.images
+        if image.source.archive is None and image.source.context_path is None
+    }
 
     sources: list[ContextSource] = []
     for image in plan.images:
         source = image.source
-        if source.context_path is not None and source.fileset in whole_filesets:
+        if source.archive is not None:
+            # Unpacked whole, once, whichever directory of it each image builds from.
+            source = ContextSource(fileset=source.fileset, archive=source.archive)
+        elif source.context_path is not None and source.fileset in whole_filesets:
             continue  # the whole-fileset download covers this subtree
         if source not in sources:
             sources.append(source)

@@ -39,6 +39,7 @@ class PlannedImage:
         fileset = self.spec.source.fileset
         return ContextSource(
             fileset=fileset if "/" in fileset else f"{self.workspace}/{fileset}",
+            archive=self.spec.source.archive or None,
             context_path=self.spec.source.context_path or None,
         )
 
@@ -92,11 +93,11 @@ class BuildPlan:
 
     def groups(self) -> list[tuple[ContextSource, tuple[PlannedImage, ...]]]:
         """Each group builds in its own sandbox, so a Dockerfile never sees another source's context."""
-        grouped: dict[tuple[str, str | None], list[PlannedImage]] = {}
+        grouped: dict[tuple[str, str | None, str | None], list[PlannedImage]] = {}
         for image in self.images:
             source = image.source
-            grouped.setdefault((source.fileset, source.context_path), []).append(image)
+            grouped.setdefault((source.fileset, source.archive, source.context_path), []).append(image)
         return [
-            (ContextSource(fileset=fileset, context_path=context_path), tuple(images))
-            for (fileset, context_path), images in grouped.items()
+            (ContextSource(fileset=fileset, archive=archive, context_path=context_path), tuple(images))
+            for (fileset, archive, context_path), images in grouped.items()
         ]
