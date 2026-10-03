@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
@@ -48,6 +48,8 @@ from nhx.core.models.schemas import (
     ModelEntity,
     ModelEntityFilter,
     ModelEntitySortField,
+    ModelFamily,
+    ModelFamilySort,
     UpdateAdapterRequest,
     UpdateModelEntityRequest,
 )
@@ -218,6 +220,65 @@ async def list_models(
     except Exception:
         logger.exception("Failed to list model entities")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model entities")
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/model-families",
+    summary="List Model Families",
+    response_description="Return the model architecture families and how many models belong to each",
+    status_code=status.HTTP_200_OK,
+    response_model=Page[ModelFamily],
+    openapi_extra=generate_openapi_extra_params(
+        filter_schema=ModelEntityFilter,
+        filter_description=(
+            "Narrow the models counted into each family, using the same filters as List Models: name, "
+            "project, workspace, base_model, adapters, finetuning_type, prompt, lora_enabled, "
+            "description, fileset, family, model_providers, created_at, and updated_at."
+        ),
+    ),
+)
+async def list_model_families(
+    workspace: str,
+    page: int = Query(default=1, ge=1, description="Page number."),
+    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    sort: ModelFamilySort = Query(
+        default=ModelFamilySort.NAME_ASC,
+        description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
+    ),
+    parsed_filter: ParsedFilter = Depends(make_filter_dep(ModelEntityFilter)),
+    service: ModelEntityService = Depends(get_model_entity_service),
+) -> Page[ModelFamily]:
+    """
+    List the distinct model architecture families (`spec.family`) among a workspace's models.
+
+    Each family is returned once with the number of models in it. Models with no family are
+    left out. Accepts the same filters as List Models, so the families can be narrowed to those
+    of a given provider, for example.
+    """
+    try:
+        filter_workspace = parsed_filter.remove("workspace") or workspace
+
+        return await service.list_model_families(
+            workspace=filter_workspace,
+            parsed_filter=parsed_filter,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+        )
+    except HTTPException:
+        raise
+    except InvalidFilterError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NemoHTTPError as e:
+        if e.status_code >= 500:
+            logger.exception("Failed to list model families")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model families"
+            ) from e
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+    except Exception:
+        logger.exception("Failed to list model families")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model families")
 
 
 @router.get(

@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
@@ -17,6 +18,7 @@ from nemo_helix_plugin.entities import (
 )
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import Entity
+from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
 from pydantic import PrivateAttr, computed_field
 
 
@@ -131,13 +133,68 @@ async def test_count_by_raises_http_error_rather_than_missing_counts(
         await client.count_by(ExperimentGroup, "insight_id")
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["", "spec.", ".spec", "spec..family", "not-valid", "spec.not-valid", "data.insight_id", "data.spec.family"],
+)
 @pytest.mark.asyncio
-async def test_count_by_rejects_non_direct_field() -> None:
+async def test_count_by_rejects_malformed_field(field: str) -> None:
     mock_api = Mock()
     client = EntityClient(mock_api)
 
-    with pytest.raises(ValueError, match="direct entity data field"):
-        await client.count_by(ExperimentGroup, "data.insight_id")
+    with pytest.raises(ValueError, match="not an entity data field"):
+        await client.count_by(ExperimentGroup, field)
+
+
+@pytest.mark.asyncio
+async def test_count_by_groups_by_a_nested_field() -> None:
+    mock_api = Mock()
+    mock_api.list_entities = AsyncMock(return_value=_entities_page(group_counts={"llama": 3}))
+    client = EntityClient(mock_api)
+
+    counts = await client.count_by(ExperimentGroup, "spec.family")
+
+    assert counts == {"llama": 3}
+    call = mock_api.list_entities.await_args
+    assert call is not None
+    assert call.kwargs["query_params"]["count_by"] == "data.spec.family"
+
+
+@pytest.mark.asyncio
+async def test_count_by_sends_a_filter_operation_as_the_filter() -> None:
+    mock_api = Mock()
+    mock_api.list_entities = AsyncMock(return_value=_entities_page(group_counts={"llama": 1}))
+    client = EntityClient(mock_api)
+    operation = ComparisonOperation(operator=FilterOperator.CONTAINS, field="data.model_providers", value="ws/p")
+
+    await client.count_by(ExperimentGroup, "spec.family", filter_operation=operation)
+
+    call = mock_api.list_entities.await_args
+    assert call is not None
+    assert json.loads(call.kwargs["query_params"]["filter"]) == operation.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_count_by_rejects_both_filter_forms() -> None:
+    client = EntityClient(Mock())
+    operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.a", value=1)
+
+    with pytest.raises(ValueError, match="either filter_operation or filter_obj"):
+        await client.count_by(ExperimentGroup, "spec.family", filter_operation=operation, filter_obj={"a": 1})
+
+
+def test_sync_count_by_groups_by_a_nested_field_with_a_filter_operation() -> None:
+    mock_api = Mock()
+    mock_api.list_entities = Mock(return_value=_entities_page(group_counts={"llama": 2}))
+    client = SyncEntityClient(mock_api)
+    operation = ComparisonOperation(operator=FilterOperator.EQ, field="data.a", value=1)
+
+    counts = client.count_by(ExperimentGroup, "spec.family", filter_operation=operation)
+
+    assert counts == {"llama": 2}
+    call = mock_api.list_entities.call_args
+    assert call.kwargs["query_params"]["count_by"] == "data.spec.family"
+    assert json.loads(call.kwargs["query_params"]["filter"]) == operation.to_dict()
 
 
 class _Child(EntityBase):

@@ -209,17 +209,19 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         relationship_child_workspaces: set[str] | None = None,
         session: AsyncSession | None = None,
     ) -> dict[str, int]:
-        """Count filtered entities grouped by a direct string data field."""
+        """Count filtered entities grouped by a string data field, optionally nested (``data.spec.family``)."""
         async with self._get_session(session) as sess:
             parts = group_by.split(".")
-            if len(parts) != 2 or parts[0] != "data" or not parts[1].isidentifier():
-                raise ValueError(f"Field '{group_by}' is not a direct string data field")
+            if len(parts) < 2 or parts[0] != "data" or not all(part.isidentifier() for part in parts[1:]):
+                raise ValueError(f"Field '{group_by}' is not a supported string data field")
 
-            field = parts[1]
-            raw_group_column = DBEntity.data[field]
+            path = parts[1:]
+            raw_group_column = DBEntity.data
+            for key in path:
+                raw_group_column = raw_group_column[key]
             group_column = raw_group_column.as_string()
             if self._is_sqlite(sess):
-                json_type = func.json_type(DBEntity.data, f"$.{field}")
+                json_type = func.json_type(DBEntity.data, "$." + ".".join(path))
                 string_type = "text"
             else:
                 json_type = func.json_typeof(raw_group_column)

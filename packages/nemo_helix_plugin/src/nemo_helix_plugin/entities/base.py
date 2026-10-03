@@ -426,6 +426,23 @@ def _get_entity_type(entity_class: EntityTypeLike) -> str:
     return str(entity_class.__entity_type__)
 
 
+def _count_by_data_field(field: str) -> str:
+    if field.startswith("data.") or not all(part.isidentifier() for part in field.split(".")):
+        raise ValueError(f"Field '{field}' is not an entity data field path such as 'spec.family' (no 'data.' prefix)")
+    return f"data.{field}"
+
+
+def _count_by_filter_dict(
+    filter_operation: FilterOperation | None,
+    filter_obj: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if filter_operation is not None and filter_obj:
+        raise ValueError("count_by: pass either filter_operation or filter_obj, not both.")
+    if filter_operation is not None:
+        return filter_operation.to_dict()
+    return _convert_filter_obj_to_filter_str(filter_obj) if filter_obj else {}
+
+
 def _convert_filter_obj_to_filter_str(filter_obj: Dict[str, Any]) -> Dict[str, Any]:
     """Convert a filter dict to API filter format.
 
@@ -667,18 +684,21 @@ class EntityClient:
         *,
         workspace: str = DEFAULT_WORKSPACE,
         filter_obj: dict[str, Any] | None = None,
+        filter_operation: FilterOperation | None = None,
     ) -> dict[str, int]:
-        """Return the number of matching entities grouped by ``field``."""
-        if not field.isidentifier():
-            raise ValueError(f"Field '{field}' is not a direct entity data field")
+        """Return the number of matching entities grouped by ``field``.
 
-        filter_dict = _convert_filter_obj_to_filter_str(filter_obj) if filter_obj else {}
+        ``field`` may be nested, such as ``spec.family``. ``filter_operation`` and ``filter_obj`` are
+        mutually exclusive.
+        """
+        count_by_field = _count_by_data_field(field)
+        filter_dict = _count_by_filter_dict(filter_operation, filter_obj)
 
         # Only the grouped tallies are wanted, so ask for the smallest possible page.
         query_params: ListEntitiesQueryParams = {
             "page": 1,
             "page_size": 1,
-            "count_by": f"data.{field}",
+            "count_by": count_by_field,
         }
         if filter_dict:
             query_params["filter"] = json.dumps(filter_dict)
@@ -1176,17 +1196,20 @@ class SyncEntityClient:
         *,
         workspace: str = DEFAULT_WORKSPACE,
         filter_obj: dict[str, Any] | None = None,
+        filter_operation: FilterOperation | None = None,
     ) -> dict[str, int]:
-        """Return the number of matching entities grouped by ``field``."""
-        if not field.isidentifier():
-            raise ValueError(f"Field '{field}' is not a direct entity data field")
+        """Return the number of matching entities grouped by ``field``.
 
-        filter_dict = _convert_filter_obj_to_filter_str(filter_obj) if filter_obj else {}
+        ``field`` may be nested, such as ``spec.family``. ``filter_operation`` and ``filter_obj`` are
+        mutually exclusive.
+        """
+        count_by_field = _count_by_data_field(field)
+        filter_dict = _count_by_filter_dict(filter_operation, filter_obj)
 
         query_params: ListEntitiesQueryParams = {
             "page": 1,
             "page_size": 1,
-            "count_by": f"data.{field}",
+            "count_by": count_by_field,
         }
         if filter_dict:
             query_params["filter"] = json.dumps(filter_dict)
