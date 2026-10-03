@@ -13,6 +13,14 @@ from nemo_builder_plugin._perms import BuildPerms, ContainerImagePerms
 from nemo_builder_plugin.authz import scope
 from nemo_builder_plugin.backend import BackendRefused
 from nemo_builder_plugin.backends import load_backend
+from nemo_builder_plugin.completion import (
+    Caller,
+    CompleteRequest,
+    CompletionConflict,
+    caller_refusal,
+    complete,
+    current_caller,
+)
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.schema import BuildSet
@@ -43,6 +51,13 @@ class SubmitBuildResponse(BaseModel):
     images: list[ContainerImage] = Field(
         description="One row per build spec, created `pending`. POLL THESE, not the job."
     )
+
+
+async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str) -> ContainerImage:
+    try:
+        return await entity_client.get(ContainerImage, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
 
 
 class BuilderService(NemoService):
@@ -164,5 +179,43 @@ def _build_router() -> APIRouter:
             return await entity_client.get(ContainerImage, name=name, workspace=workspace)
         except NemoEntityNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+
+    @router.post("/container-images/{name}/complete", response_model=ContainerImage, tags=["Builder"])
+    @scope.write
+    @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ContainerImagePerms.COMPLETE])
+    async def complete_container_image(
+        workspace: str,
+        name: str,
+        body: CompleteRequest,
+        entity_client: NemoEntitiesClient = Depends(get_entity_client),
+        caller: Caller = Depends(current_caller),
+    ) -> ContainerImage:
+        """Make an image `ready` at the digest its push step pushed and signed.
+
+        Completing an image already `ready` at that digest returns it; 409 if it settled otherwise.
+        """
+        row = await _get_row(entity_client, workspace, name)
+        refusal = caller_refusal(row, caller)
+        if refusal is not None:
+            logger.warning(
+                "completing %s/%s refused: %s",
+                sanitize_for_log(workspace),
+                sanitize_for_log(name),
+                sanitize_for_log(refusal),
+            )
+            raise HTTPException(status_code=403, detail=refusal)
+        try:
+            ready = await complete(entity_client, workspace=workspace, name=name, digest=body.digest)
+        except NemoEntityNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
+        except CompletionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        logger.info(
+            "image %s/%s ready: %s",
+            sanitize_for_log(workspace),
+            sanitize_for_log(name),
+            sanitize_for_log(ready.image_ref),
+        )
+        return ready
 
     return router
