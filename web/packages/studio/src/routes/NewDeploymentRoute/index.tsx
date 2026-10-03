@@ -45,6 +45,7 @@ import { useCreateDeploymentBySource } from '@studio/routes/NewDeploymentRoute/u
 import { useHuggingFaceNameDefault } from '@studio/routes/NewDeploymentRoute/useHuggingFaceNameDefault';
 import { WorkspaceSourceFields } from '@studio/routes/NewDeploymentRoute/WorkspaceSourceFields';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
 import { FC, useCallback, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
@@ -104,6 +105,7 @@ export const NewDeploymentRoute: FC = () => {
     useCreateDeploymentBySource(workspace);
   const [advancedAccordion, setAdvancedAccordion] = useState<string>();
   const [createSecretModalOpen, setCreateSecretModalOpen] = useState(false);
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
 
   // Read once at mount: the page owns the form after that, and re-seeding on a
   // URL change would silently discard whatever the user has typed.
@@ -238,6 +240,7 @@ export const NewDeploymentRoute: FC = () => {
                       queryEnabled={!!workspace}
                       workspace={workspace}
                       onRequestNewSecret={() => setCreateSecretModalOpen(true)}
+                      onRequestEditSecret={setEditSecretName}
                     />
                   )}
                   {source === SOURCE_WORKSPACE && (
@@ -283,6 +286,14 @@ export const NewDeploymentRoute: FC = () => {
             setCreateSecretModalOpen(false);
           }}
         />
+        {editSecretName ? (
+          <EditSecretModal
+            workspace={workspace}
+            name={editSecretName}
+            open
+            onClose={() => setEditSecretName(null)}
+          />
+        ) : null}
       </Stack>
     </AccessibleTitle>
   );

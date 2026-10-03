@@ -18,10 +18,12 @@ import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import type { HelixSecretResponse } from '@nemo/sdk/generated/platform/schema';
 import {
+  getSecretsGetSecretQueryKey,
   getSecretsListSecretsQueryKey,
+  useSecretsGetSecret,
   useSecretsUpdateSecret,
 } from '@nemo/sdk/generated/platform/secrets';
-import { FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
+import { Flex, FormField, Spinner, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
@@ -37,10 +39,62 @@ type EditSecretFormData = z.infer<typeof editSecretFormSchema>;
 
 interface EditSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
+  /** Name of the secret to edit. The record is fetched so the description defaults to the stored one. */
+  name: string;
+}
+
+/**
+ * Callers reach this from a secrets table row and from the secret picker inside other forms, and
+ * only the table has the full record. Fetching by name keeps one contract for both, and keeps a
+ * stale description from a cached list page out of a field that overwrites the stored one on save.
+ */
+export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, name, open, onClose }) => {
+  const {
+    data: secret,
+    error,
+    isFetching,
+  } = useSecretsGetSecret(workspace, name, { query: { enabled: open && Boolean(name) } });
+
+  // Not `if (secret)`: a cached record is served before its refetch settles, and the form reads
+  // its defaults once at mount. Mounting on stale data would let the next save write back a
+  // description the user already replaced.
+  if (secret && !isFetching) {
+    return (
+      <EditSecretForm
+        key={`${workspace}/${name}`}
+        workspace={workspace}
+        secret={secret}
+        open={open}
+        onClose={onClose}
+      />
+    );
+  }
+
+  return (
+    <FormModal
+      open={open}
+      onClose={onClose}
+      title="Edit Secret"
+      submitButtonText="Save"
+      onSubmit={(event) => event.preventDefault()}
+      submitDisabled
+      errorText={error ? getErrorMessage(error) : undefined}
+    >
+      {isFetching ? (
+        <Flex align="center" justify="center" className="py-8">
+          <Spinner aria-label={`Loading ${name}`} />
+        </Flex>
+      ) : null}
+    </FormModal>
+  );
+};
+
+interface EditSecretFormProps extends Pick<FormModalProps, 'open' | 'onClose'> {
+  workspace: string;
   secret: HelixSecretResponse;
 }
 
-export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, open, onClose }) => {
+const EditSecretForm: FC<EditSecretFormProps> = ({ workspace, secret, open, onClose }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
 
@@ -54,6 +108,11 @@ export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, o
       onSuccess: () => {
         toast.success('Secret updated successfully');
         queryClient.invalidateQueries({ queryKey: getSecretsListSecretsQueryKey(workspace) });
+        // The list key is not a prefix of the detail key, so invalidating the list alone would
+        // leave this secret's own cache entry holding the description it had before this save.
+        queryClient.invalidateQueries({
+          queryKey: getSecretsGetSecretQueryKey(workspace, secret.name),
+        });
         resetAndClose();
       },
     },

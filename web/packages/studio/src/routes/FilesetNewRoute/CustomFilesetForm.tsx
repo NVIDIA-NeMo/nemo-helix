@@ -23,8 +23,9 @@ import { DatasetQualityReportView } from '@studio/routes/FilesetNewRoute/compone
 import { PURPOSE_OPTIONS, DATASET_TYPE_CUSTOM } from '@studio/routes/FilesetNewRoute/constants';
 import { toFileList } from '@studio/routes/FilesetNewRoute/helpers';
 import { DatasetFormFields, DatasetType } from '@studio/routes/FilesetNewRoute/types';
+import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
-import { FC, FormEventHandler, RefObject } from 'react';
+import { FC, FormEventHandler, RefObject, useState } from 'react';
 import { Control, Controller, FieldErrors, UseFormSetValue } from 'react-hook-form';
 
 interface CustomFilesetFormProps {
@@ -68,6 +69,10 @@ export const CustomFilesetForm: FC<CustomFilesetFormProps> = ({
   onClearQualityReports,
   onRequestNewSecret,
 }) => {
+  // Local, unlike creation: the parent owns that only because it writes the new name back
+  // into the form, and editing changes nothing this form holds.
+  const [editSecretName, setEditSecretName] = useState<string | null>(null);
+
   return (
     <>
       <Text kind="body/regular/md">
@@ -188,6 +193,7 @@ export const CustomFilesetForm: FC<CustomFilesetFormProps> = ({
                     ensureOptionValue={selectedSecretName || undefined}
                     useControllerProps={{ control, name: 'secretKey' }}
                     onRequestNewSecret={onRequestNewSecret}
+                    onRequestEditSecret={setEditSecretName}
                     triggerPlaceholder=""
                     formFieldProps={{
                       slotLabel: secretKeyLabel,
@@ -202,6 +208,14 @@ export const CustomFilesetForm: FC<CustomFilesetFormProps> = ({
           </Flex>
         </Stack>
       </form>
+      {editSecretName ? (
+        <EditSecretModal
+          workspace={workspace}
+          name={editSecretName}
+          open
+          onClose={() => setEditSecretName(null)}
+        />
+      ) : null}
     </>
   );
 };

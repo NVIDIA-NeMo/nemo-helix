@@ -21,7 +21,7 @@ import {
 import { MenuItem } from '@nvidia/foundations-react-core';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useMemo } from 'react';
-import { type FieldValues, type UseControllerProps } from 'react-hook-form';
+import { type FieldValues, type UseControllerProps, useWatch } from 'react-hook-form';
 
 const SECRETS_PAGE_SIZE = 20;
 
@@ -42,6 +42,11 @@ export type SecretSearchableSelectProps<T extends FieldValues> = {
   ensureOptionValue?: string;
   useControllerProps: UseControllerProps<T>;
   onRequestNewSecret: () => void;
+  /**
+   * Opens an editor for the secret currently selected. Without it the footer offers creation only,
+   * and a secret holding the wrong credential can be fixed only from the Secrets page.
+   */
+  onRequestEditSecret?: (secretName: string) => void;
   formFieldProps: SecretSearchableSelectFormFieldProps;
   /** Use `''` for no visible trigger text (see `ControlledSearchableSelect` `triggerPlaceholder`). */
   triggerPlaceholder?: string;
@@ -53,9 +58,16 @@ export function SecretSearchableSelect<T extends FieldValues>({
   ensureOptionValue,
   useControllerProps,
   onRequestNewSecret,
+  onRequestEditSecret,
   formFieldProps,
   triggerPlaceholder = 'Select a secret (optional)',
 }: SecretSearchableSelectProps<T>) {
+  // The form owns the value, and the footer has to name the secret it would edit. NO_SECRET_SELECT_VALUE
+  // is the empty string, so an unset field and the explicit "None" row are both falsy here.
+  const selectedSecret: string | undefined = useWatch({
+    control: useControllerProps.control,
+    name: useControllerProps.name,
+  });
   const {
     data: secretsPages,
     fetchNextPage,
@@ -102,14 +114,27 @@ export function SecretSearchableSelect<T extends FieldValues>({
       emptyMessage="No secrets found"
       triggerPlaceholder={triggerPlaceholder}
       listFooter={({ close }) => (
-        <MenuItem
-          onClick={() => {
-            close();
-            onRequestNewSecret();
-          }}
-        >
-          New Secret
-        </MenuItem>
+        <>
+          {/* First, so the always-present entry keeps its position as the edit row comes and goes. */}
+          <MenuItem
+            onClick={() => {
+              close();
+              onRequestNewSecret();
+            }}
+          >
+            New Secret
+          </MenuItem>
+          {onRequestEditSecret && selectedSecret ? (
+            <MenuItem
+              onClick={() => {
+                close();
+                onRequestEditSecret(selectedSecret);
+              }}
+            >
+              Edit selected secret
+            </MenuItem>
+          ) : null}
+        </>
       )}
       formFieldProps={formFieldProps}
     />
