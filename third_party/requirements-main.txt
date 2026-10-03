@@ -1375,7 +1375,7 @@ importlib-metadata==8.9.0 ; (platform_machine == 'arm64' and sys_platform == 'da
     #   diffusers
     #   litellm
     #   mlflow-skinny
-insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-helix
     #   nemo-insights-plugin
@@ -3992,7 +3992,7 @@ tqdm==4.70.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   transformers
     #   unsloth
     #   unsloth-zoo
-trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   insight-agent
     #   nemo-helix

@@ -1759,7 +1759,7 @@ def test_get_archive_building() -> None:
     assert response.json()["download"] is None
 
 
-def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN001
+def test_get_archive_ready_streams_download(monkeypatch) -> None:  # noqa: ANN001
     built_at = datetime(2026, 6, 15, 12, tzinfo=UTC)
     _override_conn(
         _conn_with_fetchone(
@@ -1771,10 +1771,6 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
             )
         )
     )
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda key: f"http://signed.example/{key}",
-    )
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 
@@ -1783,33 +1779,11 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
     assert body["status"] == "ready"
     assert body["size_bytes"] == 2048
     assert body["built_at"] == "2026-06-15T12:00:00Z"
+    # Downloads always stream through the API now (presigned direct-to-storage URLs are gone).
     assert body["download"] == {
-        "method": "GET",
-        "url": "http://signed.example/evaluations/ev_test123/results.tar.gz",
-    }
-
-
-def test_get_archive_ready_uses_api_download_when_backend_cannot_presign(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(
-        _conn_with_fetchone(
-            _archive_row(
-                archive_status="ready",
-                archive_object_key="evaluations/ev_test123/results.tar.gz",
-            )
-        )
-    )
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.can_presign_get", lambda: False)
-    presign = MagicMock()
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
-
-    response = client.get("/v1/evaluations/ev_test123/archive")
-
-    assert response.status_code == 200
-    assert response.json()["download"] == {
         "method": "GET",
         "url": "/evaluations/ev_test123/archive/download",
     }
-    assert presign.call_count == 0
 
 
 def test_get_archive_404_when_evaluation_unknown() -> None:
@@ -1852,16 +1826,12 @@ def test_post_archive_ready_without_force_returns_existing_download(monkeypatch)
         )
     )
     _override_conn(conn)
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda _key: "http://signed.example/archive",
-    )
 
     response = client.post("/v1/evaluations/ev_test123/archive", json={})
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
-    assert response.json()["download"]["url"] == "http://signed.example/archive"
+    assert response.json()["download"]["url"] == "/evaluations/ev_test123/archive/download"
     assert len(conn.cursor.return_value.__enter__.return_value.execute.call_args_list) == 1
 
 

@@ -3,6 +3,7 @@
 
 """ROUGE metric runtime implementation."""
 
+import asyncio
 from functools import cached_property
 from typing import ClassVar, Literal
 
@@ -61,8 +62,13 @@ class ROUGEMetric(ROUGE):
         return self._scorer.score(ground_truth, prediction)
 
     async def compute_scores(self, input: MetricInput) -> MetricResult:
-        """Compute structured score output for one item/sample pair."""
-        scores = self._metric(input.row.data, input.candidate)
+        """Compute structured score output for one item/sample pair.
+
+        Scoring runs in a worker thread because building the scorer pulls in NLTK's stemmer and
+        tokenizer, which takes about a second and would otherwise hold the event loop for any
+        caller scoring inside a request handler.
+        """
+        scores = await asyncio.to_thread(self._metric, input.row.data, input.candidate)
         return MetricResult(
             outputs=[
                 MetricOutput(name=score_name, value=scores[score_key].fmeasure)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.models import Model, ModelRef
 
@@ -34,6 +35,9 @@ def _shell_env_name(secret_name: str) -> str:
 class LocalSecretResolver:
     """Resolve secrets from local environment variables.
 
+    Structurally implements ``SecretResolver`` via ``resolve_secret`` (values for metrics) and
+    ``EnvSecretSource`` via ``env_var_for`` (source variable names for harnesses).
+
     A workspace-qualified ref (``my-workspace/openai-api-key``) is looked up under its prefixed names
     first (``MY_WORKSPACE_OPENAI_API_KEY``) and then, with ``bare_fallback``, under the names of its
     bare secret name (``OPENAI_API_KEY``). A bare ref is only ever looked up under its own names.
@@ -54,11 +58,8 @@ class LocalSecretResolver:
             return [], _candidate_env_names(name)
         return _candidate_env_names(secret_ref.root), _candidate_env_names(name) if self._bare_fallback else []
 
-    def find_env_name(self, secret_ref: SecretRef, env_name: str = "") -> str | None:
-        """Name of the first non-empty candidate env var holding ``secret_ref``, or ``None``.
-
-        ``env_name`` is unused: locally the value's location depends only on the ref.
-        """
+    def _find_env_name(self, secret_ref: SecretRef) -> str | None:
+        """Name of the first non-empty candidate environment variable, or ``None``."""
         prefixed, bare = self._candidates(secret_ref)
         bare_set = next((name for name in bare if os.getenv(name)), None)
         for name in prefixed:
@@ -74,7 +75,7 @@ class LocalSecretResolver:
                 return name
         return bare_set
 
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str = "") -> str:
+    def _missing_message(self, secret_ref: SecretRef) -> str:
         """Name the env var(s) to export before a local run."""
         _, sep, name = secret_ref.root.rpartition("/")
         env_vars = _shell_env_name(secret_ref.root)
@@ -85,9 +86,16 @@ class LocalSecretResolver:
             "before launching evaluation locally."
         )
 
+    def env_var_for(self, secret_ref: SecretRef, env_name: str = "") -> str:
+        """Name of the non-empty env var holding ``secret_ref``; ``env_name`` is unused locally."""
+        found = self._find_env_name(secret_ref)
+        if found is None:
+            raise MissingSecretError(self._missing_message(secret_ref))
+        return found
+
     async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
         """Resolve one secret value from environment variables."""
-        name = self.find_env_name(secret_ref)
+        name = self._find_env_name(secret_ref)
         return os.getenv(name) if name is not None else None
 
 

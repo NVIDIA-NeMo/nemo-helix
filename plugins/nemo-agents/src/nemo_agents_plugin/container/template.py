@@ -129,7 +129,8 @@ WHEEL_LATEST = "LATEST"
 #: ``WORKDIR`` of every rendered agent image.
 _IMAGE_WORKDIR = "/workspace"
 
-PINNED_HERMES_COMMIT = "29112bef099274229cadff79cdff7bf7b99c4b77"  # Hermes Agent 0.21.0
+# Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
+PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
 
 _FABRIC_HARNESS_INSTALLS = {
     "claude": "nemo-agents-plugin-claude",
@@ -296,10 +297,10 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 {% endif %}
 {% if install_hermes %}
 # Hermes Agent cannot share the Platform environment. Install the pinned source
-# and matching Fabric adapter in Python 3.12, then let Fabric launch that adapter
+# and matching Fabric adapter in Python 3.14, then let Fabric launch that adapter
 # through its isolated interpreter.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
-    uv venv --python 3.12 /opt/hermes-venv && \\
+    uv venv --python 3.14 /opt/hermes-venv && \\
     git init --quiet /opt/hermes-agent && \\
     git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
     git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\

@@ -346,40 +346,11 @@ print(f"Output teacher model: {TRAINED_TEACHER_NAME}")
 ```
 
 ```python
-from IPython.display import clear_output
+from nemo_helix_ext.quickstart import wait_for_training
 
-
-def wait_for_job(job_name: str):
-    """Poll job status until completion."""
-    while True:
-        status = client.jobs.get_status(name=job_name, workspace="default")
-        clear_output(wait=True)
-        print(f"Job: {job_name}")
-        print(f"Status: {status.status}")
-
-        for job_step in status.steps or []:
-            if job_step.name == "training":
-                for task in job_step.tasks or []:
-                    details = task.status_details or {}
-                    step = details.get("step")
-                    max_steps = details.get("max_steps")
-                    if step is not None and max_steps is not None:
-                        print(f"Progress: Step {step}/{max_steps} ({step / max_steps * 100:.1f}%)")
-                    phase = details.get("phase")
-                    if phase:
-                        print(f"Phase: {phase}")
-                    break
-                break
-
-        if status.status in ("completed", "failed", "cancelled", "error"):
-            print(f"\nJob finished: {status.status}")
-            return status
-
-        time.sleep(10)
-
-
-teacher_status = wait_for_job(TEACHER_JOB_NAME)
+teacher_status = wait_for_training(client, TEACHER_JOB_NAME)
 assert teacher_status.status == "completed"
+
 ```
 
 ---
@@ -405,7 +376,7 @@ baseline_deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
     },
 )
@@ -605,9 +576,14 @@ print(f"Output student model: {DISTILLED_STUDENT_NAME}")
 
 ### 10. Track Distillation Progress
 
+The same progress display used for teacher training prints completion percentage and the latest loss, and charts loss by step once history is available.
+
 ```python
-kd_status = wait_for_job(KD_JOB_NAME)
+from nemo_helix_ext.quickstart import wait_for_training
+
+kd_status = wait_for_training(client, KD_JOB_NAME)
 assert kd_status.status == "completed"
+
 ```
 
 ---
@@ -633,7 +609,7 @@ student_deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
     },
 )

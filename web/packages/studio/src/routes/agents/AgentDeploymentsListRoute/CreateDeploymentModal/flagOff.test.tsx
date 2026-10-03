@@ -9,6 +9,7 @@ vi.hoisted(() => {
 
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 
 const workspace = workspace1.workspace;
@@ -35,5 +36,19 @@ describe('CreateDeploymentModal without container deployments', () => {
     await screen.findByRole('dialog', { name: 'Deploy Agent' });
 
     expect(screen.queryByRole('textbox', { name: 'Container Image' })).not.toBeInTheDocument();
+  });
+
+  it('blocks deploying when the platform also turns subprocess off', async () => {
+    mockEnabledModes('k8s');
+    renderRoute(
+      <CreateDeploymentModal open onClose={vi.fn()} workspace={workspace} agent="an-agent" />
+    );
+
+    const dialog = await screen.findByRole('dialog', { name: 'Deploy Agent' });
+
+    expect(
+      await within(dialog).findByText(/no deployment mode enabled for agents/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
   });
 });

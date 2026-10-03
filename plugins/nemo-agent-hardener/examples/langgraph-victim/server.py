@@ -59,10 +59,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     ``PluginConfig()`` is the empty base config: Relay layers the *discovered* ``plugins.toml``
     (``/etc/nemo-relay/plugins.toml``) over it. Agent Hardener uploads each round's guardrails there
     before restarting the victim, and nothing activates them — nor the ATOF sink the run's preflight
-    insists on — without this call.
+    insists on — without this call. The activation owns the plugin host, so it stays open for the
+    app's whole lifetime.
     """
-    await nemo_relay.plugin.initialize(PluginConfig())
-    yield
+    async with nemo_relay.plugin.activate(PluginConfig()):
+        yield
 
 
 def create_app() -> FastAPI:

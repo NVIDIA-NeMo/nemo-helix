@@ -330,13 +330,12 @@ def _archive_response(row: Mapping[str, Any]) -> EvaluationArchiveResponse:
     object_key = row.get("archive_object_key")
     download = None
     if status == "ready" and object_key:
-        if s3.can_presign_get():
-            download = {"method": "GET", "url": s3.presign_get(object_key)}
-        else:
-            download = {
-                "method": "GET",
-                "url": f"/evaluations/{row['id']}/archive/download",
-            }
+        # Post-Files-migration downloads always stream through the API; presigned
+        # direct-to-storage URLs are gone (the client has no storage credentials).
+        download = {
+            "method": "GET",
+            "url": f"/evaluations/{row['id']}/archive/download",
+        }
     return EvaluationArchiveResponse(
         evaluation_id=row["id"],
         status=status,

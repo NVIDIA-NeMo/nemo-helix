@@ -1077,6 +1077,97 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evaluator/v2/workspaces/{workspace}/evaluate/live:
+    post:
+      tags:
+      - Evaluator Plugin Live Evaluation Route
+      summary: Run Live Evaluation
+      description: 'Run a synchronous evaluation on a single dataset row.
+
+
+        Scores the given row with the given metrics and returns the results immediately.
+        Use this for
+
+        quick, interactive checks of an evaluation config before saving it. For anything
+        larger, use
+
+        the async job-based evaluation endpoints.
+
+
+        Creates no job and stores no result: nothing is persisted and nothing is published
+        to Intake.
+
+
+        The dataset must be provided inline and hold exactly one row. Each metric
+        is either an inline
+
+        definition or a reference to a stored metric (`workspace/metric-name`). Supply
+        at most 24
+
+        metrics, of which at most 4 may be model-backed (an LLM judge or a RAGAS metric),
+        since each
+
+        model-backed metric costs an upstream inference call.
+
+
+        By default the row carries the model output already, and is scored offline.
+        Supplying a
+
+        `target` instead makes the server generate that output first, in which case
+        `prompt_template`
+
+        is required.
+
+
+        **Per-metric results:**
+
+        Every requested metric appears in the response, in request order, with either
+        its scores or
+
+        the error that stopped it -- so one failing metric out of several is identifiable
+        rather than
+
+        collapsing the whole response into a single error. A request in which no metric
+        scored at all
+
+        fails with 502.
+
+
+        Past the concurrency cap the request is rejected with 429 rather than queued;
+        past the overall
+
+        time limit it fails with 504.'
+      operationId: run_live_evaluation_apis_evaluator_v2_workspaces__workspace__evaluate_live_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveScoreRequest'
+      responses:
+        '200':
+          description: Score one row inline, without creating a job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveScoreResponse'
+        '429':
+          description: Too many concurrent live evaluations
+        '504':
+          description: Live evaluation did not finish in time
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evaluator/v2/workspaces/{workspace}/metrics:
     get:
       tags:
@@ -5069,6 +5160,126 @@ components:
         \ can supply the dataset identity\n``evaluations.create`` requires."
     JsonValue:
       title: JsonValue
+    LiveMetricResult:
+      properties:
+        metric:
+          type: string
+          title: Metric
+          description: The metric's runtime type name, matching the request order.
+        scores:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/AggregateRangeScore'
+            - $ref: '#/components/schemas/AggregateRubricScore'
+            - $ref: '#/components/schemas/AggregateScalarScore'
+          type: array
+          title: Scores
+          description: Aggregated scores for this metric. Empty when it failed.
+        error:
+          title: Error
+          description: Why this metric produced no scores. Null when it succeeded.
+          type: string
+      additionalProperties: false
+      type: object
+      required:
+      - metric
+      title: LiveMetricResult
+      description: 'One requested metric''s outcome: its scores, or why it produced
+        none.'
+    LiveScoreRequest:
+      properties:
+        dataset:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          maxItems: 1
+          minItems: 1
+          title: Dataset
+          description: The single row to evaluate. Offline requests carry the model
+            output on the row.
+        metrics:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/MetricInline'
+            - $ref: '#/components/schemas/MetricRef'
+          type: array
+          maxItems: 24
+          minItems: 1
+          title: Metrics
+          description: Metrics to score the row with, given as inline definitions
+            and/or references to stored metrics (`workspace/metric-name`).
+        target:
+          allOf:
+          - $ref: '#/components/schemas/Model'
+          description: Optional model to generate the row's output before scoring.
+            Omit to score an output already present on the row. Agent targets are
+            not supported on this route.
+        prompt_template:
+          anyOf:
+          - type: string
+          - additionalProperties: true
+            type: object
+          title: Prompt Template
+          description: Optional prompt template applied to online target generation.
+        field_mapping:
+          allOf:
+          - $ref: '#/components/schemas/FieldMapping'
+          description: Optional mapping from canonical evaluator fields to dataset
+            columns.
+        params:
+          anyOf:
+          - $ref: '#/components/schemas/RunConfig'
+          - $ref: '#/components/schemas/RunConfigOnlineModel'
+          title: Params
+          description: Optional execution parameters. Single-row, no-retry and timeout
+            settings are pinned by the route and cannot be overridden.
+      additionalProperties: false
+      type: object
+      required:
+      - dataset
+      - metrics
+      title: LiveScoreRequest
+      description: 'One row, the metrics to score it with, and an optional model to
+        generate it.
+
+
+        Deliberately not a subclass of the job''s ``EvaluateInputSpec``: this route
+        persists nothing, so
+
+        the publication field and its identity validator have no meaning here, and
+        a ``FilesetRef``
+
+        dataset would reintroduce the file I/O the route exists to avoid.'
+    LiveScoreResponse:
+      properties:
+        output:
+          title: Output
+          description: The candidate text that was scored. Generated server-side for
+            an online target; echoed from the row for an offline request.
+          type: string
+        metrics:
+          items:
+            $ref: '#/components/schemas/LiveMetricResult'
+          type: array
+          title: Metrics
+          description: One entry per requested metric, in request order.
+      additionalProperties: false
+      type: object
+      required:
+      - output
+      - metrics
+      title: LiveScoreResponse
+      description: 'Per-metric outcomes for the row, plus whatever text was scored.
+
+
+        Every requested metric appears, in request order, whether or not it succeeded.
+        A failing metric
+
+        reports its own error and leaves its siblings'' scores intact, so one broken
+        metric out of eight
+
+        is identifiable rather than collapsing the whole response into a single error.'
     McpFulfillment:
       properties:
         url:
