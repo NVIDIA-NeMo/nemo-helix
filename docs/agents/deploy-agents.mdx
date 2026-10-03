@@ -56,7 +56,7 @@ export NMP_BASE_URL=http://localhost:8080
 
 curl -fsS --connect-timeout 2 --max-time 5 \
   "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  echo "NeMo Helix is not ready at $NMP_BASE_URL"
   exit 1
 }
 
