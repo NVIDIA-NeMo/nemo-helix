@@ -191,7 +191,7 @@ describe('useModelSearchCore', () => {
 
     it('lists providers as workspace-qualified options', async () => {
       mockListProviders.mockResolvedValue({
-        data: [{ workspace: 'ws1', name: 'build' }],
+        data: [{ workspace: 'default', name: 'nvidia-build' }],
       } as unknown as ModelProvidersPage);
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
 
@@ -199,7 +199,7 @@ describe('useModelSearchCore', () => {
 
       await waitFor(() =>
         expect(result.current.modelFilters.providerOptions).toEqual([
-          { value: 'ws1/build', label: 'build' },
+          { value: 'default/nvidia-build', label: 'nvidia-build' },
         ])
       );
     });
