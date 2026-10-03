@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  matchesModelSize,
   MODEL_SIZE_OPTIONS,
   type ModelFilterValues,
 } from '@nemo/common/src/api/models/modelFilters';
@@ -11,7 +12,7 @@ import type {
   ModelSelection,
   ModelSelectV2Props,
 } from '@nemo/common/src/components/ModelSelectV2/types';
-import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
+import type { InferenceParams, ModelEntity, ModelSpec } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
 
@@ -161,15 +162,44 @@ export const WithModelTypeToggle: Story = {
 
 const MOCK_FAMILIES = ['llama', 'mistral', 'nemotron'];
 
+const withParameterCountFromName = (model: ModelEntity): ModelEntity => {
+  const billions = /-(\d+)b/.exec(model.name)?.[1];
+  if (!billions) return model;
+  return { ...model, spec: { base_num_parameters: Number(billions) * 1e9 } as ModelSpec };
+};
+
+const EXTRA_NVIDIA_MODELS = [
+  'nemotron-4-340b-instruct',
+  'nemotron-4-340b-reward',
+  'nemotron-mini-4b',
+].map(
+  (name, index): ModelEntity => ({
+    id: `extra-${index}`,
+    name,
+    workspace: 'nvidia',
+    created_at: '2025-06-01T00:00:00Z',
+    updated_at: '2025-06-01T00:00:00Z',
+  })
+);
+
+const sizedMockGroups = mockGroups.map((group) => ({
+  ...group,
+  models: [...group.models, ...(group.workspace === 'nvidia' ? EXTRA_NVIDIA_MODELS : [])].map(
+    withParameterCountFromName
+  ),
+}));
+
 const WithFiltersRender = (args: ModelSelectV2Props) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [filters, setFilters] = useState<ModelFilterValues>({});
-  const groups = mockGroups
-    .filter((group) => !filters.provider || group.workspace === filters.provider)
+  const { provider, family, size } = filters;
+  const groups = sizedMockGroups
+    .filter((group) => !provider || group.workspace === provider)
     .map((group) => ({
       ...group,
       models: group.models.filter(
-        (model) => !filters.family || model.name.startsWith(filters.family)
+        (model) =>
+          (!family || model.name.startsWith(family)) && (!size || matchesModelSize(model, size))
       ),
     }))
     .filter((group) => group.models.length > 0);
@@ -185,7 +215,7 @@ const WithFiltersRender = (args: ModelSelectV2Props) => {
         onChange: setFilters,
         providerOptions: mockGroups.map(({ workspace }) => ({
           value: workspace,
-          label: workspace,
+          label: `${workspace}-build`,
         })),
         familyOptions: MOCK_FAMILIES.map((family) => ({ value: family, label: family })),
         sizeOptions: MODEL_SIZE_OPTIONS,

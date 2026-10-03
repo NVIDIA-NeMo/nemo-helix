@@ -170,13 +170,13 @@ describe('useModelSearch', () => {
     });
 
     it('lists providers as workspace-qualified options', async () => {
-      mockProviders.data = [{ workspace: 'ws1', name: 'build' }];
+      mockProviders.data = [{ workspace: 'default', name: 'nvidia-build' }];
       mockListModels.mockResolvedValue(makePage([makeModel('a')], 1, 1));
 
       const { result } = renderSearch();
 
       expect(result.current.modelFilters.providerOptions).toEqual([
-        { value: 'ws1/build', label: 'build' },
+        { value: 'default/nvidia-build', label: 'nvidia-build' },
       ]);
     });
 
