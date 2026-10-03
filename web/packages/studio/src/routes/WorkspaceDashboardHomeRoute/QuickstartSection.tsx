@@ -98,7 +98,7 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           enabled: true,
           icon: <Upload className="size-4" />,
           label: 'Upload an Agent',
-          href: getAgentsListRoute(workspace),
+          href: getAgentsListRoute(workspace, { register: true }),
         },
         {
           enabled: evaluatorEnabled,
