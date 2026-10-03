@@ -1028,6 +1028,10 @@ core:
     controllers: []
     # -- Additional arguments to pass to the Core Controller service
     extraArgs: []
+    # -- Additional volume mounts to add to the core controller container.
+    extraVolumeMounts: []
+    # -- Additional volumes to add to the core controller pod.
+    extraVolumes: []
 
     # -- Service configuration for the controller service. This only configures a headless service for DNS resolution.
     # @default -- This object has the following default values for the service configuration.
