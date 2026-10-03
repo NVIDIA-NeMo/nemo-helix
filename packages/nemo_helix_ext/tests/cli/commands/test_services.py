@@ -10,6 +10,7 @@ fixture + ``_NHX_STATE_DIR`` env var ensure all state goes to a temp directory.
 from __future__ import annotations
 
 import os
+import signal
 import socket
 from pathlib import Path
 from types import ModuleType
@@ -30,6 +31,14 @@ from nhx.platform_runner.config import HelixAppConfig
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+def _leader_process() -> MagicMock:
+    """A launcher identity captured before the pid can be reused."""
+    leader = MagicMock()
+    leader.create_time.return_value = 10.0
+    return leader
+
 
 _PROCESS_MODULE = "nemo_helix_ext.local.process"
 _CLI_MODULE = "nemo_helix_ext.cli.commands.services.cli"
@@ -305,6 +314,9 @@ def test_start_reports_failure(base_dir: Path):
         patch(f"{_CLI_MODULE}._require_services_extra"),
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
+        patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
+        patch(f"{_PROCESS_MODULE}.os.killpg"),
     ):
         result = runner.invoke(
             app,
@@ -313,6 +325,271 @@ def test_start_reports_failure(base_dir: Path):
 
     assert result.exit_code == 1
     assert "exited early" in result.stderr
+    mock_stop.assert_not_called()
+
+
+def test_start_help_documents_ready_timeout():
+    result = runner.invoke(app, ["services", "start", "--help"])
+    assert result.exit_code == 0
+    assert "--ready-timeout" in result.stdout
+    assert "240" in result.stdout
+    assert "nemo services start --ready-timeout 360" in result.stdout
+
+
+def test_start_default_ready_timeout_is_240(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_proc.poll.return_value = None
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True) as mock_wait,
+        patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "timeout-default"])
+
+    assert result.exit_code == 0, result.stderr
+    assert mock_wait.call_args.kwargs["timeout"] == 240
+    assert mock_wait.call_args.kwargs["proc"] is mock_proc
+    mock_stop.assert_not_called()
+
+
+def test_start_ready_timeout_override(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 99999
+    mock_proc.poll.return_value = None
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc) as mock_start,
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True) as mock_wait,
+    ):
+        result = runner.invoke(
+            app,
+            ["services", "start", "--instance", "timeout-override", "--ready-timeout", "360"],
+        )
+
+    assert result.exit_code == 0, result.stderr
+    assert mock_wait.call_args.kwargs["timeout"] == 360
+    mock_start.assert_called_once()
+
+
+@pytest.mark.parametrize("command", ["start", "restart"])
+@pytest.mark.parametrize("timeout", ["0", "-1"])
+def test_services_reject_non_positive_ready_timeout(command: str, timeout: str):
+    with patch(f"{_CLI_MODULE}.start_background") as mock_start:
+        result = runner.invoke(app, ["services", command, "--ready-timeout", timeout])
+
+    assert result.exit_code != 0
+    assert "--ready-timeout" in f"{result.stdout}{result.stderr}"
+    mock_start.assert_not_called()
+
+
+def test_start_stops_child_when_ready_times_out(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = None
+
+    def _stop(*_args, **_kwargs):
+        mock_proc.poll.return_value = 0
+        return StopResult(stopped_pids=[88888])
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "timeout-stop"])
+
+    assert result.exit_code == 1
+    assert "did not become ready within 240s" in result.stderr
+    assert "was stopped" in result.stderr
+    assert "Platform services started" not in result.stdout
+    mock_stop.assert_called_once()
+    assert mock_stop.call_args.kwargs["force"] is True
+    assert mock_stop.call_args.kwargs["timeout"] == 30.0
+    mock_killpg.assert_not_called()
+
+
+def test_start_reports_child_still_running_when_stop_fails(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = None
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
+        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "timeout-stuck"])
+
+    assert result.exit_code == 1
+    assert "88888" in result.stderr
+    assert "nemo services stop --force" in result.stderr
+    assert "nemo services restart" in result.stderr
+    assert "was stopped" not in result.stderr
+    mock_stop.assert_called_once()
+    assert mock_stop.call_args.kwargs["force"] is True
+    assert [call.args[1] for call in mock_killpg.call_args_list] == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_start_does_not_signal_a_reused_pid_when_group_lookup_fails(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = None
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])),
+        patch(f"{_CLI_MODULE}.os.getpgid", side_effect=ProcessLookupError),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "timeout-missing-pid"])
+
+    assert result.exit_code == 1
+    assert "still running" in result.stderr
+    assert "88888" in result.stderr
+    mock_killpg.assert_not_called()
+
+
+def test_start_signals_group_when_launcher_exits_but_lock_remains(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = None
+    alive_checks = {"n": 0}
+
+    def _stop(*_args, **_kwargs):
+        mock_proc.poll.return_value = 0
+        return StopResult(stopped_pids=[88888])
+
+    def _alive(*_args, **_kwargs):
+        alive_checks["n"] += 1
+        return alive_checks["n"] > 1
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
+        patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop),
+        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "timeout-orphan-lock"])
+
+    assert result.exit_code == 1
+    assert "was stopped" not in result.stderr
+    assert "still running" in result.stderr
+    assert [call.args[1] for call in mock_killpg.call_args_list] == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_start_releases_lock_when_launcher_exits_early(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = 1
+    alive_checks = {"n": 0}
+    events: list[str] = []
+
+    def _alive(*_args, **_kwargs):
+        alive_checks["n"] += 1
+        return alive_checks["n"] > 1
+
+    def _stop(*_args, **_kwargs):
+        events.append("stop")
+        return StopResult(stopped_pids=[88888])
+
+    def _killpg(*_args, **_kwargs):
+        events.append("killpg")
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
+        patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
+        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg", side_effect=_killpg) as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "early-exit-lock"])
+
+    assert result.exit_code == 1
+    assert "exited early" in result.stderr
+    assert "was stopped" not in result.stderr
+    assert "still running" in result.stderr
+    mock_stop.assert_called_once()
+    assert mock_stop.call_args.kwargs["force"] is True
+    assert [call.args[1] for call in mock_killpg.call_args_list] == [signal.SIGTERM, signal.SIGKILL]
+    assert events == ["killpg", "killpg", "stop"]
+
+
+def test_start_signals_group_when_launcher_exits_before_lock(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = 1
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
+        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "early-exit-nolock"])
+
+    assert result.exit_code == 1
+    assert "exited early" in result.stderr
+    assert "was stopped" not in result.stderr
+    mock_stop.assert_not_called()
+    assert [call.args[1] for call in mock_killpg.call_args_list] == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_start_stops_scope_when_lock_appears_after_early_exit_signal(base_dir: Path):
+    mock_proc = MagicMock()
+    mock_proc.pid = 88888
+    mock_proc.poll.return_value = 1
+    alive_checks = {"n": 0}
+
+    def _alive(*_args, **_kwargs):
+        alive_checks["n"] += 1
+        return alive_checks["n"] > 2
+
+    with (
+        patch(f"{_CLI_MODULE}._require_services_extra"),
+        patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+        patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
+        patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
+        patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
+        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+        patch(f"{_PROCESS_MODULE}.os.killpg"),
+    ):
+        result = runner.invoke(app, ["services", "start", "--instance", "early-exit-late-lock"])
+
+    assert result.exit_code == 1
+    assert "exited early" in result.stderr
+    assert "still running" in result.stderr
+    mock_stop.assert_called_once()
+    assert mock_stop.call_args.kwargs["force"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +829,116 @@ class TestServicesRestart:
         config = mock_start.call_args.args[0]
         assert config.keep_alive_timeout_seconds == 15
 
+    def test_restart_help_documents_ready_timeout(self):
+        result = runner.invoke(app, ["services", "restart", "--help"])
+        assert result.exit_code == 0
+        assert "--ready-timeout" in result.stdout
+        assert "240" in result.stdout
+        assert "nemo services restart --ready-timeout 360" in result.stdout
+
+    def test_restart_default_ready_timeout_is_240(self, base_dir: Path):
+        scope = "restart-timeout-default"
+        fd = acquire_lock(scope, base_dir=base_dir)
+        write_descriptor(
+            InstanceDescriptor(
+                pid=os.getpid(),
+                config=HelixAppConfig(scope=scope),
+                mode="background",
+                create_time=1.0,
+            ),
+            base_dir=base_dir,
+        )
+        mock_proc = MagicMock()
+        mock_proc.pid = 33333
+        mock_proc.poll.return_value = None
+        try:
+            with (
+                patch(f"{_CLI_MODULE}._require_services_extra"),
+                patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[os.getpid()])) as mock_stop,
+                patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+                patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True) as mock_wait,
+            ):
+                result = runner.invoke(app, ["services", "restart", "--instance", scope])
+        finally:
+            os.close(fd)
+
+        assert result.exit_code == 0, result.stderr
+        assert mock_wait.call_args.kwargs["timeout"] == 240
+        assert mock_wait.call_args.kwargs["proc"] is mock_proc
+        mock_stop.assert_called_once()
+
+    def test_restart_ready_timeout_override(self, base_dir: Path):
+        scope = "restart-timeout-override"
+        fd = acquire_lock(scope, base_dir=base_dir)
+        write_descriptor(
+            InstanceDescriptor(
+                pid=os.getpid(),
+                config=HelixAppConfig(scope=scope),
+                mode="background",
+                create_time=1.0,
+            ),
+            base_dir=base_dir,
+        )
+        mock_proc = MagicMock()
+        mock_proc.pid = 33334
+        mock_proc.poll.return_value = None
+        try:
+            with (
+                patch(f"{_CLI_MODULE}._require_services_extra"),
+                patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[os.getpid()])),
+                patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+                patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True) as mock_wait,
+            ):
+                result = runner.invoke(
+                    app,
+                    ["services", "restart", "--instance", scope, "--ready-timeout", "360"],
+                )
+        finally:
+            os.close(fd)
+
+        assert result.exit_code == 0, result.stderr
+        assert mock_wait.call_args.kwargs["timeout"] == 360
+
+    def test_restart_stops_new_child_when_ready_times_out(self, base_dir: Path):
+        scope = "restart-timeout-stop"
+        write_descriptor(
+            InstanceDescriptor(
+                pid=44444,
+                config=HelixAppConfig(scope=scope, host="127.0.0.1"),
+                mode="background",
+                create_time=1.0,
+            ),
+            base_dir=base_dir,
+        )
+        mock_proc = MagicMock()
+        mock_proc.pid = 44444
+        mock_proc.poll.return_value = None
+
+        def _stop(*_args, **_kwargs):
+            if mock_stop.call_count >= 2:
+                mock_proc.poll.return_value = 0
+            return StopResult(stopped_pids=[44444])
+
+        with (
+            patch(f"{_CLI_MODULE}._require_services_extra"),
+            patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
+            patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
+            patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False) as mock_wait,
+            patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
+            patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
+            patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        ):
+            result = runner.invoke(app, ["services", "restart", "--instance", scope])
+
+        assert result.exit_code == 1
+        assert mock_wait.call_args.kwargs["timeout"] == 240
+        assert "did not become ready within 240s" in result.stderr
+        assert "was stopped" in result.stderr
+        assert "Platform services restarted" not in result.stdout
+        assert mock_stop.call_count == 2
+        assert mock_stop.call_args_list[1].kwargs["force"] is True
+        mock_killpg.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # status
@@ -586,6 +973,27 @@ class TestServicesStatus:
         assert str(os.getpid()) in result.stdout
         assert "foreground" in result.stdout
         assert "healthy" in result.stdout
+
+    def test_status_probes_with_three_second_timeout(self, base_dir: Path):
+        scope = "status-timeout"
+        fd = acquire_lock(scope, base_dir=base_dir)
+        write_descriptor(
+            InstanceDescriptor(
+                pid=os.getpid(),
+                config=HelixAppConfig(scope=scope),
+                mode="background",
+                create_time=1.0,
+            ),
+            base_dir=base_dir,
+        )
+        try:
+            with patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=True) as mock_wait:
+                result = runner.invoke(app, ["services", "status", "--instance", scope])
+        finally:
+            os.close(fd)
+
+        assert result.exit_code == 0
+        assert mock_wait.call_args.kwargs["timeout"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +1280,18 @@ class TestWaitForHealthy:
 
         assert result is False
 
+    def test_returns_false_when_child_already_exited(self):
+        from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
+
+        proc = MagicMock()
+        proc.poll.return_value = 1
+
+        with patch(f"{_CLI_MODULE}.httpx.get") as mock_get:
+            result = _wait_for_healthy("127.0.0.1", 8080, timeout=240, poll_interval=30, proc=proc)
+
+        assert result is False
+        mock_get.assert_not_called()
+
     def test_retries_until_success(self):
         import httpx
         from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
@@ -909,6 +1329,132 @@ class TestWaitForHealthy:
 
         assert "localhost" in captured_urls[0]
         assert "0.0.0.0" not in captured_urls[0]
+
+    def test_probes_again_after_sleep_before_deadline(self):
+        import httpx
+        from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
+
+        clock = {"now": 0.0}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        calls = {"n": 0}
+
+        def monotonic():
+            return clock["now"]
+
+        def sleep(seconds):
+            clock["now"] += seconds
+
+        def get(url, timeout):
+            calls["n"] += 1
+            assert timeout <= 1
+            if calls["n"] == 1:
+                raise httpx.ConnectError("")
+            return mock_resp
+
+        with (
+            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+        ):
+            result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
+
+        assert result is True
+        assert calls["n"] == 2
+
+    def test_status_probe_timeout_stays_within_ready_budget(self):
+        import httpx
+        from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
+
+        clock = {"now": 0.0}
+        seen: list[float] = []
+
+        def monotonic():
+            return clock["now"]
+
+        def sleep(seconds):
+            clock["now"] += seconds
+
+        def get(url, timeout):
+            seen.append(timeout)
+            clock["now"] += timeout
+            raise httpx.ConnectError("")
+
+        with (
+            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+        ):
+            result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
+
+        assert result is False
+        assert seen == [1]
+
+    def test_observes_readiness_in_the_final_slice(self):
+        import httpx
+        from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
+
+        clock = {"now": 0.0}
+
+        def monotonic():
+            return clock["now"]
+
+        def sleep(seconds):
+            clock["now"] += seconds
+
+        def get(url, timeout):
+            if clock["now"] < 1:
+                assert timeout <= 1
+            else:
+                assert timeout == 0.5
+            if clock["now"] >= 0.99:
+                response = MagicMock()
+                response.status_code = 200
+                return response
+            raise httpx.ConnectError("")
+
+        with (
+            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+        ):
+            result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
+
+        assert result is True
+        assert clock["now"] <= 1.05
+
+    def test_uses_the_full_budget_before_giving_up(self):
+        import httpx
+        from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
+
+        clock = {"now": 0.0}
+        probes = {"n": 0}
+
+        def monotonic():
+            return clock["now"]
+
+        def sleep(seconds):
+            clock["now"] += seconds
+
+        def get(url, timeout):
+            probes["n"] += 1
+            if clock["now"] < 1:
+                assert timeout <= 1
+            else:
+                assert timeout == 0.5
+            assert clock["now"] <= 1
+            raise httpx.ConnectError("")
+
+        with (
+            patch(f"{_CLI_MODULE}.time.monotonic", side_effect=monotonic),
+            patch(f"{_CLI_MODULE}.time.sleep", side_effect=sleep),
+            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+        ):
+            result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
+
+        assert result is False
+        assert probes["n"] >= 2
+        assert clock["now"] == pytest.approx(1)
 
     def test_non_200_keeps_polling(self):
         from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy

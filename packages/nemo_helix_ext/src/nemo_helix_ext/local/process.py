@@ -306,6 +306,10 @@ class InstanceDescriptor(BaseModel):
     transport: Literal["tcp", "uds"] = "tcp"
     mode: Literal["foreground", "background", "daemon"] = "background"
     create_time: float = 0.0
+    # Process group of the launcher. Background start uses a new session, so
+    # this stays valid after the leader exits and ``stop --force`` can signal
+    # descendants that still hold the flock.
+    pgid: int | None = None
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @model_validator(mode="after")
@@ -330,6 +334,7 @@ class InstanceDescriptor(BaseModel):
             transport=transport,
             mode=mode,
             create_time=get_create_time(resolved_pid),
+            pgid=_process_group_id(resolved_pid),
         )
 
 
@@ -445,6 +450,52 @@ def validate_pid(pid: int, expected_create_time: float, *, tolerance: float = 2.
 def get_create_time(pid: int) -> float:
     """Return the create_time for *pid*.  Raises if the process doesn't exist."""
     return psutil.Process(pid).create_time()
+
+
+def _process_group_id(pid: int) -> int | None:
+    """Return *pid*'s process group, or None when the pid is already gone."""
+    try:
+        return os.getpgid(pid)
+    except ProcessLookupError:
+        return None
+    except OSError:
+        logger.debug("Failed to read process group for pid %s", pid, exc_info=True)
+        return None
+
+
+def _signal_saved_process_group(pgid: int, leader_create_time: float) -> None:
+    """SIGTERM a group recorded while its leader was alive, then SIGKILL if it remains.
+
+    If *pgid* now belongs to a different process, do nothing. A dead leader
+    does not retire the group while a descendant remains. SIGKILL follows only
+    after the group is still present at the end of the shutdown grace period.
+    """
+    try:
+        leader = psutil.Process(pgid)
+    except psutil.NoSuchProcess:
+        leader = None
+    except psutil.AccessDenied:
+        return
+    if leader is not None and abs(leader.create_time() - leader_create_time) >= 2.0:
+        return
+
+    def _send(sig: int) -> bool:
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return False
+        except OSError:
+            logger.debug("Failed to signal process group %s with signal %s", pgid, sig, exc_info=True)
+        return True
+
+    if not _send(signal.SIGTERM):
+        return
+    deadline = time.monotonic() + _SIGKILL_WAIT_TIMEOUT
+    while time.monotonic() < deadline:
+        if not _send(0):
+            return
+        _pause(_SIGTERM_POLL_INTERVAL)
+    _send(signal.SIGKILL)
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +705,26 @@ def stop_instance(
     pid = desc.pid
     if not validate_pid(pid, desc.create_time):
         logger.debug("PID %d doesn't match recorded create_time, cleaning up descriptor", pid)
+        # killpg may have already signaled the lock holder. Wait for the flock
+        # to drop before deciding the scope is still occupied, matching the
+        # normal stop path. Preserve the descriptor only if the lock outlives
+        # that wait.
+        if is_instance_alive(scope, base_dir=base_dir):
+            if desc.pgid is not None:
+                _signal_saved_process_group(desc.pgid, desc.create_time)
+            if not _wait_until_instance_lock_released(
+                scope,
+                base_dir=base_dir,
+                timeout=min(_LOCK_RELEASE_WAIT_TIMEOUT, timeout),
+            ):
+                logger.warning(
+                    "Instance %r pid %d is stale but the lock is still held; preserving descriptor",
+                    scope,
+                    pid,
+                )
+                return StopResult(stopped_pids=[])
+        if _stop_should_preserve_descriptor(scope, desc, base_dir=base_dir):
+            return StopResult(stopped_pids=[])
         remove_descriptor(scope, base_dir=base_dir)
         return StopResult(stopped_pids=[])
 
@@ -722,6 +793,23 @@ def stop_instance(
     else:
         remove_descriptor(scope, base_dir=base_dir)
     return StopResult(stopped_pids=[pid], swept_children=swept)
+
+
+def _stop_should_preserve_descriptor(
+    scope: str,
+    desc: InstanceDescriptor,
+    *,
+    base_dir: Path | None,
+) -> bool:
+    """True when the scope was replaced or re-locked before stop finished deleting it."""
+    if is_instance_alive(scope, base_dir=base_dir):
+        logger.warning("Instance %r lock is held again; preserving descriptor", scope)
+        return True
+    current = read_descriptor(scope, base_dir=base_dir)
+    if current is not None and (current.pid != desc.pid or current.create_time != desc.create_time):
+        logger.warning("Instance %r descriptor changed during stop; preserving replacement descriptor", scope)
+        return True
+    return False
 
 
 def _wait_for_lock_release(scope: str, *, base_dir: Path | None, timeout: float) -> bool:
