@@ -23,22 +23,31 @@ def _disable_reconcile_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(intake_service, "LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS", 0)
 
 
+_OBSERVATION_TIMEOUT_SECONDS = 5.0
+
+
+async def _wait_until(ready) -> None:
+    async def _poll() -> None:
+        while not ready():
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(_poll(), timeout=_OBSERVATION_TIMEOUT_SECONDS)
+
+
 async def _wait_for_clickhouse_url(service: IntakeService, url: str) -> None:
-    for _ in range(50):
+    def _ready() -> bool:
         client = service.clickhouse_client
-        if client is not None and client.settings.url == url:
-            return
-        await asyncio.sleep(0)
+        return client is not None and client.settings.url == url
+
+    await _wait_until(_ready)
     client = service.clickhouse_client
     assert client is not None
     assert client.settings.url == url
 
 
 async def _wait_for_readiness_message(service: IntakeService, message: str) -> None:
-    for _ in range(50):
-        if service.readiness_message == message:
-            return
-        await asyncio.sleep(0)
+    await _wait_until(lambda: service.readiness_message == message)
+    assert service.readiness_message == message
 
 
 def _external_config() -> IntakeConfig:
@@ -198,6 +207,32 @@ def test_local_clickhouse_retry_adopts_ephemeral_url(monkeypatch: pytest.MonkeyP
     asyncio.run(start_probe_and_stop())
     assert reconcile.await_count == 2
     stop.assert_awaited_once_with(data_dir=intake_config.clickhouse_config.data_dir)
+
+
+def test_failed_adoption_stops_the_reconciled_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NHX_INTAKE_CLICKHOUSE_URL", raising=False)
+    reconcile = AsyncMock(return_value=_RECONCILED_URL)
+    stop = AsyncMock(return_value=True)
+    monkeypatch.setattr("nhx.intake.service.reconcile_local_clickhouse", reconcile)
+    monkeypatch.setattr("nhx.intake.service.stop_local_clickhouse", stop)
+
+    def fail_adopt(_self: IntakeService, *_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("client failed")
+
+    monkeypatch.setattr(IntakeService, "_adopt_reconciled_clickhouse", fail_adopt)
+    intake_config = IntakeConfig(clickhouse_config=ClickHouseConfig())
+    service = IntakeService().with_config(intake_config)
+
+    async def start_and_stop() -> None:
+        await service.on_startup()
+        try:
+            await _wait_until(lambda: stop.await_count > 0)
+        finally:
+            await service.on_shutdown()
+
+    asyncio.run(start_and_stop())
+    stop.assert_awaited_once_with(data_dir=intake_config.clickhouse_config.data_dir)
+    assert service.clickhouse_client is None
 
 
 def test_unexpected_reconcile_error_retries_and_shutdown_continues(monkeypatch: pytest.MonkeyPatch) -> None:

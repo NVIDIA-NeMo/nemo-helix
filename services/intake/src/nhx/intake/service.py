@@ -77,7 +77,12 @@ class _LocalClickHouseProvisioner(BackgroundWorker):
             if self._stopping.is_set():
                 await self._stop_unadopted_container()
                 return
-            self._service._adopt_reconciled_clickhouse(url, self._settings, self._data_dir)
+            try:
+                self._service._adopt_reconciled_clickhouse(url, self._settings, self._data_dir)
+            except Exception:
+                logger.exception("Failed to adopt reconciled local ClickHouse")
+                await self._stop_unadopted_container()
+                raise
             return
 
     def _record_failure(self, exc: LocalClickHouseProvisioningError) -> None:
