@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Docker E2E configuration
+#
+# Used as-is; the platform applies merge overwrite (defaults + this file) at runtime.
+# Only overrides needed for E2E tests are specified here.
+
+# Override platform.base_url to use Docker network hostname.
+# Jobs run in separate Docker containers and can't reach "localhost:8080".
+# The Docker network hostname "nhx-quickstart" allows jobs to reach the API.
+# This is important for model reference resolution (ModelRef)
+# where the API builds IGW URLs that jobs will call.
+platform:
+  base_url: "http://nhx-quickstart:8080"
+inference_gateway:
+  mock_provider_prefix: igw-mock-
+automodel:
+  default_training_execution_profile: gpu
+unsloth:
+  default_training_execution_profile: gpu
+safe_synthesizer:
+  job_mode: container
+  container_image: nhx-safe-synthesizer-tasks
+deployments:
+  default_executor: local-docker
+  executors:
+    - name: local-docker
+      backend: docker
+      config:
+        pull_images: true
+        endpoint_mode: network
+        port_range_start: 49152
+        port_range_end: 49251
+  controller:
+    interval_seconds: 2
+    orphan_cleanup_interval_seconds: 15
+jobs:
+  executors:
+    - provider: subprocess
+      profile: default
+      backend: subprocess
+      config:
+        working_directory: /tmp/nhx-subprocess-jobs
+        cleanup_completed_jobs_immediately: false
+        ttl_seconds_before_active: 60
+        ttl_seconds_active: 3600
+        ttl_seconds_after_finished: 300
+    - provider: cpu
+      profile: gpu
+      backend: docker
+      config:
+        launcher_tool_path: ./services/core/jobs/jobs-launcher/jobs-launcher
+    - provider: gpu
+      profile: gpu
+      backend: docker
+      config:
+        launcher_tool_path: ./services/core/jobs/jobs-launcher/jobs-launcher
+  executor_defaults:
+    docker:
+      # Add additional volume for E2E tests
+      storage:
+        additional_volume_mounts:
+        - volume_name: nhx-e2e-additional-volume
+          mount_path: /mnt/additional_storage
+          allow_create_volume: true

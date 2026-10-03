@@ -527,6 +527,8 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
           NGC_API_KEY: not-used-for-ghcr-cpu-smoke
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
         run: |
           test -n "${NHX_E2E_CLUSTER_URL}"
           export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
@@ -606,7 +608,7 @@ jobs:
           uv run --frozen pytest \
             e2e \
             -v \
-            -m "not gym_e2e" \
+            -m "not gym_e2e and not platform_deploy" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-e2e.xml
@@ -1735,7 +1737,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run e2e tests
-        run: make test-e2e
+        run: make test-e2e PYTEST_EXTRA='-m "not platform_deploy"'
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
