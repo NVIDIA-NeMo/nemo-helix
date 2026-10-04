@@ -50,7 +50,7 @@ async def main() -> int:
             runtime=RuntimeConfig(input_schema="chat", output_schema="message"),
         ),
         sandbox=DockerSandboxProvider(),
-        secrets={"NVIDIA_API_KEY": SecretRef(root="NVIDIA_API_KEY")},
+        env_secrets={"NVIDIA_API_KEY": SecretRef(root="NVIDIA_API_KEY")},
     )
 
     task = AgentEvalTask(

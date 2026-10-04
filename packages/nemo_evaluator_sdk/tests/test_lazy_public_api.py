@@ -91,6 +91,25 @@ def _block_harbor_import(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builtins, "__import__", blocked_harbor_import)
 
 
+def test_fabric_env_import_does_not_pull_the_execution_stack() -> None:
+    probe = """
+import json, sys
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
+validate_fabric_env({}, {})
+print(json.dumps(sorted(sys.modules)))
+"""
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    modules = json.loads(proc.stdout)
+    for prefix in (
+        "nemo_fabric",
+        "opentelemetry",
+        "nemo_evaluator_sdk.agent_eval.runtimes.sandbox",
+        "nemo_evaluator_sdk.agent_eval.runtimes.fabric._common",
+    ):
+        assert not any(name == prefix or name.startswith(prefix + ".") for name in modules), prefix
+
+
 def test_agent_eval_import_does_not_pull_the_execution_stack() -> None:
     """The optimizer imports only ``agent_eval``; it must not pay for backends and benchmarks.
 
