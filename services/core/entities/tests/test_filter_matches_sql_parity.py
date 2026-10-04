@@ -42,6 +42,13 @@ class FakeEntity(Base):
 # absent keys (a documented native divergence pinned in the unit tests). A
 # plain-column NULL (name on row 5) and an explicit/absent ``k`` for $eq-None
 # coverage are the only nullable bits, and $eq agrees with SQL on both.
+#
+# Rows 6-9 carry SQL LIKE metacharacters (``_``/``%``) in ``name``/``data.tier``,
+# each paired with a near-identical row that a wildcard interpretation would
+# wrongly match. They pin the AIRCORE-749 contract that ``$like`` is a literal
+# substring (``_``/``%`` are ordinary characters), agreeing with the in-memory
+# backend. All keep score/tier/flag/tags present so no absent-key divergence is
+# introduced into the existing cases.
 SEED = [
     dict(id=1, name="llama", data={"score": 5, "tier": "free", "flag": True, "k": None, "tags": ["red", "blue"]}),
     dict(id=2, name="Llama-2", data={"score": 9, "tier": "pro", "flag": False, "tags": ["red"]}),
@@ -49,6 +56,13 @@ SEED = [
     dict(id=3, name="zephyr", data={"score": 10, "tier": "pro", "flag": True, "k": "v", "tags": ["green", "redish"]}),
     dict(id=4, name="mistral", data={"score": 100, "tier": "enterprise", "flag": False, "tags": []}),
     dict(id=5, name=None, data={"score": 1, "tier": "free", "flag": False, "tags": ["blue"]}),
+    # `_` is a single-char wildcard under LIKE; "prod_db" must not match "prodXdb".
+    dict(id=6, name="prod_db", data={"score": 7, "tier": "free", "flag": True, "tags": []}),
+    dict(id=7, name="prodXdb", data={"score": 8, "tier": "pro", "flag": False, "tags": []}),
+    # `%` is a multi-char wildcard under LIKE; "50%off" must not match "50pctoff".
+    # data.tier "a_c" must not match "axc" (exercises the JSON cast-to-text path).
+    dict(id=8, name="50%off", data={"score": 11, "tier": "a_c", "flag": True, "tags": []}),
+    dict(id=9, name="50pctoff", data={"score": 12, "tier": "axc", "flag": False, "tags": []}),
 ]
 
 
@@ -91,6 +105,10 @@ CASES = [
     ("like_name_lower", C(FilterOperator.LIKE, "name", "LAMA")),
     ("like_data_tier", C(FilterOperator.LIKE, "data.tier", "pr")),
     ("like_data_miss", C(FilterOperator.LIKE, "data.tier", "zzz")),
+    # AIRCORE-749: `_`/`%` are literal substrings, not SQL wildcards.
+    ("like_name_underscore_literal", C(FilterOperator.LIKE, "name", "prod_db")),
+    ("like_name_percent_literal", C(FilterOperator.LIKE, "name", "50%off")),
+    ("like_data_tier_underscore_literal", C(FilterOperator.LIKE, "data.tier", "a_c")),
     ("in_name", C(FilterOperator.IN, "name", ["llama", "mistral"])),
     ("in_data_tier", C(FilterOperator.IN, "data.tier", ["pro", "free"])),
     ("in_data_score", C(FilterOperator.IN, "data.score", [5, 10])),
