@@ -1255,6 +1255,22 @@ class ModelEntitySortField(StrEnum):
     UPDATED_AT_DESC = "-updated_at"
 
 
+class ModelFamilySort(StrEnum):
+    """Sort fields for Model Family queries."""
+
+    NAME_ASC = "name"
+    NAME_DESC = "-name"
+    MODEL_COUNT_ASC = "model_count"
+    MODEL_COUNT_DESC = "-model_count"
+
+
+class ModelFamily(BaseModel):
+    """A model architecture family and how many models belong to it."""
+
+    name: str = Field(description="Model architecture family, from spec.family (e.g. 'llama', 'mixtral').")
+    model_count: int = Field(description="Number of models in this family that match the filter.")
+
+
 class GetModelEntityRequest(BaseModel):
     """Request model for getting a Model Entity."""
 

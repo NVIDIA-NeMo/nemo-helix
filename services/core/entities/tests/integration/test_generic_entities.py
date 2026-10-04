@@ -196,7 +196,7 @@ class TestEntityCRUD:
         )
 
         assert response.status_code == 400
-        assert "direct string data field" in response.json()["detail"]
+        assert "supported string data field" in response.json()["detail"]
 
     async def test_update_entity_by_name(self, client: AsyncClient, ctx):
         """Test updating an entity by name."""
