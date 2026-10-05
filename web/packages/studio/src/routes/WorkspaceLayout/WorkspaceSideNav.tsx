@@ -10,7 +10,6 @@ import type {
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { isPluginIconName } from '@studio/plugins/iconMap';
 import {
   usePluginInstalled,
   usePlugins,
@@ -39,9 +38,12 @@ import {
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
 import { getAgentsListRoute } from '@studio/routes/utils';
-import { DynamicIcon } from 'lucide-react/dynamic';
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useLocation } from 'react-router';
+
+const PluginNavIcon = lazy(() =>
+  import('@studio/plugins/PluginNavIcon').then((m) => ({ default: m.PluginNavIcon }))
+);
 
 // The parent rows stand for the entity their landing page lists, so they take
 // that entity's canonical glyph. `Datasets` only groups the data jobs today,
@@ -202,9 +204,11 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
               // Namespaced: ids are React keys and accordion-state keys, and
               // merging puts plugin items in the same array as core ones.
               id: `${plugin.name}:${item.id}`,
-              slotIcon: isPluginIconName(item.iconName) ? (
-                <DynamicIcon name={item.iconName} className={iconColorClass} />
-              ) : undefined,
+              slotIcon: (
+                <Suspense>
+                  <PluginNavIcon iconName={item.iconName} className={iconColorClass} />
+                </Suspense>
+              ),
               slotLabel: item.label,
               href: item.href,
             })),
