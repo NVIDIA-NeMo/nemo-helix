@@ -24,6 +24,8 @@ RELEASE_TEST_SCOPE_REFERENCES_PATH = Path(".agents/skills/release-test-scope/ref
 IGNORE_PATHS = {
     # These are existing GitHub team slugs, not product identifiers to rename.
     Path(".github/CODEOWNERS"),
+    # Intentional reference in the release notes
+    Path("docs/about/release-notes/release-0-6-0.mdx"),
     RENAME_SCRIPT,
     RENAME_IMPL,
     VERIFY_SCRIPT,

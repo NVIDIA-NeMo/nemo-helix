@@ -64,7 +64,7 @@ nemo data-designer validate product_reviews.py
   ✅    ✔ Configuration is valid
 ```
 
-Validation covers both the configuration itself and the NeMo Helix resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
+Validation covers both the configuration itself and NeMo Helix resources it depends on: Inference Gateway provider references, Files service seed sources, Nemotron Personas filesets, and the seed source types the service supports.
 
 It does **not** check whether the models you reference actually respond. A provider can resolve while still refusing to serve the model named alongside it, so a green `validate` is not a promise that a preview will run. Use [`check-models`](#check-models) for that.
 

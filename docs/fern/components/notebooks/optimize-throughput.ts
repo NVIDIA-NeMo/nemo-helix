@@ -17,8 +17,8 @@ export default { cells: [
   },
   {
     "type": "markdown",
-    "source": "## Quick Start\n\n### 1. Initialize SDK\n\nThe SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](../../get-started/quickstart.md) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:\n\n```sh\nexport NHX_BASE_URL=<YOUR_NHX_BASE_URL>\n```",
-    "source_html": "<h2>Quick Start</h2>\n<h3>1. Initialize SDK</h3>\n<p>The SDK needs to know your NeMo Helix server URL. By default, <code>http://localhost:8080</code> is used in accordance with the <a href=\"/documentation/get-started\">Quickstart</a> guide. If NeMo Helix is running at a custom location, you can override the URL by setting the <code>NHX_BASE_URL</code> environment variable:</p>\n<pre><code class=\"language-sh\">export NHX_BASE_URL=&lt;YOUR_NHX_BASE_URL&gt;\n</code></pre>\n"
+    "source": "## Quick Start\n\n### 1. Initialize SDK\n\nThe SDK needs to know the URL for your NeMo Helix deployment. By default, `http://localhost:8080` is used in accordance with the [Quickstart](../../get-started/quickstart.md) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:\n\n```sh\nexport NHX_BASE_URL=<YOUR_NHX_BASE_URL>\n```",
+    "source_html": "<h2>Quick Start</h2>\n<h3>1. Initialize SDK</h3>\n<p>The SDK needs to know the URL for your NeMo Helix deployment. By default, <code>http://localhost:8080</code> is used in accordance with the <a href=\"/documentation/get-started\">Quickstart</a> guide. If NeMo Helix is running at a custom location, you can override the URL by setting the <code>NHX_BASE_URL</code> environment variable:</p>\n<pre><code class=\"language-sh\">export NHX_BASE_URL=&lt;YOUR_NHX_BASE_URL&gt;\n</code></pre>\n"
   },
   {
     "type": "code",
