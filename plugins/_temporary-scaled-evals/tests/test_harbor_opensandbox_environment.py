@@ -12,6 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 pytest.importorskip("harbor.environments.opensandbox")
@@ -21,7 +22,7 @@ pytest.importorskip("scaled_evals", reason="scaled-evals plugin not installed")
 import harbor.environments.opensandbox as harbor_opensandbox
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
-from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME
+from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME, SANDBOX_EXIT_FILENAME_PREFIX
 from scaled_evals.harbor_opensandbox_environment import (
     CREATE_ATTEMPT_METADATA_KEY,
     MANAGED_BY_METADATA_KEY,
@@ -170,6 +171,9 @@ def test_harbor_private_hooks_still_exist() -> None:
     assert "self._build_network_policy(sdk)" in inspect.getsource(base._create_sandbox)
     assert hasattr(base, "_safe_kill")
     assert hasattr(base, "_build_connection_config")
+    assert list(inspect.signature(base.stop).parameters) == ["self", "delete"]
+    for attribute in ("self._domain", "self._api_key", "self._protocol"):
+        assert attribute in inspect.getsource(base.__init__)
 
 
 def _policy_sent(server: _Server) -> dict[str, Any]:
@@ -310,3 +314,74 @@ async def test_strict_verification_rejects_a_dropped_rule(tmp_path: Path, server
         await environment._create_sandbox(sdk)
 
     assert server.live() == set()
+
+
+# Minimal OpenSandbox inspect reports; the parsing itself is tested in test_opensandbox_diagnostics.py.
+OOM_INSPECT = """\
+Phase:          Failed
+
+Containers:
+  sandbox:
+    State:          Terminated (exit=137, reason=OOMKilled)
+"""
+
+RUNNING_INSPECT = """\
+Phase:          Running
+
+Containers:
+  sandbox:
+    State:          Running (since 2026-10-05 16:07:07+00:00)
+"""
+
+
+async def _started(tmp_path: Path, inspect_response: httpx.Response, requests: list[httpx.Request]) -> Any:
+    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+    environment._sandbox = await environment._create_sandbox(environment._load_opensandbox())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return inspect_response
+
+    environment._diagnostics_transport = httpx.MockTransport(handler)
+    return environment
+
+
+async def test_stop_records_a_dead_sandbox_before_deleting_it(tmp_path: Path, server: _Server) -> None:
+    requests: list[httpx.Request] = []
+    environment = await _started(tmp_path, httpx.Response(200, text=OOM_INSPECT), requests)
+    environment._api_key = "test-key"
+
+    await environment.stop(delete=True)
+
+    record = json.loads((tmp_path / f"{SANDBOX_EXIT_FILENAME_PREFIX}sbx-1.json").read_text())
+    assert str(requests[0].url) == "https://opensandbox.example/v1/sandboxes/sbx-1/diagnostics/inspect"
+    assert requests[0].headers["OPEN-SANDBOX-API-KEY"] == "test-key"
+    assert record["role"] == "agent"
+    assert (record["reason"], record["exit_code"]) == ("OOMKilled", 137)
+    assert record["inspect"] == OOM_INSPECT
+    assert server.killed == ["sbx-1"]
+
+
+async def test_stop_records_nothing_for_a_running_sandbox(tmp_path: Path, server: _Server) -> None:
+    environment = await _started(tmp_path, httpx.Response(200, text=RUNNING_INSPECT), [])
+
+    await environment.stop(delete=True)
+
+    assert list(tmp_path.glob(f"{SANDBOX_EXIT_FILENAME_PREFIX}*")) == []
+    assert server.killed == ["sbx-1"]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.Response(502, text="Bad Gateway"), httpx.Response(200, text="not a pod report")],
+    ids=["unavailable", "unreadable"],
+)
+async def test_stop_still_deletes_when_diagnostics_fail(
+    tmp_path: Path, server: _Server, response: httpx.Response
+) -> None:
+    environment = await _started(tmp_path, response, [])
+
+    await environment.stop(delete=True)
+
+    assert list(tmp_path.glob(f"{SANDBOX_EXIT_FILENAME_PREFIX}*")) == []
+    assert server.killed == ["sbx-1"]

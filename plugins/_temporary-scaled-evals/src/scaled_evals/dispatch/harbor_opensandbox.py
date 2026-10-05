@@ -69,6 +69,7 @@ from scaled_evals.harbor_opensandbox_cleanup import (
     BENCHMARK_RUN_METADATA_KEY,
     DEPLOYMENT_METADATA_KEY,
     EVALUATION_METADATA_KEY,
+    SANDBOX_EXIT_FILENAME_PREFIX,
     ownership_selector,
     validate_selector,
 )
@@ -514,22 +515,52 @@ def write_applied_egress_summary(job_dir: Path) -> None:
     (job_dir / APPLIED_EGRESS_SUMMARY_FILENAME).write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
 
 
+def sandbox_exit_summary(job_dir: Path) -> str | None:
+    """Describe the sandbox containers that died mid-trial, from ``NemoOpenSandboxEnvironment``'s records."""
+    # Sandbox and trial IDs stay out of the summary: failure classification matches substrings such
+    # as "503" in the detail, and a random ID could contain one.
+    deaths: list[str] = []
+    for path in sorted(job_dir.glob(f"*/{SANDBOX_EXIT_FILENAME_PREFIX}*.json")):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            LOG.warning("unreadable sandbox exit record %s", path)
+            continue
+        reason = record.get("reason")
+        exit_code = record.get("exit_code")
+        death = f"{record.get('role') or 'trial'} sandbox container "
+        death += "was OOMKilled" if reason == "OOMKilled" else f"exited ({reason})" if reason else "exited"
+        if exit_code is not None:
+            death += f", exit {exit_code}"
+        deaths.append(death)
+    return "; ".join(deaths) or None
+
+
 def make_harbor_opensandbox_status_reader(*, harbor_dir: str, jobs_dir: str) -> StatusReader:
-    """Read Harbor's status like ``sandbox_k8s``, and write the applied-egress summary once the run ends."""
+    """Read Harbor's status like ``sandbox_k8s``, name any sandbox that died, and summarize applied egress."""
     read_harbor = make_sandbox_k8s_status_reader(harbor_dir=harbor_dir, jobs_dir=jobs_dir)
 
     def read(handle: LaunchHandle) -> RuntimeStatus:
         # Harbor writes the same result.json as under sandbox_k8s, so reuse that runtime's reader.
         status = read_harbor(handle)
+        if status.phase not in {"succeeded", "failed"}:
+            return status
+        job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
+
+        # A dead sandbox makes Harbor's next call fail with an unrelated-looking error, such as a
+        # failed verifier download, so report the death itself as the cause. A runner failure
+        # (failure_code set) is already the cause and is left alone.
+        if status.phase == "failed" and status.failure_code is None:
+            exit_summary = sandbox_exit_summary(job_dir)
+            if exit_summary:
+                status = status.model_copy(update={"detail": f"harbor sandbox failed ({exit_summary})"})
 
         # Once Harbor has finished, every trial has written its record, so summarize them now.
         # A failed write is logged, not raised: it must not change the evaluation's outcome.
-        if status.phase in {"succeeded", "failed"}:
-            job_dir = _harbor_result_path(handle, harbor_dir=harbor_dir, jobs_dir=jobs_dir).parent
-            try:
-                write_applied_egress_summary(job_dir)
-            except OSError as exc:
-                LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
+        try:
+            write_applied_egress_summary(job_dir)
+        except OSError as exc:
+            LOG.warning("harbor_opensandbox applied-egress summary for %s failed: %s", handle.external_id, exc)
         return status
 
     return read

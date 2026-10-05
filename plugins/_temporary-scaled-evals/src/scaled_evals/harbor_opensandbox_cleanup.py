@@ -38,6 +38,9 @@ BENCHMARK_RUN_METADATA_KEY = "nemo-scaled-evals-benchmark-run"
 REQUIRED_SELECTOR_KEYS = (DEPLOYMENT_METADATA_KEY, EVALUATION_METADATA_KEY)
 # Per-trial record NemoOpenSandboxEnvironment writes after a sandbox's policy passes verification.
 APPLIED_EGRESS_FILENAME = "nemo-applied-egress.json"
+# Per-sandbox record NemoOpenSandboxEnvironment writes when a sandbox's container had died before stop,
+# named ``<prefix><sandbox id>.json`` because a trial's agent and verifier sandboxes share one trial directory.
+SANDBOX_EXIT_FILENAME_PREFIX = "nemo-sandbox-exit-"
 # OpenSandbox states in which a sandbox no longer needs killing.
 _TERMINAL_STATES = frozenset({"Terminated", "Failed"})
 # Platform-style environment names accepted as fallbacks for the names the OpenSandbox SDK reads.

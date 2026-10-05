@@ -18,6 +18,7 @@ import yaml
 pytest.importorskip("scaled_evals")
 
 from scaled_evals import harbor_opensandbox_cleanup as cleanup
+from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.framework_versions import resolve_framework_runner
 from scaled_evals.api.settings import Settings, settings
 from scaled_evals.dispatch import harbor_opensandbox as backend
@@ -395,6 +396,75 @@ def test_status_reader_writes_applied_egress_when_terminal(tmp_path: Path) -> No
 
     assert status.phase == "succeeded"
     assert [item["policy_sha256"] for item in _applied_summary(tmp_path)["sandboxes"]] == ["2" * 64]
+
+
+VERIFIER_DOWNLOAD_FAILED = {
+    "finished_at": "2026-09-28T00:00:00Z",
+    "n_total_trials": 1,
+    "stats": {"n_errored_trials": 1, "evals": {"oracle": {"exception_stats": {"DownloadVerifierDirError": ["t-a"]}}}},
+}
+
+
+def _write_sandbox_exit(tmp_path: Path, trial: str, sandbox_id: str, **record: Any) -> None:
+    trial_dir = tmp_path / "harbor" / "jobs" / "ev_os1" / trial
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    (trial_dir / f"{cleanup.SANDBOX_EXIT_FILENAME_PREFIX}{sandbox_id}.json").write_text(
+        json.dumps({"sandbox_id": sandbox_id, **record})
+    )
+
+
+def _read_status(tmp_path: Path, result: Mapping[str, Any]) -> Any:
+    job_dir = tmp_path / "harbor" / "jobs" / "ev_os1"
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(json.dumps(result))
+    read = backend.make_harbor_opensandbox_status_reader(harbor_dir=str(tmp_path / "harbor"), jobs_dir="jobs")
+    return read(_handle(tmp_path))
+
+
+def test_status_reader_reports_a_sandbox_that_died_as_infrastructure(tmp_path: Path) -> None:
+    _write_sandbox_exit(tmp_path, "t-a", "sbx-503", role="verifier", reason="OOMKilled", exit_code=137)
+
+    status = _read_status(tmp_path, VERIFIER_DOWNLOAD_FAILED)
+
+    assert status.phase == "failed"
+    assert status.detail == "harbor sandbox failed (verifier sandbox container was OOMKilled, exit 137)"
+    assert failure_category_for_code("DownloadVerifierDirError", status.detail) == "infrastructure"
+    assert not is_retryable_failure("DownloadVerifierDirError", status.detail)
+
+
+@pytest.mark.parametrize(
+    ("reason", "exit_code", "expected"),
+    [
+        ("Error", 1, "agent sandbox container exited (Error), exit 1"),
+        ("unknown", None, "agent sandbox container exited (unknown)"),
+    ],
+)
+def test_status_reader_names_other_container_exits(
+    tmp_path: Path, reason: str, exit_code: int | None, expected: str
+) -> None:
+    _write_sandbox_exit(tmp_path, "t-a", "sbx-1", role="agent", reason=reason, exit_code=exit_code)
+
+    status = _read_status(tmp_path, VERIFIER_DOWNLOAD_FAILED)
+
+    assert status.detail == f"harbor sandbox failed ({expected})"
+
+
+def test_status_reader_keeps_harbor_detail_without_a_sandbox_exit(tmp_path: Path) -> None:
+    status = _read_status(tmp_path, VERIFIER_DOWNLOAD_FAILED)
+
+    assert status.phase == "failed"
+    assert status.detail == "harbor run finished with errored trials (1/1 trials errored: DownloadVerifierDirError)"
+
+
+def test_status_reader_leaves_a_succeeded_run_alone(tmp_path: Path) -> None:
+    _write_sandbox_exit(tmp_path, "t-a", "sbx-1", role="agent", reason="OOMKilled", exit_code=137)
+
+    status = _read_status(
+        tmp_path, {"finished_at": "2026-09-28T00:00:00Z", "n_total_trials": 1, "stats": {"n_errored_trials": 0}}
+    )
+
+    assert status.phase == "succeeded"
+    assert status.detail is None
 
 
 def test_backend_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
