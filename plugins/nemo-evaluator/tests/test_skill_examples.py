@@ -612,8 +612,8 @@ def test_skill_documents_the_taskset_submit_path_and_its_job_handle() -> None:
     agent_eval = (root / "references/agent-evaluation.md").read_text(encoding="utf-8")
     troubleshooting = (root / "references/troubleshooting.md").read_text(encoding="utf-8")
 
-    assert "client.evaluator.submit(tasks=..., target=<runner>)" in skill
-    assert 'job = client.evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)' in agent_eval
+    assert "evaluator.submit(tasks=..., target=<runner>)" in skill
+    assert 'job = evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)' in agent_eval
     assert "no `get_result()` or" in agent_eval
     assert "`AttributeError` on `get_result()` or `download_artifacts()` after `submit(tasks=...)`" in troubleshooting
 
@@ -660,7 +660,7 @@ def test_agent_evaluation_shows_how_to_retrieve_stored_trials() -> None:
     )
 
     assert 'agent_eval_results.retrieve("<result-name>")' in reference
-    assert "client.files.download(remote_path=stored.bundle_ref" in reference
+    assert "sdk.files.download(remote_path=stored.bundle_ref" in reference
     assert 'read_trials("previous-run")' in reference
     assert "nemo jobs results download agent-eval-results" in reference
     assert callable(read_trials)

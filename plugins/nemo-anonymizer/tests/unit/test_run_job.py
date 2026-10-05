@@ -150,7 +150,7 @@ async def test_run_job_uses_igw_provider_registry(
 
     igw_lookup.assert_awaited_once()
     assert igw_lookup.await_args is not None
-    assert igw_lookup.await_args.kwargs["sdk"] is async_sdk
+    assert igw_lookup.await_args.kwargs["client"] is async_sdk
     assert isinstance(step_config, AnonymizerStepConfig)
     assert len(step_config.dd_model_providers) == 1
     assert step_config.dd_model_providers[0]["name"] == "provider"

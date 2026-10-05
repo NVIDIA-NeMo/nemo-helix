@@ -670,6 +670,24 @@ class ListExperimentsQueryParams(TypedDict, total=False):
     filter: ExperimentFilterParam | str
 
 
+class EvaluationFilterParam(TypedDict, total=False):
+    name: str
+    experiment_id: str
+    dataset_name: str
+    dataset_version: str
+    created_by: str
+    is_deleted: bool
+    is_pinned: bool
+    metadata: dict[str, str]
+
+
+class ListEvaluationsQueryParams(TypedDict, total=False):
+    page: int
+    page_size: int
+    sort: str
+    filter: EvaluationFilterParam | str
+
+
 ExperimentPage = Page[ExperimentResponse]
 
 TracePage = Page[Trace]

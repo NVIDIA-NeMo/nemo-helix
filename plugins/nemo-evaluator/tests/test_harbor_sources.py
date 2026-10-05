@@ -278,7 +278,7 @@ async def test_resolver_rejects_mixed_lists_before_entity_access(reverse):
     with pytest.raises(ValueError, match="Cannot mix inline tasks and stored task references"):
         await load_tasks(
             tasks,  # ty: ignore[invalid-argument-type] -- deliberately mixed public branches
-            SubmitContext(workspace="default", entity_client=client, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=client, async_client=None, adapters=KIND_ADAPTERS),
         )
     assert client.mock_calls == []
 

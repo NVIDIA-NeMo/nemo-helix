@@ -25,10 +25,14 @@ Aim for documents of 200–2,000 tokens that are representative of the domain. G
 ```python
 import os
 from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+data_designer = DataDesignerResource(client)
 print(NHX_BASE_URL)
 
 ```
@@ -98,7 +102,7 @@ gen_spec = RetrievalGenerateJobConfig(
     quality_judge_model=CHAT_MODEL,
     embed_model=EMBED_MODEL,
 )
-job = client.data_designer.retrieval_generate(gen_spec, workspace="default")
+job = data_designer.retrieval_generate(gen_spec, workspace="default")
 print("Stage 0 job:", job.name)
 job.wait_until_done()
 gen_status = job.get_job_status()
@@ -109,7 +113,7 @@ if gen_status != "completed":
 ```
 
 ```python
-results_page = client.jobs.results.list(job.name, workspace="default")
+results_page = sdk.jobs.results.list(job.name, workspace="default")
 data = getattr(results_page, "data", results_page)
 rows = list(data() if callable(data) else data or [])
 sdg_ref = None

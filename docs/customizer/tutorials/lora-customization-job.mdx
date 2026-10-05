@@ -40,6 +40,8 @@ import time
 import uuid
 from pathlib import Path
 from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 from nemo_helix.types.secrets import HelixSecretResponse
 from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
@@ -65,10 +67,15 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(
+sdk = NeMoHelix(
     base_url=NHX_BASE_URL,
     workspace="default"
 )
+client = NemoClient(
+    base_url=NHX_BASE_URL,
+    workspace="default"
+)
+customization = Customization.from_client(client)
 
 ```
 
@@ -143,7 +150,7 @@ Upload the training and validation JSONL files to a FileSet so the customization
 
 ```python
 try:
-    client.files.filesets.create(
+    sdk.files.filesets.create(
         workspace="default",
         name=DATASET_NAME,
         description="SFT training data",
@@ -153,13 +160,13 @@ try:
 except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
-client.files.fsspec.put(
+sdk.files.fsspec.put(
     lpath=DATASET_PATH,
     rpath=f"default/{DATASET_NAME}/",
     recursive=True
 )
 print("Training data:")
-print(client.files.list(fileset=DATASET_NAME, workspace="default"))
+print(sdk.files.list(fileset=DATASET_NAME, workspace="default"))
 
 ```
 
@@ -181,13 +188,13 @@ def create_or_get_secret(name: str, value: str | None, label: str) -> HelixSecre
         print(f"{label} is not set - skipping setting secret")
         return None
     try:
-        secret = client.secrets.create(name=name, workspace="default", value=value)
+        secret = sdk.secrets.create(name=name, workspace="default", value=value)
         print(f"Created secret: {name}")
         print(secret.model_dump_json(indent=2))
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        secret = client.secrets.retrieve(name=name, workspace="default")
+        secret = sdk.secrets.retrieve(name=name, workspace="default")
         print(secret.model_dump_json(indent=2))
         return secret
 
@@ -211,7 +218,7 @@ try:
     )
     if hf_secret:
         storage["token_secret"] = hf_secret.name
-    base_model_fs = client.files.filesets.create(
+    base_model_fs = sdk.files.filesets.create(
         workspace="default",
         name=MODEL_NAME,
         description="Qwen3 0.6b base model from Hugging Face",
@@ -219,32 +226,32 @@ try:
         cache=True,
     )
 except ConflictError:
-    base_model_fs = client.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
+    base_model_fs = sdk.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
 
 try:
-    base_model = client.models.create(
+    base_model = sdk.models.create(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
         trust_remote_code=False,
     )
 except ConflictError:
-    client.models.update(
+    sdk.models.update(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
         trust_remote_code=False,
     )
-    base_model = client.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
 
 print(f"Base model fileset: fileset://default/{base_model.name}")
-print(client.files.list(fileset=MODEL_NAME, workspace="default"))
+print(sdk.files.list(fileset=MODEL_NAME, workspace="default"))
 
 time_check = max_wait_time_checker(600, "Model Spec")
 while not base_model.spec:
     time_check()
     time.sleep(10)
-    base_model = client.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
 
 # Clear verbose linear_layers list for cleaner output
 base_model.spec.linear_layers = None
@@ -285,7 +292,7 @@ spec = AutomodelJobInput(
     output={"name": OUTPUT_NAME},
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     spec=spec, workspace="default", name=JOB_NAME
 )
 print(f"Submitted job: {job.job.name}")
@@ -300,7 +307,7 @@ Poll until the job finishes. Each update shows the current step, how much of tha
 ```python
 from nemo_helix_ext.quickstart import wait_for_training
 
-status = wait_for_training(client, job.job.name, timeout_seconds=3600)
+status = wait_for_training(sdk, job.job.name, timeout_seconds=3600)
 assert status.status == "completed"
 
 ```
@@ -314,7 +321,7 @@ deploy_suffix = uuid.uuid4().hex[:4]
 DEPLOYMENT_CONFIG_NAME = f"lora-deploy-cfg-{deploy_suffix}"
 deployment_name = f"lora-deploy-{deploy_suffix}"
 
-deployment_config = client.inference.deployment_configs.create(
+deployment_config = sdk.inference.deployment_configs.create(
     workspace="default",
     name=DEPLOYMENT_CONFIG_NAME,
     engine="vllm",
@@ -331,13 +338,13 @@ deployment_config = client.inference.deployment_configs.create(
     },
 )
 
-deployment = client.inference.deployments.create(
+deployment = sdk.inference.deployments.create(
     workspace="default",
     name=deployment_name,
     config=deployment_config.name,
 )
 
-model_entity = client.models.retrieve(workspace="default", name=MODEL_NAME)
+model_entity = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
 if model_entity.spec:
     model_entity.spec.linear_layers = None
 print(model_entity.model_dump_json(indent=2))
@@ -358,7 +365,7 @@ print(f"Monitoring deployment '{deployment_name}'... (timeout {TIMEOUT_MINUTES} 
 while True:
     time.sleep(15)
     time_check()
-    deployment_status = client.inference.deployments.retrieve(name=deployment_name, workspace="default")
+    deployment_status = sdk.inference.deployments.retrieve(name=deployment_name, workspace="default")
     elapsed = time.time() - start_time
     clear_output(wait=True)
     print(f"Deployment: {deployment_name}")
@@ -366,7 +373,7 @@ while True:
     print(f"Elapsed: {int(elapsed // 60)}m {int(elapsed % 60)}s")
     if deployment_status.status in ("RUNNING", "READY"):
         print("\nDeployment is ready!")
-        if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
+        if not sdk.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
     if deployment_status.status in ("FAILED", "ERROR", "TERMINATED"):
@@ -387,7 +394,7 @@ messages = [
     {"role": "user", "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"}
 ]
 INFERENCE_MODEL_NAME = f"default--{OUTPUT_NAME}"
-response = client.inference.gateway.provider.post(
+response = sdk.inference.gateway.provider.post(
     "v1/chat/completions",
     name=deployment_name,
     workspace="default",

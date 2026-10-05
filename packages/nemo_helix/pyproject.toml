@@ -237,12 +237,6 @@ jobs-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-models = [
-  "nemo-helix-sdk",
-  "openai",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 models-service = [
   "fastapi>=0.115.8",
   "pydantic>=2.10.6",
@@ -851,7 +845,6 @@ customizer = "nemo_customizer.skills:get_skills_path"
 [tool.uv.sources]
 nemo-helix-ext = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
-models = { workspace = true }
 filesets = { workspace = true }
 nhx-build-tools = { workspace = true }
 
@@ -897,7 +890,6 @@ nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_
 # The CLI. nemo-helix-ext registers its own scripts under private names so the
 # workspace venv only exposes one `nemo`; the wrapper publishes the public names.
 nemo-helix-ext = { source = "../../packages/nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", inherit = { "entry-points" = ["nemo.*"] }, scripts = [{ name = "nemo", value = "nemo_helix_ext.cli.app:cli" }, { name = "nhx", value = "nemo_helix_ext.cli.app:cli" }], force_include = { "../../../../docs" = "nemo_helix_ext/cli/docs" } }
-models = { source = "../../packages/models/src/models", module = "models" }
 filesets = { source = "../../packages/filesets/src/filesets", module = "filesets" }
 nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk", inherit = { "optional-dependencies" = ["harbor"] } }
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }

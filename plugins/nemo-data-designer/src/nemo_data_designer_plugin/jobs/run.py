@@ -24,9 +24,9 @@ BUFFER_SIZE = 500
 def run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NemoClient,
+    client: NemoClient,
 ) -> int:
-    result = run_step_config_result(step_config, ctx, sdk)
+    result = run_step_config_result(step_config, ctx, client)
     exit_code = result.get("exit_code")
     return exit_code if isinstance(exit_code, int) else 1
 
@@ -34,10 +34,10 @@ def run_step_config(
 def run_step_config_result(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NemoClient,
+    client: NemoClient,
 ) -> dict[str, object]:
     try:
-        return _run_step_config(step_config, ctx, sdk)
+        return _run_step_config(step_config, ctx, client)
     except Exception as exc:
         logger.exception("Data Designer job failed: %s", exc)
         return {
@@ -51,7 +51,7 @@ def run_step_config_result(
 def _run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NemoClient,
+    client: NemoClient,
 ) -> dict[str, object]:
     # In dispatched-container mode the root logger has no handler;
     # attach our JSON-formatted stderr handler so the container's
@@ -61,7 +61,7 @@ def _run_step_config(
     workspace = ctx.workspace
     workspace_cvar.set(workspace)
 
-    dd_ctx = create_execution_context(sdk, workspace)
+    dd_ctx = create_execution_context(client, workspace)
 
     config_builder = dd.DataDesignerConfigBuilder.from_config(step_config.job_config.config.to_dict())
 

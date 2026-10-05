@@ -323,6 +323,18 @@ class RetryPolicy:
     respect_retry_after_headers: bool = False
 
 
+# The retry contract the generated ``NeMoHelix`` SDK applied by default. Clients
+# that replace a ``NeMoHelix`` use it to keep the same resilience against
+# transient gateway errors.
+PLATFORM_DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    retryable_status_codes=(408, 409, 429),
+    retry_all_server_errors=True,
+    respect_retry_decision_headers=True,
+    respect_retry_after_headers=True,
+)
+
+
 @dataclass(frozen=True, slots=True)
 class PreparedRequest(Generic[ResponseT]):
     """A request ready to be sent — carries the endpoint metadata and payload.

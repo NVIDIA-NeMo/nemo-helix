@@ -25,39 +25,39 @@ class DataDesignerExecutionContext:
 
     def __init__(
         self,
-        sdk: SyncHelixClient,
+        client: SyncHelixClient,
         workspace: str,
         *,
         validated_roots: set[str] | None = None,
     ) -> None:
-        self._sdk = sdk
+        self._client = client
         self._workspace = workspace
         self._validated_filesystem_roots = set(validated_roots or ())
 
     def get_secret_resolver(self) -> SecretResolver:
-        return NHXSecretResolver(self._sdk, self._workspace)
+        return NHXSecretResolver(self._client, self._workspace)
 
     def get_seed_readers(self) -> list[SeedReader]:
         provider = FilesetFileSystemProvider(
-            self._sdk,
+            self._client,
             workspace=self._workspace,
             validated_roots=self._validated_filesystem_roots,
         )
         return [
             HuggingFaceSeedReader(),
-            FilesetFileSeedReader(self._sdk),
+            FilesetFileSeedReader(self._client),
             DirectorySeedReader(fs_provider=provider),
             FileContentsSeedReader(fs_provider=provider),
         ]
 
     def get_person_reader(self) -> PersonReader | None:
-        return FilesetsPersonReader(self._sdk)
+        return FilesetsPersonReader(self._client)
 
 
 def create_execution_context(
-    sdk: SyncHelixClient,
+    client: SyncHelixClient,
     workspace: str,
     *,
     validated_roots: set[str] | None = None,
 ) -> DataDesignerExecutionContext:
-    return DataDesignerExecutionContext(sdk, workspace, validated_roots=validated_roots)
+    return DataDesignerExecutionContext(client, workspace, validated_roots=validated_roots)

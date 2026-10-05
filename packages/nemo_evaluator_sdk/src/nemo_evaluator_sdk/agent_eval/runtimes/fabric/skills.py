@@ -189,7 +189,7 @@ def resolve_skill_mode(*, capability_plan: Mapping[str, object], adapter_id: str
     """
     if native_skills_route(capability_plan):
         return SKILL_MODE_NATIVE
-    if adapter_id.strip().lower() == _CODEX_ADAPTER_ID:
+    if is_codex_adapter(adapter_id):
         return SKILL_MODE_CODEX_SKILLS_DIR
     return None
 
@@ -236,6 +236,10 @@ def relocate_skills_into_workspace(config: Any, *, base_dir: Path | None, worksp
         config.remove_skill_path(entry)
     config.add_skill_path(WORKSPACE_SKILLS_SOURCE)
     return locations
+
+
+def is_codex_adapter(adapter_id: str) -> bool:
+    return adapter_id.strip().lower() == _CODEX_ADAPTER_ID
 
 
 def install_skill(

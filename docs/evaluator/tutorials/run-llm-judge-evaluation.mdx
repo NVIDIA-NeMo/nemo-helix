@@ -61,7 +61,7 @@ pip install pandas scipy matplotlib
 
 Before you begin, here is a quick overview of the resources you will use:
 
-- **Evaluator resource**: The plugin SDK resource mounted at `client.evaluator`. Use it to run metrics locally or submit durable platform jobs.
+- **Evaluator resource**: The plugin SDK resource built with `Evaluator.from_client(client)`. Use it to run metrics locally or submit durable platform jobs.
 - **Metric**: An inline Python object that defines how to score model outputs. In this tutorial, we create LLM judge metrics that prompt a model to rate responses.
 - **Fileset**: A dataset registered with NeMo Helix. The evaluator plugin SDK accepts fileset references directly, so this tutorial passes the registered HelpSteer2 split to evaluations as a `FilesetRef`.
 - **Workspace**: A workspace that isolates your resources. Secrets, filesets, and jobs belong to a workspace.
@@ -80,20 +80,25 @@ import uuid
 
 from nemo_evaluator.sdk import Evaluator
 from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 # Workspace for this tutorial.
 WORKSPACE = "llm-as-judge-tutorial"
 
 # Create an SDK instance to interact with the NeMo Helix.
-client = NeMoHelix(
+sdk = NeMoHelix(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace=WORKSPACE,
+)
+evaluator = Evaluator.from_client(client)
 
 # Create the workspace
 try:
-    client.workspaces.create(name=WORKSPACE)
+    sdk.workspaces.create(name=WORKSPACE)
     print(f"Workspace '{WORKSPACE}' created")
 except ConflictError:
     print(f"Workspace '{WORKSPACE}' already exists, continuing...")
@@ -124,7 +129,7 @@ if not nvidia_api_key:
     raise ValueError(f"{NVIDIA_BUILD_API_KEY_ENV} is not set")
 
 try:
-    nvidia_api_key_secret = client.secrets.create(
+    nvidia_api_key_secret = sdk.secrets.create(
         name="nvidia-api-key",
         workspace=WORKSPACE,
         value=nvidia_api_key,
@@ -132,7 +137,7 @@ try:
     print("Created secret: nvidia-api-key")
 except ConflictError:
     print("Secret 'nvidia-api-key' already exists, retrieving...")
-    nvidia_api_key_secret = client.secrets.retrieve(
+    nvidia_api_key_secret = sdk.secrets.retrieve(
         name="nvidia-api-key",
         workspace=WORKSPACE,
     )
@@ -203,7 +208,7 @@ DATASET_NAME = "helpsteer2-eval"
 DATASET_SPLIT_PATH = "validation.jsonl.gz"
 
 try:
-    fileset = client.files.filesets.create(
+    fileset = sdk.files.filesets.create(
         name=DATASET_NAME,
         description="NVIDIA HelpSteer2 dataset for quality evaluation",
         storage=HuggingfaceStorageConfigParam(
@@ -232,7 +237,7 @@ try:
     )
     print(f"Registered HelpSteer2 fileset: {fileset.workspace}/{fileset.name}")
 except ConflictError:
-    fileset = client.files.filesets.retrieve(name=DATASET_NAME)
+    fileset = sdk.files.filesets.retrieve(name=DATASET_NAME)
     print(f"{fileset.workspace}/{fileset.name} dataset already registered")
 ```
 
@@ -659,23 +664,23 @@ from nemo_helix import NotFoundError
 # objects and do not create platform jobs.
 for job_name in [job_v1.name, job_v2.name]:
     try:
-        client.jobs.delete(name=job_name, workspace=WORKSPACE)
+        sdk.jobs.delete(name=job_name, workspace=WORKSPACE)
     except Exception:
         pass
 
 # Delete fileset and secret.
 try:
-    client.files.filesets.delete(name=DATASET_NAME, workspace=WORKSPACE)
+    sdk.files.filesets.delete(name=DATASET_NAME, workspace=WORKSPACE)
 except NotFoundError:
     pass
 
 try:
-    client.secrets.delete(name=nvidia_api_key_secret.name, workspace=WORKSPACE)
+    sdk.secrets.delete(name=nvidia_api_key_secret.name, workspace=WORKSPACE)
 except NotFoundError:
     pass
 
 # Now delete the workspace.
-client.workspaces.delete(name=WORKSPACE)
+sdk.workspaces.delete(name=WORKSPACE)
 print("Cleanup complete!")
 ```
 
@@ -707,7 +712,7 @@ curl -s http://localhost:8080/health/ready
 If you're re-running the tutorial, delete the existing workspace first:
 
 ```python
-client.workspaces.delete(name=WORKSPACE)
+sdk.workspaces.delete(name=WORKSPACE)
 ```
 
 ### Local NVIDIA Build authentication fails
@@ -781,13 +786,13 @@ If scores show `None` or the job fails with parsing errors:
 For gated or private datasets, create a secret with your Hugging Face token:
 
 ```python
-client.secrets.create(name="hf-token", value="hf_your_token_here")
+sdk.secrets.create(name="hf-token", value="hf_your_token_here")
 ```
 
 Then reference it in the fileset:
 
 ```python
-client.files.filesets.create(
+sdk.files.filesets.create(
     name="my-dataset",
     storage=HuggingfaceStorageConfigParam(
         type="huggingface",

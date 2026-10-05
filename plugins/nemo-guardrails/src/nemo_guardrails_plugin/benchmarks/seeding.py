@@ -27,8 +27,7 @@ from nemo_guardrails_plugin.benchmarks.constants import (
     VM_NAME,
     WORKSPACE,
 )
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
@@ -77,7 +76,7 @@ class SeededResources:
 
 
 def seed_benchmark(
-    sdk: NeMoHelix,
+    client: NemoClient,
     *,
     nemoguardrails_repo_root: Path,
     generated_dir: Path,
@@ -89,10 +88,10 @@ def seed_benchmark(
     rerun against a reused NHX instance.
     """
     generated_dir.mkdir(parents=True, exist_ok=True)
-    workspaces_client = client_from_platform(sdk, WorkspacesClient)
-    models_client = client_from_platform(sdk, ModelsClient)
-    guardrail_client = client_from_platform(sdk, GuardrailClient)
-    virtual_models_client = client_from_platform(sdk, VirtualModelsClient)
+    workspaces_client = WorkspacesClient.from_client(client)
+    models_client = ModelsClient.from_client(client)
+    guardrail_client = GuardrailClient.from_client(client)
+    virtual_models_client = VirtualModelsClient.from_client(client)
 
     log.info("Creating workspace %s", WORKSPACE)
     workspaces_client.create_workspace(

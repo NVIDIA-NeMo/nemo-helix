@@ -134,7 +134,7 @@ nemo jobs results download agent-eval-results \
 ```
 
 The task-driven job handle does not provide the dataset-evaluation `get_result()` or
-`download_artifacts()` methods. Query aggregates through `client.evaluator.agent_eval_results` and
+`download_artifacts()` methods. Query aggregates through `evaluator.agent_eval_results` (`evaluator = Evaluator.from_client(client)`) and
 download individual trials from its bundle reference.
 
 ## Legacy Evaluator API troubleshooting
