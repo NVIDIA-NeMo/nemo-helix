@@ -58,17 +58,25 @@ Optional inputs include manual additions, agreed exclusions, and a GitHub issue 
 ## Required capabilities
 
 - Read access to repository history.
-- Local Git history is sufficient to generate a commit-backed draft.
-- Network access and authenticated `gh` access enrich the artifact with authoritative PR metadata, owners, labels, and linked issues.
+- Local Git history with the three fetched refs is sufficient to generate the release boundary, commit evidence, documentation state, and main-forwarding checks.
+- Network access and authenticated `gh` access only enrich the artifact with PR metadata that is not stored in Git, such as owners, labels, review context, and linked issues.
 - GitHub write access only when the user explicitly authorizes issue creation or update.
 
-If `gh auth status` or API access fails, continue from local Git unless the user explicitly required complete GitHub metadata. Mark GitHub enrichment unavailable, use commit SHAs instead of guessed PR metadata or owners, and identify the affected fields as incomplete. Do not call a locally generated artifact complete when GitHub-only evidence is missing.
+If `gh auth status` or API access fails, continue from local Git unless the user explicitly required GitHub enrichment. Mark PR metadata unavailable, use commit SHAs instead of guessed PR metadata or owners, and identify only the affected enrichment fields as incomplete.
 
 ## Workflow
 
 ### 1. Validate boundaries and topology
 
-Run:
+Run the deterministic boundary checks before summarizing anything. Prefer the checked-in helper because it records the raw evidence files for review:
+
+```bash
+bash .agents/skills/release-test-scope/references/collect-git-evidence.sh \
+  "${previous_ref}" "${release_ref}" "${main_ref}" \
+  "release-artifacts/<version>/evidence"
+```
+
+If the helper is unavailable, run the equivalent commands directly:
 
 ```bash
 git rev-parse --verify "${previous_ref}^{commit}"
@@ -81,6 +89,8 @@ git rev-parse "${release_ref}^{commit}"
 git rev-parse "${main_ref}^{commit}"
 git merge-base "${release_ref}" "${main_ref}"
 ```
+
+Keep this command output as mechanical evidence. Do not ask the LLM to infer ref topology from prose or PR titles.
 
 Stop if a ref does not resolve. If the previous release is not an ancestor of either snapshot, report the topology and ask for corrected boundaries. Do not substitute a triple-dot range or merge base silently.
 
@@ -185,7 +195,7 @@ Before finalizing draft release notes in an interactive run, present all otherwi
 
 ### 6. Generate the shared local artifact
 
-Read [the shared release test-scope template](references/ticket-template.md).
+Read [the shared release test-scope template](references/ticket-template.md). Use [the deterministic Git evidence collector](references/collect-git-evidence.sh) when available instead of manually retyping the Git collection commands; the generated files are analysis inputs, not the user-facing artifact.
 
 Write:
 
@@ -193,11 +203,11 @@ Write:
 release-artifacts/<version>/qa-test-scope.md
 ```
 
-The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, Studio path, CLI command, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
+The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, applicable Studio or CLI entry points, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
 
 Draft release notes must use one structured block per included user-visible capability: `Description`, `Documentation`, and `Use it`. Under `Use it`, include verified CLI commands and/or Studio navigation as applicable; state explicitly when neither surface applies. Keep internal-only maintenance compact and do not invent an interface to fill the template.
 
-In the metadata table, set `Review deadline` to the report generation date. Do not add top-level QA owner or approver fields, an approval section, or generation notes. Track stakeholder decisions outside the generated artifact unless they are preserved human notes, manual additions, or exclusions.
+In the metadata table, set `Review deadline` to the report generation date. Keep the artifact as a draft review input: if approvals or final scope decisions are needed, point reviewers to the external release tracker instead of adding approver fields, an approval section, or generation notes.
 
 If the artifact already exists, read it first and preserve human decisions, manual additions, exclusions, notes, and execution status.
 
@@ -244,7 +254,7 @@ Report:
 - Counts by forward-merge state and disposition.
 - Path to the local shared artifact.
 - Missing evidence and review decisions.
-- State that the output is a draft for stakeholder review.
+- State that the output is a draft for stakeholder review and link or name the external place where approvals should be tracked when known.
 - GitHub issue URL only when creation or update was authorized.
 
-Do not represent the generated artifact as an approval record; approval and scope finalization happen outside it.
+Represent the generated artifact as supporting evidence for review; approval and scope finalization happen outside it.

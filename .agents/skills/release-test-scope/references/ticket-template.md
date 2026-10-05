@@ -18,22 +18,15 @@
 ## Release collection summary
 
 - Candidate range: `<previous_ref>..<release_ref>`.
-- Release-range commits: `<count>`.
-- Associated PRs: `<count or unavailable>`; commit-only evidence: `<count>`.
-- Documentation-touched PRs: `<count>`; substantive candidates after release-note exclusion: `<count>`.
-- Consolidated capabilities: `<count>`.
-- Forward-merge states: `<counts by state>`.
-- Release-note coverage: `<Covered / Partial / Missing counts>`.
-- Dispositions: `<counts by disposition>`.
+- Scope basis: `<how the release range, published docs, and release-note coverage constrained inclusion>`.
+- Consolidated scope: `<short qualitative summary of included user journeys and highest-risk areas>`.
+- Release-note coverage: `<where coverage is complete, partial, or missing without restating mechanical counts>`.
+- Forwarding check: `<all release-derived work is present on main, or summarize only exceptions>`.
 - Status: `Draft`; human review is required before the release scope is finalized.
 
-## Release-to-main forward-merge trace
+## Release-to-main forwarding exceptions
 
-| Capability | Forward-merge state | Release evidence | Main/forward-merge evidence | Follow-up |
-|---|---|---|---|---|
-| `<item>` | `<state>` | `<PRs/docs/commits>` | `<PRs/commits/docs>` | `<follow-up or None>` |
-
-### Missing or different forward-merges
+Only include rows when release-derived work is missing, materially different, or needs follow-up on main.
 
 | Capability | Release evidence | Main evidence | Owner | Follow-up |
 |---|---|---|---|---|
@@ -54,7 +47,7 @@
 | Release sources | `<commit SHAs and PR links when available>` |
 | Release documentation | `<paths and immutable links>` |
 | Release-note coverage | `Covered / Partial / Missing — <note path and heading or reason>` |
-| Forward-merge evidence | `<main evidence>` |
+| Forward-merge follow-up | `<only when missing, different, or needing human action; otherwise omit this row>` |
 
 **Description**
 
@@ -66,12 +59,14 @@
 
 #### Studio validation
 
+Include only when the capability has a Studio surface or a Studio path needs clarification.
+
 1. `<documented navigation or action>`
 2. `<documented expected result>`
 
-Write `Not applicable` when no Studio surface exists. Write `Needs clarification` when evidence is incomplete.
-
 #### CLI validation
+
+Include only when the capability has a CLI surface or a CLI command needs clarification.
 
 ```bash
 <exact documented commands or clearly labeled placeholders>
@@ -81,13 +76,11 @@ Expected:
 
 - `<documented observable outcome>`
 
-Write `Not applicable` when no CLI surface exists. Write `Needs clarification` when evidence is incomplete.
-
 #### Additional validation
 
 - Failure or validation path: `<coverage or Needs clarification>`
-- Upgrade or compatibility: `<coverage or Not applicable>`
-- Permissions or security: `<coverage or Not applicable>`
+- Upgrade or compatibility: `<coverage when applicable; omit otherwise>`
+- Permissions or security: `<coverage when applicable; omit otherwise>`
 
 #### Draft release-note text
 
