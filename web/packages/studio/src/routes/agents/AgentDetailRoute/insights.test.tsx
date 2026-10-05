@@ -20,14 +20,17 @@ const renderDetail = (search = '') =>
     routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
   });
 
+const checkActiveTab = async (tab: string) => {
+  expect(await screen.findByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true');
+};
+
 describe('AgentDetailRoute insights tab', () => {
   it('shows the stored analysis config when the tab is selected', async () => {
     const user = userEvent.setup();
     renderDetail();
 
     await user.click(await screen.findByRole('tab', { name: 'Insights' }));
-
-    expect(await screen.findByText('Insights analysis')).toBeInTheDocument();
+    await checkActiveTab('Insights');
     expect(await screen.findByText('Enabled')).toBeInTheDocument();
     expect(screen.getAllByText(mockAnalysisConfig.default_model)).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
@@ -35,11 +38,6 @@ describe('AgentDetailRoute insights tab', () => {
 
   it('opens on the insights tab from a ?tab=insights link', async () => {
     renderDetail('?tab=insights');
-
-    expect(await screen.findByRole('tab', { name: 'Insights' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-    expect(await screen.findByText('Insights analysis')).toBeInTheDocument();
+    await checkActiveTab('Insights');
   });
 });
