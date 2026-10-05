@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import Counter
 from collections.abc import Iterable
 from typing import Literal
 
@@ -69,12 +70,16 @@ def agent_eval_outcome(result: AgentEvalResult) -> RunOutcome:
     errored = sum(
         1 for trial in result.trials if trial.status is AgentEvalTrialStatus.FAILED or trial.error is not None
     )
-    scored_trial_ids = {
+    # Trial ids may repeat (Gym derives them from a rollout index), and a score names only the id,
+    # so a usable score cannot be pinned to one duplicate. Cap scored trials per id at the number of
+    # usable scores for that id: exact for one metric per trial, never above the trial count otherwise.
+    usable_scores_by_id: Counter[str] = Counter(
         score.trial_id
         for score in result.scores
         if score.status is not AgentEvalScoreStatus.FAILED and _has_usable_value(score.outputs)
-    }
-    scored = sum(1 for trial in result.trials if trial.id in scored_trial_ids)
+    )
+    trials_by_id = Counter(trial.id for trial in result.trials)
+    scored = sum(min(count, usable_scores_by_id[trial_id]) for trial_id, count in trials_by_id.items())
     return RunOutcome(unit="trials", total=len(result.trials), errored=errored, scored=scored)
 
 

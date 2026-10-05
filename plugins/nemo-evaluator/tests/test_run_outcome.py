@@ -147,6 +147,18 @@ class TestAgentEvalOutcome:
         assert outcome == RunOutcome(unit="trials", total=2, errored=1, scored=1)
         assert not outcome.failed
 
+    def test_duplicate_trial_ids_do_not_inflate_the_scored_count(self) -> None:
+        """Gym can emit two trials with one id; a single usable score must not mark both as scored."""
+        trials = [
+            _trial("t1", status=AgentEvalTrialStatus.COMPLETED),
+            _trial("t1", status=AgentEvalTrialStatus.FAILED, error=TrialError(type="ConnectError")),
+        ]
+        scores = [_score("t1", status=AgentEvalScoreStatus.COMPLETED), _score("t1", status=AgentEvalScoreStatus.FAILED)]
+
+        outcome = agent_eval_outcome(_agent_result(trials, scores))
+
+        assert outcome == RunOutcome(unit="trials", total=2, errored=1, scored=1)
+
     def test_an_errored_partial_trial_counts_as_errored_and_scored(self) -> None:
         """Harbor marks an errored trial PARTIAL so it still scores; it belongs in both counts."""
         trials = [_trial("t1", status=AgentEvalTrialStatus.PARTIAL, error=TrialError(type="TimeoutError"))]
