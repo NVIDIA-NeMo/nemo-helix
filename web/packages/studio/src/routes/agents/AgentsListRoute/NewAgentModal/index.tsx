@@ -485,12 +485,17 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     try {
       if (onGitTab) {
         if (!repoSource || !repoReady) return;
-        // Each backend reads its own secret field, so an SSH key is never sent as a GitHub token.
-        const { storage, sourceLabel } =
+        // Each backend reads its own secret; an SSH fileset is rooted at the repository for includes.
+        const { storage, sourceLabel, specDir } =
           repoSource.kind === 'ssh'
             ? {
-                storage: gitStorageConfig(repoSource.source, formData.sshKeySecret, knownHosts),
+                storage: gitStorageConfig(
+                  { ...repoSource.source, path: '' },
+                  formData.sshKeySecret,
+                  knownHosts
+                ),
                 sourceLabel: formatGitSource(repoSource.source),
+                specDir: repoSource.source.path || undefined,
               }
             : {
                 storage: githubStorageConfig(
@@ -498,12 +503,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
                   formData.secretKey?.trim() || undefined
                 ),
                 sourceLabel: formatGitHubSource(repoSource.source),
+                specDir: undefined,
               };
         await createAgentFromRepo({
           workspace,
           name,
           storage,
           sourceLabel,
+          specDir,
           replaceOrphanedFileset: replaceOrphan,
         });
         return;
@@ -513,10 +520,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
       // An orphaned fileset is recoverable, so the next submit replaces it.
       setReplaceArmedFor(error instanceof AgentSpecFilesetOrphanError ? name : null);
       if (error instanceof AgentConfigNotFoundError && repoSource) {
-        const root = repoSource.source.path;
         setDiscoveredAgents({
           repository: formatRepositorySource(withRepositoryPath(repoSource, '')),
-          paths: error.directories.map((directory) => (root ? `${root}/${directory}` : directory)),
+          paths: error.directories,
         });
       }
     }

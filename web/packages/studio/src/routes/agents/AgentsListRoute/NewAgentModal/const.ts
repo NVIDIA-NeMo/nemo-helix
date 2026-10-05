@@ -8,6 +8,9 @@ export const AGENT_CONFIG_FILENAME = 'agent.yaml';
 
 export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
+// Fileset custom field naming the directory that holds agent.yaml; matches AGENT_SPEC_DIR_FIELD in the agents plugin.
+export const AGENT_SPEC_DIR_FIELD = 'agent_spec_dir';
+
 // Container staging skips this file, so its bytes never reach a deployment.
 export const AGENT_SPEC_FILENAME = 'AGENT-SPEC.md';
 

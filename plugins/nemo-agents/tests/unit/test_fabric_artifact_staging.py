@@ -60,6 +60,7 @@ def patched_download_fileset(monkeypatch: pytest.MonkeyPatch) -> None:
         workspace: str,
         fileset_name: str,
         local_path: Path,
+        agent_config: dict[str, Any],
     ) -> None:
         try:
             await files_client.download(local_path=str(local_path), fileset=fileset_name, workspace=workspace)
@@ -81,28 +82,63 @@ def _fileset_file(path: str, content: bytes) -> dict[str, Any]:
     }
 
 
-@pytest.mark.asyncio
-async def test_download_fileset_downloads_listed_files_with_typed_client(tmp_path: Path) -> None:
-    content = {
-        "agent.yaml": b"name: fabric-agent\n",
-        "skills/review/SKILL.md": b"# Review\n",
-    }
+def _files_service(content: dict[str, bytes], custom_fields: dict[str, Any] | None = None):
+    """A files service for one fileset that filters listings by ``path`` prefix as the real one does."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if str(request.url).endswith("/files"):
-            return httpx.Response(200, json={"data": [_fileset_file(path, data) for path, data in content.items()]})
-        encoded_path = str(request.url).split("/-/", 1)[1]
-        path = encoded_path.replace("%2F", "/")
-        return httpx.Response(200, content=content[path])
+        url = request.url.path
+        if url.endswith("/files"):
+            prefix = request.url.params.get("path", "")
+            listed = [
+                _fileset_file(path, data)
+                for path, data in content.items()
+                if not prefix or path == prefix or path.startswith(f"{prefix}/")
+            ]
+            return httpx.Response(200, json={"data": listed})
+        if "/-/" in url:
+            return httpx.Response(200, content=content[url.split("/-/", 1)[1]])
+        return httpx.Response(
+            200,
+            json={
+                "id": "fileset-1",
+                "name": "fabric-agent-ethos",
+                "workspace": "default",
+                "description": "",
+                "purpose": "generic",
+                "storage": {"type": "local", "path": "/tmp"},
+                "metadata": {},
+                "custom_fields": custom_fields or {},
+                "project": "",
+                "created_at": "",
+                "updated_at": "",
+            },
+        )
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+    return handler
+
+
+async def _download_with(
+    tmp_path: Path,
+    content: dict[str, bytes],
+    *,
+    custom_fields: dict[str, Any] | None = None,
+    includes: list[dict[str, str]] | None = None,
+) -> None:
+    transport = httpx.MockTransport(_files_service(content, custom_fields))
+    async with httpx.AsyncClient(transport=transport) as http_client:
         files_client = AsyncFilesClient(base_url="http://test", workspace="default", http_client=http_client)
         await _download_fileset(
             files_client,
             workspace="default",
             fileset_name="fabric-agent-ethos",
             local_path=tmp_path,
+            agent_config={"includes": includes or []},
         )
+
+
+@pytest.mark.asyncio
+async def test_download_fileset_downloads_listed_files_with_typed_client(tmp_path: Path) -> None:
+    await _download_with(tmp_path, {"agent.yaml": b"name: fabric-agent\n", "skills/review/SKILL.md": b"# Review\n"})
 
     assert (tmp_path / "agent.yaml").read_bytes() == b"name: fabric-agent\n"
     assert (tmp_path / "skills" / "review" / "SKILL.md").read_bytes() == b"# Review\n"
@@ -780,3 +816,117 @@ async def test_stage_fabric_ethos_dir_allows_symlinks_inside_runtime_directories
     )
 
     assert (base_dir / "artifacts" / "link").is_symlink()
+
+
+REPO = {
+    "agents/planner/agent.yaml": b"name: planner\n",
+    "agents/planner/prompts/system.md": b"plan\n",
+    "agents/other/agent.yaml": b"name: other\n",
+    "landscape/mcp_servers/check_server.py": b"print('check')\n",
+    "landscape/mcp_servers/_loaders.py": b"LOADERS = 1\n",
+    "landscape/README.md": b"landscape\n",
+}
+SPEC_DIR = {"agent_spec_dir": "agents/planner"}
+MCP_INCLUDE = {"source": "../../landscape/mcp_servers", "target": "mcp_servers"}
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.mark.asyncio
+async def test_download_fileset_takes_only_the_agent_directory_of_a_repository_rooted_fileset(tmp_path: Path) -> None:
+    await _download_with(tmp_path, REPO, custom_fields=SPEC_DIR)
+
+    assert _tree(tmp_path) == {"agent.yaml": b"name: planner\n", "prompts/system.md": b"plan\n"}
+
+
+@pytest.mark.asyncio
+async def test_download_fileset_copies_included_directories_and_files_to_their_targets(tmp_path: Path) -> None:
+    await _download_with(
+        tmp_path,
+        REPO,
+        custom_fields=SPEC_DIR,
+        includes=[MCP_INCLUDE, {"source": "../../landscape/README.md", "target": "docs/landscape.md"}],
+    )
+
+    assert _tree(tmp_path) == {
+        "agent.yaml": b"name: planner\n",
+        "prompts/system.md": b"plan\n",
+        "mcp_servers/check_server.py": b"print('check')\n",
+        "mcp_servers/_loaders.py": b"LOADERS = 1\n",
+        "docs/landscape.md": b"landscape\n",
+    }
+
+
+@pytest.mark.parametrize(
+    ("custom_fields", "source", "message"),
+    [
+        (SPEC_DIR, "../../../outside", "climbs out of fileset"),
+        ({}, "../landscape", "register the agent from its repository root"),
+        (SPEC_DIR, "../../landscape/missing", "matches nothing"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_download_fileset_refuses_includes_it_cannot_satisfy(
+    tmp_path: Path, custom_fields: dict[str, Any], source: str, message: str
+) -> None:
+    with pytest.raises(FabricArtifactStagingError, match=message):
+        await _download_with(
+            tmp_path, REPO, custom_fields=custom_fields, includes=[{"source": source, "target": "extra"}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_download_fileset_refuses_an_include_that_overwrites_an_agent_file(tmp_path: Path) -> None:
+    with pytest.raises(FabricArtifactStagingError, match="would overwrite 'prompts/system.md'"):
+        await _download_with(
+            tmp_path,
+            REPO,
+            custom_fields=SPEC_DIR,
+            includes=[{"source": "../../landscape/README.md", "target": "prompts/system.md"}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_download_fileset_rejects_a_spec_dir_that_escapes_the_fileset(tmp_path: Path) -> None:
+    with pytest.raises(FabricArtifactStagingError, match="Invalid path"):
+        await _download_with(tmp_path, REPO, custom_fields={"agent_spec_dir": "../elsewhere"})
+
+
+@pytest.mark.asyncio
+async def test_stage_fabric_ethos_dir_stages_includes_for_subprocess_deployments(tmp_path: Path) -> None:
+    config = {**_fabric_config(), "includes": [MCP_INCLUDE]}
+    transport = httpx.MockTransport(_files_service(REPO, SPEC_DIR))
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        await stage_fabric_ethos_dir(
+            workspace="default",
+            agent_name="fabric-agent",
+            agent_config=config,
+            base_dir=tmp_path,
+            files_client=AsyncFilesClient(base_url="http://test", workspace="default", http_client=http_client),
+        )
+
+    assert (tmp_path / "mcp_servers" / "check_server.py").read_bytes() == b"print('check')\n"
+    assert not (tmp_path / "landscape").exists()
+
+
+@pytest.mark.asyncio
+async def test_stage_fabric_ethos_config_files_stages_includes_for_container_deployments() -> None:
+    config = {**_fabric_config(), "includes": [MCP_INCLUDE]}
+    transport = httpx.MockTransport(_files_service(REPO, SPEC_DIR))
+    async with httpx.AsyncClient(transport=transport) as http_client:
+        result = await stage_fabric_ethos_config_files(
+            workspace="default",
+            agent_name="fabric-agent",
+            rewritten_agent_config=config,
+            agent_yaml_path="/workspace/agent.yaml",
+            files_client=AsyncFilesClient(base_url="http://test", workspace="default", http_client=http_client),
+        )
+
+    assert {config_file.path for config_file in result} == {
+        "/workspace/agent.yaml",
+        "/workspace/prompts/system.md",
+        "/workspace/mcp_servers/check_server.py",
+        "/workspace/mcp_servers/_loaders.py",
+    }

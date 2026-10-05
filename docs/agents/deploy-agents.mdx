@@ -567,6 +567,31 @@ response = agents.invoke(
 </Tabs>
 ---
 
+## Include Files from Elsewhere in the Repository
+
+An agent registered from a Git repository over SSH can copy files that live outside its own directory into its root when it deploys. Use this to run stdio MCP servers or reuse prompts that a repository keeps beside its agents rather than inside them.
+
+List each file or directory under `includes` in `agent.yaml`. `source` is relative to the directory that holds `agent.yaml` and can climb with `..`, but not out of the repository. `target` is where it lands inside the agent root.
+
+```yaml
+includes:
+  - source: ../../landscape/mcp_servers
+    target: mcp_servers
+
+mcp:
+  servers:
+    check:
+      transport: stdio
+      url: python
+      args: [mcp_servers/check_server.py]
+```
+
+Every deployment mode copies includes the same way, including the image build for container modes:
+
+- A deployment fails if a source matches nothing, climbs out of the repository, or would overwrite one of the agent's own files.
+- Container modes deliver included files with the agent's own files, so they must be text and fit within the same size limit.
+- Only an agent registered from a repository over SSH can include files outside its own directory. An uploaded agent, or one registered from GitHub, can include only files inside the directory it was registered from.
+
 ## Interact with a Deployed Agent
 
 Start an interactive, multi-turn session with a running deployment:

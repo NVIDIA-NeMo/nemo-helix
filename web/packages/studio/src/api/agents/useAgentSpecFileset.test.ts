@@ -82,6 +82,19 @@ describe('agentSpecSource', () => {
     });
   });
 
+  it('names the agent directory of a repository-rooted SSH fileset', () => {
+    const source = agentSpecSource({
+      ...fileset({
+        type: 'git',
+        url: 'git@gitlab.example.com:acme/agents.git',
+        revision: 'abc123',
+      }),
+      custom_fields: { agent_spec_dir: 'agents/calc' },
+    });
+
+    expect(source?.repository).toBe('git@gitlab.example.com:acme/agents.git#agents/calc');
+  });
+
   it('ignores a fileset that is not repository-backed', () => {
     expect(agentSpecSource(fileset({ type: 'local', path: '/data/calc' }))).toBeUndefined();
     expect(agentSpecSource(undefined)).toBeUndefined();

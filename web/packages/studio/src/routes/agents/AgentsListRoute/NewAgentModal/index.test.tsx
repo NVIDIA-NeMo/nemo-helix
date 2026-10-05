@@ -82,7 +82,7 @@ interface Scenario {
 const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}) => {
   const uploaded: string[] = [];
   const created: { name?: string }[] = [];
-  const filesets: { storage?: unknown }[] = [];
+  const filesets: { storage?: unknown; custom_fields?: unknown }[] = [];
   const deleted: string[] = [];
   const deployments: { agent?: string; deployment_mode?: string }[] = [];
 
@@ -102,7 +102,7 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
       return HttpResponse.json({ name: 'deleted' });
     }),
     http.post(FILESETS_URL, async ({ request }) => {
-      const body = (await request.json()) as { storage?: unknown };
+      const body = (await request.json()) as { storage?: unknown; custom_fields?: unknown };
       filesets.push(body);
       return HttpResponse.json(body);
     }),
@@ -633,10 +633,10 @@ describe('NewAgentModal Git import', () => {
       type: 'git',
       url: 'git@gitlab.example.com:acme/agents.git',
       revision: 'v2',
-      path: 'calc',
       ssh_key_secret: 'huggingface-token',
       known_hosts: HOST_KEY_LINE,
     });
+    expect(filesets[0]?.custom_fields).toEqual({ agent_spec_dir: 'calc' });
   });
 
   it('keeps Register disabled while the host key is being looked up', async () => {
@@ -914,7 +914,9 @@ describe('NewAgentModal Git import', () => {
     await submit(dialog, user);
 
     await waitFor(() => expect(created).toHaveLength(1));
-    expect(filesets[0]?.storage).toMatchObject({ revision: 'main', path: 'agents/support' });
+    expect(filesets[0]?.storage).toMatchObject({ revision: 'main' });
+    expect(filesets[0]?.storage).not.toHaveProperty('path');
+    expect(filesets[0]?.custom_fields).toEqual({ agent_spec_dir: 'agents/support' });
   });
 
   it('asks for neither an SSH key nor host keys for a GitHub repository', async () => {
