@@ -80,6 +80,13 @@ typecheck = ["transformers>=5.5.0,<5.9.0"]
 scaled-evals = [
   "nemo-scaled-evals-plugin",
 ]
+# The strands-harness-optimizer plugin is opt-in for the same reason: a path dependency
+# outside `enabled-plugins` and `nemo-helix[all]`, so it is installed on demand with
+# `uv sync --frozen --all-packages --group strands-harness-optimizer` and pulls in Strands only
+# for those who ask. CI runs its tests in a dedicated job that asks for this group.
+strands-harness-optimizer = [
+  "strands-harness-optimizer-plugin",
+]
 dev = [
   "pre-commit>=3.8.0",
   "pydantic-settings>=2.6.1",
@@ -429,6 +436,7 @@ nemo-insights-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
+strands-harness-optimizer-plugin = { path = "plugins/strands-harness-optimizer", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
@@ -629,6 +637,9 @@ extra-paths = [
   # temporary scaled-evals plugin is opt-in; add its src so ty can resolve
   # nemo_scaled_evals_plugin and scaled_evals imports when checking plugin tests.
   "plugins/_temporary-scaled-evals/src",
+  # strands-harness-optimizer plugin is opt-in too; its src lets ty resolve the package
+  # from the plugin's tests.
+  "plugins/strands-harness-optimizer/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.

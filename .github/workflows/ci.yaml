@@ -51,6 +51,7 @@ jobs:
       evaluator-sdk-closure: ${{ steps.changes.outputs.evaluator-sdk-closure }}
       evaluator-integration: ${{ steps.changes.outputs.evaluator-integration }}
       scaled-evals: ${{ steps.changes.outputs.scaled-evals }}
+      strands-harness-optimizer: ${{ steps.changes.outputs.strands-harness-optimizer }}
       e2e: ${{ steps.changes.outputs.e2e }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
@@ -1143,6 +1144,34 @@ jobs:
           cache-dependency-glob: uv.lock
       - name: Run scaled-evals plugin tests
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+
+  # Same shape for the opt-in strands-harness-optimizer plugin: its tests importorskip Strands,
+  # which only this group installs, so the shared run skips them.
+  python-unit-test-strands-harness-optimizer:
+    name: Python unit tests (strands-harness-optimizer plugin)
+    needs: [changes]
+    if: >
+      !cancelled() &&
+      (needs.changes.outputs.deps == 'true' || needs.changes.outputs.strands-harness-optimizer == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Run strands-harness-optimizer plugin tests
+        run: uv run --frozen --group strands-harness-optimizer pytest plugins/strands-harness-optimizer/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
@@ -2406,6 +2435,7 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
+      - python-unit-test-strands-harness-optimizer
       - fabric-wheel-smoke
       - evaluator-sdk-closure-smoke
       # Enable if you want this required

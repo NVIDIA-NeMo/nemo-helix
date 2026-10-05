@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "strands-harness-optimizer-plugin"
+version = "0.1.0"
+description = "The `strands-harness-optimizer` strategy for `nemo agents optimize`: tunes an agent's system prompt with Strands Harness Optimizer against a labelled dataset."
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "nemo-agent-optimization-plugin",
+  "nemo-agents-plugin",
+  "nemo-helix",
+  "nemo-helix-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.2",
+  "strands-harness-optimizer>=0.0.1",
+  "strands-agents[openai]>=1.0.0",
+]
+
+# Discovered by `nemo agents optimize` through the `nemo_agent_optimization_strategy` class
+# variable.  The key sits under the router's `agent-optimization` namespace, so a deployment
+# that allows the router also gets this strategy; nothing mounts the key as its own route.
+[project.entry-points."nemo.jobs"]
+"agent-optimization.strands-harness-optimizer" = "strands_harness_optimizer_plugin.jobs.optimize:StrandsHarnessOptimizeJob"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/strands_harness_optimizer_plugin"]
+
+# Not a member of the root uv workspace (see README, "Install"), so sibling packages are
+# resolved by path the way plugins/_temporary-scaled-evals does it.
+[tool.uv.sources]
+nemo-agent-optimization-plugin = { path = "../nemo-agent-optimization", editable = true }
+nemo-agents-plugin = { path = "../nemo-agents", editable = true }
+nemo-helix = { path = "../../packages/nemo_helix", editable = true }
+nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
