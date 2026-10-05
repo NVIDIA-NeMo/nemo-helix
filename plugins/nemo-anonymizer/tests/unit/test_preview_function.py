@@ -96,7 +96,7 @@ async def test_preview_function_resets_request_log_callback(
 
     igw_lookup.assert_awaited_once()
     assert igw_lookup.await_args is not None
-    assert igw_lookup.await_args.kwargs["sdk"] is async_sdk
+    assert igw_lookup.await_args.kwargs["client"] is async_sdk
     assert [frame.model_dump()["kind"] for frame in frames] == ["log", "done"]
     assert request_callback_cvar.get() is None
 

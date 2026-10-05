@@ -20,15 +20,15 @@ Submit a metric evaluation with the Evaluator plugin SDK. The `submit` method re
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_evaluator_sdk import RunConfig
 from nemo_evaluator_sdk import ExactMatchMetric
 
-sdk = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = sdk.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 
 metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}")
 

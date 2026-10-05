@@ -43,15 +43,17 @@ definition freely without accumulating versions.
 ```python
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_evaluator.sdk import Evaluator
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+evaluator = Evaluator.from_client(client)
 
-tasks = client.evaluator.tasks        # EvaluatorTasksResource
-tasksets = client.evaluator.tasksets  # EvaluatorTasksetsResource
+tasks = evaluator.tasks        # EvaluatorTasksResource
+tasksets = evaluator.tasksets  # EvaluatorTasksetsResource
 ```
 
 ## Manage Tasks
@@ -64,7 +66,7 @@ metric classes and options.
 from nemo_evaluator_sdk import ExactMatchMetric
 
 # Store a metric the task will reference.
-client.evaluator.metrics.create(
+evaluator.metrics.create(
     "answer-exact-match",
     metric=ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}"),
 )
@@ -429,21 +431,23 @@ Delete the taskset before its member tasks, then remove the metric used by the t
 tasksets.delete("geography-suite")
 tasks.delete("capital-of-france")
 tasks.delete("capital-of-japan")
-client.evaluator.metrics.delete("answer-exact-match")
+evaluator.metrics.delete("answer-exact-match")
 ```
 
 ## Async usage
 
-`AsyncNeMoHelix` exposes the same surface; await each call.
+`AsyncEvaluator` exposes the same surface; await each call.
 
 ```python
 import asyncio
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_evaluator.sdk import AsyncEvaluator
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def main() -> None:
-    client = AsyncNeMoHelix(base_url="http://localhost:8080", workspace="default")
-    page = await client.evaluator.tasks.list()
+    async with AsyncNemoClient(base_url="http://localhost:8080", workspace="default") as async_client:
+        evaluator = AsyncEvaluator.from_client(async_client)
+        page = await evaluator.tasks.list()
     for item in page.data:
         print(item.name)
 

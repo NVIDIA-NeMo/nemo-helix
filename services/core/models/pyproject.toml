@@ -53,7 +53,6 @@ dev = [
     "pytest-xdist>=3.8.0",
     "datamodel-code-generator>=0.71.0",
     "openai>=1.0.0",  # For e2e testing of sdk.models helper methods
-    "models",  # For e2e testing of sdk.models helper methods
 ]
 
 # Pytest configuration inherited from root pytest.ini
@@ -62,4 +61,3 @@ dev = [
 [tool.uv.sources]
 nhx-common = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-models = { workspace = true }

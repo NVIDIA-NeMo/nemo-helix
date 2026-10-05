@@ -16,7 +16,6 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from models import parse_workspace_name_ref
 from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
 from nemo_evaluator.shared.metric_bundles.bundles import (
@@ -34,6 +33,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
@@ -152,7 +152,7 @@ async def resolve_metrics_to_inline(
     *,
     workspace: str,
     entity_client: EntityClient | None,
-    async_sdk: AsyncHelixClient,
+    async_client: AsyncHelixClient | None,
 ) -> list[MetricInline]:
     """Resolve a wire metric list (inline + stored refs) into canonical inline metrics.
 
@@ -160,10 +160,16 @@ async def resolve_metrics_to_inline(
     model references are resolved through the platform.
 
     Stored-ref loading awaits real file I/O, so it uses the typed Files client
-    derived from the public SDK. Model-ref resolution uses the typed Models client.
+    derived from the platform client. Model-ref resolution uses the typed Models client.
+    Both need ``async_client``; it is only optional so callers can pass through the
+    job context's handle, and it must be set when any reference needs resolving.
     """
     has_metric_ref = any(isinstance(metric, MetricRef) for metric in metrics)
-    files_client = client_from_platform(async_sdk, AsyncFilesClient) if has_metric_ref else None
+    files_client = None
+    if has_metric_ref:
+        if async_client is None:
+            raise ValueError("resolving stored metric references requires a platform client")
+        files_client = client_from_platform(async_client, AsyncFilesClient)
     resolved_bundles = await resolve_metric_specs(
         metrics,
         workspace=workspace,
@@ -174,7 +180,9 @@ async def resolve_metrics_to_inline(
     final_bundles = resolved_bundles
     unresolved = unresolved_model_refs(runtime_metrics)
     if unresolved:
-        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        if async_client is None:
+            raise ValueError("resolving metric model references requires a platform client")
+        models_client = client_from_platform(async_client, AsyncModelsClient)
         resolver: ModelResolver = HelixMetricModelResolver(models_client)
         await asyncio.gather(
             *(metric.resolve_models(resolver) for metric in runtime_metrics if isinstance(metric, MetricWithModels))

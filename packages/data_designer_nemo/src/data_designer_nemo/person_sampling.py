@@ -13,14 +13,14 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 logger = logging.getLogger(__name__)
 
 
-async def ensure_nemotron_personas_filesets(config: dd.DataDesignerConfig, sdk: AsyncHelixClient) -> None:
+async def ensure_nemotron_personas_filesets(config: dd.DataDesignerConfig, client: AsyncHelixClient) -> None:
     """Validate filesets exist for all locales required to execute the given config."""
     locales = _get_required_personas_locales(config)
     if not locales:
         return
 
     unreachable_locales = set()
-    files = client_from_platform(sdk, AsyncFilesClient)
+    files = client_from_platform(client, AsyncFilesClient)
 
     for locale in locales:
         fileset_name = get_resource_name_for_locale(locale)

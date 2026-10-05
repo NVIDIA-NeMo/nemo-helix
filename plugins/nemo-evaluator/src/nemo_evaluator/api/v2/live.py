@@ -290,7 +290,7 @@ async def _resolve_metrics(
         list(metrics),
         workspace=workspace,
         entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
-        async_sdk=async_client,
+        async_client=async_client,
     )
     runtime = [unbundle_metric(to_runtime_bundle(metric)) for metric in resolved]
     model_backed = [metric for metric in runtime if isinstance(metric, MetricWithModels)]

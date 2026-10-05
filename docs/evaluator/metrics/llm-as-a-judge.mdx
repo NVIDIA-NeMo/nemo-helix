@@ -37,12 +37,17 @@ import os
 
 from nemo_evaluator.sdk import Evaluator
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+sdk = NeMoHelix(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+evaluator = Evaluator.from_client(client)
 ```
 
 ---
@@ -581,7 +586,7 @@ For `nemo_evaluator_sdk.Evaluator` versus submitted-job behavior of `api_key_sec
 
 ```python
 # Create a secret with your API key
-client.secrets.create(name="judge-api-key", value="your-api-key-here")
+sdk.secrets.create(name="judge-api-key", value="your-api-key-here")
 ```
 
 ### Reference the Secret in Your Metric

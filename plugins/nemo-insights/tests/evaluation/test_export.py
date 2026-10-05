@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 from evaluation import artifact, export
 from evaluation.registry import Subject
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 # --------------------------------------------------------------------------- #
 # fake SDK client
@@ -57,6 +57,16 @@ class _FakePaginated:
         return _paginator(self._items)
 
 
+class _FakeResponse:
+    """Stand-in for the typed client's single-entity response."""
+
+    def __init__(self, item):
+        self._item = item
+
+    def data(self):
+        return self._item
+
+
 class FakeClient:
     """Captures every list call's kwargs; serves canned docs per (collection, workspace).
 
@@ -69,19 +79,6 @@ class FakeClient:
         self.calls: list[tuple[str, dict]] = []
         self.closed = False
         outer = self
-
-        class _Collection:
-            def __init__(self, name):
-                self.name = name
-
-            def list(self, **kwargs):
-                outer.calls.append((self.name, kwargs))
-                items = outer.docs.get((self.name, kwargs["workspace"]), [])
-                filters = kwargs.get("filter") or {}
-                for key in ("evaluation_id", "trace_id", "session_id"):
-                    if key in filters:
-                        items = [item for item in items if item.payload.get(key) == filters[key]]
-                return _paginator(items)
 
         class _Intake:
             def _list(self, name, *, workspace, query_params=None):
@@ -106,14 +103,14 @@ class FakeClient:
             def list_traces(self, **kwargs):
                 return self._list("traces", **kwargs)
 
-        class _Experiments:
-            async def retrieve(self, name, **kwargs):
-                outer.calls.append(("experiments", {"name": name, **kwargs}))
-                return outer.docs[("experiments", kwargs["workspace"])][0]
+            def list_evaluations(self, **kwargs):
+                return self._list("evaluations", **kwargs)
+
+            async def get_experiment(self, *, name, workspace):
+                outer.calls.append(("experiments", {"name": name, "workspace": workspace}))
+                return _FakeResponse(outer.docs[("experiments", workspace)][0])
 
         self.intake = _Intake()
-        self.experiments = _Experiments()
-        self.evaluations = _Collection("evaluations")
 
     async def close(self):
         self.closed = True
@@ -240,7 +237,7 @@ def test_export_closes_injected_client(tmp_path, monkeypatch):
         ["ws-a"],
         tmp_path,
         since=None,
-        client=cast(AsyncNeMoHelix, client),
+        client=cast(AsyncNemoClient, client),
     )
 
     assert client.closed

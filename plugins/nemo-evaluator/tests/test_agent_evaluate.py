@@ -1532,7 +1532,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     resolved = await _resolve_gym_environment(
         target,
         workspace="dev",
-        async_sdk=_async_sdk(),
+        async_client=_async_sdk(),
     )
 
     assert isinstance(resolved, GymRunnerTarget)
@@ -1575,7 +1575,7 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
     resolved = await _resolve_gym_environment(
         _gym_environment_target(),
         workspace="dev",
-        async_sdk=_async_sdk(),
+        async_client=_async_sdk(),
     )
 
     assert isinstance(resolved, GymRunnerTarget)
@@ -1599,7 +1599,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
         await _resolve_gym_environment(
             target,
             workspace="dev",
-            async_sdk=_async_sdk(),
+            async_client=_async_sdk(),
         )
 
 
@@ -1620,7 +1620,7 @@ async def test_resolve_gym_environment_rejects_missing_manifest(mocker: MockerFi
         await _resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
-            async_sdk=_async_sdk(),
+            async_client=_async_sdk(),
         )
 
     files.download_file.assert_not_awaited()
@@ -1643,7 +1643,7 @@ async def test_resolve_gym_environment_rejects_manifest_listing_mismatch(mocker:
         await _resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
-            async_sdk=_async_sdk(),
+            async_client=_async_sdk(),
         )
 
 

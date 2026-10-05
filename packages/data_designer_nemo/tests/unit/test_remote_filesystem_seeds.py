@@ -29,7 +29,7 @@ def test_remote_context_includes_filesystem_seed_readers() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_seed_returns_canonical_validated_filesystem_root() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response(["corpus/a.md"]))
@@ -39,7 +39,7 @@ async def test_validate_seed_returns_canonical_validated_filesystem_root() -> No
     config = builder.build()
 
     with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
-        validated_root = await validate_seed(config, "default", sdk)
+        validated_root = await validate_seed(config, "default", client)
 
     assert validated_root == "default/docs#corpus"
     files.get_fileset.assert_awaited_once_with(name="docs", workspace="default")
@@ -52,7 +52,7 @@ async def test_validate_seed_returns_canonical_validated_filesystem_root() -> No
 
 @pytest.mark.asyncio
 async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))
@@ -63,7 +63,7 @@ async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
 
     with pytest.raises(NDDInvalidConfigError, match="contains no files to use as seed data"):
         with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
-            await validate_seed(config, "default", sdk)
+            await validate_seed(config, "default", client)
 
     files.list_files.assert_awaited_once_with(
         workspace="default",
@@ -74,7 +74,7 @@ async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_seed_rejects_path_with_no_files() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))
@@ -85,14 +85,14 @@ async def test_validate_seed_rejects_path_with_no_files() -> None:
 
     with pytest.raises(NDDInvalidConfigError, match="contains no files to use as seed data"):
         with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
-            await validate_seed(config, "default", sdk)
+            await validate_seed(config, "default", client)
 
 
 @pytest.mark.asyncio
 async def test_validate_seed_reports_missing_fileset_file() -> None:
     # FilesetFileSeedSource points at a single file, so the error should say "File ... not found"
     # rather than the directory-style "contains no files" message.
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     files = Mock()
     files.get_fileset = AsyncMock()
     files.list_files = AsyncMock(return_value=_list_files_response([]))
@@ -101,4 +101,4 @@ async def test_validate_seed_reports_missing_fileset_file() -> None:
 
     with pytest.raises(NDDInvalidConfigError, match=r"File 'corpus/missing.parquet' not found"):
         with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
-            await _validate_seed_from_files_service(seed_source, "default", sdk)
+            await _validate_seed_from_files_service(seed_source, "default", client)

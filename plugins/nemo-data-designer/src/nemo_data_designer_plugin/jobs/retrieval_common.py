@@ -107,11 +107,11 @@ async def retrieval_step(
     module: str,
     spec: BaseModel,
     profile: str | None,
-    async_sdk: AsyncNemoClient,
+    async_client: AsyncNemoClient,
     gpu: bool = False,
     hf_token_secret: str | None = None,
 ) -> HelixJobStep:
-    del async_sdk
+    del async_client
     if gpu:
         # The GPU mining step runs with ``HF_HUB_OFFLINE``; it never reaches the Hub.
         return gpu_retrieval_step(name, module, spec, profile)
@@ -121,10 +121,10 @@ async def retrieval_step(
 async def model_download_step(
     fileset: str,
     profile: str | None,
-    async_sdk: AsyncNemoClient,
+    async_client: AsyncNemoClient,
 ) -> HelixJobStep:
     """Download a model fileset into the job's shared ``model`` directory."""
-    del async_sdk
+    del async_client
     config = FileIOTaskConfig(download=[DownloadItem(src=FileSetRef.model_validate(fileset), dest="model")])
     return cpu_retrieval_step(
         "retrieval-model-download",

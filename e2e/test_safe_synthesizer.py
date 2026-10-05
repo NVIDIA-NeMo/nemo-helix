@@ -546,12 +546,12 @@ def nss_model_filesets(client: NemoClient) -> None:
     platform_root = _platform_root()
     setup_module = _load_model_filesets_setup_module(platform_root)
     create_filesets = cast(
-        Callable[[NemoClient, str, bool], list[str]],
+        Callable[[FilesClient, str, bool], list[str]],
         getattr(setup_module, "create_filesets"),
     )
     model_filesets = cast(list[dict[str, object]], getattr(setup_module, "MODEL_FILESETS"))
 
-    created = create_filesets(client, "default", False)
+    created = create_filesets(_files_client(client), "default", False)
     if len(created) != len(model_filesets):
         pytest.fail(
             "Failed to register all Safe Synthesizer model filesets: "

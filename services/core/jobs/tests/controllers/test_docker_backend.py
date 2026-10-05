@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from docker.errors import APIError, NotFound
-from nemo_helix.types.shared import AuthContext as SdkAuthContext
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nhx.common.auth import (
     NHX_PRINCIPAL_ENVVAR,
@@ -3120,41 +3119,6 @@ def test_docker_job_schedule_with_auth_context_no_email():
     assert principal_data["id"] == "service-account"
     assert principal_data.get("email") is None
     assert principal_data["groups"] == ["service-accounts"]
-
-
-def test_docker_job_schedule_with_auth_context_sdk_model_none_groups(
-    docker_job, docker_client_mock, test_job_step_with_auth_context
-):
-    """Test that SDK auth context with principal_groups=None is handled correctly."""
-
-    test_job_step_with_auth_context.auth_context = SdkAuthContext(
-        principal_id="user@example.com",
-        principal_email="user@example.com",
-        principal_groups=None,
-    )
-
-    # This should not raise a validation error - exercises the actual code path
-    docker_job.schedule(test_job_step_with_auth_context.step_spec.executor, test_job_step_with_auth_context)
-
-    # Wait for background thread to complete
-    docker_job._container_run_threadpool.shutdown(wait=True)
-    docker_job._container_run_threadpool = MagicMock()  # Reset for cleanup
-
-    # Get the job container call arguments (create call)
-    create_call_args = docker_client_mock.containers.create.call_args
-    kwargs = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
-
-    # Verify NHX_PRINCIPAL env var is set correctly
-    env = kwargs["environment"]
-    assert NHX_PRINCIPAL_ENVVAR in env
-
-    # Verify JSON structure - groups should be empty list (default) not None
-    principal_json = env[NHX_PRINCIPAL_ENVVAR]
-    principal_data = json.loads(principal_json)
-
-    assert principal_data["id"] == "user@example.com"
-    assert principal_data["email"] == "user@example.com"
-    assert principal_data["groups"] == []  # Default factory kicks in, not None
 
 
 def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, docker_client_mock):
