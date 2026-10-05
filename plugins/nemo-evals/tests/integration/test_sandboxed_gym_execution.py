@@ -366,6 +366,33 @@ async def test_the_host_is_created_from_the_deployment_config_and_the_targets_se
     assert spec.bootstrap_env[REUSE_IMAGE_GYM_INSTALL_ENV_KEY] == "true"
 
 
+async def test_a_wheels_v1_run_under_strict_egress_records_that_the_host_ran_offline(
+    stub_provider: _StubHostProvider, tmp_path: Path
+) -> None:
+    """The derived flag is a deployment decision the submitter cannot see in config, so the run
+    must say so itself when PyPI or a hub turns out to be unreachable."""
+    from nemo_evals.filesets import FilesetRef
+    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
+
+    persistent = tmp_path / "job-storage"
+    (persistent / "environment").mkdir(parents=True)
+    (persistent / "environment" / "nemo-environment.yaml").write_text(
+        "format: wheels-v1\nmetadata:\n  name: greeting\nconfig_paths: []\n"
+    )
+    runner = SessionBackedGymRunner(
+        target=_target(environment=FilesetRef(root="default/greeting")),
+        plan=_plan(sandbox_egress_allow=()),
+        job_id="eval-job-offline",
+        persistent_storage_path=persistent,
+    )
+
+    await runner.run_tasks(_tasks(tmp_path), AgentEvalRunConfig(work_dir=tmp_path))
+
+    (spec,) = stub_provider.created
+    assert spec.bootstrap_env[ENVIRONMENT_OFFLINE_ENV_KEY] == "true"
+    assert runner.runner_info().config["environment_offline"] is True
+
+
 async def test_the_host_is_destroyed_when_the_run_finishes(stub_provider: _StubHostProvider, tmp_path: Path) -> None:
     runner = SessionBackedGymRunner(target=_target(), plan=_plan(), job_id="eval-job-3")
 

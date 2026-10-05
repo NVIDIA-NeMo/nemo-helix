@@ -518,6 +518,123 @@ def test_fileset_backed_docker_requires_the_trusted_persistent_storage_path() ->
         )
 
 
+def stage_manifest(persistent: Path, manifest: str) -> Path:
+    """Write what the stage step leaves behind: the package tree under ``persistent/environment``."""
+    environment = persistent / "environment"
+    environment.mkdir(parents=True, exist_ok=True)
+    (environment / "nemo-environment.yaml").write_text(manifest)
+    return persistent
+
+
+WHEELS_V1_MANIFEST = """
+format: wheels-v1
+metadata:
+  name: greeting
+config_paths: []
+"""
+
+NATIVE_V1_MANIFEST = """
+format: native-v1
+metadata:
+  name: greeting
+config_paths:
+  - resources_servers/greeting/configs/greeting.yaml
+"""
+
+
+def test_a_wheels_v1_package_under_strict_egress_runs_the_host_offline(tmp_path: Path) -> None:
+    """Nothing in that combination may legitimately reach the network, so a fetch should fail
+    by name rather than hang on a blocked socket."""
+    persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym")),
+        capable_plan(sandbox_egress_allow=()),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is True
+
+
+def test_an_allowed_egress_destination_keeps_a_wheels_v1_host_online(tmp_path: Path) -> None:
+    """The operator allowed it for a reason; offline mode would block the fetch they expect."""
+    persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym")),
+        capable_plan(sandbox_egress_allow=("huggingface.co:443",)),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is False
+
+
+def test_a_native_v1_package_is_never_offline(tmp_path: Path) -> None:
+    """Gym installs its servers from an index at start; offline would fail every one of them."""
+    persistent = stage_manifest(tmp_path, NATIVE_V1_MANIFEST)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym")),
+        capable_plan(sandbox_egress_allow=()),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is False
+
+
+def test_a_docker_host_is_never_offline(tmp_path: Path) -> None:
+    """Docker records the allowlist without enforcing it, so an empty one promises nothing about
+    the network; forcing offline there would make a laptop run stricter than the cluster run."""
+    persistent = tmp_path / "default" / "job-9" / "1" / "job-storage"
+    stage_manifest(persistent, WHEELS_V1_MANIFEST)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym")),
+        capable_plan(sandbox_host_provider="docker", sandbox_egress_allow=()),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is False
+
+
+def test_a_built_in_environment_is_never_offline() -> None:
+    assert serve_config(target(), capable_plan(sandbox_egress_allow=()), job_id="job-9")["environment_offline"] is False
+
+
+@pytest.mark.parametrize("manifest", [None, "format: [", "format: wheels-v2\nmetadata: {name: x}"])
+def test_an_unreadable_staged_manifest_leaves_the_host_online(tmp_path: Path, manifest: str | None) -> None:
+    """The host revalidates the package and names what is wrong with it; this must not pre-empt
+    that with an offline failure that points elsewhere."""
+    persistent = tmp_path if manifest is None else stage_manifest(tmp_path, manifest)
+
+    payload = serve_config(
+        target(environment=FilesetRef(root="default/custom-gym")),
+        capable_plan(sandbox_egress_allow=()),
+        job_id="job-9",
+        persistent_storage_path=persistent,
+    )
+
+    assert payload["environment_offline"] is False
+
+
+def test_the_derived_offline_flag_reaches_the_built_spec(tmp_path: Path) -> None:
+    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
+
+    persistent = stage_manifest(tmp_path, WHEELS_V1_MANIFEST)
+
+    spec = built_host_spec(
+        capable_plan(sandbox_egress_allow=()),
+        target(environment=FilesetRef(root="default/custom-gym")),
+        persistent_storage_path=persistent,
+    )
+
+    assert spec.bootstrap_env[ENVIRONMENT_OFFLINE_ENV_KEY] == "true"
+
+
 def test_opensandbox_keeps_pvc_subpaths_when_the_local_storage_path_is_available(tmp_path: Path) -> None:
     persistent = tmp_path / "job-storage"
 
