@@ -628,6 +628,8 @@ extra-paths = [
   "plugins/_temporary-scaled-evals/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
+  # nemo-builder isn't a workspace member; its tests import the package under test.
+  "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
