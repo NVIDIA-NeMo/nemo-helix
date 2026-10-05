@@ -283,6 +283,9 @@ for the queryable result record and SDK retrieval path.
   claim.
 - **Agent returns no rollout:** Set `agent_ref_name` to the agent instance registered by the package.
 - **Model connection failure:** Add the model host and port to the deployment-owned egress allowlist.
+- **`uv` reports a package "not found in the cache", or a Hugging Face load fails on a missing
+  file:** The host ran a `wheels-v1` package offline because the deployment allows no egress
+  beyond the model. Add the missing wheel to `wheels/`, or vendor the dataset in the package.
 
 ## Related
 
