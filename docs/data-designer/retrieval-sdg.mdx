@@ -148,12 +148,14 @@ nemo data-designer retrieval-prepare --spec '{
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+data_designer = DataDesignerResource(client)
 
-client.data_designer.retrieval_prepare(
+data_designer.retrieval_prepare(
     RetrievalPrepareJobConfig(
         sdg_input="hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
         enable_mining=True,
@@ -252,12 +254,14 @@ against the same `eval_beir` split.
 ## SDK
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+data_designer = DataDesignerResource(client)
 
-client.data_designer.retrieval_generate(
+data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(
         corpus="default/my-docs",
         provider="default/nvidia-build",

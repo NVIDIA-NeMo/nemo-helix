@@ -64,23 +64,26 @@ import os
 import tempfile
 import urllib.request
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
 WORKSPACE = "default"
 FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
 base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
+sdk = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
+client = NemoClient(base_url=base_url, workspace=WORKSPACE)
 
 # Create fileset
-client.files.filesets.create(name=FILESET_NAME)
+sdk.files.filesets.create(name=FILESET_NAME)
 
 # Download and upload seed data
 with tempfile.NamedTemporaryFile(suffix=".csv") as tmpfile:
     url = "https://raw.githubusercontent.com/NVIDIA/GenerativeAIExamples/refs/heads/main/nemo/NeMo-Data-Designer/data/gretelai_symptom_to_diagnosis.csv"
     urllib.request.urlretrieve(url, tmpfile.name)
 
-    client.files.upload(
+    sdk.files.upload(
         fileset=FILESET_NAME,
         local_path=tmpfile.name,
         remote_path=FILE_PATH,
@@ -266,7 +269,7 @@ Create a client:
 
 ```python
 # Using the client instance from Step 1
-data_designer = client.data_designer
+data_designer = DataDesignerResource(client)
 ```
 
 Use the `preview` method for rapid iteration:

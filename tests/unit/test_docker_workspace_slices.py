@@ -17,7 +17,7 @@ SDK_EDITABLE_DOCKERFILES = (
     Path("docker/automodel/Dockerfile.nhx-automodel-training"),
     Path("docker/rl/Dockerfile.nhx-rl-training"),
 )
-SDK_ALIAS_PACKAGES = ("filesets", "models")
+SDK_ALIAS_PACKAGES = ("filesets",)
 WANDB_PACKAGE_SPEC_RE = re.compile(r"(?<![\w./-])wandb(?:\[[^\]]+\])?(?:==|~=|!=|<=|>=|<|>)[^\\\s\"']+")
 DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
     Path("docker/Dockerfile.nhx-customizer-tasks"),

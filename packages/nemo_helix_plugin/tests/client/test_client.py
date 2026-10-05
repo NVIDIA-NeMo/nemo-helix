@@ -18,6 +18,7 @@ from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoResponseValidationError, NotFoundError
 from nemo_helix_plugin.client.response import NemoResponse
 from nemo_helix_plugin.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_plugin.client.types import RetryPolicy
 from pydantic import BaseModel
 
 BASE = "http://test:8000"
@@ -624,6 +625,37 @@ def test_from_client_carries_the_timeout() -> None:
     )
 
     assert NemoClient.from_client(client)._timeout == upload_timeout
+
+
+@pytest.mark.asyncio
+async def test_to_async_mirrors_the_config_on_its_own_transport() -> None:
+    upload_timeout = httpx.Timeout(30.0, write=10 * 60)
+    retry = RetryPolicy(max_retries=5)
+    resolver = MagicMock(side_effect=lambda path: path)
+    sync_client = NemoClient(
+        base_url=BASE,
+        workspace="ws",
+        auth="token",
+        default_headers={"X-Test": "1"},
+        timeout=upload_timeout,
+        retry=retry,
+        url_resolver=resolver,
+    )
+
+    async with sync_client.to_async() as async_client:
+        assert isinstance(async_client, AsyncNemoClient)
+        assert async_client.base_url == sync_client.base_url
+        assert async_client.workspace == "ws"
+        assert async_client._auth is sync_client._auth
+        assert async_client.default_headers == {"X-Test": "1"}
+        assert async_client._timeout == upload_timeout
+        assert async_client.retry is retry
+        assert async_client._url_resolver is resolver
+        transport = async_client._http
+
+    assert transport.is_closed
+    assert not sync_client._http.is_closed
+    sync_client.close()
 
 
 @pytest.mark.asyncio

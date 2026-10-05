@@ -60,7 +60,7 @@ class LoadedTask:
 class SubmitContext:
     workspace: str
     entity_client: EntityClient | None
-    async_sdk: AsyncHelixClient | None
+    async_client: AsyncHelixClient | None
     adapters: Mapping[str, TaskKindAdapter]
 
 

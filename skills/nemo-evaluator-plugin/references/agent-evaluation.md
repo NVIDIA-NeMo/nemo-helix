@@ -58,7 +58,7 @@ runner = GymAgentTaskRunner(
         resources_server="mcqa",
     )
 )
-job = client.evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
+job = evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
 job.wait_until_done()
 ```
 
@@ -265,7 +265,7 @@ Set `agent_ref_name` when the package registers that agent under a different
 instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
-From a live runner, `client.evaluator.submit(tasks=..., target=runner,
+From a live runner, `evaluator.submit(tasks=..., target=runner,
 placement=GymPlacement(...))` builds this target without rebuilding it by hand.
 `env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
 from your environment); `environment` and `agent_ref_name` live on the
@@ -287,8 +287,8 @@ Retrieve the run index, download its bundle, and hydrate `trials.jsonl`:
 ```python
 from nemo_evaluator_sdk.agent_eval.persistence import read_trials
 
-stored = client.evaluator.agent_eval_results.retrieve("<result-name>")
-client.files.download(remote_path=stored.bundle_ref, local_path="previous-run")
+stored = evaluator.agent_eval_results.retrieve("<result-name>")
+sdk.files.download(remote_path=stored.bundle_ref, local_path="previous-run")
 trials = read_trials("previous-run")
 ```
 
@@ -332,13 +332,13 @@ defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
 
 Use the in-memory result for programmatic follow-up and the bundle for
 inspection, sharing, or rescoring. Platform jobs persist the bundle and create
-a queryable record under `client.evaluator.agent_eval_results`.
+a queryable record under `evaluator.agent_eval_results`.
 
 A platform job hands back an `AgentEvaluatorJobResource`, which is not the
 dataset-driven job handle: it offers `name`, `job`, `get_job_status()`,
 `check_if_complete()`, and `wait_until_done()`, but no `get_result()` or
 `download_artifacts()`. Read the scores through
-`client.evaluator.agent_eval_results`.
+`evaluator.agent_eval_results`.
 
 Inspect failed and partial trials and score diagnostics before interpreting
 aggregate values; a high mean with low coverage can hide missing or failed

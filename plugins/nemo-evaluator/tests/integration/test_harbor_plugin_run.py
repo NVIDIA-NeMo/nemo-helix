@@ -36,14 +36,14 @@ from nemo_evaluator.jobs.agent_spec import (
     HarborBuiltinAgentSource,
     HarborRunnerTarget,
 )
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRewardMetric, discover_harbor_tasks
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 pytestmark = [pytest.mark.integration]
 
@@ -64,7 +64,6 @@ def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path,
     import httpx
     from nemo_evaluator.api.schemas import TaskInput, TaskRef, TasksetInput
     from nemo_evaluator.harbor.publication import publish_harbor_task_archive
-    from nemo_helix import NeMoHelix
     from nemo_helix_plugin.files.client import FilesClient
     from nemo_helix_plugin.files.types import CreateFilesetRequest
     from nemo_helix_plugin.jobs.client import JobsClient
@@ -75,12 +74,12 @@ def test_publish_stored_harbor_source_and_execute(subprocess_platform, tmp_path,
     files_client = FilesClient(base_url=base_url, workspace="default")
     files_client.create_fileset(body=CreateFilesetRequest(name=name)).data()
     definition = publish_harbor_task_archive(task_dir, files_client=files_client, fileset_ref=f"default/{name}")
-    sdk = NeMoHelix(base_url=base_url, workspace="default")
-    sdk.evaluator.tasks.create(
+    evaluator = Evaluator.from_client(NemoClient(base_url=base_url, workspace="default"))
+    evaluator.tasks.create(
         name,
         task=TaskInput(spec=definition),
     )
-    sdk.evaluator.tasksets.create(name, taskset=TasksetInput(tasks=[TaskRef(f"default/{name}")]))
+    evaluator.tasksets.create(name, taskset=TasksetInput(tasks=[TaskRef(f"default/{name}")]))
     route = f"{base_url}/apis/evaluator/v2/workspaces/default/agent-evaluate/jobs"
     public_tasks = [f"default/{name}"] if direct else f"default/{name}"
     response = httpx.post(
@@ -195,7 +194,7 @@ def test_sync_job_runs_a_real_harbor_target(tmp_path: Path) -> None:
             input_spec,
             workspace="default",
             entity_client=None,
-            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            async_sdk=AsyncNemoClient(base_url="http://platform.test"),
             is_local=True,
         )
     )

@@ -69,7 +69,7 @@ class RetrievalPreviewFunction(NemoFunction[RetrievalPreviewSpec]):
                 corpus_dir = materialize_corpus(
                     job.corpus,
                     dest=tmp_path / "corpus",
-                    sdk=sdk,
+                    client=sdk,
                     workspace=ctx.workspace,
                     hf_token=hf_token,
                     allow_local_path=is_local,

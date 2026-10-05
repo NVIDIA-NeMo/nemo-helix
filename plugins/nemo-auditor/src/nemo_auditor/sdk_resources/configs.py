@@ -3,7 +3,7 @@
 
 """SDK sub-resources for ``AuditConfig`` CRUD.
 
-Mounted as ``client.auditor.configs`` (sync) and on the async client. Each
+Exposed as ``AuditorPluginResource.configs`` and its async twin. Each
 method maps 1:1 onto the CLI verbs at ``nemo auditor configs <verb>`` and
 the FastAPI routes in :mod:`nemo_auditor.api.v2.configs`.
 """

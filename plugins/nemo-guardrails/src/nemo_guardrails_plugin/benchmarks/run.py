@@ -61,7 +61,10 @@ from nemo_guardrails_plugin.benchmarks.processes import (
     wait_http,
 )
 from nemo_guardrails_plugin.benchmarks.seeding import SeededResources, seed_benchmark
-from nemo_helix import APIConnectionError, APIStatusError, NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 
 log = logging.getLogger("nemo_guardrails_plugin.benchmarks")
 
@@ -197,7 +200,7 @@ def _build_aiperf_shim_process(paths: RunPaths) -> SupervisedProcess:
     )
 
 
-def _smoke_test(sdk: NeMoHelix, seeded: SeededResources) -> None:
+def _smoke_test(client: NemoClient, seeded: SeededResources) -> None:
     """Verify the VirtualModel is reachable and returns a chat completion,
     before running the AIPerf sweep.
     """
@@ -208,21 +211,22 @@ def _smoke_test(sdk: NeMoHelix, seeded: SeededResources) -> None:
     }
 
     last_error: str = "no attempts made"
+    gateway = InferenceGatewayClient.from_client(client)
 
     for attempt in range(60):
         try:
-            body = sdk.inference.gateway.openai.post(
-                "v1/chat/completions",
+            body = gateway.openai_post(
+                trailing_uri="v1/chat/completions",
                 workspace=WORKSPACE,
-                body=payload,
-            )
+                body=JsonBody(payload),
+            ).data()
             if body.get("choices"):
                 return
             last_error = f"response missing choices: {body}"
-        except APIStatusError as exc:
+        except NemoHTTPError as exc:
             last_error = f"HTTP {exc.status_code}: {str(exc)[:500]}"
             log.info("Smoke test attempt %d: %s; retrying", attempt + 1, last_error)
-        except APIConnectionError as exc:
+        except NemoTransportError as exc:
             last_error = f"transport error: {str(exc)[:500]}"
             log.info("Smoke test attempt %d: %s; retrying", attempt + 1, last_error)
         time.sleep(1.0)
@@ -452,15 +456,15 @@ def main(argv: list[str] | None = None) -> int:
 
         log.info(f"All services are ready. Seeding benchmark resources in workspace {WORKSPACE}...")
 
-        sdk = NeMoHelix(base_url=NHX_BASE_URL)
+        client = NemoClient(base_url=NHX_BASE_URL)
         seeded = seed_benchmark(
-            sdk,
+            client,
             nemoguardrails_repo_root=paths.nemoguardrails_repo_root,
             generated_dir=paths.generated_dir,
         )
 
         log.info("Waiting for VirtualModel %s to be ready...", seeded.vm_ref)
-        _smoke_test(sdk, seeded)
+        _smoke_test(client, seeded)
 
         # Variants run sequentially against the same NHX; only the targeted
         # VirtualModel differs, so the delta isolates middleware overhead.

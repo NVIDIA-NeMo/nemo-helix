@@ -108,6 +108,5 @@ packages = ["src/nemo_helix_plugin"]
 [tool.bundle-package]
 nemo-helix-sdk = { source = "../../sdk/python/nemo-helix/src/nemo_helix", module = "nemo_helix" }
 nemo-helix-ext = { source = "../nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", deps_group = "nemo-helix-sdk", force_include = { "../../../../docs" = "nemo_helix_ext/cli/docs" } }
-models = { source = "../models/src/models", module = "models", deps_group = "nemo-helix-sdk" }
 filesets = { source = "../filesets/src/filesets", module = "filesets", deps_group = "nemo-helix-sdk" }
 nemo-evaluator-sdk = { source = "../nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk" }

@@ -880,6 +880,24 @@ class NemoClient(BaseNemoClient[httpx.Client]):
             client_runtime=client.nemo_client_runtime,
         )
 
+    def to_async(self) -> AsyncNemoClient:
+        """Return an :class:`AsyncNemoClient` with this client's configuration.
+
+        The async client builds and owns its own network transport, so close it
+        (or use it as an async context manager) when done. A custom ``http_client``
+        on this client (ASGI, Unix socket) is not carried over; build the async
+        twin yourself when the base URL is not reachable over the network.
+        """
+        return AsyncNemoClient(
+            base_url=self.base_url,
+            workspace=self.workspace,
+            auth=self._auth,
+            default_headers=self._default_headers or None,
+            timeout=self._timeout,
+            retry=self._retry,
+            client_runtime=self.nemo_client_runtime,
+        )
+
     def close(self) -> None:
         """Close the underlying sync HTTP transport."""
         if self._owns_http:

@@ -51,12 +51,12 @@ def test_remote_no_auth_ignores_unrelated_local_oauth_context() -> None:
             "nemo_insights_plugin.platform_client.discover_nhx_config",
             return_value=NHXOIDCConfig(auth_enabled=False),
         ),
-        patch("nemo_insights_plugin.platform_client.AsyncNeMoHelix") as client_cls,
+        patch("nemo_insights_plugin.platform_client.build_direct_async_nemo_client") as build_direct,
     ):
         client = make_client(REMOTE_URL)
 
-    client_cls.assert_called_once_with(base_url=REMOTE_URL)
-    assert client is client_cls.return_value
+    build_direct.assert_called_once_with(base_url=REMOTE_URL)
+    assert client is build_direct.return_value
 
 
 def test_remote_auth_uses_local_oauth_context() -> None:
@@ -73,12 +73,12 @@ def test_remote_auth_uses_local_oauth_context() -> None:
                 token_endpoint="https://auth.example.com/token",
             ),
         ),
-        patch("nemo_insights_plugin.platform_client.AsyncNeMoHelix") as client_cls,
+        patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
     ):
         client = make_client(REMOTE_URL)
 
-    client_cls.assert_called_once_with(base_url=REMOTE_URL, config_path=config_path)
-    assert client is client_cls.return_value
+    build.assert_called_once_with(base_url=REMOTE_URL, config_path=config_path)
+    assert client is build.return_value
 
 
 def test_remote_auth_rejects_http_before_credential_bootstrap() -> None:
@@ -96,12 +96,12 @@ def test_remote_auth_rejects_http_before_credential_bootstrap() -> None:
                 token_endpoint="https://auth.example.com/token",
             ),
         ),
-        patch("nemo_insights_plugin.platform_client.AsyncNeMoHelix") as client_cls,
+        patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
         pytest.raises(ValueError, match="non-HTTPS remote URL"),
     ):
         make_client(base_url)
 
-    client_cls.assert_not_called()
+    build.assert_not_called()
 
 
 def test_remote_discovery_failure_raises_controlled_error() -> None:
@@ -114,12 +114,12 @@ def test_remote_discovery_failure_raises_controlled_error() -> None:
             "nemo_insights_plugin.platform_client.discover_nhx_config",
             side_effect=httpx.ConnectError("connection refused"),
         ),
-        patch("nemo_insights_plugin.platform_client.AsyncNeMoHelix") as client_cls,
+        patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
         pytest.raises(RuntimeError, match="could not discover NeMo Helix auth configuration"),
     ):
         make_client(REMOTE_URL)
 
-    client_cls.assert_not_called()
+    build.assert_not_called()
 
 
 def test_remote_no_auth_allows_http_without_credentials() -> None:
@@ -133,9 +133,9 @@ def test_remote_no_auth_allows_http_without_credentials() -> None:
             "nemo_insights_plugin.platform_client.discover_nhx_config",
             return_value=NHXOIDCConfig(auth_enabled=False),
         ),
-        patch("nemo_insights_plugin.platform_client.AsyncNeMoHelix") as client_cls,
+        patch("nemo_insights_plugin.platform_client.build_direct_async_nemo_client") as build_direct,
     ):
         client = make_client(base_url)
 
-    client_cls.assert_called_once_with(base_url=base_url)
-    assert client is client_cls.return_value
+    build_direct.assert_called_once_with(base_url=base_url)
+    assert client is build_direct.return_value
