@@ -20,6 +20,12 @@ from typing import Literal, TypeVar, overload
 from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from prompt_toolkit import PromptSession, prompt
 from prompt_toolkit.application import Application
+from prompt_toolkit.completion import (
+    CompleteEvent,
+    Completer,
+    Completion,
+    FuzzyCompleter,
+)
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML, FormattedText
 from prompt_toolkit.key_binding import KeyBindings
@@ -66,10 +72,10 @@ def _print_confirmation(
     Supports rich markup in the confirmation message.
     """
     prefix = " " * indent
-    if callable(confirmation):
-        msg = confirmation(result)
-    else:
+    if isinstance(confirmation, str):
         msg = confirmation
+    else:
+        msg = confirmation(result)
     console.print(f"[dim]{prefix}{msg}[/]\n")
 
 
@@ -288,6 +294,114 @@ def prompt_confirm(
     return result
 
 
+def _normalize_choices(choices: Sequence[str] | Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Normalize prompt choices to ``(value, label)`` tuples."""
+    normalized: list[tuple[str, str]] = []
+    for choice in choices:
+        if isinstance(choice, tuple):
+            normalized.append(choice)
+        else:
+            normalized.append((choice, choice))
+    return normalized
+
+
+def _default_choice_index(normalized: Sequence[tuple[str, str]], default: str | None) -> int | None:
+    """Return the one-based default index for a normalized choice list."""
+    for i, (value, _) in enumerate(normalized):
+        if value == default:
+            return i + 1
+    return None
+
+
+def _resolve_select_response(response: str, normalized: Sequence[tuple[str, str]]) -> str | None:
+    """Resolve a typed response to a choice value."""
+    # Check if it's a number
+    try:
+        idx = int(response)
+        if 1 <= idx <= len(normalized):
+            return normalized[idx - 1][0]
+    except ValueError:
+        pass
+
+    # Check if it matches a value or label
+    for value, label in normalized:
+        if value.lower() == response.lower() or label.lower() == response.lower():
+            return value
+    return None
+
+
+class _ChoiceCompleter(Completer):
+    """Completer that offers labels while preserving value lookup in the caller."""
+
+    def __init__(self, choices: Sequence[tuple[str, str]]) -> None:
+        self._choices = list(choices)
+
+    def get_completions(self, document: Document, complete_event: CompleteEvent):
+        word = document.get_word_before_cursor(WORD=True)
+        start_position = -len(word)
+        for value, label in self._choices:
+            yield Completion(
+                text=label,
+                start_position=start_position,
+                display=label,
+                display_meta=value,
+            )
+
+
+def prompt_search_select(
+    message: str,
+    choices: Sequence[str] | Sequence[tuple[str, str]],
+    *,
+    default: str | None = None,
+    hint: str | None = None,
+    indent: int = 0,
+    confirmation: str | Callable[[str], str] | None = None,
+) -> str:
+    """Prompt user to search and select from a list of options.
+
+    Uses prompt_toolkit's fuzzy completer so users can type a few characters and
+    select from the filtered completion menu. Numeric selection, exact value, and
+    exact label input are also accepted. Pressing Enter on an empty input accepts
+    the default when one is provided.
+    """
+    normalized = _normalize_choices(choices)
+    default_idx = _default_choice_index(normalized, default)
+    prefix = " " * indent
+    default_label = next((label for value, label in normalized if value == default), None)
+    prompt_suffix = "search"
+    if default_idx is not None:
+        prompt_suffix += f", Enter for default ({default_label or default})"
+    bottom_hint = hint or "Type to fuzzy-search; use Tab/↑↓ to choose a completion."
+    session: PromptSession[str] = PromptSession(
+        completer=FuzzyCompleter(_ChoiceCompleter(normalized)),
+        complete_while_typing=True,
+        style=PROMPT_STYLE,
+    )
+
+    print(f"{prefix}{message}")
+    while True:
+        try:
+            response = session.prompt(
+                HTML(f"{prefix}<prompt>Select ({prompt_suffix}): </prompt>"),
+                bottom_toolbar=_make_bottom_toolbar(bottom_hint),
+            ).strip()
+        except (KeyboardInterrupt, EOFError):
+            raise UserCancelled from None
+
+        if not response and default is not None:
+            if confirmation is not None:
+                _print_confirmation(confirmation, default, indent)
+            return default
+
+        result = _resolve_select_response(response, normalized)
+        if result is not None:
+            if confirmation is not None:
+                _print_confirmation(confirmation, result, indent)
+            return result
+
+        print(f"{prefix}Invalid selection. Type to search, enter an exact value/label, or choose 1-{len(normalized)}.")
+
+
 def prompt_select(
     message: str,
     choices: Sequence[str] | Sequence[tuple[str, str]],
@@ -315,20 +429,8 @@ def prompt_select(
     Raises:
         UserCancelled: If the user cancels (Ctrl+C/EOF).
     """
-    # Normalize to (value, label) tuples
-    normalized: list[tuple[str, str]] = []
-    for choice in choices:
-        if isinstance(choice, tuple):
-            normalized.append(choice)
-        else:
-            normalized.append((choice, choice))
-
-    # Find default index
-    default_idx = None
-    for i, (value, _) in enumerate(normalized):
-        if value == default:
-            default_idx = i + 1
-            break
+    normalized = _normalize_choices(choices)
+    default_idx = _default_choice_index(normalized, default)
 
     prefix = " " * indent
     print(f"{prefix}{message}")
@@ -348,23 +450,11 @@ def prompt_select(
         except (KeyboardInterrupt, EOFError):
             raise UserCancelled from None
 
-        # Check if it's a number
-        try:
-            idx = int(response)
-            if 1 <= idx <= len(normalized):
-                result_value = normalized[idx - 1][0]
-                if confirmation is not None:
-                    _print_confirmation(confirmation, result_value, indent)
-                return result_value
-        except ValueError:
-            pass
-
-        # Check if it matches a value or label
-        for value, label in normalized:
-            if value.lower() == response.lower() or label.lower() == response.lower():
-                if confirmation is not None:
-                    _print_confirmation(confirmation, value, indent)
-                return value
+        result_value = _resolve_select_response(response, normalized)
+        if result_value is not None:
+            if confirmation is not None:
+                _print_confirmation(confirmation, result_value, indent)
+            return result_value
 
         print(f"{prefix}Invalid selection. Please enter 1-{len(normalized)}.")
 

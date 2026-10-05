@@ -8,7 +8,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_helix_ext.ui.prompts import ProviderNameValidator
+from nemo_helix_ext.ui.prompts import ProviderNameValidator, _normalize_choices, _resolve_select_response
 from prompt_toolkit.validation import ValidationError
 
 
@@ -59,3 +59,12 @@ class TestProviderNameValidator:
     def test_error_message_describes_name_rules(self, validator: ProviderNameValidator) -> None:
         with pytest.raises(ValidationError, match=r"lowercase letter"):
             validator.validate(_make_document("bad name!"))
+
+
+def test_select_response_resolves_number_value_and_label() -> None:
+    choices = _normalize_choices([("default/model-a", "Model A"), ("default/model-b", "Model B")])
+
+    assert _resolve_select_response("2", choices) == "default/model-b"
+    assert _resolve_select_response("default/model-a", choices) == "default/model-a"
+    assert _resolve_select_response("model b", choices) == "default/model-b"
+    assert _resolve_select_response("missing", choices) is None

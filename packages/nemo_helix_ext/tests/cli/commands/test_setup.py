@@ -2601,9 +2601,9 @@ class TestInteractiveModelPairSelection:
         client.models.list_providers.return_value = _list_response([provider_a, provider_b])
 
         with patch(
-            f"{self._MOD}.prompt_select",
+            f"{self._MOD}.prompt_search_select",
             side_effect=["default/qwen2.5:1.5b", "default/qwen2.5:1.5b"],
-        ) as mock_prompt_select:
+        ) as mock_prompt_search_select:
             result = _select_model_pair(client, "default", provider_name="my-ollama-custom")
 
         assert result == ModelPair(
@@ -2616,15 +2616,15 @@ class TestInteractiveModelPairSelection:
                 "qwen2.5:1.5b (my-ollama-custom)",
             ),
         ]
-        assert mock_prompt_select.call_count == 2
-        assert all(call.kwargs["choices"] == expected_choices for call in mock_prompt_select.call_args_list)
-        default_call, fast_call = mock_prompt_select.call_args_list
+        assert mock_prompt_search_select.call_count == 2
+        assert all(call.kwargs["choices"] == expected_choices for call in mock_prompt_search_select.call_args_list)
+        default_call, fast_call = mock_prompt_search_select.call_args_list
         assert default_call.args[0] == "Choose your default model (used for quality-critical agent work):"
         assert default_call.kwargs["default"] == "default/qwen2.5:1.5b"
-        assert default_call.kwargs["hint"] == "Press Enter to accept the default."
+        assert default_call.kwargs["hint"] == "Press Enter to accept the default, or type to search."
         assert fast_call.args[0] == "Choose your fast model (used for latency-sensitive agent work):"
         assert fast_call.kwargs["default"] == "default/qwen2.5:1.5b"
-        assert fast_call.kwargs["hint"] == "Press Enter to reuse the default model."
+        assert fast_call.kwargs["hint"] == "Press Enter to reuse the default model, or type to search."
         assert client.models.list_providers.call_args.kwargs == {"workspace": "default"}
 
     def test_picker_has_no_unverified_default(self):
@@ -2638,9 +2638,9 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._get_all_model_choices", return_value=choices),
             patch(f"{self._MOD}._select_usable_model_pair", return_value=None),
             patch(
-                f"{self._MOD}.prompt_select",
+                f"{self._MOD}.prompt_search_select",
                 side_effect=["default/nvidia/nemotron-nano-9b-v2", "default/nvidia/nemotron-nano-9b-v2"],
-            ) as mock_prompt_select,
+            ) as mock_prompt_search_select,
         ):
             result = _select_model_pair(client, "default", provider_name="nvidia-build")
 
@@ -2648,9 +2648,9 @@ class TestInteractiveModelPairSelection:
             default="default/nvidia/nemotron-nano-9b-v2",
             fast="default/nvidia/nemotron-nano-9b-v2",
         )
-        default_call, fast_call = mock_prompt_select.call_args_list
+        default_call, fast_call = mock_prompt_search_select.call_args_list
         assert default_call.kwargs["default"] is None
-        assert default_call.kwargs["hint"] == "Choose a model you can access."
+        assert default_call.kwargs["hint"] == "Type to search models you can access."
         assert fast_call.kwargs["default"] == "default/nvidia/nemotron-nano-9b-v2"
 
     def test_returns_none_when_only_specialist_models_are_available(self):
@@ -2665,13 +2665,13 @@ class TestInteractiveModelPairSelection:
         client.models.list_providers.return_value = _list_response([provider])
 
         with (
-            patch(f"{self._MOD}.prompt_select") as mock_prompt_select,
+            patch(f"{self._MOD}.prompt_search_select") as mock_prompt_search_select,
             patch(f"{self._MOD}.console.print") as mock_print,
         ):
             result = _select_model_pair(client, "default", provider_name="nvidia-build")
 
         assert result is None
-        mock_prompt_select.assert_not_called()
+        mock_prompt_search_select.assert_not_called()
         printed = " ".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
         assert "No usable chat models discovered yet" in printed
 
