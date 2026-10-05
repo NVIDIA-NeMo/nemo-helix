@@ -14,15 +14,15 @@ TODO(mstaats): We need to verify the agentic path in the future, not just the en
 import os
 
 import pytest
-from nemo_platform_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.client import EntitiesClient
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
 def client() -> EntitiesClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return EntitiesClient(base_url=nmp_base_url, workspace=WORKSPACE)
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return EntitiesClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 def test_harbor_test_model_deleted(client: EntitiesClient) -> None:

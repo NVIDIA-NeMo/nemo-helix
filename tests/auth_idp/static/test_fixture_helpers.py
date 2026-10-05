@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 from cryptography import x509
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 from e2e.services_pool import RunningServices
 from tests.auth_idp import conftest, runtime
@@ -39,18 +39,18 @@ def test_authentik_stack_fixture_uses_pooled_gateway_metadata():
         interactive_user_expected_email="nemo-user@example.com",
         workload_principal_id="svc-nemo",
         workload_expected_groups=["nemo-workloads"],
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_principal_claim="sub",
         workload_groups_claim="groups",
         workload_groups_format="comma_string",
         workload_token_env_vars=[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR],
         workload_forwarded_headers={
-            "principal_id": "X-NMP-Principal-Id",
-            "principal_groups": "X-NMP-Principal-Groups",
+            "principal_id": "X-NHX-Principal-Id",
+            "principal_groups": "X-NHX-Principal-Groups",
         },
         e2e_setup_password_grant={
             "grant_type": "password",
-            "client_id": "nemo-platform",
+            "client_id": "nemo-helix",
             "username": "nemo-setup",
             "password": "nemo-setup-token-secret-dev",
             "scope": "openid email groups",
@@ -90,7 +90,7 @@ def test_auth_idp_runtime_event_line_includes_compose_instance_metadata(tmp_path
             interactive_user_expected_email="nemo-user@example.com",
             workload_principal_id="svc-nemo",
             workload_expected_groups=["nemo-workloads"],
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_principal_claim="sub",
             workload_groups_claim="groups",
             workload_groups_format="comma_string",
@@ -140,7 +140,7 @@ def test_auth_idp_runtime_event_line_includes_kubernetes_instance_metadata():
             interactive_user_expected_email="nemo-user@example.com",
             workload_principal_id="svc-nemo",
             workload_expected_groups=["nemo-workloads"],
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             workload_principal_claim="sub",
             workload_groups_claim="groups",
             workload_groups_format="comma_string",
@@ -161,7 +161,7 @@ def test_auth_idp_runtime_event_line_includes_kubernetes_instance_metadata():
             name="ci",
             context="kind-ci",
             runtime="kind",
-            kubeconfig=Path("/tmp/nmp-authentik-kubeconfig.yaml"),
+            kubeconfig=Path("/tmp/nhx-authentik-kubeconfig.yaml"),
         ),
         namespace="nemo-authentik",
         helm_release="authentik-demo",
@@ -172,7 +172,7 @@ def test_auth_idp_runtime_event_line_includes_kubernetes_instance_metadata():
     assert summary == (
         "Auth-idp runtime teardown_complete: id=authentik-kubernetes backend=kubernetes "
         "url=https://127.0.0.1:39001 port=39001 "
-        "cluster=ci context=kind-ci runtime=kind kubeconfig=/tmp/nmp-authentik-kubeconfig.yaml "
+        "cluster=ci context=kind-ci runtime=kind kubeconfig=/tmp/nhx-authentik-kubeconfig.yaml "
         "namespace=nemo-authentik helm_release=authentik-demo"
     )
 
@@ -221,7 +221,7 @@ def test_token_request_body_for_password_grant_includes_username_and_password():
     assert _token_request_body(
         {
             "grant_type": "password",
-            "client_id": "nemo-platform",
+            "client_id": "nemo-helix",
             "client_secret": "secret",
             "username": "akadmin",
             "password": "akadmin-dev",
@@ -229,7 +229,7 @@ def test_token_request_body_for_password_grant_includes_username_and_password():
         }
     ) == {
         "grant_type": "password",
-        "client_id": "nemo-platform",
+        "client_id": "nemo-helix",
         "client_secret": "secret",
         "username": "akadmin",
         "password": "akadmin-dev",
@@ -241,7 +241,7 @@ def test_token_request_body_for_workload_password_grant_includes_username_and_pa
     assert _token_request_body(
         {
             "grant_type": "password",
-            "client_id": "nemo-platform",
+            "client_id": "nemo-helix",
             "client_secret": "secret",
             "username": "svc-nemo",
             "password": "shared-secret",
@@ -249,7 +249,7 @@ def test_token_request_body_for_workload_password_grant_includes_username_and_pa
         }
     ) == {
         "grant_type": "password",
-        "client_id": "nemo-platform",
+        "client_id": "nemo-helix",
         "client_secret": "secret",
         "username": "svc-nemo",
         "password": "shared-secret",

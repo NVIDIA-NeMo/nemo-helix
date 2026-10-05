@@ -66,7 +66,7 @@ const DESCRIBE_SCHEMA: JsonSchema = {
 
 /**
  * Builds the gateway: a small, fixed set of capabilities that let an LLM
- * navigate and call the entire NeMo Platform API without holding hundreds of
+ * navigate and call the entire NeMo Helix API without holding hundreds of
  * tool definitions in context. The flow is search → describe → read/run.
  */
 export const createGateway = (capabilities: readonly CapabilityMeta[]): Capability[] => {
@@ -76,7 +76,7 @@ export const createGateway = (capabilities: readonly CapabilityMeta[]): Capabili
   const searchCapability: Capability = {
     name: 'search_capabilities',
     description:
-      'Search the NeMo Platform API for operations by keyword. Returns a ranked list of operation names with their method, path, and summary. Use this first to find the right operation, then describe_capability for its arguments.',
+      'Search the NeMo Helix API for operations by keyword. Returns a ranked list of operation names with their method, path, and summary. Use this first to find the right operation, then describe_capability for its arguments.',
     inputSchema: SEARCH_SCHEMA,
     readOnly: true,
     requiresConfirmation: false,

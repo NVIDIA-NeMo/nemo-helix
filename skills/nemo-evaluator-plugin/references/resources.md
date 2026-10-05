@@ -1,7 +1,7 @@
 # Stored Resources
 
 Read this file when definitions or results must be reusable and queryable
-through `client.evaluator`.
+through the `Evaluator` resource (`Evaluator.from_client(client)`).
 
 ## Resource map
 
@@ -28,11 +28,13 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
 )
 from nemo_evaluator_sdk import StringCheckMetric
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_evaluator.sdk import Evaluator
 
-client = NeMoPlatform(base_url="<platform-url>", workspace="<workspace>")
+client = NemoClient(base_url="<platform-url>", workspace="<workspace>")
+evaluator = Evaluator.from_client(client)
 
-client.evaluator.metrics.create(
+evaluator.metrics.create(
     "answer-exact",
     metric=StringCheckMetric(
         operation="equals",
@@ -41,7 +43,7 @@ client.evaluator.metrics.create(
     ),
 )
 
-client.evaluator.tasks.create(
+evaluator.tasks.create(
     "capital-france",
     task=TaskInput(
         spec=EvaluatorTaskDefinition(
@@ -53,7 +55,7 @@ client.evaluator.tasks.create(
     ),
 )
 
-client.evaluator.tasksets.create(
+evaluator.tasksets.create(
     "geography",
     taskset=TasksetInput(
         description="Geography smoke tasks.",
@@ -69,7 +71,7 @@ use a metric that reads it. This works on a stored task, so it survives into tas
 from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, MetricRef, TaskInput, TaskInputs
 from nemo_evaluator_sdk import ExactMatchMetric
 
-client.evaluator.metrics.create(
+evaluator.metrics.create(
     "answer-from-reference",
     metric=ExactMatchMetric(
         reference="{{reference.expected}}",
@@ -77,7 +79,7 @@ client.evaluator.metrics.create(
     ),
 )
 
-client.evaluator.tasks.create(
+evaluator.tasks.create(
     "capital-france-graded",
     task=TaskInput(
         spec=EvaluatorTaskDefinition(
@@ -103,14 +105,14 @@ content-addressed derived metrics. The same `reference` field is available on an
 ## Retrieve, list, and delete
 
 ```python
-metric = client.evaluator.metrics.retrieve("answer-exact")
-metrics = client.evaluator.metrics.list(metric_type="string-check")
-tasks = client.evaluator.tasks.list(page=1, page_size=100, sort="name")
-tasksets = client.evaluator.tasksets.list(page=1, page_size=100)
+metric = evaluator.metrics.retrieve("answer-exact")
+metrics = evaluator.metrics.list(metric_type="string-check")
+tasks = evaluator.tasks.list(page=1, page_size=100, sort="name")
+tasksets = evaluator.tasksets.list(page=1, page_size=100)
 
-client.evaluator.tasksets.delete("geography")
-client.evaluator.tasks.delete("capital-france")
-client.evaluator.metrics.delete("answer-exact")
+evaluator.tasksets.delete("geography")
+evaluator.tasks.delete("capital-france")
+evaluator.metrics.delete("answer-exact")
 ```
 
 Metric listing supports `metric_type` and `include_derived`. Task and taskset
@@ -123,16 +125,16 @@ Dataset-driven durable jobs create `eval_results`; agent-evaluation jobs create
 `agent_eval_results`.
 
 ```python
-row_eval = client.evaluator.eval_results.retrieve("<result-name>")
-row_page = client.evaluator.eval_results.list(
+row_eval = evaluator.eval_results.retrieve("<result-name>")
+row_page = evaluator.eval_results.list(
     job_id="<job-name>",
     target_kind="model",
     target_name="<model-name>",
     dataset_ref="default/eval-data",
 )
 
-agent_eval = client.evaluator.agent_eval_results.retrieve("<result-name>")
-agent_page = client.evaluator.agent_eval_results.list(
+agent_eval = evaluator.agent_eval_results.retrieve("<result-name>")
+agent_page = evaluator.agent_eval_results.list(
     job_id="<job-name>",
     target_kind="harbor",
     target_name="oracle",

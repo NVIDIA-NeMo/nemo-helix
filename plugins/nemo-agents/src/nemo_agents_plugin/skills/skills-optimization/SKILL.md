@@ -6,6 +6,9 @@ name: skills-optimization
 description: >-
   Improve agent skills via the `nemo agents` plugin (evaluate-suite / analyze / optimize-skills). Use when the user wants to improve an agent's skills using a Harbor or NAT eval suite, run a batch of agentic tests, analyze why evals fail, or kick off an automated skill-optimization
   loop. Trigger keywords - optimize skills, evaluate agent suite, analyze eval batch, skills optimizer, harbor evals.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo skills improvement workflow
@@ -31,7 +34,7 @@ When both are given, `--spec-file` wins.
 
 ## Self-referential example: improve NeMo itself
 
-The Platform repo ships a canonical `.agent-improver.yml` at its root. Running
+The NeMo Helix repo ships a canonical `.agent-improver.yml` at its root. Running
 `nemo agents optimize-skills --spec-file .agent-improver.yml` with absolute
 path overrides from the repo root improves the skills under `.agents/skills/`
 based on the `tests/agentic-use/` Harbor evals. This supplants the older

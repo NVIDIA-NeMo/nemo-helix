@@ -28,7 +28,7 @@ Official docs: [Optimize Agents](../../../../docs/agents/optimization.mdx).
 
 ### 1. Install the agents CLI
 
-From the **`nemo-platform` repo root**:
+From the **`nemo-helix` repo root**:
 
 ```bash
 uv sync --package nemo-agents-plugin
@@ -52,25 +52,72 @@ python -c "import hermes_cli; print('ok')"
 export NVIDIA_API_KEY=...   # required for inference-api.nvidia.com
 ```
 
-The example YAMLs call `https://inference-api.nvidia.com/v1` with full model ids
-such as `nvidia/nvidia/nemotron-3-nano-30b-a3b`. Confirm your key can list those
-models (`GET /v1/models`).
+The MCP example YAMLs call `https://inference-api.nvidia.com/v1` with full model
+ids such as `nvidia/nvidia/nemotron-3.5-lightning-30b-a3b`. Confirm your key can list
+those models (`GET /v1/models`). The chat-only examples go through the platform
+gateway instead (step 5).
 
 ### 4. Shell env used by every example
 
 ```bash
-export REPO_ROOT="/path/to/nemo-platform"
+export REPO_ROOT="/path/to/nemo-helix"
 export BUNDLE="$REPO_ROOT/plugins/nemo-optimization/examples/hermes-optimize"
 
-export NMP_BASE_URL="${NMP_BASE_URL:-http://localhost:8080}"
+export NHX_BASE_URL="${NHX_BASE_URL:-http://localhost:8080}"
 # Optional alias used by some CLI paths:
-export NEMO_BASE_URL="${NEMO_BASE_URL:-$NMP_BASE_URL}"
+export NEMO_BASE_URL="${NEMO_BASE_URL:-$NHX_BASE_URL}"
 
 # Point Fabric at the platform venv so Hermes adapters resolve. Without this,
 # Fabric may pick a system Python and fail with
 # `No module named 'nemo_fabric_adapters'`.
 export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 ```
+
+### 5. Route models through the platform gateway (platform submissions)
+
+A study submitted to the platform runs as a job, and jobs do **not** inherit
+provider keys such as `NVIDIA_API_KEY` from the platform process. A model that
+calls `inference-api.nvidia.com` or `integrate.api.nvidia.com` directly fails
+every trial with `NVIDIA_API_KEY is required for Hermes mode`. Route models
+through the platform inference gateway instead: the gateway holds the key as a
+platform secret, and optimize binds a placeholder key for gateway-routed models.
+
+[`optimize-chatonly.yaml`](optimize-chatonly.yaml) and
+[`agents/chatonly/agent.yaml`](agents/chatonly/agent.yaml) are set up this way.
+`optimize-chatonly.yaml` writes the gateway address as `${NHX_BASE_URL}`, which
+the optimize job expands to the platform address reachable from wherever the job
+runs (subprocess, Docker or Kubernetes). `agent.yaml` is stored as-is when the
+agent is created, so it names `localhost:8080`; edit its `base_url` values first
+if your platform is elsewhere.
+Register a provider once:
+
+```bash
+printf '%s' "$NVIDIA_API_KEY" | nemo secrets create nvidia-build-key \
+  --from-file - --workspace default
+
+nemo inference providers create nvidia-build \
+  --workspace default \
+  --host-url "https://integrate.api.nvidia.com" \
+  --api-key-secret-name "nvidia-build-key"
+
+nemo wait inference provider nvidia-build --workspace default
+```
+
+Confirm the agent's model answers through the gateway:
+
+```bash
+curl -s "$NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+  -H "Authorization: Bearer not-used" -H "Content-Type: application/json" \
+  -d '{"model": "nvidia-nemotron-3-super-120b-a12b", "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+The same model is the judge.
+
+The gateway lists every model in the provider catalog, but a key can only call
+some of them; others return an upstream 404 or 410. If yours cannot call this
+one, pick a `model_entity_id` that answers from
+`nemo inference providers get nvidia-build --workspace default` and set it in
+`agent.yaml`.
 
 ### Common bundle rules
 
@@ -88,7 +135,9 @@ export ADAPTER_PYTHON="$REPO_ROOT/.venv/bin/python"
 
 ## Example 1 — Chat-only
 
-No MCP, no extra checkouts. Good first smoke for optimize.
+No MCP, no extra checkouts. Good first smoke for optimize. Register the gateway
+provider first (setup step 5); both models in `optimize-chatonly.yaml` route
+through it.
 
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"   # if not already
@@ -100,7 +149,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
@@ -114,7 +164,7 @@ Python submission of the staged fileset:
 import os
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 print(
@@ -125,7 +175,7 @@ print(
             "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
             "workspace": WORKSPACE,
         },
-        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
     )
 )
@@ -150,13 +200,9 @@ fail the fileset size check).
 ```bash
 source "$REPO_ROOT/.venv/bin/activate"
 
-# Optional: retarget models to your platform IGW before create, e.g.
-#   model: <your-igw-model-id>
-#   base_url: http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1
-#   api_key_env: NEMO_AGENTS_IGW_API_KEY
-# (Replace host/model with your NMP_BASE_URL and IGW model id; values are
-# stored as-is at create time — no ${...} expansion for this path.)
-# Defaults in agent.yaml use inference-api (same as optimize-chatonly.yaml).
+# agent.yaml routes both models through the gateway at localhost:8080 (setup step 5).
+# Values are stored as-is at create time — no ${...} expansion — so edit
+# base_url before create if your NHX_BASE_URL differs.
 
 nemo agents create \
   --name hermes-optimize-chatonly \
@@ -183,7 +229,8 @@ nemo agents optimize prepare-fileset \
   --agent hermes-optimize-chatonly \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly-via-agent \
   --optimize-config optimize-chatonly-via-agent.yaml \
   --agent hermes-optimize-chatonly \
@@ -192,6 +239,12 @@ nemo agents optimize \
 
 **Success:** same as Example 1 (`status: completed`, `n_trials: 2`), with log
 line `Resolved agent 'hermes-optimize-chatonly' to platform agent ...`.
+
+The overlay turns the judge's thinking off with
+`inference.extra_body.chat_template_kwargs.enable_thinking: false`. A thinking
+judge can spend its token budget before writing the JSON score, and every trial
+then scores 0 with `Error in evaluator from parsing judge LLM response`. Options
+outside the OpenAI client's signature must go under `extra_body`.
 
 To replace the stored config after editing `agent.yaml`:
 
@@ -241,13 +294,19 @@ The command that `prepare-fileset` prints, with `--optimize-config` now relative
 to the fileset root:
 
 ```bash
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-chatonly \
   --optimize-config optimize-chatonly.yaml \
   --workspace default
 ```
 
 For the overlay example, add `--agent hermes-optimize-chatonly`.
+
+The MCP configs (`optimize-mcp*.yaml`) call `inference-api.nvidia.com`
+directly, so as written their trials fail on the platform with
+`NVIDIA_API_KEY is required for Hermes mode`. To submit one, route its models
+through the gateway first, as `optimize-chatonly.yaml` does (setup step 5).
 
 ### 3. Watch it
 
@@ -263,7 +322,7 @@ read them back from.
 **Where the study runs:** optimize compiles to the `subprocess` execution
 profile when the platform registers one, and otherwise to the `cpu` profile
 (docker or `kubernetes_job`, whichever the deployment registered) using the
-`nmp-cpu-tasks` image. Either way the fileset is the only input, so both
+`nhx-tasks` image. Either way the fileset is the only input, so both
 backends see the same tree. See
 [Operator notes](../../../../docs/agents/optimization.mdx) for what each backend
 needs installed.
@@ -359,7 +418,8 @@ nemo agents optimize prepare-fileset \
   --fileset hermes-optimize-mcp \
   --workspace default
 
-nemo agents optimize \
+nemo agents optimize run-strategy \
+  --strategy legacy \
   --optimize-config-fileset default/hermes-optimize-mcp \
   --optimize-config optimize-mcp.yaml \
   --workspace default
@@ -381,7 +441,7 @@ Python submission of the staged fileset:
 import os
 
 from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_platform_plugin.scheduler import NemoJobScheduler
+from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 WORKSPACE = "default"
 print(
@@ -392,7 +452,7 @@ print(
             "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
             "workspace": WORKSPACE,
         },
-        base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
         workspace=WORKSPACE,
     )
 )

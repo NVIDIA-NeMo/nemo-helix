@@ -11,7 +11,7 @@ const isDateRangeLike = (value: unknown): value is DateRangeLike =>
 
 /**
  * Converts a plain search state object into a JSON string formatted for the
- * NeMo Platform entities API `search` query parameter.
+ * NeMo Helix entities API `search` query parameter.
  *
  * Operator inference by value type:
  *   - string  → { $like: value }

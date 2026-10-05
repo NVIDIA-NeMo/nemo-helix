@@ -33,10 +33,12 @@ import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/Deploymen
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import {
+  ACTION_SEARCH_PARAM,
   type AgentDetailTab,
   DEFAULT_TAB,
   isAgentDetailTab,
@@ -63,6 +65,7 @@ export const AgentDetailRoute: FC = () => {
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
   const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
+  const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
   const [deleteDeploymentTarget, setDeleteDeploymentTarget] = useState<AgentDeployment | null>(
     null
   );
@@ -77,6 +80,7 @@ export const AgentDetailRoute: FC = () => {
   const {
     agent,
     isAgentLoading,
+    isAgentPending,
     agentDeployments,
     agentEvals,
     isAgentEvalsPending,
@@ -155,6 +159,26 @@ export const AgentDetailRoute: FC = () => {
 
   const canRunEvaluation = !!agentName && canDeploy;
 
+  const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);
+  // Waits for the agent query to settle so both modals are gated on a real agent, then strips the
+  // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
+  // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
+  useEffect(() => {
+    if (!actionFromUrl || isAgentPending) return;
+    if (actionFromUrl === 'run-evaluation' && canRunEvaluation) setSubmitEvalOpen(true);
+    if (actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && agent) {
+      setLaunchOptimizeOpen(true);
+    }
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete(ACTION_SEARCH_PARAM);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [actionFromUrl, isAgentPending, canRunEvaluation, agent, setSearchParams]);
+
   const status = healthyDeployments.length > 0 ? 'running' : agentDeployments[0]?.status;
   const statusPillLabel =
     healthyDeployments.length > 0
@@ -222,6 +246,7 @@ export const AgentDetailRoute: FC = () => {
               deployButtonRef={deployButtonRef}
               onDeploy={() => setCreateDeploymentOpen(true)}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
+              onOptimize={() => setLaunchOptimizeOpen(true)}
               onImportTraces={() => setImportTracesOpen(true)}
             />
           }
@@ -271,7 +296,10 @@ export const AgentDetailRoute: FC = () => {
 
           {AGENT_OPTIMIZATIONS_ENABLED && (
             <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
-              <OptimizeJobsTable agentName={agentName} />
+              <OptimizeJobsTable
+                agentName={agentName}
+                onOptimize={() => setLaunchOptimizeOpen(true)}
+              />
             </TabsContent>
           )}
 
@@ -341,6 +369,14 @@ export const AgentDetailRoute: FC = () => {
           onClose={() => setImportTracesOpen(false)}
           workspace={workspace}
           agent={agentName}
+        />
+      )}
+      {agentName && launchOptimizeOpen && (
+        <LaunchOptimizeModal
+          open
+          onClose={() => setLaunchOptimizeOpen(false)}
+          workspace={workspace}
+          agentName={agentName}
         />
       )}
       {createDeploymentOpen && (

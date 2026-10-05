@@ -10,7 +10,7 @@ catalog from the routes, so there is no parallel list to keep in sync.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.authz import PermissionSet, perm
+from nemo_helix_plugin.authz import PermissionSet, perm
 
 
 class AuditConfigPerms(PermissionSet, namespace="auditor.configs"):

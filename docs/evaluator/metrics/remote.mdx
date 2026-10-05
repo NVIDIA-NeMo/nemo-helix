@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="eval-metrics-remote"></a>
 
-NeMo Platform offers [built-in metrics](/documentation/evaluate-models/metrics) that can be configured to evaluate on your custom data. Remote metrics let you bring your own metric logic into the NeMo Platform evaluation workflow by serving that logic from a REST API.
+NeMo Helix offers [built-in metrics](/documentation/evaluate-models/metrics) that can be configured to evaluate on your custom data. Remote metrics let you bring your own metric logic into the NeMo Helix evaluation workflow by serving that logic from a REST API.
 
 A remote metric gives you control over the evaluation logic, request payload, and reported scores while the Evaluator plugin SDK handles dataset iteration, result aggregation, retries, and job execution.
 
@@ -20,7 +20,7 @@ Remote metrics support two types:
 | **Generic Remote** (`remote`) | Custom endpoints with configurable request body and score extraction | User-defined Jinja template |
 | **NeMo Agent Toolkit Remote** (`nemo-agent-toolkit-remote`) | NeMo Agent Toolkit evaluator endpoints | Fixed: `{evaluator_name, item}` |
 
-The Evaluator plugin SDK runs either type as a durable platform job through `evaluator.submit(metric=metric, dataset=dataset)`. To iterate on a metric in-process without platform services, use the standalone `nemo_evaluator_sdk.Evaluator` instead.
+The Evaluator plugin SDK runs either type as a durable platform job through `evaluator.submit(metric=metric, dataset=dataset)`. To iterate on a metric in-process without Helix services, use the standalone `nemo_evaluator_sdk.Evaluator` instead.
 
 ## Prerequisites
 
@@ -35,17 +35,17 @@ Before running remote metric evaluations:
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
 
 from nemo_evaluator_sdk import (
     NemoAgentToolkitRemoteMetric,
     RemoteMetric,
 )
-sdk = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = sdk.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 ```
 
 ---

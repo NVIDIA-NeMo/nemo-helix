@@ -22,9 +22,9 @@ import sys
 from urllib.parse import urlparse
 
 import pytest
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.files.client import FilesClient
 
 sys.path.insert(0, "/tests/shared")
 from trace_reader import get_session
@@ -48,14 +48,14 @@ def _make_unsigned_jwt() -> str:
     return f"{header}.{payload}."
 
 
-def _get_nmp_client() -> NeMoPlatform:
-    """Get NeMoPlatform client for the eval workspace."""
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
+def _get_nhx_client() -> NeMoHelix:
+    """Get NeMoHelix client for the eval workspace."""
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return NeMoHelix(base_url=nhx_base_url, workspace=WORKSPACE, access_token=_make_unsigned_jwt())
 
 
 def _get_files_client() -> FilesClient:
-    return client_from_platform(_get_nmp_client(), FilesClient)
+    return client_from_platform(_get_nhx_client(), FilesClient)
 
 
 # --- Dataset checks ---
@@ -70,7 +70,7 @@ def test_fileset_exists() -> None:
 
 def test_fileset_has_data() -> None:
     """Verify the dataset fileset has files uploaded."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     files = client.files._list_files(name=FILESET)
     assert len(files.data) > 0, f"Fileset '{FILESET}' has no files uploaded"
 
@@ -80,7 +80,7 @@ def test_fileset_has_data() -> None:
 
 def test_llm_judge_metric_exists() -> None:
     """Verify an LLM-as-a-Judge metric was created."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     response = client.evaluation.metrics.list()
     metrics = response.data
     judge_metrics = [m for m in metrics if m.type == "llm-judge"]
@@ -91,7 +91,7 @@ def test_llm_judge_metric_exists() -> None:
 
 def test_llm_judge_metric_named_correctly() -> None:
     """Verify the metric is named quality-judge."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     response = client.evaluation.metrics.list()
     metric_names = [m.name for m in response.data]
     assert METRIC_NAME in metric_names, (
@@ -105,7 +105,7 @@ def test_llm_judge_metric_config() -> None:
     This validates the agent configured the judge model (step 1) and
     defined the evaluation rubric/criteria (step 2) from the Linear ticket.
     """
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     metric = client.evaluation.metrics.retrieve(name=METRIC_NAME)
 
     # Model config: judge model pointing to inference endpoint
@@ -113,7 +113,7 @@ def test_llm_judge_metric_config() -> None:
     model = metric.model
     assert hasattr(model, "url"), f"Model is a reference string, expected inline config: {model}"
     parsed_model_url = urlparse(model.url)
-    trusted_igw_host = urlparse(os.environ.get("NMP_BASE_URL", "http://localhost:8080")).hostname
+    trusted_igw_host = urlparse(os.environ.get("NHX_BASE_URL", "http://localhost:8080")).hostname
     valid_url = (
         parsed_model_url.hostname == trusted_igw_host and "inference/providers" in (parsed_model_url.path or "")
     ) or parsed_model_url.hostname == "inference-api.nvidia.com"
@@ -151,7 +151,7 @@ def test_sync_evaluation_produces_scores() -> None:
     This is the key integration test: it runs the agent's metric against
     a small inline dataset and checks that the judge LLM returns real scores.
     """
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     response = client.evaluation.metrics.evaluate(
         metric=f"{WORKSPACE}/{METRIC_NAME}",
         dataset={
@@ -209,7 +209,7 @@ def test_agent_ran_sync_eval_and_examined_scores() -> None:
 
 def test_evaluation_job_created() -> None:
     """Verify that at least one evaluation metric job was created."""
-    client = _get_nmp_client()
+    client = _get_nhx_client()
     response = client.evaluation.metric_jobs.list()
     assert len(response.data) > 0, f"No evaluation metric jobs found in workspace '{WORKSPACE}'"
 

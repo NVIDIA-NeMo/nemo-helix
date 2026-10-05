@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from fastapi import APIRouter
+from nemo_evaluator.api.v2 import live as live_routes
 from nemo_evaluator.api.v2 import metrics as metrics_routes
 from nemo_evaluator.api.v2 import results as results_routes
 from nemo_evaluator.api.v2 import tasks as tasks_routes
@@ -18,9 +19,9 @@ from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
 from nemo_evaluator.jobs.evaluate import EvaluateJob
 from nemo_evaluator.jobs.retrieve_eval import RetrieveEvalJob
 from nemo_evaluator.schema import HelloResponse
-from nemo_platform_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.jobs.routes import add_job_routes
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.jobs.routes import add_job_routes
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 #: The ``source`` tag for agent-evaluate job records, passed as ``add_job_routes(..., service_name=)``.
 #: Distinct from ``EvaluateJob``'s derived ``nemo-evaluator`` source: the evaluator plugin owns two job
@@ -143,6 +144,13 @@ class EvaluatorPluginService(NemoService):
                 router=tasksets_routes.router,
                 tag="Evaluator Plugin Tasksets Routes",
                 description="Stored taskset CRUD routes.",
+                prefix="/v2/workspaces/{workspace}",
+            ),
+            RouterSpec(
+                # POST /apis/evaluator/v2/workspaces/{workspace}/evaluate/live.
+                router=live_routes.router,
+                tag="Evaluator Plugin Live Evaluation Route",
+                description="Single-row evaluation run in-process, without creating a job.",
                 prefix="/v2/workspaces/{workspace}",
             ),
         ]

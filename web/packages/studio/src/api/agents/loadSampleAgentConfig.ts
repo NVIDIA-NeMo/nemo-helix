@@ -9,7 +9,7 @@ import YAML from 'yaml';
  * Loads a sample agent's config from a public static asset and injects the
  * selected model plus the target workspace. Parse-then-set: the fetched YAML's
  * literals are overwritten, so the asset can stay byte-identical to the
- * plugin's ${NEMO_DEFAULT_MODEL} version (the platform service doesn't resolve
+ * plugin's ${NEMO_DEFAULT_MODEL} version (the Helix service doesn't resolve
  * that).
  *
  * Branches on the config's own `config_format`:

@@ -42,7 +42,7 @@ ordinary ``logging`` configuration.
 
 **Where Gym finds things.** NeMo Gym must be installed and its ``gym`` on PATH,
 along with the target environment's own dependencies. Generally that means a
-*separate* environment: Gym imports Ray at module load, and nemo-platform
+*separate* environment: Gym imports Ray at module load, and nemo-helix
 excludes Ray by constraint over an unfixed CVE, so the two cannot share one. In a
 job image the image owns PATH and this is unremarkable. There is deliberately no
 config field naming a checkout, a venv, or a search root — these runner configs
@@ -71,7 +71,7 @@ and the task simply has no ``inputs['instruction']``. See :func:`discover_gym_ta
 """
 
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, GymRuntimeConfig
-from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import discover_gym_tasks
+from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import discover_gym_tasks, validate_gym_task_row
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.runtime import GymAgentTaskRunner
 from nemo_evaluator_sdk.metrics.runner_rewards import GymRewardMetric
 
@@ -81,4 +81,5 @@ __all__ = [
     "GymRewardMetric",
     "GymRuntimeConfig",
     "discover_gym_tasks",
+    "validate_gym_task_row",
 ]

@@ -22,6 +22,15 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from nemo_evaluator_sdk.agent_eval.metrics import ToolCallCountMetric
 from nemo_optimization.backends.optuna.fabric_trial import _build_metrics
 
+#: The Hermes adapter is an optional harness, not a platform dependency. It is pinned
+#: `python_version < '3.14'` in the pyprojects that ship it, so it is genuinely absent on 3.14 --
+#: and a user who does not run Hermes never installs it either. Tests that need Fabric to *plan* a
+#: Hermes config skip rather than fail when it is missing; the ones that only read YAML still run.
+requires_hermes_adapter = pytest.mark.skipif(
+    importlib.util.find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="the nemo-fabric Hermes adapter is not installed (it is unavailable on Python 3.14)",
+)
+
 _EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "hermes-optimize"
 # Loaded from the bundle rather than imported: the bundle is a workspace member the platform venv
 # installs, but a test run synced without `--all-packages` must still exercise the fixture.
@@ -109,6 +118,7 @@ def test_the_trial_config_spawns_the_server_from_the_bundle(monkeypatch: pytest.
     assert Path(script).is_absolute() and Path(script) == _SERVER_PATH
 
 
+@requires_hermes_adapter
 def test_fabric_accepts_the_example_agent_config() -> None:
     """The MCP block must survive Fabric's own validation and planning, not just our YAML reading."""
     pytest.importorskip("nemo_fabric")
@@ -138,6 +148,7 @@ def test_the_mock_variant_differs_from_the_example_only_in_how_the_server_is_lau
     assert live_types == sorted(type(m).__name__ for m in _build_metrics(_CONFIG, _CONFIG["eval"]))
 
 
+@requires_hermes_adapter
 def test_fabric_accepts_the_example_with_its_credential_in_env(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("nemo_fabric")
     import os

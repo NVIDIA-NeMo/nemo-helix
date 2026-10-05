@@ -10,7 +10,9 @@ cannot ride into user-supplied environment code.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,16 +20,20 @@ from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
 from nemo_evaluator.jobs.gym_sandbox import (
+    CollectionTimeoutError,
     SandboxPlan,
     SandboxUnavailableError,
+    SessionBackedGymRunner,
+    collect_within,
     credential_shaped_env_vars,
     gym_global_config,
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
     resolve_sandbox_plan,
+    rollout_parallelism,
     serve_config,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     KubernetesJobExecutionProfile,
     KubernetesJobExecutionProfileConfig,
     KubernetesJobStorageConfig,
@@ -48,7 +54,7 @@ def capable_config(**overrides: Any) -> EvaluatorConfig:
     fields: dict[str, Any] = {
         "sandboxed_gym_default": True,
         "sandbox_cluster_capable": True,
-        "sandbox_runtime_image": "registry.example.com/nmp-gym-runtime:1.0",
+        "sandbox_runtime_image": "registry.example.com/nhx-gym-runtime:1.0",
         "sandbox_job_storage_pvc_claim": "job-storage",
         "sandbox_policy_base_urls": ("https://integrate.api.nvidia.com/v1",),
     }
@@ -127,7 +133,7 @@ def test_custom_environment_carries_component_selection_for_host_composition() -
     )
 
     assert config["config_paths"][0] == "responses_api_agents/simple_agent/configs/simple_agent.yaml"
-    assert config["_nmp_environment_component_selection"] == {
+    assert config["_nhx_environment_component_selection"] == {
         "agent_instance": "custom_agent",
         "agent_config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
         "resources_server_instance": "mcqa",
@@ -135,6 +141,21 @@ def test_custom_environment_carries_component_selection_for_host_composition() -
         "model_config": "responses_api_models/inference_provider/configs/inference_provider.yaml",
     }
     assert config["custom_agent"]["responses_api_agents"]["simple_agent"]["resources_server"]["name"] == "mcqa"
+
+
+def test_the_binding_is_keyed_on_the_agent_instance_without_an_environment_too() -> None:
+    """Stock Gym renames instances, so this is not a FileSet-only concern.
+
+    35 of Gym's 79 shipped agent configs key an instance differently from the component they
+    configure -- ``rewoo_agent`` on ``langgraph_agent``, the ``anyswe_*`` family on ``anyswe_agent``.
+    ``SessionBackedGymRunner`` stamps every row with ``agent_ref_name or agent`` whether or not a
+    FileSet is staged, so keying the binding on the component would bind a resources server onto an
+    instance nothing routes to and leave the one the rows ask for with no ``resources_server.name``.
+    """
+    config = gym_global_config(target(agent="langgraph_agent", agent_ref_name="rewoo_agent"))
+
+    assert "langgraph_agent" not in config, "the component name must not key the binding on its own"
+    assert config["rewoo_agent"]["responses_api_agents"]["langgraph_agent"]["resources_server"]["name"] == "mcqa"
 
 
 def test_custom_environment_omits_agent_config_when_the_package_supplies_the_agent() -> None:
@@ -147,7 +168,7 @@ def test_custom_environment_omits_agent_config_when_the_package_supplies_the_age
     )
 
     assert "responses_api_agents/simple_agent/configs/simple_agent.yaml" not in config["config_paths"]
-    assert config["_nmp_environment_component_selection"]["agent_config"] is None
+    assert config["_nhx_environment_component_selection"]["agent_config"] is None
 
 
 def test_agent_config_is_required_without_an_environment_package() -> None:
@@ -163,7 +184,7 @@ def test_environment_fileset_rejects_file_fragments() -> None:
 def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> None:
     payload = serve_config(target(), capable_plan(), job_id="job-7")
 
-    assert payload["sandbox"]["image"] == "registry.example.com/nmp-gym-runtime:1.0"
+    assert payload["sandbox"]["image"] == "registry.example.com/nhx-gym-runtime:1.0"
     assert payload["sandbox"]["environment_pvc_claim"] == "job-storage"
     assert payload["episode_broker"]["job_id"] == "job-7"
     # ...and the job's half is the environment selection, nothing else.
@@ -171,10 +192,10 @@ def test_serve_config_takes_cluster_facts_from_the_deployment_not_the_job() -> N
 
 
 def test_unset_runtime_image_uses_the_qualified_gym_host(monkeypatch: pytest.MonkeyPatch) -> None:
-    qualified = "registry.example.com/nemo/nmp-gym-host:same-platform-tag"
+    qualified = "registry.example.com/nemo/nhx-gym-host:same-platform-tag"
     monkeypatch.setattr(
         "nemo_evaluator.jobs.gym_sandbox.get_qualified_image",
-        lambda name: qualified if name == "nmp-gym-host" else "",
+        lambda name: qualified if name == "nhx-gym-host" else "",
     )
 
     plan = resolve_sandbox_plan(capable_config(sandbox_runtime_image=None), target())
@@ -430,7 +451,7 @@ def test_custom_environment_uses_the_read_only_host_mount() -> None:
         target(environment=FilesetRef(root="default/custom-gym")),
     )
 
-    assert spec.bootstrap_env["NMP_ENVIRONMENT_PATH"] == "/job/environment"
+    assert spec.bootstrap_env["NHX_ENVIRONMENT_PATH"] == "/job/environment"
 
 
 def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path: Path) -> None:
@@ -438,7 +459,7 @@ def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path
     persistent.mkdir(parents=True)
     plan = capable_plan(
         sandbox_host_provider="docker",
-        sandbox_host_provider_options={"root_dir": "/ignored", "network": "nmp-test"},
+        sandbox_host_provider_options={"root_dir": "/ignored", "network": "nhx-test"},
     )
 
     payload = serve_config(
@@ -451,7 +472,7 @@ def test_fileset_backed_docker_mounts_the_subprocess_persistent_storage(tmp_path
     sandbox = payload["sandbox"]
     assert sandbox["host_provider_options"] == {
         "root_dir": str(persistent.parent),
-        "network": "nmp-test",
+        "network": "nhx-test",
     }
     assert (
         Path(sandbox["host_provider_options"]["root_dir"])
@@ -501,10 +522,95 @@ def test_resource_requests_reach_the_host_when_configured() -> None:
     assert spec.resources == {"cpu": "2", "memory": "8Gi"}
 
 
+@pytest.mark.parametrize(
+    ("concurrency", "expected"),
+    [(1, (1, 1)), (4, (1, 4)), (8, (1, 8)), (9, (2, 4)), (10, (2, 5)), (64, (8, 8)), (100, (13, 7))],
+)
+def test_concurrency_becomes_chunks_whose_product_never_exceeds_it(concurrency: int, expected: tuple[int, int]) -> None:
+    chunk_size, max_in_flight = rollout_parallelism(concurrency)
+
+    assert (chunk_size, max_in_flight) == expected
+    assert max_in_flight <= 8, "every in-flight chunk holds a worker thread"
+    assert concurrency - chunk_size < chunk_size * max_in_flight <= concurrency
+
+
+def test_the_targets_concurrency_sets_the_sessions_chunking() -> None:
+    sandbox = serve_config(target(concurrency=10), capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (2, 5)
+
+
+def test_the_default_concurrency_survives_the_job_spec_round_trip() -> None:
+    """The job reads a target dumped with every default, so the default must map like any value."""
+    round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
+
+    sandbox = serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]
+
+    assert (sandbox["rollout_chunk_size"], sandbox["rollout_max_in_flight"]) == (1, 4)
+
+
+def test_startup_timeout_bounds_the_hosts_bootstrap() -> None:
+    from sandboxed_gym import SandboxedGymServeConfig
+
+    payload = serve_config(target(startup_timeout_s=45), capable_plan(), job_id="job-1")
+
+    assert SandboxedGymServeConfig.model_validate(payload).sandbox.bootstrap_timeout_s == 45
+
+
+def test_the_default_startup_timeout_survives_the_job_spec_round_trip() -> None:
+    round_tripped = GymRunnerTarget.model_validate(target().model_dump(mode="json"))
+
+    assert serve_config(round_tripped, capable_plan(), job_id="job-1")["sandbox"]["bootstrap_timeout_s"] == 240
+
+
+def test_a_finite_collection_timeout_caps_the_hosts_per_chunk_deadline() -> None:
+    """The host gives up on a chunk just after the job does, so the run fails as a collection timeout."""
+    spec = built_host_spec(capable_plan(), target(collection_timeout_s=2))
+
+    deadline_s = float(spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"])
+    assert 2 < deadline_s <= 60, "past the job's own deadline, so that one fires first, but no further"
+
+
+def test_an_unbounded_collection_is_bounded_only_by_the_hosts_lifetime() -> None:
+    """None must not quietly become the host's 30-minute per-request default."""
+    spec = built_host_spec(capable_plan(), target(collection_timeout_s=None))
+
+    assert spec.ttl_s is not None
+    assert float(spec.bootstrap_env["NHX_ROLLOUT_DEADLINE_S"]) == spec.ttl_s
+
+
+async def test_collection_that_outruns_its_timeout_fails_as_a_timeout_naming_the_budget() -> None:
+    async def never_finishes(examples: list[dict[str, Any]]) -> list[Any]:
+        await asyncio.sleep(60)
+        return examples
+
+    with pytest.raises(CollectionTimeoutError, match=r"collection_timeout_s=0\.05s"):
+        await collect_within(never_finishes, [{"id": 0}], timeout_s=0.05)
+
+
+async def test_collection_within_its_timeout_returns_the_results() -> None:
+    async def quick(examples: list[dict[str, Any]]) -> list[Any]:
+        return examples
+
+    assert await collect_within(quick, [{"id": 0}], timeout_s=5) == [{"id": 0}]
+    assert await collect_within(quick, [{"id": 0}], timeout_s=None) == [{"id": 0}]
+
+
+async def test_a_timeout_raised_by_the_collector_itself_is_not_reported_as_the_budget() -> None:
+    """Only the job's own deadline may claim `collection_timeout_s`; anything else keeps its identity."""
+
+    async def times_out_on_its_own(examples: list[dict[str, Any]]) -> list[Any]:
+        raise TimeoutError("host socket timed out")
+
+    with pytest.raises(TimeoutError, match="host socket timed out") as caught:
+        await collect_within(times_out_on_its_own, [{"id": 0}], timeout_s=60)
+    assert not isinstance(caught.value, CollectionTimeoutError)
+
+
 def test_the_runtime_image_and_job_id_reach_the_host() -> None:
     spec = built_host_spec(capable_plan())
 
-    assert spec.runtime_image == "registry.example.com/nmp-gym-runtime:1.0"
+    assert spec.runtime_image == "registry.example.com/nhx-gym-runtime:1.0"
     assert spec.job_id == "job-9"
 
 
@@ -565,11 +671,66 @@ def test_a_resolved_env_secret_reaches_the_host(monkeypatch: pytest.MonkeyPatch)
     assert payload["host_env"]["OPENAI_API_KEY"] == "sk-resolved"
 
 
-def test_an_unresolved_env_secret_is_named_rather_than_silently_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("ref", "workspace"), [("ws/openai", "ws"), ("openai", "team")])
+def test_an_unresolved_env_secret_is_named_rather_than_silently_missing(
+    monkeypatch: pytest.MonkeyPatch, ref: str, workspace: str
+) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    with pytest.raises(SandboxUnavailableError, match="OPENAI_API_KEY"):
+    with pytest.raises(SandboxUnavailableError, match=f"nemo secrets get openai --workspace {workspace}"):
+        serve_config(target(env_secrets={"OPENAI_API_KEY": ref}), capable_plan(), job_id="job-1", workspace="team")
+
+
+def test_an_empty_injected_secret_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    with pytest.raises(SandboxUnavailableError, match="nemo secrets get openai --workspace ws"):
         serve_config(target(env_secrets={"OPENAI_API_KEY": "ws/openai"}), capable_plan(), job_id="job-1")
+
+
+@pytest.mark.asyncio
+async def test_session_runner_records_target_provenance_before_and_after_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sandboxed_gym
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import SandboxedGymAgentTaskRunner
+
+    monkeypatch.setenv("OPENAI_API_KEY", "injected")
+    runner = SessionBackedGymRunner(
+        target=target(env_secrets={"OPENAI_API_KEY": "ws/openai"}, concurrency=10, num_repeats=3),
+        plan=capable_plan(),
+        job_id="job-1",
+    )
+    expected = {"env_secrets": {"OPENAI_API_KEY": "ws/openai"}, "resources_server": "mcqa", "agent": "simple_agent"}
+    for key, value in expected.items():
+        assert runner.runner_info().config[key] == value
+
+    class Session:
+        def descriptor(self):
+            return SimpleNamespace(rollout_url="http://host", rollout_auth_token=None, headers={})
+
+        def shutdown(self):
+            pass
+
+        async def arun_rollouts(self, examples):
+            return []
+
+    class Orchestrator:
+        def start(self, config):
+            return Session()
+
+    async def collect(self, tasks, config):
+        return []
+
+    monkeypatch.setattr(sandboxed_gym, "SandboxedGymOrchestrator", Orchestrator)
+    monkeypatch.setattr(SandboxedGymAgentTaskRunner, "run_tasks", collect)
+    assert await runner.run_tasks([]) == []
+    for key, value in expected.items():
+        assert runner.runner_info().config[key] == value
+    assert runner.runner_info().config["rollout_url"] == "http://host"
+    assert runner.runner_info().config["num_repeats"] == 3
+    assert runner.runner_info().config["rollout_chunk_size"] == 2
+    assert runner.runner_info().config["rollout_max_in_flight"] == 5
+    assert runner.runner_info().config["rollout_timeout_s"] > 0
 
 
 def test_the_host_env_reaches_the_built_spec() -> None:
@@ -582,10 +743,10 @@ def test_the_host_env_reaches_the_built_spec() -> None:
 
 
 def test_a_job_cannot_move_the_broker_by_naming_its_variable() -> None:
-    # `env_vars` is job-authored. Redefining NMP_BROKER_URL would point the host's rollouts at the
+    # `env_vars` is job-authored. Redefining NHX_BROKER_URL would point the host's rollouts at the
     # job's own listener, outside the broker's mediation.
-    with pytest.raises(ValueError, match="NMP_BROKER_URL"):
-        built_host_spec(capable_plan(), target(env_vars={"NMP_BROKER_URL": "http://evil"}))
+    with pytest.raises(ValueError, match="NHX_BROKER_URL"):
+        built_host_spec(capable_plan(), target(env_vars={"NHX_BROKER_URL": "http://evil"}))
 
 
 # --------------------------------------------------------------------------------------------

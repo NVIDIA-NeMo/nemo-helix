@@ -10,21 +10,21 @@ from unittest.mock import AsyncMock, PropertyMock, call, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
-from nemo_platform_plugin.auth.access_keys.types import AccessKeyCreateResponse
-from nemo_platform_plugin.workspaces.client import AsyncWorkspacesClient
-from nemo_platform_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
-from nmp.common.auth.access_keys import AccessKeyValidationError
-from nmp.common.auth.client import AuthClient
-from nmp.common.auth.dependencies import auth_client_context
-from nmp.common.auth.models import Principal
-from nmp.common.auth.token_claims import TokenClaims
-from nmp.common.auth.token_resolver import ResolvedBearerToken
-from nmp.common.config import AuthConfig
-from nmp.common.config.base import AccessKeyConfig, TokenSigningConfig
-from nmp.common.entities import EntityConflictError
-from nmp.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
-from nmp.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
+from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
+from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
+from nhx.common.auth.access_keys import AccessKeyValidationError
+from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.auth.models import Principal
+from nhx.common.auth.token_claims import TokenClaims
+from nhx.common.auth.token_resolver import ResolvedBearerToken
+from nhx.common.config import AuthConfig
+from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
+from nhx.common.entities import EntityConflictError
+from nhx.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
+from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyStateConflictError, get_access_key_registry
 
 
 class InMemoryAccessKeyRegistry:
@@ -84,7 +84,7 @@ class InMemoryAccessKeyRegistry:
         return None
 
     async def list_for_principal(self, principal, *, page, page_size, include_service_accounts=False):
-        from nemo_platform_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
+        from nemo_helix_plugin.auth.access_keys.types import AccessKeyListResponse, AccessKeyMetadataResponse
 
         # Sort newest-first then by jti to match the real registry's `sort="-issued_at"`.
         owned = sorted(
@@ -270,7 +270,7 @@ def client(tmp_path, access_key_workspaces_client):
         ),
         access_keys=AccessKeyConfig(
             enabled=True,
-            audience="nemo-platform-access-key",
+            audience="nemo-helix-access-key",
         ),
     )
 
@@ -298,7 +298,7 @@ def client(tmp_path, access_key_workspaces_client):
             config=config,
         )
     )
-    with patch("nmp.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
+    with patch("nhx.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
         yield TestClient(app)
     auth_client_context.reset(token)
 
@@ -316,7 +316,7 @@ def disabled_client(access_key_workspaces_client):
             config=config,
         )
     )
-    with patch("nmp.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
+    with patch("nhx.core.auth.api.v2.access_keys.endpoints.get_auth_config", return_value=config):
         yield TestClient(app)
     auth_client_context.reset(token)
 
@@ -454,7 +454,7 @@ def test_create_access_key_rotation_revoke_failure_fails_the_request_and_compens
     # Simulate an unexpected failure revoking just the rotation target (e.g. a concurrent
     # delete), while revoking any other jti (the compensating self-revoke of the new key)
     # keeps working normally.
-    from nmp.core.auth.app.access_keys import PersistentAccessKeyIssuer
+    from nhx.core.auth.app.access_keys import PersistentAccessKeyIssuer
 
     original_revoke_async = PersistentAccessKeyIssuer.revoke_async
 
@@ -464,7 +464,7 @@ def test_create_access_key_rotation_revoke_failure_fails_the_request_and_compens
         return await original_revoke_async(self, jti)
 
     monkeypatch.setattr(
-        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        "nhx.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
         _boom_for_target_only,
     )
 
@@ -498,7 +498,7 @@ def test_create_access_key_rotation_revoke_failure_rolls_back_granted_workspace_
     # now-revoked replacement must be undone too.
     prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
 
-    from nmp.core.auth.app.access_keys import PersistentAccessKeyIssuer
+    from nhx.core.auth.app.access_keys import PersistentAccessKeyIssuer
 
     original_revoke_async = PersistentAccessKeyIssuer.revoke_async
 
@@ -508,7 +508,7 @@ def test_create_access_key_rotation_revoke_failure_rolls_back_granted_workspace_
         return await original_revoke_async(self, jti)
 
     monkeypatch.setattr(
-        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        "nhx.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
         _boom_for_target_only,
     )
 
@@ -546,7 +546,7 @@ def test_create_access_key_rotation_revoke_failure_logs_when_compensation_also_f
         raise RuntimeError("entity storage unavailable")
 
     monkeypatch.setattr(
-        "nmp.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
+        "nhx.core.auth.app.access_keys.PersistentAccessKeyIssuer.revoke_async",
         _boom,
     )
 
@@ -992,8 +992,8 @@ def test_create_service_access_key_requires_platform_admin(client):
         )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only PlatformAdmin can create service-bound Scoped Access Keys"
-    has_role.assert_awaited_once_with("system", "PlatformAdmin")
+    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
+    has_role.assert_awaited_once_with("system", "HelixAdmin")
 
 
 def test_service_account_principal_cannot_create_or_manage_service_bound_keys_even_with_platform_admin_role(client):
@@ -1013,7 +1013,7 @@ def test_service_account_principal_cannot_create_or_manage_service_bound_keys_ev
         auth_client_context.reset(service_account_token)
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only PlatformAdmin can create service-bound Scoped Access Keys"
+    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
     # The service-account identity check short-circuits before any PDP role lookup.
     has_role.assert_not_awaited()
 
@@ -1035,7 +1035,7 @@ def test_privileged_service_principal_cannot_create_service_bound_keys_even_with
         auth_client_context.reset(service_token)
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Only PlatformAdmin can create service-bound Scoped Access Keys"
+    assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
     has_role.assert_not_awaited()
 
 
@@ -1108,7 +1108,7 @@ def test_platform_admin_can_revoke_service_key_created_by_a_different_admin(clie
             json={"name": "otel", "service_account_id": "otel-collector"},
         ).json()
 
-        # A second PlatformAdmin, distinct from the creator, manages the same registry.
+        # A second HelixAdmin, distinct from the creator, manages the same registry.
         other_admin_token = auth_client_context.set(
             AuthClient(
                 principal=Principal(id="bob@example.com", email="bob@example.com"),
@@ -1117,7 +1117,7 @@ def test_platform_admin_can_revoke_service_key_created_by_a_different_admin(clie
         )
         try:
             # Listing stays scoped to the caller's own keys (see PersistentAccessKeyIssuer.list_async);
-            # a PlatformAdmin manages another admin's service-bound key by its jti directly.
+            # a HelixAdmin manages another admin's service-bound key by its jti directly.
             revoked = client.delete(f"/v2/access-keys/{created['jti']}")
         finally:
             auth_client_context.reset(other_admin_token)
@@ -1194,7 +1194,7 @@ def test_platform_admin_cannot_revoke_another_admins_personal_access_key(client)
 
 
 def test_create_and_revoke_emit_actor_aware_audit_logs(client, caplog):
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         created = client.post(
             "/v2/access-keys",
             json={"name": "ci-intake", "description": "CI intake automation"},
@@ -1221,7 +1221,7 @@ def test_suspend_and_unsuspend_emit_actor_aware_audit_logs(client, caplog):
     created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
     jti = created["jti"]
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         client.post(f"/v2/access-keys/{jti}/suspend")
         client.post(f"/v2/access-keys/{jti}/suspend")
         client.post(f"/v2/access-keys/{jti}/unsuspend")
@@ -1258,7 +1258,7 @@ async def test_in_memory_access_key_registry_reports_expired_status() -> None:
             description=None,
             status="ACTIVE",
             issuer="http://testserver/apis/auth",
-            audiences=["nemo-platform-access-key"],
+            audiences=["nemo-helix-access-key"],
         )
     )
 
@@ -1532,7 +1532,7 @@ def test_access_key_lifecycle_openapi_documents_error_responses(client):
     assert create_responses["400"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
-    assert create_responses["403"]["description"] == "Service-bound Scoped Access Keys require PlatformAdmin"
+    assert create_responses["403"]["description"] == "Service-bound Scoped Access Keys require HelixAdmin"
     assert create_responses["403"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
@@ -1684,7 +1684,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "description": "CI intake automation",
             "status": "ACTIVE",
             "issuer": "http://testserver/apis/auth",
-            "audiences": ["nemo-platform-access-key"],
+            "audiences": ["nemo-helix-access-key"],
             "scope": [],
         }
     ]
@@ -2053,7 +2053,7 @@ def test_rotate_and_new_key_emit_actor_aware_audit_logs(client, caplog):
     created = client.post("/v2/access-keys", json={"name": "ci-intake"}).json()
     jti = created["jti"]
 
-    with caplog.at_level(logging.INFO, logger="nmp.core.auth.app.access_keys"):
+    with caplog.at_level(logging.INFO, logger="nhx.core.auth.app.access_keys"):
         response = client.post(f"/v2/access-keys/{jti}/rotate")
 
     new_jti = response.json()["new_key"]["jti"]

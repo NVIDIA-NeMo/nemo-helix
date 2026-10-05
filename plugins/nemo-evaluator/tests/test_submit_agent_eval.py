@@ -5,12 +5,20 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from nemo_evaluator.api.fields import TasksetRef
+from nemo_evaluator.jobs.agent_spec import (
+    GymPlacement,
+    HarborBuiltinAgentSource,
+)
 from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
+from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
 
 
 def _evaluator() -> tuple[Evaluator, MagicMock]:
@@ -25,6 +33,85 @@ def _runner() -> GymAgentTaskRunner:
     return GymAgentTaskRunner(
         config=GymRuntimeConfig(agent="simple_agent", agent_config="c.yaml", resources_server="mcqa", num_repeats=3)
     )
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_saved_trials_reach_job_spec_without_runner_conversion(monkeypatch, empty):
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = MagicMock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    convert = MagicMock(side_effect=AssertionError("Offline submission must not convert a runner"))
+    monkeypatch.setattr("nemo_evaluator.sdk._executor.runner_to_target", convert)
+    trials = (
+        []
+        if empty
+        else [
+            AgentEvalTrial(
+                id="trial-1",
+                task_id="task-1",
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="Done"),
+            )
+        ]
+    )
+    tasks = TasksetRef("default/suite")
+    job = evaluator.submit(tasks=tasks, trials=trials)
+    assert job is create_job.return_value
+    spec = create_job.call_args.kwargs["spec"]
+    assert spec.tasks == tasks
+    assert spec.trials == trials
+    assert spec.target is None
+    assert spec.model_dump(mode="json")["trials"] == [trial.model_dump(mode="json") for trial in trials]
+    convert.assert_not_called()
+
+
+@pytest.mark.parametrize("case", ["both", "neither", "placement", "no_tasks", "row_option"])
+def test_saved_trial_submission_rejects_invalid_combinations(case):
+    evaluator, executor = _evaluator()
+    options = {"tasks": TasksetRef("suite"), "trials": []}
+    if case == "both":
+        options["target"] = _runner()
+    elif case == "neither":
+        del options["trials"]
+    elif case == "placement":
+        options["placement"] = GymPlacement()
+    elif case == "no_tasks":
+        del options["tasks"]
+    else:
+        options["config"] = MagicMock()
+    with pytest.raises(TypeError):
+        evaluator.submit(**options)  # ty: ignore[no-matching-overload] -- exercise invalid public call shapes
+    executor.submit_agent_eval.assert_not_called()
+    executor.submit.assert_not_called()
+
+
+@pytest.mark.parametrize("directory", ["omitted", "none", "path"])
+def test_harbor_submission_converts_target_before_creating_job(monkeypatch, tmp_path, directory):
+    from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget
+
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    create_job = MagicMock()
+    monkeypatch.setattr(evaluator._executor, "create_agent_eval", create_job)
+    jobs_dir = tmp_path / "harbor-jobs"
+    options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else jobs_dir}
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(
+            **options, agent_name="oracle", reward_key="score", n_attempts=2, n_concurrent_trials=3
+        )
+    )
+    tasks = TasksetRef("default/suite")
+    job = evaluator.submit(tasks=tasks, target=runner)
+    assert job is create_job.return_value
+    create_job.assert_called_once()
+    kwargs = create_job.call_args.kwargs
+    assert kwargs["workspace"] == "default"
+    assert kwargs["spec"].tasks == tasks
+    assert kwargs["spec"].target == HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="oracle"), reward_key="score", n_attempts=2, n_concurrent_trials=3
+    )
+    assert "jobs_dir" not in kwargs["spec"].target.model_dump()
+    if directory == "path":
+        assert not jobs_dir.exists()
 
 
 def test_a_taskset_and_a_live_runner_route_to_the_agent_eval_path() -> None:
@@ -150,3 +237,38 @@ def test_the_agent_job_resource_does_not_offer_row_evaluation_readers() -> None:
     # And it is not related to the row resource by inheritance in either direction.
     assert not issubclass(AgentEvaluatorJobResource, EvaluatorJobResource)
     assert not issubclass(EvaluatorJobResource, AgentEvaluatorJobResource)
+
+
+def test_a_placement_for_a_runner_it_does_not_fit_is_refused() -> None:
+    # Ignoring the placement would submit a job missing the environment the caller asked for.
+    evaluator, executor = _evaluator()
+
+    # A real runner, not a mock: a MagicMock satisfies any parameter type, leaving the overloads
+    # unexercised.
+    harbor = HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=Path("/tmp/harbor-unused")))
+
+    with pytest.raises(TypeError) as excinfo:
+        evaluator.submit(tasks=TasksetRef("ts"), target=harbor, placement=GymPlacement())  # ty: ignore[invalid-argument-type]
+
+    assert "GymAgentTaskRunner" in str(excinfo.value)
+    executor.submit_agent_eval.assert_not_called()
+
+
+def test_a_placement_on_the_row_path_is_refused() -> None:
+    # A row evaluation has no runner to place; accepting one would silently drop it.
+    evaluator, executor = _evaluator()
+
+    with pytest.raises(TypeError) as excinfo:
+        evaluator.submit(  # ty: ignore[no-matching-overload]
+            metric=MagicMock(), dataset=MagicMock(), placement=GymPlacement()
+        )
+
+    assert "row evaluation" in str(excinfo.value)
+    executor.submit.assert_not_called()
+
+
+def test_executor_refuses_placement_without_target() -> None:
+    # Saved trials are not executed, so a placement would be silently dropped.
+    evaluator = Evaluator(client=EvaluatorClient(base_url="http://test", workspace="default"))
+    with pytest.raises(TypeError, match="placement requires target"):
+        evaluator._executor.submit_agent_eval(tasks=TasksetRef("default/suite"), trials=[], placement=GymPlacement())

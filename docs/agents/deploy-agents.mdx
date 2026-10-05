@@ -93,7 +93,7 @@ harnesses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 
 mcp:
@@ -122,7 +122,7 @@ import yaml
 
 with open("research-agent/agent.yaml") as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="research-agent",
     config=config,
     config_format=config["config_format"],
@@ -158,22 +158,24 @@ nemo agents environments create research \
 <Tab title="Python SDK">
 
 ```python
-client.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
+sdk.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
 
-client.agents.environment_specs.create(
+agents.environment_specs.create(
     name="research",
-    provider="local",
-    env={"LOG_LEVEL": "debug"},
-    mcp={
-        "github": {
-            "url": "docker",
-            "env": {"GITHUB_TOOLSETS": "repos,issues"},
-            "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
-        }
+    spec={
+        "provider": "local",
+        "env": {"LOG_LEVEL": "debug"},
+        "mcp": {
+            "github": {
+                "url": "docker",
+                "env": {"GITHUB_TOOLSETS": "repos,issues"},
+                "secrets": {"GITHUB_PERSONAL_ACCESS_TOKEN": "default/research-github-pat"},
+            }
+        },
     },
 )
 
-client.agents.environments.create(
+agents.environments.create(
     name="research",
     environment_spec="default/research",
     compute_spec={"resources": {"limits": {"cpu": "2", "memory": "4Gi"}}},
@@ -207,13 +209,13 @@ nemo agents deployments get research-deployment
 <Tab title="Python SDK">
 
 ```python
-client.agents.deployments.create(
+agents.deployments.create(
     agent="research-agent",
     name="research-deployment",
     environment="default/research",
 )
 
-client.agents.deployments.get("research-deployment")
+agents.deployments.get("research-deployment")
 ```
 
 </Tab>
@@ -234,11 +236,11 @@ on `nemo agents undeploy`. No image or executor configuration is required.
 
 ```bash
 # Confirm that the local Platform instance is ready
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 
@@ -266,32 +268,34 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
 # Register the agent from an agent.yaml
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
 # Deploy as a local subprocess
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-deployment",
 )
 
 # Invoke through the Agents gateway
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-deployment",
     input="What is 12 multiplied by 8?",
 )
@@ -324,17 +328,23 @@ requires the `container` extra. Install it with:
 uv sync --package nemo-agents-plugin --extra container
 ```
 
+The generated image installs the harness selected by `default_harness`; other
+configured harnesses are not included. Claude, Codex, and DeepAgents use their
+corresponding `nemo-helix` extras. Hermes is installed from its pinned source
+in a fixed Python 3.12 environment so its dependencies do not conflict with the
+Platform runtime. The Hermes Python version is not currently configurable.
+
 The examples below use the calculator agent that ships with the source
 checkout. Run them from the repository root. Its config is located at
 `plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml`.
 Build a wheel from the checkout and select it for packaging:
 
 ```bash
-uv build --package nemo-platform --wheel --out-dir dist
+uv build --package nemo-helix --wheel --out-dir dist
 export NEMO_AGENTS_WHEEL=LATEST
 ```
 
-`LATEST` selects the newest `nemo_platform-*.whl` file in `dist`. You can instead
+`LATEST` selects the newest `nemo_helix-*.whl` file in `dist`. You can instead
 set `NEMO_AGENTS_WHEEL` to an absolute wheel path.
 
 <Tabs>
@@ -448,31 +458,33 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-docker",
     deployment_mode="docker",
     image="calculator-agent:local",
 )
 
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-docker",
     input="What is 12 multiplied by 8?",
 )
@@ -518,31 +530,33 @@ nemo agents invoke \
 import os
 
 import yaml
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
 with open(
     "plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml"
 ) as f:
     config = yaml.safe_load(f)
-client.agents.create(
+agents.create(
     name="calculator-agent",
     config=config,
     config_format=config["config_format"],
 )
 
-client.agents.deployments.create(
+agents.deployments.create(
     agent="calculator-agent",
     name="calculator-agent-k8s",
     deployment_mode="k8s",
     image="<registry>/calculator-agent:1.0.0",
 )
 
-response = client.agents.invoke(
+response = agents.invoke(
     deployment="calculator-agent-k8s",
     input="What is 12 multiplied by 8?",
 )
@@ -582,8 +596,10 @@ conventions apply to `agent.yaml`:
 
 - **Set `models.default.model` to the Inference Gateway entity name.** The
   models controller creates these names by replacing slashes and dots with
-  hyphens (`nvidia/nemotron-3-nano-30b-a3b` becomes
-  `nvidia-nemotron-3-nano-30b-a3b`).
+  hyphens (`nvidia/nemotron-3.5-lightning-30b-a3b` becomes
+  `nvidia-nemotron-3-5-lightning-30b-a3b`). The bundled calculator config uses
+  `${NEMO_DEFAULT_MODEL}`; the CLI resolves it from the active context or the
+  environment before creating the agent.
 - **Leave `base_url` unset for a Platform-routed model.** When `provider` is
   `nvidia`, `openai`, or `openai-compatible`, the deployment supplies the
   Inference Gateway URL. `api_key_env` names the environment variable expected
@@ -595,7 +611,7 @@ The calculator agent uses:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: ${NEMO_DEFAULT_MODEL}
     api_key_env: NVIDIA_API_KEY
 ```
 
@@ -656,14 +672,16 @@ nemo agents deployments get calculator-agent-deployment
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
-deployment = client.agents.deployments.get("calculator-agent-deployment")
+deployment = agents.deployments.get("calculator-agent-deployment")
 print(deployment["deployment_mode"], deployment["status"], deployment["endpoints"])
 ```
 
@@ -678,6 +696,32 @@ loopback `endpoint` instead. The Agents gateway uses whichever the deployment's
 mode provides, so invocation is identical across modes.
 
 ---
+
+## Iterate on a Deployed Agent
+
+When you change an agent's config and want to push the new version to the same
+agent name, use `nemo agents redeploy` instead of running undeploy, delete,
+create, and deploy by hand:
+
+```bash
+nemo agents redeploy --agent calculator-agent --agent-config ./calculator/agent.yaml
+```
+
+The agent entity is immutable by name (`create` returns 409 on a duplicate) and
+there is no in-place update route, so `redeploy` orchestrates the full teardown
+and rebuild in one command: it undeploys every live deployment, deletes the
+agent entity (preserving the durable `{agent}-ethos` fileset), recreates the
+agent from `--agent-config`, and deploys it again.
+
+Runtime flags (`--mode`, `--image`, `--use-image-entrypoint`, `--environment`)
+are auto-detected from the agent's existing deployment when omitted; pass them
+explicitly to override. `--wait`/`--timeout` behave as they do for `deploy`.
+
+**Safety contract.** The new config is validated client-side *before* any
+teardown, so a bad config is a safe no-op — nothing is torn down. Once teardown
+begins the operation is **not atomic**: if a later step fails, the agent may be
+left undeployed. Each step is check-first, so `redeploy` is safe to re-run to
+finish; on a post-delete failure it prints the exact re-run command.
 
 ## Deployment Cleanup
 
@@ -699,18 +743,20 @@ nemo agents delete calculator-agent
 ```python
 import os
 
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
 # Stop the running deployment (removes the process/container/k8s objects)
-client.agents.deployments.delete("calculator-agent-deployment")
+agents.deployments.delete("calculator-agent-deployment")
 
 # Remove the agent entity
-client.agents.delete("calculator-agent")
+agents.delete("calculator-agent")
 ```
 
 </Tab>

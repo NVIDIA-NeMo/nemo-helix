@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("scaled_evals")
 pytest.importorskip("nemo_scaled_evals_plugin")
 
-from nemo_platform_plugin.entities.base import EntityNotFoundError
+from nemo_helix_plugin.entities.base import EntityNotFoundError
 from nemo_scaled_evals_plugin.entities import ScaledEvaluation
 from nemo_scaled_evals_plugin.projection import (
     EvaluationProjectionReader,

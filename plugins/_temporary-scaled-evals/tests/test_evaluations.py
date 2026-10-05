@@ -198,9 +198,9 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
             "source_bytes": 42,
         }
 
-    monkeypatch.setattr("scaled_evals.dispatch.worker.s3.build_evaluation_archive", fake_build)
+    monkeypatch.setattr("scaled_evals.dispatch.worker.artifacts.build_evaluation_archive", fake_build)
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.build_evaluation_archive_from_directory",
+        "scaled_evals.dispatch.worker.artifacts.build_evaluation_archive_from_directory",
         lambda evaluation_id, _root: fake_build(evaluation_id),
     )
 
@@ -209,11 +209,11 @@ def _stub_dispatch_archive_build(monkeypatch) -> None:  # noqa: ANN001
 def _disable_dispatch_artifact_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep dispatcher unit tests independent from local object-store state."""
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.sync_directory_to_prefix",
+        "scaled_evals.dispatch.worker.artifacts.sync_directory_to_prefix",
         lambda _root, _prefix: 0,
     )
     monkeypatch.setattr(
-        "scaled_evals.dispatch.worker.s3.replace_directory_at_prefix",
+        "scaled_evals.dispatch.worker.artifacts.replace_directory_at_prefix",
         lambda _root, _prefix: 0,
     )
 
@@ -338,7 +338,7 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
     monkeypatch.setattr(settings, "task_image_allowed_registries", "us-central1-docker.pkg.dev")
     checked: list[str] = []
     monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.object_exists",
+        "scaled_evals.api.routers.evaluations.artifacts.object_exists",
         lambda key: checked.append(key) or True,
     )
     conn = _conn_with_fetchone(
@@ -364,8 +364,8 @@ def test_create_allows_ready_gcs_revision_when_pack_exists(
 def test_create_409_when_ready_revision_pack_missing_local_rustfs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "object_store_backend", "s3")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.object_exists", lambda _key: False)
+    monkeypatch.setattr(settings, "object_store_backend", "artifacts")
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
     conn = _conn_with_fetchone(
         {
             "status": "ready",
@@ -513,7 +513,7 @@ def test_create_resolves_harbor_version_before_queueing() -> None:
         "0.13.2",
         "scaled-evals-api:dev",
         None,
-        "nemo-platform-plugin-overlay-v1",
+        "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
     runner_metadata = insert_call.args[1][10].obj
@@ -1666,7 +1666,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
             }
         ]
 
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", fake_list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", fake_list_objects)
 
     response = client.get("/v1/evaluations/ev_test123/artifacts", params={"prefix": "trial/"})
 
@@ -1690,7 +1690,7 @@ def test_list_artifacts_reads_s3_and_supports_prefix(monkeypatch) -> None:  # no
 def test_list_artifacts_404_when_evaluation_unknown(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(None))
     list_objects = MagicMock(return_value=[])
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.list_objects", list_objects)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.list_objects", list_objects)
 
     response = client.get("/v1/evaluations/ev_missing/artifacts")
 
@@ -1718,7 +1718,8 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
         yield b"artifact content"
 
     v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.stream_object", stream_object)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: True)
 
     response = client.get(
         "/v1/evaluations/ev_test123/artifacts/trial/result.json",
@@ -1729,10 +1730,28 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
     assert response.headers["content-disposition"] == 'attachment; filename="result.json"'
 
 
+def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: ANN001
+    conn = _conn_with_fetchone({"id": "ev_test123"})
+    _override_conn(conn)
+
+    @contextmanager
+    def stream_db() -> Iterator[Database]:
+        yield Database(conn)
+
+    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    # The object does not exist in the backing Files store; the route must map that
+    # to a clean 404 up front rather than a 200 with a stream that fails mid-iteration.
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)
+
+    response = client.get("/v1/evaluations/ev_test123/artifacts/trial/result.json")
+
+    assert response.status_code == 404
+
+
 def test_get_archive_missing(monkeypatch) -> None:  # noqa: ANN001
     _override_conn(_conn_with_fetchone(_archive_row()))
     presign = MagicMock(return_value="http://signed.example/archive")
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
+    monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.presign_get", presign)
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 
@@ -1759,7 +1778,7 @@ def test_get_archive_building() -> None:
     assert response.json()["download"] is None
 
 
-def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN001
+def test_get_archive_ready_streams_download(monkeypatch) -> None:  # noqa: ANN001
     built_at = datetime(2026, 6, 15, 12, tzinfo=UTC)
     _override_conn(
         _conn_with_fetchone(
@@ -1771,10 +1790,6 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
             )
         )
     )
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda key: f"http://signed.example/{key}",
-    )
 
     response = client.get("/v1/evaluations/ev_test123/archive")
 
@@ -1783,33 +1798,11 @@ def test_get_archive_ready_presigns_download(monkeypatch) -> None:  # noqa: ANN0
     assert body["status"] == "ready"
     assert body["size_bytes"] == 2048
     assert body["built_at"] == "2026-06-15T12:00:00Z"
+    # Downloads always stream through the API now (presigned direct-to-storage URLs are gone).
     assert body["download"] == {
-        "method": "GET",
-        "url": "http://signed.example/evaluations/ev_test123/results.tar.gz",
-    }
-
-
-def test_get_archive_ready_uses_api_download_when_backend_cannot_presign(monkeypatch) -> None:  # noqa: ANN001
-    _override_conn(
-        _conn_with_fetchone(
-            _archive_row(
-                archive_status="ready",
-                archive_object_key="evaluations/ev_test123/results.tar.gz",
-            )
-        )
-    )
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.can_presign_get", lambda: False)
-    presign = MagicMock()
-    monkeypatch.setattr("scaled_evals.api.routers.evaluations.s3.presign_get", presign)
-
-    response = client.get("/v1/evaluations/ev_test123/archive")
-
-    assert response.status_code == 200
-    assert response.json()["download"] == {
         "method": "GET",
         "url": "/evaluations/ev_test123/archive/download",
     }
-    assert presign.call_count == 0
 
 
 def test_get_archive_404_when_evaluation_unknown() -> None:
@@ -1852,16 +1845,12 @@ def test_post_archive_ready_without_force_returns_existing_download(monkeypatch)
         )
     )
     _override_conn(conn)
-    monkeypatch.setattr(
-        "scaled_evals.api.routers.evaluations.s3.presign_get",
-        lambda _key: "http://signed.example/archive",
-    )
 
     response = client.post("/v1/evaluations/ev_test123/archive", json={})
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
-    assert response.json()["download"]["url"] == "http://signed.example/archive"
+    assert response.json()["download"]["url"] == "/evaluations/ev_test123/archive/download"
     assert len(conn.cursor.return_value.__enter__.return_value.execute.call_args_list) == 1
 
 

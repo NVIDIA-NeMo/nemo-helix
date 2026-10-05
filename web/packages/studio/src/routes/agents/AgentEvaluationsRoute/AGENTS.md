@@ -74,7 +74,7 @@ persisted spec into a new Fileset. The judge is now part of the stored yardstick
 `eval-config.json` **as-is** (`parsePersistedSpec`) — no re-fan, no judge re-pick — so the
 yardstick (tasks + metric + judge) is identical across every run. Only the agent **target** is
 injected at submit; the whole is wrapped as `{ spec }` for the job request. The saved spec is
-also a valid `nemo evaluator agent-evaluate submit --spec-file` input once a `target` is added.
+also a valid `nemo evaluator agent-evaluate --spec-file` input once a `target` is added.
 
 Injected by Studio **at submit** (never stored in the config): the agent **target** only. The
 judge model and `max_concurrent_tasks` are part of the persisted yardstick.
@@ -148,7 +148,7 @@ Submit body is wrapped: `{"spec": { ...AgentEvalInputSpec }}`.
 ```
 
 Use the non-streaming chat-completions endpoint, which both agent config formats serve: a
-`nemo-agents-spec-v1` agent through the Platform-owned Fabric server, a `nat-workflow-v1`
+`nemo-agents-spec-v1` agent through the NeMo Helix-owned Fabric server, a `nat-workflow-v1`
 agent through NAT's FastAPI front end (`workflow.openai_api_v1_path`, on by default). NAT
 also serves the legacy `/generate`, but Fabric does not — it 404s — so the target must not
 branch on the agent's format.

@@ -7,7 +7,7 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { PageLayout } from '@studio/routes/PageLayout';
 import { getWorkspaceIndexRoute } from '@studio/routes/utils';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { SIDE_NAV_OPEN_KEY } from '@studio/util/localStorage';
+import { NAV_ACCORDION_STATE_KEY, SIDE_NAV_OPEN_KEY } from '@studio/util/localStorage';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
@@ -67,6 +67,7 @@ const importNavigationDrawer = async () => {
 describe('NavigationDrawer', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
+    window.localStorage.clear();
   });
   describe('General functionality', () => {
     it('renders the navigation drawer with the correct buttons', async () => {
@@ -290,7 +291,7 @@ describe('NavigationDrawer', () => {
       expect(trigger).toHaveAttribute('aria-expanded', 'false');
       expect(screen.queryByText('Entries')).not.toBeInTheDocument();
       // eslint-disable-next-line testing-library/no-node-access
-      expect(document.querySelector('.lucide-chevron-left')).toBeInTheDocument();
+      expect(document.querySelector('.lucide-chevron-right')).toBeInTheDocument();
     });
 
     it('renders a sub-item with nowhere to go as text rather than a link', async () => {
@@ -330,7 +331,7 @@ describe('NavigationDrawer', () => {
       expect(screen.queryByText('Entries')).not.toBeInTheDocument();
     });
 
-    it('hands a manually toggled parent back to the route on the next navigation', async () => {
+    it('keeps a manually toggled parent at the user preference across navigation', async () => {
       const user = userEvent.setup();
       const NavigationDrawer = await importNavigationDrawer();
 
@@ -362,17 +363,56 @@ describe('NavigationDrawer', () => {
       );
 
       const chevron = () => screen.getByRole('button', { name: /traces/i });
+      // The current section opens on its own to start.
       expect(chevron()).toHaveAttribute('aria-expanded', 'true');
 
-      // The pin holds for as long as the user stays put.
+      // Collapse it by hand.
       await user.click(chevron());
       expect(chevron()).toHaveAttribute('aria-expanded', 'false');
 
-      // Navigating drops it, so the parent owning the new page expands on its own again.
+      // Leaving and returning must not reopen it: the user's choice outlives navigation.
       await user.click(screen.getByRole('link', { name: 'Jobs' }));
       await user.click(screen.getByRole('link', { name: 'Traces' }));
-      expect(chevron()).toHaveAttribute('aria-expanded', 'true');
-      expect(screen.getByText('Entries')).toBeInTheDocument();
+      expect(chevron()).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('Entries')).not.toBeInTheDocument();
+    });
+
+    it('restores a stored preference from a prior session over defaultOpen', async () => {
+      const NavigationDrawer = await importNavigationDrawer();
+      // A previous session collapsed Traces; a fresh load honors it even though the route would
+      // otherwise open the section.
+      window.localStorage.setItem(NAV_ACCORDION_STATE_KEY, JSON.stringify({ traces: false }));
+
+      const router = createMemoryRouter(
+        [
+          {
+            path: '*',
+            element: (
+              <NavigationDrawer
+                items={[
+                  {
+                    id: 'traces',
+                    slotLabel: 'Traces',
+                    href: '/traces',
+                    defaultOpen: true,
+                    subItems: [{ id: 'entries', slotLabel: 'Entries', href: '/traces/entries' }],
+                  },
+                ]}
+              />
+            ),
+          },
+        ],
+        { initialEntries: ['/traces'] }
+      );
+      render(
+        <TestProviders>
+          <RouterProvider router={router} />
+        </TestProviders>
+      );
+
+      const chevron = await screen.findByRole('button', { name: /traces/i });
+      expect(chevron).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('Entries')).not.toBeInTheDocument();
     });
   });
 });

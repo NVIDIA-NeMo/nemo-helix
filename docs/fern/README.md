@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Fern Docs
+# NeMo Helix Fern Docs
 
-This directory holds the Fern **configuration** for the NeMo Platform documentation site. The page content (`.mdx`) lives in the parent `docs/` tree (e.g. `docs/get-started/setup.mdx`); this `docs/fern/` directory holds the navigation, theme, components, snippets, and OpenAPI wiring. The nav references pages with relative paths (`../../<area>/<page>.mdx`).
+This directory holds the Fern **configuration** for the NeMo Helix documentation site. The page content (`.mdx`) lives in the parent `docs/` tree (e.g. `docs/get-started/setup.mdx`); this `docs/fern/` directory holds the navigation, theme, components, snippets, and OpenAPI wiring. The nav references pages with relative paths (`../../<area>/<page>.mdx`).
 
 ## Quick Links
 
@@ -127,6 +127,17 @@ For patch or nonstandard cases, use object form to map a branch to the exact fut
 ```json
 {
   "release/0.6": "0.6.1"
+}
+```
+
+If a released version needs docs-only fixes that should come from the release branch instead of the immutable tag, use the option-object form with `source: "branch"`. This replaces the tag snapshot for that version while the override is present, and does not mark the version as a preview when the tag already exists. `tag` may be a string or a list when multiple version snapshots should be sourced from the same branch:
+
+```json
+{
+  "release/0.6": {
+    "tag": ["0.6.0", "0.6.1"],
+    "source": "branch"
+  }
 }
 ```
 

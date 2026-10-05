@@ -85,7 +85,7 @@ The dataset FileSet holds `training.jsonl` (required) and optionally `validation
 
 ### Row schema
 
-Source of truth: `GymDatasetRow` / `GymVerifiersDatasetRow` in `services/rl/src/nmp/rl/schemas/environment.py`.
+Source of truth: `GymDatasetRow` / `GymVerifiersDatasetRow` in `services/rl/src/nhx/rl/schemas/environment.py`.
 
 **Where rows are actually checked.** Submit verifies only that the dataset FileSet has `training.jsonl` at its root (`check_gym_dataset_layout`). Row *shape* is checked later by `DatasetValidator` inside the training container, against `GRPO_SCHEMA` — which is built from the **agent-agnostic** `GymDatasetRow`, so it requires exactly `responses_create_params` and `agent_ref` and passes everything else through. A wrong `vf_env_id` is therefore not a validation error; it surfaces as the environment failing to load, one job start later. Validate rows locally.
 
@@ -134,7 +134,7 @@ Source of truth: `GymDatasetRow` / `GymVerifiersDatasetRow` in `services/rl/src/
 
 **Converted hub environments need no work** — `pi-to-gym-conversion` writes `training.jsonl` (and `validation.jsonl` with `--validation-fraction`) alongside the package. Use those.
 
-For your own prompts, one row per prompt. `dataset_row_from_verifiers` in `services/rl/src/nmp/rl/tasks/environment/package.py` is the canonical shape; this mirrors it:
+For your own prompts, one row per prompt. `dataset_row_from_verifiers` in `services/rl/src/nhx/rl/tasks/environment/package.py` is the canonical shape; this mirrors it:
 
 ```python
 import json

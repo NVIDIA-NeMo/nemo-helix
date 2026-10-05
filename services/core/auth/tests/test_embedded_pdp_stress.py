@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nmp.common.config import Configuration
-from nmp.core.auth.app.embedded_pdp import engine as embedded_pdp_engine
-from nmp.core.auth.app.embedded_pdp import evaluate, reload_policy, set_policy_data
-from nmp.core.auth.config import AuthServiceConfig
+from nhx.common.config import Configuration
+from nhx.core.auth.app.embedded_pdp import engine as embedded_pdp_engine
+from nhx.core.auth.app.embedded_pdp import evaluate, reload_policy, set_policy_data
+from nhx.core.auth.config import AuthServiceConfig
 
 # Large-scale fixtures load multi‑MB JSON into OPA; default embedded PDP WASM memory (32 MiB) is too small.
 _STRESS_PDP_MEMORY_MB = 512
@@ -284,7 +284,7 @@ def large_scale_policy_data():
     rng = random.Random(SEED)
 
     # Load the full static-authz.yaml
-    static_path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/static-authz.yaml"
+    static_path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/static-authz.yaml"
     with open(static_path) as f:
         data = yaml.safe_load(f)
 
@@ -316,7 +316,7 @@ def large_scale_policy_data():
         principals[user_id] = {"workspaces": user_workspaces}
 
     # Add a platform admin
-    principals["admin@example.com"] = {"workspaces": {"system": ["PlatformAdmin"]}}
+    principals["admin@example.com"] = {"workspaces": {"system": ["HelixAdmin"]}}
 
     data["authz"]["workspaces"] = workspaces
     data["authz"]["principals"] = principals

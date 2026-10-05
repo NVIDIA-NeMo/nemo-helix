@@ -21,8 +21,8 @@ from nemo_example_plugin.middleware import (  # pyright: ignore[reportMissingImp
     _redact_keywords,
 )
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig  # pyright: ignore[reportMissingImports]
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.inference_middleware import (
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.inference_middleware import (
     ImmediateResponse,
     InferenceMiddlewareCacheAccessor,
     InferenceMiddlewareContext,
@@ -78,18 +78,15 @@ def _make_response(result: ResponseResult) -> InferenceResponse:
 
 
 @pytest.mark.asyncio
-async def test_startup_adapts_sdk_to_typed_entities_client() -> None:
+async def test_startup_derives_typed_entities_client() -> None:
     plugin = _make_plugin()
-    sdk = MagicMock()
+    client = MagicMock()
     typed_client = MagicMock()
     entity_client = MagicMock()
 
     with (
-        patch("nemo_platform_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
-        patch(
-            "nemo_example_plugin.middleware.client_from_platform",
-            return_value=typed_client,
-        ) as mock_adapter,
+        patch("nemo_helix_plugin.client_provider.get_async_nemo_client", return_value=client),
+        patch.object(AsyncEntitiesClient, "from_client", return_value=typed_client) as mock_from_client,
         patch(
             "nemo_example_plugin.middleware.NemoEntitiesClient",
             return_value=entity_client,
@@ -97,7 +94,7 @@ async def test_startup_adapts_sdk_to_typed_entities_client() -> None:
     ):
         await plugin.on_startup()
 
-    mock_adapter.assert_called_once_with(sdk, AsyncEntitiesClient)
+    mock_from_client.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert plugin._entity_client is entity_client
 

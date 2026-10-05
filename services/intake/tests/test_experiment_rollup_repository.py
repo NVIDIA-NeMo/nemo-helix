@@ -4,9 +4,9 @@
 """Evaluation rollup repository tests."""
 
 import pytest
-from nmp.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
-from nmp.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
+from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 
 
 class _Executor(ClickHouseExecutor):
@@ -164,7 +164,7 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
 
 
 def test_score_rollup_cte_builders_compose_the_pipeline():
-    from nmp.intake.repository.clickhouse.evaluation_rollup import (
+    from nhx.intake.repository.clickhouse.evaluation_rollup import (
         _evaluators_cte,
         _session_scores_cte,
         _test_case_scores_cte,

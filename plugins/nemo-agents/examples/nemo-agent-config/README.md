@@ -5,22 +5,24 @@
 
 ## Prerequisites
 
-This directory contains Platform-managed `nemo-agents-spec-v1` configs for
+This directory contains NeMo Helix-managed `nemo-agents-spec-v1` configs for
 NeMo Agents. Run the commands below from the repository root.
 
-The plugin installs Fabric, Relay Python bindings, and supported harness
-adapters. The Relay CLI is separate. Hermes is intentionally split out because the Hermes
-Agent runtime dependencies conflict with the Platform environment.
+The base plugin installs Fabric, Relay support, and the supported harness
+adapters. Install the extra for the harness you want to run; the
+[installation matrix](../../README.md#harness-installation-matrix) lists the
+available package expressions. Hermes is intentionally split out because its
+runtime dependencies conflict with the NeMo Helix environment.
 
 Set the credentials required by the selected model provider. The examples use
 `NVIDIA_API_KEY`. Install and authenticate the selected harness CLI when
 required; for example, run `codex login` for Codex or complete the Claude CLI
 login flow.
 
-For Claude or Codex, install and verify the Relay CLI:
+For example, install Codex and its matching Relay CLI from the repository root:
 
 ```bash
-script/dev-install-fabric.sh
+uv sync --package nemo-agents-plugin --extra codex
 nemo-relay --version
 ```
 
@@ -49,29 +51,48 @@ The selected harness is controlled by `default_harness`. To try another harness
 from the same config today, edit `default_harness` before creating or invoking
 the agent.
 
+## Model parameters
+
+Models can set optional `top_p` and `max_tokens` parameters:
+
+```yaml
+models:
+  default:
+    provider: openai
+    model: openai/gpt-5.4
+    top_p: 0.9
+    max_tokens: 1024
+```
+
+`top_p` must be between 0 and 1, inclusive. `max_tokens` must be a positive
+integer no larger than `18446744073709551615`. Omit either field to keep the
+adapter's default. Support depends on the selected harness and model.
+These fields also work under `harnesses.<name>.model`, which replaces
+`models.default` for the selected harness; individual fields are not merged.
+
 ## Invoke
 
 `agent.yaml` is the telemetry-neutral multi-harness example. Set
 `default_harness` to the harness you want to validate, then create, deploy, and
-invoke the agent through Platform.
+invoke the agent through NeMo Helix.
 
 ```bash
 make bootstrap-python
 source .venv/bin/activate
 
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 if curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null; then
-  echo "Using the running NeMo Platform instance at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null; then
+  echo "Using the running NeMo Helix instance at $NHX_BASE_URL"
 else
-  nemo setup --auto --start-services --install-skills --no-deploy-agent
+  nemo setup --auto --start-services --install-skills
 fi
 
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 
@@ -106,12 +127,12 @@ invoking:
 codex login
 ```
 
-In this example, Codex uses the shared Nemotron model through Platform IGW.
+In this example, Codex uses the shared Nemotron model through NeMo Helix IGW.
 
 ### DeepAgents
 
 Set `default_harness: deepagents` in `agent.yaml`. In this example, DeepAgents
-uses the shared Nemotron model through Platform IGW.
+uses the shared Nemotron model through NeMo Helix IGW.
 
 ### Claude
 
@@ -126,23 +147,18 @@ In this example, Claude uses its harness-local Anthropic model config.
 
 ### Hermes
 
-Hermes Agent has dependencies that conflict with the Platform environment, so
-install it with the Fabric adapter in a separate Python 3.12 environment:
+Hermes Agent has dependencies that conflict with the NeMo Helix environment, so
+use the repository helper to install Fabric's pinned Hermes source and matching
+adapter in a separate Python 3.14 environment:
 
 ```bash
-uvx uv@0.9.14 venv --python 3.12 .venv-hermes
-uvx uv@0.9.14 --no-config pip install \
-  --python .venv-hermes/bin/python \
-  "nemo-fabric[relay]>=0.3.0,<0.4.0" \
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0" \
-  "hermes-agent==0.19.0"
-
+script/dev-install-hermes.sh
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
 ```
 
 Set `default_harness: hermes` in `agent.yaml`. For subprocess deployments,
-export `ADAPTER_PYTHON` before starting Platform, or restart Platform after
-exporting it. The Platform service launches the agent subprocess, so exporting
+export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
+exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
 
 ## Relay Local Files
@@ -164,7 +180,7 @@ find ~/.local/share/nemo/agents/system/default \
 ## Relay to Intake
 
 `agent-relay-intake.yaml` enables Relay ATIF export to a locally running
-Platform Intake API. With Docker running, Intake automatically provisions its
+NeMo Helix Intake API. With Docker running, Intake automatically provisions its
 local ClickHouse container during platform startup. Use
 `agent-relay-intake.yaml` with the invoke directions above.
 

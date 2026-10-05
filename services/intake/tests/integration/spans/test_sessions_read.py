@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
-from nmp.intake.repository.clickhouse.session import _session_detail_query
-from nmp.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
-from nmp.intake.spans.clickhouse_client import ClickHouseSpanClient
+from nhx.intake.repository.clickhouse.session import _session_detail_query
+from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
+from nhx.intake.spans.clickhouse_client import ClickHouseSpanClient
 
 
 def test_session_detail_rolls_up_all_current_spans(

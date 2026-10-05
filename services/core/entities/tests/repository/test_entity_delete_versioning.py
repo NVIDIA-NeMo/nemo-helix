@@ -4,9 +4,9 @@
 """Tests for optimistic locking on entity deletes."""
 
 import pytest
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
-from nmp.core.entities.app.repository.exceptions import EntityVersionConflictError
-from nmp.core.entities.app.repository.sqlalchemy.models import DBEntity
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.core.entities.app.repository.exceptions import EntityVersionConflictError
+from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 

@@ -5,9 +5,9 @@ Generic single-database configuration.
 
 ## Generating and running migrations
 
-When you change the entities schema (e.g. tables in `src/nmp/core/entities/app/repository/sqlalchemy/models.py`), create and apply a migration as follows. Run all commands from the **service root** (`services/core/entities/`).
+When you change the entities schema (e.g. tables in `src/nhx/core/entities/app/repository/sqlalchemy/models.py`), create and apply a migration as follows. Run all commands from the **service root** (`services/core/entities/`).
 
-**Prerequisites:** A running PostgreSQL (or set `DATABASE_URL` / `DATABASE_*` env vars). The migration env uses `DatabaseConfig` from `nmp.common.config` when no URL is set in `alembic.ini`.
+**Prerequisites:** A running PostgreSQL (or set `DATABASE_URL` / `DATABASE_*` env vars). The migration env uses `DatabaseConfig` from `nhx.common.config` when no URL is set in `alembic.ini`.
 
 1. **Generate a new revision** (autogenerate from current models):
    ```bash

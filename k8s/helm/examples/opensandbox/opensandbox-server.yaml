@@ -82,7 +82,7 @@ configToml: |
   kubeconfig_path = ""
   # MUST be the same namespace the platform jobs run in (Helm release namespace).
   # PVC remounts and image-pull secrets fail across namespaces.
-  # Replace with your NeMo Platform release namespace before installing.
+  # Replace with your NeMo Helix release namespace before installing.
   namespace = "REPLACE_WITH_RELEASE_NAMESPACE"
   informer_enabled = true
   informer_resync_seconds = 300

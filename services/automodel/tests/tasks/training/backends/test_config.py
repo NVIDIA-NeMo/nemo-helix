@@ -39,7 +39,9 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "transformers", MagicMock())
 
 
-from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
+from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
+    _build_base_model,
+    _build_peft,
     _configure_chat_dataset,
     _configure_moe_backend,
     _configure_retrieval_dataset,
@@ -50,10 +52,10 @@ from nmp.automodel.tasks.training.backends.config import (  # noqa: E402
     resolve_compiled_recipe,
     resolve_warmup_steps,
 )
-from nmp.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nmp.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
+from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
+from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
-CONFIG_MODULE = "nmp.automodel.tasks.training.backends.config"
+CONFIG_MODULE = "nhx.automodel.tasks.training.backends.config"
 AUTOCONFIG_PATCH = "transformers.AutoConfig"
 MODEL_REGISTRY_PATCH = f"{CONFIG_MODULE}.ModelRegistry"
 
@@ -315,7 +317,34 @@ class TestConfigureMoeBackend:
 
         assert cfg["model"]["backend"] == {
             "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
-            "enable_deepep": False,
+            "dispatcher": "torch",
+        }
+
+    @patch(MODEL_REGISTRY_PATCH)
+    @patch(AUTOCONFIG_PATCH)
+    def test_requested_backend_settings_survive_the_moe_default(self, mock_autoconfig_cls, mock_registry) -> None:
+        """The torch-dispatcher default sits under whatever the job spec asked for."""
+        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
+            architectures=["NemotronHForCausalLM"],
+            num_local_experts=8,
+        )
+        mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
+        cfg: dict[str, Any] = {
+            "model": {
+                "backend": {
+                    "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
+                    "dispatcher": "deepep",
+                    "experts": "gmm",
+                }
+            }
+        }
+
+        _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+
+        assert cfg["model"]["backend"] == {
+            "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
+            "dispatcher": "deepep",
+            "experts": "gmm",
         }
 
     @patch(MODEL_REGISTRY_PATCH)
@@ -491,6 +520,62 @@ class TestEstimateStepsPerEpoch:
         )
 
 
+def _lora_step_config(**training: Any) -> TrainingStepConfig:
+    fixture = (
+        Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"
+    )
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    raw["training"].update(training)
+    return TrainingStepConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [(None, "absent"), (False, False), (True, True)],
+    ids=["unset-keeps-automodel-default", "explicit-false-is-sent", "explicit-true-is-sent"],
+)
+def test_peft_forwards_use_memory_efficient_lora_only_when_set(requested: bool | None, expected: object) -> None:
+    """Automodel defaults this to on, so an explicit False has to reach it to turn it off."""
+    base = _lora_step_config()
+    assert base.training.lora is not None
+    lora = base.training.lora.model_copy(update={"use_memory_efficient_lora": requested})
+    config = base.model_copy(update={"training": base.training.model_copy(update={"lora": lora})})
+    cfg: dict[str, Any] = {}
+
+    _build_peft(cfg, config)
+
+    if expected == "absent":
+        assert "use_memory_efficient_lora" not in cfg["peft"]
+    else:
+        assert cfg["peft"]["use_memory_efficient_lora"] is expected
+
+
+@pytest.mark.parametrize(
+    ("mtp", "expected"),
+    [
+        (None, {}),
+        ({}, {}),
+        ({"num_nextn_predict_layers": 2}, {"num_nextn_predict_layers": 2}),
+        (
+            {"num_nextn_predict_layers": 2, "use_repeated_layer": True, "loss_scaling_factor": 0.3},
+            {"num_nextn_predict_layers": 2, "mtp_use_repeated_layer": True, "mtp_loss_scaling_factor": 0.3},
+        ),
+    ],
+    ids=["no-mtp", "empty-mtp", "only-depth", "all-three"],
+)
+def test_base_model_forwards_only_the_mtp_fields_that_were_set(
+    mtp: dict[str, Any] | None, expected: dict[str, Any]
+) -> None:
+    """Support differs per model, so an unset field must not reach one that rejects it."""
+    cfg: dict[str, Any] = {}
+
+    _build_base_model(cfg, _lora_step_config(mtp=mtp))
+
+    mtp_keys = {"num_nextn_predict_layers", "mtp_use_repeated_layer", "mtp_loss_scaling_factor"}
+    assert {k: v for k, v in cfg["model"].items() if k in mtp_keys} == expected
+
+
 def test_compile_uses_fallback_packing_factor_for_schedule(tmp_path: Path) -> None:
     fixture = (
         Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"
@@ -525,6 +610,51 @@ def test_compile_uses_fallback_packing_factor_for_schedule(tmp_path: Path) -> No
     assert compiled["lr_scheduler"]["lr_warmup_steps"] == 1
 
 
+def test_compile_counts_packs_for_a_caller_pinned_pack_size(tmp_path: Path) -> None:
+    """A pinned size keeps its length but the schedule still counts packs, not raw samples.
+
+    Automodel caps its LR decay at the real packed step count and asserts warmup < decay,
+    so a warmup clamped against the unpacked count (13 steps here) would fail at startup.
+    """
+    from nhx.automodel.tasks.training.sequence_packing import PackingEstimate
+
+    fixture = (
+        Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"
+    )
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    config = TrainingStepConfig.model_validate(raw)
+    config.batch.packed_sequence_size = 1024
+    config.optimizer.warmup_steps = 10
+
+    prepared = PreparedDataset(
+        merged_dir=tmp_path,
+        train_file=tmp_path / "train.jsonl",
+        validation_file=tmp_path / "validation.jsonl",
+        train_samples=100,
+        validation_samples=10,
+    )
+    estimate = PackingEstimate(
+        pack_size=2048, avg_seq_length=256, max_seq_length=900, packing_factor=8.0, samples_analyzed=100
+    )
+
+    with (
+        patch(f"{CONFIG_MODULE}.prepare_dataset", return_value=prepared),
+        patch(f"{CONFIG_MODULE}.DatasetValidator"),
+        patch(f"{CONFIG_MODULE}.estimate_dataset_sequence_lengths", return_value=estimate),
+        patch(f"{CONFIG_MODULE}._configure_datasets"),
+        patch(f"{CONFIG_MODULE}._configure_moe_backend"),
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+    ):
+        compiled = compile_automodel_config(config, tmp_path, MagicMock())
+
+    # 1024 / 256 = 4 samples per pack -> ceil(100 / (8 * 4)) = 4 steps.
+    assert compiled["packed_sequence"]["packed_sequence_size"] == 1024
+    assert compiled["step_scheduler"]["max_steps"] == 4
+    assert compiled["lr_scheduler"]["lr_warmup_steps"] == 3
+
+
 def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
     """The compiler writes what AutomodelRecipeWrapper reads, under the same key.
 
@@ -535,7 +665,7 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
     is exactly the arrangement where a rename passes every test and the run
     quietly reports at the default forever. This is the test that fails.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
 
     fixture = (
         Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora_packing.json"
@@ -574,6 +704,7 @@ def test_the_reporting_block_reaches_the_recipe_config(tmp_path: Path) -> None:
         "time_series_metrics": ["*_loss"],
         "min_report_interval_seconds": 30,
     }
+    assert compiled["_recipe"] == "sft"
 
 
 def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path) -> None:
@@ -602,6 +733,7 @@ def test_compile_cross_encoder_recipe_selects_cross_encoder_model(tmp_path: Path
 
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["model"]["num_labels"] == 1
+    assert compiled["_recipe"] == "cross_encoder"
     assert "loss_fn" not in compiled
 
 
@@ -642,6 +774,7 @@ def test_auto_recipe_maps_cross_encoder_head_to_cross_encoder_model(tmp_path: Pa
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
@@ -665,6 +798,7 @@ def test_auto_recipe_prefers_cross_encoder_head_over_stale_embedding_alias(tmp_p
     compiled = _compile_retrieval(config, tmp_path, prepared)
 
     assert resolve_compiled_recipe(config) == TrainingRecipe.CROSS_ENCODER
+    assert compiled["_recipe"] == "cross_encoder"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelCrossEncoder.from_pretrained")
 
 
@@ -680,6 +814,60 @@ def test_bi_encoder_compile_uses_fused_adam_and_job_retrieval_config(tmp_path: P
     assert compiled["optimizer"]["_target_"] == "transformer_engine.pytorch.optimizers.fused_adam.FusedAdam"
     assert compiled["model"]["attn_implementation"] == "sdpa"
     assert compiled["model"]["_target_"].endswith("NeMoAutoModelBiEncoder.from_pretrained")
+    assert compiled["_recipe"] == "bi_encoder"
+
+
+@pytest.mark.parametrize("requested", [False, True])
+def test_bi_encoder_compile_forwards_distributed_inbatch_negative(tmp_path: Path, requested: bool) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=requested),
+    )
+    config.training.recipe = TrainingRecipe.BI_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    # Emitted either way: the trainer reads the attribute off the model, so
+    # writing it explicitly keeps the objective readable in the compiled config
+    # rather than leaving it to the upstream default.
+    assert compiled["model"]["do_distributed_inbatch_negative"] is requested
+
+
+def test_cross_encoder_compile_omits_distributed_inbatch_negative(tmp_path: Path) -> None:
+    config, prepared = _embed_training_config(
+        tmp_path,
+        retrieval=RetrievalConfig(do_distributed_inbatch_negative=True),
+    )
+    config.training.recipe = TrainingRecipe.CROSS_ENCODER
+
+    compiled = _compile_retrieval(config, tmp_path, prepared)
+
+    assert "do_distributed_inbatch_negative" not in compiled["model"]
+
+
+@pytest.mark.parametrize("recipe", [TrainingRecipe.BI_ENCODER, TrainingRecipe.CROSS_ENCODER])
+@pytest.mark.parametrize("shuffle", [False, True])
+def test_retrieval_dataset_honors_dataset_shuffle(
+    tmp_path: Path, mock_customizer_config: MagicMock, recipe: TrainingRecipe, shuffle: bool
+) -> None:
+    """Automodel reorders once in the dataset and again per epoch in the loader; both follow the flag."""
+    train_file = tmp_path / "train.jsonl"
+    train_file.write_text('{"query":"q","pos_doc":"p","neg_doc":["n"]}\n')
+    mock_customizer_config.dataset.shuffle = shuffle
+    cfg: dict[str, Any] = {}
+
+    _configure_retrieval_dataset(
+        cfg,
+        mock_customizer_config,
+        train_file,
+        tmp_path / "validation.jsonl",
+        seed=42,
+        retrieval_config=RetrievalConfig(),
+        recipe=recipe,
+    )
+
+    assert cfg["dataloader"]["dataset"]["do_shuffle"] is shuffle
+    assert cfg["dataloader"]["shuffle"] is shuffle
 
 
 @pytest.mark.parametrize(
@@ -709,3 +897,34 @@ def test_optimizer_selection_is_explicit_after_auto_resolution(
     config.optimizer.optimizer_name = optimizer_name
 
     assert _resolve_optimizer_target(config, recipe) == expected_target
+
+
+class TestBackendSettings:
+    """`training.backend` is typed, and only explicitly set fields reach the recipe."""
+
+    @staticmethod
+    def _explicit(backend: Any) -> dict[str, Any]:
+        from nhx.automodel.tasks.training.backends.config import _explicit_backend_settings
+
+        cfg = MagicMock()
+        cfg.training.backend = backend
+        return _explicit_backend_settings(cfg)
+
+    def test_unset_fields_are_not_forwarded(self) -> None:
+        """Automodel picks backend defaults from the node's hardware; ours would override blindly."""
+        from nhx.automodel.app.jobs.training.schemas import BackendConfig
+
+        explicit = self._explicit(BackendConfig(experts="gmm"))
+
+        assert explicit == {"experts": "gmm"}
+
+    def test_no_backend_block_yields_nothing(self) -> None:
+        assert self._explicit(None) == {}
+
+    def test_false_is_forwarded_but_none_is_not(self) -> None:
+        """False is a deliberate choice; only None means "unset"."""
+        from nhx.automodel.app.jobs.training.schemas import BackendConfig
+
+        explicit = self._explicit(BackendConfig(rope_fusion=False))
+
+        assert explicit == {"rope_fusion": False}

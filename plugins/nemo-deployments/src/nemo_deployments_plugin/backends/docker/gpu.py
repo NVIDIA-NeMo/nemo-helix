@@ -4,7 +4,7 @@
 """Thread-safe GPU pool for Docker deployments (plugin-local; not shared with models).
 
 During the 759 cutover both pools may coexist briefly — consolidate into
-nemo_platform_plugin when models docker backend is removed.
+nemo_helix_plugin when models docker backend is removed.
 """
 
 from __future__ import annotations
@@ -204,12 +204,12 @@ def get_shared_gpu_pool() -> DockerGPUPool | None:
         if _pool is None:
             reserved = None
             try:
-                from nemo_platform_plugin.config import Configuration, NemoPlatformConfig
+                from nemo_helix_plugin.config import Configuration, NemoHelixConfig
 
-                reserved = Configuration.get_service_config(NemoPlatformConfig).docker.get_reserved_gpu_ids()
+                reserved = Configuration.get_service_config(NemoHelixConfig).docker.get_reserved_gpu_ids()
             except ImportError:
                 logger.debug(
-                    "NeMo Platform configuration is unavailable; using GPU detection",
+                    "NeMo Helix configuration is unavailable; using GPU detection",
                     exc_info=True,
                 )
             except ValueError:

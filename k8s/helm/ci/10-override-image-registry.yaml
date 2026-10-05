@@ -3,12 +3,12 @@
 
 api:
   image:
-    repository: registry.example.com/nemo-platform/nmp-api
+    repository: registry.example.com/nemo-helix/nhx-api
 
 core:
   image:
-    repository: registry.example.com/nemo-platform/nmp-api
+    repository: registry.example.com/nemo-helix/nhx-api
 
 platformConfig:
   platform:
-    image_registry: registry.example.com/nemo-platform
+    image_registry: registry.example.com/nemo-helix

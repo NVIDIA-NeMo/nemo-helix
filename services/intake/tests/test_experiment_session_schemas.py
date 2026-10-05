@@ -3,9 +3,9 @@
 
 from datetime import datetime, timezone
 
-from nmp.intake.api.v2.experiments.schemas import EvaluationSessionFilter, EvaluationSessionResponse
-from nmp.intake.repository.evaluation_session import EvaluationSessionRow
-from nmp.intake.spans.domain import SpanStatus
+from nhx.intake.api.v2.experiments.schemas import EvaluationSessionFilter, EvaluationSessionResponse
+from nhx.intake.repository.evaluation_session import EvaluationSessionRow
+from nhx.intake.spans.domain import SpanStatus
 
 
 def test_evaluation_session_from_row_preserves_detailed_payloads() -> None:

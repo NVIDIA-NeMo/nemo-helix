@@ -22,7 +22,7 @@ const fulfillJson = (route: Route, body: unknown) =>
   route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
 /**
- * Intercept NMP API calls and return fixed mock responses.
+ * Intercept NHX API calls and return fixed mock responses.
  *
  * Playwright uses LIFO for route handlers, so the workspace-specific route is
  * registered last and therefore runs before the catch-all.

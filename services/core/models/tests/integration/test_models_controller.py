@@ -13,9 +13,9 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.models.types import ModelDeploymentStatus
-from nmp.core.models.controllers.backends.backends import DeploymentStatusUpdate
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.models.types import ModelDeploymentStatus
+from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate
 
 from .conftest import (
     create_deployment,

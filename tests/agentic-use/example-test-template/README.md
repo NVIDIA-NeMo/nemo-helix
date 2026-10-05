@@ -32,7 +32,7 @@ This is a template for creating new Harbor tests. Copy this folder and fill in t
 - **README.md** - Update this file to describe your specific test
 - **instruction.md** - The task prompt given to Claude Code
 - **task.toml** - Harbor configuration (timeouts, metadata, difficulty)
-- **environment/Dockerfile** - Container setup (usually inherits from nmp-agentic-base:latest)
+- **environment/Dockerfile** - Container setup (usually inherits from nhx-agentic-base:latest)
 - **tests/test.sh** - Test runner script
 - **tests/test_outputs.py** - Pytest verification of task completion
 

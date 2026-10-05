@@ -5,7 +5,7 @@ import React from 'react';
 
 /**
  * Filter value emitted by the numeric range filter. Mirrors the Mongo-style
- * `$gte` / `$lte` operators used across NeMo Platform's unified filter syntax
+ * `$gte` / `$lte` operators used across NeMo Helix's unified filter syntax
  * (see `@nemo/common/src/api/filterOperators`). Either bound may be omitted to
  * express an open-ended range.
  */

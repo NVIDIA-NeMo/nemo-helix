@@ -6,12 +6,13 @@ import {
   type AnnotationInput,
   HTTPValidationError,
   ModelEntitySortField,
-  PlatformJobLogPage,
-  PlatformJobResponsesPage,
+  HelixJobLogPage,
+  HelixJobResponsesPage,
   Project,
   TraceMetricBucketParam,
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
@@ -320,7 +321,7 @@ export const handlers = [
   }),
 
   // Jobs V1 (Safe Synthesizer)
-  http.get<never, never, PlatformJobResponsesPage>(`${PLATFORM_BASE_URL}/v1/jobs`, () => {
+  http.get<never, never, HelixJobResponsesPage>(`${PLATFORM_BASE_URL}/v1/jobs`, () => {
     return HttpResponse.json({
       data: [],
       pagination: {
@@ -335,7 +336,7 @@ export const handlers = [
   http.options(`${PLATFORM_BASE_URL}/v1/jobs`, () => new HttpResponse(null, { status: 200 })),
 
   // Jobs V2 (Platform)
-  http.get<never, never, PlatformJobResponsesPage>(
+  http.get<never, never, HelixJobResponsesPage>(
     `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs`,
     () => {
       return HttpResponse.json({
@@ -350,7 +351,7 @@ export const handlers = [
       });
     }
   ),
-  http.get<never, never, PlatformJobLogPage>(
+  http.get<never, never, HelixJobLogPage>(
     `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/logs`,
     () =>
       HttpResponse.json({
@@ -719,6 +720,7 @@ export const handlers = [
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`, () =>
     HttpResponse.json({ data: [], total: 0 })
   ),
+  ...agentDeploymentCapabilitiesHandlers,
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [

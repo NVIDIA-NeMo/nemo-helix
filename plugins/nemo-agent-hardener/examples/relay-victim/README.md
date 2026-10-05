@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# The war-game victim, as a NeMo Platform agent
+# The war-game victim, as a NeMo Helix agent
 
-This is the shape Agent Hardener expects in production: an agent **registered on NeMo Platform**, not an
+This is the shape Agent Hardener expects in production: an agent **registered on NeMo Helix**, not an
 image you built by hand. It is a retail-banking support agent with three tools worth attacking —
 `transfer_funds`, `read_customer_record` and `send_email`.
 
@@ -21,7 +21,7 @@ Agent Hardener.
 ## Running it
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 nemo agents package --agent plugins/nemo-agent-hardener/examples/relay-victim/agent.yaml \
                     --dockerfile plugins/nemo-agent-hardener/examples/relay-victim/Dockerfile --tag ledger:v1
@@ -75,7 +75,7 @@ sandbox's egress shim.
 ## Why an author-supplied Dockerfile
 
 `nemo agents package` can render one, and Agent Hardener falls back to that. Prefer your own: a rendered
-Dockerfile pins the packaging machine's `nemo-platform` version — from a git checkout that is
+Dockerfile pins the packaging machine's `nemo-helix` version — from a git checkout that is
 something like `0.4.0.post96.dev0+789b8466e`, which no index serves — and a fixed `nemo-relay` that
 an agent has no way to ask to change.
 
@@ -88,6 +88,6 @@ MCP tools and an ATOF file sink. Fabric's own translator emits `RelayObservabili
 which is the schema the war-game's uploaded `plugins.toml` matches.
 
 > **The image is not built end to end.** The Dockerfile mirrors what `render_fabric_dockerfile` produces, but
-> it has not been built here: the released `nemo-platform` on the index (0.3.0) predates the Fabric
+> it has not been built here: the released `nemo-helix` on the index (0.3.0) predates the Fabric
 > adapters, and the checkout's own version is a dev build no index serves. That gap is the same one
 > the note above describes.

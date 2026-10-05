@@ -5,10 +5,10 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nmp.guardrails.app.services.rails.registry import RailsRegistry
-from nmp.guardrails.app.services.rails.service import LLMRails, RailsService
-from nmp.guardrails.app.utils.hash_utils import compute_token_headers_hash
-from nmp.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.app.services.rails.registry import RailsRegistry
+from nhx.guardrails.app.services.rails.service import LLMRails, RailsService
+from nhx.guardrails.app.utils.hash_utils import compute_token_headers_hash
+from nhx.guardrails.entities.values._private import Model, RailsConfig
 
 
 class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
@@ -21,7 +21,7 @@ class TestRailsServiceCaching(unittest.IsolatedAsyncioTestCase):
         self.rails_service._rails_registry = self.rails_registry
 
         # Mock LLMRails with a mock that includes 'events_history_cache'
-        self.llm_rails_patcher = patch("nmp.guardrails.app.services.rails.service.LLMRails")
+        self.llm_rails_patcher = patch("nhx.guardrails.app.services.rails.service.LLMRails")
         self.mock_llm_rails_class = self.llm_rails_patcher.start()
         self.mock_llm_rails_class.side_effect = self.create_mock_llm_rails
 

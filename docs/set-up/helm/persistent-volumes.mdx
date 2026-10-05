@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="manage-storage-pvc"></a>
 
-The NeMo Platform uses persistent volume claims (PVCs) for jobs and files storage that can be mounted on multiple pods and nodes in read-write mode. This access mode is called ReadWriteMany (RWX) in Kubernetes. Using a ReadWriteMany-capable StorageClass is required for both jobs and files storage.
+The NeMo Helix uses persistent volume claims (PVCs) for jobs and files storage that can be mounted on multiple pods and nodes in read-write mode. This access mode is called ReadWriteMany (RWX) in Kubernetes. Using a ReadWriteMany-capable StorageClass is required for both jobs and files storage.
 
 NVIDIA NIM microservices also scale, upgrade, and deploy more smoothly with an RWX-backed storage class.
 
@@ -15,7 +15,7 @@ The platform does not manage storage classes. You must install an appropriate st
 
 ## Jobs and Files storage
 
-The NeMo Platform chart creates a single shared PVC for jobs and files storage, configured under `core.storage` in `values.yaml`.
+The NeMo Helix chart creates a single shared PVC for jobs and files storage, configured under `core.storage` in `values.yaml`.
 
 <Note>
 
@@ -57,7 +57,7 @@ When set, the chart does not create a new PVC; pods mount the named volume.
 
 ## NIM storage class
 
-For NIM deployments launched via the NeMo Platform, you can set the default StorageClass used by NIM PVCs via platform config. In `values.yaml`, under `platformConfig`:
+For NIM deployments launched via the NeMo Helix, you can set the default StorageClass used by NIM PVCs via platform config. In `values.yaml`, under `platformConfig`:
 
 ```yaml
 platformConfig:
@@ -98,7 +98,7 @@ For high-performance workloads:
 
 ## Azure persistent volumes
 
-On AKS, Azure Disk (`managed-csi`) only supports ReadWriteOnce (RWO). Use **Azure Files** for the shared RWX volumes required by NeMo Platform. PostgreSQL must use `managed-csi` because Azure Files does not support the POSIX permissions it requires.
+On AKS, Azure Disk (`managed-csi`) only supports ReadWriteOnce (RWO). Use **Azure Files** for the shared RWX volumes required by NeMo Helix. PostgreSQL must use `managed-csi` because Azure Files does not support the POSIX permissions it requires.
 
 1. Enable the [Azure Files CSI driver](https://learn.microsoft.com/en-us/azure/aks/azure-files-csi) if not already installed in your cluster.
 2. Set `core.storage.storageClass` to `azurefile` (or `azurefile-csi` on AKS 1.29+) and `postgresql.persistence.storageClass` to `managed-csi`.

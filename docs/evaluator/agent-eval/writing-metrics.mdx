@@ -176,7 +176,7 @@ class KeywordMatchMetric:
 ## Reading measurements
 
 Metrics read measurements from `input.row.data["trial"]["measurements"]`. The complete
-[`TrialMeasurements`](https://github.com/NVIDIA-NeMo/nemo-platform/blob/main/packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/trials.py)
+[`TrialMeasurements`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/agent_eval/trials.py)
 schema is always present: unavailable values are `None`, while a measured zero remains `0` (or
 `0.0`). Persisted or imported measurement values belong exclusively in `measurements`; free-form
 metadata values are never converted into measurements, even when their keys resemble measurement

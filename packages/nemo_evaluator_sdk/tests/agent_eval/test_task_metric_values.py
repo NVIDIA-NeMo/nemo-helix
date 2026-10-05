@@ -32,7 +32,7 @@ from pydantic import RootModel, ValidationError
 
 
 def _vendored_module(name: str) -> Any:
-    return import_module(f"nemo_platform.beta.evaluator.agent_eval.{name}")
+    return import_module(f"nemo_helix.beta.evaluator.agent_eval.{name}")
 
 
 class _TokenCount(RootModel[int]):
@@ -814,7 +814,7 @@ def test_vendored_summary_accepts_task_metric_values() -> None:
 
 def test_vendored_module_exposes_the_public_value_api() -> None:
     # The byte-copy test below proves file parity, not that the names are usable through the shipped
-    # package. These are the surface a consumer of nemo-platform actually imports.
+    # package. These are the surface a consumer of nemo-helix actually imports.
     vendored_results = _vendored_module("results")
     VendoredSummary = vendored_results.AgentEvalSummary
     VendoredValue = vendored_results.TrialMetricValue

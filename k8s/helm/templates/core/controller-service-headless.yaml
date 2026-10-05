@@ -7,10 +7,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "nmp-core.controller-servicename" . }}
+  name: {{ include "nhx-core.controller-servicename" . }}
   labels:
-    app.kubernetes.io/component: nmp-core-controller
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-controller
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.core.controller.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -24,6 +24,6 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app.kubernetes.io/component: nmp-core-controller
-    {{- include "nemo-platform.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-controller
+    {{- include "nemo-helix.selectorLabels" . | nindent 4 }}
 {{- end }}

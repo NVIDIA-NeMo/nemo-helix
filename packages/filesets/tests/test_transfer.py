@@ -19,9 +19,9 @@ import pytest
 from filesets import transfer
 from filesets.filesystem.filesystem import FilesetFileSystem
 from filesets.transfer import ListFilesResponse
-from nemo_platform_plugin.client.errors import NotFoundError
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import CacheStatus, FilesetFileOutput
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import CacheStatus, FilesetFileOutput
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send

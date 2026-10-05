@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from typing import Literal
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -19,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = ["NimEmbeddingClient", "NimEmbeddingError"]
 
-InputType = Literal["query", "passage"]
 logger = logging.getLogger(__name__)
 
 
@@ -40,10 +38,13 @@ class NimEmbeddingClient(BaseModel):
     async def encode(
         self,
         inputs: list[str],
-        input_type: InputType,
         client: httpx.AsyncClient | None = None,
     ) -> list[list[float]]:
-        """Encode ``inputs``, retrying transient HTTP failures and non-finite values."""
+        """Encode ``inputs``, retrying transient HTTP failures and non-finite values.
+
+        Query vs passage instructions belong in ``inputs`` (the job ``query_prefix`` /
+        ``passage_prefix``). ``input_type`` is omitted so the NIM does not apply a second prefix.
+        """
         if not inputs:
             return []
 
@@ -59,7 +60,6 @@ class NimEmbeddingClient(BaseModel):
                         json={
                             "model": self.model.name,
                             "input": inputs,
-                            "input_type": input_type,
                             "encoding_format": "float",
                             "modality": "text",
                         },

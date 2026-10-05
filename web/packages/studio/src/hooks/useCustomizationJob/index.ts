@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useJobsGetJob } from '@nemo/sdk/generated/platform/jobs';
-import type { PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   getCustomizationBackend,
   type CustomizationBackend,
@@ -12,7 +12,7 @@ import {
 import type { UseQueryOptions } from '@tanstack/react-query';
 
 export type CustomizationJobQueryOptions = Partial<
-  UseQueryOptions<PlatformJobResponse, unknown, PlatformJobResponse>
+  UseQueryOptions<HelixJobResponse, unknown, HelixJobResponse>
 >;
 
 export interface UseCustomizationJobResult {
@@ -28,7 +28,7 @@ export const useCustomizationJob = (
   name: string,
   query?: CustomizationJobQueryOptions
 ): UseCustomizationJobResult => {
-  const { data, isLoading, isError, refetch } = useJobsGetJob<PlatformJobResponse, unknown>(
+  const { data, isLoading, isError, refetch } = useJobsGetJob<HelixJobResponse, unknown>(
     workspace,
     name,
     { query: query ?? {} }

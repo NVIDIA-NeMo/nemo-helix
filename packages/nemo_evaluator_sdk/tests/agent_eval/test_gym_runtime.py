@@ -17,6 +17,7 @@ import logging
 import shutil
 from collections import Counter, deque
 from pathlib import Path
+from typing import Any
 
 import pytest
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import (
@@ -61,6 +62,8 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.results import (
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrialStatus, TrialMeasurements
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
+from nemo_evaluator_sdk.values import SecretRef
+from pydantic import ValidationError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = FIXTURES / "gym_mcqa_example.jsonl"
@@ -921,8 +924,8 @@ def test_flatten_overrides_serializes_a_list_of_dicts() -> None:
     assert _flatten_overrides({"a": {"b": [{"c": 1}]}}) == ["++a.b=[{c:1}]"]
 
 
-def _config(**kwargs: object) -> GymRuntimeConfig:
-    return GymRuntimeConfig(agent="simple_agent", agent_config="cfg.yaml", resources_server="mcqa", **kwargs)  # type: ignore[arg-type]
+def _config(**kwargs: Any) -> GymRuntimeConfig:
+    return GymRuntimeConfig(agent="simple_agent", agent_config="cfg.yaml", resources_server="mcqa", **kwargs)
 
 
 def test_selection_binds_the_resources_server_by_default(tmp_path: Path) -> None:
@@ -1098,7 +1101,7 @@ def test_token_usage_keys_match_the_openai_schemas_they_mirror() -> None:
     """The keys are *wire-format* field names, cross-checked here against their source of truth.
 
     Raised in review of #1295: could these come from Gym directly? No — this runtime never imports
-    `nemo_gym` (it shells out to the CLI, and nemo-platform excludes Ray by constraint), and the
+    `nemo_gym` (it shells out to the CLI, and nemo-helix excludes Ray by constraint), and the
     names are not Gym's anyway. They are OpenAI's, and `openai` *is* a dependency here.
 
     Deliberately a test rather than deriving the tuple at import time. What we match is the JSON a
@@ -1545,3 +1548,141 @@ def test_an_empty_capture_directory_does_not_refuse_a_run(tmp_path: Path) -> Non
     model_call_capture_dir(tmp_path).mkdir(parents=True)
 
     ensure_fresh_output(tmp_path / "rollouts.jsonl")
+
+
+def test_a_reused_runner_resolves_current_secret_on_each_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rotated or removed secret cannot retain a value from a prior run."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    monkeypatch.setenv("NVIDIA_API_KEY", "first")
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")}))
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    observed: list[str] = []
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env["GYM_MODEL_KEY"])
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    for value in ("first", "second"):
+        monkeypatch.setenv("NVIDIA_API_KEY", value)
+        with pytest.raises(RuntimeError, match="stop before start"):
+            asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["first", "second"]
+    monkeypatch.delenv("NVIDIA_API_KEY")
+    with pytest.raises(ValueError, match="nvidia-api-key"):
+        asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["first", "second"]
+
+
+def test_workspace_secret_prefers_prefixed_variable_then_bare_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+    monkeypatch.setenv("MY_WORKSPACE_PROBE_API_KEY", "workspace-value")
+    monkeypatch.setenv("PROBE_API_KEY", "bare-value")
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("my-workspace/probe-api-key")}))
+    observed: list[str] = []
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        observed.append(subprocess_env["GYM_MODEL_KEY"])
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    tasks = discover_gym_tasks(EXAMPLE)[:1]
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks))
+    monkeypatch.delenv("MY_WORKSPACE_PROBE_API_KEY")
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(tasks))
+    assert observed == ["workspace-value", "bare-value"]
+
+
+def test_custom_secret_resolver_supplies_gym_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym import runtime as gym_runtime
+
+    class Resolver:
+        def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+            return "CUSTOM_SRC"
+
+    monkeypatch.setenv("CUSTOM_SRC", "custom-value")
+    runner = GymAgentTaskRunner(
+        config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("key")}), secret_resolver=Resolver()
+    )
+    monkeypatch.setattr(gym_runtime, "gym_executable", lambda: "gym")
+
+    async def capture_env(gym, selection, subprocess_env, work_dir):
+        assert subprocess_env["GYM_MODEL_KEY"] == "custom-value"
+        raise RuntimeError("stop before start")
+
+    monkeypatch.setattr(runner, "_validate_config", capture_env)
+    with pytest.raises(RuntimeError, match="stop before start"):
+        asyncio.run(runner.run_tasks(discover_gym_tasks(EXAMPLE)[:1]))
+
+
+def test_value_only_resolver_is_refused_at_construction() -> None:
+    class ValueOnlyResolver:
+        async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
+            return "value"
+
+    value_only: Any = ValueOnlyResolver()
+    config = _config(env_secrets={"GYM_MODEL_KEY": SecretRef("key")})
+
+    with pytest.raises(TypeError, match="ValueOnlyResolver can't name an env var.*Gym env_secrets"):
+        GymAgentTaskRunner(config=config, secret_resolver=value_only)
+    # Without env_secrets the resolver is never consulted.
+    GymAgentTaskRunner(config=_config(), secret_resolver=value_only)
+
+
+def test_runner_info_records_secret_references_without_values() -> None:
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("ws/key")}))
+    assert runner.runner_info().config["env_secrets"] == {"GYM_MODEL_KEY": "ws/key"}
+
+
+def test_a_secret_that_does_not_resolve_stops_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unguarded, Gym still starts and scores a run made against whatever credential was lying around.
+    monkeypatch.delenv("GYM_MISSING_KEY", raising=False)
+    monkeypatch.delenv("gym-missing-key", raising=False)
+    runner = GymAgentTaskRunner(config=_config(env_secrets={"GYM_MODEL_KEY": SecretRef("gym-missing-key")}))
+
+    with pytest.raises(ValueError, match="gym-missing-key"):
+        asyncio.run(runner.run_tasks([]))
+
+
+def test_naming_a_variable_both_ways_is_refused_rather_than_layered() -> None:
+    """Which value Gym got would otherwise depend on layering order, not on what the caller asked."""
+    with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
+        _config(env_vars={"GYM_MODEL_KEY": "plaintext"}, env_secrets={"GYM_MODEL_KEY": SecretRef("nvidia-api-key")})
+
+
+def test_gym_config_validation_error_does_not_echo_rejected_secret() -> None:
+    """Reject an inline secret collision without printing the credential in the input mapping."""
+    with pytest.raises(ValidationError, match="env_vars and env_secrets") as excinfo:
+        GymRuntimeConfig.model_validate(
+            {
+                "agent": "simple_agent",
+                "agent_config": "config.yaml",
+                "resources_server": "mcqa",
+                "env_secrets": {"KEY": "ws/key"},
+                "env_vars": {"KEY": "LEAKME"},
+            }
+        )
+    assert "LEAKME" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "inputs,metadata", [({}, {}), ({"gym_row": {}}, {"gym_row_extras": []}), ({"gym_row": {}}, {"gym_row_extras": {}})]
+)
+def test_named_gym_row_validator_matches_materialization(inputs, metadata) -> None:
+    """Both entry points accept and reject the same row with identical errors."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.gym.dataset import gym_task_row, validate_gym_task_row
+
+    try:
+        gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+    except ValueError as error:
+        with pytest.raises(ValueError) as caught:
+            validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata)
+        assert str(caught.value) == str(error)
+    else:
+        assert validate_gym_task_row(task_id="task", inputs=inputs, metadata=metadata) is None

@@ -37,7 +37,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 
-	"github.com/NVIDIA-NeMo/nemo-platform/services/guardrails/callouts/internal/config"
+	"github.com/NVIDIA-NeMo/nemo-helix/services/guardrails/callouts/internal/config"
 )
 
 // CalloutServer represents a server that handles callouts.

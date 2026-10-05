@@ -7,13 +7,8 @@ import time
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any, Protocol
-from urllib.parse import urlparse
 
 import httpx
-from nemo_platform import NeMoPlatform
-from nemo_platform_ext.config.config import Config
-
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 
 class _HTTPResponse(Protocol):
@@ -37,28 +32,6 @@ class _PollingClient(Protocol):
     def get(self, url: str, *, params: dict[str, Any]) -> _HTTPResponse: ...
 
     def close(self) -> None: ...
-
-
-class _PlatformClient(Protocol):
-    def post(
-        self,
-        path: str,
-        *,
-        cast_to: type[httpx.Response],
-        content: bytes,
-        options: dict[str, Any],
-    ) -> httpx.Response: ...
-
-    def close(self) -> None: ...
-
-
-def _make_platform_client(base_url: str) -> NeMoPlatform:
-    """Build a synchronous SDK client with platform auth for remote URLs."""
-    host = (urlparse(base_url).hostname or "").lower()
-    config_path = Config.get_default_config_path()
-    if host in _LOOPBACK_HOSTS or not config_path.exists():
-        return NeMoPlatform(base_url=base_url, timeout=30.0)
-    return NeMoPlatform(base_url=base_url, config_path=config_path, timeout=30.0)
 
 
 def mint_agent_id(base: str) -> str:

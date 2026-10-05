@@ -120,7 +120,7 @@ The SDK ships three runners you'll usually reach for first:
 - **`HarborAgentTaskRunner`** runs a [Harbor](https://www.harborframework.com) task suite in Docker and
   scores its verifier reward. Point `agent_import_path` at your own Harbor agent, pass its
   constructor arguments as `agent_kwargs` (Harbor's `--ak`), and hand it credentials through
-  `agent_env_from_host` (or `env_secrets` on the platform's `HarborRunnerTarget`). See
+  `env_secrets`, which work both standalone and on the platform. See
   [Harbor Task Suite](/documentation/evaluate-models/agent-eval/harbor-runner).
 - **`GymAgentTaskRunner`** runs a [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) environment and agent,
   and scores each rollout's reward. See [NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).
@@ -132,21 +132,28 @@ adapts its rollouts into trials, scoring each rollout's reward. `GymRuntimeConfi
 `agent_config`, and `resources_server`; `discover_gym_tasks` builds the tasks from a Gym jsonl
 dataset.
 
-Gym is **not** a dependency of this SDK — it imports Ray at module load, which nemo-platform excludes
+Gym is **not** a dependency of this SDK — it imports Ray at module load, which nemo-helix excludes
 by constraint. Install it into its own environment and put its `bin` on `PATH`.
 
 It can also be submitted as a platform job from the live runner object, via
-`client.evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
+`evaluator.submit(tasks=..., target=runner)`, rather than described again as a spec.
 
-Platform job specifications use `GymRunnerTarget`. It adds fields that a live local runner cannot
-carry:
+Platform job specifications use `GymRunnerTarget`. A submission builds one from two places, split by
+what the setting is *about*:
 
-- `environment` references a complete custom environment FileSet and requires sandboxed execution.
-- `env_secrets` maps environment variable names to NeMo Platform secret references.
-- `agent_ref_name` selects the registered Gym agent instance when it differs from `agent`.
+- **The runner** carries the evaluation — including `env_secrets`, which names environment variables
+  whose values come from a secret reference. That means the same thing wherever the runner runs;
+  only the resolver differs, so a local run resolves it from your environment.
+- **A `GymPlacement`**, passed to `submit`, carries what the deployment decides: `environment` (a
+  staged FileSet, requiring sandboxed execution) and `agent_ref_name` (the agent instance a
+  sandboxed host routes rollouts to).
 
-`agent_config` is required for `GymRuntimeConfig` and for a platform target without an environment
-FileSet. A FileSet-backed target can omit it when the package declares the selected agent instance.
+```python
+evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
+```
+
+The overloads accept a `GymPlacement` only with a `GymAgentTaskRunner`, so a placement cannot be
+paired with a runner that has no use for it.
 
 Full setup, configuration reference, and caveats:
 [Evaluate a NeMo Gym Environment](/documentation/evaluate-models/agent-eval/gym-runner).
@@ -165,6 +172,9 @@ covers several agent frontends:
 | `nvidia.fabric.claude` | Claude |
 | `nvidia.fabric.hermes` | Hermes SDK (`transport="library"`) |
 | `nvidia.fabric.langchain.deepagents` | LangChain deepagents — **not** installed by this SDK's `fabric` extra (see below) |
+
+Fabric 0.4 also ships Cline, OpenClaw, OpenCode, Qwen Code, and Pi adapters. NeMo Helix does not
+install those; add the matching `nemo-fabric-adapters-*` package yourself to use one.
 
 `FabricAgentRuntime` runs that config on the host by default, capturing an ATIF trajectory. Pass
 `sandbox=<SandboxProvider>` to run the same configuration inside a sandbox instead; `image` and

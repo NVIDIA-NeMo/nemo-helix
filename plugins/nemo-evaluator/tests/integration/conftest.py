@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
-from nmp.testing import igw_mock_provider_mode
+from nhx.testing import igw_mock_provider_mode
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -33,25 +33,34 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 #: unrelated unit suites that merely collect this conftest; passed to the platform subprocess via
 #: each fixture's ``env_vars``.
 MOCK_PROVIDER_PREFIX = "igw-mock-"
-MOCK_PROVIDER_PREFIX_ENVVAR = "NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"
-CLICKHOUSE_XDIST_GROUP = "nmp_intake_clickhouse"
+MOCK_PROVIDER_PREFIX_ENVVAR = "NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX"
+CLICKHOUSE_XDIST_GROUP = "nhx_intake_clickhouse"
 CLICKHOUSE_XDIST_FIXTURE = "_clickhouse"
 
 #: Base URL (and therefore port) for the agent-eval subprocess-backend platform. Distinct from
 #: other integration platforms so both can run in the same session without a port clash.
-AGENT_PLATFORM_BASE_URL = os.environ.get("NMP_AGENT_BASE_URL", "http://localhost:8090")
+AGENT_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_BASE_URL", "http://localhost:8090")
 
 #: Base URL for the docker-backend platform — its own port so it can coexist with the subprocess one.
-AGENT_DOCKER_PLATFORM_BASE_URL = os.environ.get("NMP_AGENT_DOCKER_BASE_URL", "http://localhost:8091")
+AGENT_DOCKER_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_DOCKER_BASE_URL", "http://localhost:8091")
 
 #: Base URL for the auth-enabled subprocess platform (own port, coexists with the others).
-AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NMP_AGENT_AUTH_BASE_URL", "http://localhost:8092")
+AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_AUTH_BASE_URL", "http://localhost:8092")
 
 # xdist ``loadgroup`` does not infer shared fixtures; it only groups tests that
 # carry the same ``xdist_group`` marker. Any evaluator test that depends on the
 # ClickHouse fixture uses Intake's fixed local container, so keep those tests on
 # one worker to avoid cross-worker startup/teardown races. ``tryfirst`` matters:
 # xdist reads these markers during collection to build its scheduling groups.
+
+#: Platform fixtures, each grouped onto one xdist worker: they bind fixed ports, and a
+#: session-scoped fixture is per *worker*, so ungrouped they fight over the port. One group each
+#: rather than one shared, since the three use different ports and can run concurrently.
+PLATFORM_XDIST_FIXTURES = (
+    "subprocess_platform",
+    "auth_subprocess_platform",
+    "docker_platform",
+)
 
 
 def _docker_available() -> bool:
@@ -85,8 +94,20 @@ def _port_in_use(host: str, port: int) -> bool:
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
-        if CLICKHOUSE_XDIST_FIXTURE in item.fixturenames:
+        # Includes fixtures requested indirectly, so a wrapper fixture still lands its test in the
+        # right group.
+        requested = getattr(item, "fixturenames", ())
+        if CLICKHOUSE_XDIST_FIXTURE in requested:
             item.add_marker(pytest.mark.xdist_group(CLICKHOUSE_XDIST_GROUP))
+        for fixture in PLATFORM_XDIST_FIXTURES:
+            if fixture in requested:
+                item.add_marker(pytest.mark.xdist_group(fixture))
+
+
+#: Controllers these tests need. Not ``--controller-group all``: that also starts
+#: ``scaled-evals-jobs``, which wants a Fernet ``CREDENTIALS_ENCRYPTION_KEY`` and its own Postgres
+#: on 5432, and without them ``/health/ready`` never returns 200 and every fixture below times out.
+REQUIRED_CONTROLLERS = ("jobs", "entities", "models")
 
 
 @contextmanager
@@ -112,7 +133,7 @@ def running_platform(
     process = subprocess.Popen(
         ["uv", "run", "nemo", "services", "run", *run_args, "--port", str(port)],
         cwd=REPO_ROOT,
-        env={**os.environ, "NMP_BASE_URL": base_url, **(env_vars or {})},
+        env={**os.environ, "NHX_BASE_URL": base_url, **(env_vars or {})},
     )
     try:
         _wait_for_ready(base_url, timeout=ready_timeout, process=process)
@@ -134,7 +155,7 @@ def _igw_mock_prefix() -> Iterator[None]:
     Function-scoped + autouse so it applies only to these integration tests — never the unit suite
     that merely collects this conftest (which would break the inference-gateway ``is_mock_provider``
     tests), and never another integration suite. Uses a config override via ``igw_mock_provider_mode``
-    (an ``nmp.testing`` helper — a plugin must not import ``nmp-common`` directly) rather than an env
+    (an ``nhx.testing`` helper — a plugin must not import ``nhx-common`` directly) rather than an env
     var: the override is honored ahead of the cached/env config, so it works regardless of when the
     IGW config was first read, whereas a whole-repo run can read and cache that config before any
     plugin-local hook fires. The platform *subprocess* gets the same prefix via each fixture's
@@ -148,13 +169,13 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
     """Write a self-contained subprocess-backend platform config under ``work_root``.
 
     Owned here rather than borrowed from ``e2e/configs`` (legacy, not run in CI). It pins
-    ``platform.runtime: none`` with an explicit subprocess jobs executor and ABSOLUTE storage paths:
+    ``platform.runtime: none`` with explicit subprocess job profiles and ABSOLUTE storage paths:
     the jobs service writes each step config under ``working_directory`` while the task subprocess
     resolves the same path against a different CWD, so a relative dir would make the task miss its
     config. Absolute paths keep the step-config path agreeing across both processes.
 
     ``auth_enabled`` turns on the PDP so the auth-forwarding test can prove a submitted task's
-    ``X-NMP-*`` service-principal identity actually authenticates its IGW inference.
+    ``X-NHX-*`` service-principal identity actually authenticates its IGW inference.
     """
     jobs_work_dir = str(work_root / "subprocess-jobs")
     subprocess_executor_config = {
@@ -174,7 +195,13 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
                     "profile": "default",
                     "backend": "subprocess",
                     "config": subprocess_executor_config,
-                }
+                },
+                {
+                    "provider": "subprocess",
+                    "profile": "harbor-test",
+                    "backend": "subprocess",
+                    "config": subprocess_executor_config,
+                },
             ],
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },
@@ -187,31 +214,36 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
 
 
 #: The platform's entity store defaults to the *developer's* data directory
-#: (``~/.local/share/nemo/nmp-platform.db``). These fixtures already point file storage at a
+#: (``~/.local/share/nemo/nhx-platform.db``). These fixtures already point file storage at a
 #: per-run temp dir, so leaving the database shared both writes test entities into a real local
 #: platform and breaks reruns: metric bundles are content-addressed, so the second run finds last
 #: run's bundle entity, skips the upload as a duplicate, and then fails to download a blob that
-#: went away with the previous run's temp dir. Pointing NMP_DATA_DIR at the same work root keeps
+#: went away with the previous run's temp dir. Pointing NHX_DATA_DIR at the same work root keeps
 #: entities and blobs with the same lifetime.
-DATA_DIR_ENVVAR = "NMP_DATA_DIR"
+DATA_DIR_ENVVAR = "NHX_DATA_DIR"
 
 
 @pytest.fixture(scope="session")
-def subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def subprocess_platform(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest) -> Iterator[str]:
     """Session-scoped platform with the subprocess jobs backend + IGW mock-provider mode.
 
     Subprocess backend: the compiled task runs as a host process, so a runner target sees the host's
-    agent toolchain. IGW mock mode (``NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX``) lets
+    agent toolchain. IGW mock mode (``NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX``) lets
     Model/Agent-target tests register a mock provider returning a canned response — no real model or
-    key.
+    key. Tests may indirectly parameterize this fixture with explicit service/controller arguments
+    to avoid starting unrelated installed plugins.
     """
     work_root = tmp_path_factory.mktemp("platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=getattr(
+            request,
+            "param",
+            ["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+        ),
         base_url=AGENT_PLATFORM_BASE_URL,
         env_vars={
-            "NMP_CONFIG_FILE_PATH": str(config_path),
+            "NHX_CONFIG_FILE_PATH": str(config_path),
             DATA_DIR_ENVVAR: str(work_root / "data"),
             MOCK_PROVIDER_PREFIX_ENVVAR: MOCK_PROVIDER_PREFIX,
         },
@@ -223,17 +255,17 @@ def subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[st
 def auth_subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """Session-scoped subprocess-backend platform with ``auth.enabled`` and IGW mock mode.
 
-    Used to prove that a submitted job's forwarded ``X-NMP-*`` service-principal identity
+    Used to prove that a submitted job's forwarded ``X-NHX-*`` service-principal identity
     authenticates its online IGW inference under auth (no bearer). Test-side calls authenticate as an
     internal service principal (which the default PDP policy grants full permissions).
     """
     work_root = tmp_path_factory.mktemp("auth-platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_AUTH_PLATFORM_BASE_URL, auth_enabled=True)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
         base_url=AGENT_AUTH_PLATFORM_BASE_URL,
         env_vars={
-            "NMP_CONFIG_FILE_PATH": str(config_path),
+            "NHX_CONFIG_FILE_PATH": str(config_path),
             DATA_DIR_ENVVAR: str(work_root / "data"),
             MOCK_PROVIDER_PREFIX_ENVVAR: MOCK_PROVIDER_PREFIX,
         },
@@ -297,8 +329,8 @@ def docker_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     work_root = tmp_path_factory.mktemp("docker-platform")
     config_path = _materialize_docker_config(work_root, base_url=AGENT_DOCKER_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controller-group", "all"],
+        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
         base_url=AGENT_DOCKER_PLATFORM_BASE_URL,
-        env_vars={"NMP_CONFIG_FILE_PATH": str(config_path), DATA_DIR_ENVVAR: str(work_root / "data")},
+        env_vars={"NHX_CONFIG_FILE_PATH": str(config_path), DATA_DIR_ENVVAR: str(work_root / "data")},
     ) as base_url:
         yield base_url

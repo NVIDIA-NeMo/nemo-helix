@@ -6,15 +6,15 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.common.config import Runtime
-from nmp.core.models.config import (
+from nhx.common.config import Runtime
+from nhx.core.models.config import (
     ControllerConfig,
     backends,
     config,
     get_default_backends_for_runtime,
     merge_backends,
 )
-from nmp.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
+from nhx.core.models.controllers.backends.deployments_plugin.config import DeploymentsPluginBackendConfigModel
 from pydantic import ValidationError
 
 
@@ -134,7 +134,7 @@ def test_merge_backends_preserves_enabled_flag():
     assert merged["deployments_plugin"].enabled is True
 
 
-@patch("nmp.core.models.config.get_platform_config")
+@patch("nhx.core.models.config.get_platform_config")
 def test_merge_backends_disables_conflicting_when_runtime_demoted_to_none(mock_platform_config):
     """When runtime is NONE, force-enable deployments_plugin and disable other enabled backends."""
     mock_platform_config.return_value = MagicMock(runtime=Runtime.NONE)
@@ -151,7 +151,7 @@ def test_merge_backends_disables_conflicting_when_runtime_demoted_to_none(mock_p
     assert merged["deployments_plugin"].enabled is True
 
 
-@patch("nmp.core.models.config.get_platform_config")
+@patch("nhx.core.models.config.get_platform_config")
 def test_merge_backends_leaves_deployments_plugin_enabled_when_runtime_is_docker(mock_platform_config):
     """Sanity-check demotion logic does not disable a valid docker-runtime backend."""
     mock_platform_config.return_value = MagicMock(runtime=Runtime.DOCKER)
@@ -168,7 +168,7 @@ def test_merge_backends_leaves_deployments_plugin_enabled_when_runtime_is_docker
     assert merged["deployments_plugin"].enabled is True
 
 
-@patch("nmp.core.models.config.get_platform_config")
+@patch("nhx.core.models.config.get_platform_config")
 def test_merge_backends_force_enables_deployments_plugin_when_user_disabled_it_during_demotion(
     mock_platform_config,
 ):

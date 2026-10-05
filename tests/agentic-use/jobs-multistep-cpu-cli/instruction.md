@@ -5,13 +5,13 @@
 
 This task tests your ability to create jobs, monitor their lifecycle, and diagnose issues. You will create multiple jobs including one that intentionally fails, and demonstrate understanding of the jobs system by investigating the failure.
 
-You have access to the `nemo` CLI for NeMo Platform operations. Note: MCP tools are not available in this environment - you must use the CLI.
+You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
-The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Platform API server at http://localhost:8080 by default. CLI auth is pre-configured.
+The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default. CLI auth is pre-configured.
 
 ## Context
 
-- The NeMo Platform API server is running with the jobs controller enabled
+- The NeMo Helix API server is running with the jobs controller enabled
 - The Docker backend is configured for CPU job execution (provider `cpu`, profile `default`)
 - The Docker socket is mounted for real container execution
 - A workspace `job-test-workspace` has been pre-created

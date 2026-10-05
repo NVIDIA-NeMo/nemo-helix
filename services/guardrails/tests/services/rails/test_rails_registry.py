@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from nemoguardrails import LLMRails
-from nmp.guardrails.app.services.rails.registry import RailsRegistry
-from nmp.guardrails.app.utils.hash_utils import compute_token_headers_hash
+from nhx.guardrails.app.services.rails.registry import RailsRegistry
+from nhx.guardrails.app.utils.hash_utils import compute_token_headers_hash
 
 
 class TestRailsRegistry(unittest.IsolatedAsyncioTestCase):
@@ -16,7 +16,7 @@ class TestRailsRegistry(unittest.IsolatedAsyncioTestCase):
         self.registry = RailsRegistry()
 
         # Mock LLMRails
-        self.llm_rails_patcher = patch("nmp.guardrails.app.services.rails.registry.LLMRails")
+        self.llm_rails_patcher = patch("nhx.guardrails.app.services.rails.registry.LLMRails")
         self.mock_llm_rails_class = self.llm_rails_patcher.start()
         self.mock_llm_rails_class.side_effect = self.create_mock_llm_rails
 

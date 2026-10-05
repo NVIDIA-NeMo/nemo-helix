@@ -217,7 +217,7 @@ class TestValidateFabricConfig:
 
 
 @pytest.mark.asyncio
-class TestValidatePlatformAgentConfig:
+class TestValidateHelixAgentConfig:
     async def test_validates_platform_config_dict(self, fake_fabric_stack: None) -> None:
         doctor_report = _FakeDoctorReport({"status": "pass", "checks": [{"name": "adapter", "status": "pass"}]})
         fabric = _FakeFabric(plan={"plan": "ok"}, doctor_report=doctor_report)

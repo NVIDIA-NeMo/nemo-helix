@@ -181,7 +181,7 @@ const renderTraceNodes = ({
             onClick={() => onSelectTrace?.(trace.id)}
           >
             <SpanTreeLabel
-              name={getTraceDisplayName(trace)}
+              name={`Trace: ${getTraceDisplayName(trace)}`}
               durationMs={trace.duration_ms}
               errored={trace.status === SpanStatus.error}
             />
@@ -208,7 +208,7 @@ const renderTraceNodes = ({
         onSelect={() => onSelectTrace?.(trace.id)}
       >
         <SpanTreeLabel
-          name={getTraceDisplayName(trace)}
+          name={`Trace: ${getTraceDisplayName(trace)}`}
           durationMs={trace.duration_ms}
           errored={trace.status === SpanStatus.error}
         />

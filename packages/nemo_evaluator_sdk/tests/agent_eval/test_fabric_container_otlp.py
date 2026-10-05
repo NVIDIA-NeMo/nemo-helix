@@ -34,7 +34,6 @@ def _runtime() -> sandbox_execution.SandboxExecution:
         provider=object(),  # type: ignore[arg-type]
         image="img",
         env={},
-        model=None,
         timeout_s=600,
         capture_trajectory=True,
         trajectory_extra=None,

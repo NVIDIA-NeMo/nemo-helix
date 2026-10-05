@@ -15,7 +15,7 @@ from nemo_deployments_plugin.secrets import (
     resolve_deployment_config_secrets,
     resolve_deployment_secret_env,
 )
-from nemo_platform_plugin.client.errors import NemoClientError, NotFoundError
+from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 
 
 def _config(secret_ref: SecretRef, *, env_name: str = "NGC_API_KEY") -> DeploymentConfig:

@@ -6,13 +6,18 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.controllers.backends.kubernetes.common import (
+from kubernetes import client
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
     PodStatus,
     aggregate_pod_statuses_for_job_step,
+    image_pull_failure_message,
+    map_pod_status_to_platform_status,
+    map_pod_to_pod_status,
+    update_all_tasks,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job import map_kubernetes_job_status_to_step_status
+from nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job import map_kubernetes_job_status_to_step_status
 
 
 def _job(
@@ -55,9 +60,9 @@ def _pod(
     )
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_empty_pods_returns_pending_waiting_message(
-    mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
+    mock_list_pods: MagicMock, test_step_pending: HelixJobStepWithContext
 ) -> None:
     mock_list_pods.return_value = []
     job = _job()
@@ -65,13 +70,13 @@ def test_map_status_empty_pods_returns_pending_waiting_message(
 
     status, details = map_kubernetes_job_status_to_step_status(job, core_v1, test_step_pending)
 
-    assert status == PlatformJobStatus.PENDING
+    assert status == HelixJobStatus.PENDING
     assert "Waiting for pods" in details["message"]
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_succeeded_pods_without_job_completion_time(
-    mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
+    mock_list_pods: MagicMock, test_step_pending: HelixJobStepWithContext
 ) -> None:
     """Pods can report Succeeded before batch Job.completion_time is set."""
     mock_list_pods.return_value = [_pod(phase="Succeeded")]
@@ -80,13 +85,13 @@ def test_map_status_succeeded_pods_without_job_completion_time(
 
     status, details = map_kubernetes_job_status_to_step_status(job, core_v1, test_step_pending)
 
-    assert status == PlatformJobStatus.COMPLETED
+    assert status == HelixJobStatus.COMPLETED
     assert "completion_time" in details["message"].lower() or "transient" in details["message"].lower()
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_failed_count_without_failed_condition_true(
-    mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
+    mock_list_pods: MagicMock, test_step_pending: HelixJobStepWithContext
 ) -> None:
     cond = MagicMock()
     cond.type = "Progressing"
@@ -99,15 +104,15 @@ def test_map_status_failed_count_without_failed_condition_true(
 
     status, details = map_kubernetes_job_status_to_step_status(job, core_v1, test_step_pending)
 
-    assert status == PlatformJobStatus.ERROR
+    assert status == HelixJobStatus.ERROR
     assert "failure" in details["message"].lower() or "Failed" in details["message"]
     assert "kubernetes_conditions" in details
     assert len(details["kubernetes_conditions"]) == 1
 
 
-@patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status")
 def test_map_status_unknown_phase_pods_fallback_pending(
-    mock_list_pods: MagicMock, test_step_pending: PlatformJobStepWithContext
+    mock_list_pods: MagicMock, test_step_pending: HelixJobStepWithContext
 ) -> None:
     """Phase Unknown with no container signals maps to PENDING via aggregate."""
     mock_list_pods.return_value = [_pod(phase="Unknown")]
@@ -116,7 +121,7 @@ def test_map_status_unknown_phase_pods_fallback_pending(
 
     status, details = map_kubernetes_job_status_to_step_status(job, core_v1, test_step_pending)
 
-    assert status == PlatformJobStatus.PENDING
+    assert status == HelixJobStatus.PENDING
     assert "unclear" in details["message"].lower() or "reconciling" in details["message"].lower()
 
 
@@ -131,12 +136,226 @@ def test_aggregate_pod_statuses_error_wins() -> None:
         _pod(phase="Failed"),
     ]
     status, details = aggregate_pod_statuses_for_job_step(pods)
-    assert status == PlatformJobStatus.ERROR
+    assert status == HelixJobStatus.ERROR
     assert "error" in details["message"].lower()
 
 
 def test_aggregate_pod_statuses_all_completed() -> None:
     pods = [_pod(phase="Succeeded"), _pod(phase="Succeeded")]
     status, details = aggregate_pod_statuses_for_job_step(pods)
-    assert status == PlatformJobStatus.COMPLETED
+    assert status == HelixJobStatus.COMPLETED
     assert "transient" in details["message"].lower()
+
+
+def _waiting_pod(reason: str) -> client.V1Pod:
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(name="pod-1", uid="uid-1"),
+        status=client.V1PodStatus(
+            phase="Pending",
+            container_statuses=[
+                client.V1ContainerStatus(
+                    image="test-image",
+                    image_id="test-image-id",
+                    name="nemo-job-task",
+                    ready=False,
+                    restart_count=0,
+                    state=client.V1ContainerState(waiting=client.V1ContainerStateWaiting(reason=reason)),
+                )
+            ],
+        ),
+    )
+
+
+@pytest.mark.parametrize("reason", ["ImagePullBackOff", "ErrImagePull"])
+def test_retried_image_pull_is_pending_not_error(reason: str) -> None:
+    """The kubelet keeps retrying these, and the pull often succeeds, so the pod is still starting."""
+    pod_status = map_pod_to_pod_status(_waiting_pod(reason))
+
+    assert pod_status.errors == {}
+    assert pod_status.waiting == {"nemo-job-task": reason}
+    assert map_pod_status_to_platform_status(pod_status) == HelixJobStatus.PENDING
+
+
+@pytest.mark.parametrize("reason", ["InvalidImageName", "CreateContainerConfigError"])
+def test_unrecoverable_waiting_reason_is_error(reason: str) -> None:
+    pod_status = map_pod_to_pod_status(_waiting_pod(reason))
+
+    assert pod_status.errors == {"nemo-job-task": reason}
+    assert map_pod_status_to_platform_status(pod_status) == HelixJobStatus.ERROR
+
+
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_ignores_warning_events_for_a_running_pod(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    """A pod that recovered keeps reporting active; its stale Warning event is not the current state."""
+    mock_list_pod_status.return_value = [_pod(phase="Running", active={"nemo-job-task"})]
+    mock_get_pod_details.return_value = ({"phase": "Running"}, {"failed": "Error: ImagePullBackOff"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is False
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.ACTIVE
+    assert body.error_details == {}
+
+
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_keeps_a_retrying_pull_pending(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    """A backing-off pull emits a Failed event per attempt; the task must not go terminal on it."""
+    mock_list_pod_status.return_value = [_pod(phase="Pending", waiting={"nemo-job-task": "ImagePullBackOff"})]
+    mock_get_pod_details.return_value = ({"phase": "Pending"}, {"failed": "Error: ImagePullBackOff"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is False
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.PENDING
+    assert body.error_details == {}
+
+
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_reports_error_when_a_sibling_container_failed(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    """A retrying pull must not mask a container that has already failed."""
+    mock_list_pod_status.return_value = [
+        _pod(phase="Pending", errors={"sidecar": 1}, waiting={"nemo-job-task": "ImagePullBackOff"})
+    ]
+    mock_get_pod_details.return_value = ({"phase": "Pending"}, {"failed": "sidecar exited 1"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is True
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.ERROR
+    assert body.error_details["failed"] == "sidecar exited 1"
+
+
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_reports_error_when_an_active_sibling_container_failed(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    mock_list_pod_status.return_value = [_pod(phase="Running", errors={"sidecar": 1}, active={"nemo-job-task"})]
+    mock_get_pod_details.return_value = ({"phase": "Running"}, {"failed": "sidecar exited 1"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is True
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.ERROR
+    assert body.error_details["failed"] == "sidecar exited 1"
+
+
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.client_from_platform")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.get_pod_details")
+@patch("nhx.core.jobs.controllers.backends.kubernetes.common.list_pod_status")
+def test_update_all_tasks_reports_error_for_a_pending_pod_that_is_not_retrying(
+    mock_list_pod_status: MagicMock,
+    mock_get_pod_details: MagicMock,
+    mock_client_from_platform: MagicMock,
+    test_step_active: HelixJobStepWithContext,
+) -> None:
+    mock_list_pod_status.return_value = [_pod(phase="Pending", waiting={"nemo-job-task": "waiting"})]
+    mock_get_pod_details.return_value = ({"phase": "Pending"}, {"inspect_failed": "no such image"}, "")
+    jobs_client = MagicMock()
+    mock_client_from_platform.return_value = jobs_client
+
+    has_errors = update_all_tasks(MagicMock(), MagicMock(), "ns", test_step_active)
+
+    assert has_errors is True
+    body = jobs_client.update_job_step_task.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.ERROR
+    assert body.error_details["inspect_failed"] == "no such image"
+
+
+# ---------------------------------------------------------------------------
+# Image-pull failure messages
+# ---------------------------------------------------------------------------
+
+
+def _warning(reason: str, message: str) -> dict:
+    return {"type": "Warning", "reason": reason, "message": message}
+
+
+# The three Warning/Failed events a real kubelet emits for an unresolvable ref,
+# in the order it emits them. Captured from a kind cluster, not hand-written.
+_REAL_PULL_EVENTS = [
+    {
+        "type": "Normal",
+        "reason": "Pulling",
+        "message": 'Pulling image "registry.invalid/nhx-e2e/no-such-image:missing"',
+    },
+    _warning(
+        "Failed",
+        'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": failed to resolve reference: '
+        "dial tcp: lookup registry.invalid on 172.18.0.1:53: no such host",
+    ),
+    _warning("Failed", "Error: ErrImagePull"),
+    _warning("Failed", "Error: ImagePullBackOff"),
+]
+
+
+def test_image_pull_failure_message_prefers_the_event_naming_the_image():
+    """The informative event is not the last one, so 'keep the last' loses it.
+
+    Regression: reading ``get_pod_details``' collapsed ``error_details["failed"]``
+    yielded the bare "Error: ImagePullBackOff", so the step failed without ever
+    saying which image could not be pulled.
+    """
+    message = image_pull_failure_message(_REAL_PULL_EVENTS)
+
+    assert message.startswith("Failed to pull image")
+    assert "registry.invalid/nhx-e2e/no-such-image:missing" in message
+
+
+def test_image_pull_failure_message_falls_back_to_the_last_warning():
+    """An unrecognised failure shape still reports something."""
+    assert image_pull_failure_message([_warning("Failed", "Error: ImagePullBackOff")]) == "Error: ImagePullBackOff"
+
+
+def test_image_pull_failure_message_handles_inspect_failed():
+    """InvalidImageName arrives as InspectFailed and already names the image."""
+    detail = 'Failed to apply default image tag "__invalid_ubuntu:image": invalid reference format'
+
+    assert image_pull_failure_message([_warning("InspectFailed", detail)]) == detail
+
+
+def test_image_pull_failure_message_ignores_unrelated_events():
+    """Normal events and non-failure warnings are not pull failures."""
+    events = [
+        {"type": "Normal", "reason": "Scheduled", "message": "Successfully assigned pod"},
+        {"type": "Warning", "reason": "Unhealthy", "message": "Readiness probe failed"},
+    ]
+
+    assert image_pull_failure_message(events) == ""

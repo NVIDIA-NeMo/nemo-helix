@@ -3,8 +3,9 @@
 
 import { agentsCreateAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
-import { filesCreateFileset, filesUploadFile } from '@nemo/sdk/generated/platform/files';
+import { filesCreateFileset } from '@nemo/sdk/generated/platform/files';
 import { claimFileset, rollbackFileset } from '@studio/api/agents/agentSpecFileset';
+import { uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
 import {
   AGENT_CONFIG_FILENAME,
   FABRIC_CONFIG_FORMAT,
@@ -46,7 +47,7 @@ export const createAgentFromUpload = async ({
   });
 
   try {
-    await uploadEntries(workspace, filesetName, entries);
+    await uploadFilesetEntries(workspace, filesetName, entries);
 
     return await agentsCreateAgent(workspace, {
       name,
@@ -58,29 +59,6 @@ export const createAgentFromUpload = async ({
     await rollbackFileset(workspace, filesetName);
     throw error;
   }
-};
-
-// One request per file, so a 500-file agent is 500 round trips. Run a bounded number at
-// once: unbounded Promise.all would queue them all against the browser's per-host limit
-// and lose the first error behind hundreds of in-flight requests.
-const UPLOAD_CONCURRENCY = 6;
-
-const uploadEntries = async (
-  workspace: string,
-  filesetName: string,
-  entries: UploadAgentEntry[]
-): Promise<void> => {
-  const queue = [...entries];
-  const worker = async (): Promise<void> => {
-    for (let entry = queue.shift(); entry; entry = queue.shift()) {
-      const blob = new Blob([await entry.file.arrayBuffer()], { type: 'application/octet-stream' });
-      await filesUploadFile(workspace, filesetName, entry.path, blob);
-    }
-  };
-
-  await Promise.all(
-    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, entries.length) }, () => worker())
-  );
 };
 
 export type UseCreateAgentFromUploadOptions = Omit<

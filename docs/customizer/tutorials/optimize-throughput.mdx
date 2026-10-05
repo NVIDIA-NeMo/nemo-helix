@@ -1,15 +1,14 @@
 ---
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-
 title: "Optimize for Tokens/GPU Throughput"
 description: ""
 ---
 
-[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-platform/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
+[Run in Google Colab](https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/optimize-throughput.ipynb)
 
 ## About
-Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime. 
+Learn how to use the NeMo Helix Customizer to create a [LoRA](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) (Low-Rank Adaptation) customization job optimized for higher tokens/GPU throughput and lower runtime.
 
 **In this tutorial, you will:**
 1. Fine-tune [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) on the SQuAD dataset using LoRA, with [sequence packing](/documentation/customizer-reference/customization-concepts#nemo-ms-about-concepts-customization) enabled for one run and disabled for another.
@@ -22,30 +21,37 @@ Learn how to use the NeMo Platform Customizer to create a [LoRA](/documentation/
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
-2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
+2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-helix[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
 ## Quick Start
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```
 
 ```python
 import json
 import os
-from nemo_platform import NeMoPlatform, ConflictError
+from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(
-    base_url=NMP_BASE_URL,
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+sdk = NeMoHelix(
+    base_url=NHX_BASE_URL,
     workspace="default"
 )
+client = NemoClient(
+    base_url=NHX_BASE_URL,
+    workspace="default"
+)
+customization = Customization.from_client(client)
 ```
 
 ### 2. Create Dataset FileSet and Upload Training Data
@@ -137,7 +143,7 @@ print(f"Saved validation.jsonl with {len(validation_ds)} rows")
 # Create fileset to store SFT training data
 
 try:
-    client.files.filesets.create(
+    sdk.files.filesets.create(
         workspace="default",
         name=DATASET_NAME,
         description="SFT training data"
@@ -147,7 +153,7 @@ except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
 # Upload training data files individually to ensure correct structure
-client.files.upload(
+sdk.files.upload(
     local_path=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
     remote_path="",
     fileset=DATASET_NAME,
@@ -156,7 +162,7 @@ client.files.upload(
 
 # Validate training data is uploaded correctly
 print("Training data:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
 ```
 
 ### 3. Secrets Setup
@@ -166,11 +172,13 @@ If you plan to use NGC or Hugging Face models, you will need to configure authen
 - **NGC models** (`ngc://` URIs): Requires NGC API key
 - **Hugging Face models** (`hf://` URIs): Requires HF token for gated/private models
 
+
 Configure these as secrets in your platform. Refer to [Managing Secrets](/documentation/get-started/core-concepts/manage-secrets) for detailed instructions.
 
 Get your credentials to access base models:
 - [NGC API Key](https://ngc.nvidia.com/) (Setup → Generate API Key)
 - [Hugging Face Token](https://huggingface.co/settings/tokens) (Create token with Read access)
+
 
 ---
 
@@ -189,11 +197,12 @@ This tutorial uses the [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co
 HF_TOKEN = os.getenv("HF_TOKEN")
 NGC_API_KEY = os.getenv("NGC_API_KEY")
 
+
 def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
         raise ValueError(f"{label} environment variable is not set. Set it and try again.")
     try:
-        secret = client.secrets.create(
+        secret = sdk.secrets.create(
             name=name,
             workspace="default",
             value=value,
@@ -202,7 +211,8 @@ def create_or_get_secret(name: str, value: str | None, label: str):
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return client.secrets.retrieve(name=name, workspace="default")
+        return sdk.secrets.retrieve(name=name, workspace="default")
+
 
 # Create Hugging Face token secret
 hf_secret = create_or_get_secret("hf-token", HF_TOKEN, "HF_TOKEN")
@@ -222,7 +232,7 @@ Note: for public models, you can omit the `token_secret` parameter when creating
 
 ```python
 import time
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"
@@ -230,7 +240,7 @@ MODEL_NAME = "llama-3-2-1b-base"
 # Ensure you have a Hugging Face token secret created
 # Create a fileset pointing to the desired Hugging Face model
 try:
-    base_model_fs = client.files.filesets.create(
+    base_model_fs = sdk.files.filesets.create(
         workspace="default",
         name=MODEL_NAME,
         description="Llama 3.2 1B base model from Hugging Face",
@@ -246,14 +256,14 @@ try:
     print(f"Created base model fileset: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model fileset already exists. Skipping creation.")
-    base_model_fs = client.files.filesets.retrieve(
+    base_model_fs = sdk.files.filesets.retrieve(
         workspace="default",
         name=MODEL_NAME,
     )
 
 # Create the Model Entity representation.
 try:
-    base_model = client.models.create(
+    base_model = sdk.models.create(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
@@ -261,7 +271,7 @@ try:
     print(f"Created Model Entity: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model already exists. Updating fileset if different.")
-    base_model = client.models.update(
+    base_model = sdk.models.update(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
@@ -269,7 +279,7 @@ except ConflictError:
 
 print(f"\nBase model fileset: fileset://default/{base_model.name}")
 print("Base model fileset files list:")
-print(json.dumps([f.model_dump() for f in client.files.list(fileset=MODEL_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=MODEL_NAME, workspace="default").data], indent=2))
 
 # Wait for ModelSpec to be populated from the checkpoint
 print("\nWaiting for ModelSpec to be populated...")
@@ -279,7 +289,7 @@ while not base_model.spec:
     if time.time() - spec_start > SPEC_TIMEOUT_SECONDS:
         raise TimeoutError(f"ModelSpec not populated within {SPEC_TIMEOUT_SECONDS} seconds")
     time.sleep(2)
-    base_model = client.models.retrieve(
+    base_model = sdk.models.retrieve(
         workspace="default",
         name=MODEL_NAME,
     )
@@ -319,7 +329,7 @@ spec = AutomodelJobInput(
     output={"name": PACK_OUTPUT_NAME},
 )
 
-job_with_sequence_packing = client.customization.automodel.jobs.create(
+job_with_sequence_packing = customization.automodel.jobs.create(
     spec=spec, workspace="default", name=JOB_NAME
 )
 
@@ -330,7 +340,7 @@ print(f"Output adapter: {PACK_OUTPUT_NAME}")
 
 ### 6. Track Fine-Tuning Progress
 
-A training job contains multiple steps: 
+A training job contains multiple steps:
 - Model and dataset downloading
 - Fine-tuning where LoRA adapter weights are trained
 - Creating a fileset entry for the fine-tuned model
@@ -339,6 +349,7 @@ A training job contains multiple steps:
 The elapsed time printed below reflects progress of the entire job. We compare the time taken by the fine-tuning step for both jobs in the last section of this tutorial.
 
 #### Define Helper Functions
+
 
 ```python
 # Helpers to draw GPU VRAM Utilization and Validation Loss
@@ -371,6 +382,7 @@ def _get_gpu_snapshot() -> tuple[list[float], list[float]]:
     finally:
         pynvml.nvmlShutdown()
 
+
 # ---------------------------------------------------------------------------
 # Dashboard drawing helpers
 # ---------------------------------------------------------------------------
@@ -387,6 +399,7 @@ _PALETTE = {
     "tick":       "#666666",
 }
 
+
 def _style_axis(ax):
     """Apply shared cosmetic styling to a subplot axis."""
     ax.set_facecolor("white")
@@ -396,6 +409,7 @@ def _style_axis(ax):
     ax.spines["left"].set_color(_PALETTE["spine"])
     ax.spines["bottom"].set_color(_PALETTE["spine"])
     ax.tick_params(colors=_PALETTE["tick"], labelsize=9)
+
 
 def _plot_line(ax, xs, ys, color, label, fill=True):
     """Plot a time series, gracefully skipping None values."""
@@ -411,6 +425,7 @@ def _plot_line(ax, xs, ys, color, label, fill=True):
     )
     if fill:
         ax.fill_between(px, py, alpha=0.08, color=color)
+
 
 def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
     """Plot per-GPU time series with area fill."""
@@ -429,6 +444,7 @@ def _plot_gpu_panel(ax, xs, history, colors, fallback_label):
         ax.fill_between(xs[: len(vals)], vals, alpha=0.08, color=c)
     if n_gpus > 1:
         ax.legend(fontsize=9, framealpha=0.9, edgecolor="#DDD")
+
 
 def _draw_dashboard(
     elapsed_mins, val_losses, train_losses,
@@ -489,7 +505,7 @@ The cell below polls the job status every 10 seconds and renders a live dashboar
 import time
 from typing import cast
 from IPython.display import clear_output
-from nemo_platform.types.shared import PlatformJobStatusResponse
+from nemo_helix.types.shared import HelixJobStatusResponse
 
 # Timeout set to 30 minutes to accommodate typical LoRA training duration for this dataset size.
 # Actual training time will vary based on hardware, model size, and dataset complexity.
@@ -497,8 +513,9 @@ TIMEOUT_SECONDS = 30 * 60  # 30 minutes
 VAL_LOSS_KEY = "val_loss"
 TRAIN_LOSS_KEY = "train_loss"
 
+
 def get_training_metric(
-    status: PlatformJobStatusResponse,
+    status: HelixJobStatusResponse,
     metric_key: str,
 ) -> float | None:
     """Return a metric reported by a task in the training step."""
@@ -509,6 +526,7 @@ def get_training_metric(
                 if value is not None:
                     return float(value)
     return None
+
 
 # ---------------------------------------------------------------------------
 # Job polling with live dashboard
@@ -521,7 +539,7 @@ def wait_for_job(
     poll_interval: int = 10,
     val_loss_key: str = VAL_LOSS_KEY,
     train_loss_key: str = TRAIN_LOSS_KEY,
-) -> PlatformJobStatusResponse:
+) -> HelixJobStatusResponse:
     """
     Poll job status until completed, failed, cancelled, or timeout.
     Displays a live dashboard with loss curves and GPU metrics.
@@ -555,7 +573,7 @@ def wait_for_job(
             print("Job did not complete within the timeout period.")
             raise Exception(error_message)
 
-        status = client.jobs.get_status(name=job_name, workspace=workspace)
+        status = sdk.jobs.get_status(name=job_name, workspace=workspace)
 
         # -- Extract training progress from nested steps structure --
         step: int | None = None
@@ -677,6 +695,7 @@ def wait_for_job(
 
         time.sleep(poll_interval)
 
+
 # Wait for the job to complete
 job_with_sequence_packing_status = wait_for_job(
     workspace="default",
@@ -722,7 +741,7 @@ spec = AutomodelJobInput(
     output={"name": NO_PACK_OUTPUT_NAME},
 )
 
-job_without_sequence_packing = client.customization.automodel.jobs.create(
+job_without_sequence_packing = customization.automodel.jobs.create(
     spec=spec, workspace="default", name=JOB_NAME
 )
 
@@ -754,24 +773,24 @@ else:
 - Sequence packed version should have a higher GPU utilization and higher GPU Memory Allocation.
 
 ```python
-from nemo_platform.types.jobs import PlatformJobStep
+from nemo_helix.types.jobs import HelixJobStep
 import pandas as pd
 
 STEP_NAME = "training"
 
-def get_elapsed_time(step: PlatformJobStep) -> float:
+def get_elapsed_time(step: HelixJobStep) -> float:
     """Calculate elapsed time in seconds from step's created_at to updated_at."""
     if step.created_at is None or step.updated_at is None:
         raise ValueError("Training step timestamps are unavailable")
     return (step.updated_at - step.created_at).total_seconds()
 
-step_with_sequence_packing = client.jobs.steps.retrieve(
+step_with_sequence_packing = sdk.jobs.steps.retrieve(
             name=STEP_NAME,
             workspace="default",
             job=job_with_sequence_packing.job.name,
 )
 
-step_without_sequence_packing = client.jobs.steps.retrieve(
+step_without_sequence_packing = sdk.jobs.steps.retrieve(
             name=STEP_NAME,
             workspace="default",
             job=job_without_sequence_packing.job.name,

@@ -11,8 +11,8 @@ revision lookup needs.
 """
 
 import pytest
-from nmp.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository
+from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository
 
 pytestmark = pytest.mark.asyncio
 

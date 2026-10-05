@@ -15,8 +15,8 @@ always returns "Yes" (block), so ALL content is blocked.
 import os
 
 import pytest
-from nemo_platform_plugin.guardrail.client import GuardrailClient
-from nemo_platform_plugin.guardrail.types import GuardrailCheckRequest
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest
 
 WORKSPACE = "default"
 MODEL = "default/mock-llm"
@@ -24,8 +24,8 @@ MODEL = "default/mock-llm"
 
 @pytest.fixture
 def client() -> GuardrailClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return GuardrailClient(base_url=nmp_base_url, workspace=WORKSPACE)
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return GuardrailClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
 @pytest.fixture

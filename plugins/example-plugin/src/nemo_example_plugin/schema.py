@@ -10,7 +10,7 @@ to the FastAPI routing layer.
 
 from __future__ import annotations
 
-from nemo_platform_plugin.schema import NemoFilter
+from nemo_helix_plugin.schema import NemoFilter
 from pydantic import Field
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ from pydantic import Field
 class ExampleItemFilter(NemoFilter):
     """Query filter for ``GET /v2/workspaces/{workspace}/items``.
 
-    ``extra="forbid"`` is inherited from :class:`~nemo_platform_plugin.schema.NemoFilter`.
+    ``extra="forbid"`` is inherited from :class:`~nemo_helix_plugin.schema.NemoFilter`.
     A typo like ``?filter[ttle]=foo`` returns a 422 instead of silently
     returning unfiltered results.
 

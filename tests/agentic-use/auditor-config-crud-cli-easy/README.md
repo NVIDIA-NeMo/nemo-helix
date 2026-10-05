@@ -3,7 +3,7 @@
 
 # Auditor Config CRUD Operations (CLI)
 
-Tests the agent's ability to perform CRUD operations on auditor configurations using the NeMo Platform CLI.
+Tests the agent's ability to perform CRUD operations on auditor configurations using the NeMo Helix CLI.
 
 ## What This Tests
 

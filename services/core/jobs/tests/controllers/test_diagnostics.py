@@ -4,7 +4,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from nmp.core.jobs.controllers.diagnostics import _MAX_ERROR_STACK_CHARS, collect_job_diagnostics
+from nhx.core.jobs.controllers.diagnostics import _MAX_ERROR_STACK_CHARS, collect_job_diagnostics
 
 from services.core.jobs.tests.controllers.client_mocks import data_response
 
@@ -48,8 +48,8 @@ def test_collect_job_diagnostics_omits_raw_job_logs_by_default() -> None:
     jobs = _make_jobs_client_with_logs()
 
     with (
-        patch("nmp.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
-        patch("nmp.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", False),
+        patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
+        patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", False),
     ):
         diagnostics = collect_job_diagnostics(
             sdk,
@@ -68,8 +68,8 @@ def test_collect_job_diagnostics_includes_raw_job_logs_when_enabled() -> None:
     jobs = _make_jobs_client_with_logs()
 
     with (
-        patch("nmp.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
-        patch("nmp.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", True),
+        patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
+        patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", True),
     ):
         diagnostics = collect_job_diagnostics(
             sdk,
@@ -143,7 +143,7 @@ def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
         )
     )
 
-    with patch("nmp.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs):
+    with patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs):
         diagnostics = collect_job_diagnostics(
             sdk,
             workspace="default",

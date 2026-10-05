@@ -15,7 +15,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 ### Tutorial-Specific Prerequisites
 
-- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Platform locally.
+- Completed the [Quickstart](/documentation/get-started) to install and deploy NeMo Helix locally.
 - Installed the Python SDK and any tutorial packages you need in your environment.
 - A Hugging Face token with access to the private or gated model repository.
 - A Hugging Face model with a compatible architecture. This tutorial uses `google/gemma-2-2b-it` as an example, but success depends on architectural compatibility.
@@ -23,7 +23,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 <Note>
 
-This tutorial uses the current NeMo Platform SDK resources: `client.files.filesets`, `client.models`, `client.customization.automodel.jobs`, and `client.inference.gateway`.
+This tutorial uses the current NeMo Helix SDK resources: `sdk.files.filesets`, `sdk.models`, `sdk.inference.gateway`, and the `Customization` resource's `customization.automodel.jobs`.
 
 </Note>
 
@@ -59,10 +59,10 @@ For a complete list of tested models, see the [Model Catalog](/documentation/cus
 
 ### 1. Initialize the SDK
 
-The SDK needs your NeMo Platform server URL. By default, this tutorial uses `http://localhost:8080`.
+The SDK needs your NeMo Helix server URL. By default, this tutorial uses `http://localhost:8080`.
 
 ```sh
-export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
+export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
 ```
 
@@ -84,9 +84,11 @@ from nemo_automodel_plugin.schema import (
     ScheduleSpec,
     TrainingSpec,
 )
-from nemo_platform import ConflictError, NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
-from nemo_platform.types.secrets import PlatformSecretResponse
+from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix.types.secrets import HelixSecretResponse
 
 def max_wait_time_checker(seconds: int, job_name: str = ""):
     start_time = time.time()
@@ -97,20 +99,22 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
     return check
 
-NMP_BASE_URL = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-client = NeMoPlatform(base_url=NMP_BASE_URL, workspace="default")
+NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+customization = Customization.from_client(client)
 ```
 
 ### 2. Store the Hugging Face Token
 
-Private and gated Hugging Face repositories require a token. Store it as a NeMo Platform secret and reference that secret from the Hugging Face fileset.
+Private and gated Hugging Face repositories require a token. Store it as a NeMo Helix secret and reference that secret from the Hugging Face fileset.
 
 ```python
-def create_or_get_secret(name: str, value: str | None, label: str) -> PlatformSecretResponse:
+def create_or_get_secret(name: str, value: str | None, label: str) -> HelixSecretResponse:
     if not value:
         raise ValueError(f"{label} is not set")
     try:
-        secret = client.secrets.create(
+        secret = sdk.secrets.create(
             name=name,
             workspace="default",
             value=value,
@@ -119,7 +123,7 @@ def create_or_get_secret(name: str, value: str | None, label: str) -> PlatformSe
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return client.secrets.retrieve(name=name, workspace="default")
+        return sdk.secrets.retrieve(name=name, workspace="default")
 
 hf_secret = create_or_get_secret("hf-token", os.getenv("HF_TOKEN"), "HF_TOKEN")
 ```
@@ -139,7 +143,7 @@ model_storage = HuggingfaceStorageConfigParam(
 )
 
 try:
-    base_model_fs = client.files.filesets.create(
+    base_model_fs = sdk.files.filesets.create(
         workspace="default",
         name=MODEL_NAME,
         description=f"Private Hugging Face model {HF_REPO_ID}",
@@ -149,8 +153,8 @@ try:
     print(f"Created model fileset: {base_model_fs.name}")
 except ConflictError:
     print(f"Model fileset '{MODEL_NAME}' already exists, refreshing Hugging Face settings...")
-    client.files.filesets.delete(workspace="default", name=MODEL_NAME)
-    base_model_fs = client.files.filesets.create(
+    sdk.files.filesets.delete(workspace="default", name=MODEL_NAME)
+    base_model_fs = sdk.files.filesets.create(
         workspace="default",
         name=MODEL_NAME,
         description=f"Private Hugging Face model {HF_REPO_ID}",
@@ -159,7 +163,7 @@ except ConflictError:
     )
 
 try:
-    base_model = client.models.create(
+    base_model = sdk.models.create(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
@@ -168,7 +172,7 @@ try:
     print(f"Created Model Entity: {base_model.name}")
 except ConflictError:
     print(f"Model Entity '{MODEL_NAME}' already exists, updating fileset if needed...")
-    base_model = client.models.update(
+    base_model = sdk.models.update(
         workspace="default",
         name=MODEL_NAME,
         fileset=f"default/{MODEL_NAME}",
@@ -179,11 +183,11 @@ time_check = max_wait_time_checker(600, "ModelSpec")
 while not base_model.spec:
     time_check()
     time.sleep(10)
-    base_model = client.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
 
 if base_model.spec:
     base_model.spec.linear_layers = None
-    base_model = client.models.update(
+    base_model = sdk.models.update(
         workspace="default",
         name=MODEL_NAME,
         spec=base_model.spec,
@@ -255,7 +259,7 @@ with open(DATASET_PATH / "validation.jsonl", "w", encoding="utf-8") as f:
         f.write(json.dumps(item) + "\n")
 
 try:
-    client.files.filesets.create(
+    sdk.files.filesets.create(
         workspace="default",
         name=DATASET_NAME,
         description="Private Hugging Face model LoRA training data",
@@ -265,12 +269,12 @@ try:
 except ConflictError:
     print(f"Dataset fileset '{DATASET_NAME}' already exists, continuing...")
 
-client.files.fsspec.put(
+sdk.files.fsspec.put(
     lpath=DATASET_PATH,
     rpath=f"default/{DATASET_NAME}/",
     recursive=True,
 )
-print(client.files.list(fileset=DATASET_NAME, workspace="default"))
+print(sdk.files.list(fileset=DATASET_NAME, workspace="default"))
 ```
 
 ### 5. Start a LoRA Customization Job
@@ -307,7 +311,7 @@ spec = AutomodelJobInput(
     output=OutputRequest(name=OUTPUT_NAME),
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     spec=spec,
     workspace="default",
     name=JOB_NAME,
@@ -326,7 +330,7 @@ time_check = max_wait_time_checker(3600, "Customization Job")
 
 while True:
     time_check()
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    status = sdk.jobs.get_status(name=job.job.name, workspace="default")
     clear_output(wait=True)
     print(f"Job status: {status.status}")
 
@@ -366,7 +370,7 @@ deploy_suffix = uuid.uuid4().hex[:4]
 DEPLOYMENT_CONFIG_NAME = f"private-hf-lora-cfg-{deploy_suffix}"
 DEPLOYMENT_NAME = f"private-hf-lora-{deploy_suffix}"
 
-deployment_config = client.inference.deployment_configs.create(
+deployment_config = sdk.inference.deployment_configs.create(
     workspace="default",
     name=DEPLOYMENT_CONFIG_NAME,
     engine="vllm",
@@ -377,13 +381,13 @@ deployment_config = client.inference.deployment_configs.create(
     },
     executor_config={
         "gpu": 1,
-        "image_name": "vllm/vllm-openai",
+        "image_name": "docker.io/vllm/vllm-openai",
         "image_tag": "v0.22.1",
         "additional_args": ["--max-lora-rank", "32"],
     },
 )
 
-deployment = client.inference.deployments.create(
+deployment = sdk.inference.deployments.create(
     workspace="default",
     name=DEPLOYMENT_NAME,
     config=deployment_config.name,
@@ -398,7 +402,7 @@ time_check = max_wait_time_checker(1800, "Deployment")
 while True:
     time_check()
     time.sleep(15)
-    deployment_status = client.inference.deployments.retrieve(
+    deployment_status = sdk.inference.deployments.retrieve(
         name=deployment.name,
         workspace="default",
     )
@@ -407,7 +411,7 @@ while True:
     print(f"Status: {deployment_status.status}")
 
     if deployment_status.status in ("RUNNING", "READY"):
-        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+        if not sdk.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
     if deployment_status.status in ("FAILED", "ERROR", "TERMINATED", "LOST"):
@@ -428,7 +432,7 @@ messages = [
 ]
 
 def chat(model_id: str):
-    return client.inference.gateway.provider.post(
+    return sdk.inference.gateway.provider.post(
         "v1/chat/completions",
         name=deployment.name,
         workspace="default",
@@ -459,7 +463,7 @@ print(lora_response["choices"][0]["message"]["content"])
 export OUTPUT_NAME="<output adapter name from the Python job block>"
 export INFERENCE_MODEL_NAME="default--${OUTPUT_NAME}"
 
-curl -s "${NMP_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+curl -s "${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "'${INFERENCE_MODEL_NAME}'",

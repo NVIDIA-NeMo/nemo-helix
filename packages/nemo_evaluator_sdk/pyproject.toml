@@ -6,7 +6,7 @@ name = "nemo-evaluator-sdk"
 description = "NeMo Evaluator SDK"
 readme = "README.md"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
-requires-python = ">=3.11,<3.15"
+requires-python = ">=3.12,<3.15"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -15,7 +15,6 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Human Machine Interfaces",
   "Topic :: Software Development",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
@@ -23,9 +22,11 @@ classifiers = [
 dependencies = [
   "pydantic>=2.10.6",
   # The broker sandbox provider imports the wire contract at module scope. Cheap to depend on
-  # directly: sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
+  # directly: nemo-sandboxed-gym's base install is Pydantic alone -- its server, OpenSandbox and Ray
   # pieces are extras -- so this adds request/response models, not a web stack.
-  "sandboxed-gym",
+  # Workspace member for now; becomes an exact PyPI pin once published, per the note on
+  # `[tool.bundle-package]` in packages/nemo_helix/pyproject.toml.
+  "nemo-sandboxed-gym",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",
@@ -38,34 +39,35 @@ dependencies = [
   "ragas==0.4.3",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.7.3,<0.8",
+  "nemo-relay>=0.9.3,<0.10",
   # Fabric's typed config surface (FabricConfig/RuntimeConfig/ModelConfig/the relay models) — what the
   # agent-eval runtimes compose against. The metapackage includes nemo-fabric-runtime; the harness
   # adapters are the weight (codex ~299 MB, claude ~231 MB) and stay in the `fabric` extra below, so
   # only *resolving and running* a harness pulls them.
-  "nemo-fabric>=0.3.0,<0.4.0",
+  "nemo-fabric>=0.4.0,<0.5.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
 version = "0.0.0"
 
 [dependency-groups]
-dev = ["nemo-evaluator-plugin", "nemo-platform-sdk"]
+dev = ["nemo-evaluator-plugin", "nemo-helix-sdk"]
 
 [project.optional-dependencies]
 agent-runtimes = [
   "openai-agents[docker]>=0.17.3,<0.18",
 ]
 engine = []
-# Native Harbor execution and result adaptation need `harbor`, which requires Python >=3.12 while
-# the SDK floor remains >=3.11. The marker scopes the dependency to compatible interpreters.
-# Harbor is imported lazily, so importing the SDK and constructing Harbor configuration remain
-# valid on Python 3.11; invoking either execution or result adaptation requires this extra.
+# Native Harbor execution and result adaptation need `harbor`. It stays optional because it is
+# heavy, not because of the interpreter: the SDK floor now matches Harbor's own >=3.12, so the
+# `python_version` marker this entry used to carry is gone. Harbor is imported lazily, so importing
+# the SDK and constructing Harbor configuration work without the extra; execution and result
+# adaptation do not.
 harbor = [
-  "harbor>=0.20,<0.21; python_version >= '3.12'",
+  "harbor>=0.20,<0.21",
 ]
-nemo-platform = [
-  "nemo-platform-sdk",
+nemo-helix = [
+  "nemo-helix-sdk",
 ]
 # NeMo Fabric HARNESS ADAPTERS for the agent-eval runtime (FabricAgentRuntime, host or
 # sandbox mode). The Fabric SDK itself is a base dependency above; this extra adds the
@@ -85,15 +87,16 @@ nemo-platform = [
 #     ephemeral overlay env (`uv run --with ...`) hides them; install into the venv instead.
 #   * claude/codex go through the metapackage extras, which keep the adapters and the Fabric SDK on
 #     compatible versions.
-#   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
+#   * hermes stays direct because Fabric's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     Python<3.14-gated upstream, which the lock's own <3.14 ceiling already satisfies.
+#     The 0.4 adapter allows Python <3.15, but the lock reaches 3.14, so the marker below really does
+#     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
-  "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+  "nemo-fabric[claude,codex]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 
 [build-system]
@@ -103,12 +106,3 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
-
-[tool.vendor-package]
-package = "nemo_evaluator_sdk"
-package_root = "packages/nemo_evaluator_sdk"
-sdk_include_mode = "source-package"
-source_module = "nemo_evaluator_sdk"
-target_sdk_module = "beta.evaluator"
-sdk_optional_dependencies_name = "nemo-evaluator-sdk"
-included_paths = ["**/*.py", "**/*.Dockerfile"]

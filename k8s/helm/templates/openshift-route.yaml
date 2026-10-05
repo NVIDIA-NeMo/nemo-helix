@@ -7,9 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: {{ include "nemo-platform.name" . }}
+  name: {{ include "nemo-helix.name" . }}
   labels:
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.openshiftRoute.labels }}
   {{- toYaml . | nindent 4 }}
   {{- end }}

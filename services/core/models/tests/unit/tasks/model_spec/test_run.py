@@ -10,20 +10,20 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.metadata import FilesetMetadata
-from nemo_platform_plugin.files.storage_config import LocalStorageConfig
-from nemo_platform_plugin.files.types import FilesetOutput, FilesetPurpose
-from nemo_platform_plugin.models.client import ModelsClient
-from nemo_platform_plugin.models.types import (
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.metadata import FilesetMetadata
+from nemo_helix_plugin.files.storage_config import LocalStorageConfig
+from nemo_helix_plugin.files.types import FilesetOutput, FilesetPurpose
+from nemo_helix_plugin.models.client import ModelsClient
+from nemo_helix_plugin.models.types import (
     ModelEntity,
     UpdateModelEntityRequest,
 )
-from nemo_platform_plugin.models.types import (
+from nemo_helix_plugin.models.types import (
     ModelSpec as PluginModelSpec,
 )
-from nmp.core.models.schemas import (
+from nhx.core.models.schemas import (
     LinearLayerSpec,
     MambaConfig,
     ModelSpec,
@@ -31,8 +31,8 @@ from nmp.core.models.schemas import (
     SlidingWindowConfig,
     ToolCallConfig,
 )
-from nmp.core.models.tasks.model_spec.run import ModelSpecRunner
-from nmp.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NMPJobContext
+from nhx.core.models.tasks.model_spec.run import ModelSpecRunner
+from nhx.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NHXJobContext
 
 
 @dataclass(frozen=True)
@@ -127,7 +127,7 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         ]
     )
     files_sdk.download.side_effect = lambda **kwargs: kwargs["local_path"].mkdir(parents=True, exist_ok=True)
-    sdk = cast(NeMoPlatform, SimpleNamespace(files=files_sdk))
+    sdk = cast(NeMoHelix, SimpleNamespace(files=files_sdk))
 
     model_name = "qwen3-0-6b-automodel"
     model_entity = _model_entity(model_name)
@@ -145,7 +145,7 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
     files_client = MagicMock()
     files_client.get_fileset.return_value = _Response(fileset)
 
-    def client_factory(_sdk: NeMoPlatform, client_cls: type[Any]) -> Any:
+    def client_factory(_sdk: NeMoHelix, client_cls: type[Any]) -> Any:
         if client_cls is ModelsClient:
             return models_client
         if client_cls is FilesClient:
@@ -153,15 +153,15 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         raise AssertionError(f"Unexpected client class: {client_cls}")
 
     inferred_spec = _core_model_spec()
-    parallelism_api = types.ModuleType("nmp.core.models.parallelism.api")
+    parallelism_api = types.ModuleType("nhx.core.models.parallelism.api")
     infer_model_cfg_from_hf = MagicMock(return_value=inferred_spec)
     find_minimum_gpus_from_metadata = MagicMock(side_effect=[(4, {}), (2, {})])
     setattr(parallelism_api, "infer_model_cfg_from_hf", infer_model_cfg_from_hf)
     setattr(parallelism_api, "find_minimum_gpus_from_metadata", find_minimum_gpus_from_metadata)
-    parallelism_pkg = types.ModuleType("nmp.core.models.parallelism")
+    parallelism_pkg = types.ModuleType("nhx.core.models.parallelism")
     parallelism_pkg.__path__ = []
 
-    job_ctx = NMPJobContext(
+    job_ctx = NHXJobContext(
         workspace="default",
         job_id="job-123",
         attempt_id="attempt-0",
@@ -178,11 +178,11 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         patch.dict(
             sys.modules,
             {
-                "nmp.core.models.parallelism": parallelism_pkg,
-                "nmp.core.models.parallelism.api": parallelism_api,
+                "nhx.core.models.parallelism": parallelism_pkg,
+                "nhx.core.models.parallelism.api": parallelism_api,
             },
         ),
-        patch("nmp.core.models.tasks.model_spec.run.client_from_platform", side_effect=client_factory),
+        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", side_effect=client_factory),
     ):
         runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
         result = runner.analyze_checkpoint(ModelSpecTaskConfig(workspace="default", name=model_name))

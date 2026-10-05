@@ -12,11 +12,11 @@ torch = pytest.importorskip("torch")
 onnxruntime = pytest.importorskip("onnxruntime")
 transformers = pytest.importorskip("transformers")
 
-from nmp.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
+from nhx.automodel.tasks.training.backends.checkpoints import (  # noqa: E402
     ModelType,
     export_onnx,
 )
-from nmp.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
+from nhx.automodel.tasks.training.schemas import ExportConfig  # noqa: E402
 from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer  # noqa: E402
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase  # noqa: E402
 
@@ -119,6 +119,8 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(),
+            trust_remote_code=False,
+            load_trust_remote_code=False,
         )
 
         # Different batch/sequence dimensions from the trace sample exercise dynamic axes.
@@ -159,6 +161,8 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(pooling=pooling),
+            trust_remote_code=False,
+            load_trust_remote_code=False,
         )
 
         batch = _tokenize(embedding_checkpoint, ["hello", "an example sentence for tracing"])
@@ -183,6 +187,8 @@ class TestEmbeddingExport:
             tokenizer_path=str(embedding_checkpoint),
             model_type=ModelType.EMBEDDING,
             cfg=_parity_config(dimensions=True),
+            trust_remote_code=False,
+            load_trust_remote_code=False,
         )
 
         session = _session(onnx_path)

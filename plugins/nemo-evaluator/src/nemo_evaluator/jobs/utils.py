@@ -11,8 +11,11 @@ from contextlib import contextmanager
 from typing import TypeVar, cast
 
 import httpx
+from nemo_evaluator_sdk import Evaluator
+from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_evaluator_sdk.resolvers import LocalSecretResolver
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 T = TypeVar("T")
 AsyncClientT = TypeVar("AsyncClientT", bound=AsyncNemoClient)
@@ -21,6 +24,17 @@ type _SyncRequestHook = Callable[[httpx.Request], None]
 type _SyncResponseHook = Callable[[httpx.Response], None]
 type _AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
 type _AsyncResponseHook = Callable[[httpx.Response], Awaitable[None]]
+
+
+def job_evaluator() -> Evaluator:
+    """An SDK ``Evaluator`` for code running inside a job.
+
+    The service injects each secret under its own env name, and a bare name such as ``OPENAI_API_KEY`` may hold
+    another consumer's secret, so a workspace-qualified ref never falls back to it.
+    """
+    backend = LocalBackend()
+    backend.secret_resolver = LocalSecretResolver(bare_fallback=False)
+    return Evaluator(backend)
 
 
 def _async_request_hook(sync_hook: _SyncRequestHook) -> _AsyncRequestHook:
@@ -83,7 +97,7 @@ def async_client_from_sync_client(client: NemoClient) -> Iterator[AsyncNemoClien
         retry=client._retry,
         http_client=http_client,
         owns_http_client=True,
-        url_resolver=client._url_resolver,
+        client_runtime=client.nemo_client_runtime,
     )
     try:
         yield async_client

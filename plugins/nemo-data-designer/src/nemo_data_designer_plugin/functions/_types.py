@@ -10,7 +10,7 @@ from data_designer.config.analysis.dataset_profiler import DatasetProfilerResult
 from data_designer.config.dataset_metadata import DatasetMetadata
 from data_designer_nemo.columns import validate_no_custom_columns
 from data_designer_nemo.seed import validate_seed_source_for_execution_context
-from nemo_platform_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
 from pydantic import BaseModel, Field, model_validator
 
 LogLevel = Literal["debug", "info", "warn", "warning", "error"]

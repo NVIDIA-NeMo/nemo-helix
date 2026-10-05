@@ -7,15 +7,12 @@ import {
   type ModelSelection,
 } from '@nemo/common/src/components/ModelSelectV2';
 import { getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { hasModelProvider, toInferenceModelEntityId } from '@nemo/common/src/utils/models';
-import { getProviderProxyGetQueryKey } from '@nemo/sdk/generated/platform/inference-gateway';
+import { hasModelProvider, toInferenceModelName } from '@nemo/common/src/utils/models';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
 import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
 import { ModelChat } from '@studio/components/ModelChat';
-import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
-import { useServedModel } from '@studio/hooks/useServedModel';
 import {
   PANEL_ROLE_DOT_CLASS,
   type PanelChatControls,
@@ -77,38 +74,27 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
     [modelEntity, panel.adapter]
   );
 
-  const { modelChatStatus, isLoading: isChatStatusLoading } = useModelChatAvailability(
-    modelEntity,
-    { adapter }
-  );
-
   const {
-    servedModel: adapterServedModel,
-    providerRef: adapterProviderRef,
-    isLoading: isAdapterTargetLoading,
-  } = useServedModel(
-    adapter ? modelEntity : undefined,
-    adapter && modelEntity ? toInferenceModelEntityId(modelEntity, adapter) : ''
-  );
-  const adapterServedModelName = adapterServedModel?.served_model_name;
+    modelChatStatus,
+    isLoading: isChatStatusLoading,
+    isAdapterUnserved,
+  } = useModelChatAvailability(modelEntity, { adapter });
 
-  const adapterProviderParts = adapterProviderRef
-    ? getPartsFromReference(adapterProviderRef)
-    : undefined;
-  const adapterBaseURL = adapterProviderParts
-    ? PLATFORM_BASE_URL +
-      getProviderProxyGetQueryKey(
-        adapterProviderParts.workspace,
-        adapterProviderParts.name,
-        'v1/'
-      )[0]
-    : undefined;
-
+  // The panel knows its adapter by name from URL state; the Adapter itself only
+  // arrives with the model entity, and may never (a stale name from a link, an
+  // adapter since deleted).
   const isAdapterEntityPending = Boolean(panel.adapter) && !modelEntity;
-  const isLoadingChat = isChatStatusLoading || isAdapterTargetLoading || isAdapterEntityPending;
-  const adapterUnresolved = Boolean(panel.adapter) && !(adapterServedModelName && adapterBaseURL);
+  const isLoadingChat = isChatStatusLoading || isAdapterEntityPending;
 
-  const chatModelName = panel.adapter ? adapterServedModelName : modelName;
+  // An adapter goes on the wire as `base&adapters/{ws}/{name}`, which the gateway
+  // resolves through the base model's VirtualModel — so it needs no special base URL
+  // and inherits that VM's middleware. Without a resolved Adapter there is no
+  // composite to build, and falling back to the base name would quietly chat with
+  // the wrong weights under an adapter's label.
+  const adapterModelName =
+    adapter && modelEntity ? toInferenceModelName(modelEntity, adapter) : undefined;
+  const chatModelName = panel.adapter ? adapterModelName : modelName;
+  const adapterUnresolved = Boolean(panel.adapter) && (!adapterModelName || isAdapterUnserved);
 
   if (panel.collapsed) {
     return (
@@ -175,7 +161,6 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
           key={`${panel.modelURN ?? 'none'}:${panel.adapter ?? ''}`}
           model={chatModelName ?? ''}
           workspace={modelWorkspace}
-          baseURL={panel.adapter ? adapterBaseURL : undefined}
           disabled={!modelName || isLoadingChat || adapterUnresolved}
           modelChatStatus={modelChatStatus}
           emptyState={

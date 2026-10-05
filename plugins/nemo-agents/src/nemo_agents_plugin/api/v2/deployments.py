@@ -16,23 +16,26 @@ process and removes the entity.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
-from typing import Any
+from typing import Any, get_args
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
     AgentDeployment,
     AgentEnvironmentInline,
+    DeploymentMode,
     EnvironmentSpecInline,
     is_container_deployment_mode,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -42,26 +45,28 @@ from nemo_agents_plugin.environment_resolution import (
     resolve_environment,
 )
 from nemo_agents_plugin.runner.deployments_backend import (
-    executor_for_mode,
-    require_executor_matches_mode,
+    image_entrypoint_unsupported_message,
+    require_deployment_mode_available,
 )
 from nemo_agents_plugin.schema import (
     CreateDeploymentRequest,
     DeploymentFilter,
+    DeploymentModeAvailability,
+    DeploymentModeList,
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.auth import current_auth_context
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.schema import PaginationData
 
 logger = logging.getLogger(__name__)
 
@@ -109,15 +114,14 @@ async def create_deployment(
             status_code=400,
             detail="use_image_entrypoint requires deployment_mode 'docker' or 'k8s'.",
         )
+    if body.use_image_entrypoint and not supports_image_entrypoint(body.deployment_mode):
+        raise HTTPException(status_code=400, detail=image_entrypoint_unsupported_message(body.deployment_mode))
 
-    # The controller refuses this too, but only on its next reconcile — by which
-    # point a pending deployment exists and the caller has had its 201.
-    if is_container_deployment_mode(body.deployment_mode):
-        runner_config = AgentsConfig.get().deployments
-        try:
-            require_executor_matches_mode(executor_for_mode(runner_config, body.deployment_mode), body.deployment_mode)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
+    try:
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # The runner fails the deployment for this; the answer is already available here.
     if is_container_deployment_mode(body.deployment_mode) and not (
@@ -215,6 +219,34 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/deployment-modes", response_model=DeploymentModeList, tags=["Agent Deployments"])
+@scope.read
+@path_rule(
+    callers=[CallerKind.PRINCIPAL],
+    permissions=[DeploymentPerms.LIST],
+)
+async def list_deployment_modes(workspace: str) -> DeploymentModeList:
+    """List every deployment mode and whether this platform can run it."""
+    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+
+
+def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
+    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
+
+
+def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+    try:
+        require_deployment_mode_available(runner_config, mode)
+        enabled = True
+    except ValueError:
+        enabled = False
+    return DeploymentModeAvailability(
+        mode=mode,
+        enabled=enabled,
+        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
+    )
 
 
 @router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])

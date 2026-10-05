@@ -3,12 +3,13 @@
 
 """SDK resource class for the Agents plugin.
 
-Registered under the ``nemo.sdk`` entry-point group. The platform lazily
-instantiates this plugin's sync or async SDK resource as ``client.agents``.
+Registered as the ``agents`` ``nemo.sdk`` entry point. ``client.agents`` on a
+``NemoClient`` is the typed agents service client, so build this resource
+explicitly: ``AgentsResource(client)`` or ``AsyncAgentsResource(async_client)``.
 
 Usage (once the SDK hub is wired up)::
 
-    from nemoplatform import NeMo
+    from nemohelix import NeMo
 
     nemo = NeMo(base_url="http://localhost:8000")
 
@@ -55,9 +56,8 @@ Usage (once the SDK hub is wired up)::
     results = nemo.agents.jobs.execute.list_results(job["name"])
     run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-An async namespace is mounted as ``client.agents`` on ``AsyncNeMoPlatform``.
-It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
-remain sync-only.
+:class:`AsyncAgentsResource` exposes ``jobs`` only — agent CRUD, deployments,
+and ``invoke`` remain sync-only.
 """
 
 from __future__ import annotations
@@ -70,11 +70,11 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     ComputeSpecInline,
     EnvironmentSpecInline,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.agents.client import AgentsClient, AsyncAgentsClient
-from nemo_platform_plugin.agents.types import (
+from nemo_helix_plugin.agents.client import AgentsClient, AsyncAgentsClient
+from nemo_helix_plugin.agents.types import (
     AgentJobRequest,
     CreateAgentRequest,
     CreateComputeSpecRequest,
@@ -84,9 +84,9 @@ from nemo_platform_plugin.agents.types import (
     InvokeAgentRequest,
     JsonMap,
 )
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.response import NemoPaginatedResponse, NemoResponse
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
 _DEFAULT_MODEL_PLACEHOLDER = re.compile(r"\$(?:\{NEMO_DEFAULT_MODEL\}|NEMO_DEFAULT_MODEL(?![A-Za-z0-9_]))")
@@ -132,15 +132,15 @@ def _contains_default_model_placeholder(value: object) -> bool:
     return False
 
 
-def _agents_client_from_platform(platform: NeMoPlatform) -> AgentsClient:
-    client = client_from_platform(platform, AgentsClient)
+def _agents_client_from_platform(platform: NemoClient) -> AgentsClient:
+    client = AgentsClient.from_client(platform)
     if client.workspace is None:
         return client.with_workspace(_DEFAULT_WORKSPACE)
     return client
 
 
-def _async_agents_client_from_platform(platform: AsyncNeMoPlatform) -> AsyncAgentsClient:
-    async_client = client_from_platform(platform, AsyncAgentsClient)
+def _async_agents_client_from_platform(platform: AsyncNemoClient) -> AsyncAgentsClient:
+    async_client = AsyncAgentsClient.from_client(platform)
     if async_client.workspace is None:
         return async_client.with_workspace(_DEFAULT_WORKSPACE)
     return async_client
@@ -149,13 +149,13 @@ def _async_agents_client_from_platform(platform: AsyncNeMoPlatform) -> AsyncAgen
 class AgentsResource:
     """SDK namespace for ``nemo.agents.*``."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         """
         Args:
-            platform: The generated ``NeMoPlatform`` client. The Agents resource
-                adapts it to the typed ``AgentsClient`` while sharing the same
-                base URL, default workspace, auth headers, timeout, retry policy,
-                and underlying HTTP transport.
+            platform: The typed ``NemoClient``. The Agents resource derives an
+                ``AgentsClient`` from it while sharing the same base URL, default
+                workspace, auth headers, timeout, retry policy, and underlying
+                HTTP transport.
         """
         self._platform = platform
         self._client = _agents_client_from_platform(platform)
@@ -357,10 +357,10 @@ class _DeploymentResource:
             agent: Name of the agent to deploy.
             name: Deployment name (auto-generated if omitted).
             deployment_mode: Runtime backend — ``"subprocess"`` (default),
-                ``"docker"``, or ``"k8s"``. Container modes run the agent as a
+                ``"docker"``, ``"k8s"``, or ``"openshell"``. Container modes run the agent as a
                 durable container through the deployments plugin and require a
                 configured executor.
-            image: Container image for ``docker``/``k8s`` modes. Falls back to
+            image: Container image for container modes. Falls back to
                 ``agents.deployments.default_image`` when omitted. Rejected in
                 ``subprocess`` mode.
             use_image_entrypoint: For ``docker``/``k8s`` modes, preserve the
@@ -377,8 +377,8 @@ class _DeploymentResource:
             The created deployment as a dict.
         """
         if image and deployment_mode == "subprocess":
-            raise ValueError("image requires deployment_mode='docker' or 'k8s'.")
-        if use_image_entrypoint and deployment_mode == "subprocess":
+            raise ValueError("image requires deployment_mode='docker', 'k8s', or 'openshell'.")
+        if use_image_entrypoint and not supports_image_entrypoint(deployment_mode):
             raise ValueError("use_image_entrypoint requires deployment_mode='docker' or 'k8s'.")
         if isinstance(environment, Mapping):
             environment_body: str | AgentEnvironmentInline | None = AgentEnvironmentInline.model_validate(environment)
@@ -737,7 +737,7 @@ class AsyncAgentsResource:
     remain sync-only on :class:`AgentsResource`.
     """
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self._client = _async_agents_client_from_platform(platform)
         self._jobs: _AsyncJobsResource | None = None

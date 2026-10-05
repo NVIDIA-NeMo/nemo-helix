@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 from _doubles import make_sdk
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
-from nemo_platform_plugin.agent_hardener.client import AgentHardenerClient
-from nemo_platform_plugin.agent_hardener.types import (
+from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
+from nemo_helix_plugin.agent_hardener.types import (
     AgentHardenerManifest,
     InspectProjectRequest,
     InspectProjectResponse,

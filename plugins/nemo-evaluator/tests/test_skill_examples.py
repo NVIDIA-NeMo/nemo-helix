@@ -313,10 +313,10 @@ def test_skill_manifest_has_discovery_metadata() -> None:
     )
     assert manifest["license"] == "Apache-2.0"
     assert manifest["metadata"] == {
-        "owner": "nemo-platform",
-        "author": "nemo-platform",
+        "owner": "nemo-helix",
+        "author": "nemo-helix",
         "maturity": "active",
-        "tags": ["evaluation", "metrics", "agent-eval", "nemo-platform"],
+        "tags": ["evaluation", "metrics", "agent-eval", "nemo-helix"],
     }
 
 
@@ -489,7 +489,7 @@ def test_multiple_metric_platform_submission_uses_cli() -> None:
 
     assert "Python SDK" not in section
     assert "client.evaluator.submit" not in section
-    assert "nemo evaluator evaluate submit --spec-file multi-metric.json" in section
+    assert "nemo evaluator evaluate --spec-file multi-metric.json" in section
 
 
 class _RecordingResource:
@@ -560,17 +560,19 @@ def test_skill_store_resources_example_matches_the_sdk_and_task_schema() -> None
     assert taskset_call.arguments["name"] == "geography"
     taskset = taskset_call.arguments["taskset"]
     assert isinstance(taskset, TasksetInput)
-    assert TasksetInput.model_validate(taskset.model_dump(mode="json")).tasks == [TaskRef("capital-france")]
+    assert TasksetInput.model_validate(taskset.model_dump(mode="json", exclude_unset=True)).tasks == [
+        TaskRef("capital-france")
+    ]
 
 
 def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
     """The skill's own eval must not grade highest for what the skill tells you not to do.
 
     Two contradictions have lived here. ``evals.json`` expected
-    ``nemo evaluator evaluate run --spec`` while SKILL.md says to default to ``submit`` (the flags
-    are identical, so it rewarded the discouraged verb for nothing), and it expected the agent to
-    require manual ``.venv`` activation while SKILL.md routes a checkout through ``uv run`` and says
-    installed usage needs no activation at all.
+    ``nemo evaluator evaluate run --spec`` and later ``nemo evaluator evaluate submit --spec`` while
+    SKILL.md routes durable platform evaluation through the plugin-specific job commands, and it
+    expected the agent to require manual ``.venv`` activation while SKILL.md routes a checkout through
+    ``uv run`` and says installed usage needs no activation at all.
 
     Both are the same failure: the eval and the guidance drifting apart with nothing comparing them.
     """
@@ -580,12 +582,13 @@ def test_skill_evals_do_not_contradict_the_skill_guidance() -> None:
     assert graded, "evals.json defines no graded expectations"
     for text in graded:
         assert "evaluate run" not in text, f"eval rewards the retired local run verb: {text}"
+        assert "evaluate submit" not in text, f"eval rewards the retired submit verb: {text}"
         assert "activating the Python virtual environment" not in text, (
             f"eval rewards manual .venv activation, which SKILL.md disclaims: {text}"
         )
 
     skill = (_repo_root() / "skills/nemo-evaluator-plugin/SKILL.md").read_text(encoding="utf-8")
-    assert "Default to `submit` for every plugin evaluation." in skill
+    assert "Default to the plugin-specific job commands for durable platform evaluation" in skill
     assert "without assuming a repository root or manually activating `.venv`" in skill
 
 
@@ -609,8 +612,8 @@ def test_skill_documents_the_taskset_submit_path_and_its_job_handle() -> None:
     agent_eval = (root / "references/agent-evaluation.md").read_text(encoding="utf-8")
     troubleshooting = (root / "references/troubleshooting.md").read_text(encoding="utf-8")
 
-    assert "client.evaluator.submit(tasks=..., target=<runner>)" in skill
-    assert 'job = client.evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)' in agent_eval
+    assert "evaluator.submit(tasks=..., target=<runner>)" in skill
+    assert 'job = evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)' in agent_eval
     assert "no `get_result()` or" in agent_eval
     assert "`AttributeError` on `get_result()` or `download_artifacts()` after `submit(tasks=...)`" in troubleshooting
 
@@ -657,13 +660,13 @@ def test_agent_evaluation_shows_how_to_retrieve_stored_trials() -> None:
     )
 
     assert 'agent_eval_results.retrieve("<result-name>")' in reference
-    assert "client.files.download(remote_path=stored.bundle_ref" in reference
+    assert "sdk.files.download(remote_path=stored.bundle_ref" in reference
     assert 'read_trials("previous-run")' in reference
     assert "nemo jobs results download agent-eval-results" in reference
     assert callable(read_trials)
 
 
-def test_authored_skill_guidance_uses_submit_for_plugin_jobs() -> None:
+def test_authored_skill_guidance_uses_job_commands_for_plugin_jobs() -> None:
     root = _repo_root() / "skills/nemo-evaluator-plugin"
     markdown = {
         path: path.read_text(encoding="utf-8")
@@ -672,8 +675,8 @@ def test_authored_skill_guidance_uses_submit_for_plugin_jobs() -> None:
     examples = "\n".join(path.read_text(encoding="utf-8") for path in sorted((root / "assets/examples").glob("*.py")))
     guidance = "\n".join([*markdown.values(), examples])
 
-    # The plugin's local execution path is being retired. Prose may name it so the
-    # agent knows why to avoid it; runnable snippets must never demonstrate it.
+    # The plugin's legacy CLI verbs are retired. Prose may name them so the
+    # agent knows why to avoid them; runnable snippets must never demonstrate them.
     retiring = (
         "nemo evaluator evaluate run",
         "nemo evaluator agent-evaluate run",
@@ -686,14 +689,17 @@ def test_authored_skill_guidance_uses_submit_for_plugin_jobs() -> None:
     assert "client.evaluator.create(" not in guidance
 
     normalized_skill = " ".join(markdown[root / "SKILL.md"].split())
-    assert "is being retired" in normalized_skill
+    assert "old `nemo evaluator ... run` and `nemo evaluator ... submit` CLI verbs" in normalized_skill
     assert "`nemo_evaluator_sdk.Evaluator`" in normalized_skill
 
     assert "Evaluator().run_sync(" in guidance
     assert "AgentEvaluator().run(" in guidance
     assert "client.evaluator.submit(" in guidance
-    assert "nemo evaluator evaluate submit" in guidance
-    assert "nemo evaluator agent-evaluate submit" in guidance
+    assert "nemo evaluator evaluate" in guidance
+    assert "nemo evaluator agent-evaluate" in guidance
+    # The asserts above are substring matches, so they also pass on the broken `... submit` form.
+    assert "nemo evaluator evaluate submit" not in guidance
+    assert "nemo evaluator agent-evaluate submit" not in guidance
 
 
 def test_generator_documents_cli_contract_and_named_limits() -> None:

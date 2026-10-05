@@ -3,13 +3,13 @@
 
 # NeMo MCP Server
 
-Model Context Protocol (MCP) server for NeMo Platform.
+Model Context Protocol (MCP) server for NeMo Helix.
 
 ## Overview
 
-This MCP server exposes NeMo Platform functionality to AI assistants through the Model Context Protocol. It provides curated, workflow-oriented tools designed for agent-friendly interactions.
+This MCP server exposes NeMo Helix functionality to AI assistants through the Model Context Protocol. It provides curated, workflow-oriented tools designed for agent-friendly interactions.
 
-Located in `services/core/mcp/`, this is a core infrastructure service that follows the NeMo Platform v2 architecture patterns.
+Located in `services/core/mcp/`, this is a core infrastructure service that follows the NeMo Helix v2 architecture patterns.
 
 ## Installation
 
@@ -30,7 +30,7 @@ uv pip install -e services/core/mcp
 uv run nemo-mcp
 
 # Or with custom configuration
-uv run nemo-mcp --base-url https://your-nmp-instance.com
+uv run nemo-mcp --base-url https://your-nhx-instance.com
 
 # With HTTP transport (for debugging)
 uv run nemo-mcp --transport streamable-http --port 8080
@@ -44,8 +44,8 @@ MCP uses stdio transport, so curl won't work directly. Use the MCP Inspector to 
 # Install globally
 npm install -g @modelcontextprotocol/inspector
 
-# Invoke with the server (set NMP_BASE_URL to your NeMo Platform instance)
-NMP_BASE_URL=http://localhost:8080 npx @modelcontextprotocol/inspector uv run nemo-mcp
+# Invoke with the server (set NHX_BASE_URL to your NeMo Helix instance)
+NHX_BASE_URL=http://localhost:8080 npx @modelcontextprotocol/inspector uv run nemo-mcp
 ```
 
 This brings up both the server and the inspector and launches it in your default browser. Then go to:
@@ -57,9 +57,9 @@ Try `list_workspaces` as a starting point.
 
 The server uses NeMo SDK configuration:
 
-- **`NMP_BASE_URL`**: URL of your NeMo Platform instance (e.g., `http://localhost:8080`)
-- Other environment variables (`NMP_ACCESS_TOKEN`, etc.) as needed
-- Config file (`~/.config/nmp/config.yaml`)
+- **`NHX_BASE_URL`**: URL of your NeMo Helix instance (e.g., `http://localhost:8080`)
+- Other environment variables (`NHX_ACCESS_TOKEN`, etc.) as needed
+- Config file (`~/.config/nhx/config.yaml`)
 - Command-line flags
 
 ## Architecture
@@ -78,32 +78,32 @@ The server uses NeMo SDK configuration:
 │  │   - (more coming soon)       │   │
 │  └──────────────────────────────┘   │
 │                                     │
-│  Uses: nmp.common.mcp utilities     │
+│  Uses: nhx.common.mcp utilities     │
 └─────────────────┬───────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────┐
-│   NeMo Platform Python SDK     │
+│   NeMo Helix Python SDK     │
 └─────────────────┬───────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────┐
-│   NeMo Platform API   │
+│   NeMo Helix API   │
 └─────────────────────────────────────┘
 ```
 
 ### V2 Architecture Alignment
 
-This service follows NeMo Platform v2 patterns:
+This service follows NeMo Helix v2 patterns:
 
 - **Location**: `services/core/mcp/` (core infrastructure service)
-- **Namespace**: `nmp.core.mcp` (follows v2 naming)
-- **Shared Utilities**: Uses `nmp.common.mcp` for client factory and error handling
+- **Namespace**: `nhx.core.mcp` (follows v2 naming)
+- **Shared Utilities**: Uses `nhx.common.mcp` for client factory and error handling
 - **Dependencies**: Workspace-scoped dependencies via `uv`
 
 Future expansion will support mounting service-specific MCP servers from:
 
-- `nmp.guardrails.mcp`
+- `nhx.guardrails.mcp`
 - `nemo_customizer` plugin MCP tools (when enabled)
 - etc.
 
@@ -111,15 +111,15 @@ Future expansion will support mounting service-specific MCP servers from:
 
 ### Run Tests
 
-Manual integration test verifies the MCP server correctly connects to NeMo Platform. NeMo Platform must be running locally:
+Manual integration test verifies the MCP server correctly connects to NeMo Helix. NeMo Helix must be running locally:
 
 ```bash
 # Start platform (core services)
-NMP_CONFIG_FILE_PATH=e2e/configs/docker_in_memory.yaml \
-  uv run nemo-platform run --service-group core
+NHX_CONFIG_FILE_PATH=e2e/configs/docker_in_memory.yaml \
+  uv run nemo-helix run --service-group core
 
 # Run integration tests
-NMP_BASE_URL=http://localhost:8080 \
+NHX_BASE_URL=http://localhost:8080 \
   uv run pytest services/core/mcp/tests/integration/smoke_test.py -v
 ```
 
@@ -156,7 +156,7 @@ uv run ruff format services/core/mcp
 
 When adding new tools:
 
-1. **Use shared utilities**: Import from `nmp.common.mcp`
+1. **Use shared utilities**: Import from `nhx.common.mcp`
 2. **Follow error handling patterns**: Use `format_error_response()`
 3. **Document tools clearly**: Agents need clear descriptions
 4. **Add tests**: Integration tests in `tests/integration/`
@@ -165,7 +165,7 @@ When adding new tools:
 Example:
 
 ```python
-from nmp.common.mcp import create_nemo_client, format_error_response
+from nhx.common.mcp import create_nemo_client, format_error_response
 
 @server.tool(description="Clear, concise description for agents")
 async def my_tool(param: str) -> dict[str, Any]:
@@ -189,4 +189,4 @@ async def my_tool(param: str) -> dict[str, Any]:
 
 - [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25)
 - [FastMCP Documentation](https://gofastmcp.com/)
-- [NeMo Platform Docs](https://docs.nvidia.com/nemo-platform)
+- [NeMo Helix Docs](https://docs.nvidia.com/nemo-helix)

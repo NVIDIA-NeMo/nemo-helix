@@ -13,6 +13,9 @@ description: >-
   optimize agent, accelerate agent, smaller model, switchyard router,
   routing split, agents optimize-skills, agents optimize, agents evaluate,
   new model scan, nemotron, frontier model.
+allowed-tools: Bash
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Agent Optimization
@@ -95,14 +98,14 @@ See **the `nemo-agent-skills-optimization` skill** for the full optimize-skills 
 
 ### 3. Prompt + hyperparameter tuning
 
-If `nemo agents optimize` has not been run for this agent since the last
+If `nemo agents optimize run-strategy` has not been run for this agent since the last
 snapshot, suggest running it. The job sweeps prompts and hyperparameters via
 `nat optimize` against the agent's eval dataset.
 
 Suggested actions:
 
 - `nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>`
-- `nemo agents optimize --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
+- `nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>`
 - After it completes, apply the new prompt + hyperparameters to a sibling
   agent, deploy it, and run `nemo agents evaluate` to compare.
 
@@ -121,7 +124,7 @@ Each suggestion sets `model` to the new model name and includes:
   `--model` override flag on `evaluate`; the model swap goes through the
   sibling agent, or by editing the eval-config YAML.
 - `nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'` then
-  `nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'`
+  `nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'`
   to verify the new model is robust against jailbreaks before promotion.
 
 Pure set subtraction — no downloads required.
@@ -212,7 +215,7 @@ survives across reads.
 |--------------|---------|
 | `model_optimization` | Switchyard routing split or smaller-model fit |
 | `skill_optimization` | `nemo agents optimize-skills` is recommended |
-| `prompt_optimization` | `nemo agents optimize` is recommended |
+| `prompt_optimization` | `nemo agents optimize run-strategy` is recommended |
 | `new_model_scan` | New model appeared since last snapshot |
 
 `model_optimization` is reused for both "use a smaller model" and "add a
@@ -222,8 +225,8 @@ routing split" so existing UI tiles render without a frontend change. The
 ### Optional `apply` block (one-click action)
 
 When set, the `apply` block defines a single-action mutation that a downstream
-consumer can execute against the Platform API on the user's behalf. The
-contract is **strictly same-origin** to the Platform API host — consumers
+consumer can execute against the NeMo Helix API on the user's behalf. The
+contract is **strictly same-origin** to the NeMo Helix API host — consumers
 re-validate this at request time and reject anything else.
 
 Shape — single step (most common):
@@ -251,7 +254,7 @@ Rules — these MUST be followed when emitting an `apply` block:
 - `path` MUST start with `/`. It MUST NOT contain `://`, MUST NOT start with
   `//` (protocol-relative), MUST NOT contain query/fragment, and MUST NOT
   contain control characters.
-- The path is resolved against the configured Platform API URL; the frontend
+- The path is resolved against the configured NeMo Helix API URL; the frontend
   rejects any spec that resolves to a different origin.
 - The path's `workspaces/<ws>/` segment MUST equal the workspace the
   suggestion was emitted for. Cross-workspace mutations are rejected.
@@ -318,7 +321,7 @@ nemo models list --filter.name nemotron   # find Nemotron candidates
 # The optimize command's --optimize-config value must be relative to the staged fileset root.
 nemo agents evaluate --agent <name> --eval-config <yaml>
 nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
-nemo agents optimize --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
+nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
 nemo agents optimize-skills --spec-file .agent-improver.yml
 nemo agents evaluate-suite --spec '{"evals": "<dir>", "agent": "<name>"}'
 
@@ -331,7 +334,7 @@ nemo files filesets list
 
 # Auditor (jailbreak robustness check on a candidate model)
 nemo auditor targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
-nemo auditor audit run --spec '{"config": "default/<config>", "target": "default/<target>"}'
+nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<target>"}'
 ```
 
 ## What requires execution vs. what can be reasoned
@@ -345,7 +348,7 @@ nemo auditor audit run --spec '{"config": "default/<config>", "target": "default
   snapshot model list. Pure computation.
 - **Skill / prompt optimization gating**: check whether
   `iterations[].timestamp` from a prior `nemo agents optimize-skills` /
-  `nemo agents optimize` run is newer than the last snapshot.
+  `nemo agents optimize run-strategy` run is newer than the last snapshot.
 
 **Requires execution:**
 

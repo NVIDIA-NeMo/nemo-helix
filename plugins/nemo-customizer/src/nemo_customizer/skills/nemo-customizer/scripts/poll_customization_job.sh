@@ -4,7 +4,7 @@
 
 # Poll customization job until top-level status is terminal.
 # Usage: poll_customization_job.sh <plugin>-<job-id> [interval_seconds]
-# Requires: NMP_BASE_URL; run from nemo-platform root.
+# Requires: NHX_BASE_URL; run from nemo-helix root.
 # Resolves `nemo` on PATH, else `uv run nemo` (see SKILL.md Pre-flight).
 # Exit 0 on completed; exit 1 on error, cancelled, or get-status failure.
 
@@ -16,7 +16,7 @@ run_nemo() {
   elif command -v uv >/dev/null 2>&1 && uv run nemo --help >/dev/null 2>&1; then
     uv run nemo "$@"
   else
-    echo "NeMo CLI not found. Install NeMo Platform (nemo-setup: make bootstrap && nemo setup)." >&2
+    echo "NeMo CLI not found. Install NeMo Helix (nemo-setup: make bootstrap && nemo setup)." >&2
     return 127
   fi
 }

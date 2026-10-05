@@ -1,10 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeJob — Agents numeric HPO (``nemo agents optimize``).
+"""OptimizeJob — Fabric agent optimization, the ``legacy`` optimization strategy.
 
-Implementation lives in ``nemo_optimization``; registration and HTTP mounting
-are owned by the agents plugin (``agents.optimize``).
+Reached as ``nemo agents optimize run-strategy --strategy legacy``: the router job in
+nemo-agent-optimization-plugin discovers this class through the
+``nemo_agent_optimization_strategy`` class variable below and delegates its
+``compile`` / ``run`` to it, so this job's steps are what the platform actually runs.
 """
 
 from __future__ import annotations
@@ -20,27 +22,28 @@ from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
 import yaml
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import (
+from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
     ExecutorSpec,
-    PlatformJobSpec,
+    HelixJobSpec,
     SubprocessExecutionProviderSpec,
 )
-from nemo_platform_plugin.jobs.client import AsyncJobsClient
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_platform_plugin.jobs.image import get_qualified_image
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
+from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN,
     FilesetRef,
     LocalDir,
@@ -63,14 +66,24 @@ OPTIMIZE_COMMAND = [OPTIMIZE_TASK_MODULE]
 
 #: Image for the cpu (docker / kubernetes_job) fallback.  ``nemo-optimization-plugin`` is part of
 #: the ``cpu-tasks`` dependency group so ``python -m nemo_optimization.tasks.optimize`` imports there.
-OPTIMIZE_TASK_IMAGE = "nmp-cpu-tasks"
+OPTIMIZE_TASK_IMAGE = "nhx-tasks"
 
 
 class OptimizeJob(NemoJob):
-    """Run a Fabric-native numeric optimize study via the Agents optimize job."""
+    """Run Fabric-native optimization via the Agents optimize job."""
 
     name: ClassVar[str] = "optimize"
-    description: ClassVar[str] = "Optimize a Fabric agent workflow (numeric HPO)."
+    #: Marks this job as an agent optimization strategy, names it for
+    #: ``nemo agents optimize run-strategy --strategy``, and says what it optimizes for
+    #: ``list-strategies``. Declaring the variable is the whole contract — nothing to
+    #: subclass, and no strategy-specific entry-point group to join. The description is the
+    #: strategy's, not the job's: ``description`` below introduces the job to CLI users,
+    #: while this one tells a caller choosing a ``--strategy`` what this one does.
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="legacy",
+        description="Hyperparameter and GA prompt optimization.",
+    )
+    description: ClassVar[str] = "Optimize a Fabric agent workflow."
     container: ClassVar[str] = "cpu-tasks"
     job_collection_path: ClassVar[str | None] = None
     generate_legacy_verbs: ClassVar[bool] = False
@@ -78,13 +91,13 @@ class OptimizeJob(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel]] = OptimizeSubmitSpec
 
     @classmethod
-    async def to_spec(  # ty: ignore[invalid-method-override]
+    async def to_spec(  # ty: ignore[invalid-method-override]  (narrows the spec types)
         cls,
         input_spec: OptimizeSubmitSpec,
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> OptimizeSpec:
         del entity_client, async_sdk
@@ -93,22 +106,22 @@ class OptimizeJob(NemoJob):
         return OptimizeSpec.model_validate(payload, context={"is_local": is_local})
 
     @classmethod
-    async def compile(  # ty: ignore[invalid-method-override]
+    async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)
         cls,
         *,
         workspace: str,
         spec: OptimizeSpec,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        from nemo_platform_plugin.jobs.api_factory import (
+    ) -> HelixJobSpec:
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
-            PlatformJobStep,
+            HelixJobStep,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
@@ -116,14 +129,14 @@ class OptimizeJob(NemoJob):
         # ``compile`` is the remote submission path only, so requiring the
         # fileset here keeps platform execution remote-safe.
         if spec.optimize_config_fileset is None:
-            raise PlatformJobCompilationError(FILESET_REQUIRED)
+            raise HelixJobCompilationError(FILESET_REQUIRED)
 
         spec_dict = spec.model_dump(mode="json")
         spec_dict["workspace"] = workspace
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="optimize",
                     executor=await _resolve_executor(profile=profile or "default", async_sdk=async_sdk),
                     config=spec_dict,
@@ -137,7 +150,7 @@ class OptimizeJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform | None = None) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict:
         spec = OptimizeSpec.model_validate(config)
         with _staged_bundle(spec, ctx=ctx, sdk=sdk) as (config_path, bundle_root):
             optimize_config = _load_yaml(config_path)
@@ -169,15 +182,15 @@ class OptimizeJob(NemoJob):
         return result if published is None else {**result, "output": published}
 
 
-def _profiles_unavailable(profile: str) -> PlatformJobDependencyUnavailableError:
+def _profiles_unavailable(profile: str) -> HelixJobDependencyUnavailableError:
     """A retryable failure while resolving the backend for *profile*."""
-    return PlatformJobDependencyUnavailableError(
+    return HelixJobDependencyUnavailableError(
         f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
         "unavailable.  Retry the submission."
     )
 
 
-async def _resolve_executor(*, profile: str, async_sdk: AsyncNeMoPlatform) -> ExecutorSpec:
+async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
     """Pick the executor for *profile* from the backends the platform actually registered.
 
     Optimize prefers ``subprocess``: a study drives Fabric trials that may need the host's
@@ -213,7 +226,7 @@ async def _resolve_executor(*, profile: str, async_sdk: AsyncNeMoPlatform) -> Ex
         )
 
     available = sorted({f"{candidate.provider}/{candidate.profile}" for candidate in profiles})
-    raise PlatformJobCompilationError(
+    raise HelixJobCompilationError(
         f"No 'subprocess' or 'cpu' execution profile named {profile!r} is registered, so the "
         f"optimize step has nowhere to run.  Available profiles: {available or ['<none>']}."
     )
@@ -224,7 +237,7 @@ def _staged_bundle(
     spec: OptimizeSpec,
     *,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: NemoClient | None,
 ) -> Iterator[tuple[Path, Path | None]]:
     """Yield ``(optimize config path, bundle root)`` for the run.
 
@@ -298,7 +311,7 @@ def _staged_dataset(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: NemoClient | None,
 ) -> Iterator[dict[str, Any]]:
     """Yield *optimize_config* with a fileset dataset reference replaced by a local path.
 
@@ -360,7 +373,7 @@ def _publish_results(
     *,
     workspace: str,
     ctx: JobContext,
-    sdk: NeMoPlatform | None,
+    sdk: NemoClient | None,
 ) -> dict[str, str] | None:
     """Copy the study's artifacts to *output*, returning a pointer for the job result.
 
@@ -391,7 +404,7 @@ def _publish_results(
 
     if not artifacts.is_dir() or not any(path.is_file() for path in artifacts.rglob("*")):
         raise FileNotFoundError(
-            f"Optimize study reported success but wrote no artifacts to {artifacts}; nothing to publish."
+            f"Optimize study returned a result but wrote no artifacts to {artifacts}; nothing to publish."
         )
 
     if classify_output_target(output) is LocalDir:
@@ -404,8 +417,8 @@ def _publish_results(
     ws, name = split_fileset_ref(FilesetRef(output), workspace)
     if sdk is None:
         raise LocalRunError(
-            f"Publishing optimize results to fileset '{ws}/{name}' requires a 'sdk: NeMoPlatform', "
-            "but no platform SDK was available. Set NMP_BASE_URL or use a local output directory instead."
+            f"Publishing optimize results to fileset '{ws}/{name}' requires a sync platform client, "
+            "but none was available. Set NHX_BASE_URL or use a local output directory instead."
         )
     upload_to_fileset(artifacts, fileset=name, workspace=ws, sdk=sdk)
     logger.info("Published optimize results from %s to fileset %s/%s", artifacts, ws, name)

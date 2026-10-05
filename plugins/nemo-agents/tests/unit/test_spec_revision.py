@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision, stage_with_spec_revision
-from nemo_platform_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.files.storage_config import GithubStorageConfig
 
 FIRST_SHA = "1" * 40
 SECOND_SHA = "2" * 40

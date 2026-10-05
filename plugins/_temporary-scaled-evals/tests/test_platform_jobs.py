@@ -5,16 +5,20 @@ from __future__ import annotations
 
 import json
 import re
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import typer
+from nemo_helix_plugin.commands import add_job_commands
+from typer.testing import CliRunner
 
 pytest.importorskip("nemo_scaled_evals_plugin")
 
 import nemo_scaled_evals_plugin.jobs.evaluation_execution as evaluation_job_module
 import nemo_scaled_evals_plugin.jobs.task_image_build as build_job_module
 import nemo_scaled_evals_plugin.tasks.evaluation_execution as evaluation_task_module
-from nemo_platform_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider, SubprocessExecutionProvider
 from nemo_scaled_evals_plugin.jobs.evaluation_execution import EvaluationExecutionJob
 from nemo_scaled_evals_plugin.jobs.naming import (
     evaluation_execution_job_name,
@@ -151,7 +155,8 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     worker = MagicMock()
     worker.run.return_value = True
     worker_factory = MagicMock(return_value=worker)
-    monkeypatch.setattr(build_job_module, "TaskBuildWorker", worker_factory)
+    monkeypatch.setattr(build_job_module, "_task_build_worker_cls", lambda: worker_factory)
+    monkeypatch.setattr(build_job_module, "_backend_task_build_job_cls", lambda: SimpleNamespace)
     assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "completed"}
     worker_factory.assert_called_once_with(worker_id="scaled-evals-build-task_1-r2-a3")
     backend_job = worker.run.call_args.args[0]
@@ -161,7 +166,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
     assert TaskImageBuildJob().run(_build_spec().model_dump()) == {"status": "failed"}
 
     dispatcher = MagicMock()
-    monkeypatch.setattr(evaluation_job_module, "Dispatcher", lambda: dispatcher)
+    monkeypatch.setattr(evaluation_job_module, "_dispatcher_cls", lambda: lambda: dispatcher)
     assert EvaluationExecutionJob().run(_evaluation_spec().model_dump()) == {
         "status": "completed",
         "evaluation_id": "eval_1",
@@ -171,7 +176,7 @@ def test_direct_run_reuses_existing_backends(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_jobs_are_discovered_from_plugin_entry_points() -> None:
-    from nemo_platform_plugin.discovery import discover, discover_controllers, discover_jobs
+    from nemo_helix_plugin.discovery import discover, discover_controllers, discover_jobs
     from nemo_scaled_evals_plugin.controller import ScaledEvalsJobsController
 
     discover.cache_clear()
@@ -179,6 +184,31 @@ def test_jobs_are_discovered_from_plugin_entry_points() -> None:
     assert jobs["scaled-evals.task-image-build"] is TaskImageBuildJob
     assert jobs["scaled-evals.evaluation-execution"] is EvaluationExecutionJob
     assert discover_controllers()["scaled-evals-jobs"] is ScaledEvalsJobsController
+
+
+def test_platform_jobs_use_flat_generated_cli() -> None:
+    app = typer.Typer()
+
+    @app.callback()
+    def _noop() -> None:
+        pass
+
+    add_job_commands(
+        app,
+        {
+            "scaled-evals.task-image-build": TaskImageBuildJob,
+            "scaled-evals.evaluation-execution": EvaluationExecutionJob,
+        },
+    )
+    runner = CliRunner()
+
+    for command in ("task-image-build", "evaluation-execution"):
+        help_result = runner.invoke(app, [command, "--help"])
+        assert help_result.exit_code == 0
+        assert "explain" in help_result.output
+
+        legacy_submit = runner.invoke(app, [command, "submit", "--help"])
+        assert legacy_submit.exit_code == 2
 
 
 def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) -> None:  # noqa: ANN001
@@ -194,3 +224,27 @@ def test_evaluation_task_creates_in_cluster_kubeconfig(monkeypatch, tmp_path) ->
     assert config["clusters"][0]["cluster"]["server"] == "https://10.0.0.1:6443"
     assert config["contexts"][0]["context"]["namespace"] == "test-namespace"
     assert config["users"][0]["user"]["tokenFile"].endswith("/serviceaccount/token")
+
+
+def test_platform_jobs_default_on_and_legacy_workers_stand_down() -> None:
+    """Both flags ship enabled, and the legacy workers refuse to claim under them.
+
+    The GKE acceptance matrix passed end to end, so Platform Jobs is the
+    default execution path. The legacy in-process workers must not race it:
+    the build queue worker returns without claiming, and the dispatcher skips
+    evaluation claims while still draining cleanup rows.
+    """
+    from scaled_evals.api.settings import Settings
+
+    # The declared defaults, not the live instance, which env vars may override.
+    declared = Settings.model_fields
+    assert declared["platform_build_jobs_enabled"].default is True
+    assert declared["platform_evaluation_jobs_enabled"].default is True
+
+    # Legacy build worker stands down without touching the queue.
+    from scaled_evals.api.build.queue_worker import TaskBuildWorker
+
+    worker = MagicMock(spec=TaskBuildWorker)
+    worker.claim_next.side_effect = AssertionError("legacy build worker must not claim")
+    assert TaskBuildWorker.work_once(worker) is False
+    worker.claim_next.assert_not_called()

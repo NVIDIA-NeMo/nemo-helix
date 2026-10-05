@@ -4,7 +4,7 @@
 """Render sandbox-runtime image profiles into Dockerfile fragments.
 
 This is the packager's *mechanism*: it discovers a provider-supplied
-:class:`~nemo_platform_plugin.sandbox.SandboxImageProfile` by name and turns its
+:class:`~nemo_helix_plugin.sandbox.SandboxImageProfile` by name and turns its
 declarative fields (apt packages, users) into shell fragments the Dockerfile
 template interpolates. The provider (e.g. ``nemo-deployments[openshell]``) owns
 *what* an image needs; this module owns *how* it is baked in, so
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import re
 
-from nemo_platform_plugin.discovery import discover_sandbox_profiles
-from nemo_platform_plugin.sandbox import SandboxImageProfile
+from nemo_helix_plugin.discovery import discover_sandbox_profiles
+from nemo_helix_plugin.sandbox import SandboxImageProfile
 
 # Profile values originate from trusted provider code, not end users, but these
 # fragments are interpolated into a Dockerfile so validate against tight
@@ -76,3 +76,16 @@ def render_user_setup(profile: SandboxImageProfile) -> str:
         useradd += f" --shell {shell} {name}"
         parts.append(f"{groupadd} && \\\n    {useradd}")
     return " && \\\n    ".join(parts)
+
+
+def render_workdir_setup(profile: SandboxImageProfile, workdir: str) -> str:
+    """Return a shell command granting the profile's group write on *workdir*, or ``""``.
+
+    Applies to the directory itself only, so the venv and other contents keep the
+    ownership the image gave them.
+    """
+    if profile.workdir_group is None:
+        return ""
+    group = _validate(profile.workdir_group, _NAME_RE, "group name")
+    path = _validate(workdir, _PATH_RE, "workdir")
+    return f"chgrp {group} {path} && chmod g+w {path}"

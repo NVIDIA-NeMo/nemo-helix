@@ -1,7 +1,7 @@
 # Security floor constraints -- generated from [tool.uv] constraint-dependencies in pyproject.toml
 # Vendored from https://github.com/NVIDIA-NeMo/Safe-Synthesizer/blob/v0.1.7/constraints.txt
 # on 2026-07-10. Local additions keep pyarrow/cryptography on CVE-fixed
-# versions and the AWS SDK packages aligned with NeMo Platform's
+# versions and the AWS SDK packages aligned with NeMo Helix's
 # aiobotocore-compatible range.
 #
 # Pass to pip/uv with:  pip install <pkg> -c constraints.txt

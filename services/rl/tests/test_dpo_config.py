@@ -12,18 +12,19 @@ the reporting budget's hop through the DPO block, which no other layer can see.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
-from nmp.customization_common.service.context import NMPJobContext
-from nmp.rl.app.jobs.training.schemas import (
+from nhx.customization_common.service.context import NHXJobContext
+from nhx.rl.app.jobs.training.schemas import (
     DPOConfig,
     ModelConfig,
     OptimizerType,
     TrainingStepConfig,
     TrainingType,
 )
-from nmp.rl.tasks.training.backends.nemo_rl import dpo_config
-from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import (
+from nhx.rl.tasks.training.backends.nemo_rl import dpo_config
+from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _adapt_precision,
     _build_data_config,
     _build_logger_config,
@@ -32,7 +33,7 @@ from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _build_tokenizer_config,
     _megatron_cfg_disabled,
 )
-from nmp.rl.tasks.training.datasets.preparation import PreparedDataset
+from nhx.rl.tasks.training.datasets.preparation import PreparedDataset
 
 
 def _make_step_config(
@@ -69,8 +70,8 @@ def _write_preference_dataset(directory: Path, rows: int = 8) -> Path:
     return path
 
 
-def _job_ctx(tmp_path: Path) -> NMPJobContext:
-    return NMPJobContext(
+def _job_ctx(tmp_path: Path) -> NHXJobContext:
+    return NHXJobContext(
         workspace="default",
         job_id="rl-test",
         attempt_id="attempt-1",
@@ -265,8 +266,8 @@ def test_the_reporting_budget_rides_the_dpo_block(tmp_path: Path) -> None:
     driver would notice it being dropped -- the run would simply report at the
     default forever.
     """
-    from nmp.customization_common.training.reporting import ProgressReportingConfig
-    from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+    from nhx.customization_common.training.reporting import ProgressReportingConfig
+    from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
 
     _write_preference_dataset(tmp_path / "data")
     step_config = _make_step_config(
@@ -283,7 +284,7 @@ def test_the_reporting_budget_rides_the_dpo_block(tmp_path: Path) -> None:
 
 
 def test_the_dpo_block_carries_the_default_when_unstated(tmp_path: Path) -> None:
-    from nmp.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+    from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
 
     _write_preference_dataset(tmp_path / "data")
     step_config = _make_step_config()
@@ -293,6 +294,40 @@ def test_the_dpo_block_carries_the_default_when_unstated(tmp_path: Path) -> None
     cfg = compile_dpo_config(step_config, _job_ctx(tmp_path))
 
     assert cfg["dpo"]["progress_time_series_metrics"] is None, "absent means everything, not nothing"
+
+
+# --------------------------------------------------------------------------- #
+# compile_dpo_config: the DTensor worker's checkpoint options
+# --------------------------------------------------------------------------- #
+
+
+def _compile(tmp_path: Path, step_config: TrainingStepConfig) -> dict[str, Any]:
+    from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
+
+    _write_preference_dataset(tmp_path / "data")
+    step_config.dataset.path = str(tmp_path / "data")
+    step_config.workspace_path = str(tmp_path / "work")
+    return compile_dpo_config(step_config, _job_ctx(tmp_path))
+
+
+def test_dtensor_checkpoint_requests_consolidated_safetensors(tmp_path: Path) -> None:
+    """The DTensor policy worker fails with ``KeyError: 'checkpoint'`` without this block."""
+    cfg = _compile(tmp_path, _make_step_config())
+
+    assert cfg["policy"]["dtensor_cfg"]["checkpoint"] == {
+        "model_save_format": "safetensors",
+        "save_consolidated": "every",
+        "v4_compatible": True,
+    }
+    assert "model_save_format" not in cfg["checkpointing"]
+    assert "save_consolidated" not in cfg["checkpointing"]
+
+
+def test_dtensor_checkpoint_follows_v4_compatible(tmp_path: Path) -> None:
+    step_config = _make_step_config()
+    step_config.model.v4_compatible = False
+
+    assert _compile(tmp_path, step_config)["policy"]["dtensor_cfg"]["checkpoint"]["v4_compatible"] is False
 
 
 def test_tokenizer_config_omits_chat_template_when_none() -> None:

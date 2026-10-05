@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.auth import AuthClient, Principal, get_auth_client
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
-from nmp.core.models.api.v2.deployment_configs import router
-from nmp.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED as _DEPLOYMENTS_NOT_ENABLED
-from nmp.core.models.schemas import (
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
+from nhx.core.models.api.v2.deployment_configs import router
+from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED as _DEPLOYMENTS_NOT_ENABLED
+from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     ModelDeploymentConfig,
     ModelDeploymentConfigModelSpec,
@@ -48,7 +48,7 @@ def mock_auth_client():
 @pytest.fixture
 def test_app(mock_deployment_config_service, mock_auth_client):
     """Create a FastAPI test app with mocked dependencies."""
-    from nmp.core.models.api.dependencies import get_model_deployment_config_service
+    from nhx.core.models.api.dependencies import get_model_deployment_config_service
 
     app = FastAPI()
 
@@ -301,7 +301,7 @@ def test_create_deployment_config_entity_validation_error_returns_422(client, mo
     assert "name must match pattern" in response.json()["detail"]
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
 def test_update_deployment_config_entity_validation_error_returns_422(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):
@@ -348,7 +348,7 @@ _MINIMAL_EXECUTOR_CONFIG = {
 }
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
 def test_update_deployment_config_when_deployments_disabled_returns_422(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):
@@ -366,7 +366,7 @@ def test_update_deployment_config_when_deployments_disabled_returns_422(
     assert not mock_deployment_config_service.update_deployment_config.called
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
 def test_delete_all_deployment_config_versions_when_deployments_disabled_returns_422(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):
@@ -377,7 +377,7 @@ def test_delete_all_deployment_config_versions_when_deployments_disabled_returns
     assert not mock_deployment_config_service.delete_deployment_config.called
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=False)
 def test_delete_deployment_config_version_when_deployments_disabled_returns_422(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):
@@ -388,7 +388,7 @@ def test_delete_deployment_config_version_when_deployments_disabled_returns_422(
     assert not mock_deployment_config_service.delete_deployment_config.called
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
 def test_delete_deployment_config_conflict_returns_409(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):
@@ -400,7 +400,7 @@ def test_delete_deployment_config_conflict_returns_409(
     assert response.status_code == 409
 
 
-@patch("nmp.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
+@patch("nhx.core.models.api.v2.deployment_configs.deployments_enabled", return_value=True)
 def test_delete_deployment_config_version_conflict_returns_409(
     _mock_deployments_enabled, client, mock_deployment_config_service
 ):

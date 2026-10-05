@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.jobs.api_factory import (
-    PlatformJobSpec,
-    PlatformJobStep,
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.jobs.api_factory import (
+    HelixJobSpec,
+    HelixJobStep,
     ResourcesLimitsSpec,
     ResourcesRequestsSpec,
     ResourcesSpec,
@@ -19,7 +19,12 @@ from nemo_platform_plugin.jobs.api_factory import (
 from nemo_scaled_evals_plugin.jobs.specs import EvaluationExecutionSpec
 from nemo_scaled_evals_plugin.jobs.task_image_build import resolve_executor, resolve_secret_environment
 from pydantic import BaseModel
-from scaled_evals.dispatch.worker import Dispatcher
+
+
+def _dispatcher_cls() -> type[Any]:
+    from scaled_evals.dispatch.worker import Dispatcher
+
+    return Dispatcher
 
 
 class EvaluationExecutionJob(NemoJob):
@@ -27,6 +32,7 @@ class EvaluationExecutionJob(NemoJob):
 
     name: ClassVar[str] = "evaluation-execution"
     description: ClassVar[str] = "Execute one scaled-evals evaluation attempt."
+    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = EvaluationExecutionSpec
 
     @classmethod
@@ -40,13 +46,13 @@ class EvaluationExecutionJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile an evaluation execution into one Platform Jobs step."""
         del workspace, entity_client, job_name, async_sdk
         canonical = EvaluationExecutionSpec.model_validate(spec)
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="evaluation-execution",
                     executor=resolve_executor(
                         options,
@@ -70,7 +76,7 @@ class EvaluationExecutionJob(NemoJob):
     def run(self, config: dict[str, Any]) -> dict[str, Any]:
         """Execute the existing dispatcher for the specified execution."""
         spec = EvaluationExecutionSpec.model_validate(config)
-        Dispatcher().run(
+        _dispatcher_cls()().run(
             spec.evaluation_id,
             maintain_claim=False,
             expected_execution_number=spec.execution_number,

@@ -4,7 +4,7 @@
 
 name: nemo-agent-hardener
 description: >
-  A security war-game for an agent through NeMo Platform: register or upload the agent, resolve a
+  A security war-game for an agent through NeMo Helix: register or upload the agent, resolve a
   war-game manifest, synthesize a benign suite, attack/defend/validate, adopt the hardened image.
   Covers red-teaming, hardening, and every `nemo agent-hardener` command.
 triggers:
@@ -25,13 +25,15 @@ not-for:
 preconditions:
   - nemo_cli_available
 compatibility: >
-  nemo-platform >= 0.1.0 with the nemo-agent-hardener plugin; needs Docker, an OpenShell gateway, and
+  nemo-helix >= 0.1.0 with the nemo-agent-hardener plugin; needs Docker, an OpenShell gateway, and
   an inference credential — `nemo agent-hardener doctor` checks all three. Not sandbox-safe: it builds
   images, starts containers, and makes network calls. Give the Docker VM >= 8 GB memory.
 maturity: active
 license: Apache-2.0
 user-invocable: true
-allowed-tools: [Bash, Read, Write]
+allowed-tools: Bash, Read, Write
+metadata:
+  author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
 # NeMo Agent Hardener — war-game an agent
@@ -53,7 +55,11 @@ they pick. Do not dump every path at them.
 ## 1. Pre-flight
 
 ```bash
-export NMP_BASE_URL=http://localhost:8080   # or wherever the platform runs
+# `nemo` resolves its target from the active config context (~/.config/nhx/config.yaml)
+# or an explicit NHX_BASE_URL. Do NOT export a localhost fallback here — it would
+# override a configured remote. Leave NHX_BASE_URL unset to use your saved context;
+# set it explicitly (export NHX_BASE_URL=http://localhost:8080) only to force a local
+# platform for this shell when you have no local config context.
 nemo agent-hardener doctor
 ```
 
@@ -130,7 +136,7 @@ Suggest the `auditor` skill for scan-only coverage.
 
 1. Collect credentials first: store each secret the agent needs with the platform `nemo-secrets`
    skill (or `nemo secrets` CLI) so the run can reference them.
-2. Open `$NMP_BASE_URL/studio/`, pick the workspace, choose **Agent Hardener** in the nav.
+2. Open `$NHX_BASE_URL/studio/`, pick the workspace, choose **Agent Hardener** in the nav.
 3. **Manifests → New manifest** — the source toggle offers *Registered agent* and *Bring your
    own* (BYO takes a project archive upload).
 4. Open the manifest page → **Run war-game** → fill env vars → submit.

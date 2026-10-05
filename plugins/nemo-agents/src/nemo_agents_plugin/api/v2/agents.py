@@ -24,15 +24,15 @@ from nemo_agents_plugin.schema import (
     AgentPage,
     CreateAgentRequest,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
-from nemo_platform_plugin.schema import PaginationData
+from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
 # "failed" and "deleting" are excluded — they are terminal/in-cleanup and

@@ -16,8 +16,8 @@ from nemo_evaluator.metric_storage import (
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
-from nemo_platform_plugin.files.client import AsyncFilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 
 class _FakeDownloadResponse:

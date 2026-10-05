@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from data_designer.config.utils.constants import NEMOTRON_PERSONAS_DATASET_SIZES
-from nemo_platform_plugin.client.errors import ConflictError
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import NGCStorageConfig
-from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetPurpose
-from nemo_platform_plugin.schema import SecretRef
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import NGCStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.schema import SecretRef
 
 logger = logging.getLogger(__name__)
 

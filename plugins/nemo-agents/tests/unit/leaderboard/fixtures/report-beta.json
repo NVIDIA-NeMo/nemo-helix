@@ -3,7 +3,7 @@
   "task": {
     "task": "secrets-crud-cli",
     "timestamp": "20260429T230000Z",
-    "image": "nmp-nat-secrets-crud-cli:latest",
+    "image": "nhx-nat-secrets-crud-cli:latest",
     "reward": 1,
     "build_status": "ok",
     "agent_status": "ok",

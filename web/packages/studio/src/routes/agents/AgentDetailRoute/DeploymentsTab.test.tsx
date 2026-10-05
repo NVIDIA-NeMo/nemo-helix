@@ -11,7 +11,7 @@ const STAGED = 'a'.repeat(40);
 const MOVED = 'b'.repeat(40);
 
 const LONG_ERROR =
-  "No container-reachable inference base URL for k8s deployment: platform base URL 'http://127.0.0.1:8080' is not usable from an agent pod and no internal API Service URL is set. Set NEMO_INTERNAL_BASE_URL / NMP_INTERNAL_BASE_URL (or deploy with a cluster-internal gateway address).";
+  "No container-reachable inference base URL for k8s deployment: platform base URL 'http://127.0.0.1:8080' is not usable from an agent pod and no internal API Service URL is set. Set NEMO_INTERNAL_BASE_URL / NHX_INTERNAL_BASE_URL (or deploy with a cluster-internal gateway address).";
 
 const failedDeployment = {
   name: 'calculator-agent-2-17aa2130',

@@ -1,12 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PlatformJobResultResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResultResponse } from '@nemo/sdk/generated/platform/schema';
 import { resolveArtifactItems } from '@studio/routes/JobDetailRoute/utils';
 
-const makeResult = (
-  overrides: Partial<PlatformJobResultResponse> = {}
-): PlatformJobResultResponse => ({
+const makeResult = (overrides: Partial<HelixJobResultResponse> = {}): HelixJobResultResponse => ({
   name: 'result',
   job: 'job-1',
   workspace: 'default',

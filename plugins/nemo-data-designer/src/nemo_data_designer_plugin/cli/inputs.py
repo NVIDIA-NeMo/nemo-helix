@@ -23,6 +23,8 @@ from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
 from data_designer.config.config_builder import DataDesignerConfigBuilder
 from data_designer.config.utils.constants import DEFAULT_NUM_RECORDS
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
 _NON_INTERACTIVE_HELP = (
     "Display all records at once instead of browsing interactively. Ignored when --save-results is used."
@@ -122,21 +124,18 @@ def _replace_function_submit(group: typer.Typer) -> None:
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str = typer.Option("default", "--workspace", "-w"),
-        cluster: str | None = typer.Option(None, "--cluster"),
-        base_url: str | None = typer.Option(None, "--base-url"),
+        workspace: WorkspaceOption = None,
         request_id: str | None = typer.Option(None, "--request-id"),
         non_interactive: bool = typer.Option(False, "--non-interactive", help=_NON_INTERACTIVE_HELP),
         save_results: bool = typer.Option(False, "--save-results", help=_SAVE_RESULTS_HELP),
         artifact_path: str | None = typer.Option(None, "--artifact-path", "-o", help=_ARTIFACT_PATH_HELP),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         with _spec_from_builder(config_source, num_records) as spec:
             original(
                 typer_ctx,
                 spec=spec,
                 spec_file=None,
-                cluster=cluster,
-                base_url=base_url,
                 workspace=workspace,
                 request_id=request_id,
                 non_interactive=non_interactive,
@@ -162,10 +161,8 @@ def _replace_job_submit(group: typer.Typer) -> None:
         typer_ctx: typer.Context,
         config_source: str = typer.Argument(..., metavar="[CONFIG_SOURCE]", help=_CONFIG_SOURCE_HELP),
         num_records: int = typer.Option(DEFAULT_NUM_RECORDS, "--num-records", "-n", min=1),
-        workspace: str = typer.Option("default", "--workspace", "-w"),
+        workspace: WorkspaceOption = None,
         profile: str | None = typer.Option(None, "--profile"),
-        cluster: str | None = typer.Option(None, "--cluster"),
-        base_url: str | None = typer.Option(None, "--base-url"),
         options: list[str] = typer.Option(  # noqa: B008 — Typer evaluates default lazily per invocation
             [],  # noqa: B006
             "-o",
@@ -173,8 +170,9 @@ def _replace_job_submit(group: typer.Typer) -> None:
         ),
         options_file: Path | None = typer.Option(None, "--options-file"),
     ) -> None:
+        workspace = resolve_cli_workspace(typer_ctx, workspace)
         if explain is not None and config_source == "explain":
-            explain(profile=profile, cluster=cluster)
+            explain(profile=profile)
             return
 
         with _spec_from_builder(config_source, num_records) as spec:
@@ -185,8 +183,6 @@ def _replace_job_submit(group: typer.Typer) -> None:
                 options=options,
                 options_file=options_file,
                 profile=profile,
-                cluster=cluster,
-                base_url=base_url,
                 workspace=workspace,
                 config=None,
                 config_file=None,

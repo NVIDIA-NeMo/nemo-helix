@@ -4,7 +4,7 @@
 import {
   type EvaluateJob,
   type EvaluateJobsPage,
-  PlatformJobStatus,
+  HelixJobStatus,
 } from '@nemo/sdk/generated/evaluator/schema';
 
 export const mockEvalConfigOnline1 = {
@@ -83,7 +83,7 @@ export const metricEvaluationJob1: EvaluateJob = {
   workspace: 'default',
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T01:00:00Z',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     metrics: [],
     dataset: `default/test-dataset` as unknown as EvaluateJob['spec']['dataset'],
@@ -97,7 +97,7 @@ export const metricEvaluationJob2: EvaluateJob = {
   workspace: 'default',
   created_at: '2024-01-02T00:00:00Z',
   updated_at: '2024-01-02T01:00:00Z',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     metrics: [],
     dataset: `default/test-dataset-2` as unknown as EvaluateJob['spec']['dataset'],
@@ -111,7 +111,7 @@ export const metricEvaluationJob3: EvaluateJob = {
   workspace: 'default',
   created_at: '2024-01-03T00:00:00Z',
   updated_at: '2024-01-03T01:00:00Z',
-  status: PlatformJobStatus.completed,
+  status: HelixJobStatus.completed,
   spec: {
     metrics: [],
     dataset: `default/test-dataset-3` as unknown as EvaluateJob['spec']['dataset'],

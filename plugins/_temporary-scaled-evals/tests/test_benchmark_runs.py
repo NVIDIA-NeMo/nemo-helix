@@ -550,7 +550,7 @@ def test_create_run_rejects_member_with_missing_task_pack(
         fetchall=[[member]],
     )
     _use_conn(conn)
-    monkeypatch.setattr("scaled_evals.api.routers.benchmark_runs.s3.object_exists", lambda _key: False)
+    monkeypatch.setattr("scaled_evals.api.routers.benchmark_runs.artifacts.object_exists", lambda _key: False)
 
     resp = client.post("/v1/benchmark-runs", json={"name": "suite run", "benchmark_id": "bm_suite"})
 
@@ -675,7 +675,7 @@ def test_create_run_resolves_version_once_for_run_and_members() -> None:
         "0.13.2",
         "scaled-evals-api:dev",
         None,
-        "nemo-platform-plugin-overlay-v1",
+        "nemo-helix-plugin-overlay-v1",
         "0.1.13",
     )
     assert run_insert.args[1][10].obj["qualification"]["release"]["version"] == "0.13.2"

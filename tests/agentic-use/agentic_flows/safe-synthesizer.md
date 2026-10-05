@@ -74,4 +74,4 @@ Original Data → PII Removal → Fine Tune/Generate → Evaluation → Syntheti
 - Synthesize: docs/safe-synthesizer/synthesize/
 - Evaluate: docs/safe-synthesizer/evaluate/
 
-**Note**: Additional permutations exist in OSS repository; NeMo Platform includes top user flows.
+**Note**: Additional permutations exist in OSS repository; NeMo Helix includes top user flows.

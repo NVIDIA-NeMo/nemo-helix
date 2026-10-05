@@ -20,7 +20,7 @@ import os
 import time
 
 import pytest
-from nemo_platform_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.client import JobsClient
 from trace_reader import get_session
 
 WORKSPACE = "job-test-workspace"
@@ -41,9 +41,9 @@ def _make_unsigned_jwt() -> str:
 
 @pytest.fixture
 def client() -> JobsClient:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
     return JobsClient(
-        base_url=nmp_base_url,
+        base_url=nhx_base_url,
         workspace=WORKSPACE,
         auth=_make_unsigned_jwt(),
     )

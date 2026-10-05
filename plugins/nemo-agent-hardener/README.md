@@ -22,11 +22,11 @@ Assumes Docker and OpenShell are installed — if not, do [What you need](#what-
 
 ```bash
 export INFERENCE_API_KEY=<your-nvapi-key>
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 
 # 1. Start the platform (logs to a file — backgrounding alone still prints over your prompt)
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; echo ready
 
 # 2. Give it a model provider  (409 "already exists" just means you've run these before)
@@ -39,7 +39,7 @@ uv run nemo inference providers create nvidia-inference --workspace default \
 # 3. Register the example agent. NEMO_DEFAULT_MODEL must be set *now* — it is baked into
 #    the stored config. Use a model entity name from `nemo models list`, not a provider id.
 uv run nemo models list --workspace default | grep nemotron
-export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b   # example — use what you saw
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b   # example — use what you saw
 uv run nemo agents create --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
 
@@ -77,7 +77,7 @@ Two environment variables. `nemo agent-hardener setup` installs agent-hardener i
 
 ```bash
 export INFERENCE_API_KEY=<your-nvapi-key>
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
 <details>
@@ -163,9 +163,9 @@ brew install colima docker && colima start          # or Docker Desktop
 
 # Use the native installer — `uv tool install openshell` gives you the CLI
 # without the gateway service, and the war-game needs the gateway. Pinned to a
-# release tag so the script can't change under you; matches the openshell>=0.0.92
+# release tag so the script can't change under you; matches the openshell>=0.1.2
 # the deployments plugin requires.
-curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.0.92/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/v0.1.2/install.sh | sh
 openshell status                                     # expect "Status: Connected"
 ```
 
@@ -187,7 +187,7 @@ openshell status
 ## One-time setup
 
 ```bash
-cd /path/to/nemo-platform
+cd /path/to/nemo-helix
 make bootstrap                       # Python deps + Studio assets
 
 uv run nemo agent-hardener setup         # creates ~/.agent-hardener/venv and ~/.agent-hardener/garak-venv
@@ -202,12 +202,12 @@ Start the platform:
 # 0.0.0.0 → lets the sandbox reach the Inference Gateway via host.docker.internal
 # logs go to a file — backgrounding alone still prints them over your prompt
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 
 until curl -sf http://localhost:8080/health/ready >/dev/null; do sleep 2; done; echo ready
 ```
 
-Watch it with `tail -f /tmp/nemo-platform.log`; stop it with `uv run nemo services stop`.
+Watch it with `tail -f /tmp/nemo-helix.log`; stop it with `uv run nemo services stop`.
 
 Register an inference provider. Both commands fail with `409 already exists` if you've run them
 before — that's harmless, skip to the next step. To start from a clean platform instead, stop it
@@ -230,7 +230,7 @@ Register an agent to attack. This example ships with the repo and needs no extra
 # discovered — not a provider model id. Entity names are lowercase-and-hyphens only; a slash gets
 # rejected by the Inference Gateway with "Invalid model".
 uv run nemo models list --workspace default | grep nemotron      # pick one
-export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-nano-30b-a3b  # example — use what you saw
+export NEMO_DEFAULT_MODEL=nvidia-nvidia-nemotron-3-5-lightning-30b-a3b  # example — use what you saw
 
 uv run nemo agents create --name react-agent \
   --agent-config plugins/nemo-agents/examples/react-agent/react-agent.yml
@@ -265,7 +265,7 @@ Start the platform as usual:
 
 ```bash
 uv run nemo services run --service-group all --controllers models,jobs \
-  --host 0.0.0.0 --port 8080 > /tmp/nemo-platform.log 2>&1 &
+  --host 0.0.0.0 --port 8080 > /tmp/nemo-helix.log 2>&1 &
 ```
 
 Open **http://localhost:8080/studio/** → **Governance → Agent Hardener**. If the entry is missing,
@@ -393,7 +393,7 @@ stripped for you; anything else means the agent needs a real project, so pass `-
 
 **The victim is healthy but every request 422s with `Invalid model`.** The workflow's `model_name`
 isn't a model entity the platform knows. Entity names are lowercase letters, digits and hyphens —
-a provider id like `nvidia/nemotron-3-nano-30b-a3b` is rejected for the slash. Check
+a provider id like `nvidia/nemotron-3.5-lightning-30b-a3b` is rejected for the slash. Check
 `nemo models list --workspace default`, then re-register the agent with that exact name (the value
 is baked in at `agents create` time).
 

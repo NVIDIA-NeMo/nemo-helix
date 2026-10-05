@@ -4,16 +4,18 @@
 """say-hello job — registered under ``nemo.jobs``.
 
 Writes a greeting to persistent storage and registers it as a result
-via :attr:`~nemo_platform_plugin.job_context.JobContext.results`. Programmatic
-tests can provide :class:`~nemo_platform_plugin.job_results.LocalJobResults` so
+via :attr:`~nemo_helix_plugin.job_context.JobContext.results`. Programmatic
+tests can provide :class:`~nemo_helix_plugin.job_results.LocalJobResults` so
 the artefact lands under ``<persistent>/results/greeting`` with no clients.
 """
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from nemo_example_plugin.core import say_hello
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
 
 DEFAULT_RESULT_NAME = "greeting"
 DEFAULT_FILE_NAME = "greeting.txt"
@@ -25,6 +27,7 @@ class SayHelloJob(NemoJob):
     name = "say-hello"
     description = "Greet a name and save the greeting as a registered job result."
     container = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
 
     def run(
         self,

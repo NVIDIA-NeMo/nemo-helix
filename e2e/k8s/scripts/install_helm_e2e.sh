@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 #
-# Install NeMo Platform through Helm for local and CI Kubernetes E2E runs.
+# Install NeMo Helix through Helm for local and CI Kubernetes E2E runs.
 #
 # This script intentionally handles both kind and minikube installs. Cluster
 # setup remains in the setup_local_* scripts; this script owns Helm values,
@@ -16,14 +16,14 @@ source "${SCRIPT_DIR}/lib.sh"
 REPO_ROOT="$(git -C "${SCRIPT_DIR}" rev-parse --show-toplevel)"
 
 NAMESPACE="${NAMESPACE:-${KUBE_NAMESPACE:-default}}"
-HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-platform}"
+HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-helix}"
 HELM_CHART="${HELM_CHART:-${REPO_ROOT}/k8s/helm}"
 HELM_VALUES="${HELM_VALUES:-${HELM_VALUES_FILE:-${REPO_ROOT}/e2e/k8s/values/default.yaml}}"
 HELM_EXTRA_ARGS="${HELM_EXTRA_ARGS:-}"
-NMP_E2E_REGISTRY="${NMP_E2E_REGISTRY:-}"
-NMP_E2E_TAG="${NMP_E2E_TAG:-}"
-NMP_E2E_PULL_POLICY="${NMP_E2E_PULL_POLICY:-}"
-REQUIRE_NMP_E2E_IMAGES="${REQUIRE_NMP_E2E_IMAGES:-false}"
+NHX_E2E_REGISTRY="${NHX_E2E_REGISTRY:-}"
+NHX_E2E_TAG="${NHX_E2E_TAG:-}"
+NHX_E2E_PULL_POLICY="${NHX_E2E_PULL_POLICY:-}"
+REQUIRE_NHX_E2E_IMAGES="${REQUIRE_NHX_E2E_IMAGES:-false}"
 POSTGRES_IMAGE="${POSTGRES_IMAGE:-docker.io/library/postgres}"
 BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-docker.io/library/busybox:stable}"
 RELEASE_READY_SCRIPT="${RELEASE_READY_SCRIPT:-${SCRIPT_DIR}/wait_for_release_ready.sh}"
@@ -70,18 +70,18 @@ validate_file_inputs() {
 }
 
 validate_image_inputs() {
-    if [ "${REQUIRE_NMP_E2E_IMAGES}" = "true" ]; then
-        require_non_empty NMP_E2E_REGISTRY
-        require_non_empty NMP_E2E_TAG
+    if [ "${REQUIRE_NHX_E2E_IMAGES}" = "true" ]; then
+        require_non_empty NHX_E2E_REGISTRY
+        require_non_empty NHX_E2E_TAG
     fi
 
-    if [ -n "${NMP_E2E_REGISTRY}" ] && [ -z "${NMP_E2E_TAG}" ]; then
-        log_error "NMP_E2E_TAG is required when NMP_E2E_REGISTRY is set"
+    if [ -n "${NHX_E2E_REGISTRY}" ] && [ -z "${NHX_E2E_TAG}" ]; then
+        log_error "NHX_E2E_TAG is required when NHX_E2E_REGISTRY is set"
         exit 1
     fi
 
-    if [ -z "${NMP_E2E_REGISTRY}" ] && [ -n "${NMP_E2E_TAG}" ]; then
-        log_error "NMP_E2E_REGISTRY is required when NMP_E2E_TAG is set"
+    if [ -z "${NHX_E2E_REGISTRY}" ] && [ -n "${NHX_E2E_TAG}" ]; then
+        log_error "NHX_E2E_REGISTRY is required when NHX_E2E_TAG is set"
         exit 1
     fi
 }
@@ -148,7 +148,7 @@ collect_install_diagnostics() {
 }
 
 maybe_export_minikube_cluster_url() {
-    if [ -n "${NMP_E2E_CLUSTER_URL:-}" ]; then
+    if [ -n "${NHX_E2E_CLUSTER_URL:-}" ]; then
         return 0
     fi
 
@@ -162,11 +162,11 @@ maybe_export_minikube_cluster_url() {
 
     local minikube_ip
     minikube_ip="$(minikube ip -p "${MINIKUBE_PROFILE}")"
-    NMP_E2E_CLUSTER_URL="http://${minikube_ip}"
-    export NMP_E2E_CLUSTER_URL
+    NHX_E2E_CLUSTER_URL="http://${minikube_ip}"
+    export NHX_E2E_CLUSTER_URL
 
     if [ -n "${GITHUB_ENV:-}" ]; then
-        echo "NMP_E2E_CLUSTER_URL=${NMP_E2E_CLUSTER_URL}" >> "${GITHUB_ENV}"
+        echo "NHX_E2E_CLUSTER_URL=${NHX_E2E_CLUSTER_URL}" >> "${GITHUB_ENV}"
     fi
 }
 
@@ -204,26 +204,26 @@ HELM_ARGS=(
     --timeout 15m
 )
 
-if [ -n "${NMP_E2E_REGISTRY}" ]; then
+if [ -n "${NHX_E2E_REGISTRY}" ]; then
     HELM_ARGS+=(
-        --set api.image.repository="${NMP_E2E_REGISTRY}/nmp-api"
-        --set core.image.repository="${NMP_E2E_REGISTRY}/nmp-api"
-        --set-string platformConfig.platform.image_registry="${NMP_E2E_REGISTRY}"
+        --set api.image.repository="${NHX_E2E_REGISTRY}/nhx-api"
+        --set core.image.repository="${NHX_E2E_REGISTRY}/nhx-api"
+        --set-string platformConfig.platform.image_registry="${NHX_E2E_REGISTRY}"
     )
 fi
 
-if [ -n "${NMP_E2E_TAG}" ]; then
+if [ -n "${NHX_E2E_TAG}" ]; then
     HELM_ARGS+=(
-        --set api.image.tag="${NMP_E2E_TAG}"
-        --set core.image.tag="${NMP_E2E_TAG}"
-        --set-string platformConfig.platform.image_tag="${NMP_E2E_TAG}"
+        --set api.image.tag="${NHX_E2E_TAG}"
+        --set core.image.tag="${NHX_E2E_TAG}"
+        --set-string platformConfig.platform.image_tag="${NHX_E2E_TAG}"
     )
 fi
 
-if [ -n "${NMP_E2E_PULL_POLICY}" ]; then
+if [ -n "${NHX_E2E_PULL_POLICY}" ]; then
     HELM_ARGS+=(
-        --set api.image.pullPolicy="${NMP_E2E_PULL_POLICY}"
-        --set core.image.pullPolicy="${NMP_E2E_PULL_POLICY}"
+        --set api.image.pullPolicy="${NHX_E2E_PULL_POLICY}"
+        --set core.image.pullPolicy="${NHX_E2E_PULL_POLICY}"
     )
 fi
 
@@ -244,11 +244,11 @@ printf '  release: %s\n' "${HELM_RELEASE_NAME}"
 printf '  namespace: %s\n' "${NAMESPACE}"
 printf '  chart: %s\n' "${HELM_CHART}"
 printf '  values: %s\n' "${HELM_VALUES}"
-if [ -n "${NMP_E2E_REGISTRY}" ]; then
-    printf '  api image: %s/nmp-api:%s\n' "${NMP_E2E_REGISTRY}" "${NMP_E2E_TAG}"
-    printf '  core image: %s/nmp-api:%s\n' "${NMP_E2E_REGISTRY}" "${NMP_E2E_TAG}"
-    printf '  platform image registry: %s\n' "${NMP_E2E_REGISTRY}"
-    printf '  platform image tag: %s\n' "${NMP_E2E_TAG}"
+if [ -n "${NHX_E2E_REGISTRY}" ]; then
+    printf '  api image: %s/nhx-api:%s\n' "${NHX_E2E_REGISTRY}" "${NHX_E2E_TAG}"
+    printf '  core image: %s/nhx-api:%s\n' "${NHX_E2E_REGISTRY}" "${NHX_E2E_TAG}"
+    printf '  platform image registry: %s\n' "${NHX_E2E_REGISTRY}"
+    printf '  platform image tag: %s\n' "${NHX_E2E_TAG}"
 else
     printf '  image overrides: chart defaults\n'
 fi
@@ -279,7 +279,7 @@ maybe_export_minikube_cluster_url
 log_info "Helm values from chart (${HELM_RELEASE_NAME}):"
 helm get values -n "${NAMESPACE}" "${HELM_RELEASE_NAME}" || true
 
-log_info "NeMo Platform Helm install complete"
-if [ -n "${NMP_E2E_CLUSTER_URL:-}" ]; then
-    log_info "Cluster URL: ${NMP_E2E_CLUSTER_URL}"
+log_info "NeMo Helix Helm install complete"
+if [ -n "${NHX_E2E_CLUSTER_URL:-}" ]; then
+    log_info "Cluster URL: ${NHX_E2E_CLUSTER_URL}"
 fi

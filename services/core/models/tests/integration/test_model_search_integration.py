@@ -15,7 +15,7 @@ where to_dict() produced a list instead of a dict).
 
 import uuid
 
-from nmp.testing import ClientContext
+from nhx.testing import ClientContext
 
 DEFAULT_WORKSPACE = "default"
 

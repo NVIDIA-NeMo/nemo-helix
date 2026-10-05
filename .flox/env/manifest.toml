@@ -9,7 +9,7 @@ common = '''
 
   test -f .git/hooks/pre-commit || pre-commit install
 
-  gum style "NeMo Platform"
+  gum style "NeMo Helix"
 '''
 
 [include]

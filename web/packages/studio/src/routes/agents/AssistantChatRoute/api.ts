@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getStoredOidcBearerToken } from '@nemo/sdk/src/utils/oidcBearerToken';
 import { BASE_URL, PLATFORM_BASE_URL } from '@studio/constants/environment';
 import {
   cleanAssistantArtifactText,
@@ -26,7 +27,6 @@ import type {
   AssistantSkill,
   AssistantStreamHandlers,
 } from '@studio/routes/agents/AssistantChatRoute/types';
-import { User } from 'oidc-client-ts';
 
 const ASSISTANT_API_BASE_PATH = '/apis/studio/v2/assistant';
 
@@ -43,30 +43,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const assistantApiUrl = (path: string): string =>
   `${PLATFORM_BASE_URL}${ASSISTANT_API_BASE_PATH}${path}`;
 
-const getAssistantAccessToken = (): string | undefined => {
-  const authority = import.meta.env.VITE_AUTH_AUTHORITY;
-  const clientId = import.meta.env.VITE_AUTH_CLIENT_ID;
-  if (!authority || !clientId || typeof localStorage === 'undefined') return undefined;
-
-  const oidcStorageKey = `oidc.user:${authority}:${clientId}`;
-  const oidcStorage = localStorage.getItem(oidcStorageKey);
-  if (!oidcStorage) return undefined;
-
-  try {
-    const user = User.fromStorageString(oidcStorage);
-    return user?.access_token && !user.expired ? user.access_token : undefined;
-  } catch {
-    localStorage.removeItem(oidcStorageKey);
-    return undefined;
-  }
-};
-
 const assistantFetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const accessToken = getAssistantAccessToken();
-  if (!accessToken) return fetch(input, init);
+  const bearerToken = getStoredOidcBearerToken({
+    authority: import.meta.env.VITE_AUTH_AUTHORITY,
+    clientId: import.meta.env.VITE_AUTH_CLIENT_ID,
+    configuredSource: import.meta.env.VITE_AUTH_BEARER_TOKEN_SOURCE,
+    storage: typeof localStorage === 'undefined' ? undefined : localStorage,
+  });
+  if (!bearerToken) return fetch(input, init);
 
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', `Bearer ${accessToken}`);
+  headers.set('Authorization', `Bearer ${bearerToken}`);
   return fetch(input, { ...init, headers });
 };
 

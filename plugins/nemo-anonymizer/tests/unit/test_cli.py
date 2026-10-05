@@ -5,15 +5,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import yaml
 from nemo_anonymizer_plugin import cli as cli_module
 from nemo_anonymizer_plugin.cli import AnonymizerCLI
 from nemo_anonymizer_plugin.functions.preview import PreviewFunction
-from nemo_platform_plugin.commands import add_function_commands, add_job_commands
-from nemo_platform_plugin.job import NemoJob
+from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_plugin.job import NemoJob
 from typer.testing import CliRunner
+
+
+def _platform(base_url: str) -> SimpleNamespace:
+    """Stand-in CLI state: the platform comes from ``nemo --base-url`` / the active context."""
+    return SimpleNamespace(get_base_url=lambda default=None: base_url)
 
 
 class _RunJob(NemoJob):
@@ -58,10 +64,10 @@ def test_preview_function_uses_flat_remote_submit(monkeypatch) -> None:
         captured["cli_kwargs"] = cli_kwargs
 
     monkeypatch.setattr(
-        "nemo_platform_plugin.discovery.discover_functions",
+        "nemo_helix_plugin.discovery.discover_functions",
         lambda: {"anonymizer.preview": PreviewFunction},
     )
-    monkeypatch.setattr("nemo_platform_plugin.commands._post_function_submit", fake_post_function_submit)
+    monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", fake_post_function_submit)
     cli = AnonymizerCLI()
     app = cli.get_cli()
     runner = CliRunner()
@@ -83,9 +89,8 @@ def test_preview_function_uses_flat_remote_submit(monkeypatch) -> None:
             ),
             "--workspace",
             "team-a",
-            "--base-url",
-            "http://platform.example",
         ],
+        obj=_platform("http://platform.example"),
     )
     nested_result = runner.invoke(app, ["preview", "submit", "--spec", "{}"])
 
@@ -114,7 +119,7 @@ def test_run_job_uses_flat_remote_submit(monkeypatch) -> None:
         captured["kwargs"] = kwargs
         return {"name": "anon-job-1", "workspace": "team-a"}
 
-    monkeypatch.setattr("nemo_platform_plugin.scheduler.NemoJobScheduler.submit_remote", fake_submit_remote)
+    monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", fake_submit_remote)
 
     cli = AnonymizerCLI()
     app = cli.get_cli()
@@ -129,9 +134,8 @@ def test_run_job_uses_flat_remote_submit(monkeypatch) -> None:
             '{"name": "Remote"}',
             "--workspace",
             "team-a",
-            "--base-url",
-            "http://platform.example",
         ],
+        obj=_platform("http://platform.example"),
     )
     nested_result = runner.invoke(app, ["run", "run", "--spec", '{"name": "Nested"}'])
     help_result = runner.invoke(app, ["run", "--help"])

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { EvaluateJob, PlatformJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
 import { ActionMenu } from '@studio/components/evaluation/Jobs/ActionMenu';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -27,7 +27,7 @@ describe('ActionMenu', () => {
   const mockJob: EvaluateJob = {
     id: 'test-job-1',
     name: 'test-job-1',
-    status: PlatformJobStatus.completed,
+    status: HelixJobStatus.completed,
     created_at: '2024-01-01T00:00:00Z',
     spec: { metrics: [], dataset: [] },
   };

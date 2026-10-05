@@ -3,7 +3,7 @@
 
 """Minimal test OIDC issuer for the authz E2E harness.
 
-Serves the two endpoints ``nmp.common.auth.jwt.JWTValidator`` actually
+Serves the two endpoints ``nhx.common.auth.jwt.JWTValidator`` actually
 consumes — ``/.well-known/openid-configuration`` and a JWKS document — over
 real HTTP, and mints real RS256-signed JWTs. Token-defect cases (expired,
 wrong issuer, wrong audience, unknown signing key, ``alg=none``) are minted
@@ -32,7 +32,7 @@ from jwt.algorithms import RSAAlgorithm
 KID_ACTIVE = "e2e-active-key"
 KID_ROGUE = "e2e-rogue-key"
 
-DEFAULT_AUDIENCE = "nmp-e2e-authz"
+DEFAULT_AUDIENCE = "nhx-e2e-authz"
 
 
 @dataclass

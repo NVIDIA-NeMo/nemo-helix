@@ -8,7 +8,7 @@ from data_designer_nemo.errors import NDDInvalidConfigError
 
 _CUSTOM_COLUMN_TYPE = "custom"
 CUSTOM_COLUMNS_UNSUPPORTED_MESSAGE = (
-    "Custom columns are not supported by the NeMo Platform Data Designer service. "
+    "Custom columns are not supported by the NeMo Helix Data Designer service. "
     "Replace the custom column with a built-in column type before trying again."
 )
 

@@ -6,7 +6,7 @@ metadata:
   # Not `scaled-evals-*`: that prefix is taken by the live deployment, its
   # staging release, and CI's per-MR preview namespaces. This one must not be
   # mistakable for any of them.
-  name: nemo-platform-scaled-evals
+  name: nemo-helix-scaled-evals
   labels:
     # Same posture the existing scaled-evals namespaces enforce. Nothing here
     # needs privileged; the compose stack's privileged BuildKit is absent

@@ -13,7 +13,7 @@ from __future__ import annotations
 from io import StringIO
 
 from nemo_agents_plugin.leaderboard.types import AgentLeaderboard, AgentLeaderboardEntry
-from nemo_platform_ext.cli.core.help_formatter import _get_terminal_width
+from nemo_helix_ext.cli.core.help_formatter import _get_terminal_width
 from rich.console import Console
 from rich.table import Table
 

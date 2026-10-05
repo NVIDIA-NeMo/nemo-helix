@@ -27,10 +27,10 @@ from nemo_evaluator.jobs.metric_resolution import (
 from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
-from nemo_evaluator.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
+from nemo_evaluator.jobs.token_usage import report_row_evaluation_usage
+from nemo_evaluator.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
-from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.config import resolve_params
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
@@ -45,13 +45,13 @@ from nemo_evaluator_sdk.values import (
 )
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_platform_plugin.entities import EntityClient
-from nemo_platform_plugin.intake.client import AsyncIntakeClient
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.intake.client import AsyncIntakeClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -228,10 +228,10 @@ class _EvaluateJobBase(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncHelixClient | None,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
+    ) -> HelixJobSpec:
         """Compile canonical spec to a plugin-native evaluator job."""
         del workspace, entity_client, job_name, async_sdk, options
         from nemo_evaluator.jobs.compiler import compile_evaluate_job
@@ -283,7 +283,7 @@ class _EvaluateJobBase(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncHelixClient | None,
         is_local: bool,
     ) -> BaseModel:
         """Resolve submitter-facing model and metric references into the canonical evaluation spec."""
@@ -298,7 +298,7 @@ class _EvaluateJobBase(NemoJob):
             submit_spec.metrics,
             workspace=workspace,
             entity_client=entity_client,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
         )
         return EvaluateSpec(
             metrics=metrics,
@@ -322,7 +322,7 @@ class _EvaluateJobBase(NemoJob):
         # nowhere to put it. Publication needs a start time that is a function of the run, not of
         # when it was published, or re-ingest duplicates spans instead of replacing them.
         started_at = datetime.now(UTC)
-        evaluator = Evaluator()
+        evaluator = job_evaluator()
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         if isinstance(spec.target, Model):
@@ -360,6 +360,7 @@ class _EvaluateJobBase(NemoJob):
                 field_mapping=spec.field_mapping,
                 prompt_template=None,
             )
+        report_row_evaluation_usage(result, ctx.usage)
         result_files = self._write_result_files(
             result, ctx.storage.persistent, run_id=ctx.job_id, started_at=started_at
         )

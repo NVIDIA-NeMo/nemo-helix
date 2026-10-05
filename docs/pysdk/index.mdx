@@ -2,19 +2,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Platform Python SDK Reference"
+title: "NeMo Helix Python SDK Reference"
 description: ""
 ---
 <a id="nemo-ms-pysdk"></a>
 
-The [NeMo Platform Python SDK](https://pypi.org/project/nemo-platform/) is a library for building and deploying AI models, abstracting the underlying infrastructure and providing a high-level interface for the NeMo Platform APIs.
+The [NeMo Helix Python SDK](https://pypi.org/project/nemo-helix/) is a library for building and deploying AI models, abstracting the underlying infrastructure and providing a high-level interface for the NeMo Helix APIs.
 
 ## Installation
 
-Install the PyPI `nemo-platform` wrapper package using `pip`. The wrapper defines the `all` extra and includes the SDK. If you are working from a source checkout, run `make bootstrap` from the repository root instead; the generated SDK package under `sdk/python/nemo-platform/pyproject.toml` does not define the wrapper extras.
+Install the PyPI `nemo-helix` wrapper package using `pip`. The wrapper defines the `all` extra and includes the SDK. If you are working from a source checkout, run `make bootstrap` from the repository root instead; the generated SDK package under `sdk/python/nemo-helix/pyproject.toml` does not define the wrapper extras.
 
 ```bash
-pip install "nemo-platform[all]"
+pip install "nemo-helix[all]"
 ```
 
 <Note>
@@ -27,7 +27,7 @@ This project will download and install additional third-party open source softwa
     ```bash
     pip uninstall nemo-microservices
     ```
-<Markdown src="/snippets/sdk/python/overrides/nemo-platform/README/03_usage.mdx" />
+<Markdown src="/snippets/sdk/python/overrides/nemo-helix/README/03_usage.mdx" />
 ## Next Steps
 
 - Read more about connecting with the [client APIs](/documentation/reference/python-sdk/client-ap-is).

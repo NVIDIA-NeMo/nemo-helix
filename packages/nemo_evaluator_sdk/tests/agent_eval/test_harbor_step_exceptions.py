@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import _trial_from_harbor_result
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter import _trial_from_harbor_result
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
 
 _STEP_EXCEPTION = {

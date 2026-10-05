@@ -12,14 +12,14 @@ one-file change.
 Design constraints (see AALGO-289):
 
 * **Pure.** Every function reads SDK types and returns request params. No HTTP,
-  no platform client, no imports from the Intake *service* (``nmp.intake.*``).
+  no platform client, no imports from the Intake *service* (``nhx.intake.*``).
 * **Typed at the boundary.** The returned values are typed-client
   ``TypedDict`` params (``AtifCreateParams`` / ``EvaluatorResultCreateParams``).
-  At runtime they are plain dicts the adapter splats into the client
-  (``client.intake.ingest.atif.create(**body)``); statically, ``ty`` checks our
-  field names, literals, and nested shapes against the real generated schema, so
-  an API change that regenerates the SDK surfaces here as a type error instead of
-  drifting silently. We depend on the client SDK (already a plugin dependency),
+  At runtime they are plain dicts the publisher wraps into the typed client's
+  request models (``AsyncIntakeClient.create_atif`` / ``create_evaluator_result``);
+  statically, ``ty`` checks our field names, literals, and nested shapes against
+  the typed intake schema, so an API change there surfaces here as a type error
+  instead of drifting silently. We depend on the client SDK (already a plugin dependency),
   never on the Intake service package.
 * The well-known evidence-key constants (``initial_state``/``trace``/``logs``/
   ``final_state``/``verifier_logs``) belong with the SDK evidence work (D1,
@@ -47,7 +47,7 @@ from nemo_evaluator_sdk.values.otlp import (
     set_span_attributes,
 )
 from nemo_evaluator_sdk.values.protocol import OUTPUT_DETAIL
-from nemo_platform_plugin.intake.types import (
+from nemo_helix_plugin.intake.types import (
     AtifAgentParam,
     AtifCreateParams,
     AtifFinalMetricsParam,

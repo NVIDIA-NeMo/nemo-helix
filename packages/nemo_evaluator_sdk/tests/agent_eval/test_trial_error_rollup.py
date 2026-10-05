@@ -22,7 +22,7 @@ from pydantic import ValidationError
 
 
 def _vendored_module(name: str) -> Any:
-    return import_module(f"nemo_platform.beta.evaluator.agent_eval.{name}")
+    return import_module(f"nemo_helix.beta.evaluator.agent_eval.{name}")
 
 
 def _trial(
@@ -163,7 +163,7 @@ def test_summary_round_trips_the_rollup_through_json() -> None:
 
 def test_vendored_module_exposes_the_error_rollup_surface() -> None:
     # The byte-copy pin proves file parity, not that these names are importable through the shipped
-    # package -- which is the path a nemo-platform consumer actually uses.
+    # package -- which is the path a nemo-helix consumer actually uses.
     vendored_results = _vendored_module("results")
     vendored_trials = _vendored_module("trials")
     VendoredSummary = vendored_results.AgentEvalSummary

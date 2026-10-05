@@ -3,7 +3,7 @@
 
 package main
 
-import "github.com/NVIDIA-NeMo/nemo-platform/services/core/jobs/jobs-launcher/cmd"
+import "github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/cmd"
 
 func main() {
 	cmd.Execute()

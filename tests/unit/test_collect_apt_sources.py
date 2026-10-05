@@ -63,7 +63,7 @@ def test_installed_sources_use_installed_source_version_and_explicit_sources_sta
 
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
-    env["NMP_COLLECT_SOURCES"] = "1"
+    env["NHX_COLLECT_SOURCES"] = "1"
     output_dir = tmp_path / "out"
 
     result = subprocess.run(

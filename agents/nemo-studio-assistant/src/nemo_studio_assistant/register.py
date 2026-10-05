@@ -11,7 +11,7 @@ from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
 import httpx
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 from pydantic import BaseModel, Field
 
 DEFAULT_WORKSPACE = "default"
@@ -28,7 +28,7 @@ _REFUSAL_LIKE_PROBE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_clients: dict[str, NeMoPlatform] = {}
+_clients: dict[str, NeMoHelix] = {}
 _api_error_streaks: dict[str, int] = {}
 _guardrail_check_failures: dict[str, int] = {}
 _preflighted_guardrail_models: set[tuple[str, str, str]] = set()
@@ -48,19 +48,19 @@ class GuardrailWorkflowError(RuntimeError):
 
 
 def _active_workspace() -> str:
-    return os.environ.get("NMP_WORKSPACE") or DEFAULT_WORKSPACE
+    return os.environ.get("NHX_WORKSPACE") or DEFAULT_WORKSPACE
 
 
-def _get_client(workspace: str) -> NeMoPlatform:
+def _get_client(workspace: str) -> NeMoHelix:
     request_workspace = workspace.strip()
     if not request_workspace:
         raise ValueError("workspace is required")
     if request_workspace not in _clients:
-        base_url = os.environ.get("NMP_BASE_URL") or os.environ.get("NEMO_BASE_URL")
+        base_url = os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL")
         kwargs: dict[str, Any] = {"workspace": request_workspace}
         if base_url:
             kwargs["base_url"] = base_url
-        _clients[request_workspace] = NeMoPlatform(**kwargs)
+        _clients[request_workspace] = NeMoHelix(**kwargs)
     return _clients[request_workspace]
 
 
@@ -80,7 +80,7 @@ def _public_members(value: Any) -> list[str]:
     return sorted(name for name in dir(value) if not name.startswith("_"))
 
 
-def _resolve_resource(client: NeMoPlatform, resource_path: str) -> Any:
+def _resolve_resource(client: NeMoHelix, resource_path: str) -> Any:
     current = client
     for part in resource_path.split("."):
         if not part or part.startswith("_"):
@@ -179,7 +179,7 @@ def _guardrail_model_route(model: Any, workspace: str) -> tuple[str, str]:
 
 
 def _preflight_guardrail_model(
-    client: NeMoPlatform,
+    client: NeMoHelix,
     workspace: str,
     params: dict[str, Any] | None,
     error_key: str,
@@ -304,7 +304,7 @@ def _report_workflow_activity(
 
 
 def _guardrail_check(
-    client: NeMoPlatform,
+    client: NeMoHelix,
     *,
     workspace: str,
     backend_model: str,
@@ -329,7 +329,7 @@ def _guardrail_check(
     return serialized
 
 
-def _routable_virtual_model(client: NeMoPlatform, workspace: str, virtual_model_name: str) -> bool:
+def _routable_virtual_model(client: NeMoHelix, workspace: str, virtual_model_name: str) -> bool:
     expected = f"{workspace}/{virtual_model_name}"
     models = client.inference.gateway.openai.v1.models.list(workspace=workspace)
     for model in models:
@@ -362,9 +362,9 @@ def _studio_callback_url(
     workspace: str | None = None,
     studio_base_url: str | None = None,
 ) -> str:
-    base_url = (os.environ.get("NMP_BASE_URL") or os.environ.get("NEMO_BASE_URL") or "").rstrip("/")
+    base_url = (os.environ.get("NHX_BASE_URL") or os.environ.get("NEMO_BASE_URL") or "").rstrip("/")
     if not base_url:
-        raise RuntimeError("NMP_BASE_URL is required for Studio UI callbacks")
+        raise RuntimeError("NHX_BASE_URL is required for Studio UI callbacks")
 
     query = {
         key: value
@@ -780,7 +780,7 @@ def nemo_api(
     studio_session_id: str | None = None,
     workspace: str | None = None,
 ) -> str:
-    """Call a NeMo Platform SDK method; writes require explicit Studio approval.
+    """Call a NeMo Helix SDK method; writes require explicit Studio approval.
 
     ``resource`` is a dot-separated SDK path such as ``workspaces``,
     ``inference.providers``, ``files.filesets``, ``evaluation.metric_jobs``,

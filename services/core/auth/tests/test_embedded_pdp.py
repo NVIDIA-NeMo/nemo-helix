@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 
 import pytest
 import yaml
-from nmp.core.auth.app.embedded_pdp import (
+from nhx.core.auth.app.embedded_pdp import (
     OPAPolicy,
     PolicyEngineError,
     evaluate,
@@ -25,7 +25,7 @@ from nmp.core.auth.app.embedded_pdp import (
 @pytest.fixture
 def static_authz_data():
     """Load the static authorization data."""
-    path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/static-authz.yaml"
+    path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/static-authz.yaml"
     with open(path) as f:
         return yaml.safe_load(f)
 
@@ -50,7 +50,7 @@ def minimal_authz_data():
                 "test@example.com": {
                     "workspaces": {
                         "test-workspace": ["Editor"],
-                        "system": ["PlatformAdmin"],
+                        "system": ["HelixAdmin"],
                     }
                 },
                 "viewer@example.com": {
@@ -62,7 +62,7 @@ def minimal_authz_data():
             "roles": {
                 "Viewer": {"permissions": ["models.read", "datasets.read"]},
                 "Editor": {"permissions": ["models.read", "models.create", "models.update", "datasets.read"]},
-                "PlatformAdmin": {"permissions": ["*"]},
+                "HelixAdmin": {"permissions": ["*"]},
                 "ServiceSystem": {"permissions": ["*"]},
             },
             "endpoints": {
@@ -81,7 +81,7 @@ def minimal_authz_data():
 @pytest.fixture(autouse=True)
 def reset_policy():
     """Reset policy state between tests."""
-    import nmp.core.auth.app.embedded_pdp.engine as pe
+    import nhx.core.auth.app.embedded_pdp.engine as pe
 
     pe._reset_policy_state_for_testing()
     yield
@@ -162,9 +162,9 @@ class TestPolicyLoading:
         assert "OPAPolicy used from a different thread" in str(error)
 
     def test_policy_load_forwards_auto_build_config(self, monkeypatch: pytest.MonkeyPatch):
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         calls: list[bool] = []
 
@@ -259,7 +259,7 @@ class TestAllowEntrypoint:
         result = evaluate(
             "allow",
             {
-                "principal_id": "test@example.com",  # Has PlatformAdmin in system workspace
+                "principal_id": "test@example.com",  # Has HelixAdmin in system workspace
                 "path": "/apis/models/v2/workspaces/any-workspace/anything",
                 "method": "DELETE",
             },
@@ -374,9 +374,9 @@ class TestResourceLimits:
 
     def test_fuel_exhaustion_raises_policy_error(self, minimal_authz_data):
         """Verify that an absurdly low fuel limit triggers PolicyEngineError."""
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=0, embedded_pdp_memory_limit_mb=32))
         try:
@@ -411,16 +411,16 @@ class TestResourceLimits:
 
     def test_memory_limit_applied(self):
         """Verify that memory limits are set on the WASM store."""
-        path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/policy.wasm"
+        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
         policy = OPAPolicy(str(path), fuel_limit=100_000_000, memory_limit_mb=16)
         assert policy.store is not None
         assert policy.fuel_limit == 100_000_000
 
     def test_custom_fuel_limit(self, minimal_authz_data):
         """Verify that a custom fuel limit works when sufficient."""
-        import nmp.core.auth.app.embedded_pdp.engine as pe
-        from nmp.common.config import Configuration
-        from nmp.core.auth.config import AuthServiceConfig
+        import nhx.core.auth.app.embedded_pdp.engine as pe
+        from nhx.common.config import Configuration
+        from nhx.core.auth.config import AuthServiceConfig
 
         Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=50, embedded_pdp_memory_limit_mb=32))
         try:
@@ -452,7 +452,7 @@ class TestDefaultDenyWithoutData:
 
     def test_evaluate_without_set_data_raises(self):
         """OPAPolicy.evaluate() must raise when set_data() was never called."""
-        path = Path(__file__).parent.parent / "src/nmp/core/auth/assets/policy.wasm"
+        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
         policy = OPAPolicy(str(path))
         with pytest.raises(PolicyEngineError, match="Policy data not loaded"):
             policy.evaluate(self.AUTHENTICATED_REQUEST)
@@ -500,8 +500,8 @@ class TestDefaultDenyWithoutData:
             {
                 "authz": {
                     "endpoints": {},
-                    "principals": {"admin@example.com": {"workspaces": {"system": ["PlatformAdmin"]}}},
-                    "roles": {"PlatformAdmin": {"permissions": ["*"]}},
+                    "principals": {"admin@example.com": {"workspaces": {"system": ["HelixAdmin"]}}},
+                    "roles": {"HelixAdmin": {"permissions": ["*"]}},
                 }
             }
         )
@@ -597,6 +597,31 @@ class TestWithStaticAuthzData:
         assert editor_result["allowed"] is False
         assert job_runner_result["allowed"] is True
 
+    def test_job_runner_otlp_logs_allow_identity_only_workload_scopes(self, static_authz_data):
+        static_authz_data["authz"]["principals"] = {
+            "nemo-workloads": {"workspaces": {"my-ws": ["Viewer", "JobRunner"]}},
+        }
+        set_policy_data(static_authz_data)
+
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "nemo-workloads",
+                "method": "POST",
+                "path": "/apis/files/v2/workspaces/my-ws/filesets/job-fileset-test/otlp/v1/logs",
+                "scopes": ["openid", "email", "groups"],
+            },
+        )
+
+        assert result["allowed"] is True
+
+    def test_job_runner_otlp_logs_endpoint_is_not_file_scope_gated(self, static_authz_data):
+        post_config = static_authz_data["authz"]["endpoints"][
+            "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
+        ]["post"]
+
+        assert post_config == {"permissions": ["jobs.logs.create"], "scopes": []}
+
 
 class TestIntakeAuthorization:
     """Verify active Intake endpoints are workspace-scoped in static authz data."""
@@ -686,7 +711,7 @@ class TestGenericEntitiesApiBlocked:
     """Verify that Viewer/Editor roles cannot access the generic Entities API.
 
     The entities.* permissions are intentionally not assigned to any role,
-    so only PlatformAdmin and service principals can access these endpoints.
+    so only HelixAdmin and service principals can access these endpoints.
     """
 
     # /apis/entities/v2/entities/{id} is excluded because it has no workspace segment,
@@ -730,11 +755,11 @@ class TestGenericEntitiesApiBlocked:
         self._setup_principals(
             static_authz_data,
             {
-                "admin@test.com": {"workspaces": {"system": ["PlatformAdmin"]}},
+                "admin@test.com": {"workspaces": {"system": ["HelixAdmin"]}},
             },
         )
         result = evaluate("allow", {"principal_id": "admin@test.com", "method": method, "path": path})
-        assert result["allowed"] is True, f"PlatformAdmin should be allowed {method} {path}"
+        assert result["allowed"] is True, f"HelixAdmin should be allowed {method} {path}"
 
     @pytest.mark.parametrize("method,path", ENTITY_ENDPOINTS)
     def test_service_principal_allowed(self, static_authz_data, method, path):
@@ -774,7 +799,7 @@ class TestGenericEntitiesApiBlocked:
     def test_workspace_create_uses_system_scoped_permission(self, static_authz_data):
         static_authz_data["authz"]["principals"] = {
             "*": {"workspaces": {"system": ["WorkspaceCreator"]}},
-            "admin@test.com": {"workspaces": {"system": ["PlatformAdmin"]}},
+            "admin@test.com": {"workspaces": {"system": ["HelixAdmin"]}},
             "group:ml-leads": {"workspaces": {"system": ["WorkspaceCreator"]}},
         }
         set_policy_data(static_authz_data)
@@ -791,7 +816,7 @@ class TestGenericEntitiesApiBlocked:
         assert wildcard_allowed["allowed"] is True
 
         static_authz_data["authz"]["principals"] = {
-            "admin@test.com": {"workspaces": {"system": ["PlatformAdmin"]}},
+            "admin@test.com": {"workspaces": {"system": ["HelixAdmin"]}},
             "group:ml-leads": {"workspaces": {"system": ["WorkspaceCreator"]}},
         }
         set_policy_data(static_authz_data)
@@ -1002,3 +1027,45 @@ class TestWasmNativeBuiltins:
         for path, expect in cases:
             result = evaluate("allow", {"principal_id": "service:probe", "method": "GET", "path": path})
             assert result["allowed"] is expect, f"GET {path} as service:probe: expected allowed={expect}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["evaluator:read", "evaluator:write"])
+@pytest.mark.parametrize("workspace", ["source", "inaccessible"])
+async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz_data, monkeypatch, scope, workspace):
+    """Exercise the injected authorizer against real policy, not a canned 403 response."""
+    from fastapi import HTTPException
+    from nhx.common.auth.client import AuthClient, AuthorizationResult
+    from nhx.common.auth.dependencies import auth_client_context, get_request_authorizer
+    from nhx.common.auth.models import Principal
+    from nhx.common.config import AuthConfig
+    from starlette.requests import Request
+
+    data = static_authz_data["authz"]
+    data["principals"] = {"member@test.com": {"workspaces": {"source": ["TaskReader"]}}}
+    data["roles"]["TaskReader"] = {"permissions": ["evaluator.tasks.read"]}
+    data["endpoints"]["/apis/evaluator/v2/workspaces/{workspace}/tasks/{name}"] = {
+        "get": {"permissions": ["evaluator.tasks.read"], "scopes": ["evaluator:read", "platform:read"]}
+    }
+    set_policy_data(static_authz_data)
+
+    async def authorize(self, method, path, scopes=None, http_client=None):
+        result = evaluate(
+            "allow", {"principal_id": self.principal.id, "method": method, "path": path, "scopes": scopes}
+        )
+        return AuthorizationResult(allowed=result["allowed"])
+
+    monkeypatch.setattr(AuthClient, "authorize_request", authorize)
+    client = AuthClient(principal=Principal(id="member@test.com"), config=AuthConfig())
+    token = auth_client_context.set(client)
+    try:
+        request = Request({"type": "http", "headers": [(b"x-nhx-scopes", scope.encode())]})
+        check = get_request_authorizer(request)
+        if scope == "evaluator:read" and workspace == "source":
+            await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+        else:
+            with pytest.raises(HTTPException) as denied:
+                await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+            assert denied.value.status_code == 403
+    finally:
+        auth_client_context.reset(token)

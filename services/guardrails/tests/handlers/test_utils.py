@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from nmp.guardrails.app.handlers.utils import (
+from nhx.guardrails.app.handlers.utils import (
     get_rail_types_from_config,
     get_rails_name_from_config,
     model_with_req_scoped_custom_headers,
@@ -16,7 +16,7 @@ from nmp.guardrails.app.handlers.utils import (
     set_main_model_merged_custom_headers_into_context,
     update_models_in_config,
 )
-from nmp.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.entities.values._private import Model, RailsConfig
 from pytest_mock import MockerFixture
 
 default_llm_provider = os.getenv("DEFAULT_LLM_PROVIDER", "nim")
@@ -24,7 +24,7 @@ default_llm_provider = os.getenv("DEFAULT_LLM_PROVIDER", "nim")
 
 @pytest.fixture
 def set_headers_into_context_mock(mocker: MockerFixture) -> MagicMock:
-    return mocker.patch("nmp.guardrails.app.handlers.utils.set_request_default_headers_into_context")
+    return mocker.patch("nhx.guardrails.app.handlers.utils.set_request_default_headers_into_context")
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ class TestUpdateModelsInConfig:
             ]
         )
         mocker.patch(
-            "nmp.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+            "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
             return_value={},
         )
 
@@ -94,7 +94,7 @@ class TestUpdateModelsInConfig:
             ]
         )
         mocker.patch(
-            "nmp.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+            "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
             return_value={},
         )
 
@@ -119,7 +119,7 @@ class TestUpdateModelsInConfig:
         # x-custom-header1 should be set to value2 since it should override the value1 provided in the config
         # x-custom-header3 should be set to value3
         mocker.patch(
-            "nmp.guardrails.app.handlers.utils.get_request_default_headers_from_context",
+            "nhx.guardrails.app.handlers.utils.get_request_default_headers_from_context",
             return_value={"x-custom-header1": "value2", "x-custom-header3": "value3"},
         )
         config.models[1].parameters = {"default_headers": {"X-Custom-Header1": "value1"}}
@@ -236,7 +236,7 @@ class TestModelWithReqScopedCustomHeaders:
         model = Model(type="content_safety", model="test_model", engine="test_engine")
         req_custom_headers = {"x-header": "value"}
 
-        mocker.patch("nmp.guardrails.app.handlers.utils.get_merged_custom_headers", side_effect=Exception("Test error"))
+        mocker.patch("nhx.guardrails.app.handlers.utils.get_merged_custom_headers", side_effect=Exception("Test error"))
 
         with pytest.raises(Exception, match="Test error"):
             model_with_req_scoped_custom_headers(model, req_custom_headers)
@@ -304,7 +304,7 @@ class TestSetMainModelMergedCustomHeadersIntoContext:
         )
 
         mocker.patch(
-            "nmp.guardrails.app.handlers.utils.set_request_default_headers_into_context",
+            "nhx.guardrails.app.handlers.utils.set_request_default_headers_into_context",
             side_effect=Exception("Context error"),
         )
 

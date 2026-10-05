@@ -10,7 +10,7 @@ import pytest
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.client import KubernetesClients, build_api_client
 from nemo_deployments_plugin.backends.registry import BACKEND_CLASSES, ExecutorRegistry, ExecutorSpec
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def test_k8s_backend_registered() -> None:
 
 
 def test_executor_registry_accepts_k8s_backend() -> None:
-    sdk = AsyncNeMoPlatform(base_url="http://localhost:8080")
+    sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
     with patch("nemo_deployments_plugin.backends.k8s.backend.KubernetesClients"):
         registry = ExecutorRegistry.from_config(
             sdk,

@@ -19,7 +19,7 @@ def _entry(
     entry_id: str,
     *,
     task_name: str = "workspace-basic-mcp",
-    runtime_image: str | None = "nmp-nat-workspace-basic-mcp:latest",
+    runtime_image: str | None = "nhx-nat-workspace-basic-mcp:latest",
     token_count: int | None = 2000,
     compute_units: float,
     created_at: datetime | None = None,
@@ -54,7 +54,7 @@ def test_render_entries_wide_layout_contains_full_columns():
     assert "CU/Token" in rendered
     assert "Created" in rendered
     assert "workspace-basic-mcp" in rendered
-    assert "nmp-nat-workspace" in rendered
+    assert "nhx-nat-workspace" in rendered
 
 
 def test_render_entries_compact_layout_omits_wide_only_columns():

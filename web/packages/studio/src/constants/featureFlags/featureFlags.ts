@@ -30,7 +30,7 @@ import { z } from 'zod';
 // 2. Add the flag definition to `flagDefinitions` below:
 //    myNewFlag: booleanFlag('VITE_FF_MY_NEW_FLAG', false),
 //
-// 3. Add the flag to the `service/studio/src/nmp/studio/env_mappings.py`. Example:
+// 3. Add the flag to the `service/studio/src/nhx/studio/env_mappings.py`. Example:
 //    EnvMapping(marker="STUDIO_UI_VITE_FF_MY_NEW_FLAG", config_path="studio.feature_flags.my_new_flag", default="false"),
 //
 // 4. Use it in your code:
@@ -58,8 +58,8 @@ export const flagDefinitions = {
     'VITE_FF_AGENT_CONTAINER_DEPLOYMENTS_ENABLED',
     true
   ),
-  agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', false),
-  agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', false),
+  agentOptimizationsEnabled: booleanFlag('VITE_FF_AGENT_OPTIMIZATIONS_ENABLED', true),
+  agentOverviewEnabled: booleanFlag('VITE_FF_AGENT_OVERVIEW_ENABLED', true),
   agentsEnabled: previewFlag('VITE_FF_AGENTS_ENABLED', true),
   anonymizerEnabled: booleanFlag('VITE_FF_ANONYMIZER_ENABLED', true),
   baseModelsEnabled: previewFlag('VITE_FF_BASE_MODELS_ENABLED', true),
@@ -67,19 +67,21 @@ export const flagDefinitions = {
   copilotStudioEnabled: previewFlag('VITE_FF_COPILOT_STUDIO_ENABLED', false),
   customizerEnabled: previewFlag('VITE_FF_CUSTOMIZER_ENABLED', true),
   dashboardEnabled: previewFlag('VITE_FF_DASHBOARD_ENABLED', false),
+  dashboardSandboxEnabled: previewFlag('VITE_FF_DASHBOARD_SANDBOX_ENABLED', true),
   dataDesignerEnabled: previewFlag('VITE_FF_DATA_DESIGNER_ENABLED', true),
   datasetsEnabled: previewFlag('VITE_FF_DATASETS_ENABLED', true),
-  deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED'),
+  deploymentsEnabled: previewFlag('VITE_FF_DEPLOYMENTS_ENABLED', true),
   evaluatorBenchmarksEnabled: previewFlag('VITE_FF_EVALUATOR_BENCHMARKS_ENABLED', false),
   evaluatorEnabled: previewFlag('VITE_FF_EVALUATOR_ENABLED', true),
   experiment: previewFlag('VITE_FF_EXPERIMENT', true),
   filesetDetailsEnabled: previewFlag('VITE_FF_FILESET_DETAILS_ENABLED'),
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
-  inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED'),
+  inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
   jobsEnabled: previewFlag('VITE_FF_JOBS_ENABLED', true),
   membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED'),
   modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
+  modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
   optimizerEnabled: previewFlag('VITE_FF_OPTIMIZER_ENABLED', true),
   pluginsEnabled: previewFlag('VITE_FF_PLUGINS_ENABLED', true),

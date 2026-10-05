@@ -17,13 +17,12 @@ from data_designer.logging import RandomEmoji
 from nemo_data_designer_plugin.sdk.errors import DataDesignerJobError
 from nemo_data_designer_plugin.sdk.job_results import DataDesignerJobResults
 from nemo_data_designer_plugin.sdk.logging import with_logging
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.errors import NemoHTTPError, NotFoundError
-from nemo_platform_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
-from nemo_platform_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
-from nemo_platform_plugin.jobs.archive import safe_extract_tar
-from nemo_platform_plugin.jobs.schemas import PlatformJobStatus
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
+from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
+from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
+from nemo_helix_plugin.jobs.archive import safe_extract_tar
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -115,7 +114,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: NeMoPlatform,
+        platform: NemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -125,14 +124,14 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: DataDesignerClient | None = None,
-        platform: NeMoPlatform | None = None,
+        platform: NemoClient | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):
         if client is None:
             if platform is None:
                 raise TypeError("DataDesignerJobResource requires either client= or platform=")
-            client = client_from_platform(platform, DataDesignerClient)
+            client = DataDesignerClient.from_client(platform)
         elif platform is not None:
             raise TypeError("Pass only one of client= or platform=")
 
@@ -165,7 +164,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
             raise _get_job_error(exc) from exc
         return job.model_dump(mode="json")
 
-    def get_job_status(self) -> PlatformJobStatus | None:
+    def get_job_status(self) -> HelixJobStatus | None:
         """Get the current status of the job.
 
         Returns:
@@ -377,7 +376,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
-        platform: AsyncNeMoPlatform,
+        platform: AsyncNemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ) -> None: ...
@@ -387,14 +386,14 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         *,
         job_name: str,
         client: AsyncDataDesignerClient | None = None,
-        platform: AsyncNeMoPlatform | None = None,
+        platform: AsyncNemoClient | None = None,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
     ):
         if client is None:
             if platform is None:
                 raise TypeError("AsyncDataDesignerJobResource requires either client= or platform=")
-            client = client_from_platform(platform, AsyncDataDesignerClient)
+            client = AsyncDataDesignerClient.from_client(platform)
         elif platform is not None:
             raise TypeError("Pass only one of client= or platform=")
 
@@ -427,7 +426,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
             raise _get_job_error(exc) from exc
         return response.data().model_dump(mode="json")
 
-    async def get_job_status(self) -> PlatformJobStatus | None:
+    async def get_job_status(self) -> HelixJobStatus | None:
         """Get the current status of the job.
 
         Returns:
@@ -649,7 +648,7 @@ def _try_parse_log_message(raw_message: str) -> dict[str, str] | None:
     return deserialized
 
 
-def _status_is_complete(status: PlatformJobStatus | None, raise_if_not_complete: bool) -> bool:
+def _status_is_complete(status: HelixJobStatus | None, raise_if_not_complete: bool) -> bool:
     if status == "completed":
         return True
     if status == "active":

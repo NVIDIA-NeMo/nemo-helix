@@ -139,6 +139,20 @@ describe('SubmitEvaluationModal', () => {
     expect(await screen.findByLabelText<HTMLInputElement>('Evaluation Name')).toHaveValue('');
   });
 
+  it('offers a parallel-requests setting that defaults to 4', async () => {
+    mockLists();
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('spinbutton', { name: 'Parallel requests' })).toHaveValue(4);
+  });
+
   it('will not advance past the experiment step without a name', async () => {
     mockLists();
     const user = userEvent.setup();
@@ -161,7 +175,7 @@ describe('SubmitEvaluationModal', () => {
 
     // Re-running has no experiment to set up, so it is two steps.
     expect(await screen.findByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Create evaluation')).toBeInTheDocument();
+    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
     expect(screen.queryByText('Create experiment')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('radio', { name: /Create a new experiment/ }));
@@ -169,7 +183,7 @@ describe('SubmitEvaluationModal', () => {
     // The new-experiment path gains its own step, and all three are named up front.
     expect(await screen.findByText('Create experiment')).toBeInTheDocument();
     expect(screen.getByText('Begin')).toBeInTheDocument();
-    expect(screen.getByText('Create evaluation')).toBeInTheDocument();
+    expect(screen.getByText('Run Evaluation')).toBeInTheDocument();
   });
 
   it("puts the new run's name under the picker it is derived from", async () => {

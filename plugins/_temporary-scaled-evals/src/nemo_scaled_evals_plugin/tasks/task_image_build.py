@@ -8,9 +8,9 @@ from __future__ import annotations
 import logging
 import sys
 
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.tasks.dispatcher import exit_code_for, read_step_config
-from nemo_platform_plugin.tasks.logging_setup import configure_task_logging
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.tasks.dispatcher import exit_code_for, read_step_config
+from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 from nemo_scaled_evals_plugin.jobs.task_image_build import TaskImageBuildJob
 
 logger = logging.getLogger(__name__)

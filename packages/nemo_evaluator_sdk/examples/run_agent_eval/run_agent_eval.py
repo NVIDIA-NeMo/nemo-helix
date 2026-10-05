@@ -86,7 +86,7 @@ async def run_agentic_task(
     *,
     output_dir: Path,
     min_pass_rate: float,
-    nmp_base_url: str,
+    nhx_base_url: str,
     agent_model: str | None,
     skip_build: bool,
     verify: bool,
@@ -111,7 +111,7 @@ async def run_agentic_task(
                 aut_agent_config=aut_agent_config,
                 aut_seed_providers=seed_providers,
                 agent_model=agent_model,
-                nmp_base_url=nmp_base_url,
+                nhx_base_url=nhx_base_url,
                 nvidia_api_key=os.environ.get("NVIDIA_API_KEY"),
                 inference_nvidia_api_key=os.environ.get("INFERENCE_NVIDIA_API_KEY"),
                 anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
@@ -121,7 +121,7 @@ async def run_agentic_task(
     else:
         runtime = NatWorkflowRuntime(
             NatWorkflowConfig(
-                nmp_base_url=nmp_base_url,
+                nhx_base_url=nhx_base_url,
                 nvidia_api_key=os.environ.get("NVIDIA_API_KEY"),
                 agent_model=agent_model,
                 run_verify=verify,
@@ -207,7 +207,7 @@ async def _main() -> int:
         "--agentic-task",
         default=None,
         help="Run a real tests/agentic-use/<name> task end to end via the NAT workflow runtime "
-        "(requires Docker, nmp-agentic-base, and a running NeMo Platform).",
+        "(requires Docker, nhx-agentic-base, and a running NeMo Helix).",
     )
     parser.add_argument(
         "--backend",
@@ -229,7 +229,7 @@ async def _main() -> int:
     )
     parser.add_argument("--skip-build", action="store_true", help="Skip the BUILD phase (image must exist).")
     parser.add_argument("--verify", action="store_true", help="Run the pytest VERIFY phase for the agentic task.")
-    parser.add_argument("--nmp-base-url", default=os.environ.get("NMP_BASE_URL", "http://localhost:8080"))
+    parser.add_argument("--nhx-base-url", default=os.environ.get("NHX_BASE_URL", "http://localhost:8080"))
     parser.add_argument("--agent-model", default=os.environ.get("NAT_AGENT_MODEL"), help="Model for the agent.")
     args = parser.parse_args()
 
@@ -249,7 +249,7 @@ async def _main() -> int:
                 args.agentic_task,
                 output_dir=args.output_dir,
                 min_pass_rate=args.min_pass_rate,
-                nmp_base_url=args.nmp_base_url,
+                nhx_base_url=args.nhx_base_url,
                 agent_model=args.agent_model,
                 skip_build=args.skip_build,
                 verify=args.verify,
@@ -260,7 +260,7 @@ async def _main() -> int:
             )
         except (RuntimeError, FileNotFoundError, OSError) as exc:
             print(f"agentic-task run failed: {exc}")
-            print("Real tasks need Docker, the nmp-agentic-base image, and a running NeMo Platform (see README).")
+            print("Real tasks need Docker, the nhx-agentic-base image, and a running NeMo Helix (see README).")
             return 1
     elif args.rescore_dir:
         result = await rescore(args.rescore_dir, output_dir=args.output_dir, min_pass_rate=args.min_pass_rate)

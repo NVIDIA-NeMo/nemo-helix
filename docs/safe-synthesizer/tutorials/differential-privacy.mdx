@@ -62,39 +62,54 @@ By default, NeMo Safe Synthesizer uses **record-level** differential privacy, wh
 
 ## Setup
 
-Install the PyPI `nemo-platform` wrapper package with Safe Synthesizer support.
+Install the PyPI `nemo-helix` wrapper package with Safe Synthesizer support.
 If you are working from a source checkout, run `make bootstrap` from the repository root instead,
 then install the tutorial-only packages (`kagglehub matplotlib`) in that environment.
 
 For a PyPI install:
 
 ```shell
-if command -v uv &> /dev/null; then
- uv pip install "nemo-platform[all]" kagglehub matplotlib
+if command -v uv >/dev/null 2>&1 && [ -n "$VIRTUAL_ENV" ]; then
+    uv pip install "nemo-helix[all]" 'kagglehub==0.3.13' matplotlib
 else
- pip install "nemo-platform[all]" kagglehub matplotlib
+    pip install "nemo-helix[all]" 'kagglehub==0.3.13' matplotlib
 fi
 ```
 
 And assuming the platform is running locally:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import os
 import pandas as pd
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
-# Configure client
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+# Configure the clients
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+
+# Use the provider configured during NeMo Helix setup for PII classification.
+provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
+if "/" in provider_name:
+    provider_workspace, provider_id = provider_name.split("/", 1)
+    client.inference.providers.retrieve(provider_id, workspace=provider_workspace)
+else:
+    client.inference.providers.retrieve(provider_name)
 ```
 
 ---
 
 ## Load and Prepare Data
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Load sample dataset
 import kagglehub  # type: ignore[import-not-found]
@@ -103,7 +118,7 @@ path = kagglehub.dataset_download("nicapotato/womens-ecommerce-clothing-reviews"
 df = pd.read_csv(f"{path}/Womens Clothing E-Commerce Reviews.csv", index_col=0)
 
 print(f"Dataset size: {len(df)} records")
-print(f"Recommended delta: {1 / (len(df) ** 2):.2e}")
+print(f"Recommended delta: {1 / (len(df) ** 1.2):.2e}")
 ```
 
 ---
@@ -112,6 +127,7 @@ print(f"Recommended delta: {1 / (len(df) ** 2):.2e}")
 
 First, create a baseline without differential privacy:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import time
 
@@ -120,16 +136,14 @@ print("🔬 Experiment 1: No Differential Privacy (Baseline)")
 builder_baseline = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .synthesize()
 )
 
 # Create a project for our jobs (creates if it doesn't exist)
 project_name = "test-project"
-try:
-    client.projects.create(workspace="default", name=project_name)
-except Exception:
-    pass  # Project may already exist
+sdk.projects.create(workspace="default", name=project_name, exist_ok=True)
 
 job_baseline = builder_baseline.create_job(
     name=f"dp-baseline-{int(time.time())}", project="test-project"
@@ -150,14 +164,16 @@ print(f" DPS (Privacy): {summary_baseline.data_privacy_score}")
 
 Apply moderate differential privacy:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 print("\n🔬 Experiment 2: Moderate Privacy (ε=6)")
 
 builder_moderate = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(epsilon=6.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=6.0, delta=1e-5)
     .synthesize()
 )
 
@@ -180,14 +196,16 @@ print(f" DPS (Privacy): {summary_moderate.data_privacy_score}")
 
 Apply strong differential privacy:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 print("\n🔬 Experiment 3: Strong Privacy (ε=1)")
 
 builder_strong = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
-    .with_differential_privacy(epsilon=1.0, delta=1e-5)
+    .with_differential_privacy(dp_enabled=True, epsilon=1.0, delta=1e-5)
     .synthesize()
 )
 
@@ -210,6 +228,7 @@ print(f" DPS (Privacy): {summary_strong.data_privacy_score}")
 
 Visualize the privacy-utility tradeoff:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import matplotlib.pyplot as plt
 
@@ -238,16 +257,16 @@ fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.bar(experiments, safe_sqs, color=["blue", "green", "red"], alpha=0.7)
 ax1.set_ylabel("Score")
 ax1.set_title("Synthetic Quality Score (SQS)")
-ax1.set_ylim([0, 100])
-ax1.axhline(y=70, color="gray", linestyle="--", label="Good threshold")
+ax1.set_ylim([0, 10])
+ax1.axhline(y=7, color="gray", linestyle="--", label="Good threshold")
 ax1.legend()
 
 # DPS comparison
 ax2.bar(experiments, safe_dps, color=["blue", "green", "red"], alpha=0.7)
 ax2.set_ylabel("Score")
 ax2.set_title("Data Privacy Score (DPS)")
-ax2.set_ylim([0, 100])
-ax2.axhline(y=70, color="gray", linestyle="--", label="Good threshold")
+ax2.set_ylim([0, 10])
+ax2.axhline(y=7, color="gray", linestyle="--", label="Good threshold")
 ax2.legend()
 
 plt.tight_layout()
@@ -270,6 +289,7 @@ for i, exp in enumerate(experiments):
 
 Configure differential privacy with custom parameters:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_safe_synthesizer_plugin.sdk.config import DifferentialPrivacyHyperparams
 
@@ -285,6 +305,7 @@ privacy_config = DifferentialPrivacyHyperparams(
 builder_custom = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(config=privacy_config)
     .synthesize()
@@ -295,15 +316,17 @@ builder_custom = (
 
 For datasets where multiple records belong to the same entity (e.g., a patient with multiple visits), group-level privacy protects entire entities rather than individual records:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
-# Group-level privacy for multi-record entities
+# Group-level privacy for repeated records in this tutorial's sample dataset.
+# For patient data, replace "Clothing ID" with your patient identifier column.
 builder_grouped = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
-    .with_train(
-        group_training_examples_by="patient_id"  # Group records by patient
+    .with_data(
+        group_training_examples_by="Clothing ID"
     )
-    .with_differential_privacy(epsilon=8.0)
+    .with_differential_privacy(dp_enabled=True, epsilon=8.0)
     .synthesize()
 )
 ```
@@ -312,14 +335,16 @@ builder_grouped = (
 
 When running multiple experiments, the privacy budget compounds:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
-# Total privacy budget across experiments
-total_epsilon = 0.0  # No DP baseline
-total_epsilon += 6.0  # Moderate privacy
-total_epsilon += 1.0  # Strong privacy
+# Basic sequential composition for DP outputs released from the same source data.
+# Do not release the non-DP baseline: it has no finite DP guarantee.
+released_budgets = [(6.0, 1e-5), (1.0, 1e-5)]
+total_epsilon = sum(epsilon for epsilon, _ in released_budgets)
+total_delta = sum(delta for _, delta in released_budgets)
 
-print(f"\n🔐 Total Privacy Budget Consumed: ε = {total_epsilon}")
-print("Note: Each additional release compounds the privacy budget")
+print(f"\n🔐 Composed Privacy Budget: ε = {total_epsilon}, δ = {total_delta:.1e}")
+print("Note: Each additional DP release compounds the privacy budget")
 print("Best practice: Only release one synthetic dataset per original dataset")
 ```
 
@@ -331,6 +356,7 @@ print("Best practice: Only release one synthetic dataset per original dataset")
 
 Measures if an attacker can determine whether a record was in training data:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Fetch detailed evaluation reports
 baseline_report = job_baseline.fetch_summary()
@@ -342,13 +368,14 @@ print(f"Moderate (ε=6): {moderate_report.membership_inference_protection_score}
 
 print("\nInterpretation:")
 print("- Higher score = Better protection")
-print("- Score > 0.5 means attacker cannot reliably identify training records")
+print("- Scores use a 0-10 scale; higher values indicate stronger protection")
 ```
 
 ### Attribute Inference Attack (AIA)
 
 Measures if sensitive attributes can be inferred from other attributes:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 print("\n🔍 Attribute Inference Protection:")
 print(f"Baseline: {baseline_report.attribute_inference_protection_score}")
@@ -367,6 +394,7 @@ print("- Measures difficulty of inferring sensitive values from known attributes
 
 Differential privacy works best with larger datasets:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 def check_data_requirements(dataset_size):
     """Check if dataset size is suitable for DP."""
@@ -384,7 +412,7 @@ def check_data_requirements(dataset_size):
         print(" Recommendation: Start with higher epsilon (ε=10-12)")
     else:
         print("❌ Small - DP may significantly reduce quality")
-        print(" Consider: Collecting more data or using DP without")
+        print(" Consider collecting more data or running without DP")
 
     print(f"\n Recommended delta: {1 / (dataset_size ** 1.2):.2e}")
 
@@ -398,6 +426,7 @@ check_data_requirements(len(df))
 
 ### Choosing Epsilon
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 def recommend_epsilon(dataset_size, sensitivity):
     """
@@ -432,6 +461,7 @@ recommend_epsilon(len(df), "medium")
 
 Differential privacy training requires special considerations:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Optimal DP training configuration
 builder_optimized = (
@@ -439,9 +469,14 @@ builder_optimized = (
     .with_data_source(df)
     .with_train(
         batch_size=256,  # Larger batch sizes benefit DP
-        num_epochs=10,  # May need more epochs for convergence
+        num_input_records_to_sample=len(df) * 10,  # Approximately ten passes over the input
     )
-    .with_differential_privacy(epsilon=8.0, delta="auto", per_sample_max_grad_norm=1.0)
+    .with_differential_privacy(
+        dp_enabled=True,
+        epsilon=8.0,
+        delta="auto",
+        per_sample_max_grad_norm=1.0,
+    )
     .synthesize()
 )
 ```
@@ -478,6 +513,7 @@ builder_optimized = (
 
 If synthetic quality drops significantly:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Try these approaches:
 # 1. Increase epsilon (reduce privacy slightly)
@@ -489,10 +525,12 @@ builder_improved = (
     SafeSynthesizerJobBuilder(client)
     .with_data_source(df)
     .with_train(
-        num_epochs=10  # More training
+        num_input_records_to_sample=len(df) * 10  # Approximately ten passes over the input
     )
+    .with_classify_model_provider(provider_name)
     .with_replace_pii()
     .with_differential_privacy(
+        dp_enabled=True,
         epsilon=6.0,  # Slightly higher
         delta=1e-5,
         per_sample_max_grad_norm=1.5,  # Less aggressive clipping

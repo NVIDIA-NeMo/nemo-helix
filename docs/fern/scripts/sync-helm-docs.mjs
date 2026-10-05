@@ -24,25 +24,25 @@ const VALUES = resolve(repoRoot, "k8s", "helm", "values.yaml");
 const OUTPUT = resolve(repoRoot, "docs", "helm", "index.mdx");
 
 const FRONTMATTER = `---
-title: "NeMo Platform Helm Chart"
+title: "NeMo Helix Helm Chart"
 description: ""
 ---
 `;
 
 const DROP_LINE =
-  /^Documentation can be found at: https:\/\/docs\.nvidia\.com\/nemo-platform\.\s*$/;
+  /^Documentation can be found at: https:\/\/docs\.nvidia\.com\/nemo-helix\.\s*$/;
 
 const DEPLOYMENT_LINK =
-  /For deployment instructions, see https:\/\/docs\.nvidia\.com\/nemo-platform\/(?:latest\/)?documentation\/(?:self-managed-deployment|kubernetes-deployment)\/setup\.?/;
+  /For deployment instructions, see https:\/\/docs\.nvidia\.com\/nemo-helix\/(?:latest\/)?documentation\/(?:self-managed-deployment|kubernetes-deployment)\/setup\.?/;
 
 const DEPLOYMENT_LINK_REPLACEMENT =
   "For deployment guide, see " +
   "[Kubernetes Deployment](/documentation/kubernetes-deployment/setup) " +
-  "in the NeMo Platform documentation.";
+  "in the NeMo Helix documentation.";
 
 const EXAMPLES_OVERLAY_LINK = /\[examples\/opensandbox\]\(examples\/opensandbox\)/;
 const EXAMPLES_OVERLAY_REPLACEMENT =
-  "[k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-platform/tree/main/k8s/helm/examples/opensandbox)";
+  "[k8s/helm/examples/opensandbox](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/k8s/helm/examples/opensandbox)";
 
 function rewritePublishedDocsUrls(text) {
   return text
@@ -104,7 +104,7 @@ export function buildHelmReferenceMdx(readme, valuesYaml) {
     extractIntro(readme) +
     "\n\n" +
     "## Values\n\n" +
-    "The following is the complete `values.yaml` for the NeMo Platform Helm Chart.\n" +
+    "The following is the complete `values.yaml` for the NeMo Helix Helm Chart.\n" +
     "All configuration options are documented inline with comments.\n\n" +
     "```yaml wordWrap\n" +
     valuesYaml.trimEnd() +

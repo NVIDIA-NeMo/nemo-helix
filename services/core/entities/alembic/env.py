@@ -7,7 +7,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from dotenv import load_dotenv
-from nmp.common.config import DatabaseConfig
+from nhx.common.config import DatabaseConfig
 from sqlalchemy import engine_from_config, pool
 
 # Load .env if present (for local dev).
@@ -21,7 +21,7 @@ if not config.get_main_option("sqlalchemy.url"):
     config.set_main_option("sqlalchemy.url", DatabaseConfig().sqlalchemy_database_url())
 
 # Interpret the config file for Python logging.
-# When running inside the NeMo Platform, the root logger already has a structlog
+# When running inside the NeMo Helix, the root logger already has a structlog
 # handler (ProcessorFormatter). Skip fileConfig so we don't add alembic.ini's
 # generic handler; then Alembic logs propagate to root and use the platform format.
 # When running Alembic from the CLI, root has no such handler, so we apply fileConfig.
@@ -39,8 +39,8 @@ elif _in_platform or _in_pytest:
     logging.getLogger("alembic").setLevel(logging.INFO)
 
 # For autogenerate: use Entities Base.metadata; import models so all tables are registered.
-import nmp.core.entities.app.repository.sqlalchemy.models  # noqa: E402, F401
-from nmp.core.entities.app.repository.sqlalchemy.base import Base  # noqa: E402
+import nhx.core.entities.app.repository.sqlalchemy.models  # noqa: E402, F401
+from nhx.core.entities.app.repository.sqlalchemy.base import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

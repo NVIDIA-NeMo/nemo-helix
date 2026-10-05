@@ -13,6 +13,6 @@ else
 fi
 
 echo '=== Creating workspace ==='
-/app/.venv/bin/nmp workspaces create --name job-test-workspace || echo 'Workspace may already exist'
+/app/.venv/bin/nhx workspaces create --name job-test-workspace || echo 'Workspace may already exist'
 
 echo '=== Environment setup complete ==='

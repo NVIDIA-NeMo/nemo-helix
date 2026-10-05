@@ -8,12 +8,12 @@ import {
   useAgentsGetDeploymentLogs,
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema';
-import type { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { Block, Select, Stack, Text } from '@nvidia/foundations-react-core';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { streamSse } from '@studio/util/sseStream';
 import { type FC, useEffect, useMemo, useState } from 'react';
-import { useAuth } from 'react-oidc-context';
 
 interface DeploymentLogsViewProps {
   workspace: string;
@@ -116,9 +116,9 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     { query: { staleTime: 5000 } }
   );
 
-  const [streamedLines, setStreamedLines] = useState<PlatformJobLog[]>([]);
+  const [streamedLines, setStreamedLines] = useState<HelixJobLog[]>([]);
 
-  const accessToken = useAuth()?.user?.access_token;
+  const accessToken = useOidcBearerToken();
   const tailOffset = data?.next_offset;
 
   // Also keyed on tailOffset: a refetch re-baselines `data` to the latest tail and
@@ -138,7 +138,7 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
       initialLastEventId: tailOffset != null ? String(tailOffset) : undefined,
       onEvent: (event) => {
         try {
-          const parsed = JSON.parse(event.data) as PlatformJobLog;
+          const parsed = JSON.parse(event.data) as HelixJobLog;
           setStreamedLines((prev) => {
             const next = [...prev, parsed];
             return next.length > MAX_STREAMED_LINES
@@ -156,9 +156,9 @@ const LogsForDeployment: FC<LogsForDeploymentProps> = ({ workspace, deploymentNa
     return () => controller.abort();
   }, [workspace, deploymentName, accessToken, isLoading, tailOffset]);
 
-  const logs = useMemo<PlatformJobLog[]>(() => {
+  const logs = useMemo<HelixJobLog[]>(() => {
     const initial = (data?.data ?? []).map(
-      (line): PlatformJobLog => ({
+      (line): HelixJobLog => ({
         timestamp: line.timestamp,
         message: line.message,
         job: '',

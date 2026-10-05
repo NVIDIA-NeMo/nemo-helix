@@ -13,7 +13,7 @@ import pytest
 from nemo_evaluator_sdk.retrieval import dense_search as dense_search_module
 from nemo_evaluator_sdk.retrieval.beir import BeirDataset
 from nemo_evaluator_sdk.retrieval.dense_search import dense_search, retrieve
-from nemo_evaluator_sdk.retrieval.nim_embeddings import InputType, NimEmbeddingClient, NimEmbeddingError
+from nemo_evaluator_sdk.retrieval.nim_embeddings import NimEmbeddingClient, NimEmbeddingError
 from nemo_evaluator_sdk.values.models import Model
 from nemo_evaluator_sdk.values.retrieval import Retrieval
 
@@ -44,7 +44,6 @@ async def test_encode_batches_cancels_siblings_on_first_failure() -> None:
         async def encode(
             self,
             inputs: list[str],
-            input_type: InputType,
             client: httpx.AsyncClient | None = None,
         ) -> list[list[float]]:
             text = inputs[0]
@@ -65,7 +64,6 @@ async def test_encode_batches_cancels_siblings_on_first_failure() -> None:
             await dense_search_module._encode_batches(
                 FailingEmbeddings(model=_model()),
                 ["bad", "slow", "queued"],
-                input_type="query",
                 batch_size=1,
                 in_flight=2,
                 client=client,
@@ -76,7 +74,7 @@ async def test_encode_batches_cancels_siblings_on_first_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_embedding_client_sends_nim_input_type_and_checks_dimension() -> None:
+async def test_embedding_client_omits_input_type_and_checks_dimension() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -86,7 +84,6 @@ async def test_embedding_client_sends_nim_input_type_and_checks_dimension() -> N
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         vectors = await NimEmbeddingClient(model=_model(), dimensions=2).encode(
             ["question"],
-            input_type="query",
             client=client,
         )
 
@@ -95,7 +92,6 @@ async def test_embedding_client_sends_nim_input_type_and_checks_dimension() -> N
     assert json.loads(requests[0].content) == {
         "model": "embed-model",
         "input": ["question"],
-        "input_type": "query",
         "encoding_format": "float",
         "modality": "text",
     }
@@ -116,7 +112,6 @@ async def test_embedding_client_replaces_chat_completion_route() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         await NimEmbeddingClient(model=model, dimensions=2).encode(
             ["question"],
-            input_type="query",
             client=client,
         )
 
@@ -143,7 +138,6 @@ async def test_embedding_client_retries_http_503(monkeypatch: pytest.MonkeyPatch
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await NimEmbeddingClient(model=_model(), dimensions=2).encode(
             ["question"],
-            input_type="query",
             client=client,
         )
 
@@ -165,7 +159,6 @@ async def test_embedding_client_does_not_retry_http_400() -> None:
         with pytest.raises(NimEmbeddingError, match="embedding HTTP 400"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["question"],
-                input_type="query",
                 client=client,
             )
 
@@ -189,7 +182,6 @@ async def test_embedding_client_does_not_retry_vlm_image_503() -> None:
         with pytest.raises(NimEmbeddingError, match="image inputs require VLM"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["data:image/png;base64,abc"],
-                input_type="passage",
                 client=client,
             )
 
@@ -210,7 +202,6 @@ async def test_embedding_client_includes_http_error_body(monkeypatch: pytest.Mon
         with pytest.raises(NimEmbeddingError, match="queue full"):
             await NimEmbeddingClient(model=_model(), dimensions=2, max_retries=0).encode(
                 ["question"],
-                input_type="query",
                 client=client,
             )
 
@@ -232,7 +223,6 @@ async def test_embedding_client_retries_non_finite_response(monkeypatch: pytest.
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         result = await NimEmbeddingClient(model=_model(), dimensions=2, max_retries=1).encode(
             ["question"],
-            input_type="query",
             client=client,
         )
 
@@ -248,7 +238,6 @@ async def test_embedding_client_accepts_native_width_when_dimensions_omitted() -
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         vectors = await NimEmbeddingClient(model=_model()).encode(
             ["question"],
-            input_type="query",
             client=client,
         )
 
@@ -264,7 +253,6 @@ async def test_embedding_client_rejects_wrong_dimension() -> None:
         with pytest.raises(NimEmbeddingError, match="expected embedding dimension 2"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["question"],
-                input_type="query",
                 client=client,
             )
 
@@ -285,7 +273,6 @@ async def test_embedding_client_rejects_duplicate_indexes() -> None:
         with pytest.raises(NimEmbeddingError, match="invalid indexes"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["first", "second"],
-                input_type="query",
                 client=client,
             )
 
@@ -306,7 +293,6 @@ async def test_embedding_client_rejects_skipped_indexes() -> None:
         with pytest.raises(NimEmbeddingError, match="invalid indexes"):
             await NimEmbeddingClient(model=_model(), dimensions=2).encode(
                 ["first", "second"],
-                input_type="query",
                 client=client,
             )
 
@@ -323,12 +309,13 @@ async def test_dense_search_ranks_documents_and_uses_passage_then_query(tmp_path
         "query-id\tcorpus-id\tscore\nq1\td1\t1\n",
         encoding="utf-8",
     )
-    input_types: list[str] = []
+    batches: list[list[str]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        input_types.append(payload["input_type"])
-        vectors = [[1.0, 0.0], [0.0, 1.0]] if payload["input_type"] == "passage" else [[0.8, 0.2]]
+        assert "input_type" not in payload
+        batches.append(payload["input"])
+        vectors = [[1.0, 0.0], [0.0, 1.0]] if len(payload["input"]) == 2 else [[0.8, 0.2]]
         return _response(request, vectors)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -338,9 +325,39 @@ async def test_dense_search_ranks_documents_and_uses_passage_then_query(tmp_path
             client=client,
         )
 
-    assert input_types == ["passage", "query"]
+    assert batches == [["passage: alpha", "passage: beta"], ["query: alpha?"]]
     assert list(results["q1"]) == ["d1", "d2"]
     assert results["q1"]["d1"] > results["q1"]["d2"]
+
+
+@pytest.mark.asyncio
+async def test_dense_search_applies_query_and_passage_prefixes(tmp_path: Path) -> None:
+    (tmp_path / "qrels").mkdir()
+    (tmp_path / "corpus.jsonl").write_text('{"_id":"d1","text":"alpha"}\n', encoding="utf-8")
+    (tmp_path / "queries.jsonl").write_text('{"_id":"q1","text":"alpha?"}\n', encoding="utf-8")
+    (tmp_path / "qrels" / "test.tsv").write_text("query-id\tcorpus-id\tscore\nq1\td1\t1\n", encoding="utf-8")
+    encoded: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "input_type" not in payload
+        encoded.append(payload["input"])
+        count = len(payload["input"])
+        return _response(request, [[1.0, 0.0]] * count)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await dense_search(
+            BeirDataset.from_path(tmp_path),
+            NimEmbeddingClient(model=_model(), dimensions=2),
+            query_prefix="query: ",
+            passage_prefix="passage: ",
+            client=client,
+        )
+
+    assert encoded == [
+        ["passage: alpha"],
+        ["query: alpha?"],
+    ]
 
 
 @pytest.mark.asyncio
@@ -499,8 +516,9 @@ async def test_retrieve_truncates_long_documents_before_embed(tmp_path: Path) ->
 
     def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        if payload.get("input_type") == "passage":
-            sent.extend(payload["input"])
+        texts = payload["input"]
+        if any(text.startswith("passage: ") for text in texts):
+            sent.extend(texts)
             return _response(request, [[1.0, 0.0]])
         return _response(request, [[1.0, 0.0]])
 
@@ -512,7 +530,51 @@ async def test_retrieve_truncates_long_documents_before_embed(tmp_path: Path) ->
         )
 
     assert len(sent) == 1
+    assert sent[0].startswith("passage: ")
     assert len(sent[0]) == DOCUMENT_CHARACTER_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_retrieve_start_truncation_keeps_passage_prefix(tmp_path: Path) -> None:
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        texts = payload["input"]
+        if any(text.startswith("passage: ") for text in texts):
+            sent.extend(texts)
+            return _response(request, [[1.0, 0.0]])
+        return _response(request, [[1.0, 0.0]])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await retrieve(
+            _write_beir(tmp_path, title="Title", text="x" * (DOCUMENT_CHARACTER_LIMIT + 80)),
+            Retrieval(embeddings=_model(), embedding_dimensions=2, truncate_long_documents="start"),
+            client=client,
+        )
+
+    assert len(sent) == 1
+    assert sent[0].startswith("passage: ")
+    assert len(sent[0]) == DOCUMENT_CHARACTER_LIMIT
+    assert sent[0].endswith("x")
+
+
+def test_prefixed_passage_raises_when_untruncated_text_exceeds_budget() -> None:
+    from nemo_evaluator_sdk.retrieval.dense_search import _prefixed_passage
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    with pytest.raises(ValueError, match="passage exceeds the limit"):
+        _prefixed_passage("passage: ", "x" * DOCUMENT_CHARACTER_LIMIT, None)
+
+
+def test_prefixed_passage_raises_when_prefix_exceeds_limit() -> None:
+    from nemo_evaluator_sdk.retrieval.dense_search import _prefixed_passage
+    from nemo_evaluator_sdk.retrieval.passages import DOCUMENT_CHARACTER_LIMIT
+
+    with pytest.raises(ValueError, match="passage_prefix exceeds"):
+        _prefixed_passage("p" * (DOCUMENT_CHARACTER_LIMIT + 1), "body", "end")
 
 
 @pytest.mark.asyncio
@@ -530,7 +592,7 @@ async def test_retrieve_reranks_dense_hits(tmp_path: Path) -> None:
                 headers={"content-type": "application/json"},
             )
         payload = json.loads(request.content)
-        vectors = [[1.0, 0.0]] if payload["input_type"] == "passage" else [[1.0, 0.0]]
+        vectors = [[1.0, 0.0] for _ in payload["input"]]
         return _response(request, vectors)
 
     target = Retrieval(
@@ -542,5 +604,5 @@ async def test_retrieve_reranks_dense_hits(tmp_path: Path) -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         results = await retrieve(_write_beir(tmp_path), target, client=client)
 
-    assert ranking_bodies[0]["query"] == {"text": "alpha?"}
+    assert ranking_bodies[0]["query"] == {"text": "query: alpha?"}
     assert results["q1"] == {"d1": 4.2}

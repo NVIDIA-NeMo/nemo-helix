@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import Request
 from nemoguardrails import LLMRails
-from nmp.guardrails.app.handlers.checks import CheckRequestHandler
-from nmp.guardrails.app.services.rails.service import RailsService
-from nmp.guardrails.entities.enums import StatusEnum
-from nmp.guardrails.entities.values._private import Model, RailsConfig
-from nmp.guardrails.entities.values.check import GuardrailCheckRequest, GuardrailCheckResponse
-from nmp.guardrails.entities.values.common import GuardrailsDataInput, GuardrailsDataOutput
+from nhx.guardrails.app.handlers.checks import CheckRequestHandler
+from nhx.guardrails.app.services.rails.service import RailsService
+from nhx.guardrails.entities.enums import StatusEnum
+from nhx.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.entities.values.check import GuardrailCheckRequest, GuardrailCheckResponse
+from nhx.guardrails.entities.values.common import GuardrailsDataInput, GuardrailsDataOutput
 
 
 @pytest.fixture
@@ -55,8 +55,8 @@ def handler(mock_rails_service, mock_request, mock_request_body, mock_response_m
 
 
 @pytest.mark.asyncio
-@patch("nmp.guardrails.app.handlers.checks.convert_check_request_to_guardrails")
-@patch("nmp.guardrails.app.handlers.checks.create_guardrail_check_response_from_generation_response")
+@patch("nhx.guardrails.app.handlers.checks.convert_check_request_to_guardrails")
+@patch("nhx.guardrails.app.handlers.checks.create_guardrail_check_response_from_generation_response")
 async def test_handle_request(
     mock_create_response,
     mock_convert_request,
@@ -96,8 +96,8 @@ def test_get_guardrails_config(handler):
 
 
 @pytest.mark.asyncio
-@patch("nmp.guardrails.app.handlers.checks.LLMRails")
-@patch("nmp.guardrails.app.handlers.checks.set_main_model_into_context")
+@patch("nhx.guardrails.app.handlers.checks.LLMRails")
+@patch("nhx.guardrails.app.handlers.checks.set_main_model_into_context")
 async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context,
     _mock_llm_rails,

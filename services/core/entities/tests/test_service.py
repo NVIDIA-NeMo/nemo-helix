@@ -4,7 +4,7 @@
 """Unit tests for EntitiesService health and readiness."""
 
 import pytest
-from nmp.core.entities.service import EntitiesService
+from nhx.core.entities.service import EntitiesService
 
 
 @pytest.mark.unit

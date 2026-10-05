@@ -10,17 +10,17 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nemo_platform.types.inference import ModelProvider, ServedModelMapping
-from nemo_platform.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_platform_plugin.inference_middleware import ImmediateResponse, InferenceRequest, NemoInferenceMiddleware
-from nmp.core.inference_gateway.api.dependencies import (
+from nemo_helix.types.inference import ModelProvider, ServedModelMapping
+from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
+from nemo_helix_plugin.inference_middleware import ImmediateResponse, InferenceRequest, NemoInferenceMiddleware
+from nhx.core.inference_gateway.api.dependencies import (
     global_middleware_registry,
     global_model_cache,
     global_virtual_model_cache,
 )
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
-from nmp.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
-from nmp.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, ResolvedMiddlewareCall
+from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelEntityInfo, ModelProviderInfo
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 
 
 def _autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[SDKVirtualModel]:

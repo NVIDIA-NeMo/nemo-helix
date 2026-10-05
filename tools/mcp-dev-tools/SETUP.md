@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Development Tools MCP Server - Setup Complete ✓
+# NeMo Helix Development Tools MCP Server - Setup Complete ✓
 
 ## What Was Created
 
@@ -13,12 +13,12 @@ tools/mcp-dev-tools/
 ├── README.md                    # Full documentation
 ├── SETUP.md                     # This file
 ├── pyproject.toml               # Package definition
-└── nmp_dev_mcp.py               # 18 development tools
+└── nhx_dev_mcp.py               # 18 development tools
 ```
 
 ### Configuration Updated
-- `~/.claude.json` - Added `nmp-dev` server to local scope (personal config)
-- `.claude/settings.local.json` - Enabled `nmp-dev` server and added permissions
+- `~/.claude.json` - Added `nhx-dev` server to local scope (personal config)
+- `.claude/settings.local.json` - Enabled `nhx-dev` server and added permissions
 
 ## How It Works
 
@@ -81,7 +81,7 @@ uv run python tools/mcp-dev-tools/test_server.py
 npm install -g @modelcontextprotocol/inspector
 
 # Launch inspector with your server
-npx @modelcontextprotocol/inspector uv run nmp-dev-mcp
+npx @modelcontextprotocol/inspector uv run nhx-dev-mcp
 ```
 
 This opens a browser interface where you can:
@@ -98,7 +98,7 @@ The server is now configured in your local `~/.claude.json` and enabled in `.cla
 To restart Claude:
 - Exit this session
 - Start a new session in this directory
-- The `nmp-dev` MCP server will load automatically from your local config
+- The `nhx-dev` MCP server will load automatically from your local config
 
 ## Next Steps
 
@@ -111,7 +111,7 @@ Once restarted, you can ask me to:
 - "Run unit tests" → I'll use `run_unit_tests()` tool
 
 ### 3. Expand as Needed
-If you need more tools, edit `tools/mcp-dev-tools/nmp_dev_mcp.py`:
+If you need more tools, edit `tools/mcp-dev-tools/nhx_dev_mcp.py`:
 
 ```python
 @server.tool(description="Your new tool description")
@@ -145,7 +145,7 @@ This adds the server to their local `~/.claude.json` without modifying the share
                   │
                   ▼
 ┌─────────────────────────────────────┐
-│   NeMo Platform Development Tools MCP Server          │
+│   NeMo Helix Development Tools MCP Server          │
 │                                     │
 │  ✓ Purpose-built development tools  │
 │  ✓ Using Python subprocess          │
@@ -179,7 +179,7 @@ This adds the server to their local `~/.claude.json` without modifying the share
 ### Server Not Loading
 ```bash
 # Verify installation
-cd tools/mcp-dev-tools && uv run nmp-dev-mcp --help
+cd tools/mcp-dev-tools && uv run nhx-dev-mcp --help
 
 # Check local configuration
 claude mcp list
@@ -191,19 +191,19 @@ cat .claude/settings.local.json
 ### Tools Not Working
 ```bash
 # Test individual tool with inspector
-npx @modelcontextprotocol/inspector uv run nmp-dev-mcp
+npx @modelcontextprotocol/inspector uv run nhx-dev-mcp
 ```
 
 ### Tools Not Being Used
 - Confirm you restarted Claude after configuration
-- Check that `.claude/settings.local.json` includes "nmp-dev" in enabledMcpjsonServers
+- Check that `.claude/settings.local.json` includes "nhx-dev" in enabledMcpjsonServers
 - Verify the server is in your local config: `claude mcp list`
 - Verify the MCP server loaded successfully at startup
 
 ## Questions?
 
 - **README.md** - Full documentation
-- **nmp_dev_mcp.py** - All tool implementations
+- **nhx_dev_mcp.py** - All tool implementations
 - Ask in your next Claude session once the server loads!
 
 ---

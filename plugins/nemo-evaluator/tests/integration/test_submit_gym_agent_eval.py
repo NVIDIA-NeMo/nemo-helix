@@ -8,20 +8,18 @@ description as a target spec, transport to the service, and persistence — so w
 the evaluation that was configured going in.
 
 **Scope is submission, not execution.** Running a Gym eval additionally needs the ``gym`` CLI on the
-job's PATH and tasks carrying ``gym_dataset_path`` metadata from ``discover_gym_tasks``; neither is
-a property of the submit path, and asserting on them here would make this test fail for reasons that
+job's PATH and tasks carrying discovery-compatible ``gym_row`` inputs and ``gym_row_extras`` metadata.
+The dataset path is optional provenance. This fixture supplies valid row content, and asserting on them here would make this test fail for reasons that
 have nothing to do with what it covers. The job is therefore submitted and its stored spec inspected,
 not run to completion.
 
 Run directly::
 
-    RUN_AGENT_EVAL_INTEGRATION=1 uv run pytest \\
-        plugins/nemo-evaluator/tests/integration/test_submit_gym_agent_eval.py -v
+    uv run pytest plugins/nemo-evaluator/tests/integration/test_submit_gym_agent_eval.py -v
 """
 
 from __future__ import annotations
 
-import os
 import sys
 import uuid
 
@@ -30,6 +28,7 @@ import httpx
 import pytest
 from nemo_evaluator.api.schemas import (
     EvaluatorTaskDefinition,
+    MetadataItem,
     MetricInline,
     TaskInput,
     TaskInputs,
@@ -37,23 +36,27 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
+from nemo_evaluator.filesets import FilesetRef
+from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator.sdk.job_resources import AgentEvaluatorJobResource
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
-from nemo_platform_plugin.sdk import NeMoPlatform
+from nemo_evaluator_sdk.values import SecretRef
+from nemo_helix_plugin.client.errors import UnprocessableEntityError
+from nemo_helix_plugin.client.types import RetryPolicy
+from nemo_helix_plugin.evaluator.client import EvaluatorClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from pydantic import SecretStr
 
 WORKSPACE = "default"
 
-#: Opt-in: shares the evaluator-plugin integration opt-in (spins a real ``nemo services`` platform).
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 
 # Pickle metrics defined in this module BY VALUE, so the bundle embeds the class itself: the service
@@ -85,22 +88,27 @@ def _inline_metric() -> MetricInline:
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 
 
-def _stored_taskset(client: NeMoPlatform) -> str:
-    """A one-task taskset to reference. Its content is irrelevant — only the reference travels."""
+def _evaluator(base_url: str) -> Evaluator:
+    return Evaluator(EvaluatorClient(base_url=base_url, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2)))
+
+
+def _stored_taskset(client: Evaluator) -> str:
+    """A one-task taskset with valid Gym row content for submission validation."""
     task_name = _unique("gym-submit-task")
-    client.evaluator.tasks.create(
+    client.tasks.create(
         task_name,
         task=TaskInput(
             spec=EvaluatorTaskDefinition(
                 kind="evaluator",
                 intent="Placeholder task; this test asserts on submission, not execution.",
-                inputs=TaskInputs(instruction="unused"),
+                inputs=TaskInputs.model_validate({"gym_row": {"input": "Reply DONE"}}),
                 metrics=[_inline_metric()],
-            )
+            ),
+            metadata=[MetadataItem(key="gym_row_extras", value={})],
         ),
     )
     taskset_name = _unique("gym-submit-suite")
-    client.evaluator.tasksets.create(
+    client.tasksets.create(
         taskset_name,
         taskset=TasksetInput(tasks=[TaskRef(f"{WORKSPACE}/{task_name}")]),
     )
@@ -108,7 +116,7 @@ def _stored_taskset(client: NeMoPlatform) -> str:
 
 
 def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subprocess_platform: str) -> None:
-    client = NeMoPlatform(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = _evaluator(subprocess_platform)
     taskset_name = _stored_taskset(client)
 
     # Non-default values throughout: a field dropped anywhere along runner -> target -> wire ->
@@ -128,7 +136,7 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
         )
     )
 
-    job = client.evaluator.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner)
+    job = client.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner)
 
     assert isinstance(job, AgentEvaluatorJobResource), (
         "a taskset submission must return the agent job resource, not the row-evaluation one"
@@ -139,7 +147,7 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
     # assuming: `job_route_base_url` builds the status path from `/evaluate/jobs` while agent jobs
     # live under `/agent-evaluate/jobs`, and a review round questioned whether that 404s. It does
     # not — the status lookup ignores the collection prefix — but nothing else covers it, since the
-    # execution path polls through `nmp.testing` rather than this resource.
+    # execution path polls through `nhx.testing` rather than this resource.
     status = job.get_job_status()
     assert status.status, f"the agent job's status route returned no status: {status!r}"
 
@@ -164,3 +172,76 @@ def test_a_live_gym_runner_submits_and_round_trips_through_the_service(subproces
     assert target["bind_resources_server"] is False
     assert target["hydra_params"] == {"simple_agent": {"responses_api_agents": {"x": 1}}}
     assert target["env_vars"] == {"WMT_TRANSLATION_COMET_PY_CACHE": "/shared/cache"}
+
+
+def test_a_secret_reference_and_agent_ref_name_survive_submission(subprocess_platform: str) -> None:
+    """A secret reference and an agent instance, from the runner and the placement, on one target.
+
+    The secret is created for real, so the reference names something the service can resolve rather
+    than a string that happens to parse.
+    """
+    client = _evaluator(subprocess_platform)
+    secret_name = _unique("gym-model-key")
+    SecretsClient.from_client(client._client).create_secret(
+        body=HelixSecretCreateRequest(name=secret_name, value=SecretStr("sk-not-a-real-key"))
+    )
+    taskset_name = _stored_taskset(client)
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="mcqa",
+            env_secrets={"EXTERNAL_MODEL_API_KEY": SecretRef(f"{WORKSPACE}/{secret_name}")},
+        )
+    )
+
+    job = client.submit(
+        tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"),
+        target=runner,
+        placement=GymPlacement(agent_ref_name="mcqa_simple_agent"),
+    )
+
+    fetched = httpx.get(
+        f"{subprocess_platform}/apis/evaluator/v2/workspaces/{WORKSPACE}/agent-evaluate/jobs/{job.name}",
+        timeout=30,
+    )
+    assert fetched.status_code == 200, fetched.text
+    target = fetched.json()["spec"]["target"]
+
+    assert target["env_secrets"] == {"EXTERNAL_MODEL_API_KEY": f"{WORKSPACE}/{secret_name}"}
+    assert target["agent_ref_name"] == "mcqa_simple_agent"
+
+
+def test_an_environment_fileset_reaches_the_compiler_from_a_runner(subprocess_platform: str) -> None:
+    """A FileSet environment named on the placement is resolved by the service, not dropped.
+
+    Executing one needs a Kubernetes or Volcano profile with a shared PVC, which this subprocess
+    deployment does not have — so the job is refused at compile time. That refusal *is* the
+    assertion: reaching a FileSet-only branch of the compiler proves ``environment`` travelled from
+    the placement through ``runner_to_target`` onto the spec. A dropped field would compile cleanly
+    as an ordinary colocated Gym run, which is the silent wrong answer this guards.
+    """
+    client = _evaluator(subprocess_platform)
+    fileset_name = _unique("gym-env")
+    FilesClient.from_client(client._client).create_fileset(
+        body=CreateFilesetRequest(name=fileset_name, purpose=FilesetPurpose.ENVIRONMENT)
+    )
+    taskset_name = _stored_taskset(client)
+
+    runner = GymAgentTaskRunner(
+        config=GymRuntimeConfig(
+            agent="simple_agent",
+            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            resources_server="custom_greeting",
+        )
+    )
+    placement = GymPlacement(environment=FilesetRef(root=f"{WORKSPACE}/{fileset_name}"))
+
+    with pytest.raises(UnprocessableEntityError) as excinfo:
+        client.submit(tasks=TasksetRef(f"{WORKSPACE}/{taskset_name}"), target=runner, placement=placement)
+
+    message = str(excinfo.value)
+    assert fileset_name in message or "FileSet" in message, (
+        f"the refusal must come from the FileSet path rather than a generic spec error: {message}"
+    )

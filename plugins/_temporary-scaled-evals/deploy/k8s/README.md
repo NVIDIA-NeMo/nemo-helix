@@ -21,12 +21,12 @@ cp local.env.example local.env   # then fill it in
 ./apply.sh               # deploy
 ./smoke.sh               # create -> upload -> Cloud Build -> ready, then verify GAR
 ./eval-smoke.sh          # execute through Platform Jobs and sandbox-k8s
-kubectl delete ns nemo-platform-scaled-evals
+kubectl delete ns nemo-helix-scaled-evals
 ```
 
 ## Blast radius
 
-Everything lands in **`nemo-platform-scaled-evals`**. The name deliberately
+Everything lands in **`nemo-helix-scaled-evals`**. The name deliberately
 avoids a bare `scaled-evals-*` prefix, which in a shared project may already
 belong to a standalone deployment, its staging release, and CI's per-MR preview
 namespaces — nothing here should be mistakable for those, and `kubectl delete
@@ -50,7 +50,7 @@ PROJECT=$SE_GCP_PROJECT
 SA=$SE_GCP_SERVICE_ACCOUNT
 BUILD_SA=${SE_CLOUD_BUILD_SERVICE_ACCOUNT##*/}   # strip projects/.../serviceAccounts/
 BUCKET=$SE_GCS_BUCKET
-NS=nemo-platform-scaled-evals
+NS=nemo-helix-scaled-evals
 
 # Note when choosing SE_GCS_BUCKET: GCS caps bucket names at 63 characters. Over
 # the cap, the API rejects the create with a misleading "Use of this bucket name
@@ -188,7 +188,7 @@ Two compatibility controls are opt-in because they are not neutral:
 
 ## Viewing a run
 
-`kubectl port-forward -n nemo-platform-scaled-evals deploy/scaled-evals-api 8080:8080`,
+`kubectl port-forward -n nemo-helix-scaled-evals deploy/scaled-evals-api 8080:8080`,
 then query the API under `/apis/scaled-evals/v1` — `evaluations/<id>` for status,
 `.../artifacts` to list outputs, `.../archive` for a signed tarball URL, and
 `.../logs` or `.../events` to follow a run. The `scaled-evals` CLI works against

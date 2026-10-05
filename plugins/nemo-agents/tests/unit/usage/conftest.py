@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
-from nemo_platform_plugin.files.types import FilesetFileOutput, ListFilesetFilesResponse
+from nemo_helix_plugin.files.types import FilesetFileOutput, ListFilesetFilesResponse
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -133,7 +133,7 @@ class FakeFiles:
 
 
 class FakeSDK:
-    """Stand-in for ``NeMoPlatform``; ``build_files_client`` hands out FakeFiles."""
+    """Stand-in for ``NeMoHelix``; ``build_files_client`` hands out FakeFiles."""
 
     def __init__(self, staged_dir: Path) -> None:
         self.files = FakeFiles(staged_dir)

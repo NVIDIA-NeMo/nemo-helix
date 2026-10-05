@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nhx-platform-runner"
+description = "Headless local platform runner for Nemo Helix services"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "fastapi[standard]>=0.115.4",
+    "uvicorn[standard]>=0.12.0",
+    "nemo-helix-plugin",
+    "nhx-common",
+    "pyleak>=0.1.0",
+    "rich>=14.1.0",
+]
+version = "0.0.0"
+
+[tool.uv.sources]
+nemo-helix-plugin = { workspace = true }
+nhx-common = { workspace = true }
+nhx-testing = { workspace = true }
+
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.23.0",
+    "nhx-testing",
+    "httpx>=0.27.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "src/*",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nhx"]

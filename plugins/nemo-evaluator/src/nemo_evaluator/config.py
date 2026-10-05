@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-from nemo_platform_plugin.config import NemoConfig, get_platform_config
+from nemo_helix_plugin.config import NemoConfig, get_platform_config
 from pydantic import Field
 
 
@@ -30,7 +30,7 @@ class EvaluatorConfig(NemoConfig):
     # Whether a Gym evaluation runs its environment inside a sandbox is a property of the
     # deployment, not of the job: the same submitted `GymRunnerTarget` runs colocated on a trusted
     # dev box and sandboxed on a shared cluster. Customizer settled the same question the same way
-    # for GRPO (`NMP_RL_SANDBOXED_GYM_DEFAULT`), so the submit contract stays identical across both.
+    # for GRPO (`NHX_RL_SANDBOXED_GYM_DEFAULT`), so the submit contract stays identical across both.
 
     sandboxed_gym_default: bool = Field(
         default=False,
@@ -51,7 +51,7 @@ class EvaluatorConfig(NemoConfig):
     sandbox_runtime_image: str | None = Field(
         default=None,
         description="Optional fully qualified image for the sandboxed Gym host. When unset, the deployment "
-        "uses the qualified `nmp-gym-host` image matching the platform registry and tag. Set this only to "
+        "uses the qualified `nhx-gym-host` image matching the platform registry and tag. Set this only to "
         "override that release-coupled default.",
     )
     sandbox_episode_backend: Literal["opensandbox", "memory"] = Field(
@@ -73,7 +73,7 @@ class EvaluatorConfig(NemoConfig):
     )
     sandbox_host_provider_options: dict[str, Any] = Field(
         default_factory=dict,
-        description="Provider-specific settings, e.g. {'root_dir': '/tmp/nmp-gym-host'} for `docker`.",
+        description="Provider-specific settings, e.g. {'root_dir': '/tmp/nhx-gym-host'} for `docker`.",
     )
     sandbox_environment_sub_path: str = Field(
         default="environment",

@@ -3,7 +3,7 @@
 
 # Secrets Service Agentic Flows
 
-The Secrets service provides secure storage for sensitive data like API keys and credentials. Secrets are foundational for provider API key management in NeMo Platform.
+The Secrets service provides secure storage for sensitive data like API keys and credentials. Secrets are foundational for provider API key management in NeMo Helix.
 
 **PIC**: Taylor Mutch
 **Priority**: High
@@ -32,7 +32,7 @@ The Secrets service provides secure storage for sensitive data like API keys and
 - Delete secret
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 
 **Success Criteria**:

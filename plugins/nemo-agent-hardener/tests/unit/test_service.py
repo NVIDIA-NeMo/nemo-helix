@@ -37,7 +37,7 @@ def test_service_authz_derives_from_routes() -> None:
     ``get_authz_contribution``). Doubles as the derivation gate: the service must derive with no
     problems (every route ruled) and no fail-closed DENY bindings.
     """
-    from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+    from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
     contribution, problems, _warnings = _derive_service_contribution(AgentHardenerPluginService())
 

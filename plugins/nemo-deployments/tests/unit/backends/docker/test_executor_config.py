@@ -28,12 +28,12 @@ def test_docker_executor_config_defaults(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_docker_executor_config_reads_network_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("NEMO_DEPLOYMENTS_DOCKER_NETWORK", "nmp-e2e-test-network")
+    monkeypatch.setenv("NEMO_DEPLOYMENTS_DOCKER_NETWORK", "nhx-e2e-test-network")
     monkeypatch.setenv("MODELS_DOCKER_NETWORK", "legacy-network")
 
     cfg = DockerExecutorConfig()
 
-    assert cfg.network == "nmp-e2e-test-network"
+    assert cfg.network == "nhx-e2e-test-network"
 
 
 def test_docker_executor_config_reads_legacy_models_network_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,7 +47,7 @@ def test_docker_executor_config_reads_legacy_models_network_env(monkeypatch: pyt
 
 def test_docker_executor_config_reads_endpoint_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE", "NETWORK")
-    monkeypatch.setenv("NEMO_DEPLOYMENTS_DOCKER_NETWORK", "nmp-e2e-test-network")
+    monkeypatch.setenv("NEMO_DEPLOYMENTS_DOCKER_NETWORK", "nhx-e2e-test-network")
 
     cfg = DockerExecutorConfig()
 
@@ -84,7 +84,7 @@ def test_docker_executor_config_parses_additional_volume_mounts() -> None:
         additional_volume_mounts=[
             DockerAdditionalVolumeMount(
                 volume_name="gateway-tls",
-                mount_path="/etc/nmp/gateway-tls",
+                mount_path="/etc/nhx/gateway-tls",
                 read_only=True,
             )
         ]
@@ -93,7 +93,7 @@ def test_docker_executor_config_parses_additional_volume_mounts() -> None:
     assert len(cfg.additional_volume_mounts) == 1
     mount = cfg.additional_volume_mounts[0]
     assert mount.volume_name == "gateway-tls"
-    assert mount.mount_path == "/etc/nmp/gateway-tls"
+    assert mount.mount_path == "/etc/nhx/gateway-tls"
     assert mount.read_only is True
 
 

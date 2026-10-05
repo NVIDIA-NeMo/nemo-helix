@@ -23,7 +23,7 @@ from nemo_agent_hardener_plugin.project_resolver import (
 FABRIC_DOCKERFILE = """\
 FROM python:3.12-slim
 RUN python -m venv /workspace/.venv \\
- && /workspace/.venv/bin/pip install --no-cache-dir "nemo-platform"
+ && /workspace/.venv/bin/pip install --no-cache-dir "nemo-helix"
 ENV AGENT_CONFIG_PATH=/workspace/agent.yaml
 ENV PORT=8000
 ENV PATH="/workspace/.venv/bin:$PATH"

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StatusBadge, type StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
-import type { PlatformJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { getFormattedCustomizationStatus } from '@studio/util/customizations';
 import type { FC } from 'react';
 
@@ -16,7 +16,7 @@ const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
 };
 
 interface Props {
-  status: PlatformJobStatus | string;
+  status: HelixJobStatus | string;
   progressPercent?: number;
 }
 

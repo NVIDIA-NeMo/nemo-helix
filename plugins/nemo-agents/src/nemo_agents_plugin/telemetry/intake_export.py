@@ -8,10 +8,10 @@ writing an agent config: the reachable platform URL differs per deployment
 context, and the same config should work whether it is deployed or run as a
 job. So the backend wires it, and the config carries at most a name.
 
-The two contexts differ only in how identity reaches Intake. A deployment
-routes through a loopback auth-proxy sidecar that stamps the principal on the
-way out. A job has one creator for its whole life and is handed that principal
-directly, so it names environment variables the exporter reads instead.
+Every context reaches Intake the same way: through a loopback proxy that
+stamps the caller's identity on the way out -- a sidecar container for a
+deployment, an in-process server for a job. So the only thing that differs
+between them is the origin they wire, and no credential ever enters the config.
 """
 
 from __future__ import annotations
@@ -83,7 +83,6 @@ def configure_intake_atif_export(
     *,
     workspace: str,
     base_url: str,
-    header_env: dict[str, str] | None = None,
 ) -> bool:
     """Point *config*'s ATIF export at *workspace*'s Intake ingest.
 
@@ -104,11 +103,10 @@ def configure_intake_atif_export(
     Args:
         config: Agent config to wire, modified in place.
         workspace: Workspace whose Intake receives the trajectory.
-        base_url: Platform URL reachable from wherever the agent will run.
-        header_env: Header name to environment variable name, for contexts
-            with no auth proxy to stamp identity. The variables must exist in
-            the agent process; the values deliberately never enter the config,
-            which is written into the run's artifacts.
+        base_url: Origin reachable from wherever the agent will run, which
+            authenticates the export on its way to the platform. No credential
+            is carried here: the config is written into the run's artifacts,
+            so anything inline would be a downloadable one.
     """
     telemetry = _telemetry_awaiting_destination(config)
     if telemetry is None:
@@ -118,8 +116,6 @@ def configure_intake_atif_export(
         "type": "http",
         "endpoint": f"{base_url.rstrip('/')}{INTAKE_ATIF_INGEST_PATH.format(workspace=workspace)}",
     }
-    if header_env:
-        storage["header_env"] = dict(header_env)
 
     atif = dict(telemetry.atif or {})
     atif["enabled"] = True

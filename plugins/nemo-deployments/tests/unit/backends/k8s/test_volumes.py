@@ -193,3 +193,13 @@ async def test_delete_volume_missing_is_released(k8s_backend, mock_k8s_clients: 
     update = await k8s_backend.delete_volume("default", "gone")
 
     assert update.status == "RELEASED"
+
+
+@pytest.mark.asyncio
+async def test_delete_volume_api_failure_is_reported(k8s_backend, mock_k8s_clients: MagicMock) -> None:
+    mock_k8s_clients.core_v1.delete_namespaced_persistent_volume_claim.side_effect = ApiException(status=403)
+
+    update = await k8s_backend.delete_volume("default", "weights")
+
+    assert update.status == "FAILED"
+    assert "Failed to delete PVC" in update.status_message

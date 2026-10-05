@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Platform Plugins
+# NeMo Helix Plugins
 
-This directory contains first-party NeMo Platform plugins. Each subdirectory is a standalone Python package that registers one or more surfaces with the platform via entry points.
+This directory contains first-party NeMo Helix plugins. Each subdirectory is a standalone Python package that registers one or more surfaces with the platform via entry points.
 
 ## Installing a plugin
 
@@ -30,9 +30,13 @@ Reference plugins such as `plugins/example-plugin/` are not installed by default
 
 ### Switchyard middleware
 
-`plugins/nemo-switchyard/` is an inference middleware plugin. It registers the `nemo-switchyard` middleware entry point, which can be referenced from a VirtualModel's `request_middleware` or `response_middleware`.
+`plugins/nemo-switchyard/` is an inference middleware plugin. Its distribution
+name is `nemo-switchyard-plugin`, while the `nemo-switchyard` middleware entry
+point remains the name used by VirtualModels.
 
-The middleware is installed by default through the root workspace's `enabled-plugins` group. The plugin vendors the required subset of the Switchyard library under `plugins/nemo-switchyard/vendor/switchyard/`, so no separate checkout, `SWITCHYARD_PATH`, or PyPI-shadow workaround is needed.
+The middleware is installed by default through the root workspace's
+`enabled-plugins` group and depends on `nemo-switchyard==0.3.0` for the native
+Python bindings.
 
 ```bash
 uv sync
@@ -45,8 +49,12 @@ With the platform running, use `nemo-switchyard` in VirtualModel middleware conf
 ```json
 {
   "name": "nemo-switchyard",
-  "config_type": "translate",
-  "config": {"target_format": "auto", "enable_stats": false}
+  "config_type": "random_routing",
+  "config": {
+    "strong": {"model": "workspace/model-a"},
+    "weak": {"model": "workspace/model-b"},
+    "strong_probability": 0.5
+  }
 }
 ```
 
@@ -66,10 +74,9 @@ The package name is the `name` field in the plugin's `pyproject.toml`, not the d
 | `nemo-data-designer/` | `nemo-data-designer-plugin` |
 | `nemo-evaluator/` | `nemo-evaluator-plugin` |
 | `nemo-scaled-evals/` | `nemo-scaled-evals-plugin` (Phase 1 ephemeral; install `-e`) |
-| `nemo-experimentalist/` | `nemo-experimentalist-plugin` |
 | `nemo-guardrails/` | `nemo-guardrails-plugin` |
 | `nemo-insights/` | `nemo-insights-plugin` |
-| `nemo-switchyard/` | `nemo-switchyard` |
+| `nemo-switchyard/` | `nemo-switchyard-plugin` |
 
 Example:
 
@@ -96,7 +103,7 @@ Inference middleware plugins do not necessarily add CLI commands or HTTP routes.
 
 ## Writing a new plugin
 
-See `packages/nemo_platform_plugin/` for the public contract. A basic plugin only needs `nemo-platform-plugin` as a dependency — no access to `nmp-common` or platform internals is required.
+See `packages/nemo_helix_plugin/` for the public contract. A basic plugin only needs `nemo-helix-plugin` as a dependency — no access to `nhx-common` or platform internals is required.
 
 Entry points point to **classes**, not instances. The platform instantiates each class at startup, which keeps the plugin author out of the construction lifecycle and makes future dependency injection straightforward.
 
@@ -104,33 +111,33 @@ Minimum `pyproject.toml`:
 
 ```toml
 [project]
-name = "nmp-my-plugin"
+name = "nhx-my-plugin"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["nemo-platform-plugin"]
+dependencies = ["nemo-helix-plugin"]
 
 [project.entry-points."nemo.services"]
-my-plugin = "nmp.my_plugin.service:MyService"
+my-plugin = "nhx.my_plugin.service:MyService"
 
 [project.entry-points."nemo.cli"]
-my-plugin = "nmp.my_plugin.cli:MyCLI"
+my-plugin = "nhx.my_plugin.cli:MyCLI"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 ```
 
-Normal plugin packages only need `hatchling` in `build-system.requires`. `nmp-build-tools` is reserved for first-party packages that declare `[tool.bundle-package]` and need to bundle workspace sources into a published wheel.
+Normal plugin packages only need `hatchling` in `build-system.requires`. `nhx-build-tools` is reserved for first-party packages that declare `[tool.bundle-package]` and need to bundle workspace sources into a published wheel.
 
 Minimum service implementation:
 
 ```python
-# src/nmp/my_plugin/service.py
+# src/nhx/my_plugin/service.py
 from fastapi import APIRouter
-from nemo_platform_plugin.service import NemoService, RouterSpec
+from nemo_helix_plugin.service import NemoService, RouterSpec
 
 class MyService(NemoService):
     name = "my-plugin"
@@ -149,13 +156,13 @@ class MyService(NemoService):
 Minimum CLI implementation:
 
 ```python
-# src/nmp/my_plugin/cli.py
+# src/nhx/my_plugin/cli.py
 import typer
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 
 class MyCLI(NemoCLI):
     def get_cli(self) -> typer.Typer:
-        app = typer.Typer(help="My plugin commands.")
+        app = create_typer_app(help="My plugin commands.")
 
         @app.command()
         def run(model: str) -> None:
@@ -164,3 +171,8 @@ class MyCLI(NemoCLI):
 
         return app
 ```
+
+For commands that call the platform, take the typed client from `cli_state(ctx)` and use the shared
+options and output helpers in `nemo_helix_plugin` (`--workspace`, `--output-format`, `-f code`); see
+`plugins/example-plugin/src/nemo_example_plugin/cli.py`. Never add a per-command `--base-url`: the
+platform comes from the global `nemo --base-url` / `--context`.

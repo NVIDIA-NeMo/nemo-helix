@@ -18,6 +18,7 @@ def test_iter_auth_idp_cases_can_filter_by_backend() -> None:
     case_ids = {case.id for case in iter_auth_idp_cases(backend="kubernetes")}
 
     assert "authentik-kubernetes" in case_ids
+    assert "zitadel-kubernetes" in case_ids
     assert "authentik-compose" not in case_ids
 
 
@@ -25,6 +26,12 @@ def test_iter_auth_idp_cases_can_filter_by_provider_name() -> None:
     case_ids = {case.id for case in iter_auth_idp_cases(provider_name="authentik")}
 
     assert case_ids == {"authentik-compose", "authentik-kubernetes"}
+
+
+def test_iter_auth_idp_cases_can_filter_by_zitadel_provider_name() -> None:
+    case_ids = {case.id for case in iter_auth_idp_cases(provider_name="zitadel")}
+
+    assert case_ids == {"zitadel-kubernetes"}
 
 
 def test_iter_auth_idp_cases_can_filter_by_runtime_id() -> None:

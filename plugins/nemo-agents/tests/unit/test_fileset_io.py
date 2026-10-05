@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from nemo_agents_plugin.jobs.fileset_io import resolve_output, resolve_staged_config, split_fileset_ref
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.refs import FilesetRef
 
 
 def test_resolve_staged_config_local_pass_through(tmp_path: Path, ctx: JobContext) -> None:
@@ -69,7 +69,7 @@ def test_resolve_staged_config_fileset_without_sdk_raises(ctx: JobContext) -> No
             kind="optimize-config",
         ):
             pass
-    assert "sdk" in str(exc.value).lower()
+    assert "platform client" in str(exc.value)
 
 
 def test_resolve_staged_config_empty_fileset_ref_is_invalid(ctx: JobContext) -> None:

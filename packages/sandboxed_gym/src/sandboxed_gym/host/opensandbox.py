@@ -18,9 +18,11 @@ if TYPE_CHECKING:
 from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.egress import build_egress_policy
 from sandboxed_gym.host.models import (
+    GymHostBootstrapFailed,
     GymHostHandle,
     GymHostSpec,
     GymHostVolumeMount,
+    render_host_error,
 )
 from sandboxed_gym.opensandbox_policy import create_options_with_policy
 
@@ -28,6 +30,39 @@ LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 2.0
 _DEFAULT_RUNTIME_ENTRYPOINT = ("python", "-m", "sandboxed_gym.runtime.gym_host_runtime")
+
+
+def _host_resource_limits(resources: Mapping[str, str] | None) -> dict[str, str]:
+    """Turn the host size into the SDK's limit map.
+
+    ``Sandbox.create`` substitutes ``{"cpu": "1", "memory": "2Gi"}`` when ``resource`` is omitted,
+    while this host's ``resources`` are sent as requests. A request above that default is an
+    invalid pod: Kubernetes requires requests to be at most the limits, and the create call then
+    waits until it times out.
+    """
+    if not resources:
+        return {}
+    limits: dict[str, str] = {}
+    cpu = resources.get("cpu")
+    if cpu is not None and str(cpu) != "":
+        limits["cpu"] = str(cpu)
+    memory = resources.get("memory")
+    memory_mib = resources.get("memory_mib")
+    if (memory is None or str(memory) == "") and memory_mib is not None and str(memory_mib) != "":
+        memory = f"{memory_mib}Mi"
+    if memory is not None and str(memory) != "":
+        limits["memory"] = str(memory)
+    return limits
+
+
+def _create_options_for_host(create: Mapping[str, Any], resources: Mapping[str, str] | None) -> dict[str, Any]:
+    """Keep a caller-supplied cap. Otherwise the host size is the limit too."""
+    options = dict(create)
+    if "resource" not in options:
+        limits = _host_resource_limits(resources)
+        if limits:
+            options["resource"] = limits
+    return options
 
 
 class _HostRoutes(NamedTuple):
@@ -81,7 +116,10 @@ class OpenSandboxGymHostProvider:
         egress = build_egress_policy(spec.egress_allowlist)
         return self.provider_class(
             connection=self._connection,
-            create=create_options_with_policy(self._create_options, egress),
+            create=_create_options_for_host(
+                create_options_with_policy(self._create_options, egress),
+                spec.resources,
+            ),
             probe=self._probe,
             operations=self._operations,
         )
@@ -203,7 +241,13 @@ class OpenSandboxGymHostProvider:
                 body = await asyncio.to_thread(self._get_json, handle.health_url, handle.headers)
                 if body.get("status") == "ready":
                     return
+                if body.get("status") == "failed":
+                    raise GymHostBootstrapFailed(
+                        f"job host {handle.host_id} failed to start: {render_host_error(body.get('error'))}"
+                    )
                 last_error = RuntimeError(f"host not ready: {body!r}")
+            except GymHostBootstrapFailed:
+                raise
             except Exception as exc:
                 last_error = exc
             await asyncio.sleep(_HEALTH_POLL_S)
@@ -221,7 +265,11 @@ class OpenSandboxGymHostProvider:
                 payload = response.read()
         except HTTPError as exc:
             if exc.code == 503:
-                return {"status": "starting"}
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                except Exception:
+                    body = None
+                return body if isinstance(body, dict) else {"status": "starting"}
             raise
         except URLError:
             raise
@@ -265,3 +313,10 @@ class OpenSandboxGymHostProvider:
             await provider.close(resource_handle)
         except Exception:
             LOGGER.exception("Failed to destroy job host %s", handle.host_id)
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Destroy every OpenSandbox resource labeled with this job id."""
+        if not job_id:
+            raise ValueError("sandbox cleanup requires a job id")
+        driver = self.provider_class(connection=self._connection)
+        return await driver.destroy_sandboxes_matching({JOB_ID_METADATA_KEY: job_id})

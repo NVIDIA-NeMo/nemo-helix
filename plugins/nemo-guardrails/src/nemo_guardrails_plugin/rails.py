@@ -23,9 +23,9 @@ from typing import Any
 from nemo_guardrails_plugin.constants import DEFAULT_MAIN_ENGINE, W3C_TRACE_CONTEXT_HEADERS
 from nemo_guardrails_plugin.llmrails_cache import InferenceTargetResolver
 from nemo_guardrails_plugin.transforms import GenerationResponseMapper
-from nemo_platform_plugin.guardrail.types import GenerationLog, GenerationLogOptionsParam, GuardrailsData
-from nemo_platform_plugin.guardrail.types import (
-    GenerationStats as PlatformGenerationStats,
+from nemo_helix_plugin.guardrail.types import GenerationLog, GenerationLogOptionsParam, GuardrailsData
+from nemo_helix_plugin.guardrail.types import (
+    GenerationStats as HelixGenerationStats,
 )
 from nemoguardrails.llm.models.initializer import init_llm_model
 from nemoguardrails.rails.llm.config import Model
@@ -102,9 +102,9 @@ def build_generate_async_options(
 
 
 def _build_generation_stats(
-    input_stats: PlatformGenerationStats | None,
-    output_stats: PlatformGenerationStats | None,
-) -> PlatformGenerationStats:
+    input_stats: HelixGenerationStats | None,
+    output_stats: HelixGenerationStats | None,
+) -> HelixGenerationStats:
     input_stats_dict = input_stats.model_dump() if input_stats else {}
     output_stats_dict = output_stats.model_dump() if output_stats else {}
 
@@ -120,7 +120,7 @@ def _build_generation_stats(
             return None
         return int(input_value or 0) + int(output_value or 0)
 
-    return PlatformGenerationStats(
+    return HelixGenerationStats(
         input_rails_duration=input_stats_dict.get("input_rails_duration"),
         output_rails_duration=output_stats_dict.get("output_rails_duration"),
         total_duration=_sum_float("total_duration"),
@@ -233,7 +233,7 @@ def build_main_llm(
     - model name: always ``request_body["model"]``.
     - ``base_url``: config ``parameters.base_url`` else the IGW gateway URL.
     - ``default_headers``: static config headers ∪ allowlisted request
-      headers — ``x-*`` (NeMo Platform principal, ``x-otel-*``, custom) plus W3C
+      headers — ``x-*`` (NeMo Helix principal, ``x-otel-*``, custom) plus W3C
       Trace Context (``traceparent``, ``tracestate``, ``baggage``).
 
     Synchronous on purpose (``init_llm_model`` does a blocking LangChain
@@ -278,7 +278,7 @@ def build_main_llm(
         base_url = target.openai_base_url
 
     static_headers = dict(static_params.get("default_headers") or {})
-    # Forward ``x-*`` (NeMo Platform principal, ``x-otel-*``, custom) and W3C
+    # Forward ``x-*`` (NeMo Helix principal, ``x-otel-*``, custom) and W3C
     # Trace Context (``traceparent``, ``tracestate``, ``baggage``) so
     # tracing survives even when the upstream emits standard-form
     # headers. ``Authorization`` and other non-allowlisted headers are

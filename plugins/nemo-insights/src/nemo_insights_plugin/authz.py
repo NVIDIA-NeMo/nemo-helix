@@ -3,6 +3,6 @@
 
 """Authorization scope shared by Insights routes."""
 
-from nemo_platform_plugin.authz import AuthzScope
+from nemo_helix_plugin.authz import AuthzScope
 
 scope = AuthzScope("insights")

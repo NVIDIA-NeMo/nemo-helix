@@ -9,19 +9,12 @@ backed by the NemoClient typed HTTP client and fsspec filesystem access.
 
 from collections.abc import AsyncIterator, Iterator
 from functools import cached_property
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from fsspec.callbacks import Callback
-from nemo_platform.resources.files.files import (
-    AsyncFilesResource as GeneratedAsyncFilesResource,
-)
-from nemo_platform.resources.files.files import (
-    FilesResource as GeneratedFilesResource,
-)
-from nemo_platform.resources.files.filesets import AsyncFilesetsResource, FilesetsResource
-from nemo_platform.resources.files.otlp.otlp import AsyncOtlpResource, OtlpResource
-from nemo_platform_plugin.files.client import AsyncFilesClient, FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest, FilesetOutput
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
 
 from filesets import transfer
 from filesets.filesystem.filesystem import (
@@ -61,38 +54,16 @@ class FilesResource:
 
     def __init__(
         self,
-        client,
+        client: SyncHelixClient,
         *,
         files_client: FilesClient | None = None,
     ) -> None:
-        # Retain the platform client so the generated fileset/otlp sub-resources
-        # (which speak to the platform client, not the FilesClient) can be exposed.
-        self._platform_client = client
-        self._generated_files = GeneratedFilesResource(client)
-        if files_client is not None:
-            self._client = files_client
-        else:
-            from nemo_platform_plugin.client.adapter import client_from_platform
-
-            self._client = client_from_platform(client, FilesClient)
+        self._client = files_client if files_client is not None else client_from_platform(client, FilesClient)
 
     @cached_property
     def client(self) -> FilesClient:
         """Access the underlying FilesClient for direct API calls."""
         return self._client
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._generated_files, name)
-
-    @cached_property
-    def filesets(self) -> FilesetsResource:
-        """Fileset entity CRUD (create/list/get/update/delete) via the generated SDK resource."""
-        return FilesetsResource(self._platform_client)
-
-    @cached_property
-    def otlp(self) -> OtlpResource:
-        """OTLP telemetry logs sub-resource via the generated SDK resource."""
-        return OtlpResource(self._platform_client)
 
     @cached_property
     def fsspec(self) -> FilesetFileSystem:
@@ -534,35 +505,13 @@ class AsyncFilesResource:
     For fsspec filesystem access, use ``resource.fsspec``.
     """
 
-    def __init__(self, client, *, files_client: AsyncFilesClient | None = None) -> None:
-        # Retain the platform client so the generated fileset/otlp sub-resources
-        # (which speak to the platform client, not the FilesClient) can be exposed.
-        self._platform_client = client
-        self._generated_files = GeneratedAsyncFilesResource(client)
-        if files_client is not None:
-            self._client = files_client
-        else:
-            from nemo_platform_plugin.client.adapter import client_from_platform
-
-            self._client = client_from_platform(client, AsyncFilesClient)
+    def __init__(self, client: AsyncHelixClient, *, files_client: AsyncFilesClient | None = None) -> None:
+        self._client = files_client if files_client is not None else client_from_platform(client, AsyncFilesClient)
 
     @cached_property
     def client(self) -> AsyncFilesClient:
         """Access the underlying AsyncFilesClient for direct API calls."""
         return self._client
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._generated_files, name)
-
-    @cached_property
-    def filesets(self) -> AsyncFilesetsResource:
-        """Fileset entity CRUD (create/list/get/update/delete) via the generated SDK resource."""
-        return AsyncFilesetsResource(self._platform_client)
-
-    @cached_property
-    def otlp(self) -> AsyncOtlpResource:
-        """OTLP telemetry logs sub-resource via the generated SDK resource."""
-        return AsyncOtlpResource(self._platform_client)
 
     @cached_property
     def fsspec(self) -> AsyncFilesetFileSystem:

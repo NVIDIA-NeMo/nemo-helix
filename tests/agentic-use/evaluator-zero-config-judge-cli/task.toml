@@ -4,7 +4,7 @@
 version = "1.0"
 
 [metadata]
-author_name = "NeMo Platform Team"
+author_name = "NeMo Helix Team"
 difficulty = "medium"
 category = "evaluator"
 tags = ["evaluator", "llm-judge", "zero-config", "cli"]

@@ -298,6 +298,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/deployment-modes:
+    get:
+      tags:
+      - Agent Deployments
+      summary: List Deployment Modes
+      description: List every deployment mode and whether this platform can run it.
+      operationId: list_deployment_modes_apis_agents_v2_workspaces__workspace__deployment_modes_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentModeList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/deployments:
     post:
       tags:
@@ -942,7 +969,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1130,7 +1157,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1162,7 +1189,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1194,7 +1221,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1424,7 +1451,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1612,7 +1639,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1644,7 +1671,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1676,7 +1703,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -1714,7 +1741,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1902,7 +1929,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -1934,7 +1961,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -1966,7 +1993,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2100,7 +2127,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2288,7 +2315,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -2320,7 +2347,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2352,103 +2379,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize:
-    post:
-      tags:
-      - Agents
-      summary: Create Job
-      operationId: create_job_apis_agents_v2_workspaces__workspace__jobs_optimize_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OptimizeJobRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    get:
-      tags:
-      - Agents
-      summary: List Jobs
-      operationId: list_jobs_apis_agents_v2_workspaces__workspace__jobs_optimize_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page number.
-          default: 1
-          title: Page
-        description: Page number.
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          exclusiveMinimum: 0
-          description: Page size.
-          default: 10
-          title: Page Size
-        description: Page size.
-      - name: sort
-        in: query
-        required: false
-        schema:
-          allOf:
-          - $ref: '#/components/schemas/OptimizeJobsSortField'
-          description: The field to sort by. To sort in decreasing order, use `-`
-            in front of the field name.
-          default: -created_at
-        description: The field to sort by. To sort in decreasing order, use `-` in
-          front of the field name.
-      - in: query
-        name: filter
-        style: deepObject
-        required: false
-        explode: true
-        schema:
-          $ref: '#/components/schemas/OptimizeJobsListFilter'
-        description: Filter jobs on various criteria.
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJobsPage'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -2582,7 +2513,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2770,7 +2701,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -2802,7 +2733,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -2834,297 +2765,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{job}/results/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Result
-      operationId: get_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize__job__results__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{job}/results/{name}/download:
-    get:
-      tags:
-      - Agents
-      summary: Download Job Result
-      operationId: download_job_result_apis_agents_v2_workspaces__workspace__jobs_optimize__job__results__name__download_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: job
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Job
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        '404':
-          description: Not Found
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}:
-    get:
-      tags:
-      - Agents
-      summary: Get Job
-      operationId: get_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-    delete:
-      tags:
-      - Agents
-      summary: Delete Job
-      operationId: delete_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__delete
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '204':
-          description: Successful Response
-        '404':
-          description: Job not Found
-        '409':
-          description: Job is not in a terminal state
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/cancel:
-    post:
-      tags:
-      - Agents
-      summary: Cancel Job
-      operationId: cancel_job_apis_agents_v2_workspaces__workspace__jobs_optimize__name__cancel_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OptimizeJob'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/logs:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Logs
-      operationId: get_job_logs_apis_agents_v2_workspaces__workspace__jobs_optimize__name__logs_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      - name: limit
-        in: query
-        required: false
-        schema:
-          title: Limit
-          type: integer
-      - name: page_cursor
-        in: query
-        required: false
-        schema:
-          title: Page Cursor
-          type: string
-      - name: tail
-        in: query
-        required: false
-        schema:
-          title: Tail
-          type: integer
-          maximum: 10000
-          exclusiveMinimum: 0
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/results:
-    get:
-      tags:
-      - Agents
-      summary: List Job Results
-      operationId: list_job_results_apis_agents_v2_workspaces__workspace__jobs_optimize__name__results_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/agents/v2/workspaces/{workspace}/jobs/optimize/{name}/status:
-    get:
-      tags:
-      - Agents
-      summary: Get Job Status
-      operationId: get_job_status_apis_agents_v2_workspaces__workspace__jobs_optimize__name__status_get
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      - name: name
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Name
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -3258,7 +2899,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3446,7 +3087,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -3478,7 +3119,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -3510,7 +3151,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -3964,9 +3605,11 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
           description: Runtime backend for this deployment. 'subprocess' (default)
-            reads the loopback 'endpoint'; 'docker'/'k8s' read the projected 'endpoints'.
+            reads the loopback 'endpoint'; 'docker'/'k8s'/'openshell' read the projected
+            'endpoints'.
           default: subprocess
         endpoint:
           type: string
@@ -3983,7 +3626,7 @@ components:
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Empty for subprocess;
+          description: Container image for container modes. Empty for subprocess;
             falls back to AgentsConfig.deployments.default_image.
           default: ''
         use_image_entrypoint:
@@ -4572,7 +4215,7 @@ components:
         spec:
           $ref: '#/components/schemas/AnalyzeBatchConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -4652,7 +4295,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -4703,6 +4346,10 @@ components:
           type: string
           title: Principal Id
           description: The principal's unique identifier
+        principal_account_id:
+          title: Principal Account Id
+          description: Stable NeMo account identifier for the principal
+          type: string
         principal_email:
           title: Principal Email
           description: The principal's email address
@@ -4713,6 +4360,12 @@ components:
           type: array
           title: Principal Groups
           description: Groups the principal belongs to
+        principal_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal Authz Aliases
+          description: Alternate trusted identifiers for the principal
         principal_on_behalf_of:
           title: Principal On Behalf Of
           description: If acting on behalf of another principal, their principal ID
@@ -4727,6 +4380,16 @@ components:
           title: Principal On Behalf Of Email
           description: The on-behalf-of principal's email address
           type: string
+        principal_on_behalf_of_account_id:
+          title: Principal On Behalf Of Account Id
+          description: Stable NeMo account identifier for the on-behalf-of principal
+          type: string
+        principal_on_behalf_of_authz_aliases:
+          items:
+            type: string
+          type: array
+          title: Principal On Behalf Of Authz Aliases
+          description: Alternate trusted identifiers for the on-behalf-of principal
       type: object
       required:
       - principal_id
@@ -4834,13 +4497,15 @@ components:
           - subprocess
           - docker
           - k8s
+          - openshell
           title: Deployment Mode
-          description: 'Runtime backend: subprocess (default), docker, or k8s.'
+          description: 'Runtime backend: subprocess (default), docker, k8s, or openshell.'
           default: subprocess
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s modes. Ignored for subprocess.
+          description: Container image for docker/k8s/openshell modes. Ignored for
+            subprocess.
           default: ''
         use_image_entrypoint:
           type: boolean
@@ -5027,6 +4692,46 @@ components:
       - next_offset
       title: DeploymentLogsResponse
       description: Response body for ``GET /deployments/{name}/logs``.
+    DeploymentModeAvailability:
+      properties:
+        mode:
+          type: string
+          enum:
+          - subprocess
+          - docker
+          - k8s
+          - openshell
+          title: Mode
+          description: The deployment mode.
+        enabled:
+          type: boolean
+          title: Enabled
+          description: True when a deployment in this mode would run on a matching
+            executor backend.
+        requires_image:
+          type: boolean
+          title: Requires Image
+          description: True when a deployment in this mode must set 'image' because
+            no default image is configured.
+      type: object
+      required:
+      - mode
+      - enabled
+      - requires_image
+      title: DeploymentModeAvailability
+      description: Whether this platform can run deployments in one ``deployment_mode``.
+    DeploymentModeList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/DeploymentModeAvailability'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: DeploymentModeList
+      description: Response for ``GET /v2/workspaces/{workspace}/deployment-modes``.
     Endpoint:
       properties:
         name:
@@ -5162,10 +4867,10 @@ components:
         output:
           title: Output
           description: "Where to write eval outputs \u2014 either a local directory\
-            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Platform\
-            \ fileset reference ('name' or 'workspace/name').  Filesets are created\
-            \ on demand if missing.  Defaults to <ctx.storage.persistent>/results\
-            \ (the platform-injected persistent volume) when not provided."
+            \ (path-shaped: starts with '/', './', '../', '~/') or a NeMo Helix fileset\
+            \ reference ('name' or 'workspace/name').  Filesets are created on demand\
+            \ if missing.  Defaults to <ctx.storage.persistent>/results (the platform-injected\
+            \ persistent volume) when not provided."
           type: string
         workspace:
           type: string
@@ -5199,15 +4904,15 @@ components:
         \        this ``None`` and let ``eval_config`` be a real local path.\n   \
         \ output: Where to put the eval outputs.  Accepts either a local\n       \
         \ directory path (``./out``, ``/abs/out``, ``~/out``) or an\n        NeMo\
-        \ Platform fileset reference (``\"name\"`` or ``\"workspace/name\"``).\n \
-        \       Path-shaped values write directly to disk; bare names upload\n   \
-        \     results to the named fileset, creating it on demand.  When\n       \
-        \ ``None`` the job writes to ``ctx.storage.persistent /\n        \"results\"\
-        `` \u2014 the platform-injected persistent volume in\n        container runs,\
-        \ a tempdir under ``$TMPDIR`` for local CLI\n        runs.\n    workspace:\
-        \ NeMo Platform workspace used to scope gateway URL injection,\n        ``--agent``\
-        \ resolution, and ``--output`` fileset creation\n        when those values\
-        \ are given as bare names."
+        \ Helix fileset reference (``\"name\"`` or ``\"workspace/name\"``).\n    \
+        \    Path-shaped values write directly to disk; bare names upload\n      \
+        \  results to the named fileset, creating it on demand.  When\n        ``None``\
+        \ the job writes to ``ctx.storage.persistent /\n        \"results\"`` \u2014\
+        \ the platform-injected persistent volume in\n        container runs, a tempdir\
+        \ under ``$TMPDIR`` for local CLI\n        runs.\n    workspace: NeMo Helix\
+        \ workspace used to scope gateway URL injection,\n        ``--agent`` resolution,\
+        \ and ``--output`` fileset creation\n        when those values are given as\
+        \ bare names."
     EvaluateJob:
       properties:
         id:
@@ -5236,7 +4941,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5316,7 +5021,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5472,7 +5177,7 @@ components:
         spec:
           $ref: '#/components/schemas/EvaluateSuiteConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5552,7 +5257,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5680,7 +5385,7 @@ components:
 
         canonical ``EvaluateSuiteConfig`` fallback to ``Path.cwd()`` would
 
-        silently land in ``/tmp/nmp-subprocess-jobs/.../task-*/``.  Making
+        silently land in ``/tmp/nhx-subprocess-jobs/.../task-*/``.  Making
 
         them required at the schema layer surfaces the requirement as a
 
@@ -5813,7 +5518,7 @@ components:
         spec:
           $ref: '#/components/schemas/ExecuteAgentStepConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -5893,7 +5598,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -5952,6 +5657,248 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     LogLine:
       properties:
         timestamp:
@@ -5982,7 +5929,7 @@ components:
       - timestamp
       - message
       title: LogLine
-      description: One line shaped to match ``PlatformJobLog`` so Studio's LogViewer
+      description: One line shaped to match ``HelixJobLog`` so Studio's LogViewer
         renders it as-is.
     McpFulfillment:
       properties:
@@ -6182,159 +6129,6 @@ components:
       required:
       - data
       title: NemoListResponse_Agent_
-    OptimizeJob:
-      properties:
-        id:
-          title: Id
-          type: string
-        name:
-          type: string
-          title: Name
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        workspace:
-          title: Workspace
-          type: string
-        created_at:
-          title: Created At
-          type: string
-          format: date-time
-        updated_at:
-          title: Updated At
-          type: string
-          format: date-time
-        spec:
-          $ref: '#/components/schemas/OptimizeSpec'
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          title: Status Details
-          additionalProperties: true
-          type: object
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - name
-      - spec
-      title: OptimizeJob
-    OptimizeJobRequest:
-      properties:
-        name:
-          title: Name
-          type: string
-        description:
-          title: Description
-          type: string
-        project:
-          title: Project
-          type: string
-        spec:
-          $ref: '#/components/schemas/OptimizeSubmitSpec'
-        profile:
-          title: Profile
-          type: string
-        options:
-          title: Options
-          additionalProperties: true
-          type: object
-        ownership:
-          title: Ownership
-          additionalProperties: true
-          type: object
-        custom_fields:
-          title: Custom Fields
-          additionalProperties: true
-          type: object
-        output_location:
-          title: Output Location
-          type: string
-      type: object
-      required:
-      - spec
-      title: OptimizeJobRequest
-    OptimizeJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
-          description: The current status.
-        spec:
-          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
-          title: Spec
-          additionalProperties: true
-          type: object
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: OptimizeJobsListFilter
-      type: object
-    OptimizeJobsPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/OptimizeJob'
-          type: array
-          title: Data
-        pagination:
-          allOf:
-          - $ref: '#/components/schemas/PaginationData'
-          description: Pagination information.
-        sort:
-          title: Sort
-          description: The field on which the results are sorted.
-          type: string
-        filter:
-          title: Filter
-          description: Filtering information.
-          additionalProperties: true
-          type: object
-      type: object
-      required:
-      - data
-      title: OptimizeJobsPage
-    OptimizeJobsSortField:
-      type: string
-      enum:
-      - created_at
-      - -created_at
-      - updated_at
-      - -updated_at
-      title: OptimizeJobsSortField
     OptimizeSkillsConfig:
       properties:
         evals:
@@ -6447,7 +6241,7 @@ components:
         spec:
           $ref: '#/components/schemas/OptimizeSkillsConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6527,7 +6321,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -6572,99 +6366,6 @@ components:
       - updated_at
       - -updated_at
       title: OptimizeSkillsJobsSortField
-    OptimizeSpec:
-      properties:
-        optimize_config:
-          type: string
-          minLength: 1
-          title: Optimize Config
-          description: "Location of the Fabric-native optimization YAML.  With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root.  Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
-        optimize_config_fileset:
-          title: Optimize Config Fileset
-          description: 'Fileset holding the optimization bundle: the config named
-            by optimize_config plus every asset it references (Agent under Test package,
-            dataset, eval.fabric.base_dir tree, hooks and MCP configs).  Stage one
-            with `nemo agents optimize prepare-fileset`. Required for remote submissions,
-            where the job has no access to the client''s filesystem.'
-          type: string
-        workspace:
-          type: string
-          title: Workspace
-          description: Workspace used to fetch a platform agent and for VirtualModel
-            preflight.
-          default: default
-        agent:
-          title: Agent
-          description: Optional platform agent reference ('name' or 'workspace/name').
-            When omitted, the optimization config must include an inline Fabric agent
-            package.
-          type: string
-          minLength: 1
-        output:
-          title: Output
-          description: "Where to publish the study artifacts (optimized config, trials\
-            \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
-            \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
-            \  Filesets are created on demand if missing.  This is in addition to\
-            \ the per-job artifacts that ``ctx.results.save`` always registers; it\
-            \ gives remote clients a stable, addressable location to read from."
-          type: string
-      type: object
-      required:
-      - optimize_config
-      title: OptimizeSpec
-      description: Spec for an Agents optimize study (``nemo agents optimize``).
-    OptimizeSubmitSpec:
-      properties:
-        optimize_config:
-          type: string
-          minLength: 1
-          title: Optimize Config
-          description: "Location of the Fabric-native optimization YAML.  With optimize_config_fileset\
-            \ set \u2014 required for remote submission \u2014 this is a path relative\
-            \ to the fileset root.  Without it (programmatic local runs only) it is\
-            \ an absolute path on the host running the job."
-        optimize_config_fileset:
-          title: Optimize Config Fileset
-          description: 'Fileset holding the optimization bundle: the config named
-            by optimize_config plus every asset it references (Agent under Test package,
-            dataset, eval.fabric.base_dir tree, hooks and MCP configs).  Stage one
-            with `nemo agents optimize prepare-fileset`. Required for remote submissions,
-            where the job has no access to the client''s filesystem. Programmatic
-            local runs may omit it and use an absolute host path for optimize_config.'
-          type: string
-        workspace:
-          type: string
-          title: Workspace
-          description: Workspace used to fetch a platform agent and for VirtualModel
-            preflight.
-          default: default
-        agent:
-          title: Agent
-          description: Optional platform agent reference ('name' or 'workspace/name').
-            When omitted, the optimization config must include an inline Fabric agent
-            package.
-          type: string
-          minLength: 1
-        output:
-          title: Output
-          description: "Where to publish the study artifacts (optimized config, trials\
-            \ dataframe, pareto plots, ATIF evidence) once the study succeeds \u2014\
-            \ either a local directory (path-shaped: starts with '/', './', '../',\
-            \ '~/') or a NeMo Platform fileset reference ('name' or 'workspace/name').\
-            \  Filesets are created on demand if missing.  This is in addition to\
-            \ the per-job artifacts that ``ctx.results.save`` always registers; it\
-            \ gives remote clients a stable, addressable location to read from."
-          type: string
-      type: object
-      required:
-      - optimize_config
-      title: OptimizeSubmitSpec
-      description: Submitter-facing optimize spec for remote platform submissions.
     PackageAgentInput:
       properties:
         agent:
@@ -6773,7 +6474,7 @@ components:
         spec:
           $ref: '#/components/schemas/PackageAgentSpec'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -6853,7 +6554,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -7018,248 +6719,6 @@ components:
       - total_pages
       - total_results
       title: PaginationData
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     ResolvedAgentConfig:
       properties:
         name:

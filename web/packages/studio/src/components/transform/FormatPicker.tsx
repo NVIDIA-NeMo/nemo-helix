@@ -29,7 +29,7 @@ export const FormatPicker: FC<Props> = ({ mapping, label = 'Target format' }) =>
             value={option.id}
             label={<Text kind="body/bold/md">{option.label}</Text>}
             description={
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 {option.description}
               </Text>
             }

@@ -20,12 +20,12 @@ export const SkillCard = ({ skill }: { skill: AssistantSkill }) => (
           <Text kind="body/semibold/sm" className="truncate" title={skill.name}>
             {getSkillDisplayName(skill)}
           </Text>
-          <Text kind="body/regular/xs" color="secondary" className="truncate">
+          <Text kind="body/regular/xs" className="truncate text-secondary">
             {skill.claude_name}
           </Text>
         </Stack>
       </Flex>
-      <Text kind="body/regular/sm" color="secondary" className="break-words">
+      <Text kind="body/regular/sm" className="break-words text-secondary">
         {skill.description || 'No description'}
       </Text>
     </Stack>

@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Hardware and Software Requirements for NeMo Platform"
+title: "Hardware and Software Requirements for NeMo Helix"
 description: ""
 ---
 
@@ -11,13 +11,13 @@ self-managed Kubernetes deployments. For the full compatibility table, see the
 [Support Matrix](/documentation/reference/support-matrix).
 
 For local setup, use the Python package and `nemo setup`. For self-managed
-clusters, use the NeMo Platform Helm chart on Kubernetes.
+clusters, use the NeMo Helix Helm chart on Kubernetes.
 
 ## Local Setup Requirements
 
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
-| Python | 3.12 or 3.13 | Use an isolated virtual environment. |
+| Python | 3.12, 3.13, or 3.14 | Use an isolated virtual environment. |
 | Package installer | `uv>=0.10.10` recommended for source checkouts; `pip` supported for published packages | The one-line installer sets up `uv` automatically when needed. |
 | Operating system | Recent Linux or macOS release | See the [Support Matrix](/documentation/reference/support-matrix) for the supported OS list. |
 | Memory | 8 GB RAM minimum | 16 GB or more is recommended for larger local workflows. |
@@ -31,9 +31,9 @@ clusters, use the NeMo Platform Helm chart on Kubernetes.
 | Component | Requirement | Notes |
 |-----------|-------------|-------|
 | Kubernetes | minikube, kind, EKS, AKS, GKE, OKE, OpenShift, or on-prem Kubernetes | Use a cluster with storage, networking, and image-pull access configured before installing the chart. |
-| Helm | Helm 3 | Required to install and upgrade the NeMo Platform chart. |
+| Helm | Helm 3 | Required to install and upgrade the NeMo Helix chart. |
 | Storage | ReadWriteMany-capable persistent storage | Required for shared files and job storage in multi-pod deployments. |
-| Image access | NGC credentials and Kubernetes image pull secrets | Required to pull NeMo Platform container images. |
+| Image access | NGC credentials and Kubernetes image pull secrets | Required to pull NeMo Helix container images. |
 
 ## GPU Requirements
 

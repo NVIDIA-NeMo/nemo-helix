@@ -25,8 +25,8 @@ when you score it.
 
 <Note>
 
-Both shapes score with the **same `Metric` interface**. A deterministic/code scorer or an
-LLM-as-a-judge scorer works in either one — the difference is the shape of the input being scored,
+All three shapes score with the **same `Metric` interface**. A deterministic/code scorer or an
+LLM-as-a-judge scorer works in any of them — the difference is the shape of the input being scored,
 not the scorer.
 
 </Note>
@@ -94,7 +94,7 @@ result = await Evaluator().run(
 ```
 
 ```bash
-uv run nemo evaluator retrieve-eval submit --spec \
+uv run nemo evaluator retrieve-eval --spec \
   '{"dataset":"default/eval-beir","target":"default/embed-nim","k":[1,5,10,100]}'
 ```
 

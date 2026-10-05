@@ -29,12 +29,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.host.models import GymHostHandle, GymHostSpec, GymHostVolumeMount
 
 LOGGER = logging.getLogger(__name__)
 
 _HEALTH_POLL_S = 1.0
-_CONTAINER_PREFIX = "nmp-gym-host-"
+_CONTAINER_PREFIX = "nhx-gym-host-"
 
 
 class DockerHostError(RuntimeError):
@@ -60,7 +61,7 @@ class DockerGymHostProvider:
         docker: str | None = None,
         network: str | None = None,
     ) -> None:
-        self._root = Path(root_dir or "/tmp/nmp-gym-host").expanduser()
+        self._root = Path(root_dir or "/tmp/nhx-gym-host").expanduser()
         self._docker = docker or shutil.which("docker") or "docker"
         self._network = network
         self._containers: dict[str, str] = {}
@@ -100,14 +101,24 @@ class DockerGymHostProvider:
     async def create_host(self, spec: GymHostSpec) -> GymHostHandle:
         """Start the container and return its published health and rollout URLs."""
         name = _CONTAINER_PREFIX + uuid.uuid4().hex[:12]
-        argv = ["run", "-d", "--name", name, "-P", "--expose", str(spec.runtime_http_port)]
+        argv = [
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--label",
+            f"{JOB_ID_METADATA_KEY}={spec.job_id}",
+            "-P",
+            "--expose",
+            str(spec.runtime_http_port),
+        ]
         if self._network:
             argv += ["--network", self._network]
         argv += self._mount_args(spec)
         for key, value in spec.bootstrap_env.items():
             argv += ["-e", f"{key}={value}"]
         # The runtime reads its port from the environment; publishing alone would not move it.
-        argv += ["-e", f"NMP_RUNTIME_HTTP_PORT={spec.runtime_http_port}"]
+        argv += ["-e", f"NHX_RUNTIME_HTTP_PORT={spec.runtime_http_port}"]
         for key, value in (spec.resources or {}).items():
             if key == "cpu":
                 argv += ["--cpus", str(value)]
@@ -212,3 +223,17 @@ class DockerGymHostProvider:
         await self._force_remove(handle.host_id)
         self._containers.pop(handle.host_id, None)
         self._egress.pop(handle.host_id, None)
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Remove every container labeled with this job id, including ones this process did not start."""
+        if not job_id:
+            raise ValueError("sandbox cleanup requires a job id")
+        listed = await self._run("ps", "-aq", "--filter", f"label={JOB_ID_METADATA_KEY}={job_id}")
+        names = [line.strip() for line in listed.splitlines() if line.strip()]
+        removed: list[str] = []
+        for name in names:
+            await self._force_remove(name)
+            self._containers.pop(name, None)
+            self._egress.pop(name, None)
+            removed.append(name)
+        return tuple(removed)

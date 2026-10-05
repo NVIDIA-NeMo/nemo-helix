@@ -12,25 +12,32 @@ each other.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self, TypeAlias
+import logging
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any, Literal, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its bundle
 # payload kind so MetricBundle payloads round-trip through validation.
 import nemo_evaluator.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evaluator.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_evaluator.api.schemas import MetricInline, TaskInputs, TaskMetadataList, TasksetRef
+from nemo_evaluator.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
+from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
+from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.metric_resolution import to_runtime_bundle, unresolved_model_refs
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
-from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
 from nemo_evaluator_sdk.values import Agent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
 from nemo_evaluator_sdk.values.agents import AgentBase
+from nemo_helix_plugin.agents.types import EnvironmentSpecInline
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class ModelTarget(BaseModel):
@@ -39,7 +46,7 @@ class ModelTarget(BaseModel):
     The prompt template *is* the request sent to the model, so it lives here with the endpoint.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["model"] = "model"
     model: Model = Field(description="The model endpoint to generate trials against.")
@@ -69,20 +76,11 @@ class AgentTarget(BaseModel):
     )
 
 
-class FabricRunnerTarget(BaseModel):
-    """Generate trials by driving an agent harness through the NeMo Fabric runtime.
-
-    Fabric is harness-agnostic: the harness (Codex, Hermes, ...) is selected by the supplied
-    config's ``harness.adapter_id`` and is never inferred from ``model``. ``model`` is applied as the
-    config's default model when given.
-
-    A run is described by exactly one complete ``config``. Fabric 0.1.0rc2 removed profile overlays,
-    so the former ``profiles`` field is gone — fold any overlay you were passing into ``config``.
-    """
+class FabricConfigSource(BaseModel):
+    """An agent described inline: one complete Fabric ``agent.yaml`` as a JSON-shaped mapping."""
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["fabric"] = "fabric"
     config: dict[str, Any] = Field(
         description="Inline NeMo Fabric agent config (an ``agent.yaml`` as a JSON-shaped mapping). Its "
         "``harness.adapter_id`` selects the harness, e.g. ``nvidia.fabric.codex`` for Codex.",
@@ -92,12 +90,159 @@ class FabricRunnerTarget(BaseModel):
         description="Optional ``provider/model`` slug applied as the config's default model; the harness "
         "default is used when omitted.",
     )
+
+
+class RegisteredAgentSource(BaseModel):
+    """An agent registered on the platform (``nemo agents create``), resolved at submit.
+
+    The model is part of what the agent is, so there is no model override; what an evaluation shapes is
+    the ``environment`` the agent runs in.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: AgentRef = Field(
+        description="The registered agent to run: `workspace/name`, or `name` in the submission workspace. "
+        "Rewritten to the qualified form at submit. The agent runs fresh for every trial; an existing "
+        "deployment is never called.",
+    )
+    environment: EnvironmentSpecInline | None = Field(
+        default=None,
+        description="Environment to evaluate the agent in, merged onto its config exactly as a deployment "
+        "would: MCP fulfilments (url/env/secrets) for servers the agent declares, process env, secret refs, "
+        "and Fabric environment settings.",
+    )
+    files: FilesetRef | None = Field(
+        default=None,
+        description="Set at submit, never by the submitter: a job-owned snapshot of the agent's Ethos FileSet, "
+        "taken when the agent was resolved so a re-registration while the job is queued cannot change the "
+        "files it runs with. Present only when the resolved config refers to files by relative path.",
+    )
+
+
+#: What a Fabric run is made from. The two shapes share no field, so a document is one or the other.
+FabricSource: TypeAlias = FabricConfigSource | RegisteredAgentSource
+
+
+class FabricRunnerTarget(BaseModel):
+    """Generate trials by driving an agent harness through the NeMo Fabric runtime.
+
+    Fabric is harness-agnostic: the harness (Codex, Hermes, ...) is selected by the config's
+    ``harness.adapter_id`` and is never inferred from a model. The config comes from ``source``: given
+    inline, or resolved at submit from a registered platform agent with the same resolution a deployment
+    gets (environment merge, Inference Gateway binding, translation of the platform ``agent.yaml``). A
+    resolved registered agent's config is carried as ``resolved_config`` next to its source, so the job
+    never looks the agent up. Fabric 0.1.0rc2 removed profile overlays, so the former ``profiles`` field
+    is gone — fold any overlay into the config.
+    """
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    kind: Literal["fabric"] = "fabric"
+    source: FabricSource = Field(
+        description="The agent to run: an inline `config` (with an optional `model`), or a registered `agent` "
+        "(with an optional `environment`)."
+    )
+    resolved_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Set by submit-time resolution of a registered `agent`, never by the submitter: the Fabric "
+        "config the agent resolved to, which is what the job runs.",
+    )
     timeout_s: int = Field(default=600, ge=1, description="Per-task timeout for the Fabric run, in seconds.")
     capture_trajectory: bool = Field(
         default=True,
         description="Capture the agent trajectory as ATIF via NeMo Relay and attach it to trial evidence. "
         "Requires the NeMo Relay gateway in the run environment.",
     )
+    env_secrets: dict[str, SecretRef] = Field(
+        default_factory=dict,
+        description="Environment variables for the Fabric harness, sourced from the secrets service, as "
+        "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
+        "environment at compile time, where the harness reads it by name (e.g. a model `api_key_env` or an MCP "
+        "server's `env`). No credential is stored on the spec or the run bundle.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_flat_config(cls, data: Any) -> Any:
+        """Accept the pre-``source`` inline shape, ``{"config": ..., "model": ...}``, for one release.
+
+        Deprecated since 0.8; remove in 0.9. Persisted jobs and saved specs from before the ``source``
+        union carry ``config``/``model`` at the top level.
+        """
+        if not isinstance(data, dict) or "source" in data or "config" not in data:
+            return data
+        lifted = {key: value for key, value in data.items() if key not in ("config", "model")}
+        lifted["source"] = {
+            "config": data["config"],
+            **({"model": data["model"]} if data.get("model") is not None else {}),
+        }
+        logger.warning(
+            "FabricRunnerTarget: top-level `config`/`model` is deprecated; put them under `source`. "
+            "This shape stops being accepted in the release after 0.8."
+        )
+        return lifted
+
+    @model_validator(mode="after")
+    def _resolved_config_belongs_to_a_registered_agent(self) -> Self:
+        if self.resolved_config is not None and not isinstance(self.source, RegisteredAgentSource):
+            raise ValueError(
+                "`resolved_config` is the resolution of a registered `agent`; an inline `config` needs none"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _env_vars_are_fabric_safe(self) -> Self:
+        """Reject environment overrides once an inline or registered agent config is available."""
+        if self.config is not None:
+            validate_fabric_env(self.config, self.env_secrets)
+        return self
+
+    @property
+    def config(self) -> dict[str, Any] | None:
+        """The Fabric config the job runs: the inline one, or the registered agent's once resolved."""
+        if isinstance(self.source, FabricConfigSource):
+            return self.source.config
+        return self.resolved_config
+
+    @property
+    def model(self) -> str | None:
+        """The inline source's model override; a registered agent's model is part of the agent."""
+        return self.source.model if isinstance(self.source, FabricConfigSource) else None
+
+
+class HarborBuiltinAgentSource(BaseModel):
+    """One of Harbor's built-in agents, selected by name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(description="Built-in Harbor agent to run, e.g. `oracle`.")
+    model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+
+
+class HarborImportedAgentSource(BaseModel):
+    """A Harbor agent class the run environment can already import."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    import_path: str = Field(
+        description="Harbor agent import path, e.g. `harbor_wrapper:WrappedAgent`. The module must already be "
+        "importable in the run environment.",
+    )
+    model_name: str | None = Field(default=None, description="Optional model slug passed to the agent.")
+
+
+#: What Harbor runs in each task container. The three shapes share no required field, so a document is
+#: exactly one of them.
+HarborAgentSource: TypeAlias = HarborBuiltinAgentSource | HarborImportedAgentSource | RegisteredAgentSource
+
+#: The SDK's installed Fabric agent, which a registered agent runs as: it brings its own Python, so any
+#: task image works.
+REGISTERED_AGENT_HARBOR_IMPORT_PATH = (
+    "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
+)
+
+_LEGACY_HARBOR_AGENT_FIELDS = ("agent_name", "agent_import_path", "agent_model_name")
 
 
 class HarborRunnerTarget(BaseModel):
@@ -110,19 +255,18 @@ class HarborRunnerTarget(BaseModel):
     injected from the job's storage at run time; only the harness-selection and run knobs live here.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # Validation error text never echoes inputs, so a rejected credential isn't printed back.
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["harbor"] = "harbor"
-    agent_name: str | None = Field(
-        default="oracle",
-        description="Built-in Harbor agent to run (e.g. 'oracle'). Ignored when `agent_import_path` is set.",
+    source: HarborAgentSource = Field(
+        default_factory=lambda: HarborBuiltinAgentSource(name="oracle"),
+        description="The agent Harbor runs in each task container: a built-in agent by `name`, your own by "
+        "`import_path`, or a registered platform `agent` (with an optional `environment`). A registered agent is "
+        "resolved at submit into the SDK's installed Fabric agent with the agent's translated config in "
+        "`agent_kwargs.fabric_config`, so it runs as registered — identity, skills, MCP servers, and telemetry "
+        "included — and stays, qualified, as the run's provenance.",
     )
-    agent_import_path: str | None = Field(
-        default=None,
-        description="Custom Harbor agent import path (e.g. 'harbor_wrapper:WrappedAgent'); overrides `agent_name`. "
-        "The module must already be importable in the run environment.",
-    )
-    agent_model_name: str | None = Field(default=None, description="Optional model slug passed to the Harbor agent.")
     agent_kwargs: dict[str, JsonValue] = Field(
         default_factory=dict,
         description="Keyword arguments forwarded to the Harbor agent's constructor, the equivalent of Harbor's "
@@ -134,7 +278,14 @@ class HarborRunnerTarget(BaseModel):
         description="Environment variables for the Harbor agent, sourced from the secrets service, as "
         "{ENV_NAME: secret-ref}. The reference travels in the spec; the service resolves it into the job's "
         "environment at compile time, and Harbor receives a `${ENV_NAME}` template it expands when the agent "
-        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`.",
+        "is created, so no credential is stored on the spec, the run bundle, or the job dir's `config.json`. "
+        "A bare ref resolves in the job's workspace.",
+    )
+    env_vars: dict[str, str] = Field(
+        default_factory=dict,
+        description="Non-secret environment variables for the Harbor agent, as literal values that travel in the "
+        "spec and reach only the agent. Keys Harbor treats as secrets (matching KEY, SECRET, TOKEN, PASSWORD, "
+        "CREDENTIAL or AUTH) are rejected; use `env_secrets` for credentials.",
     )
     n_attempts: int = Field(default=1, ge=1, description="Number of attempts Harbor runs per task.")
     n_concurrent_trials: int = Field(default=4, ge=1, description="Maximum concurrent Harbor trials.")
@@ -147,11 +298,66 @@ class HarborRunnerTarget(BaseModel):
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
+    agent_setup_timeout_multiplier: float | None = Field(
+        default=None,
+        gt=0,
+        description="Harbor agent-setup timeout multiplier. An agent that installs itself into the task container "
+        "(a Fabric harness, a registered agent) needs several times Harbor's default, which is tuned for prebuilt "
+        "agents.",
+    )
+    agent_timeout_multiplier: float | None = Field(
+        default=None, gt=0, description="Harbor agent-phase timeout multiplier, applied to every trial."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_agent_fields(cls, data: Any) -> Any:
+        """Accept the pre-``source`` flat fields for one release. Deprecated since 0.8; remove in 0.9."""
+        if not isinstance(data, dict) or "source" in data or not any(k in data for k in _LEGACY_HARBOR_AGENT_FIELDS):
+            return data
+        lifted = {key: value for key, value in data.items() if key not in _LEGACY_HARBOR_AGENT_FIELDS}
+        model_name = data.get("agent_model_name")
+        with_model = {"model_name": model_name} if model_name is not None else {}
+        if data.get("agent_import_path") is not None:
+            lifted["source"] = {"import_path": data["agent_import_path"], **with_model}
+        elif data.get("agent_name") is not None:
+            lifted["source"] = {"name": data["agent_name"], **with_model}
+        elif model_name is not None:
+            lifted["source"] = {"name": "oracle", **with_model}
+        logger.warning(
+            "HarborRunnerTarget: top-level `agent_name` / `agent_import_path` / `agent_model_name` are deprecated; "
+            "select the agent under `source`. This shape stops being accepted in the release after 0.8."
+        )
+        return lifted
 
     @model_validator(mode="after")
     def _agent_kwargs_carry_no_credentials(self) -> Self:
         require_no_plaintext_credentials(self.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
         return self
+
+    @model_validator(mode="after")
+    def _env_vars_are_harbor_safe(self) -> Self:
+        validate_harbor_env(self.env_vars, self.env_secrets)
+        return self
+
+    @property
+    def agent_name(self) -> str | None:
+        """The built-in Harbor agent the source names, if it names one."""
+        return self.source.name if isinstance(self.source, HarborBuiltinAgentSource) else None
+
+    @property
+    def agent_import_path(self) -> str | None:
+        """The Harbor agent class to import; a registered agent runs as the installed Fabric agent."""
+        if isinstance(self.source, HarborImportedAgentSource):
+            return self.source.import_path
+        if isinstance(self.source, RegisteredAgentSource):
+            return REGISTERED_AGENT_HARBOR_IMPORT_PATH
+        return None
+
+    @property
+    def agent_model_name(self) -> str | None:
+        """The model slug handed to a built-in or imported agent."""
+        return None if isinstance(self.source, RegisteredAgentSource) else self.source.model_name
 
 
 class GymRunnerTarget(BaseModel):
@@ -163,7 +369,7 @@ class GymRunnerTarget(BaseModel):
     to materialize the selected tasks for rollout collection.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["gym"] = "gym"
     environment: FilesetRef | None = Field(
@@ -206,10 +412,11 @@ class GymRunnerTarget(BaseModel):
     )
     agent_ref_name: str | None = Field(
         default=None,
-        description="Gym agent instance rollouts are routed to when running against a sandboxed host, "
-        "stamped as each row's `agent_ref`. Defaults to `agent`. Set it when the environment's config "
-        "defines the agent under a different name -- `mcqa` registers `mcqa_simple_agent`, and routing to "
-        "`simple_agent` there does not answer.",
+        description="Gym agent *instance*, as distinct from the `agent` component it configures. Defaults "
+        "to `agent`. Set it whenever the two differ, which is common in stock Gym: `rewoo_agent` is an "
+        "instance of the `langgraph_agent` component, as are the whole `anyswe_*` and `anyterminal_*` "
+        "families of theirs. It keys the resources-server binding, decides whether an environment package "
+        "declares the agent, and is stamped as each row's `agent_ref`. Requires sandboxed execution.",
     )
     env_secrets: dict[str, SecretRef] = Field(
         default_factory=dict,
@@ -224,11 +431,17 @@ class GymRunnerTarget(BaseModel):
         ge=1,
         description="Concurrent rollouts for `gym eval run`.",
     )
-    startup_timeout_s: float = Field(default=240.0, gt=0, description="Max wait for `gym env start` readiness.")
+    startup_timeout_s: float = Field(
+        default=240.0,
+        gt=0,
+        description="Max wait for the Gym servers to report ready: `gym env start` colocated, the host's "
+        "bootstrap when sandboxed. Excludes pulling a sandboxed host's image.",
+    )
     collection_timeout_s: float | None = Field(
         default=None,
         gt=0,
-        description="Max wait for `gym eval run` collection; None = unbounded.",
+        description="Max wait for rollout collection, measured from when it starts; exceeding it fails the "
+        "run. None = unbounded, though a sandboxed host still stops at the end of its lifetime.",
     )
     shutdown_grace_s: float = Field(
         default=30.0,
@@ -256,14 +469,83 @@ class GymRunnerTarget(BaseModel):
             raise ValueError("The agent_config field is required when no environment FileSet is supplied")
         return self
 
+    @model_validator(mode="after")
+    def _no_variable_is_both_plaintext_and_a_secret(self) -> Self:
+        overlap = sorted(set(self.env_vars) & set(self.env_secrets))
+        if overlap:
+            raise ValueError(f"{overlap} appear in both env_vars and env_secrets; name each variable once")
+        return self
+
+
+class GymPlacement(BaseModel):
+    """Where and how the platform runs a :class:`GymAgentTaskRunner`, supplied at submission.
+
+    Deliberately *not* on ``GymRuntimeConfig``: the local ``gym`` CLI has no equivalent of either,
+    so a runner carrying them would hold fields that do nothing wherever it actually runs. A setting
+    that means the same thing in both worlds — ``env_secrets`` — stays on the runner.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    environment: FilesetRef | None = Field(
+        default=None,
+        description="Environment FileSet containing a native-v1 or wheels-v1 Gym package. "
+        "The complete FileSet is staged read-only; file fragments are not supported. Requires a "
+        "deployment with sandboxed Gym execution.",
+    )
+    agent_ref_name: str | None = Field(
+        default=None,
+        description="Gym agent *instance* the sandboxed host composes its config around, as distinct from "
+        "the runner's `agent` component. Defaults to `agent`. Set it whenever the two differ, which is "
+        "common in stock Gym -- `rewoo_agent` is an instance of the `langgraph_agent` component. Requires "
+        "sandboxed execution.",
+    )
+
 
 #: The agent-runner slot of the target union — the spec-side mirror of ``AgentTaskRunner``, resolved
 #: to a runtime at run time. ``kind``-discriminated; widen with more members as runners land.
 AgentRunnerTarget: TypeAlias = FabricRunnerTarget | GymRunnerTarget | HarborRunnerTarget
 
+
 #: What generates trials: a Model or Agent endpoint, or an agent runner. ``kind``-discriminated, and
 #: the spec-level analog of the SDK's runtime ``AgentEvalTarget`` (Model | Agent | AgentTaskRunner).
 Target: TypeAlias = ModelTarget | AgentTarget | AgentRunnerTarget
+
+
+def registered_agent_source(target: Target | None) -> RegisteredAgentSource | None:
+    """The registered agent a Fabric or Harbor target runs, if it runs one."""
+    if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and isinstance(
+        target.source, RegisteredAgentSource
+    ):
+        return target.source
+    return None
+
+
+def registered_agent_config(target: FabricRunnerTarget | HarborRunnerTarget) -> dict[str, Any] | None:
+    """The Fabric config a registered agent resolved to: Fabric carries it whole, Harbor inside ``agent_kwargs``."""
+    if isinstance(target, FabricRunnerTarget):
+        return target.resolved_config
+    config = target.agent_kwargs.get("fabric_config")
+    return config if isinstance(config, dict) else None
+
+
+def registered_agent_name(target: Target | None) -> str | None:
+    """The bare name of the registered agent a Fabric or Harbor target names, if any."""
+    source = registered_agent_source(target)
+    return source.agent.root.rpartition("/")[2] if source is not None else None
+
+
+def registered_agent_config_needs_files(config: Mapping[str, Any]) -> bool:
+    """Whether a translated Fabric config refers to files by relative path (skills, local adapters)."""
+    skills = config.get("skills") or {}
+    discovery = config.get("discovery") or {}
+    return bool(skills.get("paths") or discovery.get("local_paths"))
+
+
+def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget) -> FilesetRef | None:
+    """The FileSet a registered agent's files are staged from: the snapshot resolution took, if it took one."""
+    source = registered_agent_source(target)
+    return source.files if source is not None else None
 
 
 def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[str | None, str | None]:
@@ -271,8 +553,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
 
     Only targets that carry a real name yield one — nothing here invents an identity, because a
     made-up agent name is worse than an explicit one the submitter had to supply. A ``ModelTarget``
-    has a model but no agent; the runners other than Harbor name a harness, not an agent. Those
-    cases return ``None`` and the spec must carry ``publication.intake.agent_name``.
+    has a model but no agent; a Fabric runner names a harness, not an agent, unless it runs a registered
+    agent. Those cases return ``None`` and the spec must carry ``publication.intake.agent_name``.
 
     Accepts both unions: agent-eval passes its ``Target`` spec wrappers, while the dataset-driven
     eval's ``TargetSpec`` is the bare ``Model``/``Agent`` SDK value. Without the bare branches a row
@@ -284,13 +566,15 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     if isinstance(target, AgentTarget):
         return target.agent.name, None
     if isinstance(target, HarborRunnerTarget):
+        if isinstance(target.source, RegisteredAgentSource):
+            return registered_agent_name(target), None
         return target.agent_import_path or target.agent_name, target.agent_model_name
     if isinstance(target, GymRunnerTarget):
         return target.agent, None
     if isinstance(target, ModelTarget):
         return None, target.model.name
     if isinstance(target, FabricRunnerTarget):
-        return None, target.model
+        return registered_agent_name(target), target.model
     # Bare SDK values, as carried by the dataset-driven eval spec.
     if isinstance(target, AgentBase):
         return target.name, None
@@ -299,13 +583,8 @@ def target_agent_identity(target: Target | Model | AgentBase | None) -> tuple[st
     return None, None
 
 
-class _AgentEvalTaskCommon(BaseModel):
-    """Fields shared by the submitter and canonical task DTOs (everything but ``metrics``).
-
-    ``metrics`` differs between the two (refs allowed vs. fully resolved), so — as
-    with ``EvaluateInputSpec``/``EvaluateSpec`` — the variants are siblings that add
-    it, not a subtype pair (a mutable field can't be narrowed across inheritance).
-    """
+class AgentEvalTaskInput(BaseModel):
+    """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -324,23 +603,69 @@ class _AgentEvalTaskCommon(BaseModel):
     )
     metadata: TaskMetadataList = Field(default_factory=list, description="Key/value annotations for the task.")
 
-
-class AgentEvalTaskInput(_AgentEvalTaskCommon):
-    """Submitter-facing task DTO: metrics may be inline bundles or stored-metric references."""
-
     metrics: list[MetricRefOrInline] = Field(
         default_factory=list,
         description="Metrics that score this task, inline and/or references to stored metrics.",
     )
 
 
-class AgentEvalTaskSpec(_AgentEvalTaskCommon):
-    """Canonical task DTO: metrics fully resolved to inline bundles, reconstructed at run time."""
+ResolvedTaskDefinition: TypeAlias = Annotated[
+    ResolvedEvaluatorTaskDefinition | ResolvedHarborTaskDefinition, Field(discriminator="kind")
+]
 
-    metrics: list[MetricInline] = Field(
-        default_factory=list,
-        description="Inline metric bundles that score this task; reconstructed to runtime metrics at run time.",
-    )
+
+class ResolvedTask(BaseModel):
+    """A task captured in the canonical specification of a submitted job.
+
+    This submission-time snapshot is distinct from a persisted task revision: it contains the
+    runtime identity, metadata, and execution-ready definition with metric references expanded.
+    For a stored task, ``spec.provenance`` identifies the immutable revision from which the
+    snapshot was derived. Expanding metric/model references does not rewrite that
+    provenance digest; an inline task has no stored revision or provenance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    spec: ResolvedTaskDefinition
+    metadata: TaskMetadataList = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _harbor_envelope_invariants(self) -> Self:
+        """Require Harbor snapshots to use the native task ID as their runtime ID."""
+        if self.spec.kind == "harbor":
+            if self.id != self.spec.native_task_id:
+                raise ValueError("Harbor task id must equal spec.native_task_id")
+        return self
+
+
+def validate_task_collection(tasks: Sequence[ResolvedTask]) -> None:
+    """Require a nonempty selection with unique runtime IDs ignoring case and no repeated stored entities."""
+    if not tasks:
+        raise ValueError("Expected at least one task")
+    ids = [task.id.casefold() for task in tasks]
+    if len(set(ids)) != len(ids):
+        raise ValueError("task ids must be unique within an evaluation")
+    entities = [task.spec.provenance.entity_name for task in tasks if task.spec.provenance is not None]
+    if len(set(entities)) != len(entities):
+        raise ValueError("Duplicate task identity")
+
+
+def validate_single_kind(tasks: Sequence[ResolvedTask]) -> str:
+    """Require one task kind across an evaluation and return its discriminator.
+
+    Args:
+        tasks: Resolved tasks already validated as a nonempty collection.
+
+    Returns:
+        The single shared task-kind discriminator.
+
+    Raises:
+        ValueError: The collection mixes evaluator and Harbor tasks.
+    """
+    kinds = {task.spec.kind for task in tasks}
+    if len(kinds) != 1:
+        raise ValueError("An evaluation requires exactly one task kind; cannot mix Harbor and evaluator tasks")
+    return next(iter(kinds))
 
 
 class _AgentEvalSpecCommon(BaseModel):
@@ -351,8 +676,11 @@ class _AgentEvalSpecCommon(BaseModel):
     # only discovering it via a 422 at runtime. Each branch also excludes an explicit ``null`` (the
     # validator keys off non-null, not mere presence), so a request that sends ``"target": null``
     # alongside ``trials`` is accepted by the schema exactly as the runtime accepts it.
+    # ``hide_input_in_errors`` keeps a nested target's rejected credential out of the error text; pydantic
+    # has no per-field option, so every field's error loses its ``input_value``.
     model_config = ConfigDict(
         extra="forbid",
+        hide_input_in_errors=True,
         json_schema_extra={
             "oneOf": [
                 {"required": ["target"], "properties": {"target": {"not": {"type": "null"}}}},
@@ -419,13 +747,16 @@ class _AgentEvalSpecCommon(BaseModel):
 class AgentEvalInputSpec(_AgentEvalSpecCommon):
     """Submitter-facing agent-evaluation input.
 
-    ``tasks`` is either an inline list of tasks (whose metrics may be inline or references) or a
-    :class:`TasksetRef` naming a stored taskset whose member tasks are loaded and expanded during spec
-    resolution. Either way it hydrates to the canonical ``AgentEvalSpec.tasks`` list.
+    ``tasks`` accepts inline tasks, stored task references, or a stored taskset reference.
+    Stored definitions and scoring expand at submission; Harbor archives are prepared on the worker.
     """
 
-    tasks: TasksetRef | list[AgentEvalTaskInput] = Field(
-        description="Tasks to evaluate: an inline list (at least one) or a reference to a stored taskset.",
+    tasks: (
+        TasksetRef
+        | Annotated[list[AgentEvalTaskInput], Field(min_length=1)]
+        | Annotated[list[TaskRef], Field(min_length=1)]
+    ) = Field(
+        description="Tasks to evaluate: a nonempty list containing only inline tasks or only task references, or a stored taskset reference.",
     )
 
     @model_validator(mode="after")
@@ -436,19 +767,43 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
             raise ValueError("provide at least one task, or a `tasks` taskset reference")
         return self
 
+    @model_validator(mode="after")
+    def _reject_resolution_outputs_on_submit(self) -> Self:
+        target = self.target
+        if isinstance(target, FabricRunnerTarget) and target.resolved_config is not None:
+            raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
+        source = registered_agent_source(target)
+        if source is not None and source.files is not None:
+            raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
+        if isinstance(target, HarborRunnerTarget) and source is not None and "fabric_config" in target.agent_kwargs:
+            raise ValueError(
+                "`agent_kwargs.fabric_config` is derived from the registered `agent`; pass one or the other"
+            )
+        return self
+
 
 class AgentEvalSpec(_AgentEvalSpecCommon):
-    """Canonical agent-evaluation spec: tasks with all metric references resolved to inline."""
+    """Canonical evaluation containing self-contained, resolved task snapshots."""
 
-    tasks: list[AgentEvalTaskSpec] = Field(min_length=1, description="Tasks to evaluate; at least one is required.")
+    tasks: Annotated[list[ResolvedTask], Field(min_length=1)] = Field(
+        description="Resolved task snapshots in execution order. Only archive materialization remains on the worker."
+    )
 
     @model_validator(mode="after")
-    def _reject_unresolved_metric_model_refs(self) -> Self:
-        for task in self.tasks:
-            unresolved = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in task.metrics])
-            if unresolved:
+    def _reject_unresolved_registered_agent(self) -> Self:
+        target = self.target
+        if isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)) and registered_agent_source(target) is not None:
+            if registered_agent_config(target) is None:
                 raise ValueError(
-                    f"AgentEvalSpec task {task.id!r} metric models must be resolved before run: "
-                    + ", ".join(unresolved)
+                    f"AgentEvalSpec {target.kind} target names registered agent {registered_agent_name(target)!r} but "
+                    "carries no resolved config; it must be resolved before run"
                 )
+        elif isinstance(target, FabricRunnerTarget) and target.config is None:
+            raise ValueError("AgentEvalSpec Fabric target has no config")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_resolved_tasks(self) -> Self:
+        validate_task_collection(self.tasks)
+        validate_single_kind(self.tasks)
         return self

@@ -9,7 +9,7 @@ Use the tutorials in this section to gain a deeper understanding of how the NVID
 
 <Tip>
 
-Tutorials are organized by complexity and typically build on one another. The tutorials reference `NMP_BASE_URL`, which is the base URL of your NeMo Platform deployment. Refer to the [Setup guide](/documentation/get-started) for installation, setup, and platform URL guidance.
+Tutorials are organized by complexity and typically build on one another. The tutorials reference `NHX_BASE_URL`, which is the base URL of your NeMo Helix deployment. Refer to the [Setup guide](/documentation/get-started) for installation, setup, and platform URL guidance.
 
 </Tip>
 
@@ -82,11 +82,18 @@ Learn how to compress a larger teacher model into a smaller student model using 
 <small><span class="md-tag">nemo-customizer</span> <span class="md-tag">knowledge-distillation</span></small>
 
 </Card>
-<Card title="Fine-Tune an Embedding Model With Positive and Negative Samples Using LoRA" href="/documentation/customizer-reference/tutorials/embedding-customization-job">
+<Card title="Fine-Tune Nemotron 3 Embed for Domain Retrieval" href="/documentation/customizer-reference/tutorials/embedding-customization-job">
 
-Learn how to fine-tune embedding models using LoRA merged training for improved question-answering and retrieval tasks.
+Mine hard negatives from NVIDIA's published NVDocs dataset, fine-tune Nemotron 3 Embed 1B, then deploy Retriever NIM and compare nDCG and Recall against the base model.
 
-<small><span class="md-tag">embedding-models</span> <span class="md-tag">lora-merged</span> <span class="md-tag">nemo-customizer</span></small>
+<small><span class="md-tag">embedding-models</span> <span class="md-tag">bi-encoder</span> <span class="md-tag">nemo-customizer</span></small>
+
+</Card>
+<Card title="Train on SPECTER or Triplet JSONL" href="/documentation/customizer-reference/tutorials/embedding-triplet-dataset">
+
+Register an existing triplet dataset as a fileset and train on it instead of mined NVDocs data.
+
+<small><span class="md-tag">embedding-models</span> <span class="md-tag">datasets</span> <span class="md-tag">nemo-customizer</span></small>
 
 </Card>
 

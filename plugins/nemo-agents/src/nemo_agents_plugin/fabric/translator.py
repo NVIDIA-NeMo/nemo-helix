@@ -31,7 +31,7 @@ HARNESS_ADAPTER_IDS = {
 # than a translation error here.
 FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
 
-PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NMP_BASE_URL", "NMP_WORKSPACE")
+PLATFORM_RUNTIME_ENV_VARS = ("NEMO_BASE_URL", "NHX_BASE_URL", "NHX_WORKSPACE")
 
 
 class FabricTranslationError(ValueError):

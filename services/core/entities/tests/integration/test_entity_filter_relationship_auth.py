@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
-from nmp.core.entities.api.v2.utils import ROLE_BINDING_ENTITY_TYPE
-from nmp.core.entities.app.repository import (
+from nhx.core.entities.api.v2.utils import ROLE_BINDING_ENTITY_TYPE
+from nhx.core.entities.app.repository import (
     EntityRepositoryInterface,
     WorkspaceRepositoryInterface,
 )

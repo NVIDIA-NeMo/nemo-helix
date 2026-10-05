@@ -11,17 +11,17 @@ from nemoguardrails.rails.llm.options import (
     GenerationStats,
     LLMCallInfo,
 )
-from nmp.guardrails.app.schemas.guardrails import (
+from nhx.guardrails.app.schemas.guardrails import (
     GuardrailsChatCompletionRequest,
     GuardrailsCompletionRequest,
 )
-from nmp.guardrails.app.schemas.utils.response_transformers import (
+from nhx.guardrails.app.schemas.utils.response_transformers import (
     create_guardrail_chat_completion_response_from_generation_response,
 )
-from nmp.guardrails.entities.values._private import (
-    GenerationLog as NMPGenerationLog,
+from nhx.guardrails.entities.values._private import (
+    GenerationLog as NHXGenerationLog,
 )
-from nmp.guardrails.entities.values.common import (
+from nhx.guardrails.entities.values.common import (
     GuardrailsDataInput,
     GuardrailsDataOutput,
 )
@@ -104,15 +104,15 @@ def test_guardrails_data():
     data = GuardrailsDataOutput(
         llm_output={"output": "Hello, world!"},
         output_data={"data": "Hi, user!"},
-        log=NMPGenerationLog(),
+        log=NHXGenerationLog(),
     )
     assert data.llm_output == {"output": "Hello, world!"}
     assert data.output_data == {"data": "Hi, user!"}
 
 
-def test_nmp_ngm_generation_log():
+def test_nhx_ngm_generation_log():
     log1 = GenerationLog()
-    log2 = NMPGenerationLog()
+    log2 = NHXGenerationLog()
 
     assert log1.__dict__.keys() == log2.__dict__.keys()
 

@@ -1176,9 +1176,8 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
     failures are also fatal: falling back after a partial local stage can launch
     Harbor against the wrong or incomplete task.
     """
-    from botocore.exceptions import BotoCoreError, ClientError
-
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
+    from scaled_evals.api._files_backend import MissingObjectError
 
     try:
         with tempfile.TemporaryDirectory(prefix="se-task-") as tmp:
@@ -1187,12 +1186,18 @@ def _stage_task_tree(tarball_object_key: str, dest: Path) -> Path | None:
             extracted = tmp_path / "extracted"
             extracted.mkdir()
             try:
-                s3.download_object(tarball_object_key, str(tarball_path))
-            except (BotoCoreError, ClientError) as exc:
+                artifacts.download_object(tarball_object_key, str(tarball_path))
+            except MissingObjectError as exc:
                 raise RuntimeError(
                     f"could not fetch task pack object {tarball_object_key!r} from "
-                    f"the object store: {exc}. The revision's artifact may be missing "
-                    f"(re-upload + finalize the task) or the store unreachable."
+                    f"storage: {exc}. The revision's artifact is missing "
+                    f"(re-upload + finalize the task)."
+                ) from exc
+            except Exception as exc:  # noqa: BLE001 - any Files transport error (5xx/connection) is a fetch failure, not a 'no task tree' signal
+                raise RuntimeError(
+                    f"could not fetch task pack object {tarball_object_key!r} from "
+                    f"storage: {exc}. The object store may be unreachable; retry, or "
+                    f"re-upload + finalize the task."
                 ) from exc
             _extract_pack(tarball_path, extracted)
             task_src = _find_task_tree(extracted)
@@ -1231,7 +1236,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
     <name> is derived from the key. Best-effort: failures are logged and skipped
     so a bad key doesn't abort the whole launch.
     """
-    from scaled_evals.api import s3
+    from scaled_evals.api import artifacts
 
     # Harbor sets environment_dir = task_tree/environment/ (it appends /environment
     # to the task path). Candidate 0 in _upload_environment_skills is
@@ -1252,7 +1257,7 @@ def _inject_extra_skills(task_tree: Path, object_keys: list[str]) -> list[dict[s
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / filename
         try:
-            s3.download_object(key, str(dest))
+            artifacts.download_object(key, str(dest))
         except Exception as exc:  # noqa: BLE001
             LOG.warning("could not inject extra skill %s: %s", key, exc)
             materials.append({"object_key": key, "status": "download_failed"})
@@ -1577,6 +1582,21 @@ def make_sandbox_k8s_docker_terminator() -> Callable[[LaunchHandle], None]:
     return terminate
 
 
+def _kubeconfig_flag(recorded_path: object) -> list[str]:
+    """Return the ``--kubeconfig`` flag for a cleanup, or nothing if it cannot apply.
+
+    The recorded path is captured when the sandbox launches. Under Platform Jobs
+    that happens inside a Job pod whose ``$HOME`` differs from the dispatch
+    worker that later drains the cleanup, so the path can name a file that only
+    ever existed on another pod's filesystem. Passing it anyway fails every
+    kubectl call and wedges the evaluation. Falling back to no flag lets kubectl
+    resolve through the cleanup process's own ``KUBECONFIG``.
+    """
+    if recorded_path and Path(str(recorded_path)).exists():
+        return ["--kubeconfig", str(recorded_path)]
+    return []
+
+
 def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
     """Delete and verify per-evaluation Sandbox resources.
 
@@ -1608,8 +1628,7 @@ def _cleanup_sandbox_k8s_resources(handle: LaunchHandle) -> None:
         raise RuntimeError("sandbox cleanup requires kubectl or oc")
 
     base = [kubectl]
-    if kubeconfig_path:
-        base.extend(["--kubeconfig", str(kubeconfig_path)])
+    base.extend(_kubeconfig_flag(kubeconfig_path))
     if context:
         base.extend(["--context", str(context)])
     if cleanup_metadata.get("verify_ssl") is False:
@@ -1788,8 +1807,7 @@ def _sandbox_kubectl_base(handle: LaunchHandle) -> tuple[list[str], str] | None:
     if kubectl is None:
         return None
     base = [kubectl]
-    if cleanup.get("kubeconfig_path"):
-        base.extend(["--kubeconfig", str(cleanup["kubeconfig_path"])])
+    base.extend(_kubeconfig_flag(cleanup.get("kubeconfig_path")))
     if cleanup.get("context"):
         base.extend(["--context", str(cleanup["context"])])
     if cleanup.get("verify_ssl") is False:

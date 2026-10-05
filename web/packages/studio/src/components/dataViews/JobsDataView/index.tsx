@@ -15,9 +15,9 @@ import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataView
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { useJobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
-  PlatformJobListSortField,
-  PlatformJobResponse,
-  PlatformJobsListFilter,
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 import { Flex, Tag } from '@nvidia/foundations-react-core';
 import {
@@ -36,7 +36,7 @@ import { ComponentProps, type ReactNode, useRef } from 'react';
 
 const SOURCE_DISPLAY: Record<string, { label: string; icon: ReactNode }> = {
   [JOB_SOURCE.CUSTOMIZATION]: {
-    label: 'Customizer',
+    label: 'Fine-tuning',
     icon: <Sliders className={iconColorClass} size={14} />,
   },
   [JOB_SOURCE.DATA_DESIGNER]: {
@@ -79,21 +79,22 @@ export const JobsDataView = () => {
 
   const {
     data: jobsData,
-    isFetching,
+    isLoading,
+    isPlaceholderData,
     error,
   } = useJobsListJobs(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
       page_size: dataViewState.pagination.state.pageSize,
-      sort: getSortParam(dataViewState.sorting.state) as PlatformJobListSortField,
+      sort: getSortParam(dataViewState.sorting.state) as HelixJobListSortField,
       filter: {
         ...userFilter,
         ...(hasUserSourceFilter
           ? {}
-          : withOperators<PlatformJobsListFilter>({ source: { $nin: hiddenJobSources } })),
+          : withOperators<HelixJobsListFilter>({ source: { $nin: hiddenJobSources } })),
         ...(dataViewState.apiFilter.searchText
-          ? withOperators<PlatformJobsListFilter>({
+          ? withOperators<HelixJobsListFilter>({
               name: { $like: dataViewState.apiFilter.searchText },
             })
           : {}),
@@ -126,7 +127,7 @@ export const JobsDataView = () => {
     .map((source) => ({ label: SOURCE_DISPLAY[source]?.label ?? source, value: source }));
   const mergedSourceOptions = [...sourceFilterOptions, ...dynamicSourceOptions];
 
-  const makeColumns: ComponentProps<typeof StudioDataView<PlatformJobResponse>>['makeColumns'] = ({
+  const makeColumns: ComponentProps<typeof StudioDataView<HelixJobResponse>>['makeColumns'] = ({
     accessor,
   }) => [
     accessor((original) => original?.name || '', {
@@ -138,6 +139,14 @@ export const JobsDataView = () => {
       header: 'Source',
       enableSorting: true,
       meta: {
+        // The cell renders a label for the source; without this the OS tooltip falls back
+        // to the raw accessor value and shows the API's own word for it instead.
+        title: (cell) => {
+          const value = cell.getValue();
+          return typeof value === 'string' && value
+            ? (SOURCE_DISPLAY[value]?.label ?? value)
+            : undefined;
+        },
         filter: {
           type: 'single-select' as const,
           label: 'Source',
@@ -209,11 +218,11 @@ export const JobsDataView = () => {
   }
 
   return (
-    <StudioDataView<PlatformJobResponse>
+    <StudioDataView<HelixJobResponse>
       dataViewState={dataViewState}
       searchField="name"
       makeColumns={makeColumns}
-      onRowClick={(row: PlatformJobResponse, _index, event) =>
+      onRowClick={(row: HelixJobResponse, _index, event) =>
         openRow(event, getJobDetailRoute(row, workspace))
       }
       attributes={{
@@ -223,7 +232,7 @@ export const JobsDataView = () => {
         DataViewRoot: {
           data: jobs,
           totalCount: CUSTOMIZER_ENABLED ? jobsData?.pagination?.total_results || 0 : jobs.length,
-          requestStatus: isFetching ? 'loading' : undefined,
+          requestStatus: isLoading || isPlaceholderData ? 'loading' : undefined,
         },
         DataViewTableContent: {
           renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

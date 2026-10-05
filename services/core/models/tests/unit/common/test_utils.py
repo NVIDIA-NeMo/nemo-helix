@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 
 import pytest
-from nemo_platform_plugin.models.types import (
+from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
     ModelDeployment,
     ModelDeploymentConfig,
@@ -17,8 +17,8 @@ from nemo_platform_plugin.models.types import (
     ModelProvider,
     ModelSpec,
 )
-from nmp.core.models.app import normalize_model_entity_name
-from nmp.core.models.app.utils import (
+from nhx.core.models.app import normalize_model_entity_name
+from nhx.core.models.app.utils import (
     ModelConfigParseError,
     ModelWeightsType,
     _get_k8s_safe_name,
@@ -819,7 +819,7 @@ def test_normalize_model_entity_name_matches_entity_store_pattern():
     """Valid inputs produce names that match entity store NAME_PATTERN."""
     import re
 
-    from nmp.common.entities.constants import NAME_PATTERN
+    from nhx.common.entities.constants import NAME_PATTERN
 
     pattern = re.compile(NAME_PATTERN)
     valid_inputs = ["meta/llama-3.2-1b", "x--y", "already-valid", "ab", "model-v1-0"]

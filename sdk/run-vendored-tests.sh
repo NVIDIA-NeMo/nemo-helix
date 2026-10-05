@@ -16,7 +16,7 @@ PYTHON_VERSION="$1"
 # Get the repository base directory
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-cd "$REPO_ROOT/sdk/python/nemo-platform"
+cd "$REPO_ROOT/sdk/python/nemo-helix"
 uv venv --python "$PYTHON_VERSION" ".venv-$PYTHON_VERSION"
 source ".venv-${PYTHON_VERSION}/bin/activate"
 uv pip install -e . --all-extras --group dev -r pyproject.toml

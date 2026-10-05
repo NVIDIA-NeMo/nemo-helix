@@ -153,7 +153,7 @@ def test_build_nat_runner_command_forwards_matrix_flags(tmp_path: Path) -> None:
         allow_dirty=True,
         timeout=123,
         codex_auth_json=Path("/tmp/auth.json"),
-        nmp_base_url="http://localhost:8080",
+        nhx_base_url="http://localhost:8080",
         anthropic_base_url="https://anthropic.example",
         python_executable="python-test",
     )
@@ -184,7 +184,7 @@ def test_build_nat_runner_command_uses_task_args_when_manifest_omitted(tmp_path:
         allow_dirty=False,
         timeout=600,
         codex_auth_json=None,
-        nmp_base_url="http://localhost:8080",
+        nhx_base_url="http://localhost:8080",
         anthropic_base_url="https://anthropic.example",
         python_executable="python-test",
     )
@@ -279,7 +279,7 @@ def test_run_candidates_parallelizes_across_candidates(tmp_path: Path, monkeypat
         allow_dirty=True,
         timeout=30,
         codex_auth_json=None,
-        nmp_base_url="http://localhost:8080",
+        nhx_base_url="http://localhost:8080",
         anthropic_base_url="https://anthropic.example",
         parallel_candidates=2,
     )

@@ -3,7 +3,7 @@
 
 # LLM-as-a-Judge Evaluation - CLI Harbor Test
 
-Tests configuring and running an LLM-as-a-Judge evaluation job using the NeMo Platform CLI.
+Tests configuring and running an LLM-as-a-Judge evaluation job using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -17,7 +17,7 @@ Tests configuring and running an LLM-as-a-Judge evaluation job using the NeMo Pl
 ## Running
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 export ANTHROPIC_API_KEY='your-key'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
 harbor run -p tests/agentic-use/evaluator-llm-judge-cli \

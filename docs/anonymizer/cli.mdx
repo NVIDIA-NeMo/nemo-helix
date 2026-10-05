@@ -15,7 +15,7 @@ This reference covers the `nemo anonymizer` commands exposed by the Anonymizer p
 |----------------------------------|--------------------------------------------------------------|
 | `nemo anonymizer validate`       | Validate an `AnonymizerConfig` (and optional `model_configs`).|
 | `nemo anonymizer preview`        | Run a streaming preview through the Anonymizer plugin service. |
-| `nemo anonymizer run`            | Submit an `anonymizer.run` job to the NeMo Platform Jobs worker. |
+| `nemo anonymizer run`            | Submit an `anonymizer.run` job to the NeMo Helix Jobs worker. |
 
 ## `nemo anonymizer validate`
 
@@ -39,8 +39,8 @@ The command does not accept `data.source`. Input-source validation happens durin
 ```bash
 nemo anonymizer preview \
   --spec-file /tmp/anonymizer-preview.yaml \
-  --workspace "${NMP_WORKSPACE:-default}" \
-  --base-url "${NMP_BASE_URL:-http://localhost:8080}"
+  --workspace "${NHX_WORKSPACE:-default}" \
+  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
 ```
 
 | Flag             | Description                                                                            |
@@ -57,8 +57,8 @@ nemo anonymizer preview \
 ```bash
 nemo anonymizer run \
   --spec-file /tmp/anonymizer-run.yaml \
-  --workspace "${NMP_WORKSPACE:-default}" \
-  --base-url "${NMP_BASE_URL:-http://localhost:8080}"
+  --workspace "${NHX_WORKSPACE:-default}" \
+  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
 ```
 
 | Flag             | Description                                                                                       |
@@ -86,8 +86,8 @@ nemo anonymizer run \
 Track and pull artifacts using either the standard `nemo jobs ...` commands or the Python SDK:
 
 ```bash
-nemo jobs get-status anonymizer-run-2026-05-12-abc123 --workspace "${NMP_WORKSPACE:-default}"
-nemo jobs get-logs anonymizer-run-2026-05-12-abc123 --workspace "${NMP_WORKSPACE:-default}"
+nemo jobs get-status anonymizer-run-2026-05-12-abc123 --workspace "${NHX_WORKSPACE:-default}"
+nemo jobs get-logs anonymizer-run-2026-05-12-abc123 --workspace "${NHX_WORKSPACE:-default}"
 ```
 
 ```python
@@ -112,7 +112,7 @@ Run specs use the `AnonymizerRequest` shape. Preview specs use the same fields p
 | `data.text_column`| string                                          | no       | Defaults to `text`.                                                    |
 | `data.id_column`  | string                                          | no       | Optional record identifier column.                                     |
 | `data.data_summary` | string                                        | no       | Optional short description of the data.                                |
-| `model_configs`   | list of Data Designer `ModelConfig`             | yes      | Required so execution routes through NeMo Platform Inference Gateway.  |
+| `model_configs`   | list of Data Designer `ModelConfig`             | yes      | Required so execution routes through NeMo Helix Inference Gateway.  |
 | `selected_models` | object with `detection` / `replace` / `rewrite` | no       | Role overrides on top of bundled defaults. Requires `model_configs`.   |
 
 ## Fileset Reference Forms

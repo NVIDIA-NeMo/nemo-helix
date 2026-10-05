@@ -3,14 +3,14 @@
 
 import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import type { LogLoadProgress } from '@nemo/common/src/utils/logs';
-import type { PlatformJobLog } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { Panel } from '@nvidia/foundations-react-core';
 import { FC } from 'react';
 
 interface ProgressSectionProps {
   jobId: string;
   isLoading: boolean;
-  logs: PlatformJobLog[];
+  logs: HelixJobLog[];
   loadProgress?: LogLoadProgress | null;
 }
 

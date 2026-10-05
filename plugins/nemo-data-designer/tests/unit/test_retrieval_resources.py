@@ -18,7 +18,7 @@ from nemo_data_designer_plugin.retrieval.manifest import (
     write_generation_manifest,
 )
 from nemo_data_designer_plugin.retrieval.secrets import resolve_hf_token
-from nemo_platform_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError, PermissionDeniedError
 
 
 def test_fileset_corpus_must_match_job_workspace(tmp_path: Path) -> None:
@@ -26,7 +26,7 @@ def test_fileset_corpus_must_match_job_workspace(tmp_path: Path) -> None:
         _download_fileset(
             "other/documents",
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -39,7 +39,7 @@ def test_local_corpus_path_is_preview_only(tmp_path: Path) -> None:
         materialize_corpus(
             str(corpus),
             dest=tmp_path / "unused",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
             allow_local_path=True,
         )
@@ -50,7 +50,7 @@ def test_local_corpus_path_is_preview_only(tmp_path: Path) -> None:
         materialize_corpus(
             str(corpus),
             dest=tmp_path / "unused",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -120,7 +120,7 @@ def test_hf_corpus_rejects_path_traversal(tmp_path: Path, corpus: str) -> None:
         materialize_corpus(
             corpus,
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -131,7 +131,7 @@ def test_hf_corpus_requires_retrieval_extra(tmp_path: Path, monkeypatch: pytest.
         materialize_corpus(
             "hf://org/dataset",
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -158,7 +158,7 @@ def test_hf_corpus_passes_token_to_snapshot_download(tmp_path: Path, monkeypatch
     materialize_corpus(
         "hf://org/private-dataset",
         dest=tmp_path / "corpus",
-        sdk=Mock(),
+        client=Mock(),
         workspace="default",
         hf_token="hf_secret_value",
     )
@@ -183,7 +183,7 @@ def test_hf_file_uri_includes_filename_in_allow_patterns(tmp_path: Path, monkeyp
     staged = materialize_corpus(
         "hf://org/dataset@abc123/nv_pp_dd_sdg.json",
         dest=dest,
-        sdk=Mock(),
+        client=Mock(),
         workspace="default",
     )
 

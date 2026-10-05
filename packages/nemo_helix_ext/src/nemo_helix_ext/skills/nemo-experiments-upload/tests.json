@@ -1,0 +1,16 @@
+{
+  "skill": "nemo-experiments-upload",
+  "tests": [
+    { "type": "explicit", "prompt": "How do I log evaluation traces to NeMo Experiments?", "expected_skill": "nemo-experiments-upload" },
+    { "type": "explicit", "prompt": "Upload my Harbor eval results to NeMo Experiments", "expected_skill": "nemo-experiments-upload" },
+    { "type": "explicit", "prompt": "log to experiments", "expected_skill": "nemo-experiments-upload" },
+    { "type": "implicit", "prompt": "I ran an agent eval and want to see it in the platform leaderboard", "expected_skill": "nemo-experiments-upload" },
+    { "type": "implicit", "prompt": "How do I get my evaluation runs and scores into NeMo?", "expected_skill": "nemo-experiments-upload" },
+    { "type": "implicit", "prompt": "Send my ATIF trajectory to intake with evaluation context", "expected_skill": "nemo-experiments-upload" },
+    { "type": "contextual", "prompt": "I have a Harbor run with verifier rewards and I need them to show up as experiment scores", "expected_skill": "nemo-experiments-upload" },
+    { "type": "contextual", "prompt": "Create an experiment and an evaluation, then publish traces to it", "expected_skill": "nemo-experiments-upload" },
+    { "type": "negative-control", "prompt": "Help me author an LLM-as-a-judge metric for my benchmark", "expected_skill_not": "nemo-experiments-upload" },
+    { "type": "negative-control", "prompt": "Is the NeMo Helix healthy right now?", "expected_skill_not": "nemo-experiments-upload" },
+    { "type": "negative-control", "prompt": "What is the status of PR #612 in the platform repo?", "expected_skill_not": "nemo-experiments-upload" }
+  ]
+}

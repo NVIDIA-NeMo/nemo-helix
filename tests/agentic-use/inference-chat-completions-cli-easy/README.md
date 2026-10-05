@@ -5,7 +5,7 @@
 
 ## Overview
 
-This eval tests whether a coding agent can use the NeMo Platform CLI to make chat completion requests through the Inference Gateway (IGW).
+This eval tests whether a coding agent can use the NeMo Helix CLI to make chat completion requests through the Inference Gateway (IGW).
 
 ## Environment Setup
 
@@ -16,7 +16,7 @@ This eval uses a **mock inference backend** instead of a real LLM:
 - The mock model `default/chat-model` is available for inference
 
 The mock provider setup is handled by `environment/setup-mock.py`, which runs after
-the NeMo Platform API is healthy but before the agent starts.
+the NeMo Helix API is healthy but before the agent starts.
 
 ## What the Agent Should Do
 
@@ -42,7 +42,7 @@ The verifier checks:
 
 ```text
 environment/
-  Dockerfile       - Extends nmp-agentic-base:latest with mock provider env var + setup script
+  Dockerfile       - Extends nhx-agentic-base:latest with mock provider env var + setup script
   setup-mock.py    - Creates mock inference provider after API starts
 instruction.md     - Task description for the agent
 task.toml          - Harbor configuration (timeouts, resources)

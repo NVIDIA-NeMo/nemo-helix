@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import pytest
-from nmp.core.inference_gateway.testing.harness import IGWPluginHarness
-from nmp.testing.mock_chat_completions import ChatCompletion, chat_completion
+from nhx.core.inference_gateway.testing.harness import IGWPluginHarness
+from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,

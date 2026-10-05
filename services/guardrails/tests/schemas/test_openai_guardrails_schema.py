@@ -3,15 +3,15 @@
 
 import pytest
 from nemoguardrails.rails.llm.options import GenerationResponse
-from nmp.guardrails.api.schemas import BaseRequest
-from nmp.guardrails.app.schemas.utils.request_converters import (
+from nhx.guardrails.api.schemas import BaseRequest
+from nhx.guardrails.app.schemas.utils.request_converters import (
     convert_chat_completion_request_to_guardrails,
 )
-from nmp.guardrails.entities.values.chat import (
+from nhx.guardrails.entities.values.chat import (
     GuardrailChatCompletionRequest,
     GuardrailChatCompletionResponse,
 )
-from nmp.guardrails.entities.values.common import GuardrailsDataInput
+from nhx.guardrails.entities.values.common import GuardrailsDataInput
 
 
 def test_guardrails_openai_chat_completion_request_to_guardrails():

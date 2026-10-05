@@ -23,9 +23,9 @@ import uuid
 import pytest
 from nemo_example_plugin.middleware import ExampleInferenceMiddleware
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
-from nemo_platform.types.inference.middleware_call_param import MiddlewareCallParam
-from nmp.core.inference_gateway.testing.harness import IGWPluginHarness
-from nmp.testing.mock_chat_completions import (
+from nemo_helix.types.inference.middleware_call_param import MiddlewareCallParam
+from nhx.core.inference_gateway.testing.harness import IGWPluginHarness
+from nhx.testing.mock_chat_completions import (
     ChatCompletion,
     ChatCompletionStream,
     chat_completion,

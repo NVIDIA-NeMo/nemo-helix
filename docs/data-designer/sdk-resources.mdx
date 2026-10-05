@@ -5,10 +5,10 @@
 title: "Data Designer SDK Resources"
 description: ""
 ---
-<a id="data-designer-nmp-sdk-resources"></a>
+<a id="data-designer-nhx-sdk-resources"></a>
 
 The `data_designer.config` module provides a consistent, context-agnostic experience for building Data Designer configs.
-Once you are ready to execute that config through NeMo Services APIs, you use objects from the `nemo_platform` SDK.
+Once you are ready to execute that config through NeMo Services APIs, you use objects from the `nemo_helix` SDK.
 This page explains the SDK objects used for Data Designer API execution.
 
 ## DataDesignerResource
@@ -16,17 +16,18 @@ This page explains the SDK objects used for Data Designer API execution.
 The `DataDesignerResource` is the initial SDK object for working with Data Designer through the SDK.
 It provides Data Designer API preview and create operations for Data Designer configurations.
 
-A `DataDesignerResource` is accessed directly from a `NeMoPlatform` instance:
+Build a `DataDesignerResource` from a `NemoClient` instance:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-data_designer = client.data_designer  # this object is a DataDesignerResource
+data_designer = DataDesignerResource(client)
 ```
 
 The `DataDesignerResource` is primarily used to make Data Designer API preview requests (`preview`) and create jobs (`create`),
@@ -35,12 +36,15 @@ but exposes some additional useful methods:
 | Method | Description |
 |--------|-------------|
 | `validate(config_builder, *, workspace=None)` | Checks a configuration and returns a `ValidationReport` (see below). |
+| `check_models(config_builder, *, workspace=None)` | Probes the models a configuration references and returns a `CheckModelsReport` (see below). |
 | `get_default_model_providers()` | Returns a list of model providers registered with the Models API and Inference Gateway API that can be used in your Data Designer config. |
 | `get_job_resource(job_name: str)` | Returns a `DataDesignerJobResource` for interacting with a job (see below). |
 
 ### Validating a config
 
 `validate()` runs the same checks `preview()` and `create()` perform internally, but never short-circuits — every detectable problem appears in one report. Use it to catch configuration errors before submitting work.
+
+It checks that your configuration is well-formed and that the platform resources it names resolve. It does not check whether those models respond; see [`check_models()`](#checking-models).
 
 ```python
 import data_designer.config as dd
@@ -49,14 +53,14 @@ config_builder = dd.DataDesignerConfigBuilder(
     model_configs=[
         dd.ModelConfig(
             provider="default/nvidia-build",
-            model="nvidia/nemotron-3-nano-30b-a3b",
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
             alias="text",
         )
     ],
 )
 # Add columns, constraints, seed datasets, processors, and profilers here.
 
-report = client.data_designer.validate(config_builder)
+report = data_designer.validate(config_builder)
 
 if not report.ok:
     for error in report.errors:
@@ -66,8 +70,34 @@ if not report.ok:
 The `workspace` keyword argument selects the workspace used to resolve provider references and seed sources. It falls back to the platform client's workspace, then to `"default"`.
 
 ```python
-report = client.data_designer.validate(config_builder, workspace="my-workspace")
+report = data_designer.validate(config_builder, workspace="my-workspace")
 ```
+
+### Checking models
+
+`check_models()` probes every model your configuration references, without running a workload. It sends a small generation request to each model alias through the Inference Gateway and reports whether it came back.
+
+This is the companion to `validate()`. A provider can resolve while still refusing to serve the model named alongside it, so a green `ValidationReport` is not a promise that a preview will run — only a live request can tell you that.
+
+```python
+report = data_designer.check_models(config_builder)
+
+if not report.ok:
+    for error in report.errors:
+        print(f"{error.error_type}: {error.message}")
+```
+
+Each call bills a real generation per model alias, so use it when you first wire up a config or change a model or provider, rather than on every edit. Models configured with `skip_health_check=True` are skipped.
+
+Unlike `validate()`, the probe stops at the first model that fails. The resource logs each alias as it checks it, so the output identifies which model failed:
+
+```text
+🩺 Running health checks for models...
+👀 Checking 'nvidia/nemotron-3.5-lightning-30b-a3b' in provider named 'default/nvidia-build' for model alias 'text'...
+✅ Passed!
+```
+
+The `workspace` keyword argument behaves the same as it does for `validate()`.
 
 ## ValidationReport
 
@@ -78,6 +108,18 @@ report = client.data_designer.validate(config_builder, workspace="my-workspace")
 | `ok` | `True` when no errors were found. |
 | `errors` | A list of `ValidationError` objects, each with a `message` string. Empty when `ok` is `True`. |
 | `config_source` | The configuration source path when validation ran through the CLI. `None` for SDK calls. |
+
+## CheckModelsReport
+
+`check_models()` returns a `CheckModelsReport` describing what the probes found.
+
+| Attribute | Description |
+|--------|-------------|
+| `ok` | `True` when every probe succeeded. |
+| `errors` | A list of `ModelCheckError` objects, each with an `error_type` and a `message` string. Empty when `ok` is `True`. |
+| `config_source` | The configuration source path when the check ran through the CLI. `None` for SDK calls. |
+
+The `error_type` names the underlying failure — for example `ModelNotFoundError` for a model the provider will not serve, `ModelAuthenticationError` for a credentials problem, or `ModelAPIConnectionError` when the provider could not be reached.
 
 ## DataDesignerJobResource
 

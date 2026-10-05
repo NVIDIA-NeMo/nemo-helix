@@ -30,6 +30,7 @@ HarborRewardValueRejection = Literal["boolean", "non_numeric", "non_finite"]
 #: Trial-metadata keys carrying one parsed Harbor reward mapping. Named here rather than spelled
 #: independently at each writer and reader so the durable vocabulary stays centralized.
 REWARD_DETAILS_KEY = "reward_details"
+HARBOR_PRIMARY_REWARD_KEY = "harbor_primary_reward_key"
 REWARD_REJECTIONS_KEY = "reward_rejections"
 REWARD_ENTRY_REJECTIONS_KEY = "reward_entry_rejections"
 

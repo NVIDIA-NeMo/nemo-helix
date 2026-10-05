@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Test that PodDisruptionBudget renders with maxUnavailable.
-# CI validates by running: helm template nemo-platform . -f ci/15-pdb-max-unavailable.yaml
+# CI validates by running: helm template nemo-helix . -f ci/15-pdb-max-unavailable.yaml
 # The rendered output must include a PodDisruptionBudget for the API with spec.maxUnavailable: 1.
 
 api:

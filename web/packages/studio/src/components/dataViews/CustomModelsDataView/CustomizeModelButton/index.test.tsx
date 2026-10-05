@@ -43,6 +43,7 @@ const renderRoute = (props: { model?: ModelEntity } = {}) => {
         ),
       },
       { path: ROUTES.workspace.newCustomizationJob, element: <LocationDisplay /> },
+      { path: ROUTES.workspace.newCustomizationJobScratch, element: <LocationDisplay /> },
     ],
     { initialEntries: [ROUTES.workspace.customizationJobList] }
   );
@@ -65,12 +66,14 @@ describe('CustomizeModelButton', () => {
       expect(screen.getByRole('button', { name: 'Customize a Model' })).toBeInTheDocument();
     });
 
-    it('navigates straight to the fine-tuning form on click', async () => {
+    it('navigates to the start picker on click', async () => {
       const user = userEvent.setup();
       renderRoute();
       await user.click(screen.getByRole('button', { name: 'Customize a Model' }));
-      expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
-        `/workspaces/${workspace1.workspace}/customizations/fine-tuned/new`
+      // Exact, not `toHaveTextContent`: that is a substring match, so the scratch route
+      // would satisfy it too — and telling the two apart is the point of this assertion.
+      expect((await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent).toBe(
+        `/workspaces/${workspace1.workspace}/fine-tune/new`
       );
     });
 
@@ -109,8 +112,8 @@ describe('CustomizeModelButton', () => {
       const user = userEvent.setup();
       renderRoute({ model: testModel });
       await user.click(screen.getByRole('button', { name: /Customize this Model/ }));
-      expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
-        `/workspaces/${workspace1.workspace}/customizations/fine-tuned/new`
+      expect((await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).textContent).toBe(
+        `/workspaces/${workspace1.workspace}/fine-tune/new/scratch?model=ws%2Fmy-model`
       );
     });
   });

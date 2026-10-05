@@ -25,8 +25,8 @@ class OpenShellTLSConfig(BaseModel):
     client_key_path: str | None = Field(default=None, description="Path to the client private key (mTLS).")
 
 
-class PlatformEgressConfig(BaseModel):
-    """The NeMo platform endpoint a sandbox must always be able to reach.
+class HelixEgressConfig(BaseModel):
+    """The NeMo Helix endpoint a sandbox must always be able to reach.
 
     Environment-specific: on the docker driver a sandbox reaches the platform at
     host.docker.internal:8080; an in-cluster (k8s) driver uses the platform Service
@@ -39,16 +39,16 @@ class PlatformEgressConfig(BaseModel):
 
     host: str = Field(default="host.docker.internal", description="Platform host reachable from inside a sandbox.")
     port: int = Field(default=8080, ge=1, description="Platform port (the inference gateway / API listener).")
-    # Value sets track openshell/proto/sandbox.proto (NetworkAccessRule), which is broader than
-    # the summaries above imply: protocol also allows "graphql" and "" (L4-only), tls allows
-    # "passthrough".
+    # Value sets track OpenShell's authored policy schema: protocol also allows "graphql" and
+    # "" (L4-only). OpenShell 0.1 removed tls "terminate"/"passthrough": omitted TLS is
+    # inspected automatically, and "skip" turns inspection off.
     protocol: Literal["rest", "websocket", "graphql", "sql", ""] = Field(
         default="rest",
         description='OpenShell L7 protocol: "rest", "websocket", "graphql", "sql", or "" for L4-only.',
     )
-    tls: Literal["terminate", "passthrough", ""] = Field(
+    tls: Literal["", "skip"] = Field(
         default="",
-        description='TLS handling: "terminate" for HTTPS L7 intercept, "passthrough" (or "") for no L7 interception.',
+        description='TLS handling: "" (default) for automatic inspection, "skip" to disable inspection.',
     )
     access: Literal["read-only", "read-write", "full"] = Field(
         default="full",
@@ -75,6 +75,10 @@ class OpenShellExecutorConfig(BaseModel):
             "The gRPC target is the same host:port; http implies plaintext, https implies TLS."
         ),
     )
+    workspace: str = Field(
+        default="default",
+        description="OpenShell gateway workspace that every sandbox RPC is scoped to. The gateway creates 'default'.",
+    )
     insecure: bool | None = Field(
         default=None,
         description="Force plaintext (True) or TLS (False). When None, derived from the endpoint scheme.",
@@ -94,8 +98,8 @@ class OpenShellExecutorConfig(BaseModel):
             "disable it entirely (e.g. gateway-managed inference via inference.local)."
         ),
     )
-    platform_egress: PlatformEgressConfig | None = Field(
-        default_factory=PlatformEgressConfig,
+    platform_egress: HelixEgressConfig | None = Field(
+        default_factory=HelixEgressConfig,
         description=(
             "Platform endpoint a sandbox reaches directly. Drives the generated default policy "
             "(when default_policy_path is unset) and is injected into every policy as a mandatory "
@@ -105,11 +109,13 @@ class OpenShellExecutorConfig(BaseModel):
         ),
     )
     serve_workdir: str = Field(
-        default="/home/sandbox",
+        default="~",
         description=(
             "Working directory for the detached serve command. Must be writable by the sandbox "
-            "user: a packaged agent image chowns /workspace to its own 'agent' user, so NAT's "
-            "per-run temp dir is written here instead. Empty string disables the chdir."
+            "identity: a packaged agent image's /workspace contents are owned by its 'agent' user. "
+            "'~' (default) is that identity's home, which differs by compute driver (the docker "
+            "driver runs as the policy's 'sandbox' user, the kubernetes driver as its own uid with "
+            "HOME=/sandbox). Empty string disables the chdir."
         ),
     )
     serve_path: str = Field(

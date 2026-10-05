@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { EvaluateJob, PlatformJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
 import { EvaluationJobBulkDeleteModal } from '@studio/components/evaluation/Jobs/EvaluationJobBulkDeleteModal';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
@@ -28,7 +28,7 @@ describe('EvaluationJobBulkDeleteModal', () => {
     {
       id: 'job-1',
       name: 'job-1',
-      status: PlatformJobStatus.completed,
+      status: HelixJobStatus.completed,
       created_at: '2024-01-01T00:00:00Z',
       spec: {
         metrics: [],
@@ -39,7 +39,7 @@ describe('EvaluationJobBulkDeleteModal', () => {
     {
       id: 'job-2',
       name: 'job-2',
-      status: PlatformJobStatus.active,
+      status: HelixJobStatus.active,
       created_at: '2024-01-02T00:00:00Z',
       spec: {
         metrics: [],

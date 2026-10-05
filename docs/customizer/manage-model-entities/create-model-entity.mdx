@@ -11,10 +11,10 @@ Create a Model Entity that references your FileSet to enable customization jobs.
 ## Prerequisites
 
 - Created a FileSet containing your model checkpoint (refer to [Create a Model FileSet](/documentation/customizer-reference/manage-model-entities/create-a-model-file-set)).
-- Set the `NMP_BASE_URL` environment variable.
+- Set the `NHX_BASE_URL` environment variable.
 
 ```bash
-export NMP_BASE_URL="https://your-nemo-platform-url"
+export NHX_BASE_URL="https://your-nemo-helix-url"
 ```
 
 ---
@@ -23,16 +23,23 @@ export NMP_BASE_URL="https://your-nemo-platform-url"
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
-from nemo_platform._exceptions import ConflictError
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
+from nemo_helix._exceptions import ConflictError
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+customization = Customization.from_client(client)
 
 try:
-    model = client.models.create(
+    model = sdk.models.create(
         workspace="default",
         name="qwen3-1.7b",
         fileset="default/qwen3-1.7b",  # Reference: workspace/fileset-name
@@ -41,7 +48,7 @@ try:
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists")
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
 ```
 
 <Accordion title="Example Response">
@@ -75,7 +82,7 @@ import time
 # Poll until spec is populated
 print("Waiting for model spec to be auto-populated...")
 while True:
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
     if model.spec:
         break
     print(" Still waiting...")
@@ -114,7 +121,7 @@ print(f" Attention Heads: {model.spec.num_attention_heads}")
 Before using in a customization job, verify everything is set up correctly:
 
 ```python
-model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
 
 # Verification checks
 assert model.spec is not None, "Model spec not yet populated - wait longer"
@@ -141,7 +148,7 @@ spec = AutomodelJobInput(
     training={"training_type": "sft", "finetuning_type": "lora"},
     schedule={"epochs": 1},
 )
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name="my-lora-job")
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-lora-job")
 ```
 
 Refer to [create-job](/documentation/customizer-reference/manage-customization-jobs/create-a-customization-job) for complete job creation details.
@@ -158,7 +165,7 @@ After a customization job completes, the output depends on the fine-tuning regim
 For LoRA jobs, you can list adapters attached to a model:
 
 ```python
-model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
 
 if model.adapters:
     print(f"Adapters attached to {model.name}:")

@@ -3,7 +3,7 @@
 
 # nemo-agents plugin
 
-A NeMo Platform plugin for building, registering, deploying, and invoking agents
+A NeMo Helix plugin for building, registering, deploying, and invoking agents
 as first-class managed resources.
 
 The plugin supports two agent flows:
@@ -38,31 +38,56 @@ executes it through the selected harness.
 | Requirement | Notes |
 |---|---|
 | Python | `>=3.11,<3.15` |
-| NeMo Platform | Installed and running with an inference provider and model configured |
+| NeMo Helix | Installed and running with an inference provider and model configured |
 | Model credentials | Set the credentials required by the selected provider; the examples use `NVIDIA_API_KEY` |
-| Harness CLI and authentication | Install and authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
-| NeMo Relay CLI | Required for Claude and Codex; install it with `script/dev-install-fabric.sh` after installing the plugin |
-| Hermes runtime | Required only for Hermes; use a separate Python 3.12 environment and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
+| Harness authentication | Authenticate the selected harness when required; for example, run `codex login` for Codex or complete the Claude CLI login flow |
+| Hermes runtime | Required only for Hermes; install it with `script/dev-install-hermes.sh` and set `ADAPTER_PYTHON` as described in the [Hermes example](examples/nemo-agent-config/README.md#hermes) |
 
-Install the plugin from the repository root, after `uv sync`. This installs
-Fabric, the Relay Python bindings, and the supported harness adapters. The NeMo
-Relay CLI and Hermes harness runtime remain separate as noted above.
+### Harness installation matrix
+
+The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
+DeepAgents, and Hermes adapter implementations. It does not install the
+third-party harness packages. Choose an extra when the harness should share the
+Platform environment:
+
+| Harness selection | `nemo-helix` package expression | Plugin expression (source or local wheel) | Harness packages installed |
+|---|---|---|---|
+| Adapters only | `nemo-helix[nemo-agents-plugin]` | `nemo-agents-plugin` | None |
+| Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
+| Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
+| DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
+| All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
+| Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
+
+Install the Agents plugin and one harness with its namespaced Platform extra.
+For example, install DeepAgents with:
 
 ```bash
-uv pip install -e plugins/nemo-agents/
+uv tool install "nemo-helix[nemo-agents-plugin-deepagents]"
+```
+
+In an activated virtual environment, install the same package expression with:
+
+```bash
+uv pip install "nemo-helix[nemo-agents-plugin-deepagents]"
+```
+
+Plain `pip install` also works in an environment you manage yourself.
+Add `all` to the extra list only when the environment must also run every local
+Platform service: `nemo-helix[all,nemo-agents-plugin-deepagents]`.
+
+The standalone plugin expressions apply when installing the plugin directly,
+including from a source checkout. From the repository root, install one harness
+with:
+
+```bash
+uv sync --package nemo-agents-plugin --extra deepagents
 ```
 
 Verify it loaded:
 
 ```bash
 nemo --help   # should show "agents" under Plugins
-```
-
-If you are using Claude or Codex, install and verify the NeMo Relay CLI:
-
-```bash
-script/dev-install-fabric.sh
-nemo-relay --version
 ```
 
 > **Working directory:** Platform-backed examples use paths relative to the
@@ -85,7 +110,7 @@ nemo-relay --version
 ### Calculator agent demo — DeepAgents + Relay
 
 [`examples/nemo-agent-config/calculator-agent/agent.yaml`](examples/nemo-agent-config/calculator-agent/agent.yaml)
-uses DeepAgents as its harness and routes `nvidia-nemotron-3-nano-30b-a3b`
+uses DeepAgents as its harness and routes `nvidia-nemotron-3-5-lightning-30b-a3b`
 through the Platform Inference Gateway. The agent answers arithmetic and
 numeric comparison requests and records ATIF and ATOF telemetry with NeMo
 Relay.
@@ -96,23 +121,22 @@ Set the NVIDIA API key and local Platform URL from the repository root:
 
 ```bash
 export NVIDIA_API_KEY="<your NVIDIA API key>"
-export NMP_BASE_URL=http://localhost:8080
+export NHX_BASE_URL=http://localhost:8080
 ```
 
-Start ClickHouse for Intake, then set up NeMo Platform without deploying the
-default demo agent:
+Start ClickHouse for Intake, then set up NeMo Helix:
 
 ```bash
 services/intake/scripts/spans/run_clickhouse.sh
-nemo setup --auto --start-services --install-skills --no-deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 Confirm that the Platform is ready before continuing:
 
 ```bash
 curl -fsS --connect-timeout 2 --max-time 5 \
-  "$NMP_BASE_URL/health/ready" >/dev/null || {
-  echo "NeMo Platform is not ready at $NMP_BASE_URL"
+  "$NHX_BASE_URL/health/ready" >/dev/null || {
+  echo "NeMo Helix is not ready at $NHX_BASE_URL"
   exit 1
 }
 ```
@@ -167,21 +191,23 @@ The packaging command runs locally; Platform services are not required.
 |---|---|
 | Docker | A running Docker-compatible daemon |
 | Container dependencies | Install with `uv sync --package nemo-agents-plugin --extra container` from the repository root |
-| A released `nemo-platform` (Fabric only) | Fabric images pin the installed `nemo-platform` version and resolve it from an index. A source checkout reports a setuptools-scm version such as `0.3.0.post402.dev0+062f0ac6e8`, which no index serves, so packaging stops before building. See below. |
+| A released `nemo-helix` (Fabric only) | Fabric images pin the installed `nemo-helix` version and resolve it from an index. A source checkout reports a setuptools-scm version such as `0.3.0.post402.dev0+062f0ac6e8`, which no index serves, so packaging stops before building. See below. |
 
 ##### Packaging a Fabric agent from a source checkout
 
-`nemo agents package` renders `uv pip install "nemo-platform[nemo-agents-plugin]==<version>"`
-into the Fabric image, where `<version>` is whatever is installed on the build
-host. A checkout reports something like `0.3.0.post402.dev0+062f0ac6e8`, which is
+`nemo agents package` renders a release-pinned `nemo-helix` requirement with
+the extra for `default_harness`, such as
+`nemo-helix[nemo-agents-plugin-deepagents]==<version>`. Here, `<version>` is
+whatever is installed on the build host. A checkout reports something like
+`0.3.0.post402.dev0+062f0ac6e8`, which is
 both a developmental release and a local build identifier — neither of which a
 public index serves — so the command fails immediately:
 
 ```text
-Error: The installed nemo-platform version '0.3.0.post402.dev0+062f0ac6e8' carries
+Error: The installed nemo-helix version '0.3.0.post402.dev0+062f0ac6e8' carries
 a local build identifier and is a developmental release, so no package index serves
 it. Fabric packaging pins this exact version inside the image, so the build would
-fail while resolving it. Install a released nemo-platform to package an agent, or
+fail while resolving it. Install a released nemo-helix to package an agent, or
 set NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION=1 if your index serves this
 version.
 ```
@@ -191,7 +217,7 @@ The image installs that wheel instead of resolving the pin, so the version never
 has to be one an index can serve:
 
 ```bash
-uv build --package nemo-platform --wheel --out-dir dist && \
+uv build --package nemo-helix --wheel --out-dir dist && \
 NEMO_AGENTS_WHEEL=LATEST nemo agents package \
   --agent plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml \
   --tag calculator-agent:local
@@ -295,7 +321,7 @@ through Studio or `nemo agents create`, the source of truth is the
 `{agent}-spec` fileset instead, and the `agents.package` job builds from that:
 
 ```bash
-curl -X POST "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
+curl -X POST "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
   -H 'Content-Type: application/json' \
   -d '{"spec": {"agent": "my-agent", "tag": "my-agent:1.0"}}'
 ```
@@ -303,15 +329,15 @@ curl -X POST "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
 Poll it like any other platform job:
 
 ```bash
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/status"
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/logs"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/status"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/logs"
 ```
 
 The tag to hand to `nemo agents deploy --image` is published as a
 `package_result` job result:
 
 ```bash
-curl "$NMP_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/results"
+curl "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package/<job>/results"
 ```
 
 ```json
@@ -450,7 +476,7 @@ Additional environment variables:
 
 | Variable | Effect |
 |---|---|
-| `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION` | Set to `1` to let Fabric packaging pin an unpublished `nemo-platform` version (a local build identifier or a `.dev` release). Use only when the build's index serves that version. Does not apply when `nemo-platform` is not installed at all. |
+| `NEMO_AGENTS_ALLOW_UNPUBLISHED_CONTRACT_VERSION` | Set to `1` to let Fabric packaging pin an unpublished `nemo-helix` version (a local build identifier or a `.dev` release). Use only when the build's index serves that version. Does not apply when `nemo-helix` is not installed at all. |
 
 There are no compatibility aliases. `NAT_VERSION` remains available only for
 NAT workflow packaging.
@@ -492,7 +518,7 @@ Agent-specific labels are:
 | Label | Platform agent value |
 |---|---|
 | `com.nemo.agent.id` | Content-addressed 12-character ID |
-| `com.nemo.agent.framework` | `nemo_platform_agent` |
+| `com.nemo.agent.framework` | `nemo_helix_agent` |
 | `com.nemo.agent.contract-version` | Release-matched packaging contract |
 
 NAT images add a NAT version label as described in the NAT-specific packaging
@@ -513,14 +539,16 @@ installation differs:
 
 | Mode | Trigger | Install strategy |
 |---|---|---|
-| Config-only | No `--pyproject` | Install the release-matched `nemo-platform[nemo-agents-plugin]` runtime |
-| Project | `--pyproject` provided | Install the release-matched runtime and the project together |
+| Config-only | No `--pyproject` | Install the release-matched Agents plugin and the configured `default_harness` |
+| Project | `--pyproject` provided | Install that runtime and the project together |
 
-The image includes the supported harness adapters and dependencies, matching
-NeMo Relay CLI and Python binding version `0.7.3`, a non-root `agent` user, and
-the packaged agent server on port `8000`. The Hermes adapter is installed, but
-the Hermes harness runtime remains excluded until its Python dependency
-constraint is resolved.
+The image installs only `default_harness`; other entries under `harnesses` are
+configuration alternatives and are not available in the immutable image.
+Claude, Codex, and DeepAgents use their corresponding `nemo-helix` extras.
+Hermes uses the adapter-only Platform extra and installs the pinned Hermes
+source plus matching Fabric adapter in an isolated Python 3.14 environment.
+Every image runs as a non-root `agent` user and serves the packaged agent on
+port `8000`.
 
 #### Deploy the packaged calculator image
 
@@ -579,10 +607,10 @@ nemo agents logs --agent calculator-agent --path
 Logs are stored under the Platform user-data directory:
 
 ```text
-$NMP_DATA_DIR/agents/system/<workspace>/<deployment-name>.log
+$NHX_DATA_DIR/agents/system/<workspace>/<deployment-name>.log
 ```
 
-`$NMP_DATA_DIR` resolves first from the explicit environment variable, then
+`$NHX_DATA_DIR` resolves first from the explicit environment variable, then
 from `$XDG_DATA_HOME/nemo`, and finally to `~/.local/share/nemo`. The CLI must
 run on the same host as the Platform service to read these local files.
 
@@ -594,7 +622,7 @@ to hyphens:
 
 | Provider model name | IGW entity name |
 |---|---|
-| `nvidia/nemotron-3-nano-30b-a3b` | `nvidia-nemotron-3-nano-30b-a3b` |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | `nvidia-nemotron-3-5-lightning-30b-a3b` |
 
 The calculator config therefore declares:
 
@@ -602,7 +630,7 @@ The calculator config therefore declares:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 ```
 
@@ -658,7 +686,7 @@ nat --help    # should show run, eval, optimize, start, …
 ```
 
 > **Working directory:** All example commands that reference `examples/` use
-> paths relative to the plugin directory.  Run them from `plugins/nemo-agents/`:
+> paths relative to the plugin directory. Run them from `plugins/nemo-agents/`:
 >
 > ```bash
 > cd plugins/nemo-agents/
@@ -668,7 +696,8 @@ nat --help    # should show run, eval, optimize, start, …
 
 ### ReAct agent demo — Wikipedia search + datetime tools
 
-`examples/react-agent.yml` uses `meta/llama-3.1-70b-instruct` with:
+`examples/react-agent/react-agent.yml` uses the model selected by
+`NEMO_DEFAULT_MODEL` with:
 
 - `wiki_search` — searches Wikipedia (no API key needed)
 - `current_datetime` — returns current UTC time
@@ -682,7 +711,7 @@ automatically into the agent config — you only need to:
 
 #### NAT Step 1 — Start the platform
 
-Run this in a **dedicated terminal** — it stays in the foreground.  Use a
+Run this in a **dedicated terminal** — it stays in the foreground. Use a
 separate terminal for all subsequent steps.
 
 ```bash
@@ -695,7 +724,7 @@ In a new terminal, export the base URL once so all subsequent `nemo` commands
 pick it up automatically:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 cd plugins/nemo-agents/
 ```
 
@@ -723,21 +752,20 @@ nemo wait inference provider nvidia-build
 #### NAT Step 3 — Create and deploy the agent
 
 ```bash
-# Register the agent config with the platform
+# The config resolves this model when the agent is created.
+nemo models list
+export NEMO_DEFAULT_MODEL=your-model-entity-name
 nemo agents create \
     --name react-agent \
     --agent-config examples/react-agent/react-agent.yml
 
-# Deploy it.  ``deploy`` waits for the spawned subprocess to reach a
-# terminal state (``running`` or ``failed``) by default and exits 0 only
-# when the agent is actually serving — so the exit code reflects the
-# real outcome instead of just "the API call succeeded".
+# Deploy waits for the agent to reach a running or failed state.
 nemo agents deploy --agent react-agent
 
 # Container mode (docker): requires the nemo-deployments controller plus a
 # configured docker executor (see agents.deployments / deployments.executors).
 # Build an image first, then deploy with that tag:
-#   nemo agents package --agent-config examples/react-agent/react-agent.yml --tag react-agent:local
+#   nemo agents package --agent examples/react-agent/react-agent.yml --tag react-agent:local
 #   nemo agents deploy --agent react-agent --mode docker --image react-agent:local
 #
 # --mode k8s needs a k8s executor and a registry-reachable image; in-cluster
@@ -776,19 +804,8 @@ nemo agents invoke \
     --input "Who invented the telephone? Also, what time is it right now?"
 ```
 
-Expected response:
-```json
-{
-  "choices": [{
-    "message": {
-      "content": "Alexander Graham Bell invented the telephone. The current time is 2026-03-23 23:17:08 +0000.",
-      "role": "assistant"
-    }
-  }]
-}
-```
-
 The gateway URL is:
+
 ```
 http://127.0.0.1:8080/apis/agents/v2/workspaces/default/agents/react-agent/-/v1/chat/completions
 ```
@@ -800,8 +817,8 @@ stopped when the response or response stream completes. To retain runtime
 context across turns, send a stable session ID in that header; the registered
 runtime then follows the Platform session lifecycle.
 
-The agent is still running — continue to the [Evaluation](#evaluation) section
-below, or see [Cleanup](#cleanup-optional) to tear everything down.
+The agent is still running — continue to [Evaluation](#evaluation) below, or
+see [Cleanup](#cleanup-optional) to tear everything down.
 
 ---
 
@@ -811,53 +828,17 @@ Evaluation delegates to `nat eval`, which sends dataset questions to the
 agent's `/generate/full` endpoint and scores responses with a judge LLM.
 
 The agent must be deployed and running (see NAT Step 3 above) before evaluating.
+The supplied config pins separate agent and judge models. Check that both
+are available in your workspace and adjust their `model_name` values if needed.
 
 ```bash
 nemo agents evaluate \
-    --eval-config examples/test-eval.yml \
+    --eval-config examples/react-agent/react-eval.yml \
     --agent react-agent
 ```
 
 The `--agent` flag resolves the running deployment endpoint automatically and
 passes it to `nat eval --endpoint`.
-
-Expected output:
-```
-=== EVALUATION SUMMARY ===
-Workflow Status: COMPLETED (workflow_output.json)
-Total Runtime: ~1.8s
-
-Per evaluator results:
-| Evaluator   |   Avg Score | Output File         |
-|-------------|-------------|---------------------|
-| runtime     |        ~0.9 | runtime_output.json |
-```
-
-A non-zero `Avg Score` and `Total Runtime` confirms requests reached the agent
-successfully.  (The `avg_workflow_runtime` metric reports average seconds per
-request, so the score varies with network latency.)
-
-#### LLM-judge evaluation (requires a judge LLM)
-
-`examples/calculator-agent/calculator-eval.yml` uses `tunable_rag_evaluator`
-with an LLM judge. The judge's `model_name` is `${NEMO_DEFAULT_MODEL}`, which
-resolves to whichever model your platform context has set as the default
-(see `nemo_platform.config.get_context().default_model`); `base_url` and
-`api_key` are auto-injected by the platform to route through the Inference
-Gateway. Set the env var, or edit `llms.judge_llm.model_name` to pin a
-specific VirtualModel registered in your workspace, then run:
-
-```bash
-export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b   # or any registered VirtualModel
-nemo agents evaluate \
-    --eval-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-eval.yml \
-    --agent calculator-agent
-```
-
-The job pre-flights every LLM `model_name` against
-`sdk.inference.virtual_models.retrieve` before invoking `nat eval`, so a
-missing or mistyped model fails fast with a message naming the model and
-suggesting recovery options instead of an opaque subprocess error.
 
 ---
 
@@ -918,7 +899,7 @@ runtime version.
 Agent configs are standard NAT workflow YAML files. The platform stores them
 as `nat-workflow-v1` entities. All NAT component types are supported.
 
-**ReAct agent with tools** (`examples/react-agent.yml`):
+**ReAct agent with tools** (`examples/react-agent/react-agent.yml`):
 
 ```yaml
 functions:
@@ -931,7 +912,7 @@ llms:
   llm:
     _type: openai
     api_key: not-used            # injected by platform at deploy time
-    model_name: nvidia-nemotron-3-nano-30b-a3b  # IGW entity name
+    model_name: ${NEMO_DEFAULT_MODEL}
     temperature: 0.0
 
 workflow:
@@ -950,7 +931,7 @@ it absent so the injected gateway URL takes effect.
 
 The injected URL format:
 ```
-{NMP_BASE_URL}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1
+{NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1
 ```
 
 ---
@@ -986,6 +967,6 @@ This can cut 20--40 seconds off the first deploy.
   gateway handles the translation).
 
 - **IPv6 / localhost**: Start the platform with
-  `NMP_BASE_URL=http://127.0.0.1:8080` to ensure agent subprocess processes
+  `NHX_BASE_URL=http://127.0.0.1:8080` to ensure agent subprocess processes
   can reach the platform. Python's `httpx` resolves bare `localhost` to IPv6
   `::1` on macOS, which does not match an IPv4-only listener.

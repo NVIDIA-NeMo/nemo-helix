@@ -21,18 +21,18 @@ the module-scoped fixture setup that triggers these imports.
 import os
 
 import pytest
-from nmp.core.inference_gateway.testing.fixtures import (
+from nhx.core.inference_gateway.testing.fixtures import (
     _igw_app_context,
     _igw_loopback_context,
     igw_loopback_harness,
     igw_plugin_harness,
 )
-from nmp.testing.client import ServiceFactory
+from nhx.testing.client import ServiceFactory
 
 # Must precede the ``nemoguardrails``-pulling import below.
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
-from nmp.guardrails.service import GuardrailsService  # noqa: E402
+from nhx.guardrails.service import GuardrailsService  # noqa: E402
 
 __all__ = [
     "_igw_app_context",

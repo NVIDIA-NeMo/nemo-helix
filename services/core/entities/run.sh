@@ -24,7 +24,7 @@ uv run --frozen python -m entities.entrypoint migrate &
 MIGRATE_PID=$!
 wait $MIGRATE_PID
 
-uv run --frozen nmp-core infra --target entities-api &
+uv run --frozen nhx-core infra --target entities-api &
 API_PID=$!
 
 # Wait for API to be healthy

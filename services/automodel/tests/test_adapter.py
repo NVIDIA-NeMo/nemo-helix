@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nemo_automodel_plugin.schema import AutomodelJobOutput
-from nmp.automodel.adapter import automodel_spec_to_compiler_output
-from nmp.automodel.api.v2.jobs.schemas import DeploymentParams, DistillationTraining, SFTTraining
-from nmp.customization_common.integrations import collect_integration_secret_envs
+from nhx.automodel.adapter import automodel_spec_to_compiler_output
+from nhx.automodel.api.v2.jobs.schemas import DeploymentParams, DistillationTraining, SFTTraining
+from nhx.customization_common.integrations import collect_integration_secret_envs
 
 
 def test_adapter_sft() -> None:
@@ -68,6 +68,7 @@ def test_adapter_plumbs_retrieval_spec() -> None:
                     "train_n_passages": 7,
                     "query_prefix": "query:",
                     "passage_prefix": "passage:",
+                    "do_distributed_inbatch_negative": True,
                     "export": {"dimensions": True, "opset": 18},
                 },
             },
@@ -79,6 +80,7 @@ def test_adapter_plumbs_retrieval_spec() -> None:
     assert spec.training.retrieval.train_n_passages == 7
     assert spec.training.retrieval.query_prefix == "query:"
     assert spec.training.retrieval.passage_prefix == "passage:"
+    assert spec.training.retrieval.do_distributed_inbatch_negative is True
     assert spec.training.retrieval.export is not None
     assert spec.training.retrieval.export.dimensions is True
     assert spec.training.retrieval.export.opset == 18

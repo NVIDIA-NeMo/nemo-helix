@@ -10,17 +10,17 @@ import type { FC } from 'react';
 /**
  * Two vocabularies on purpose. "Deployed" describes the deployment itself, which is
  * what a top-level row has. An adapter never has its own deployment — it is loaded
- * into the one serving its base model — so it reads "Served" / "Not served".
+ * into the one serving its base model — so it reads "Active" / "Not active".
  *
  * No icons, matching `CustomizationStatusBadge` in this same table.
  */
 const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
   deployed: { label: 'Deployed', color: 'green' },
-  served: { label: 'Served', color: 'green' },
+  active: { label: 'Active', color: 'green' },
   available: { label: 'Available', color: 'teal' },
   deploying: { label: 'Deploying', color: 'blue' },
   deleting: { label: 'Deleting', color: 'yellow' },
-  'not-served': { label: 'Not served', color: 'yellow' },
+  'not-active': { label: 'Not active', color: 'yellow' },
   failed: { label: 'Failed', color: 'red' },
   unavailable: { label: 'Unavailable', color: 'gray' },
   'not-deployed': { label: 'Not deployed', color: 'gray' },
@@ -30,10 +30,12 @@ const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
 function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): string {
   switch (state.kind) {
     case 'adapter-not-loaded':
-      return 'not-served';
+      return 'not-active';
 
     case 'not-deployed':
-      return 'not-deployed';
+      // Nothing serves it. An adapter still has no deployment of its own, so it
+      // keeps the adapter vocabulary rather than switching to "Not deployed".
+      return isAdapter ? 'not-active' : 'not-deployed';
 
     case 'unknown':
       return 'unknown';
@@ -51,7 +53,7 @@ function toStatusKey(state: DeploymentIndicatorState, isAdapter: boolean): strin
 
       switch (state.status) {
         case ModelDeploymentStatus.READY:
-          return isAdapter ? 'served' : 'deployed';
+          return isAdapter ? 'active' : 'deployed';
         case ModelDeploymentStatus.CREATED:
         case ModelDeploymentStatus.PENDING:
           return 'deploying';

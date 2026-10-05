@@ -1,9 +1,0 @@
-# This directory contains custom CLI command implementations that override generated commands.
-# 
-# To use an override:
-# 1. Place your custom command file here (e.g., secrets.py)
-# 2. Add it to CLI_BUILD_CONFIG["overrides"] in config.py
-# 3. Run generate-cli to copy it to the target location
-
-
-

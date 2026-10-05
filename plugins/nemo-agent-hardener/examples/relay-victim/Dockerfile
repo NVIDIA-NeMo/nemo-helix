@@ -4,7 +4,7 @@
 # The image for a Fabric agent, owned by its author rather than rendered.
 #
 # `nemo agents package` can render one, but a rendered Dockerfile pins the packaging machine's own
-# nemo-platform version — from a git checkout that is something like `0.4.0.post96.dev0+789b8466e`,
+# nemo-helix version — from a git checkout that is something like `0.4.0.post96.dev0+789b8466e`,
 # which no index serves — and a fixed nemo-relay an agent cannot ask to change. Registering this file
 # beside agent.yaml uploads it with the bundle, and Agent Hardener reads it back in preference.
 #
@@ -22,23 +22,23 @@ WORKDIR /workspace
 
 # The Fabric entrypoint, its DeepAgents adapter, and the MCP SDK the tool server uses.
 #
-# nemo-relay is pinned <0.8 because the Fabric adapters cap it there. That is also why the uploaded
-# plugins.toml uses observability schema 3: 0.7.3 rejects 4 outright, and a rejected schema fails the
-# whole plugin initialize() — taking the guardrail component in the same file down with it.
+# nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10. Keep the
+# uploaded plugins.toml on a schema this Relay accepts: a rejected schema fails the whole plugin
+# initialize() — taking the guardrail component in the same file down with it.
 #
 # No `RUN --mount=type=cache`: OpenShell builds through the Docker Engine API's classic builder,
 # which rejects BuildKit-only syntax. Agent Hardener strips these flags anyway; not writing them is one
 # less surprise.  [war-game]
 # nemo-fabric and the harness adapter are named explicitly: the published
-# nemo-platform[nemo-agents-plugin] ships nemo_agents_plugin.fabric.server but does not pull the
+# nemo-helix[nemo-agents-plugin] ships nemo_agents_plugin.fabric.server but does not pull the
 # Fabric runtime it imports, so the entrypoint dies at startup with
 # `ModuleNotFoundError: No module named 'nemo_fabric'`.
 RUN python -m venv /workspace/.venv \
  && /workspace/.venv/bin/pip install --no-cache-dir \
-      "nemo-platform[nemo-agents-plugin]" \
+      "nemo-helix[nemo-agents-plugin]" \
       "nemo-fabric" \
       "nemo-fabric-adapters-deepagents" \
-      "nemo-relay>=0.7.2,<0.8" \
+      "nemo-relay>=0.9.3,<0.10" \
       "mcp[cli]"
 
 COPY agent.yaml /workspace/agent.yaml

@@ -8,13 +8,11 @@ import nemo_data_designer_plugin.testing.utils as u
 import pytest
 from data_designer_nemo.nemotron_personas import WORKSPACE, get_resource_name_for_locale
 from nemo_data_designer_plugin.cli import personas as personas_module
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.storage_config import NGCStorageConfig
-from nemo_platform_plugin.secrets.client import SecretsClient
-from nemo_platform_plugin.secrets.types import PlatformSecretCreateRequest
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.storage_config import NGCStorageConfig
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from pydantic import SecretStr
 
 pytestmark = pytest.mark.integration
@@ -23,8 +21,8 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def mock_ngc_client() -> Generator[dict[str, Mock]]:
     with (
-        patch("nmp.core.files.app.backends.ngc.Client") as mock_client_cls,
-        patch("nmp.core.files.app.backends.ngc.ResourceAPI") as mock_resource_api_cls,
+        patch("nhx.core.files.app.backends.ngc.Client") as mock_client_cls,
+        patch("nhx.core.files.app.backends.ngc.ResourceAPI") as mock_resource_api_cls,
     ):
         mock_client = Mock()
         mock_resource_api = Mock()
@@ -47,21 +45,14 @@ def mock_ngc_client() -> Generator[dict[str, Mock]]:
 
 
 @pytest.fixture
-def sdk(monkeypatch: pytest.MonkeyPatch, mock_ngc_client: dict[str, Mock]) -> Generator[NeMoPlatform]:
-    with u.make_mock_client_context() as client_context:
-        monkeypatch.setenv("NGC_API_KEY", "nvapi-abc123")
-        yield client_context.sdk
-        monkeypatch.delenv("NGC_API_KEY")
-
-
-@pytest.fixture
-def cli_sdk(monkeypatch: pytest.MonkeyPatch, sdk: NeMoPlatform) -> NeMoPlatform:
-    client = client_from_platform(sdk, NemoClient)
+def cli_platform(monkeypatch: pytest.MonkeyPatch, mock_ngc_client: dict[str, Mock], client: NemoClient) -> None:
+    """Point the personas CLI at the in-process platform, with an NGC key in the environment."""
+    monkeypatch.setenv("NGC_API_KEY", "nvapi-abc123")
     monkeypatch.setattr(personas_module.NemoClient, "from_config", staticmethod(lambda: client))
-    return sdk
 
 
-def test_make_fileset_creates_requested_locale_with_existing_secret(cli_sdk: NeMoPlatform) -> None:
+@pytest.mark.usefixtures("cli_platform")
+def test_make_fileset_creates_requested_locale_with_existing_secret(files_client: FilesClient) -> None:
     result = u.invoke_cli(
         [
             "personas",
@@ -74,17 +65,17 @@ def test_make_fileset_creates_requested_locale_with_existing_secret(cli_sdk: NeM
     )
 
     assert result.exit_code == 0, result.output
-    files = client_from_platform(cli_sdk, FilesClient)
-    filesets_page = files.list_filesets(workspace=WORKSPACE)
+    filesets_page = files_client.list_filesets(workspace=WORKSPACE)
     assert [fileset.name for fileset in filesets_page.items()] == [get_resource_name_for_locale("en_US")]
 
-    fileset = files.get_fileset(name=get_resource_name_for_locale("en_US"), workspace=WORKSPACE).data()
+    fileset = files_client.get_fileset(name=get_resource_name_for_locale("en_US"), workspace=WORKSPACE).data()
     assert isinstance(fileset.storage, NGCStorageConfig)
     assert fileset.storage.api_key_secret.root == "system/ngc-api-key"
 
 
+@pytest.mark.usefixtures("cli_platform")
 def test_make_fileset_creates_secret_from_env_then_fileset(
-    monkeypatch: pytest.MonkeyPatch, cli_sdk: NeMoPlatform
+    monkeypatch: pytest.MonkeyPatch, files_client: FilesClient, secrets_client: SecretsClient
 ) -> None:
     monkeypatch.setenv("MY_NGC_API_KEY", "nvapi-from-env")
 
@@ -102,11 +93,10 @@ def test_make_fileset_creates_secret_from_env_then_fileset(
     )
 
     assert result.exit_code == 0, result.output
-    secret = client_from_platform(cli_sdk, SecretsClient).access_secret(name="my-ngc-key", workspace="system").data()
+    secret = secrets_client.access_secret(name="my-ngc-key", workspace="system").data()
     assert secret.value == "nvapi-from-env"
 
-    files = client_from_platform(cli_sdk, FilesClient)
-    fileset = files.get_fileset(name=get_resource_name_for_locale("en_US"), workspace=WORKSPACE).data()
+    fileset = files_client.get_fileset(name=get_resource_name_for_locale("en_US"), workspace=WORKSPACE).data()
     assert isinstance(fileset.storage, NGCStorageConfig)
     assert fileset.storage.api_key_secret.root == "system/my-ngc-key"
 
@@ -163,12 +153,13 @@ def test_make_fileset_bare_secret_name() -> None:
     assert "WORKSPACE/NAME" in result.output
 
 
+@pytest.mark.usefixtures("cli_platform")
 def test_make_fileset_create_secret_conflict_does_not_create_fileset(
-    monkeypatch: pytest.MonkeyPatch, cli_sdk: NeMoPlatform
+    monkeypatch: pytest.MonkeyPatch, files_client: FilesClient, secrets_client: SecretsClient
 ) -> None:
-    client_from_platform(cli_sdk, SecretsClient).create_secret(
+    secrets_client.create_secret(
         workspace="system",
-        body=PlatformSecretCreateRequest(name="my-ngc-key", value=SecretStr("nvapi-existing")),
+        body=HelixSecretCreateRequest(name="my-ngc-key", value=SecretStr("nvapi-existing")),
     )
     monkeypatch.setenv("MY_NGC_API_KEY", "nvapi-from-env")
 
@@ -187,12 +178,12 @@ def test_make_fileset_create_secret_conflict_does_not_create_fileset(
 
     assert result.exit_code == 1
     assert "already exists" in result.output
-    files = client_from_platform(cli_sdk, FilesClient)
-    assert list(files.list_filesets(workspace=WORKSPACE).items()) == []
+    assert list(files_client.list_filesets(workspace=WORKSPACE).items()) == []
 
 
+@pytest.mark.usefixtures("cli_platform")
 def test_make_fileset_create_secret_internal_error_surfaces_clearly(
-    monkeypatch: pytest.MonkeyPatch, cli_sdk: NeMoPlatform
+    monkeypatch: pytest.MonkeyPatch, files_client: FilesClient
 ) -> None:
     monkeypatch.setenv("MY_NGC_API_KEY", "nvapi-from-env")
 
@@ -220,11 +211,11 @@ def test_make_fileset_create_secret_internal_error_surfaces_clearly(
     assert result.exit_code == 1
     assert "Failed to create secret" in result.output
     assert "secrets backend exploded" in result.output
-    files = client_from_platform(cli_sdk, FilesClient)
-    assert list(files.list_filesets(workspace=WORKSPACE).items()) == []
+    assert list(files_client.list_filesets(workspace=WORKSPACE).items()) == []
 
 
-def test_make_fileset_is_idempotent_when_fileset_already_exists(cli_sdk: NeMoPlatform) -> None:
+@pytest.mark.usefixtures("cli_platform")
+def test_make_fileset_is_idempotent_when_fileset_already_exists(files_client: FilesClient) -> None:
     # First invocation creates the fileset.
     first = u.invoke_cli(
         [
@@ -255,13 +246,13 @@ def test_make_fileset_is_idempotent_when_fileset_already_exists(cli_sdk: NeMoPla
     assert second.exit_code == 0, second.output
     assert "already exists" in second.output
 
-    files = client_from_platform(cli_sdk, FilesClient)
-    assert [fileset.name for fileset in files.list_filesets(workspace=WORKSPACE).items()] == [
+    assert [fileset.name for fileset in files_client.list_filesets(workspace=WORKSPACE).items()] == [
         get_resource_name_for_locale("en_US")
     ]
 
 
-def test_make_fileset_create_fileset_internal_error_surfaces_clearly(cli_sdk: NeMoPlatform) -> None:
+@pytest.mark.usefixtures("cli_platform")
+def test_make_fileset_create_fileset_internal_error_surfaces_clearly(files_client: FilesClient) -> None:
     error_message = "kaboom-fileset-error"
 
     mock_files = Mock()
@@ -282,5 +273,4 @@ def test_make_fileset_create_fileset_internal_error_surfaces_clearly(cli_sdk: Ne
     assert result.exit_code == 1
     assert "Failed to create fileset" in result.output
     assert error_message in result.output
-    files = client_from_platform(cli_sdk, FilesClient)
-    assert list(files.list_filesets(workspace=WORKSPACE).items()) == []
+    assert list(files_client.list_filesets(workspace=WORKSPACE).items()) == []

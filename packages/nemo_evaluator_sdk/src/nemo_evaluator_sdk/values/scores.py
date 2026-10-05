@@ -289,12 +289,15 @@ class ScoreParserJSON(ScoreParser):
             return MetricScore(name=self.score.name, value=float("nan"))
 
         if self.rubric_mapping:
+            # A rubric label is a string; anything else (a list or object included) matches no label.
+            if not isinstance(score, str):
+                return MetricScore(name=self.score.name, value=float("nan"))
             return self._get_rubric_score(score)
-
-        if isinstance(score, str):
-            return MetricScore(name=self.score.name, value=float("nan"))
 
         if isinstance(score, bool):
             score = 1.0 if score else 0.0
+
+        if not isinstance(score, int | float):
+            return MetricScore(name=self.score.name, value=float("nan"))
 
         return MetricScore(name=self.score.name, value=score)

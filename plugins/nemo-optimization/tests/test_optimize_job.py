@@ -4,29 +4,39 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator, cast
+from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 import yaml
-from nemo_optimization.jobs.optimize import OptimizeJob
-from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.errors import LocalRunError
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.exceptions import (
-    PlatformJobCompilationError,
-    PlatformJobDependencyUnavailableError,
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.errors import LocalRunError
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.exceptions import (
+    HelixJobCompilationError,
+    HelixJobDependencyUnavailableError,
 )
-from nemo_platform_plugin.jobs.execution_profiles import (
+from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
-from nemo_platform_plugin.refs import FilesetRef
+from nemo_helix_plugin.refs import FilesetRef
+from nemo_optimization.backends.protocol import (
+    OptimizationBackendCapabilities,
+    OptimizationPhase,
+    OptimizationPhaseRequest,
+    OptimizationPhaseResult,
+    OptimizationPhaseStatus,
+)
+from nemo_optimization.jobs.optimize import OptimizeJob
+from nemo_optimization.schemas.optimize import FILESET_REQUIRED, OptimizeSpec, OptimizeSubmitSpec
 from pydantic import ValidationError
 
 FABRIC_AGENT = {
@@ -97,7 +107,7 @@ async def test_compile_stamps_the_fileset_ref_into_the_step_config() -> None:
 @pytest.mark.asyncio
 async def test_compile_requires_a_staged_fileset() -> None:
     spec = OptimizeSpec(optimize_config="/abs/optimize.yml")
-    with pytest.raises(PlatformJobCompilationError, match="prepare-fileset"):
+    with pytest.raises(HelixJobCompilationError, match="prepare-fileset"):
         await compile_spec(spec)
 
 
@@ -159,14 +169,14 @@ async def test_compile_prefers_the_subprocess_profile() -> None:
 async def test_compile_falls_back_to_the_cpu_profile_with_a_task_image() -> None:
     with (
         profiles(CPU_PROFILE),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec())
 
     executor = next(iter(platform_spec["steps"]))["executor"]
     assert executor["provider"] == "cpu"
     assert executor["profile"] == "default"
-    assert executor["container"]["image"] == "reg.example/nmp-cpu-tasks:test"
+    assert executor["container"]["image"] == "reg.example/nhx-tasks:test"
     assert [*executor["container"]["entrypoint"], *executor["container"]["command"]] == [
         "python",
         "-m",
@@ -182,7 +192,7 @@ async def test_compile_matches_the_requested_profile_name() -> None:
             SUBPROCESS_PROFILE,
             DockerJobExecutionProfile(provider="cpu", profile="high-mem", config=DockerJobExecutionProfileConfig()),
         ),
-        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nmp-cpu-tasks:test"),
+        patch("nemo_optimization.jobs.optimize.get_qualified_image", return_value="reg.example/nhx-tasks:test"),
     ):
         platform_spec = await compile_spec(staged_spec(), profile="high-mem")
 
@@ -194,14 +204,14 @@ async def test_compile_matches_the_requested_profile_name() -> None:
 @pytest.mark.asyncio
 async def test_compile_reports_available_profiles_when_none_match() -> None:
     with profiles(DockerJobExecutionProfile(provider="gpu", profile="a100", config=DockerJobExecutionProfileConfig())):
-        with pytest.raises(PlatformJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
+        with pytest.raises(HelixJobCompilationError, match=r"Available profiles: \['gpu/a100'\]"):
             await compile_spec(staged_spec())
 
 
 @pytest.mark.asyncio
 async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     import httpx
-    from nemo_platform_plugin.client.errors import NemoTransportError
+    from nemo_helix_plugin.client.errors import NemoTransportError
 
     async def _boom() -> Any:
         raise NemoTransportError(httpx.ConnectError("connection refused", request=httpx.Request("GET", "http://x")))
@@ -211,7 +221,7 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
     client.get_execution_profiles = _boom
     with (
         patch("nemo_optimization.jobs.optimize.client_from_platform", return_value=client),
-        pytest.raises(PlatformJobDependencyUnavailableError, match="temporarily unavailable"),
+        pytest.raises(HelixJobDependencyUnavailableError, match="temporarily unavailable"),
     ):
         await compile_spec(staged_spec())
 
@@ -280,7 +290,9 @@ def test_run_expands_env_vars_in_the_config(tmp_path: Path, ctx: JobContext, mon
     assert dispatch.call_args.kwargs["optimize_config"]["models"]["default"]["model"] == "demo-model"
 
 
-def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobContext) -> None:
+def test_run_resolves_platform_agent_before_dispatch(
+    tmp_path: Path, ctx: JobContext, make_platform_client: Callable[..., NemoClient]
+) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
     platform_agent = {
@@ -311,14 +323,10 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         },
     }
 
-    class _StubAgents:
-        def get(self, *, name: str, workspace: str) -> dict[str, Any]:
-            assert name == "react-agent"
-            assert workspace == "default"
-            return {"config": platform_agent}
-
-    class _StubSDK:
-        agents = _StubAgents()
+    def _serve_agent(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/agents/v2/workspaces/default/agents/react-agent"
+        return httpx.Response(200, json={"name": "react-agent", "workspace": "default", "config": platform_agent})
 
     with patch(
         "nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", return_value={"status": "completed"}
@@ -326,7 +334,7 @@ def test_run_resolves_platform_agent_before_dispatch(tmp_path: Path, ctx: JobCon
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "agent": "react-agent"},
             ctx=ctx,
-            sdk=cast(NeMoPlatform, _StubSDK()),
+            sdk=make_platform_client(_serve_agent),
         )
 
     agent_config = dispatch.call_args.kwargs["agent_config"]
@@ -357,11 +365,11 @@ def bundle_sdk(
     *,
     downloaded: dict[str, Any] | None = None,
     uploaded: dict[str, Any] | None = None,
-) -> Iterator[NeMoPlatform]:
+) -> Iterator[NemoClient]:
     """Patch fileset staging helpers so typed-manager calls materialize *bundle*."""
 
     bundle = bundle or {}
-    sdk = MagicMock(spec=NeMoPlatform)
+    sdk = MagicMock(spec=NemoClient)
     files_client = MagicMock()
 
     def _manager(
@@ -414,7 +422,7 @@ def bundle_sdk(
         patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=files_client),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
     ):
-        yield cast(NeMoPlatform, sdk)
+        yield cast(NemoClient, sdk)
 
 
 def test_run_stages_the_config_from_the_fileset(ctx: JobContext) -> None:
@@ -522,7 +530,7 @@ def test_run_rejects_a_staged_config_missing_from_the_fileset(ctx: JobContext) -
 
 
 def test_run_rejects_a_staged_config_without_an_sdk(ctx: JobContext) -> None:
-    with pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"):
+    with pytest.raises(LocalRunError, match="requires a sync platform client"):
         OptimizeJob().run(
             {
                 "optimize_config": "optimize.yml",
@@ -700,6 +708,92 @@ def test_run_does_not_publish_when_study_fails(tmp_path: Path, ctx: JobContext) 
     assert uploaded == {}
 
 
+def test_run_publishes_intermediate_artifacts_when_prompt_phase_fails(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls, fail_prompt=True)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "intermediate_numeric_payload.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+@pytest.mark.integration
+def test_run_publishes_preflight_failure_when_real_prompt_config_raises(
+    tmp_path: Path,
+    ctx: JobContext,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config(prompt_overrides={"population_size": 0}))
+    dest = tmp_path / "published"
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "failed"
+    assert [phase["status"] for phase in result["phases"]] == ["skipped", "failed"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "phase_results.json").is_file()
+    assert not (published / "intermediate_numeric_config.yml").exists()
+    assert not (published / "intermediate_numeric_payload.json").exists()
+    assert (published / "prompt_phase_failure.json").is_file()
+    assert not (published / "final_optimized_config.yml").exists()
+
+
+def test_run_publishes_final_artifacts_when_multi_phase_succeeds(
+    tmp_path: Path,
+    ctx: JobContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    optimize_config = write_config(tmp_path, _multi_phase_config())
+    dest = tmp_path / "published"
+    calls: list[str] = []
+
+    def _backend(name: str, *, phase: OptimizationPhase):  # noqa: ANN001
+        return _JobFakeBackend(name=name, phase=phase, calls=calls)
+
+    monkeypatch.setattr("nemo_optimization.router.require_optimization_backend", _backend)
+
+    result = OptimizeJob().run(
+        {"optimize_config": optimize_config, "workspace": "default", "output": str(dest)},
+        ctx=ctx,
+    )
+
+    assert result["status"] == "completed"
+    assert calls == ["numeric", "prompt"]
+    published = dest / "optimizer_results"
+    assert (published / "optimization_summary.json").is_file()
+    assert (published / "intermediate_numeric_config.yml").is_file()
+    assert (published / "final_optimized_config.yml").is_file()
+    assert (
+        yaml.safe_load((published / "final_optimized_config.yml").read_text(encoding="utf-8"))["instructions"][
+            "system"
+        ]["content"]
+        == "Tuned prompt."
+    )
+
+
 def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext) -> None:
     optimize_config = write_config(tmp_path, MINIMAL_CONFIG)
 
@@ -709,7 +803,7 @@ def test_run_rejects_fileset_output_without_sdk(tmp_path: Path, ctx: JobContext)
 
     with (
         patch("nemo_optimization.jobs.optimize.OptimizeRouter.dispatch", side_effect=_dispatch),
-        pytest.raises(LocalRunError, match="requires a 'sdk: NeMoPlatform'"),
+        pytest.raises(LocalRunError, match="requires a sync platform client"),
     ):
         OptimizeJob().run(
             {"optimize_config": optimize_config, "workspace": "default", "output": "tuned-results"},
@@ -742,3 +836,109 @@ def test_optimize_task_module_is_importable() -> None:
     from nemo_optimization.jobs.optimize import OPTIMIZE_TASK_MODULE
 
     assert importlib.import_module(OPTIMIZE_TASK_MODULE) is not None
+
+
+class _JobFakeBackend:
+    def __init__(
+        self,
+        *,
+        name: str,
+        phase: OptimizationPhase,
+        calls: list[str],
+        fail_prompt: bool = False,
+    ) -> None:
+        self.name = name
+        self.capabilities = OptimizationBackendCapabilities(phases=(phase,))
+        self._phase = phase
+        self._calls = calls
+        self._fail_prompt = fail_prompt
+
+    def run_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> OptimizationPhaseResult:
+        del ctx, sdk
+        self._calls.append(request.phase.value)
+        payload = copy.deepcopy(request.payload)
+        if self._phase is OptimizationPhase.NUMERIC:
+            payload["models"]["default"]["temperature"] = 0.4
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.NUMERIC,
+                backend=self.name,
+                status=OptimizationPhaseStatus.COMPLETED,
+                optimized_payload=payload,
+                summary={"best_params": {"temperature": 0.4}},
+                trial_count=2,
+                trial_number_offset=request.trial_number_offset,
+            )
+
+        if self._fail_prompt:
+            return OptimizationPhaseResult(
+                phase=OptimizationPhase.PROMPT,
+                backend=self.name,
+                status=OptimizationPhaseStatus.FAILED,
+                optimized_payload=copy.deepcopy(request.payload),
+                summary={"error": "prompt failed"},
+                trial_count=1,
+                trial_number_offset=request.trial_number_offset,
+            )
+        payload["instructions"]["system"]["content"] = "Tuned prompt."
+        return OptimizationPhaseResult(
+            phase=OptimizationPhase.PROMPT,
+            backend=self.name,
+            status=OptimizationPhaseStatus.COMPLETED,
+            optimized_payload=payload,
+            summary={"best_prompts": {"system_prompt": "Tuned prompt."}},
+            trial_count=3,
+            trial_number_offset=request.trial_number_offset,
+        )
+
+    def validate_phase(
+        self,
+        request: OptimizationPhaseRequest,
+        *,
+        ctx: JobContext,
+        sdk=None,  # noqa: ANN001
+    ) -> None:
+        del request, ctx, sdk
+
+
+def _multi_phase_config(*, prompt_overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+    prompt = {"enabled": True, "backend": "ga", "model": "prompt_optimizer"}
+    if prompt_overrides:
+        prompt.update(prompt_overrides)
+    return {
+        **FABRIC_AGENT,
+        "models": {
+            "default": {"provider": "openai", "model": "agent-model", "temperature": 0.0},
+            "prompt_optimizer": {
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "base_url": "https://example.test/v1",
+                "api_key_env": "NVIDIA_API_KEY",
+            },
+        },
+        "instructions": {"system": {"content": "Base prompt."}},
+        "optimizer": {
+            "experiment_id": "exp-job",
+            "numeric": {"enabled": True, "backend": "optuna", "n_trials": 2},
+            "prompt": prompt,
+            "eval_metrics": {"average_score": {"direction": "maximize", "weight": 1.0}},
+            "search_space": {
+                "temperature": {
+                    "type": "fabric",
+                    "path": "models.default.temperature",
+                    "values": [0.0, 0.4],
+                },
+                "system_prompt": {
+                    "type": "fabric",
+                    "path": "instructions.system.content",
+                    "is_prompt": True,
+                    "purpose": "Answer accurately.",
+                },
+            },
+        },
+    }

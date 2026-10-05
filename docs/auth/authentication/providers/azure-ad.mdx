@@ -5,16 +5,16 @@
 title: "Azure AD (Entra ID) Setup"
 description: ""
 ---
-Complete walkthrough for connecting NeMo Platform to Azure AD (Entra ID), from app registration to first successful login.
+Complete walkthrough for connecting NeMo Helix to Azure AD (Entra ID), from app registration to first successful login.
 
 **Prerequisites**: Access to Azure Portal with permission to create app registrations. Familiarity with [OIDC Setup](/documentation/access-control/authentication/oidc-setup).
 
 ## App Registration
 
-1. In Azure Portal, go to **Azure Active Directory** → **App registrations** → **New registration**.
-2. Name the application (e.g., "NeMo Platform").
+1. In Azure Portal, go to **Azure Active Directory** > **App registrations** > **New registration**.
+2. Name the application, for example "NeMo Helix".
 3. Set **Supported account types** to your tenant configuration.
-4. No redirect URI is needed for device flow, but setting one is good practice.
+4. No redirect URI is needed for device flow, but setting one is good practice if Studio or another browser client uses the same app.
 5. Note the **Application (client) ID** and **Directory (tenant) ID**.
 
 ## Enable Device Flow
@@ -25,47 +25,66 @@ Complete walkthrough for connecting NeMo Platform to Azure AD (Entra ID), from a
 
 ## Expose API Scopes
 
+This section is needed when OIDC login tokens should carry NeMo Helix API scopes. If you skip API scopes, NeMo Helix still enforces role bindings.
+
 1. Go to **Expose an API**.
-2. Set the **Application ID URI** (e.g., `api://<client-id>`).
+2. Set the **Application ID URI**, usually `api://<client-id>`.
 3. Add scopes:
- - `platform:read` — "Read access to NeMo Platform platform resources"
- - `platform:write` — "Write access to NeMo Platform platform resources"
-4. Go to **API permissions** → **Add a permission** → **My APIs** → select your app → add the scopes.
-5. Click **Grant admin consent** for the scopes.
+   - `platform:read` - read access to NeMo Helix platform resources
+   - `platform:write` - write access to NeMo Helix platform resources
+4. Go to **API permissions** > **Add a permission** > **My APIs** > select your app > add the scopes.
+5. Click **Grant admin consent** for the scopes, if your tenant requires it.
 
-## Configure Group Claims (Optional)
+Use short scope names in NeMo Helix configuration. Azure may require the fully qualified request form, such as `api://<client-id>/platform:read`; set `scope_prefix` so the CLI can send that form while users and docs keep referring to `platform:read`.
 
-1. Go to **Token configuration** → **Add groups claim**.
-2. Select **Security groups** (or the group types your organization uses).
-3. For the **Access token**, select **Group ID**.
+## Configure Group Claims
 
-## NeMo Platform Configuration
+This section is needed when Azure group or entitlement values should match NeMo Helix workspace members or role bindings.
+
+1. Go to **Token configuration** > **Add groups claim**.
+2. Select **Security groups** or the group types your organization uses.
+3. For the bearer token NeMo Helix validates, select the group value format you plan to bind in NeMo Helix.
+
+Azure OAuth scopes in `scope` or `scp` are not group principals and they do not grant workspace access. Use NeMo Helix role bindings for workspace authorization. If Azure returns NeMo Helix API scopes such as `platform:read` in `scp`, NeMo Helix uses those scopes to narrow API access for that token.
+
+## Configuration Notes
+
+NeMo Helix uses Azure AD as an OIDC identity provider. The Azure token must be a signed JWT that NeMo Helix can validate, and its claims must contain the identity values you want to authorize:
+
+- `issuer`: the tenant issuer for the token version your application uses.
+- `client_id`: the Azure application client ID used by CLI and Studio login.
+- `audience`: the expected token `aud` claim, if you want audience validation. For Azure AD v2.0 access tokens, this is often the application client ID GUID; verify the token's actual `aud` claim.
+- `email_claim`: often `upn` for Azure AD access tokens.
+- `subject_claim`: often `oid` for Azure AD access tokens.
+- `groups_claim`: `groups` when Azure emits group IDs in the token.
+
+## NeMo Helix Configuration
 
 ```yaml
 auth:
- enabled: true
- admin_email: "platform-admin@company.com"
- oidc:
- enabled: true
- issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
- client_id: "<client-id>"
- audience: "api://<client-id>"
- # Azure AD v1 tokens may have a different issuer
- additional_issuers:
- - "https://sts.windows.net/<tenant-id>/"
- email_claim: "upn"
- subject_claim: "oid"
- groups_claim: "groups"
- # Azure AD prefixes custom scopes with the API URI
- scope_prefix: "api://<client-id>/"
- default_scopes: "openid profile email offline_access api://<client-id>/platform:read api://<client-id>/platform:write"
+  enabled: true
+  admin_email: "platform-admin@company.com"
+  oidc:
+    enabled: true
+    issuer: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+    client_id: "<client-id>"
+    audience: "<token-audience>"
+    # Azure AD v1 tokens may have a different issuer.
+    additional_issuers:
+      - "https://sts.windows.net/<tenant-id>/"
+    email_claim: "upn"
+    subject_claim: "oid"
+    groups_claim: "groups"
+    # Required when Azure expects API scopes in resource-qualified form.
+    scope_prefix: "api://<client-id>/"
+    default_scopes: "platform:read platform:write openid profile email offline_access"
 ```
 
 ## Verification
 
 ```bash
 nemo auth login
-# Browser opens to Microsoft login page
+# Browser opens to the Azure AD login page
 # Sign in and consent to the requested permissions
 
 nemo auth status
@@ -76,9 +95,9 @@ nemo auth status
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| AADSTS70011 | Scope not configured or no admin consent | Add scopes in "Expose an API" and grant admin consent |
-| AADSTS50011 | Reply URL mismatch | Not typically needed for device flow; check Authentication settings |
-| Audience mismatch | `audience` doesn't match token's `aud` claim | Set `audience: "api://<client-id>"` |
+| AADSTS70011 | Scope not configured or no admin consent | Add the API scopes under **Expose an API**, add them under **API permissions**, and grant consent if required |
+| AADSTS50011 | Reply URL mismatch | Not typically needed for device flow; check **Authentication** settings if you also use browser redirects |
+| Audience mismatch | `audience` doesn't match token's `aud` claim | Set `audience` to the Azure token audience, or leave it unset if your deployment does not require audience validation |
 | Empty email claim | Azure AD didn't populate `email` | Use `email_claim: "upn"` instead |
 
 ## Related

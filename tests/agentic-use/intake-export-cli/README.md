@@ -3,7 +3,7 @@
 
 # Intake Export to File - Harbor Eval (CLI)
 
-Tests the agent's ability to use the NeMo Platform Intake service to collect LLM interaction data
+Tests the agent's ability to use the NeMo Helix Intake service to collect LLM interaction data
 and export it to a file. This is a CLI eval - MCP tools are disabled.
 
 ## What This Tests

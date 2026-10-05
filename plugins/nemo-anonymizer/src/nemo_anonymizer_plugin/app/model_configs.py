@@ -7,7 +7,7 @@
 defining the model aliases and optional ``selected_models`` overrides. The
 standalone library can use bundled defaults when this is omitted, but plugin
 preview/run execution requires explicit entries so providers resolve through
-NeMo Platform Inference Gateway.
+NeMo Helix Inference Gateway.
 
 The plugin accepts overrides as a loose dict (``SelectedModelsOverrides``)
 because some roles take a scalar and others take a pool, then renders the
@@ -106,7 +106,7 @@ def validate_selected_models_have_model_configs(
     Upstream treats ``selected_models`` as a section in the same unified YAML
     document as ``model_configs``. If the plugin accepts overrides without a
     model pool, the only choices are to silently ignore them or synthesize an
-    implicit default pool that bypasses NeMo Platform provider resolution. Failing
+    implicit default pool that bypasses NeMo Helix provider resolution. Failing
     fast keeps the user's intent explicit.
     """
     if has_selected_model_overrides(selected_models) and not model_configs:

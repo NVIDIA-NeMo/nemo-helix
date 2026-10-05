@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nmp.common.config import Configuration
-from nmp.core.auth.config import AuthServiceConfig
-from nmp.core.auth.service import AuthService
+from nhx.common.config import Configuration
+from nhx.core.auth.config import AuthServiceConfig
+from nhx.core.auth.service import AuthService
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +24,7 @@ async def test_on_startup_preflights_embedded_policy_wasm(monkeypatch: pytest.Mo
         )
     )
     monkeypatch.setattr(
-        "nmp.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
+        "nhx.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
     )
 
     await AuthService().on_startup()
@@ -47,7 +47,7 @@ async def test_on_startup_skips_policy_wasm_preflight_when_not_needed(
     calls: list[bool] = []
     Configuration.set_override(config)
     monkeypatch.setattr(
-        "nmp.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
+        "nhx.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
     )
 
     await AuthService().on_startup()

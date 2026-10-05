@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from nmp.intake.api.v2.experiments.endpoints import _sort_evaluations, _validate_default_sort
-from nmp.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate
+from nhx.intake.api.v2.experiments.endpoints import _sort_evaluations, _validate_default_sort
+from nhx.intake.api.v2.experiments.schemas import EvaluationResponse, EvaluatorAggregate
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
@@ -118,7 +118,7 @@ def test_validate_default_sort_rejects_unsortable_fields() -> None:
 def test_entity_coerces_legacy_default_sort_to_created_at() -> None:
     # Schema-on-read: rows persisted before default_sort was a non-null string stored it as null (or,
     # earlier, a SortCriterion list). Both must deserialize to the default, not raise.
-    from nmp.intake.entities.experiments import ExperimentGroup
+    from nhx.intake.entities.experiments import ExperimentGroup
 
     for stored in (None, [{"field": "cost_usd.mean", "direction": "asc"}]):
         group = ExperimentGroup.model_validate({"name": "g", "workspace": "default", "default_sort": stored})
@@ -128,7 +128,7 @@ def test_entity_coerces_legacy_default_sort_to_created_at() -> None:
 def test_entity_coerces_legacy_non_string_metadata_values() -> None:
     # Schema-on-read: metadata tightened from dict[str, Any] to dict[str, str]. Rows persisted with
     # non-string values (the old type) must deserialize — stringified, JSON-encoding structured values.
-    from nmp.intake.entities.experiments import Experiment, ExperimentGroup
+    from nhx.intake.entities.experiments import Experiment, ExperimentGroup
 
     exp = Experiment.model_validate(
         {

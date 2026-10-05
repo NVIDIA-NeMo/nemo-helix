@@ -7,12 +7,12 @@
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-default}"
-HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-platform}"
+HELM_RELEASE_NAME="${HELM_RELEASE_NAME:-nemo-helix}"
 TIMEOUT_SECONDS="${RELEASE_READY_TIMEOUT_SECONDS:-900}"
 LOG_INTERVAL_SECONDS="${RELEASE_READY_LOG_INTERVAL_SECONDS:-30}"
 GATEWAY_NAME="${KUBE_GATEWAY_NAME:-}"
-HTTPROUTE_NAME="${KUBE_HTTPROUTE_NAME:-nemo-platform}"
-CLUSTER_INFO_URL="${NMP_E2E_CLUSTER_URL:-}"
+HTTPROUTE_NAME="${KUBE_HTTPROUTE_NAME:-nemo-helix}"
+CLUSTER_INFO_URL="${NHX_E2E_CLUSTER_URL:-}"
 SELECTOR="app.kubernetes.io/instance=${HELM_RELEASE_NAME}"
 CORE_STORAGE_PVC_NAME="${CORE_STORAGE_PVC_NAME:-${HELM_RELEASE_NAME}-core-storage}"
 CORE_STORAGE_BINDER_POD_NAME="${CORE_STORAGE_BINDER_POD_NAME:-${HELM_RELEASE_NAME}-core-storage-binder}"
@@ -170,7 +170,7 @@ metadata:
   name: ${CORE_STORAGE_BINDER_POD_NAME}
   labels:
     app.kubernetes.io/instance: ${HELM_RELEASE_NAME}
-    app.kubernetes.io/name: nemo-platform
+    app.kubernetes.io/name: nemo-helix
     app.kubernetes.io/component: core-storage-binder
 spec:
   restartPolicy: Never
@@ -210,7 +210,7 @@ resolve_cluster_info_url() {
 
     CLUSTER_INFO_URL="http://${address}"
     if [ -n "${GITHUB_ENV:-}" ] && [ "${CLUSTER_INFO_URL_EXPORTED}" = "false" ]; then
-        echo "NMP_E2E_CLUSTER_URL=${CLUSTER_INFO_URL}" >> "${GITHUB_ENV}"
+        echo "NHX_E2E_CLUSTER_URL=${CLUSTER_INFO_URL}" >> "${GITHUB_ENV}"
         CLUSTER_INFO_URL_EXPORTED=true
     fi
     log "Resolved Gateway URL: ${CLUSTER_INFO_URL}"

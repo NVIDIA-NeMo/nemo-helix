@@ -28,7 +28,7 @@ def main() -> None:
     provider = TracerProvider(resource=Resource.create({"service.name": "intake-spans-smoke"}))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=args.endpoint)))
     trace.set_tracer_provider(provider)
-    tracer = trace.get_tracer("nmp.intake.spans.sample")
+    tracer = trace.get_tracer("nhx.intake.spans.sample")
 
     with tracer.start_as_current_span("sample-chain") as chain:
         chain.set_attribute("openinference.span.kind", "CHAIN")

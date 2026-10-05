@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from nemo_data_designer_plugin.jobs.retrieval_common import (
     RETRIEVAL_MINE_MODULE,
@@ -16,12 +16,12 @@ from nemo_data_designer_plugin.jobs.retrieval_common import (
 )
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig, RetrievalPrepareStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nmp.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
-from nmp.customization_common.service.platform_client import (
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nhx.customization_common.retrieval.inline import move_aux_files_to_additional, wrapped_to_inline_jsonl
+from nhx.customization_common.service.platform_client import (
     async_customization_platform_clients_from_platform,
     fetch_model_entity,
 )
@@ -41,9 +41,10 @@ class RetrievalPrepareJob(NemoJob):
     async def to_spec(
         cls,
         input_spec: BaseModel,
+        *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
         job_config = cast(RetrievalPrepareJobConfig, input_spec)
@@ -71,14 +72,15 @@ class RetrievalPrepareJob(NemoJob):
     @classmethod
     async def compile(
         cls,
+        *,
         workspace: str,
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncNeMoPlatform,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
-        options: dict | None = None,
-    ) -> PlatformJobSpec:
+        options: dict[str, Any] | None = None,
+    ) -> HelixJobSpec:
         spec = cast(RetrievalPrepareStepConfig, spec)
         steps = [
             await retrieval_step(
@@ -86,7 +88,7 @@ class RetrievalPrepareJob(NemoJob):
                 "nemo_data_designer_plugin.jobs.retrieval_prepare",
                 spec,
                 profile=profile,
-                async_sdk=async_sdk,
+                async_client=async_sdk,
                 hf_token_secret=spec.job_config.hf_token_secret,
             )
         ]
@@ -98,7 +100,7 @@ class RetrievalPrepareJob(NemoJob):
                 await model_download_step(
                     spec.model_fileset,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                 )
             )
             steps.append(
@@ -107,39 +109,39 @@ class RetrievalPrepareJob(NemoJob):
                     RETRIEVAL_MINE_MODULE,
                     mine_spec,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                     gpu=True,
                 )
             )
-        return PlatformJobSpec(steps=steps)
+        return HelixJobSpec(steps=steps)
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         step = RetrievalPrepareStepConfig.model_validate(config)
         if step.phase == "mine":
-            raise RuntimeError("Mining runs as nmp.automodel.tasks.retrieval_mine, not this module")
+            raise RuntimeError("Mining runs as nhx.automodel.tasks.retrieval_mine, not this module")
         return _run_convert(step.job_config, work_dir(ctx, "stage1_data_prep"), ctx, sdk)
 
 
-def _materialize_input(ref: str, dest: Path, ctx: JobContext, sdk: NeMoPlatform) -> Path:
+def _materialize_input(ref: str, dest: Path, ctx: JobContext, client: NemoClient) -> Path:
     hf_token = hf_token_from_env()
     if Path(ref).is_absolute():
-        return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
+        return materialize_corpus(ref, dest=dest, client=client, workspace=ctx.workspace, hf_token=hf_token)
     storage_root = (ctx.storage.persistent or ctx.storage.ephemeral).resolve()
     staged = (storage_root / ref).resolve()
     if not staged.is_relative_to(storage_root):
         raise ValueError(f"Staged input path escapes job storage: {ref}")
     if staged.exists():
         return staged
-    return materialize_corpus(ref, dest=dest, sdk=sdk, workspace=ctx.workspace, hf_token=hf_token)
+    return materialize_corpus(ref, dest=dest, client=client, workspace=ctx.workspace, hf_token=hf_token)
 
 
-def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, sdk: NeMoPlatform) -> dict:
+def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobContext, client: NemoClient) -> dict:
     if job.train_input_file:
         train_file = _materialize_input(
             job.train_input_file,
             ctx.storage.ephemeral / "train_input",
             ctx,
-            sdk,
+            client,
         )
         if train_file.is_dir():
             candidate = train_file / "train.json"
@@ -156,7 +158,7 @@ def _run_convert(job: RetrievalPrepareJobConfig, output_dir: Path, ctx: JobConte
             job.sdg_input,
             ctx.storage.ephemeral / "sdg_input",
             ctx,
-            sdk,
+            client,
         )
         from nemo_data_designer_plugin.retrieval.conversion import execute_conversion
 

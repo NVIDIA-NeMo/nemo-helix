@@ -110,7 +110,7 @@ export const DatasetSelect: FC<Props> = ({ project, disabled, error }) => {
               render: (
                 <Flex gap="density-md" align="center" justify="between" className="w-full">
                   <span>{name}</span>
-                  <Text kind="body/regular/xs" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/xs">
                     <RelativeTime datetime={fileset.updated_at} />
                   </Text>
                 </Flex>

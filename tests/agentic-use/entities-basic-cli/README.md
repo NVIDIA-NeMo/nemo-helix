@@ -3,7 +3,7 @@
 
 # Entity CRUD Operations - CLI Eval
 
-Tests that a coding agent can perform basic entity CRUD operations using the NeMo Platform CLI.
+Tests that a coding agent can perform basic entity CRUD operations using the NeMo Helix CLI.
 
 ## What This Tests
 
@@ -16,7 +16,7 @@ Tests that a coding agent can perform basic entity CRUD operations using the NeM
 ## Build and Run
 
 ```bash
-docker build -f Dockerfile.agentic-base -t nmp-agentic-base:latest .
+docker build -f Dockerfile.agentic-base -t nhx-agentic-base:latest .
 
 export ANTHROPIC_API_KEY='your-key'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'

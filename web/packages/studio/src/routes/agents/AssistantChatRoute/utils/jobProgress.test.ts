@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
-import type { PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { getJobDetailRoute } from '@studio/components/dataViews/JobsDataView/utils';
 import { JOB_PROGRESS_JOB_TYPE } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import {
@@ -29,7 +29,7 @@ const getJobRefetchIntervalMock = vi.mocked(getJobRefetchInterval);
 const getJobDetailRouteMock = vi.mocked(getJobDetailRoute);
 const getAgentEvaluationDetailRouteMock = vi.mocked(getAgentEvaluationDetailRoute);
 
-const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobResponse =>
+const createJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse =>
   ({
     attempt_id: 'attempt-1',
     fileset: 'fileset-1',
@@ -40,7 +40,7 @@ const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobRes
     status: 'active',
     workspace: 'default',
     ...overrides,
-  }) as PlatformJobResponse;
+  }) as HelixJobResponse;
 
 beforeEach(() => {
   getJobRefetchIntervalMock.mockReset().mockReturnValue(5_000);

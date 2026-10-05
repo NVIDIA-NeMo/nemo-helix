@@ -4,9 +4,9 @@
 """Extended filesets module with FilesetFileSystem support.
 
 This module provides high-level file operations (upload, download, etc.) and
-fsspec integration for NeMo Platform filesets via the sdk.files.fsspec property.
+fsspec integration for NeMo Helix filesets via the sdk.files.fsspec property.
 
-Located at: nemo_platform/filesets/ (after vendoring)
+Located at: nemo_helix/filesets/ (after vendoring)
 
 ``ListFilesResponse`` lives in :mod:`filesets.transfer`; it is also re-exported
 here for backwards compatibility.

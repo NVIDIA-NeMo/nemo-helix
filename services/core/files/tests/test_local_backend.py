@@ -7,9 +7,9 @@ from pathlib import Path
 
 import anyio
 import pytest
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.local import LocalStorageConfig, LocalStorageImpl
-from nmp.core.files.exceptions import InvalidPathError, NotFoundError
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.local import LocalStorageConfig, LocalStorageImpl
+from nhx.core.files.exceptions import InvalidPathError, NotFoundError
 
 
 @pytest.fixture

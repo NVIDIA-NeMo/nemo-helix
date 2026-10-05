@@ -7,7 +7,7 @@ Use this reference only for plugin execution concerns. The [Anonymizer library d
 
 For preview/run execution (`sdk.anonymizer.preview`, `nemo anonymizer run`):
 
-- Include `model_configs` so rewrite model calls route through NeMo Platform Inference Gateway providers.
+- Include `model_configs` so rewrite model calls route through NeMo Helix Inference Gateway providers.
 - Use HTTP(S) URLs or fileset references for `data.source`.
 - Only include `selected_models.rewrite` when you need to override library defaults, and use Anonymizer library role names exactly.
 
@@ -23,7 +23,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 
 selected_models:
   detection:

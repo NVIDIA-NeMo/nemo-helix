@@ -8,10 +8,10 @@ SPDX-License-Identifier: Apache-2.0
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ printf "%s-jobs-egress" (include "nemo-platform.fullname" .) | trunc 63 | trimSuffix "-" }}
+  name: {{ printf "%s-jobs-egress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/component: nmp-core-jobs
-    {{- include "nemo-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: nhx-core-jobs
+    {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   podSelector:
     {{- toYaml $jobs.podSelector | nindent 4 }}
@@ -32,8 +32,8 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: nmp-api
-              {{- include "nemo-platform.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: nhx-api
+              {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ default .Values.api.service.port $jobs.platformApi.port }}

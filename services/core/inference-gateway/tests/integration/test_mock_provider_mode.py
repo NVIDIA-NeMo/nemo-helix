@@ -33,12 +33,22 @@ import uuid
 from typing import Generator
 
 import pytest
-from nmp.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_STATUS_HEADER
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.core.models.service import ModelsService
-from nmp.testing import ClientContext, MockProviderResponse, add_mock_provider, create_test_client
+from nemo_helix_plugin.client.errors import InternalServerError, NotFoundError, RateLimitError
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.models.client import ModelsClient
+from nhx.core.inference_gateway.api.mock_provider import MOCK_RESPONSE_HEADER, MOCK_STATUS_HEADER
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.core.models.service import ModelsService
+from nhx.testing import ClientContext, MockProviderResponse, add_mock_provider, create_test_client
 
 DEFAULT_WORKSPACE = "default"
+
+
+def _gateway(ctx: ClientContext, extra_headers: dict[str, str] | None = None) -> InferenceGatewayClient:
+    """Typed gateway client for the in-process app, optionally with per-request headers."""
+    client = InferenceGatewayClient(base_url="http://testserver", http_client=ctx.test_client)
+    return client.with_headers(extra_headers) if extra_headers else client
 
 
 def _unique_name(prefix: str) -> str:
@@ -72,24 +82,24 @@ def mock_provider_test_clients() -> Generator[ClientContext, None, None]:
 
     This is the recommended fixture for testing services that need to make
     inference calls through IGW. It provides:
-    - An SDK client for making API calls (ctx.sdk)
+    - A TestClient to back typed clients (see ``_gateway``) and ``ctx.client`` for add_mock_provider()
     - Use add_mock_provider() to add mock providers
     - Auto-prefixing of provider names with 'igw-mock-'
 
     Example:
         def test_my_llm_service(mock_provider_test_clients: ClientContext):
             provider = add_mock_provider(
-                mock_provider_test_clients.sdk,
+                mock_provider_test_clients.client,
                 workspace="default",
                 name="judge",  # Becomes "igw-mock-judge"
                 mock_response_body={"id": "chatcmpl-mock", "choices": [...]},
             )
-            response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-                "v1/chat/completions",
-                name=provider.name,  # Use provider.name from returned ModelProvider
+            response = _gateway(mock_provider_test_clients).provider_post(
+                trailing_uri="v1/chat/completions",
+                name=provider.name,
                 workspace="default",
-                body={"model": "test", "messages": []},
-            )
+                body=JsonBody({"model": "test", "messages": []}),
+            ).data()
     """
     with create_test_client(
         InferenceGatewayService,
@@ -113,7 +123,7 @@ def provider_in_cache(mock_provider_test_clients: ClientContext) -> tuple[str, s
     served_model_name = "mock-served-model"
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("test-provider"),
         served_models={model_entity_name: served_model_name},
@@ -134,7 +144,7 @@ def provider_with_default_response(mock_provider_test_clients: ClientContext) ->
     served_model_name = "served-with-defaults"
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("provider-with-defaults"),
         mock_response_body={
@@ -193,43 +203,45 @@ def test_example_chat_completion_with_provider_default(mock_provider_test_client
     # The name (without igw-mock- prefix) becomes the default model entity name
     entity_name = _unique_name("chat-provider")
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=entity_name,
         mock_response_body=chat_completion_response,
     )
-    sdk = mock_provider_test_clients.sdk
+    gateway = _gateway(mock_provider_test_clients)
 
     # === Route 1: Provider route ===
     # Route directly to a provider by name
-    response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
+    response = gateway.provider_post(
+        trailing_uri="v1/chat/completions",
         name=provider.name,
         workspace=DEFAULT_WORKSPACE,
-        body={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
-    )
+        body=JsonBody({"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}),
+    ).data()
     assert response["id"] == "chatcmpl-abc123"
 
     # === Route 2: Model Entity route ===
     # Route by model entity name (uses default served_models mapping)
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_name,
         workspace=DEFAULT_WORKSPACE,
-        body={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
-    )
+        body=JsonBody({"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}),
+    ).data()
     assert response["id"] == "chatcmpl-abc123"
 
     # === Route 3: OpenAI route ===
     # Route using OpenAI-compatible format with model as workspace/entity_name
-    response = sdk.inference.gateway.openai.post(
-        "v1/chat/completions",
+    response = gateway.openai_post(
+        trailing_uri="v1/chat/completions",
         workspace=DEFAULT_WORKSPACE,
-        body={
-            "model": f"{DEFAULT_WORKSPACE}/{entity_name}",
-            "messages": [{"role": "user", "content": "Hello"}],
-        },
-    )
+        body=JsonBody(
+            {
+                "model": f"{DEFAULT_WORKSPACE}/{entity_name}",
+                "messages": [{"role": "user", "content": "Hello"}],
+            }
+        ),
+    ).data()
     assert response["id"] == "chatcmpl-abc123"
     assert response["choices"][0]["message"]["content"] == "Hello! How can I help you today?"
     assert response["usage"]["total_tokens"] == 21
@@ -259,13 +271,16 @@ def test_example_inline_mock_response_header(mock_provider_test_clients: ClientC
         ],
     }
 
-    # Use SDK with extra_headers - provider doesn't need to exist
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name="any-provider",
-        workspace=DEFAULT_WORKSPACE,
-        body={"model": "any-model", "messages": []},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(inline_response)},
+    # Use the typed client with extra headers - provider doesn't need to exist
+    response = (
+        _gateway(mock_provider_test_clients, {MOCK_RESPONSE_HEADER: json.dumps(inline_response)})
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name="any-provider",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"model": "any-model", "messages": []}),
+        )
+        .data()
     )
 
     assert response["id"] == "chatcmpl-inline"
@@ -282,10 +297,8 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
     - 500: Server errors
     - 503: Service unavailable
     """
-    from nemo_platform import RateLimitError
-
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="rate-limited-provider",  # Becomes "igw-mock-rate-limited-provider"
         mock_response_body={
@@ -299,22 +312,20 @@ def test_example_simulate_rate_limit_error(mock_provider_test_clients: ClientCon
     )
 
     with pytest.raises(RateLimitError) as exc_info:
-        mock_provider_test_clients.sdk.inference.gateway.provider.post(
-            "v1/chat/completions",
+        _gateway(mock_provider_test_clients).provider_post(
+            trailing_uri="v1/chat/completions",
             name=provider.name,
             workspace=DEFAULT_WORKSPACE,
-            body={"model": "test", "messages": []},
-        )
+            body=JsonBody({"model": "test", "messages": []}),
+        ).data()
 
     assert exc_info.value.status_code == 429
 
 
 def test_example_simulate_server_error(mock_provider_test_clients: ClientContext):
     """Example: Simulate a 500 Internal Server Error."""
-    from nemo_platform import InternalServerError
-
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="error-provider",  # Becomes "igw-mock-error-provider"
         mock_response_body={
@@ -327,12 +338,12 @@ def test_example_simulate_server_error(mock_provider_test_clients: ClientContext
     )
 
     with pytest.raises(InternalServerError) as exc_info:
-        mock_provider_test_clients.sdk.inference.gateway.provider.post(
-            "v1/chat/completions",
+        _gateway(mock_provider_test_clients).provider_post(
+            trailing_uri="v1/chat/completions",
             name=provider.name,
             workspace=DEFAULT_WORKSPACE,
-            body={"model": "test", "messages": []},
-        )
+            body=JsonBody({"model": "test", "messages": []}),
+        ).data()
 
     assert exc_info.value.status_code == 500
 
@@ -365,17 +376,21 @@ def test_example_chat_completion_multiple_choices(mock_provider_test_clients: Cl
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="multi-choice-provider",  # Becomes "igw-mock-multi-choice-provider"
         mock_response_body=multi_choice_response,
     )
 
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={"model": "test", "messages": [], "n": 3},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"model": "test", "messages": [], "n": 3}),
+        )
+        .data()
     )
 
     assert len(response["choices"]) == 3
@@ -402,17 +417,21 @@ def test_example_embeddings_response(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="embeddings-provider",  # Becomes "igw-mock-embeddings-provider"
         mock_response_body=embeddings_response,
     )
 
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/embeddings",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={"model": "text-embedding-ada-002", "input": "Hello world"},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/embeddings",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"model": "text-embedding-ada-002", "input": "Hello world"}),
+        )
+        .data()
     )
 
     assert response["object"] == "list"
@@ -458,46 +477,48 @@ def test_example_llm_judge_with_json_output(mock_provider_test_clients: ClientCo
     # Create the judge provider - entity_name becomes the model entity name for routing
     entity_name = _unique_name("llm-judge")
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=entity_name,
         mock_response_body=judge_response,
     )
-    sdk = mock_provider_test_clients.sdk
+    gateway = _gateway(mock_provider_test_clients)
     judge_messages = [
         {"role": "system", "content": "You are an evaluation judge..."},
         {"role": "user", "content": "Evaluate: What is Python?"},
     ]
 
     # === Route 1: Provider route ===
-    response = sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
+    response = gateway.provider_post(
+        trailing_uri="v1/chat/completions",
         name=provider.name,
         workspace=DEFAULT_WORKSPACE,
-        body={"model": "llama-3.1-70b-instruct", "messages": judge_messages},
-    )
+        body=JsonBody({"model": "llama-3.1-70b-instruct", "messages": judge_messages}),
+    ).data()
     judge_output = json.loads(response["choices"][0]["message"]["content"])
     assert judge_output["score"] == 4
 
     # === Route 2: Model Entity route ===
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name=entity_name,
         workspace=DEFAULT_WORKSPACE,
-        body={"model": "llama-3.1-70b-instruct", "messages": judge_messages},
-    )
+        body=JsonBody({"model": "llama-3.1-70b-instruct", "messages": judge_messages}),
+    ).data()
     judge_output = json.loads(response["choices"][0]["message"]["content"])
     assert judge_output["score"] == 4
 
     # === Route 3: OpenAI route ===
-    response = sdk.inference.gateway.openai.post(
-        "v1/chat/completions",
+    response = gateway.openai_post(
+        trailing_uri="v1/chat/completions",
         workspace=DEFAULT_WORKSPACE,
-        body={
-            "model": f"{DEFAULT_WORKSPACE}/{entity_name}",
-            "messages": judge_messages,
-        },
-    )
+        body=JsonBody(
+            {
+                "model": f"{DEFAULT_WORKSPACE}/{entity_name}",
+                "messages": judge_messages,
+            }
+        ),
+    ).data()
     judge_output = json.loads(response["choices"][0]["message"]["content"])
     assert judge_output["score"] == 4
     assert "accurate" in judge_output["judgment"].lower()
@@ -509,58 +530,73 @@ def test_example_different_http_methods(mock_provider_test_clients: ClientContex
 
     Different endpoints may use different HTTP methods. Mock provider mode supports all of them.
     """
-    sdk = mock_provider_test_clients.sdk
+    gateway = _gateway(mock_provider_test_clients)
 
     # GET request
     get_response = {"method": "GET", "data": "retrieved"}
-    response = sdk.inference.gateway.provider.get(
-        "v1/custom",
-        name="any",
-        workspace=DEFAULT_WORKSPACE,
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(get_response)},
+    response = (
+        gateway.with_headers({MOCK_RESPONSE_HEADER: json.dumps(get_response)})
+        .provider_get(
+            trailing_uri="v1/custom",
+            name="any",
+            workspace=DEFAULT_WORKSPACE,
+        )
+        .data()
     )
     assert response["method"] == "GET"
 
     # POST request
     post_response = {"method": "POST", "data": "created"}
-    response = sdk.inference.gateway.provider.post(
-        "v1/custom",
-        name="any",
-        workspace=DEFAULT_WORKSPACE,
-        body={"input": "test"},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(post_response)},
+    response = (
+        gateway.with_headers({MOCK_RESPONSE_HEADER: json.dumps(post_response)})
+        .provider_post(
+            trailing_uri="v1/custom",
+            name="any",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"input": "test"}),
+        )
+        .data()
     )
     assert response["method"] == "POST"
 
     # PUT request
     put_response = {"method": "PUT", "data": "updated"}
-    response = sdk.inference.gateway.provider.put(
-        "v1/custom",
-        name="any",
-        workspace=DEFAULT_WORKSPACE,
-        body={"input": "test"},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(put_response)},
+    response = (
+        gateway.with_headers({MOCK_RESPONSE_HEADER: json.dumps(put_response)})
+        .provider_put(
+            trailing_uri="v1/custom",
+            name="any",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"input": "test"}),
+        )
+        .data()
     )
     assert response["method"] == "PUT"
 
     # PATCH request
     patch_response = {"method": "PATCH", "data": "patched"}
-    response = sdk.inference.gateway.provider.patch(
-        "v1/custom",
-        name="any",
-        workspace=DEFAULT_WORKSPACE,
-        body={"input": "test"},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(patch_response)},
+    response = (
+        gateway.with_headers({MOCK_RESPONSE_HEADER: json.dumps(patch_response)})
+        .provider_patch(
+            trailing_uri="v1/custom",
+            name="any",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"input": "test"}),
+        )
+        .data()
     )
     assert response["method"] == "PATCH"
 
     # DELETE request
     delete_response = {"method": "DELETE", "data": "deleted"}
-    response = sdk.inference.gateway.provider.delete(
-        "v1/custom",
-        name="any",
-        workspace=DEFAULT_WORKSPACE,
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(delete_response)},
+    response = (
+        gateway.with_headers({MOCK_RESPONSE_HEADER: json.dumps(delete_response)})
+        .provider_delete(
+            trailing_uri="v1/custom",
+            name="any",
+            workspace=DEFAULT_WORKSPACE,
+        )
+        .http_response.json()
     )
     assert response["method"] == "DELETE"
 
@@ -577,7 +613,7 @@ def test_example_dynamic_per_model_responses(mock_provider_test_clients: ClientC
     """
     workspace = DEFAULT_WORKSPACE
     add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=workspace,
         name=_unique_name("multi-model"),
         mock_response_body_by_model={
@@ -605,45 +641,45 @@ def test_example_dynamic_per_model_responses(mock_provider_test_clients: ClientC
             "content-safety": "content-safety",
         },
     )
-    sdk = mock_provider_test_clients.sdk
+    gateway = _gateway(mock_provider_test_clients)
 
     # Call main-llm via model entity route
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name="main-llm",
         workspace=workspace,
-        body={"model": f"{workspace}/main-llm", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/main-llm", "messages": []}),
+    ).data()
     assert response["id"] == "main-1"
     assert "Hello from main LLM" in response["choices"][0]["message"]["content"]
 
     # First call to content-safety returns "safe: true"
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name="content-safety",
         workspace=workspace,
-        body={"model": f"{workspace}/content-safety", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/content-safety", "messages": []}),
+    ).data()
     assert response["id"] == "safety-1"
     assert '"safe": true' in response["choices"][0]["message"]["content"]
 
     # Second call to content-safety returns "safe: false" (sequential)
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name="content-safety",
         workspace=workspace,
-        body={"model": f"{workspace}/content-safety", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/content-safety", "messages": []}),
+    ).data()
     assert response["id"] == "safety-2"
     assert '"safe": false' in response["choices"][0]["message"]["content"]
 
     # Third call clamps to last response
-    response = sdk.inference.gateway.model.post(
-        "v1/chat/completions",
+    response = gateway.model_post(
+        trailing_uri="v1/chat/completions",
         name="content-safety",
         workspace=workspace,
-        body={"model": f"{workspace}/content-safety", "messages": []},
-    )
+        body=JsonBody({"model": f"{workspace}/content-safety", "messages": []}),
+    ).data()
     assert response["id"] == "safety-2"  # Still returns last response
 
 
@@ -651,33 +687,40 @@ def test_example_header_overrides_provider_default(mock_provider_test_clients: C
     """Example: Request header takes priority over provider defaults.
 
     If a provider has a default mock response configured, you can still
-    override it for specific requests by passing extra_headers to the SDK.
+    override it for specific requests by passing extra headers to the typed client.
     """
     # Provider has a default response
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("override-example"),
         mock_response_body={"source": "provider_default", "score": 3},
     )
 
     # Request without extra_headers uses provider default
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/test",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/test",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({}),
+        )
+        .data()
     )
     assert response["source"] == "provider_default"
 
     # Request with extra_headers overrides the default
     override_response = {"source": "request_header", "score": 5}
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/test",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(override_response)},
+    response = (
+        _gateway(mock_provider_test_clients, {MOCK_RESPONSE_HEADER: json.dumps(override_response)})
+        .provider_post(
+            trailing_uri="v1/test",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({}),
+        )
+        .data()
     )
     assert response["source"] == "request_header"
     assert response["score"] == 5
@@ -1123,7 +1166,7 @@ def test_llm_judge_e2e_use_case(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name=_unique_name("mock-judge"),
         mock_response_body=judge_response,
@@ -1152,9 +1195,9 @@ def test_llm_judge_e2e_use_case(mock_provider_test_clients: ClientContext):
 
 
 # =============================================================================
-# nmp.testing.mock_provider Fixture Tests
+# nhx.testing.mock_provider Fixture Tests
 # =============================================================================
-# These tests verify that the nmp.testing.mock_provider fixture works correctly.
+# These tests verify that the nhx.testing.mock_provider fixture works correctly.
 # Other services can use this fixture to test with IGW in mock provider mode.
 #
 # The mock_provider_test_clients fixture is the recommended way to test services that need
@@ -1167,17 +1210,20 @@ def test_fixture_basic_usage(mock_provider_test_clients: ClientContext):
     """Test basic mock_provider_test_clients fixture usage.
 
     This is the simplest usage pattern: use the fixture and make requests
-    with inline X-Mock-Response headers via the SDK.
+    with inline X-Mock-Response headers via the typed gateway client.
     """
-    assert mock_provider_test_clients.sdk is not None
+    assert mock_provider_test_clients.test_client is not None
 
     mock_response = {"test": "response"}
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/test",
-        name="any-provider",
-        workspace=DEFAULT_WORKSPACE,
-        body={},
-        extra_headers={MOCK_RESPONSE_HEADER: json.dumps(mock_response)},
+    response = (
+        _gateway(mock_provider_test_clients, {MOCK_RESPONSE_HEADER: json.dumps(mock_response)})
+        .provider_post(
+            trailing_uri="v1/test",
+            name="any-provider",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({}),
+        )
+        .data()
     )
 
     assert response == mock_response
@@ -1191,7 +1237,7 @@ def test_fixture_add_provider(mock_provider_test_clients: ClientContext):
     The provider name is auto-prefixed with 'igw-mock-'.
     """
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="fixture-test-provider",  # Will become "igw-mock-fixture-test-provider"
         mock_response_body={
@@ -1203,11 +1249,15 @@ def test_fixture_add_provider(mock_provider_test_clients: ClientContext):
     assert provider.name == "igw-mock-fixture-test-provider"
     assert provider.workspace == DEFAULT_WORKSPACE
 
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={"model": "test", "messages": []},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"model": "test", "messages": []}),
+        )
+        .data()
     )
 
     assert response["id"] == "chatcmpl-fixture"
@@ -1219,10 +1269,8 @@ def test_fixture_add_provider_with_error_status(mock_provider_test_clients: Clie
     Use mock_status to configure the HTTP status code returned by the mock.
     This is useful for testing error handling in your service.
     """
-    from nemo_platform import RateLimitError
-
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="error-provider",  # Becomes "igw-mock-error-provider"
         mock_response_body={"error": "rate limited"},
@@ -1230,12 +1278,12 @@ def test_fixture_add_provider_with_error_status(mock_provider_test_clients: Clie
     )
 
     with pytest.raises(RateLimitError) as exc_info:
-        mock_provider_test_clients.sdk.inference.gateway.provider.post(
-            "v1/chat/completions",
+        _gateway(mock_provider_test_clients).provider_post(
+            trailing_uri="v1/chat/completions",
             name=provider.name,
             workspace=DEFAULT_WORKSPACE,
-            body={"model": "test", "messages": []},
-        )
+            body=JsonBody({"model": "test", "messages": []}),
+        ).data()
 
     assert exc_info.value.status_code == 429
 
@@ -1247,51 +1295,58 @@ def test_fixture_add_provider_with_model_entity_routing(mock_provider_test_clien
     to the /model/{model_entity_name}/ route to be routed to your mock provider.
     """
     add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="model-provider",  # Becomes "igw-mock-model-provider"
         mock_response_body={"id": "via-model-entity"},
         served_models={"my-model": "served-model-name"},
     )
 
-    response = mock_provider_test_clients.sdk.inference.gateway.model.post(
-        "v1/chat/completions",
-        name="my-model",
-        workspace=DEFAULT_WORKSPACE,
-        body={"model": "test", "messages": []},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .model_post(
+            trailing_uri="v1/chat/completions",
+            name="my-model",
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({"model": "test", "messages": []}),
+        )
+        .data()
     )
 
     assert response["id"] == "via-model-entity"
 
 
 def test_fixture_remove_provider(mock_provider_test_clients: ClientContext):
-    """Test removing a provider via SDK delete.
+    """Test removing a provider via the models client.
 
     Demonstrates deleting a provider and verifying it's no longer accessible.
-    Note: SDK delete removes from database, but we also need to clear from
+    Note: The API delete removes from database, but we also need to clear from
     the IGW model cache for immediate effect.
     """
-    from nemo_platform import NotFoundError
-    from nmp.core.inference_gateway.api.dependencies import global_model_cache
+    from nhx.core.inference_gateway.api.dependencies import global_model_cache
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="to-remove",
         mock_response_body={"temporary": True},
     )
 
     # Verify provider works
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/test",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={},
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/test",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody({}),
+        )
+        .data()
     )
     assert response == {"temporary": True}
 
-    # Delete the provider via SDK (removes from database)
-    mock_provider_test_clients.sdk.inference.providers.delete(
+    # Delete the provider via the models client (removes from database)
+    ModelsClient(base_url="http://testserver", http_client=mock_provider_test_clients.test_client).delete_provider(
         workspace=DEFAULT_WORKSPACE,
         name=provider.name,
     )
@@ -1305,21 +1360,18 @@ def test_fixture_remove_provider(mock_provider_test_clients: ClientContext):
 
     # Verify provider is gone (404 without X-Mock-Response header)
     with pytest.raises(NotFoundError) as exc_info:
-        mock_provider_test_clients.sdk.inference.gateway.provider.get(
-            "v1/health/ready",
+        _gateway(mock_provider_test_clients).provider_get(
+            trailing_uri="v1/health/ready",
             name=provider.name,
             workspace=DEFAULT_WORKSPACE,
-        )
+        ).data()
     assert exc_info.value.status_code == 404
 
 
-def test_fixture_sdk_access(mock_provider_test_clients: ClientContext):
-    """Test that ClientContext provides SDK access.
-
-    The sdk property gives you direct access to the NeMoPlatform client.
-    """
-    assert mock_provider_test_clients.sdk is not None
+def test_fixture_client_access(mock_provider_test_clients: ClientContext):
+    """Test that ClientContext exposes the TestClient the typed clients are built on."""
     assert mock_provider_test_clients.test_client is not None
+    assert _gateway(mock_provider_test_clients).base_url == "http://testserver"
 
 
 def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
@@ -1349,23 +1401,29 @@ def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
     }
 
     provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
+        mock_provider_test_clients.client,
         workspace=DEFAULT_WORKSPACE,
         name="llm-judge",  # Becomes "igw-mock-llm-judge"
         mock_response_body=judge_response,
     )
 
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/chat/completions",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={
-            "model": "judge-model",
-            "messages": [
-                {"role": "system", "content": "You are a judge..."},
-                {"role": "user", "content": "Evaluate: ..."},
-            ],
-        },
+    response = (
+        _gateway(mock_provider_test_clients)
+        .provider_post(
+            trailing_uri="v1/chat/completions",
+            name=provider.name,
+            workspace=DEFAULT_WORKSPACE,
+            body=JsonBody(
+                {
+                    "model": "judge-model",
+                    "messages": [
+                        {"role": "system", "content": "You are a judge..."},
+                        {"role": "user", "content": "Evaluate: ..."},
+                    ],
+                }
+            ),
+        )
+        .data()
     )
 
     judge_output = json.loads(response["choices"][0]["message"]["content"])
@@ -1373,42 +1431,34 @@ def test_fixture_llm_judge_pattern(mock_provider_test_clients: ClientContext):
     assert "accurate" in judge_output["reasoning"].lower()
 
 
-def test_fixture_isolation(mock_provider_test_clients: ClientContext):
-    """Test that mock_provider_test_clients fixture properly isolates test state.
+def test_fixture_isolation():
+    """Each test context starts from an empty gateway cache and an empty entity store.
 
-    Each test using mock_provider_test_clients gets a fresh context. Providers added in
-    one test won't be visible in another test.
+    The contexts are opened one after the other. One opened *inside* another shares the
+    process-global entities engine, and its gateway would see the outer provider after its
+    first cache refresh.
     """
-    from nemo_platform import NotFoundError
+    with create_test_client(InferenceGatewayService, ModelsService, client_type=ClientContext) as first:
+        provider = add_mock_provider(
+            first.client,
+            workspace=DEFAULT_WORKSPACE,
+            name="isolated-provider",  # Becomes "igw-mock-isolated-provider"
+            mock_response_body={"context": 1},
+        )
+        response = (
+            _gateway(first)
+            .provider_post(trailing_uri="v1/test", name=provider.name, workspace=DEFAULT_WORKSPACE, body=JsonBody({}))
+            .data()
+        )
+        assert response == {"context": 1}
 
-    # Add a provider in this test
-    provider = add_mock_provider(
-        mock_provider_test_clients.sdk,
-        workspace=DEFAULT_WORKSPACE,
-        name="isolated-provider",  # Becomes "igw-mock-isolated-provider"
-        mock_response_body={"context": 1},
-    )
-
-    # Verify it works in this context
-    response = mock_provider_test_clients.sdk.inference.gateway.provider.post(
-        "v1/test",
-        name=provider.name,
-        workspace=DEFAULT_WORKSPACE,
-        body={},
-    )
-    assert response == {"context": 1}
-
-    # Create a new context (simulating another test)
-    with create_test_client(
-        InferenceGatewayService,
-        ModelsService,
-        client_type=ClientContext,
-    ) as new_ctx:
-        # Provider should not exist in the new context
+    with create_test_client(InferenceGatewayService, ModelsService, client_type=ClientContext) as second:
         with pytest.raises(NotFoundError) as exc_info:
-            new_ctx.sdk.inference.gateway.provider.get(
-                "v1/health/ready",
-                name=provider.name,
-                workspace=DEFAULT_WORKSPACE,
-            )
+            _gateway(second).provider_get(
+                trailing_uri="v1/health/ready", name=provider.name, workspace=DEFAULT_WORKSPACE
+            ).data()
         assert exc_info.value.status_code == 404
+        # The store too, not only the cache: the cache is empty until the gateway's first refresh either way.
+        models = ModelsClient(base_url="http://testserver", http_client=second.test_client)
+        with pytest.raises(NotFoundError):
+            models.get_provider(workspace=DEFAULT_WORKSPACE, name=provider.name).data()

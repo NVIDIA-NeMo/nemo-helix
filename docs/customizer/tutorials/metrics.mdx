@@ -128,16 +128,23 @@ Get job status and training metrics through the platform Jobs service:
 
 ```python
 import os
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+sdk = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
+customization = Customization.from_client(client)
 
 # Get job status with metrics
 job_name = "my-sft-job"
-status = client.jobs.get_status(name=job_name, workspace="default")
+status = sdk.jobs.get_status(name=job_name, workspace="default")
 
 print(f"Job: {status.name}")
 print(f"Status: {status.status}")
@@ -212,7 +219,7 @@ spec = AutomodelJobInput(
     },
 )
 
-job = client.customization.automodel.jobs.create(
+job = customization.automodel.jobs.create(
     name="my-wandb-job",
     workspace="default",
     spec=spec,

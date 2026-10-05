@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/22-envoy-config-override.yaml
+# CI validates by running: helm template nemo-helix . -f ci/22-envoy-config-override.yaml
 # Exercises the full-replacement envoyProxy.configOverride path with a deliberately
 # small custom Envoy config, so this fixture does not duplicate the chart default.
 

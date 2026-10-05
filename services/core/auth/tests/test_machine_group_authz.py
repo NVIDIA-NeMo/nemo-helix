@@ -4,9 +4,9 @@
 import uuid
 
 from fastapi.testclient import TestClient
-from nemo_platform_ext.auth.helpers import generate_unsigned_jwt
-from nmp.common.config import AuthConfig
-from nmp.testing.client import create_test_client
+from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
+from nhx.common.config import AuthConfig
+from nhx.testing.client import create_test_client
 
 SERVICE_PRINCIPAL = "service:integration-test"
 WORKSPACES_PATH = "/apis/entities/v2/workspaces"
@@ -28,7 +28,7 @@ def test_external_machine_identity_group_binding_grants_workspace_access():
         email=f"{machine_principal_id}@example.com",
         groups=[group_name],
     )
-    service_headers = {"X-NMP-Principal-Id": SERVICE_PRINCIPAL}
+    service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
 
     with create_test_client(
         client_type=TestClient,

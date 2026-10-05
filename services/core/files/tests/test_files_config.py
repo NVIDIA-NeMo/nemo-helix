@@ -4,8 +4,8 @@
 """Unit tests for FilesConfig (allowed_external_hosts and related)."""
 
 import pytest
-from nmp.common.config import Configuration
-from nmp.core.files.config import FilesConfig
+from nhx.common.config import Configuration
+from nhx.core.files.config import FilesConfig
 
 
 class TestFilesConfigAllowedExternalHosts:
@@ -24,9 +24,9 @@ class TestFilesConfigAllowedExternalHosts:
         ]
 
     def test_allowed_external_hosts_from_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test NMP_FILES_ALLOWED_EXTERNAL_HOSTS env var sets allowed_external_hosts."""
+        """Test NHX_FILES_ALLOWED_EXTERNAL_HOSTS env var sets allowed_external_hosts."""
         monkeypatch.setenv(
-            "NMP_FILES_ALLOWED_EXTERNAL_HOSTS",
+            "NHX_FILES_ALLOWED_EXTERNAL_HOSTS",
             "https://proxy.corp.example.com,https://api.ngc.nvidia.com",
         )
         config = FilesConfig()
@@ -83,10 +83,10 @@ class TestFilesConfigHuggingFaceRetries:
         assert config.hf_retry_max_delay_seconds == 5.0
 
     def test_hf_retry_from_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test NMP_FILES_HF_RETRY_* env vars set Hugging Face retry config."""
-        monkeypatch.setenv("NMP_FILES_HF_RETRY_ATTEMPTS", "7")
-        monkeypatch.setenv("NMP_FILES_HF_RETRY_INITIAL_DELAY_SECONDS", "1")
-        monkeypatch.setenv("NMP_FILES_HF_RETRY_MAX_DELAY_SECONDS", "30")
+        """Test NHX_FILES_HF_RETRY_* env vars set Hugging Face retry config."""
+        monkeypatch.setenv("NHX_FILES_HF_RETRY_ATTEMPTS", "7")
+        monkeypatch.setenv("NHX_FILES_HF_RETRY_INITIAL_DELAY_SECONDS", "1")
+        monkeypatch.setenv("NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS", "30")
 
         config = FilesConfig()
 

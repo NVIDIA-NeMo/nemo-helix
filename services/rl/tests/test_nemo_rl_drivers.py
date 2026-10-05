@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-DRIVERS = Path(__file__).resolve().parents[1] / "src/nmp/rl/tasks/training/backends/nemo_rl"
+DRIVERS = Path(__file__).resolve().parents[1] / "src/nhx/rl/tasks/training/backends/nemo_rl"
 
 
 def _closes_logger_in_finally(source: str) -> bool:
@@ -264,7 +264,7 @@ def test_grpo_driver_fails_a_run_that_saved_no_checkpoint() -> None:
 )
 def test_missing_checkpoint_messages_are_classified(message: str, expected_type: str, expected_detail: str) -> None:
     """The driver raises these as ValueError; the rules must map them for the user."""
-    from nmp.rl.tasks.training.errors.converter import create_error_details
+    from nhx.rl.tasks.training.errors.converter import create_error_details
 
     details = create_error_details(ValueError(message))
     assert details["type"] == expected_type

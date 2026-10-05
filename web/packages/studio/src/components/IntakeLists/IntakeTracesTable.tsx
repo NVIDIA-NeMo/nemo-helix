@@ -24,6 +24,17 @@ import { keepPreviousData } from '@tanstack/react-query';
 import { Columns3 } from 'lucide-react';
 import { type FC, useState } from 'react';
 
+// Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
+// whenever makeColumns changes.
+const makeTraceColumns = makeIntakeTraceColumns({
+  traceIdFilter: true,
+  sessionIdFilter: true,
+  statusFilter: true,
+  agentNameFilter: true,
+  startedAtSort: true,
+  startedAtFilter: true,
+});
+
 export interface IntakeTracesTableProps {
   workspace?: string;
   slotEndPortalTargetId?: string;
@@ -95,13 +106,7 @@ const SeededIntakeTracesTable: FC<
   return (
     <IntakeTelemetryDataView<Trace>
       dataViewState={dataViewState}
-      makeColumns={makeIntakeTraceColumns({
-        traceIdFilter: true,
-        sessionIdFilter: true,
-        statusFilter: true,
-        startedAtSort: true,
-        startedAtFilter: true,
-      })}
+      makeColumns={makeTraceColumns}
       slotEndPortalTargetId={slotEndPortalTargetId}
       toolbarSlotEnd={
         <EditColumnsMenu

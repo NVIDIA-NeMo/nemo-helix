@@ -15,13 +15,13 @@ Instantiate the metric class you want to run and pass it with `dataset` and opti
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 ```
 
 ## Create Metric Objects Inline

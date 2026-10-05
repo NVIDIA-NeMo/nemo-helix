@@ -4,9 +4,9 @@
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { jobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
-  PlatformJobListSortField,
-  PlatformJobResponse,
-  PlatformJobsListFilter,
+  HelixJobListSortField,
+  HelixJobResponse,
+  HelixJobsListFilter,
 } from '@nemo/sdk/generated/platform/schema';
 
 const EVALUATOR_JOB_SOURCES = ['nemo-evaluator', 'nemo-evaluator.agent-evaluate'] as const;
@@ -16,9 +16,9 @@ const PAGE_SIZE = 50;
 export const fetchEvaluatorJobs = async (
   workspace: string,
   signal: AbortSignal,
-  shouldStop?: (accumulated: PlatformJobResponse[]) => boolean
-): Promise<PlatformJobResponse[]> => {
-  const all: PlatformJobResponse[] = [];
+  shouldStop?: (accumulated: HelixJobResponse[]) => boolean
+): Promise<HelixJobResponse[]> => {
+  const all: HelixJobResponse[] = [];
   let page = 1;
   while (true) {
     const res = await jobsListJobs(
@@ -26,8 +26,8 @@ export const fetchEvaluatorJobs = async (
       {
         page,
         page_size: PAGE_SIZE,
-        sort: '-created_at' as PlatformJobListSortField,
-        filter: withOperators<PlatformJobsListFilter>({
+        sort: '-created_at' as HelixJobListSortField,
+        filter: withOperators<HelixJobsListFilter>({
           source: { $in: [...EVALUATOR_JOB_SOURCES] },
         }),
       },

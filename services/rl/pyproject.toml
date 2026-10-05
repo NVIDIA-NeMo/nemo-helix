@@ -2,15 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [project]
-name = "nmp-rl"
+name = "nhx-rl"
 version = "0.1.0"
 description = "NeMo-RL task package — Ray DPO driver and compile glue. No HTTP server."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nmp-common",
-    "nmp-customization-common",
-    "nemo-platform-plugin",
+    "nhx-common",
+    "nhx-customization-common",
+    "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.6.1",
     "httpx>=0.27.0",
@@ -22,7 +22,7 @@ dependencies = [
 
 # Heavy ML deps (nemo-rl, ray, megatron, torch, transformers, etc.) are NOT declared here: they are
 # provided by the published NGC NeMo-RL container (v0.6.0) that
-# docker/Dockerfile.nmp-rl-base builds on, with the platform glue installed on
+# docker/Dockerfile.nhx-rl-base builds on, with the platform glue installed on
 # top — exactly like the reference customizer. The package stays importable
 # without that stack (compile.py + schemas), so plugin discovery and the compiler pay
 # no install cost.
@@ -44,23 +44,23 @@ conversion = [
 
 [project.scripts]
 # Container entrypoints. Names match the automodel/unsloth pattern for parity.
-nmp-rl-training = "nmp.rl.tasks.training.__main__:main"
-pi-to-gym-conversion = "nmp.rl.tasks.environment.__main__:main"
+nhx-rl-training = "nhx.rl.tasks.training.__main__:main"
+pi-to-gym-conversion = "nhx.rl.tasks.environment.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nmp"]
+packages = ["src/nhx"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.uv.sources]
-nmp-common = { workspace = true }
-nmp-customization-common = { workspace = true }
-nemo-platform-plugin = { workspace = true }
+nhx-common = { workspace = true }
+nhx-customization-common = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 [dependency-groups]
 dev = [

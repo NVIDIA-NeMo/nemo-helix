@@ -5,11 +5,10 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from nemo_platform_ext.auth.helpers import discover_nmp_config
+from nemo_helix_ext.auth.helpers import discover_nhx_config
 
 from tests.auth_idp.common import require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import (
-    authenticate_authentik_device_flow,
     url_origin,
     with_url_origin,
 )
@@ -30,14 +29,19 @@ def test_provider_gateway_serves_oidc_discovery(auth_idp_case, auth_idp_runtime)
 
     response.raise_for_status()
     discovery = response.json()
-    assert discovery["issuer"].endswith("/application/o/nemo/")
+    expected_issuer_path = urlparse(auth_idp_case.provider.issuer_url).path.rstrip("/")
+    actual_issuer = urlparse(discovery["issuer"])
+    if expected_issuer_path:
+        assert actual_issuer.path.rstrip("/") == expected_issuer_path
+    else:
+        assert discovery["issuer"].rstrip("/") == auth_idp_runtime.gateway_base_url.rstrip("/")
     assert discovery["jwks_uri"]
 
 
 def test_provider_discovery_exposes_device_flow_when_supported(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
 
     assert oidc.auth_enabled is True
     assert oidc.client_id
@@ -49,7 +53,7 @@ def test_provider_discovery_exposes_device_flow_when_supported(auth_idp_case, au
 def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
     tls_config = runtime_tls_config(auth_idp_runtime)
     assert oidc.device_authorization_endpoint is not None
     device_authorization_endpoint = with_url_origin(
@@ -77,13 +81,14 @@ def test_provider_device_authorization_endpoint_issues_user_code(auth_idp_case, 
     assert verification_complete.scheme == verification_uri.scheme
     assert verification_complete.netloc == verification_uri.netloc
     assert verification_complete.path == verification_uri.path
-    assert parse_qs(verification_complete.query) == {"code": [body["user_code"]]}
+    verification_query = parse_qs(verification_complete.query)
+    assert verification_query.get("code", verification_query.get("user_code")) == [body["user_code"]]
 
 
 def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runtime):
     require_capability(auth_idp_case, "device_flow")
 
-    oidc = discover_nmp_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
     assert oidc.client_id is not None
     assert oidc.token_endpoint
     assert oidc.device_authorization_endpoint
@@ -95,8 +100,7 @@ def test_provider_device_flow_returns_refresh_token(auth_idp_case, auth_idp_runt
         auth_idp_runtime.gateway_base_url,
     )
     token_endpoint = with_url_origin(oidc.token_endpoint, auth_idp_runtime.gateway_base_url)
-    token_response = authenticate_authentik_device_flow(
-        gateway_base_url=auth_idp_runtime.gateway_base_url,
+    token_response = auth_idp_runtime.authenticate_device_flow(
         device_authorization_endpoint=device_authorization_endpoint,
         token_endpoint=token_endpoint,
         client_id=oidc.client_id,

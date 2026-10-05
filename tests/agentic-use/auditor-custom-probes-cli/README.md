@@ -13,11 +13,11 @@ selected probes, create an audit target, and run an audit with the custom config
 **Audits may not run to completion in the Harbor test environment.**
 
 The audit job execution chain requires:
-1. A pre-built `auditor-tasks` Docker image (contains Garak framework)
+1. A pre-built `nhx-auditor-tasks` Docker image (contains Garak framework)
 2. Docker-in-Docker (DOOD) access via `/var/run/docker.sock`
 3. A working inference endpoint for Garak probes to call
 
-The Harbor container runs the NeMo Platform API in quickstart mode, but the
+The Harbor container runs the NeMo Helix API in quickstart mode, but the
 local Garak runtime may not be available.
 
 As a result, the verifier validates:

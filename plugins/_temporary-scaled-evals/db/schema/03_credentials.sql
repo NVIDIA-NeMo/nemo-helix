@@ -8,13 +8,13 @@
 -- See docs/API.md sections "Credentials (BYOK)", "Tenancy", "Identifiers".
 
 -- provider is the single category and states what the secret is for: the
--- model providers carry an API key; 'nmp' is NMP Intake (workspace token,
+-- model providers carry an API key; 'nhx' is NHX Intake (workspace token,
 -- supplied as a `yaml` blob); 'openshift' is a user's OpenShift bearer token
 -- (a `key`) that dispatch turns into a per-eval kubeconfig so the run acts as
 -- that user. Callers already know this mapping, so there is no separate `type`
 -- column.
 CREATE TYPE credential_provider AS ENUM (
-    'openai', 'anthropic', 'nvidia', 'nmp', 'openshift', 'switchyard'
+    'openai', 'anthropic', 'nvidia', 'nhx', 'openshift', 'switchyard'
 );
 
 -- Which write-once secret was supplied: a single-string `key` (model API

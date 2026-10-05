@@ -11,7 +11,7 @@ import pytest
 from data_designer_nemo.errors import NDDInvalidConfigError
 from nemo_data_designer_plugin.functions.retrieval_preview import RetrievalPreviewFrame, RetrievalPreviewFunction
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalPreviewSpec
-from nemo_platform_plugin.functions.frames import Done, Error
+from nemo_helix_plugin.functions.frames import Done, Error
 
 
 def _generate_config(tmp_path) -> RetrievalGenerateJobConfig:
@@ -142,7 +142,7 @@ async def test_retrieval_preview_resolves_hf_token_secret(tmp_path) -> None:
     preview_result = SimpleNamespace(num_seed_records=1, num_preview_records=1)
     resolved: dict[str, str | None] = {}
 
-    async def resolve(async_sdk: object, hf_token_secret: str | None, workspace: str) -> str:
+    async def resolve(async_client: object, hf_token_secret: str | None, workspace: str) -> str:
         resolved.update(secret=hf_token_secret, workspace=workspace)
         return "hf_secret_value"
 

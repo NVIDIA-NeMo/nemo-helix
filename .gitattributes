@@ -30,8 +30,6 @@ plugins/*/openapi/**/*.yaml linguist-generated
 services/core/infrastructure/models/src/models/nim_operator_types/*.py linguist-generated
 # Generated SDK client bindings
 sdk/python/** linguist-generated
-# Generated CLI
-packages/nemo_platform_ext/src/nemo_platform_ext/cli/commands/api/** linguist-generated
 # Built plugin web bundles (vite output, shipped in the wheel)
 plugins/*/src/*/web/dist/** linguist-generated
 # Rolled-up Studio plugin surface types (pnpm --filter @nemo/common types:plugin)

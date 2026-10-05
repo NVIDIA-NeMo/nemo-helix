@@ -7,53 +7,53 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from nemo_platform_plugin.capabilities import ProbeResult
-from nmp.common.config import Configuration, Runtime
-from nmp.core.jobs.app.providers import (
+from nemo_helix_plugin.capabilities import ProbeResult
+from nhx.common.config import Configuration, Runtime
+from nhx.core.jobs.app.providers import (
     ComputeResources,
     ContainerSpec,
     CPUExecutionProvider,
     GPUExecutionProvider,
     SubprocessExecutionProvider,
 )
-from nmp.core.jobs.app.schemas import PlatformJobEnvironmentVariable
-from nmp.core.jobs.config import JobsServiceConfig
-from nmp.core.jobs.controllers.backends.base import JobExecutionProfileConfig, resolve_gpu_job_shm_size
-from nmp.core.jobs.controllers.backends.config import (
+from nhx.core.jobs.app.schemas import HelixJobEnvironmentVariable
+from nhx.core.jobs.config import JobsServiceConfig
+from nhx.core.jobs.controllers.backends.base import JobExecutionProfileConfig, resolve_gpu_job_shm_size
+from nhx.core.jobs.controllers.backends.config import (
     DefaultExecutionProfileConfig,
     get_default_executor_profiles_for_runtime,
     merge_executor_profiles,
 )
-from nmp.core.jobs.controllers.backends.docker import (
+from nhx.core.jobs.controllers.backends.docker import (
     DockerJobExecutionProfile,
     DockerJobExecutionProfileConfig,
     k8s_shm_quantity_to_docker,
 )
-from nmp.core.jobs.controllers.backends.kubernetes import (
+from nhx.core.jobs.controllers.backends.kubernetes import (
     KubernetesJobExecutionProfile,
     KubernetesJobExecutionProfileConfig,
     KubernetesJobStorageConfig,
     VolcanoJobExecutionProfile,
     VolcanoJobExecutionProfileConfig,
 )
-from nmp.core.jobs.controllers.backends.registry import BackendKey, BackendRegistry, backend_registry
-from nmp.core.jobs.controllers.backends.subprocess import (
+from nhx.core.jobs.controllers.backends.registry import BackendKey, BackendRegistry, backend_registry
+from nhx.core.jobs.controllers.backends.subprocess import (
     SubprocessJobExecutionProfile,
     SubprocessJobExecutionProfileConfig,
 )
-from nmp.core.jobs.controllers.backends.test import (
+from nhx.core.jobs.controllers.backends.test import (
     MockDockerCPUJobBackend,
     MockKubernetesCPUJobBackend,
     MockKubernetesGPUJobBackend,
 )
-from nmp.core.jobs.entities import PlatformJob
+from nhx.core.jobs.entities import HelixJob
 from pydantic import ValidationError
 
 
 def test_job_instantiation_and_validation(sample_job_dict):
     """Test that a job can be instantiated and has correct step configuration."""
     # Instantiate the job from the dictionary
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     # Validate basic job properties
     assert job.name == "docker-test-job"
@@ -70,7 +70,7 @@ def test_job_instantiation_and_validation(sample_job_dict):
     assert cpu_step.executor.provider == "cpu"
     assert cpu_step.executor.profile == "default"
     assert cpu_step.executor.container.image == "ubuntu:latest"
-    assert cpu_step.environment == [PlatformJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
+    assert cpu_step.environment == [HelixJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
     assert isinstance(cpu_step.executor, CPUExecutionProvider)
 
     # Validate second step (GPU)
@@ -79,14 +79,14 @@ def test_job_instantiation_and_validation(sample_job_dict):
     assert gpu_step.executor.provider == "gpu"
     assert gpu_step.executor.profile == "default"
     assert gpu_step.executor.container.image == "ubuntu:latest"
-    assert gpu_step.environment == [PlatformJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
+    assert gpu_step.environment == [HelixJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
     assert gpu_step.executor.resources.num_gpus == 2
     assert isinstance(gpu_step.executor, GPUExecutionProvider)
 
 
 def test_step_container_command_configuration(sample_job_dict):
     """Test that step container commands are properly configured."""
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     expected_command = ["c1", "c2"]
     expected_entrypoint = ["a1", "a2"]
@@ -100,7 +100,7 @@ def test_step_container_command_configuration(sample_job_dict):
 
 def test_step_container_command_is_none(sample_job_dict):
     """Test that step container commands are properly configured when using strings."""
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     step = next((step for step in job.platform_spec.steps if step.name == "docker-step-no-command-or-entrypoint"), None)
     assert step is not None
@@ -131,25 +131,25 @@ def test_backend_registry_configuration(backend_registry):
 
 def test_step_environment_variables(sample_job_dict):
     """Test that step environment variables are properly configured."""
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     # Both steps should have the same environment configuration
     for step in job.platform_spec.steps:
         assert step.environment is not None
-        assert step.environment == [PlatformJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
+        assert step.environment == [HelixJobEnvironmentVariable(name="TEST_ENV", value="test_value")]
         assert len(step.environment) == 1
 
 
 def test_job_spec_parameters(sample_job_dict):
     """Test that job spec parameters are correctly configured."""
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     assert job.spec is not None
     assert "parameters" in job.spec
     assert job.spec["parameters"]["test_param"] == "test_value"
 
 
-@patch("nmp.common.sdk_factory.get_platform_sdk")
+@patch("nhx.common.sdk_factory.get_platform_sdk")
 def test_full_integration_matching_test_registry(mock_get_sdk, sample_job_dict, backend_registry):
     """Test full integration flow matching the test_registry.py script."""
     mock_sdk = MagicMock()
@@ -160,7 +160,7 @@ def test_full_integration_matching_test_registry(mock_get_sdk, sample_job_dict, 
     assert backend is not None
 
     # Create and validate job
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
     assert job.name == "docker-test-job"
     assert len(job.platform_spec.steps) == 3
 
@@ -181,7 +181,7 @@ def test_full_integration_matching_test_registry(mock_get_sdk, sample_job_dict, 
     assert entrypoint_list[1] == "a2"
 
 
-@patch("nmp.common.sdk_factory.get_platform_sdk")
+@patch("nhx.common.sdk_factory.get_platform_sdk")
 def test_gpu_step(mock_get_sdk, sample_job_dict, backend_registry):
     """Test full integration flow matching the test_registry.py script."""
     mock_sdk = MagicMock()
@@ -193,7 +193,7 @@ def test_gpu_step(mock_get_sdk, sample_job_dict, backend_registry):
     assert isinstance(backend, MockKubernetesGPUJobBackend)
 
     # Create and validate job
-    job = PlatformJob.model_validate(sample_job_dict)
+    job = HelixJob.model_validate(sample_job_dict)
 
     step = next((step for step in job.platform_spec.steps if step.name == "docker-step-gpu"), None)
     assert step is not None
@@ -211,7 +211,7 @@ def test_jobs_config_merge_with_defaults_docker_additional_volumes():
                     "storage": {
                         "additional_volume_mounts": [
                             {
-                                "volume_name": "nmp-e2e-additional-volume",
+                                "volume_name": "nhx-e2e-additional-volume",
                                 "mount_path": "/mnt/additional_storage",
                                 "allow_create_volume": True,
                             }
@@ -232,7 +232,7 @@ def test_jobs_config_merge_with_defaults_docker_additional_volumes():
     assert docker_defaults.storage.volume_name == "nemo-jobs-storage"  # default unchanged
     additional = docker_defaults.storage.additional_volume_mounts
     assert len(additional) == 1
-    assert additional[0].volume_name == "nmp-e2e-additional-volume"
+    assert additional[0].volume_name == "nhx-e2e-additional-volume"
     assert additional[0].mount_path == "/mnt/additional_storage"
     assert additional[0].allow_create_volume is True
 
@@ -258,20 +258,20 @@ def test_docker_default_profiles(monkeypatch):
     # Clear caches to ensure fresh config read
     Configuration.clear_cache()
     test_dir = pathlib.Path(__file__).parent
-    monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(test_dir / "fixtures" / "docker.yaml"))
+    monkeypatch.setenv("NHX_CONFIG_FILE_PATH", str(test_dir / "fixtures" / "docker.yaml"))
 
     config = Configuration.get_service_config(JobsServiceConfig)
     defaults = config.executor_defaults
 
     assert defaults.docker is not None
-    assert defaults.docker.storage.volume_name == "nemo-platform_jobs_storage"
+    assert defaults.docker.storage.volume_name == "nemo-helix_jobs_storage"
 
 
 def test_kubernetes_default_profiles(monkeypatch):
     # Clear caches to ensure fresh config read
     Configuration.clear_cache()
     test_dir = pathlib.Path(__file__).parent
-    monkeypatch.setenv("NMP_CONFIG_FILE_PATH", str(test_dir / "fixtures" / "kubernetes.yaml"))
+    monkeypatch.setenv("NHX_CONFIG_FILE_PATH", str(test_dir / "fixtures" / "kubernetes.yaml"))
 
     config = Configuration.get_service_config(JobsServiceConfig)
     defaults = config.executor_defaults
@@ -294,14 +294,14 @@ def test_kubernetes_job_service_account_name_from_executor_defaults():
         "jobs": {
             "executor_defaults": {
                 "kubernetes_job": {
-                    "service_account_name": "nmp-jobs-sa",
+                    "service_account_name": "nhx-jobs-sa",
                     "storage": {"pvc_name": "test-pvc"},
                 }
             }
         }
     }
     config = Configuration.global_settings_to_service_config(global_settings, JobsServiceConfig)
-    assert config.executor_defaults.kubernetes_job.service_account_name == "nmp-jobs-sa"
+    assert config.executor_defaults.kubernetes_job.service_account_name == "nhx-jobs-sa"
     assert config.executor_defaults.kubernetes_job.storage.pvc_name == "test-pvc"
 
 
@@ -324,7 +324,7 @@ def test_kubernetes_job_secret_volume_from_executor_defaults():
                         "additional_volume_mounts": [
                             {
                                 "name": "trust-bundle",
-                                "mount_path": "/etc/nmp/ca",
+                                "mount_path": "/etc/nhx/ca",
                                 "read_only": True,
                             }
                         ],
@@ -339,7 +339,7 @@ def test_kubernetes_job_secret_volume_from_executor_defaults():
     assert storage.additional_volumes[0].secret is not None
     assert storage.additional_volumes[0].secret.secret_name == "platform-ca"
     assert storage.additional_volumes[0].secret.items[0].key == "ca.crt"
-    assert storage.additional_volume_mounts[0].mount_path == "/etc/nmp/ca"
+    assert storage.additional_volume_mounts[0].mount_path == "/etc/nhx/ca"
     assert storage.additional_volume_mounts[0].read_only is True
 
 
@@ -407,17 +407,17 @@ def test_default_profiles_include_subprocess_for_none_runtime():
     assert [(p.provider, p.profile, p.backend) for p in profiles] == [("subprocess", "default", "subprocess")]
 
 
-def test_backend_registry_resolves_subprocess_default(mock_nmp_client):
+def test_backend_registry_resolves_subprocess_default(mock_nhx_client):
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
     profiles = get_default_executor_profiles_for_runtime(Runtime.NONE, DefaultExecutionProfileConfig())
 
     registry = BackendRegistry.from_config(
-        nmp_sdk=mock_nmp_client,
+        nhx_sdk=mock_nhx_client,
         profiles=profiles,
         backends={BackendKey("subprocess", "subprocess"): DummyBackend},
     )
@@ -425,15 +425,15 @@ def test_backend_registry_resolves_subprocess_default(mock_nmp_client):
     assert registry.get_backend(provider="subprocess", profile="default") is not None
 
 
-def test_backend_registry_skips_docker_when_unavailable(mock_nmp_client, caplog):
+def test_backend_registry_skips_docker_when_unavailable(mock_nhx_client, caplog):
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
     class ExplodingDockerBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
             raise AssertionError("docker backend should not be constructed when unavailable")
 
     profiles = [
@@ -452,11 +452,11 @@ def test_backend_registry_skips_docker_when_unavailable(mock_nmp_client, caplog)
 
     caplog.set_level(logging.WARNING)
     with patch(
-        "nmp.core.jobs.controllers.backends.registry.probe_docker",
+        "nhx.core.jobs.controllers.backends.registry.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): ExplodingDockerBackend,
@@ -470,12 +470,12 @@ def test_backend_registry_skips_docker_when_unavailable(mock_nmp_client, caplog)
     assert "Skipping job executor profile cpu/default" in caplog.text
 
 
-def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nmp_client):
+def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nhx_client):
     """Registry boot must not permanently skip Docker after an earlier transient miss."""
 
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
@@ -489,14 +489,14 @@ def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nmp_client):
     ]
 
     with (
-        patch("nmp.core.jobs.controllers.backends.registry.reset_capability_cache") as reset_cache,
+        patch("nhx.core.jobs.controllers.backends.registry.reset_capability_cache") as reset_cache,
         patch(
-            "nmp.core.jobs.controllers.backends.registry.probe_docker",
+            "nhx.core.jobs.controllers.backends.registry.probe_docker",
             return_value=ProbeResult(available=True),
         ) as probe,
     ):
         registry = BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=profiles,
             backends={BackendKey("cpu", "docker"): DummyBackend},
         )
@@ -506,10 +506,10 @@ def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nmp_client):
     assert registry.get_backend(provider="cpu", profile="default") is not None
 
 
-def test_backend_registry_registered_profile_keys_match_constructed_backends(mock_nmp_client):
+def test_backend_registry_registered_profile_keys_match_constructed_backends(mock_nhx_client):
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
@@ -528,11 +528,11 @@ def test_backend_registry_registered_profile_keys_match_constructed_backends(moc
     ]
 
     with patch(
-        "nmp.core.jobs.controllers.backends.registry.probe_docker",
+        "nhx.core.jobs.controllers.backends.registry.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): DummyBackend,
@@ -543,15 +543,15 @@ def test_backend_registry_registered_profile_keys_match_constructed_backends(moc
     assert registry.registered_profile_keys() == frozenset({("subprocess", "default")})
 
 
-def test_backend_registry_skips_docker_init_connection_errors(mock_nmp_client, caplog):
+def test_backend_registry_skips_docker_init_connection_errors(mock_nhx_client, caplog):
     from docker.errors import DockerException
 
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
 
     class FailingDockerBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
             raise DockerException("Error while fetching server API version")
 
     profiles = [
@@ -569,9 +569,9 @@ def test_backend_registry_skips_docker_init_connection_errors(mock_nmp_client, c
     ]
 
     caplog.set_level(logging.WARNING)
-    with patch("nmp.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)):
+    with patch("nhx.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)):
         registry = BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): FailingDockerBackend,
@@ -583,9 +583,9 @@ def test_backend_registry_skips_docker_init_connection_errors(mock_nmp_client, c
     assert "Docker backend initialization failed" in caplog.text
 
 
-def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nmp_client):
+def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nhx_client):
     class BrokenConfigDockerBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
             raise ValueError("bad executor config")
 
     profiles = [
@@ -598,20 +598,20 @@ def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nmp_c
     ]
 
     with (
-        patch("nmp.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)),
+        patch("nhx.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)),
         pytest.raises(ValueError, match="bad executor config"),
     ):
         BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=profiles,
             backends={BackendKey("cpu", "docker"): BrokenConfigDockerBackend},
         )
 
 
-def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nmp_client, caplog):
+def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nhx_client, caplog):
     class DummyBackend:
-        def __init__(self, nmp_sdk, execution_profile_config, profile_name):
-            self.nmp_sdk = nmp_sdk
+        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+            self.nhx_sdk = nhx_sdk
 
     advertised = [
         DockerJobExecutionProfile(
@@ -629,11 +629,11 @@ def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nmp_client
 
     caplog.set_level(logging.WARNING)
     with patch(
-        "nmp.core.jobs.controllers.backends.registry.probe_docker",
+        "nhx.core.jobs.controllers.backends.registry.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             profiles=advertised,
             backends={
                 BackendKey("cpu", "docker"): DummyBackend,
@@ -717,7 +717,7 @@ def test_merge_executor_profiles_skips_container_backends_for_none_runtime(caplo
 
     caplog.set_level(logging.WARNING)
     with patch(
-        "nmp.core.jobs.controllers.backends.config.probe_docker",
+        "nhx.core.jobs.controllers.backends.config.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ) as validate:
         merged = merge_executor_profiles(custom, defaults, runtime=Runtime.NONE)
@@ -750,7 +750,7 @@ def test_merge_executor_profiles_skips_docker_when_unavailable_under_docker_runt
 
     caplog.set_level(logging.WARNING)
     with patch(
-        "nmp.core.jobs.controllers.backends.config.probe_docker",
+        "nhx.core.jobs.controllers.backends.config.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ) as validate:
         merged = merge_executor_profiles(custom, defaults, runtime=Runtime.DOCKER)
@@ -775,7 +775,7 @@ def test_merge_executor_profiles_keeps_docker_executor_for_none_runtime_when_doc
     ]
 
     with patch(
-        "nmp.core.jobs.controllers.backends.config.probe_docker", return_value=ProbeResult(available=True)
+        "nhx.core.jobs.controllers.backends.config.probe_docker", return_value=ProbeResult(available=True)
     ) as validate:
         merged = merge_executor_profiles(custom, defaults, runtime=Runtime.NONE)
 
@@ -947,7 +947,7 @@ def test_merge_executor_profiles_keeps_subprocess_override_for_none_runtime(capl
     ]
 
     with patch(
-        "nmp.core.jobs.controllers.backends.config.probe_docker",
+        "nhx.core.jobs.controllers.backends.config.probe_docker",
         return_value=ProbeResult(available=False, detail="down"),
     ):
         merged = merge_executor_profiles(custom_executors, default_executors, runtime=Runtime.NONE)

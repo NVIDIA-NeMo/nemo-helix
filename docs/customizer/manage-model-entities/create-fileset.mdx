@@ -10,12 +10,12 @@ Create a FileSet containing your base model checkpoint before creating a Model E
 
 ## Prerequisites
 
-- Obtained the base URL of your NeMo Platform.
+- Obtained the base URL of your NeMo Helix.
 - For gated or private Hugging Face models: Created a secret with your HF token. Refer to [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets).
-- Set the `NMP_BASE_URL` environment variable.
+- Set the `NHX_BASE_URL` environment variable.
 
 ```bash
-export NMP_BASE_URL="https://your-nemo-platform-url"
+export NHX_BASE_URL="https://your-nemo-helix-url"
 ```
 
 ---
@@ -26,11 +26,11 @@ The most common method is downloading directly from Hugging Face. The example be
 
 ```python
 import os
-from nemo_platform import ConflictError, NeMoPlatform
-from nemo_platform.types.files import HuggingfaceStorageConfigParam
+from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix.types.files import HuggingfaceStorageConfigParam
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
@@ -84,11 +84,11 @@ For models from NVIDIA NGC:
 
 ```python
 import os
-from nemo_platform import ConflictError, NeMoPlatform
-from nemo_platform.types.files import NGCStorageConfigParam
+from nemo_helix import ConflictError, NeMoHelix
+from nemo_helix.types.files import NGCStorageConfigParam
 
-client = NeMoPlatform(
-    base_url=os.environ.get("NMP_BASE_URL", "http://localhost:8080"),
+client = NeMoHelix(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 

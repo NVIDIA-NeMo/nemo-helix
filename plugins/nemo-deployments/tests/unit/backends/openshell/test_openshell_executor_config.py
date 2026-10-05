@@ -71,17 +71,23 @@ def test_platform_egress_rejects_unknown_key() -> None:
 
 
 def test_platform_egress_accepts_proto_value_sets() -> None:
-    # Value sets follow openshell/proto/sandbox.proto, not the shorter summaries: "graphql"/""
-    # protocol and "passthrough" tls are valid and must not be rejected.
+    # Value sets follow OpenShell's authored policy schema, not the shorter summaries:
+    # "graphql"/"" protocol and "skip" tls are valid and must not be rejected.
     config = OpenShellExecutorConfig.model_validate(
-        {"platform_egress": {"protocol": "graphql", "tls": "passthrough", "access": "read-only"}}
+        {"platform_egress": {"protocol": "graphql", "tls": "skip", "access": "read-only"}}
     )
     assert config.platform_egress is not None
     assert (config.platform_egress.protocol, config.platform_egress.tls, config.platform_egress.access) == (
         "graphql",
-        "passthrough",
+        "skip",
         "read-only",
     )
+
+
+@pytest.mark.parametrize("tls", ["terminate", "passthrough"])
+def test_platform_egress_rejects_tls_modes_openshell_removed(tls: str) -> None:
+    with pytest.raises(ValidationError):
+        OpenShellExecutorConfig.model_validate({"platform_egress": {"tls": tls}})
 
 
 def test_platform_egress_rejects_invalid_protocol() -> None:

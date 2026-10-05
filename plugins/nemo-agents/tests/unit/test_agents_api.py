@@ -28,7 +28,7 @@ from nemo_agents_plugin.entities import (
     AgentDeployment,
     DeploymentStatus,
 )
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,

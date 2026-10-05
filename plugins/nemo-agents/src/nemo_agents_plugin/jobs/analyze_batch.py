@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from nemo_agents_plugin.jobs.evaluate_suite import _require_absolute
-from nemo_platform_plugin.job import NemoJob
-from nemo_platform_plugin.job_context import JobContext
-from nemo_platform_plugin.jobs.api_factory import PlatformJobSpec
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.job import NemoJob
+from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -71,22 +71,22 @@ class AnalyzeBatchJob(NemoJob):
         async_sdk: object,
         profile: str | None = None,
         options: dict | None = None,
-    ) -> PlatformJobSpec:
-        """Single-step PlatformJobSpec running ``nemo_agents_plugin.tasks.analyze``."""
-        from nemo_platform_plugin.jobs.api_factory import (
+    ) -> HelixJobSpec:
+        """Single-step HelixJobSpec running ``nemo_agents_plugin.tasks.analyze``."""
+        from nemo_helix_plugin.jobs.api_factory import (
             EnvironmentVariable,
             EnvironmentVariableFromSecret,
-            PlatformJobStep,
+            HelixJobStep,
             SubprocessExecutionProviderSpec,
         )
-        from nemo_platform_plugin.jobs.constants import (
+        from nemo_helix_plugin.jobs.constants import (
             DEFAULT_JOB_STORAGE_PATH,
             PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
         )
 
         _require_absolute(spec.batch, "batch")
         if not spec.mechanical_only and not spec.anthropic_api_key_secret:
-            raise PlatformJobCompilationError(
+            raise HelixJobCompilationError(
                 "'anthropic_api_key_secret' is required when submitting unless "
                 "'mechanical_only' is True (the LLM analysis pass calls Anthropic, "
                 "and the subprocess backend's sanitized env does not inherit "
@@ -109,9 +109,9 @@ class AnalyzeBatchJob(NemoJob):
         if spec.anthropic_base_url:
             environment.append(EnvironmentVariable(name="ANTHROPIC_BASE_URL", value=spec.anthropic_base_url))
 
-        return PlatformJobSpec(
+        return HelixJobSpec(
             steps=[
-                PlatformJobStep(
+                HelixJobStep(
                     name="analyze",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",

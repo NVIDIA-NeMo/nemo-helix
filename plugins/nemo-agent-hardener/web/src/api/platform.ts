@@ -9,4 +9,4 @@ import type { PluginSdk } from '@agent-hardener/types';
  * must run on Studio's authenticated axios and its single QueryClient, so a
  * plugin never bundles or configures the SDK itself.
  */
-export const usePlatformSdk = (): PluginSdk['platform'] => useHost().sdk.platform;
+export const useHelixSdk = (): PluginSdk['platform'] => useHost().sdk.platform;

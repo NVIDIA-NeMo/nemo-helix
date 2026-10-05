@@ -7,7 +7,7 @@ description: ""
 ---
 <a id="ingress"></a>
 
-The NeMo Platform Helm chart can expose the API service externally using **Kubernetes Ingress**, the **Gateway API HTTPRoute**, or on OpenShift an **OpenShift Route**. Choose one based on your cluster.
+The NeMo Helix Helm chart can expose the API service externally using **Kubernetes Ingress**, the **Gateway API HTTPRoute**, or on OpenShift an **OpenShift Route**. Choose one based on your cluster.
 
 **Prerequisites:** Complete [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites) and [Install](/documentation/kubernetes-deployment/setup/helm/install) (or [OpenShift](/documentation/kubernetes-deployment/setup/helm/openshift)) so the platform is installed. Ensure your cluster has an [Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) controller (e.g. Traefik, OpenShift IngressController) or a [Gateway API](https://gateway-api.sigs.k8s.io/) Gateway configured.
 
@@ -20,7 +20,7 @@ To use standard Kubernetes [Ingress](https://kubernetes.io/docs/concepts/service
  ```yaml
  ingress:
  enabled: true
- defaultHost: "nmp.example.com"
+ defaultHost: "nhx.example.com"
  # optional: use if your cluster has multiple ingress classes
  # className: "nginx"
  ```
@@ -32,11 +32,11 @@ To use standard Kubernetes [Ingress](https://kubernetes.io/docs/concepts/service
  ```yaml
  ingress:
  enabled: true
- defaultHost: "nmp.example.com"
+ defaultHost: "nhx.example.com"
  tls:
  - hosts:
- - nmp.example.com
- secretName: nmp-tls-secret
+ - nhx.example.com
+ secretName: nhx-tls-secret
  ```
 
 3. **Optional: Annotations.** Pass controller-specific options (e.g. for NGINX or cert-manager) via `ingress.annotations`:
@@ -44,15 +44,15 @@ To use standard Kubernetes [Ingress](https://kubernetes.io/docs/concepts/service
  ```yaml
  ingress:
  enabled: true
- defaultHost: "nmp.example.com"
+ defaultHost: "nhx.example.com"
  annotations:
  cert-manager.io/cluster-issuer: "letsencrypt-prod"
  nginx.ingress.kubernetes.io/proxy-body-size: "0"
  ```
 
-Install or upgrade with your values file so the Ingress resource is created. After installation, use the URL shown in the Helm notes (`helm status nemo-platform`) or the host you configured.
+Install or upgrade with your values file so the Ingress resource is created. After installation, use the URL shown in the Helm notes (`helm status nemo-helix`) or the host you configured.
 
-**Advanced:** For multiple hostnames or different paths per host, leave `defaultHost` unset and use `ingress.hosts` (each entry has `name` and `paths`). See the [NeMo Platform Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) for the full structure.
+**Advanced:** For multiple hostnames or different paths per host, leave `defaultHost` unset and use `ingress.hosts` (each entry has `name` and `paths`). See the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference) for the full structure.
 
 ## Gateway API HTTPRoute
 
@@ -67,12 +67,12 @@ On clusters that use the [Gateway API](https://gateway-api.sigs.k8s.io/), you ca
  - name: my-gateway
  namespace: gateway-namespace
  hostnames:
- - "nmp.example.com" # optional
+ - "nhx.example.com" # optional
  ```
 
 2. Install or upgrade with this values file. The HTTPRoute will be created and bound to the specified Gateway(s).
 
-For full option details (e.g. `filters`, `labels`, `annotations`), see the [NeMo Platform Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference).
+For full option details (e.g. `filters`, `labels`, `annotations`), see the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference).
 
 ## OpenShift Route
 
@@ -83,16 +83,16 @@ On Red Hat OpenShift you can expose the API using an [OpenShift Route](https://d
  ```yaml
  openshiftRoute:
  enabled: true
- host: "nmp.example.com" # optional; if empty, the router may assign a default
+ host: "nhx.example.com" # optional; if empty, the router may assign a default
  ```
 
  The route targets the platform API service; you do not set the service name or port (the chart uses the API service by default).
 
 2. **Optional: TLS.** Configure `openshiftRoute.tls` (termination, certificate, key, etc.) per the [OpenShift Route TLS documentation](https://docs.openshift.com/container-platform/latest/networking/routes/route-configuration.html#nw-ingress-creating-a-route-using-a-reencryption-termination_configuring-routes).
 
-3. Install or upgrade with your values file. After installation, use the URL from the Helm notes (`helm status nemo-platform`) or the host you configured.
+3. Install or upgrade with your values file. After installation, use the URL from the Helm notes (`helm status nemo-helix`) or the host you configured.
 
-For all options (`targetPort`, `annotations`, `labels`), see the [NeMo Platform Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference).
+For all options (`targetPort`, `annotations`, `labels`), see the [NeMo Helix Helm Chart reference](/documentation/kubernetes-deployment/helm/helm-reference).
 
 ## Related
 
@@ -118,7 +118,7 @@ On AKS, use the [managed Application Routing add-on](https://learn.microsoft.com
  ```yaml
  ingress:
  enabled: true
- defaultHost: "nmp.example.com"
+ defaultHost: "nhx.example.com"
  className: webapprouting.kubernetes.azure.com
  ```
 
@@ -136,7 +136,7 @@ On EKS, use the [AWS Load Balancer Controller](https://kubernetes-sigs.github.io
  ingress:
  enabled: true
  className: alb
- defaultHost: "nmp.example.com" # optional
+ defaultHost: "nhx.example.com" # optional
  annotations:
  alb.ingress.kubernetes.io/target-type: ip
  ```
@@ -155,7 +155,7 @@ On GKE, use the built-in [GCE Ingress controller](https://cloud.google.com/kuber
  ingress:
  enabled: true
  className: gce
- defaultHost: "nmp.example.com" # optional
+ defaultHost: "nhx.example.com" # optional
  ```
 
 3. Install or upgrade with your values file. To verify, check that a load balancer was provisioned with `kubectl get ingress -n <namespace>`.

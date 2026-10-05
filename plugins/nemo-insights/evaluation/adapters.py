@@ -23,10 +23,10 @@ from evaluation.otlp_build import session_id_for, sim_to_spans
 from evaluation.otlp_ingest import export_spans, post_evaluator_results, trace_id_for
 from evaluation.registry import Subject
 from evaluation.tau2run import load_tasks, policy_version, read_policy, resolve_paths, run_tau2
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_insights_plugin.analyst.observability import AnalystEvaluationContext
 from nemo_insights_plugin.analyst.run import run_analyst
 from nemo_insights_plugin.platform_client import make_client
-from nemo_platform import AsyncNeMoPlatform
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -90,21 +90,22 @@ class IntakeAdapter:
         if missing := self.check():
             raise SystemExit(f"intake evaluation '{self.subject.name}' is missing: {', '.join(missing)}")
         client = self._basic_auth_client() if cfg.get("auth") == "basic" else make_client(str(cfg["base_url"]))
-        return await run_analyst(
-            agent=cfg["agent"],
-            ethos=None,
-            workspace=cfg["workspace"],
-            base_url=cfg["base_url"],
-            client=client,
-            insights_output=str(out_path),
-            local_only=True,
-            verbose=verbose,
-            since=since,
-            analyst_evaluation=self.analyst_evaluation,
-            enable_observability=cfg.get("auth") != "basic",
-        )
+        async with client:
+            return await run_analyst(
+                agent=cfg["agent"],
+                ethos=None,
+                workspace=cfg["workspace"],
+                base_url=cfg["base_url"],
+                client=client,
+                insights_output=str(out_path),
+                local_only=True,
+                verbose=verbose,
+                since=since,
+                analyst_evaluation=self.analyst_evaluation,
+                enable_observability=cfg.get("auth") != "basic",
+            )
 
-    def _basic_auth_client(self) -> AsyncNeMoPlatform:
+    def _basic_auth_client(self) -> AsyncNemoClient:
         """Build the basic-auth client configured for this Intake subject."""
         cfg = self.subject.config
         real_prefix = str(cfg.get("intake_path_prefix", "/api/intake")).rstrip("/") + "/"
@@ -299,19 +300,20 @@ class BenchmarkAdapter:
             f"analyzing realistic workspace '{workspace}' run '{evaluation_id}' (oracle withheld — unaided eval)",
             file=sys.stderr,
         )
-        return await run_analyst(
-            agent=str(record["agent"]),
-            ethos=policy,
-            workspace=workspace,
-            base_url=str(record["base_url"]),
-            client=make_client(str(record["base_url"])),
-            insights_output=str(out_path),
-            local_only=True,
-            verbose=verbose,
-            since=since,
-            evaluation_id=evaluation_id,
-            analyst_evaluation=self.analyst_evaluation,
-        )
+        async with make_client(str(record["base_url"])) as client:
+            return await run_analyst(
+                agent=str(record["agent"]),
+                ethos=policy,
+                workspace=workspace,
+                base_url=str(record["base_url"]),
+                client=client,
+                insights_output=str(out_path),
+                local_only=True,
+                verbose=verbose,
+                since=since,
+                evaluation_id=evaluation_id,
+                analyst_evaluation=self.analyst_evaluation,
+            )
 
 
 _ADAPTERS: dict[str, type[IntakeAdapter] | type[BenchmarkAdapter]] = {

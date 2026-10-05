@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import Request
 from nemoguardrails import LLMRails
-from nmp.guardrails.app.handlers.completion import CompletionRequestHandler, ErrorData, process_chunk
-from nmp.guardrails.entities.values._private import Model, RailsConfig
-from nmp.guardrails.entities.values.chat import (
+from nhx.guardrails.app.handlers.completion import CompletionRequestHandler, ErrorData, process_chunk
+from nhx.guardrails.entities.values._private import Model, RailsConfig
+from nhx.guardrails.entities.values.chat import (
     GuardrailChatCompletionRequest,
     GuardrailChatCompletionResponse,
     GuardrailChatCompletionStreamResponse,
 )
-from nmp.guardrails.entities.values.completions import (
+from nhx.guardrails.entities.values.completions import (
     GuardrailCompletionRequest,
 )
 from starlette.responses import StreamingResponse
@@ -66,7 +66,7 @@ async def test_handle_request_non_streaming(handler, mocker):
         log=None,
     )
     mock_run_generate = mocker.patch(
-        "nmp.guardrails.app.handlers.completion.run_generate_async",
+        "nhx.guardrails.app.handlers.completion.run_generate_async",
         new=AsyncMock(return_value=generate_result),
     )
     handler._post_process_response = MagicMock(return_value="processed_response")
@@ -180,8 +180,8 @@ async def test_handle_streaming_with_exception(handler):
 
 
 @pytest.mark.asyncio
-@patch("nmp.guardrails.app.handlers.completion.LLMRails")
-@patch("nmp.guardrails.app.handlers.completion.set_main_model_into_context")
+@patch("nhx.guardrails.app.handlers.completion.LLMRails")
+@patch("nhx.guardrails.app.handlers.completion.set_main_model_into_context")
 async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context,
     _mock_llm_rails,

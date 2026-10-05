@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
-from nmp.common.api.common import SecretRef
-from nmp.common.files.storage_config import DEFAULT_READ_CHUNK_SIZE, S3StorageConfig
-from nmp.core.files.app.backends.base import ByteRange
-from nmp.core.files.app.backends.factory import storage_impl_factory
-from nmp.core.files.app.backends.s3 import (
+from nhx.common.api.common import SecretRef
+from nhx.common.files.storage_config import DEFAULT_READ_CHUNK_SIZE, S3StorageConfig
+from nhx.core.files.app.backends.base import ByteRange
+from nhx.core.files.app.backends.factory import storage_impl_factory
+from nhx.core.files.app.backends.s3 import (
     S3AccessError,
     S3BackendError,
     S3ConfigError,
@@ -21,7 +21,7 @@ from nmp.core.files.app.backends.s3 import (
     S3UnavailableError,
     _raise_for_s3_error,
 )
-from nmp.core.files.exceptions import NotFoundError
+from nhx.core.files.exceptions import NotFoundError
 
 
 def _make_client_error(code: str, message: str = "Test error") -> ClientError:
@@ -280,7 +280,7 @@ class TestS3StorageImplDownload:
                 "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
             )
             with patch(
-                "nmp.core.files.app.backends.s3.download_url_streaming",
+                "nhx.core.files.app.backends.s3.download_url_streaming",
                 side_effect=mock_download_streaming,
             ):
                 download_iter = await s3_impl.download("file.txt", None)
@@ -306,7 +306,7 @@ class TestS3StorageImplDownload:
         async with mock_s3_client(s3_impl_no_prefix) as mock_client:
             mock_client.generate_presigned_url.return_value = "https://test.com/file?signed=true"
             with patch(
-                "nmp.core.files.app.backends.s3.download_url_streaming",
+                "nhx.core.files.app.backends.s3.download_url_streaming",
                 side_effect=mock_download_streaming,
             ):
                 download_iter = await s3_impl_no_prefix.download("file.txt", byte_range)
@@ -321,7 +321,7 @@ class TestS3StorageImplDownload:
         from unittest.mock import Mock
 
         import aiohttp
-        from nmp.core.files.exceptions import NotFoundError
+        from nhx.core.files.exceptions import NotFoundError
 
         async def mock_download_streaming_404(url, **kwargs):
             raise aiohttp.ClientResponseError(
@@ -337,7 +337,7 @@ class TestS3StorageImplDownload:
                 "https://test-bucket.s3.amazonaws.com/test-prefix/missing.txt?X-Amz-Signature=abc123"
             )
             with patch(
-                "nmp.core.files.app.backends.s3.download_url_streaming",
+                "nhx.core.files.app.backends.s3.download_url_streaming",
                 side_effect=mock_download_streaming_404,
             ):
                 download_iter = await s3_impl.download("missing.txt", None)
@@ -353,7 +353,7 @@ class TestS3StorageImplDownload:
         from unittest.mock import Mock
 
         import aiohttp
-        from nmp.core.files.app.backends.s3 import S3BackendError
+        from nhx.core.files.app.backends.s3 import S3BackendError
 
         async def mock_download_streaming_500(url, **kwargs):
             raise aiohttp.ClientResponseError(
@@ -369,7 +369,7 @@ class TestS3StorageImplDownload:
                 "https://test-bucket.s3.amazonaws.com/test-prefix/file.txt?X-Amz-Signature=abc123"
             )
             with patch(
-                "nmp.core.files.app.backends.s3.download_url_streaming",
+                "nhx.core.files.app.backends.s3.download_url_streaming",
                 side_effect=mock_download_streaming_500,
             ):
                 download_iter = await s3_impl.download("file.txt", None)
@@ -416,7 +416,7 @@ class TestS3StorageImplUpload:
                 "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
             )
             with patch(
-                "nmp.core.files.app.backends.s3.upload_url_streaming",
+                "nhx.core.files.app.backends.s3.upload_url_streaming",
                 side_effect=mock_upload_streaming,
             ):
                 result = await s3_impl.upload("file.txt", data_stream(), content_length=9)

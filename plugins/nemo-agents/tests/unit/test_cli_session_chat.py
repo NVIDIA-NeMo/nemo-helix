@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -22,7 +23,7 @@ from nemo_agents_plugin.entities import (
     SessionStatus,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform_ext.cli.chat_tui import ExitAction, collect_stream_response
+from nemo_helix_ext.cli.chat_tui import ExitAction, collect_stream_response
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -122,7 +123,8 @@ def test_session_chat_help_describes_new_and_resumed_sessions() -> None:
     assert "--session" in result.stdout
     assert "--session-name" in result.stdout
     assert "--workspace" in result.stdout
-    assert "--base-url" in result.stdout
+    # The platform comes from the global ``nemo --base-url`` / active context.
+    assert "--base-url" not in result.stdout
     assert "--timeout" in result.stdout
     assert "--interactive" not in result.stdout
 
@@ -145,11 +147,10 @@ def test_session_chat_accepts_new_named_session_options() -> None:
                 "Help me debug this",
                 "--workspace",
                 "team-a",
-                "--base-url",
-                "http://platform.test",
                 "--timeout",
                 "42",
             ],
+            obj=SimpleNamespace(get_base_url=lambda default=None: "http://platform.test"),
         )
 
     assert result.exit_code == 0, result.stderr
@@ -250,7 +251,7 @@ def test_session_chat_creates_named_session_and_passes_values_to_transport() -> 
     assert result.exit_code == 0, result.stderr
     assert (
         "Session 'debug-auth' created. Resume with:\n"
-        "  nemo agents chat --session debug-auth --workspace default --base-url http://localhost:8080" in result.stdout
+        "  nemo --base-url http://localhost:8080 agents chat --session debug-auth --workspace default" in result.stdout
     )
     assert [(request.method, request.url.path) for request in requests] == [
         ("GET", "/apis/agents/v2/workspaces/default/deployments/fabric-deployment"),
@@ -494,7 +495,7 @@ def test_session_chat_interrupt_detaches_without_closing(exception: type[BaseExc
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
-        patch("nemo_platform_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
     ):
         result = runner.invoke(AgentsCLI().get_cli(), ["chat", "--session", "debug-auth"])
 

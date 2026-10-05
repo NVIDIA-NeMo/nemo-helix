@@ -13,8 +13,8 @@ wildcard path and every proxied method), and a job-factory binding.
 from __future__ import annotations
 
 from nemo_agents_plugin.service import AgentsService
-from nemo_platform_plugin.authz import AuthzContribution
-from nemo_platform_plugin.authz_discovery import _derive_service_contribution
+from nemo_helix_plugin.authz import AuthzContribution
+from nemo_helix_plugin.authz_discovery import _derive_service_contribution
 
 _BASE = "/apis/agents/v2/workspaces/{workspace}"
 _GATEWAY_AGENT = f"{_BASE}/agents/{{name}}/-/{{trailing_uri:path}}"
@@ -126,7 +126,7 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
     # End-to-end: merging the derived contribution into static authz lands the gateway permission
     # on BOTH roles — Viewer via the explicit extra_role_permissions grant, Editor via the default
     # suffix heuristic. This is the actual user-facing guarantee the P1 regression broke.
-    from nemo_platform_plugin.authz_merge import merge_authz_contributions
+    from nemo_helix_plugin.authz_merge import merge_authz_contributions
 
     base = {
         "authz": {
@@ -144,20 +144,22 @@ def test_gateway_invoke_reaches_both_roles_after_merge() -> None:
 def test_job_factory_binding() -> None:
     contrib = _contribution()
     # evaluate-suite maps to the ``agents.suite`` sub-namespace; its collection
-    # POST is a create, item DELETE is a delete, both PRINCIPAL.
+    # POST is a create and its item DELETE is a delete. Factory-generated routes carry
+    # both caller kinds (see authz.GENERATED_ROUTE_CALLERS), unlike the hand-written
+    # routes above, which stay principal-only.
     collection = f"{_BASE}/jobs/evaluate-suite"
     create = contrib.endpoints[collection]["post"]
     assert create.permissions == ["agents.suite.create"]
     assert create.scopes == ["agents:write", "platform:write"]
-    assert create.callers == ["principal"]
+    assert create.callers == ["principal", "service_principal"]
 
     delete = contrib.endpoints[f"{collection}/{{name}}"]["delete"]
     assert delete.permissions == ["agents.suite.delete"]
 
-    # Every job-factory permission for all five collections is declared.
+    # Every job-factory permission for all six job collections is declared.
     expected_job_perms = {
         f"agents.{sub}.{verb}"
-        for sub in ("evaluate", "suite", "optimize-skills", "analyze", "optimize")
+        for sub in ("evaluate", "execute", "suite", "optimize-skills", "analyze", "package")
         for verb in ("create", "list", "read", "delete", "cancel")
     }
     assert expected_job_perms <= set(contrib.permissions)

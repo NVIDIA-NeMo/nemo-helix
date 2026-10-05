@@ -3,6 +3,30 @@
 
 # email-security-triage — sample traces
 
+## Prerequisites
+
+For automatic Insights analysis after import, enable analysis for `email-security-triage`
+and configure its default/fast model pair before importing. Trace import itself does not
+require an analysis config.
+
+```bash
+uv run nemo insights analysis enable --agent email-security-triage
+```
+
+Without a model pair from `nemo setup`, name one explicitly (any Model Entity refs the
+platform can serve), or set it from the agent's **Details** tab in Studio:
+
+```bash
+uv run nemo insights analysis enable --agent email-security-triage \
+  --default-model default/<model> --fast-model default/<model>
+```
+
+The default model runs the analysis itself. The fast model only summarizes long trace
+context before it reaches the default model, so pick something cheaper and quicker; if
+unset, the default model does both.
+
+## Sample traces
+
 Eighteen hand-written ATIF trajectories for the `email-security-triage` agent, one file per
 trace. They exercise all three of the agent's capabilities and carry three deliberate failure
 clusters, so an evaluation run has something to pass _and_ something to fail on — and so the
@@ -31,11 +55,11 @@ no separate `/evaluator-results` call needed.
 ## Import
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 export WORKSPACE=default
 
 for f in trace-*.json; do
-  curl -sS -X POST "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
+  curl -sS -X POST "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/ingest/atif" \
     -H 'Content-Type: application/json' --data-binary "@$f" \
     -o /dev/null -w "$f -> %{http_code}\n"
 done
@@ -44,7 +68,7 @@ done
 `201` with an empty body is success. Verify by reading them back:
 
 ```bash
-curl -sS -g "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=email-security-triage&page=1&page_size=100"
+curl -sS -g "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/spans?filter[agent_name]=email-security-triage&page=1&page_size=100"
 ```
 
 ## Other ingest formats
@@ -96,15 +120,10 @@ those confined to one. Each cluster above clears that bar on its own.
 The periodic controller also skips a scheduled run for an agent with fewer than 10 new traces
 since its last cursor, which 18 clears comfortably.
 
-Analysis must be enabled for the agent before a run can be triggered — the analyze-job spec needs
-the default/fast model pair, and that is only captured on the agent's analysis config:
-
-```bash
-uv run nemo insights analysis enable --agent email-security-triage
-```
+See [Prerequisites](#prerequisites) to configure automatic analysis after import.
 
 Studio's **Import traces** modal triggers a run per agent automatically after a successful import
-(the "Run insights analysis after import" checkbox). Without the config above it reports
+(the "Run insights analysis after import" checkbox). Without the [analysis config](#prerequisites) it reports
 `analysis not enabled` and leaves the import untouched.
 
 ## Notes

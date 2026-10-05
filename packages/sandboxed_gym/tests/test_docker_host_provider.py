@@ -21,7 +21,7 @@ from sandboxed_gym.host.models import GymHostEgressRule, GymHostSpec, GymHostVol
 def spec(**overrides) -> GymHostSpec:
     fields = {
         "job_id": "job-1",
-        "runtime_image": "nmp-gym-host:dev",
+        "runtime_image": "nhx-gym-host:dev",
         "environment_mount": GymHostVolumeMount(
             pvc_claim="job-storage", sub_path="environment", mount_path="/job/environment", read_only=True
         ),
@@ -97,7 +97,7 @@ def test_egress_is_recorded_rather_than_applied(tmp_path: Path) -> None:
     assert provider._egress["stub"] == (("model.example", 443),)
 
 
-@pytest.mark.parametrize("network", [None, "nmp-gym-net"])
+@pytest.mark.parametrize("network", [None, "nhx-gym-net"])
 def test_the_network_option_is_optional(tmp_path: Path, network: str | None) -> None:
     provider = DockerGymHostProvider(root_dir=str(tmp_path), network=network)
 
@@ -124,3 +124,42 @@ async def test_an_unpublished_port_fails_loudly_and_removes_the_container(tmp_pa
         await provider.create_host(spec())
 
     assert removed, "the container was left behind"
+
+
+@pytest.mark.asyncio
+async def test_create_labels_the_container_with_the_job_id(tmp_path: Path) -> None:
+    """A later sweep has to find the container after this process has forgotten its name."""
+    provider = DockerGymHostProvider(root_dir=str(tmp_path))
+    seen: list[tuple[str, ...]] = []
+
+    async def fake_run(*argv: str, timeout_s: float = 120.0) -> str:
+        seen.append(argv)
+        return "0.0.0.0:9" if argv[0] == "port" else "container-id"
+
+    provider._run = fake_run
+
+    await provider.create_host(spec())
+
+    run = next(argv for argv in seen if argv[0] == "run")
+    assert "--label" in run
+    assert "nemo-rl-job-id=job-1" in run
+
+
+@pytest.mark.asyncio
+async def test_destroy_job_sandboxes_removes_containers_for_that_job(tmp_path: Path) -> None:
+    provider = DockerGymHostProvider(root_dir=str(tmp_path))
+    removed: list[str] = []
+
+    async def fake_run(*argv: str, timeout_s: float = 120.0) -> str:
+        assert argv[:3] == ("ps", "-aq", "--filter")
+        assert argv[3] == "label=nemo-rl-job-id=job-1"
+        return "c1\nc2\n"
+
+    async def fake_force_remove(name: str) -> None:
+        removed.append(name)
+
+    provider._run = fake_run
+    provider._force_remove = fake_force_remove
+
+    assert await provider.destroy_job_sandboxes("job-1") == ("c1", "c2")
+    assert removed == ["c1", "c2"]

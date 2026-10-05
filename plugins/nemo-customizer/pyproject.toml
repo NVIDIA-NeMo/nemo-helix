@@ -3,11 +3,11 @@
 
 [project]
 name = "nemo-customizer-plugin"
-description = "Customization router for NeMo Platform training backends."
+description = "Customization router for NeMo Helix training backends."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
-    "nemo-platform-plugin",
+    "nemo-helix-plugin",
     "pydantic>=2.10.6",
     "typer>=0.12.5",
 ]
@@ -36,7 +36,7 @@ packages = ["src/nemo_customizer"]
 
 
 [tool.uv.sources]
-nemo-platform-plugin = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 
 [dependency-groups]

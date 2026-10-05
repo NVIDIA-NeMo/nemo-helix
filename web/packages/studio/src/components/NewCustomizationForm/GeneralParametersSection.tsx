@@ -45,7 +45,10 @@ export const GeneralParametersSection = () => {
         <Stack gap="density-lg">
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'rl.training.epochs', control }}
-            formFieldProps={{ slotLabel: 'Epochs' }}
+            formFieldProps={{
+              slotLabel: 'Epochs',
+              slotInfo: 'Number of complete passes through the dataset.',
+            }}
             {...specSliderProps(DPO_SPEC_DEFAULTS, 'epochs')}
             min={1}
             max={100}
@@ -54,7 +57,10 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'rl.training.learning_rate', control }}
-            formFieldProps={{ slotLabel: 'Learning Rate' }}
+            formFieldProps={{
+              slotLabel: 'Learning Rate',
+              slotInfo: 'Learning rate reached at the end of warmup, before decay begins.',
+            }}
             {...specSliderProps(DPO_SPEC_DEFAULTS, 'learning_rate')}
             min={1e-6}
             max={1e-3}
@@ -63,7 +69,10 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'rl.training.batch_size', control }}
-            formFieldProps={{ slotLabel: 'Global Batch Size' }}
+            formFieldProps={{
+              slotLabel: 'Global Batch Size',
+              slotInfo: 'Examples per optimizer step, summed across all GPUs.',
+            }}
             {...specSliderProps(DPO_SPEC_DEFAULTS, 'batch_size')}
             min={1}
             max={256}
@@ -72,7 +81,11 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'rl.training.max_seq_length', control }}
-            formFieldProps={{ slotLabel: 'Max Sequence Length' }}
+            formFieldProps={{
+              slotLabel: 'Max Sequence Length',
+              slotInfo:
+                'Maximum token sequence length for training; longer sequences are truncated.',
+            }}
             {...specSliderProps(DPO_SPEC_DEFAULTS, 'max_seq_length')}
             min={128}
             max={131072}
@@ -96,7 +109,11 @@ export const GeneralParametersSection = () => {
                   */}
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.micro_batch_size', control }}
-                    formFieldProps={{ slotLabel: 'Micro Batch Size' }}
+                    formFieldProps={{
+                      slotLabel: 'Micro Batch Size',
+                      slotInfo:
+                        'Examples each GPU processes at once. Lower this first if training runs out of memory.',
+                    }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'micro_batch_size')}
                     min={1}
                     max={64}
@@ -105,7 +122,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.warmup_steps', control }}
-                    formFieldProps={{ slotLabel: 'Warmup Steps' }}
+                    formFieldProps={{
+                      slotLabel: 'Warmup Steps',
+                      slotInfo:
+                        'Steps spent ramping the learning rate up from zero. Around 10% of total steps is a stable starting point.',
+                    }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'warmup_steps')}
                     min={0}
                     max={1000}
@@ -114,7 +135,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.weight_decay', control }}
-                    formFieldProps={{ slotLabel: 'Weight Decay' }}
+                    formFieldProps={{
+                      slotLabel: 'Weight Decay',
+                      slotInfo: 'Penalty on large weights. Higher regularizes more; 0 disables it.',
+                    }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'weight_decay')}
                     min={0}
                     max={1}
@@ -136,7 +160,7 @@ export const GeneralParametersSection = () => {
                   <ControlledSwitch
                     useControllerProps={{ name: 'rl.training.activation_checkpointing', control }}
                     formFieldProps={{
-                      slotLabel: 'Activation Checkpointing',
+                      slotLabel: 'Activation Checkpoints',
                       labelPosition: 'left',
                       slotInfo:
                         'Recompute activations during the backward pass to reduce memory at the cost of compute.',
@@ -145,7 +169,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSelect
                     useControllerProps={{ name: 'rl.training.optimizer_type', control }}
-                    formFieldProps={{ slotLabel: 'Optimizer Type' }}
+                    formFieldProps={{
+                      slotLabel: 'Optimizer Type',
+                      slotInfo:
+                        'Optimizer + LR-scheduler combination (AdamW/Adam × cosine-annealing/flat-LR). Defaults to AdamW with cosine annealing.',
+                    }}
                     items={OPTIMIZER_TYPE_ITEMS}
                     disabled={disabled}
                   />
@@ -153,7 +181,8 @@ export const GeneralParametersSection = () => {
                     useControllerProps={{ name: 'rl.training.min_learning_rate', control }}
                     formFieldProps={{
                       slotLabel: 'Min Learning Rate',
-                      slotInfo: 'Minimum LR for cosine decay.',
+                      slotInfo:
+                        'Floor the cosine schedule decays to. Keep it below the peak learning rate.',
                     }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'min_learning_rate')}
                     min={0}
@@ -163,7 +192,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.adam_beta1', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₁' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₁',
+                      slotInfo: 'Decay rate for the gradient moving average (momentum).',
+                    }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'adam_beta1')}
                     min={0}
                     max={0.999}
@@ -172,7 +204,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.adam_beta2', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₂' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₂',
+                      slotInfo: 'Decay rate for the squared-gradient moving average.',
+                    }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'adam_beta2')}
                     min={0}
                     max={0.9999}
@@ -222,7 +257,7 @@ export const GeneralParametersSection = () => {
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'rl.training.keep_top_k', control }}
                     formFieldProps={{
-                      slotLabel: 'Keep Top-K Checkpoints',
+                      slotLabel: 'Top-K Checkpoints',
                       slotInfo: 'Number of best checkpoints to retain, ranked by validation loss.',
                     }}
                     {...specSliderProps(DPO_SPEC_DEFAULTS, 'keep_top_k')}
@@ -246,7 +281,10 @@ export const GeneralParametersSection = () => {
         <Stack gap="density-lg">
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.schedule.epochs', control }}
-            formFieldProps={{ slotLabel: 'Epochs' }}
+            formFieldProps={{
+              slotLabel: 'Epochs',
+              slotInfo: 'Number of complete passes through the dataset.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'schedule_epochs')}
             min={1}
             max={100}
@@ -255,7 +293,10 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.optimizer.learning_rate', control }}
-            formFieldProps={{ slotLabel: 'Learning Rate' }}
+            formFieldProps={{
+              slotLabel: 'Learning Rate',
+              slotInfo: 'Peak learning rate. Start near 5e-5 for full SFT, or 1e-4 with LoRA.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_learning_rate')}
             min={1e-6}
             max={1e-3}
@@ -264,7 +305,10 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.batch.global_batch_size', control }}
-            formFieldProps={{ slotLabel: 'Global Batch Size' }}
+            formFieldProps={{
+              slotLabel: 'Global Batch Size',
+              slotInfo: 'Examples per optimizer step, summed across all GPUs.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'batch_global_batch_size')}
             min={1}
             max={256}
@@ -273,7 +317,11 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSliderWithTextInput
             useControllerProps={{ name: 'automodel.training.max_seq_length', control }}
-            formFieldProps={{ slotLabel: 'Max Sequence Length' }}
+            formFieldProps={{
+              slotLabel: 'Max Sequence Length',
+              slotInfo:
+                'Maximum token sequence length for training; longer sequences are truncated.',
+            }}
             {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'training_max_seq_length')}
             min={128}
             max={131072}
@@ -282,7 +330,11 @@ export const GeneralParametersSection = () => {
           />
           <ControlledSwitch
             useControllerProps={{ name: 'automodel.batch.sequence_packing', control }}
-            formFieldProps={{ slotLabel: 'Sequence Packing', labelPosition: 'left' }}
+            formFieldProps={{
+              slotLabel: 'Sequence Packing',
+              slotInfo: 'Packs short examples together to improve training speed.',
+              labelPosition: 'left',
+            }}
             disabled={disabled}
           />
           <AccordionRoot multiple>
@@ -294,7 +346,11 @@ export const GeneralParametersSection = () => {
                 <Stack gap="density-md" className="pt-density-md">
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.batch.micro_batch_size', control }}
-                    formFieldProps={{ slotLabel: 'Micro Batch Size' }}
+                    formFieldProps={{
+                      slotLabel: 'Micro Batch Size',
+                      slotInfo:
+                        'Examples each GPU processes at once. Lower this first if training runs out of memory.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'batch_micro_batch_size')}
                     min={1}
                     max={64}
@@ -347,7 +403,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.warmup_steps', control }}
-                    formFieldProps={{ slotLabel: 'Warmup Steps' }}
+                    formFieldProps={{
+                      slotLabel: 'Warmup Steps',
+                      slotInfo:
+                        'Steps spent ramping the learning rate up from zero. Around 10% of total steps is a stable starting point.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_warmup_steps')}
                     min={0}
                     max={1000}
@@ -356,7 +416,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.weight_decay', control }}
-                    formFieldProps={{ slotLabel: 'Weight Decay' }}
+                    formFieldProps={{
+                      slotLabel: 'Weight Decay',
+                      slotInfo: 'Penalty on large weights. Higher regularizes more; 0 disables it.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_weight_decay')}
                     min={0}
                     max={1}
@@ -365,7 +428,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.min_learning_rate', control }}
-                    formFieldProps={{ slotLabel: 'Min Learning Rate' }}
+                    formFieldProps={{
+                      slotLabel: 'Min Learning Rate',
+                      slotInfo:
+                        'Floor the cosine schedule decays to. Keep it below the peak learning rate.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_min_learning_rate')}
                     min={0}
                     max={1e-3}
@@ -374,7 +441,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.adam_eps', control }}
-                    formFieldProps={{ slotLabel: 'Adam Epsilon' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam Epsilon',
+                      slotInfo: 'Adam/AdamW epsilon for numerical stability.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_adam_eps')}
                     min={1e-10}
                     max={1e-6}
@@ -383,7 +453,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.adam_beta1', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₁' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₁',
+                      slotInfo: 'Decay rate for the gradient moving average (momentum).',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_adam_beta1')}
                     min={0}
                     max={0.999}
@@ -392,7 +465,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSliderWithTextInput
                     useControllerProps={{ name: 'automodel.optimizer.adam_beta2', control }}
-                    formFieldProps={{ slotLabel: 'Adam β₂' }}
+                    formFieldProps={{
+                      slotLabel: 'Adam β₂',
+                      slotInfo: 'Decay rate for the squared-gradient moving average.',
+                    }}
                     {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_adam_beta2')}
                     min={0}
                     max={0.9999}
@@ -401,7 +477,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSelect
                     useControllerProps={{ name: 'automodel.optimizer.optimizer', control }}
-                    formFieldProps={{ slotLabel: 'Optimizer' }}
+                    formFieldProps={{
+                      slotLabel: 'Optimizer',
+                      slotInfo:
+                        "Optimizer algorithm. 'auto' selects Transformer Engine FusedAdam for retrieval recipes and torch Adam for SFT.",
+                    }}
                     items={[
                       { value: 'Adam', children: 'Adam' },
                       { value: 'AdamW', children: 'AdamW' },
@@ -410,7 +490,10 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSelect
                     useControllerProps={{ name: 'automodel.optimizer.lr_decay_style', control }}
-                    formFieldProps={{ slotLabel: 'LR Decay Style' }}
+                    formFieldProps={{
+                      slotLabel: 'LR Decay Style',
+                      slotInfo: 'Learning-rate decay schedule.',
+                    }}
                     items={[
                       { value: 'cosine', children: 'Cosine' },
                       { value: 'linear', children: 'Linear' },
@@ -422,9 +505,10 @@ export const GeneralParametersSection = () => {
                     useControllerProps={{ name: 'automodel.dataset.prompt_template', control }}
                     formFieldProps={{
                       slotLabel: 'Prompt Template',
-                      slotInfo: 'Template applied to each example before training.',
+                      slotInfo:
+                        'Only needed when your columns are neither messages nor prompt/completion. Use exactly two placeholders naming your columns.',
                     }}
-                    placeholder="{prompt} {completion}"
+                    placeholder="{input} {output}"
                     disabled={disabled}
                   />
                   <ControlledSelect
@@ -457,7 +541,11 @@ export const GeneralParametersSection = () => {
                   />
                   <ControlledSelect
                     useControllerProps={{ name: 'automodel.training.attn_implementation', control }}
-                    formFieldProps={{ slotLabel: 'Attention Implementation' }}
+                    formFieldProps={{
+                      slotLabel: 'Attention Implementation',
+                      slotInfo:
+                        "Attention backend: 'sdpa' (PyTorch native), 'flash_attention_2', or 'eager'.",
+                    }}
                     items={[
                       { value: 'sdpa', children: 'SDPA' },
                       { value: 'flash_attention_2', children: 'FlashAttention 2' },
@@ -470,7 +558,11 @@ export const GeneralParametersSection = () => {
                       name: 'automodel.batch.sequence_packing_max_samples',
                       control,
                     }}
-                    formFieldProps={{ slotLabel: 'Sequence Packing Max Samples' }}
+                    formFieldProps={{
+                      slotLabel: 'Packing Max Samples',
+                      slotInfo:
+                        'Samples analyzed to estimate the optimal pack size when packing is enabled.',
+                    }}
                     {...specSliderProps(
                       AUTOMODEL_SPEC_DEFAULTS,
                       'batch_sequence_packing_max_samples'
@@ -494,7 +586,10 @@ export const GeneralParametersSection = () => {
       <Stack gap="density-lg">
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.schedule.epochs', control }}
-          formFieldProps={{ slotLabel: 'Epochs' }}
+          formFieldProps={{
+            slotLabel: 'Epochs',
+            slotInfo: 'Number of complete passes through the dataset.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'schedule_epochs')}
           min={1}
           max={100}
@@ -503,7 +598,10 @@ export const GeneralParametersSection = () => {
         />
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.optimizer.learning_rate', control }}
-          formFieldProps={{ slotLabel: 'Learning Rate' }}
+          formFieldProps={{
+            slotLabel: 'Learning Rate',
+            slotInfo: 'Learning rate reached at the end of warmup, before decay begins.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_learning_rate')}
           min={1e-6}
           max={1e-3}
@@ -512,7 +610,11 @@ export const GeneralParametersSection = () => {
         />
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.batch.per_device_train_batch_size', control }}
-          formFieldProps={{ slotLabel: 'Per-Device Batch Size' }}
+          formFieldProps={{
+            slotLabel: 'Per-Device Batch Size',
+            slotInfo:
+              'Examples per GPU per step. Keep small for large models to avoid running out of memory.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'batch_per_device_train_batch_size')}
           min={1}
           max={64}
@@ -521,7 +623,10 @@ export const GeneralParametersSection = () => {
         />
         <ControlledSliderWithTextInput
           useControllerProps={{ name: 'unsloth.model.max_seq_length', control }}
-          formFieldProps={{ slotLabel: 'Max Sequence Length' }}
+          formFieldProps={{
+            slotLabel: 'Max Sequence Length',
+            slotInfo: 'Maximum token sequence length for training; longer sequences are truncated.',
+          }}
           {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'model_max_seq_length')}
           min={128}
           max={131072}
@@ -540,7 +645,11 @@ export const GeneralParametersSection = () => {
                     name: 'unsloth.batch.gradient_accumulation_steps',
                     control,
                   }}
-                  formFieldProps={{ slotLabel: 'Gradient Accumulation Steps' }}
+                  formFieldProps={{
+                    slotLabel: 'Accumulation Steps',
+                    slotInfo:
+                      'Steps accumulated before an optimizer update. Raises the effective batch size without using more memory.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'batch_gradient_accumulation_steps')}
                   min={1}
                   max={64}
@@ -623,7 +732,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSelect
                   useControllerProps={{ name: 'unsloth.schedule.lr_scheduler_type', control }}
-                  formFieldProps={{ slotLabel: 'LR Scheduler' }}
+                  formFieldProps={{
+                    slotLabel: 'LR Scheduler',
+                    slotInfo: 'Shape of the learning-rate decay after warmup.',
+                  }}
                   items={UNSLOTH_LR_SCHEDULER_ITEMS}
                   disabled={disabled}
                 />
@@ -638,7 +750,11 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.schedule.warmup_steps', control }}
-                  formFieldProps={{ slotLabel: 'Warmup Steps' }}
+                  formFieldProps={{
+                    slotLabel: 'Warmup Steps',
+                    slotInfo:
+                      'Steps spent ramping the learning rate up from zero. Around 10% of total steps is a stable starting point.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'schedule_warmup_steps')}
                   min={0}
                   max={1000}
@@ -647,7 +763,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.weight_decay', control }}
-                  formFieldProps={{ slotLabel: 'Weight Decay' }}
+                  formFieldProps={{
+                    slotLabel: 'Weight Decay',
+                    slotInfo: 'Penalty on large weights. Higher regularizes more; 0 disables it.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_weight_decay')}
                   min={0}
                   max={1}
@@ -656,7 +775,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.adam_beta1', control }}
-                  formFieldProps={{ slotLabel: 'Adam β₁' }}
+                  formFieldProps={{
+                    slotLabel: 'Adam β₁',
+                    slotInfo: 'Decay rate for the gradient moving average (momentum).',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_adam_beta1')}
                   min={0}
                   max={1}
@@ -665,7 +787,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.adam_beta2', control }}
-                  formFieldProps={{ slotLabel: 'Adam β₂' }}
+                  formFieldProps={{
+                    slotLabel: 'Adam β₂',
+                    slotInfo: 'Decay rate for the squared-gradient moving average.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_adam_beta2')}
                   min={0}
                   max={1}
@@ -674,7 +799,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.adam_epsilon', control }}
-                  formFieldProps={{ slotLabel: 'Adam Epsilon' }}
+                  formFieldProps={{
+                    slotLabel: 'Adam Epsilon',
+                    slotInfo: 'Adam/AdamW epsilon for numerical stability.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_adam_epsilon')}
                   min={1e-10}
                   max={1e-6}
@@ -683,7 +811,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.max_grad_norm', control }}
-                  formFieldProps={{ slotLabel: 'Max Gradient Norm' }}
+                  formFieldProps={{
+                    slotLabel: 'Max Gradient Norm',
+                    slotInfo: 'Gradient-clipping max norm (TRL default 1.0).',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_max_grad_norm')}
                   min={0}
                   max={10}
@@ -692,7 +823,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.label_smoothing_factor', control }}
-                  formFieldProps={{ slotLabel: 'Label Smoothing Factor' }}
+                  formFieldProps={{
+                    slotLabel: 'Label Smoothing',
+                    slotInfo: 'Label smoothing for the cross-entropy loss. 0.0 disables.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_label_smoothing_factor')}
                   min={0}
                   max={1}
@@ -701,7 +835,11 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSliderWithTextInput
                   useControllerProps={{ name: 'unsloth.optimizer.neftune_noise_alpha', control }}
-                  formFieldProps={{ slotLabel: 'NEFTune Noise Alpha' }}
+                  formFieldProps={{
+                    slotLabel: 'NEFTune Noise Alpha',
+                    slotInfo:
+                      'NEFTune embedding-noise alpha (quality boost). Leave blank to disable.',
+                  }}
                   {...specSliderProps(UNSLOTH_SPEC_DEFAULTS, 'optimizer_neftune_noise_alpha')}
                   min={0}
                   max={20}
@@ -710,7 +848,11 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledJsonInput
                   useControllerProps={{ name: 'unsloth.schedule.lr_scheduler_kwargs', control }}
-                  formFieldProps={{ slotLabel: 'LR Scheduler Kwargs (JSON)' }}
+                  formFieldProps={{
+                    slotLabel: 'LR Scheduler Kwargs (JSON)',
+                    slotInfo:
+                      'Extra kwargs for the LR scheduler, e.g. {"num_cycles": 3} for cosine_with_restarts. Leave blank to use the scheduler defaults.',
+                  }}
                   placeholder='{ "num_cycles": 1 }'
                   disabled={disabled}
                 />
@@ -750,7 +892,10 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledSelect
                   useControllerProps={{ name: 'unsloth.hardware.precision', control }}
-                  formFieldProps={{ slotLabel: 'Precision' }}
+                  formFieldProps={{
+                    slotLabel: 'Precision',
+                    slotInfo: 'Mixed-precision dtype for training. bf16 recommended for Ampere+.',
+                  }}
                   items={UNSLOTH_PRECISION_ITEMS}
                   disabled={disabled}
                 />
@@ -813,7 +958,11 @@ export const GeneralParametersSection = () => {
                 />
                 <ControlledJsonInput
                   useControllerProps={{ name: 'unsloth.model.rope_scaling', control }}
-                  formFieldProps={{ slotLabel: 'RoPE Scaling (JSON)' }}
+                  formFieldProps={{
+                    slotLabel: 'RoPE Scaling (JSON)',
+                    slotInfo:
+                      'RoPE scaling config for long-context extension, passed to FastLanguageModel.from_pretrained (e.g. {"type": "linear", "factor": 2.0}). Leave blank to use the model\'s native context length.',
+                  }}
                   placeholder='{ "type": "linear", "factor": 2.0 }'
                   disabled={disabled}
                 />

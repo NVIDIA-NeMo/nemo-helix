@@ -9,7 +9,7 @@ import httpx
 import pytest
 from evaluation import intake_client as intake_client_module
 from evaluation.intake_client import build_basic_auth_intake_client, build_rewriting_http_client
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 async def test_rewrites_sdk_prefix_and_attaches_basic_auth() -> None:
@@ -63,19 +63,19 @@ async def test_leaves_non_intake_paths_untouched() -> None:
     assert seen["url"] == "https://agenthub.aire.nvidia.com/other/path"
 
 
-async def test_build_basic_auth_intake_client_returns_sdk_client() -> None:
+async def test_build_basic_auth_intake_client_returns_typed_client() -> None:
     client = build_basic_auth_intake_client(
         base_url="https://agenthub.aire.nvidia.com",
         username="u",
         password="p",
     )
     try:
-        assert isinstance(client, AsyncNeMoPlatform)
+        assert isinstance(client, AsyncNemoClient)
     finally:
         await client.close()
 
 
-async def test_sdk_client_closes_its_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_typed_client_closes_its_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
     monkeypatch.setattr(
         intake_client_module,

@@ -21,9 +21,7 @@ import pytest
 try:
     import click
     import httpx
-    from botocore.exceptions import ClientError
     from nemo_scaled_evals_plugin import migrations
-    from scaled_evals.api import s3
     from scaled_evals.api.build import buildkit
     from scaled_evals.api.build.errors import BuildError
     from scaled_evals.api.build.image_builder_service import _post_resolve
@@ -363,7 +361,7 @@ def test_expired_runtime_claim_and_worker_namespace_are_portable() -> None:
     workers = (Path(__file__).parents[1] / "deploy/k8s/workers.yaml").read_text()
     assert 'namespace="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"' in workers
     assert "namespace: ${namespace}" in workers
-    assert "namespace: nemo-platform-scaled-evals" not in workers
+    assert "namespace: nemo-helix-scaled-evals" not in workers
 
 
 def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -382,19 +380,6 @@ def test_detached_spawn_failure_is_terminal(tmp_path: Path, monkeypatch: pytest.
     terminal = json.loads(exit_path.read_text())
     assert terminal["exit_code"] == 127
     assert "runner missing" in terminal["error"]
-
-
-def test_streamed_gcs_errors_are_read_before_classification() -> None:
-    response = httpx.Response(
-        404,
-        stream=httpx.ByteStream(b'{"error":{"message":"missing"}}'),
-    )
-
-    with pytest.raises(ClientError) as raised:
-        s3._raise_for_gcs("DownloadObject", response)
-
-    assert response.is_stream_consumed
-    assert "missing" in str(raised.value)
 
 
 def test_cleartext_and_external_targets_are_rejected(tmp_path: Path) -> None:
@@ -423,7 +408,10 @@ def test_cleartext_and_external_targets_are_rejected(tmp_path: Path) -> None:
         "secret",
         transport=httpx.MockTransport(redirect),
     ) as client:
-        with pytest.raises(click.ClickException, match="must use HTTPS"):
+        # The broker upload target is derived from the (HTTPS-validated) client base_url
+        # rather than a client-supplied URL, so the cleartext guard now lives in make_client
+        # (asserted above). upload_file instead rejects a malformed/empty upload block.
+        with pytest.raises(click.ClickException, match="missing workspace/fileset/path"):
             upload_file(client, {"url": "http://storage.example.test/archive"}, source)
         with pytest.raises(click.ClickException, match="must use HTTPS"):
             download_artifact(client, "/artifacts/archive", tmp_path / "download")

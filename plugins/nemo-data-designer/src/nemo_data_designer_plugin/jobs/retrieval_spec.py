@@ -45,6 +45,10 @@ class RetrievalGenerateJobConfig(BaseModel):
     sentences_per_chunk: int = Field(default=5, ge=1)
     num_sections: int = Field(default=1, ge=1)
     num_files: int | None = Field(default=None, ge=1)
+    multi_doc: bool = False
+    bundle_size: int = Field(default=2, ge=1)
+    bundle_strategy: Literal["sequential", "doc_balanced", "interleaved"] = "sequential"
+    max_docs_per_bundle: int = Field(default=3, ge=1)
     max_artifacts_per_type: int = Field(default=2, ge=1)
     num_pairs: int = Field(default=7, ge=1)
     query_counts: dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_QUERY_COUNTS))
@@ -53,6 +57,7 @@ class RetrievalGenerateJobConfig(BaseModel):
     max_hops: int = Field(default=3, ge=1)
     min_complexity: int = Field(default=2, ge=1, le=5)
     similarity_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+    max_parallel_requests_for_gen: int | None = Field(default=None, ge=1)
     buffer_size: int = Field(default=200, ge=1)
     resume: Literal["never", "always", "if_possible"] = "never"
     num_records: int | None = Field(default=None, ge=1)

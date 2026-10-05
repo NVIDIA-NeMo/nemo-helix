@@ -5,12 +5,16 @@
 
 import os
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+import httpx
 import pytest
 from _pytest.reports import TestReport
-from nemo_platform import DefaultHttpxClient, NeMoPlatform
+from nemo_helix import DefaultHttpxClient, NeMoHelix
+from nemo_helix_plugin.client.auth import StaticToken, TokenProvider, TokenProviderAuth
+from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 
 from e2e.services_pool import E2EServicesPool, RunningServices, admin_headers
 
@@ -28,9 +32,9 @@ def _read_services_log_tail(log_path: Path) -> list[str]:
 def configure_services_pool(config: pytest.Config, *, configure_mock_provider: bool = True) -> None:
     """Initialize the shared service-pool manager for a pytest session."""
     if configure_mock_provider:
-        os.environ.setdefault("NMP_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX", "igw-mock-")
+        os.environ.setdefault("NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX", "igw-mock-")
 
-        from nemo_platform_plugin.config import Configuration
+        from nemo_helix_plugin.config import Configuration
 
         Configuration.clear_cache()
     if config.stash.get(_services_pool_manager_key, None) is None:
@@ -119,16 +123,89 @@ def _services(_services_instance: RunningServices) -> Iterator[str]:
 
 
 @pytest.fixture(scope="module", name="services_pool_sdk")
-def services_pool_sdk(_services: str, _services_instance: RunningServices) -> NeMoPlatform:
-    access_token = os.environ.get("NMP_ACCESS_TOKEN")
-    context_name = os.environ.get("NMP_CONTEXT_NAME")
+def services_pool_sdk(_services: str, _services_instance: RunningServices) -> NeMoHelix:
+    access_token = os.environ.get("NHX_ACCESS_TOKEN")
+    context_name = os.environ.get("NHX_CONTEXT_NAME")
     headers = admin_headers() if _services_instance.auth_enabled else {}
     http_client = DefaultHttpxClient(base_url=_services, verify=True) if _services_instance.proc is not None else None
-    return NeMoPlatform(
+    return NeMoHelix(
         base_url=_services,
         access_token=access_token,
         context_name=context_name,
         http_client=http_client,
         max_retries=2,
         default_headers=headers,
+    )
+
+
+def _services_pool_auth() -> TokenProvider | None:
+    """Resolve bearer auth for the platform instance leased from ``E2EServicesPool``.
+
+    Reads the same ``NHX_ACCESS_TOKEN`` / ``NHX_CONTEXT_NAME`` env the CLI honors.
+    """
+    access_token = os.environ.get("NHX_ACCESS_TOKEN")
+    if access_token:
+        return StaticToken(access_token)
+    context_name = os.environ.get("NHX_CONTEXT_NAME")
+    if context_name:
+        return NemoClient.from_config(context=context_name)._auth
+    return None
+
+
+@pytest.fixture(scope="module", name="services_pool_client")
+def services_pool_client(_services: str, _services_instance: RunningServices) -> Iterator[NemoClient]:
+    """Typed platform client for the platform instance this module leased from ``E2EServicesPool``.
+
+    The transport carries the base URL, admin headers and bearer auth itself so
+    tests can also issue raw ``client._client.get("/path")`` requests against
+    routes that have no typed endpoint.
+    """
+    headers = admin_headers() if _services_instance.auth_enabled else None
+    auth = _services_pool_auth()
+    http_client = httpx.Client(
+        base_url=_services,
+        headers=headers,
+        auth=TokenProviderAuth(auth) if auth is not None else None,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    client = NemoClient(
+        base_url=_services,
+        auth=auth,
+        default_headers=headers,
+        http_client=http_client,
+        owns_http_client=True,
+        retry=RetryPolicy(
+            max_retries=2,
+            retryable_status_codes=(408, 409, 429),
+            retry_all_server_errors=True,
+            respect_retry_decision_headers=True,
+            respect_retry_after_headers=True,
+        ),
+    )
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+def client_as_principal(client: NemoClient, headers: Mapping[str, str]) -> NemoClient:
+    """Return a fresh client for *client*'s platform that carries only *headers* as its identity.
+
+    The pooled client's transport sends the admin principal headers on every
+    request, so acting as another principal needs a new transport rather than a
+    ``with_headers`` clone, which would merge the two identities.
+    """
+    auth = _services_pool_auth()
+    return NemoClient(
+        base_url=client.base_url,
+        workspace=client.workspace,
+        auth=auth,
+        default_headers=dict(headers),
+        http_client=httpx.Client(
+            base_url=client.base_url,
+            headers=dict(headers),
+            auth=TokenProviderAuth(auth) if auth is not None else None,
+            timeout=DEFAULT_TIMEOUT,
+        ),
+        owns_http_client=True,
     )

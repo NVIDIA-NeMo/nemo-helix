@@ -32,12 +32,12 @@ def test_dataset_uri_no_workspace() -> None:
 
 
 def test_create_duckdb_connection_requires_injected_sdk() -> None:
-    with pytest.raises(RuntimeError, match="requires an injected NeMo Platform SDK"):
+    with pytest.raises(RuntimeError, match="requires an injected NeMo Helix SDK"):
         FilesetFileSeedReader().create_duckdb_connection()
 
 
 def test_create_duckdb_connection_uses_injected_sdk() -> None:
-    sdk = Mock()
+    client = Mock()
     conn = Mock()
     filesystem = Mock()
 
@@ -45,6 +45,6 @@ def test_create_duckdb_connection_uses_injected_sdk() -> None:
         patch("data_designer_nemo.fileset_file_seed_reader.duckdb.connect", return_value=conn),
         patch("data_designer_nemo.fileset_file_seed_reader.make_filesystem", return_value=filesystem),
     ):
-        assert FilesetFileSeedReader(sdk).create_duckdb_connection() is conn
+        assert FilesetFileSeedReader(client).create_duckdb_connection() is conn
 
     conn.register_filesystem.assert_called_once_with(filesystem)

@@ -46,7 +46,7 @@ def test_entry_keeps_optional_metadata(tmp_path: Path):
         compute_units=0.2,
         compute_units_formula_version="usage_report_v0_compute_units",
         token_count=1234,
-        runtime_image="nmp-nat-workspace-basic-mcp:latest",
+        runtime_image="nhx-nat-workspace-basic-mcp:latest",
         created_at=created_at,
         source_path=str(source_path),
         source_dir="/tmp/workspace-basic-mcp",
@@ -59,7 +59,7 @@ def test_entry_keeps_optional_metadata(tmp_path: Path):
     assert entry.source_dir == "/tmp/workspace-basic-mcp"
     assert entry.compute_units_formula_version == "usage_report_v0_compute_units"
     assert entry.token_count == 1234
-    assert entry.runtime_image == "nmp-nat-workspace-basic-mcp:latest"
+    assert entry.runtime_image == "nhx-nat-workspace-basic-mcp:latest"
     assert entry.run_count == 2
     assert entry.raw_report == {"schema_version": "v0"}
 

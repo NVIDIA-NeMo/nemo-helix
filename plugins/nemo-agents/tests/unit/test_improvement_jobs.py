@@ -8,17 +8,19 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_platform_plugin.jobs.exceptions import PlatformJobCompilationError
+from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
 
 def test_jobs_discovered_via_entry_points() -> None:
-    from nemo_platform_plugin.discovery import discover_jobs
+    from nemo_helix_plugin.discovery import discover_jobs
 
     jobs = discover_jobs()
     assert "agents.evaluate-suite" in jobs
     assert "agents.analyze" in jobs
-    assert "agents.optimize" in jobs
     assert "agents.optimize-skills" in jobs
+    # Optimization is not an agents job: nemo-agent-optimization-plugin owns the
+    # `nemo agents optimize` group and registers its own job and routes.
+    assert "agents.optimize" not in jobs
 
 
 def test_evaluate_suite_job_metadata() -> None:
@@ -90,7 +92,7 @@ def test_optimize_skills_config_validation() -> None:
 @pytest.mark.asyncio
 async def test_evaluate_suite_compile_produces_single_subprocess_step() -> None:
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteConfig, EvaluateSuiteJob
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     )
@@ -137,7 +139,7 @@ async def test_evaluate_suite_compile_rejects_relative_paths() -> None:
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteConfig, EvaluateSuiteJob
 
     spec = EvaluateSuiteConfig(evals="./my-evals", agent="/abs/agent", output="/abs/out")
-    with pytest.raises(PlatformJobCompilationError, match="'evals' must be an absolute path"):
+    with pytest.raises(HelixJobCompilationError, match="'evals' must be an absolute path"):
         await EvaluateSuiteJob.compile(
             workspace="default",
             spec=spec,
@@ -152,7 +154,7 @@ async def test_evaluate_suite_compile_rejects_none_agent() -> None:
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteConfig, EvaluateSuiteJob
 
     spec = EvaluateSuiteConfig(evals="/abs/evals", output="/abs/out")  # agent defaults to None
-    with pytest.raises(PlatformJobCompilationError, match="'agent' is required"):
+    with pytest.raises(HelixJobCompilationError, match="'agent' is required"):
         await EvaluateSuiteJob.compile(
             workspace="default",
             spec=spec,
@@ -167,7 +169,7 @@ async def test_evaluate_suite_compile_rejects_none_output() -> None:
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteConfig, EvaluateSuiteJob
 
     spec = EvaluateSuiteConfig(evals="/abs/evals", agent="/abs/agent")  # output defaults to None
-    with pytest.raises(PlatformJobCompilationError, match="'output' is required"):
+    with pytest.raises(HelixJobCompilationError, match="'output' is required"):
         await EvaluateSuiteJob.compile(
             workspace="default",
             spec=spec,
@@ -204,7 +206,7 @@ async def test_evaluate_suite_compile_injects_anthropic_secret_when_set() -> Non
 @pytest.mark.asyncio
 async def test_optimize_skills_compile_produces_single_subprocess_step() -> None:
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsConfig, OptimizeSkillsJob
-    from nemo_platform_plugin.jobs.constants import (
+    from nemo_helix_plugin.jobs.constants import (
         DEFAULT_JOB_STORAGE_PATH,
         PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
     )
@@ -259,7 +261,7 @@ async def test_optimize_skills_compile_rejects_relative_paths() -> None:
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsConfig, OptimizeSkillsJob
 
     spec = OptimizeSkillsConfig(evals="/abs/evals", agent="./my-agent")
-    with pytest.raises(PlatformJobCompilationError, match="'agent' must be an absolute path"):
+    with pytest.raises(HelixJobCompilationError, match="'agent' must be an absolute path"):
         await OptimizeSkillsJob.compile(
             workspace="default",
             spec=spec,
@@ -274,7 +276,7 @@ async def test_optimize_skills_compile_rejects_analyze_only_without_initial_batc
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsConfig, OptimizeSkillsJob
 
     spec = OptimizeSkillsConfig(evals="/abs/evals", agent="/abs/agent", analyze_only=True)
-    with pytest.raises(PlatformJobCompilationError, match="'analyze_only' requires 'initial_batch'"):
+    with pytest.raises(HelixJobCompilationError, match="'analyze_only' requires 'initial_batch'"):
         await OptimizeSkillsJob.compile(
             workspace="default",
             spec=spec,
@@ -335,7 +337,7 @@ async def test_analyze_compile_requires_anthropic_secret_unless_mechanical_only(
     from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchConfig, AnalyzeBatchJob
 
     spec = AnalyzeBatchConfig(batch="/abs/batch")  # mechanical_only defaults False, secret unset
-    with pytest.raises(PlatformJobCompilationError, match="anthropic_api_key_secret"):
+    with pytest.raises(HelixJobCompilationError, match="anthropic_api_key_secret"):
         await AnalyzeBatchJob.compile(
             workspace="default",
             spec=spec,
@@ -350,7 +352,7 @@ async def test_analyze_compile_rejects_relative_batch_path() -> None:
     from nemo_agents_plugin.jobs.analyze_batch import AnalyzeBatchConfig, AnalyzeBatchJob
 
     spec = AnalyzeBatchConfig(batch="./my-batch", mechanical_only=True)
-    with pytest.raises(PlatformJobCompilationError, match="'batch' must be an absolute path"):
+    with pytest.raises(HelixJobCompilationError, match="'batch' must be an absolute path"):
         await AnalyzeBatchJob.compile(
             workspace="default",
             spec=spec,

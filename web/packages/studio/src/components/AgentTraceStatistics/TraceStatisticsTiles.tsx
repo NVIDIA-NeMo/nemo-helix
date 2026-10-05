@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatTile, type StatTileProps } from '@nemo/common/src/components/StatTile/index';
+import { StatTile, type StatTileDiagnosticProps } from '@nemo/common/src/components/StatTile/index';
 import { Grid, Panel, Skeleton, Stack } from '@nvidia/foundations-react-core';
 import type { TraceStatisticsSummary } from '@studio/components/AgentTraceStatistics/types';
 import { formatLatencyMs, formatTokens } from '@studio/components/AgentTraceStatistics/utils';
@@ -23,7 +23,7 @@ const EMPTY_SUMMARY: TraceStatisticsSummary = {
 
 export const TraceStatisticsTiles: FC<Props> = ({ summary, isPending }) => {
   const { totalTraces, avgLatencyMs, avgTokensPerRun, avgCostUsd } = summary ?? EMPTY_SUMMARY;
-  const tiles: StatTileProps[] = [
+  const tiles: StatTileDiagnosticProps[] = [
     { label: 'Total traces', value: formatTokens(totalTraces) },
     { label: 'Avg latency', value: formatLatencyMs(avgLatencyMs), trailingLabel: 'per run' },
     {

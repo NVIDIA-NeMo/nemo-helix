@@ -1,4 +1,4 @@
-# Preserve ML stack from nmp-automodel-base (Automodel uv sync on NGC PyTorch).
+# Preserve ML stack from nhx-automodel-base (Automodel uv sync on NGC PyTorch).
 # Same pattern as customizer NO_OVERRIDE_REQUIREMENTS_PATH: impossible marker blocks
 # install/upgrade so the base venv pins remain intact when adding platform glue.
 transformers; sys_platform == 'never'

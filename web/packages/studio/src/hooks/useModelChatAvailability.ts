@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getPartsFromReference } from '@nemo/common/src/namedEntity';
+import { isServedByBaseModel } from '@nemo/common/src/utils/models';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { useModelDeploymentStatus } from '@studio/hooks/useModelDeploymentStatus';
@@ -16,24 +18,40 @@ export function useModelChatAvailability(
   options?: UseModelChatAvailabilityOptions
 ) {
   const adapter = options?.adapter;
-  // For models with a base_model (customized/prompt-tuned), deployment lives
-  // on the base model. For adapters, check the model itself directly.
-  const baseModelName = adapter ? undefined : model?.base_model;
+  // Only an adapter is served by a deployment of its base. A full-weight or merged
+  // fine-tune also carries `base_model`, but it registers its own Model Entity,
+  // deployment and provider — resolving its status against the base would report
+  // "no active deployment" for the normal case where only the fine-tune is deployed.
+  // For an adapter *row*, the model is already the parent, so it is checked directly.
+  const baseModelRef =
+    adapter || !model || !isServedByBaseModel(model) ? undefined : model.base_model;
+
+  // `base_model` is a `workspace/name` reference, while `useModelsGetModel` takes the
+  // two apart. Passing the reference as the name asks for `.../models/default/qwen3`,
+  // which 404s — and a base that fails to load is indistinguishable from one that is
+  // not deployed, so the adapter reports itself unavailable.
+  const baseParts = baseModelRef?.includes('/') ? getPartsFromReference(baseModelRef) : undefined;
 
   const { data: baseModelEntity, isLoading: isLoadingBaseModel } = useModelsGetModel(
-    model?.workspace ?? '',
-    baseModelName ?? '',
+    baseParts?.workspace ?? model?.workspace ?? '',
+    baseParts?.name ?? baseModelRef ?? '',
     undefined,
-    { query: { enabled: Boolean(baseModelName), retry: false } }
+    { query: { enabled: Boolean(baseModelRef), retry: false } }
   );
 
-  const modelForStatus = baseModelName ? baseModelEntity : model;
+  const modelForStatus = baseModelRef ? baseModelEntity : model;
   const { status: deploymentStatus, isLoading: isStatusLoading } = useModelDeploymentStatus(
     modelForStatus ?? undefined
   );
-  const { isServed, isLoading: isServedLoading } = useModelIsServed(modelForStatus);
+  // With an adapter, this asks whether the *adapter* is served, not its base: a READY
+  // base deployment that has not loaded the adapter serves the base and nothing else.
+  const {
+    isServed,
+    isLoading: isServedLoading,
+    isError: isServedError,
+  } = useModelIsServed(modelForStatus, adapter);
 
-  const isLoading = baseModelName
+  const isLoading = baseModelRef
     ? isLoadingBaseModel || isStatusLoading || isServedLoading
     : isStatusLoading || isServedLoading;
 
@@ -53,5 +71,19 @@ export function useModelChatAvailability(
 
   const isChatAvailable = modelChatStatus === 'enabled';
 
-  return { modelChatStatus, isChatAvailable, isLoading };
+  /**
+   * An adapter whose base is resolved, but which no provider lists among its served
+   * models. Distinct from a plain unavailable model: the base deployment may be fine
+   * and still coming up to the adapter, so callers give it its own empty state rather
+   * than the generic "Chat Unavailable".
+   *
+   * Excludes a failed provider lookup. Provider queries do not retry, so a single 5xx
+   * or a stale provider reference yields `isServed: false` without establishing it —
+   * and this drives copy that tells the user the base deployment has not loaded the
+   * adapter yet, which would then be a confident guess. Those fall through to the
+   * generic unavailable state instead.
+   */
+  const isAdapterUnserved = Boolean(adapter) && !isLoading && !isServedError && !isServed;
+
+  return { modelChatStatus, isChatAvailable, isLoading, isAdapterUnserved };
 }

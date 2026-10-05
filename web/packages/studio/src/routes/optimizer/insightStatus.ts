@@ -27,9 +27,9 @@ export interface InsightAction {
   color?: ComponentProps<typeof Button>['color'];
 }
 
-// Canonical order: secondary actions first, Run experiment (green brand CTA) on the right.
+// Canonical order: secondary actions first.
 const OPEN: InsightAction = {
-  label: 'Run experiment',
+  label: 'Reopen',
   target: 'open',
   kind: 'primary',
   color: 'brand',

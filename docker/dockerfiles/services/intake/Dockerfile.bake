@@ -31,7 +31,7 @@ ARG TAG=latest
     FROM build AS test
 
     # Update PYTHONPATH to ensure imports can be resolved
-    ENV PYTHONPATH=/app:/app/services/intake:/app/packages/nmp_common/src
+    ENV PYTHONPATH=/app:/app/services/intake:/app/packages/nhx_common/src
     # Disable testcontainers since we're using the postgres-test-fixture.sh script
     ENV USE_EXTERNAL_POSTGRES=true
     RUN uv sync --dev --frozen --no-editable --package=intake # get dev deps
@@ -44,7 +44,7 @@ ARG TAG=latest
     FROM root-distroless-base-3-11 AS docker
 
     # Update PYTHONPATH to ensure imports can be resolved
-    ENV PYTHONPATH=/app:/app/services/intake:/app/packages/nmp_common/src
+    ENV PYTHONPATH=/app:/app/services/intake:/app/packages/nhx_common/src
     ENV PORT=8000
     ENV HOST=0.0.0.0
     ENV PATH="/app/.venv/bin:$PATH"

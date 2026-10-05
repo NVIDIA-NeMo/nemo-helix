@@ -16,7 +16,8 @@
 #     --optimize-config aut-optimize.yml \
 #     --fileset agentic-use-aut-optimize \
 #     --agent <your-agent-name>
-#   nemo agents optimize \
+#   nemo agents optimize run-strategy \
+#     --strategy legacy \
 #     --optimize-config-fileset default/agentic-use-aut-optimize \
 #     --optimize-config aut-optimize.yml \
 #     --agent <your-agent-name>
@@ -32,7 +33,7 @@
 llms:
   llm:
     _type: openai
-    model_name: nvidia-nemotron-3-nano-30b-a3b
+    model_name: nvidia-nemotron-3-5-lightning-30b-a3b
     temperature: 0.0
     optimizable_params:
       - temperature

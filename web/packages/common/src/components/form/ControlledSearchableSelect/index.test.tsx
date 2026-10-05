@@ -53,6 +53,84 @@ describe('ControlledSearchableSelect', () => {
       expect(screen.getByText('Favorite Fruit')).toBeInTheDocument();
     });
 
+    it('should keep the help text as the trigger description when a value is selected', async () => {
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+          formFieldProps={{ slotLabel: 'Favorite Fruit', slotHelp: 'Pick one you like' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      expect(await screen.findByRole('combobox')).toHaveAccessibleDescription('Pick one you like');
+    });
+
+    it('should show the full selected label in a tooltip on hover', async () => {
+      const user = userEvent.setup();
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      await user.hover(
+        within(combobox).getByText('Banana', { ignore: '[role="tooltip"], [role="tooltip"] *' })
+      );
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent('Banana');
+    });
+
+    it('should render the selected option label in the trigger, not its raw value', async () => {
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+          formFieldProps={{ slotLabel: 'Favorite Fruit' }}
+        />,
+        { defaultValues: { fruit: 'banana' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      expect(combobox).toHaveTextContent('Banana');
+      expect(combobox).not.toHaveTextContent('banana');
+    });
+
+    it('should ellipsize a too-long selected label from the middle, keeping the distinguishing suffix', async () => {
+      const longOptions: SelectItemOption[] = [
+        { value: 'a', label: 'nvidia-nemotron-3-super-120b-a12b' },
+        { value: 'b', label: 'nvidia-nemotron-3-ultra-550b-a55b' },
+      ];
+
+      const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+        measureText: (text: string) => ({ width: text.length * 10 }),
+      } as unknown as CanvasRenderingContext2D);
+      const rectSpy = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockReturnValue({ width: 150 } as DOMRect);
+
+      renderWithForm(
+        <ControlledSearchableSelect options={longOptions} useControllerProps={{ name: 'model' }} />,
+        { defaultValues: { model: 'b' } }
+      );
+
+      const combobox = await screen.findByRole('combobox');
+      const text = within(combobox).getByText(/…/).textContent ?? '';
+      // 150px / 10px-per-char budget keeps ~15 of the label's 34 chars -- just enough to check
+      // it ellipsizes in the middle and keeps the tail that differs from the other option, not
+      // the exact character count (that's the truncation algorithm's business, not this test's).
+      expect(text).toContain('…');
+      expect(text.endsWith('a55b')).toBe(true);
+      expect(text).not.toBe('nvidia-nemotron-3-ultra-550b-a55b');
+      expect(text.length).toBeLessThan('nvidia-nemotron-3-ultra-550b-a55b'.length);
+
+      rectSpy.mockRestore();
+      getContextSpy.mockRestore();
+    });
+
     it('should show loading placeholder when isLoading is true', () => {
       renderWithForm(
         <ControlledSearchableSelect
@@ -82,6 +160,26 @@ describe('ControlledSearchableSelect', () => {
       expect(await screen.findByRole('listbox')).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Apple' })).toBeInTheDocument();
       expect(screen.getByRole('option', { name: 'Banana' })).toBeInTheDocument();
+    });
+
+    it('should size the popover to its content, capped rather than stretched full width', async () => {
+      const user = userEvent.setup();
+      renderWithForm(
+        <ControlledSearchableSelect
+          options={defaultOptions}
+          useControllerProps={{ name: 'fruit' }}
+        />
+      );
+
+      await user.click(screen.getByRole('combobox'));
+      await screen.findByRole('listbox');
+
+      const popover = screen.getByTestId('nv-select-content');
+      expect(popover).toHaveClass('w-max', 'max-w-96');
+      // `min-w-full` resolves against the anchored popover's containing block (viewport-wide),
+      // not the trigger, and outranks `max-w-*` in the CSS min/max conflict rule -- regression
+      // guard for the popover silently going full width again.
+      expect(popover.className).not.toMatch(/\bmin-w-full\b/);
     });
 
     it('should show search input in dropdown', async () => {

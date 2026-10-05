@@ -76,7 +76,7 @@ def discover_nat_evals(evals_dir: Path) -> list[EvalSpec]:
 class NATRunner:
     """Runner for NAT-based eval tasks (NeMo Agent Toolkit agent).
 
-    Locates ``nat_runner.py`` by env var ``NMP_AGENTS_NAT_RUNNER`` or by
+    Locates ``nat_runner.py`` by env var ``NHX_AGENTS_NAT_RUNNER`` or by
     convention at ``<repo_root>/tests/agentic-use/nat_runner.py``.
     """
 
@@ -116,7 +116,7 @@ class NATRunner:
                 "parallel runs contend on AUT provider seeding (see PR #227). "
                 "Lower to 1 or pass --no-aut-seed-providers if available.[/yellow]"
             )
-        # NAT tasks inherit from nmp-agentic-base:latest, the shared image
+        # NAT tasks inherit from nhx-agentic-base:latest, the shared image
         # built by the helper in _agentic_base.py. Trigger the build here so
         # NAT users don't get a silent image-not-found if Harbor hasn't been
         # run first.
@@ -130,7 +130,7 @@ class NATRunner:
         nat_runner_path = self._locate_nat_runner(project_root)
         if not nat_runner_path:
             raise RuntimeError(
-                "NAT runner not found. Set NMP_AGENTS_NAT_RUNNER or ensure "
+                "NAT runner not found. Set NHX_AGENTS_NAT_RUNNER or ensure "
                 "tests/agentic-use/nat_runner.py exists in the project."
             )
 
@@ -168,7 +168,7 @@ class NATRunner:
 
     def _locate_nat_runner(self, project_root: Path | None) -> Path | None:
         """Resolve the ``nat_runner.py`` path from env var or project convention."""
-        env = os.environ.get("NMP_AGENTS_NAT_RUNNER")
+        env = os.environ.get("NHX_AGENTS_NAT_RUNNER")
         if env:
             p = Path(env)
             return p if p.exists() else None
@@ -186,8 +186,8 @@ class NATRunner:
         started = datetime.now(timezone.utc)
 
         # PR #227 contract: --jobs-dir is an argparse flag, NAT_RUNNER_JOBS_DIR
-        # env var is no longer read. nat_runner.py's default for --nmp-base-url
-        # is localhost:8080 and it ignores shell NMP_BASE_URL — forward it
+        # env var is no longer read. nat_runner.py's default for --nhx-base-url
+        # is localhost:8080 and it ignores shell NHX_BASE_URL — forward it
         # explicitly so callers can point at a non-default deployment.
         cmd: list[str] = [
             sys.executable,
@@ -196,9 +196,9 @@ class NATRunner:
             str(out_dir),
             spec.name,
         ]
-        nmp_base_url = os.environ.get("NMP_BASE_URL")
-        if nmp_base_url:
-            cmd[-1:-1] = ["--nmp-base-url", nmp_base_url]
+        nhx_base_url = os.environ.get("NHX_BASE_URL")
+        if nhx_base_url:
+            cmd[-1:-1] = ["--nhx-base-url", nhx_base_url]
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,

@@ -10,7 +10,7 @@ with the numbers, so they are exercised rather than sanitised away.
 The logger is an adapter and nothing else: it decides *whether* a call is a report
 and what to call the metrics in it. Which entries survive, and *when* a report is
 admitted, are both the shared callback's business -- see
-``packages/nmp_customization_common/tests/training/test_callbacks.py``, which is
+``packages/nhx_customization_common/tests/training/test_callbacks.py``, which is
 where this file's throttle and flush coverage moved when the cadence stopped being
 implemented here. The stub below cannot observe a throttle by construction, which
 is the point: there is no longer one to observe on this side.
@@ -24,7 +24,7 @@ import types
 from typing import Any
 
 import pytest
-from nmp.customization_common.training.reporting import DIAGNOSTIC_TIME_SERIES
+from nhx.customization_common.training.reporting import DIAGNOSTIC_TIME_SERIES
 
 # NeMo-RL is only installed inside the training image, so the LoggerInterface import
 # at nemo_rl_logger module scope fails in a plain repo checkout. Stub just enough to
@@ -53,8 +53,8 @@ if importlib.util.find_spec("nemo_rl") is None:  # pragma: no cover - env depend
             sys.modules[_name] = _module
             _stubbed.append(_name)
 
-from nmp.rl.tasks.training.backends.nemo_rl import nemo_rl_logger  # noqa: E402
-from nmp.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (  # noqa: E402
+from nhx.rl.tasks.training.backends.nemo_rl import nemo_rl_logger  # noqa: E402
+from nhx.rl.tasks.training.backends.nemo_rl.nemo_rl_logger import (  # noqa: E402
     NemoRLLogger,
     resolve_steps_per_epoch,
 )
@@ -164,8 +164,8 @@ def _recording_callback(time_series_metrics: Any) -> tuple[Any, _RecordingReport
     """A real TrainingProgressCallback over a _RecordingReporter."""
     from typing import cast
 
-    from nmp.customization_common.training.callbacks import TrainingProgressCallback
-    from nmp.customization_common.training.progress import JobsServiceProgressReporter
+    from nhx.customization_common.training.callbacks import TrainingProgressCallback
+    from nhx.customization_common.training.progress import JobsServiceProgressReporter
 
     reporter = _RecordingReporter()
     callback = TrainingProgressCallback(

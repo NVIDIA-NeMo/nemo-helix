@@ -10,22 +10,22 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from kubernetes import client
 from kubernetes.client.rest import ApiException
-from nmp.common.auth import (
+from nhx.common.auth import (
     KUBERNETES_POD_UID_REFERENCE_NAME,
-    NMP_PRINCIPAL_ENVVAR,
+    NHX_PRINCIPAL_ENVVAR,
     WorkloadDelegationConflictError,
     reference_delegation_name,
 )
-from nmp.common.config import ImagePullSecret, PlatformConfig
-from nmp.common.jobs.constants import (
+from nhx.common.config import HelixConfig, ImagePullSecret
+from nhx.common.jobs.constants import (
     EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_WORKSPACE_ENVVAR,
     PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
 )
-from nmp.common.jobs.schemas import PlatformJobStatus
-from nmp.core.jobs.api.v2.jobs.schemas import PlatformJobStepWithContext
-from nmp.core.jobs.app.constants import (
+from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.app.constants import (
     JOB_EXECUTION_BACKEND_LABEL,
     JOB_EXECUTION_PROFILE_LABEL,
     JOB_ID_LABEL,
@@ -37,25 +37,26 @@ from nmp.core.jobs.app.constants import (
     JOB_WORKSPACE_ID_LABEL,
     KUBE_JOB_SELECTOR_LABELS,
 )
-from nmp.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, GPUExecutionProvider
-from nmp.core.jobs.app.schemas import (
-    PlatformJobEnvironmentVariable,
-    PlatformJobSecretEnvironmentVariableRef,
-    PlatformJobStepSpec,
+from nhx.core.jobs.app.providers import ContainerSpec, CPUExecutionProvider, GPUExecutionProvider
+from nhx.core.jobs.app.schemas import (
+    HelixJobEnvironmentVariable,
+    HelixJobSecretEnvironmentVariableRef,
+    HelixJobStepSpec,
 )
-from nmp.core.jobs.controllers.backends.base import (
-    NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
+from nhx.core.jobs.controllers.backends.base import (
+    NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
     WORKLOAD_IDENTITY_TOKEN_FILE_PATH,
     WORKLOAD_IDENTITY_VOLUME_NAME,
     WORKLOAD_IDENTITY_VOLUME_PATH,
+    JobUpdate,
 )
-from nmp.core.jobs.controllers.backends.kubernetes import (
+from nhx.core.jobs.controllers.backends.kubernetes import (
     CPUKubernetesJobBackend,
     GPUKubernetesJobBackend,
     KubernetesJobExecutionProfileConfig,
 )
-from nmp.core.jobs.controllers.backends.kubernetes.common import (
+from nhx.core.jobs.controllers.backends.kubernetes.common import (
     JOB_DSHM_VOLUME_NAME,
     JOB_STORAGE_VOLUME_NAME,
     KubernetesConfigMapVolume,
@@ -79,7 +80,7 @@ from nmp.core.jobs.controllers.backends.kubernetes.common import (
     delete_configmap,
     name_for_step,
 )
-from nmp.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
+from nhx.core.jobs.controllers.backends.workload_tokens import WORKLOAD_DELEGATION_TTL_BUFFER_SECONDS
 from pydantic import ValidationError
 
 DEFAULT_STORAGE = KubernetesJobStorageConfig(pvc_name="job-storage-pvc")
@@ -90,7 +91,7 @@ DEFAULT_POD_METADATA = KubernetesObjectMetadata(labels={"foo": "bar"}, annotatio
 
 
 def _kubernetes_job_for_step(
-    step: PlatformJobStepWithContext,
+    step: HelixJobStepWithContext,
     *,
     status: client.V1JobStatus | None = None,
     service_account_name: str = "default",
@@ -160,7 +161,7 @@ def workload_exchange_auth_config():
     return SimpleNamespace(
         oidc=SimpleNamespace(
             workload_token_exchange_enabled=True,
-            workload_audience="nemo-platform",
+            workload_audience="nemo-helix",
             audience=None,
         )
     )
@@ -174,11 +175,11 @@ def kubernetes_client_mock():
     core_v1_mock = MagicMock()
     with (
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.BatchV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.BatchV1Api",
             return_value=batch_v1_mock,
         ),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.CoreV1Api",
+            "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.client.CoreV1Api",
             return_value=core_v1_mock,
         ),
     ):
@@ -233,21 +234,21 @@ def cpu_execution_provider():
 
 @pytest.fixture
 def kubernetes_job(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     mock_platform_config,
 ):
     """Create a KubernetesJob instance with mocked clients."""
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
         # Convert the Pydantic model to dict format expected by the base class
-        k8s_job = CPUKubernetesJobBackend(mock_nmp_client, kubernetes_execution_profile_config, profile_name="default")
+        k8s_job = CPUKubernetesJobBackend(mock_nhx_client, kubernetes_execution_profile_config, profile_name="default")
         k8s_job._batch_v1 = kubernetes_client_mock["batch_v1"]
         k8s_job._core_v1 = kubernetes_client_mock["core_v1"]
         yield k8s_job
@@ -415,7 +416,7 @@ def test_build_metadata():
 def test_build_image_pull_secrets(mock_platform_config):
     """Test building Kubernetes image pull secrets from configuration."""
     with patch(
-        "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+        "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
         return_value=mock_platform_config,
     ):
         # Test with empty list - should return global secrets only
@@ -867,10 +868,10 @@ def test_schedule_job_success(kubernetes_job, cpu_execution_provider, test_step_
     assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
     assert env_vars[PERSISTENT_JOB_STORAGE_PATH_ENVVAR] == "/var/test"
     assert env_vars[EPHEMERAL_TASK_STORAGE_PATH_ENVVAR] == "/var/tmp"
-    assert "NMP_BASE_URL" in env_vars
+    assert "NHX_BASE_URL" in env_vars
 
     # Ensure that config warnings are disabled
-    assert env_vars["NMP_CONFIG_WARNINGS_DISABLED"] == "1"
+    assert env_vars["NHX_CONFIG_WARNINGS_DISABLED"] == "1"
 
 
 def test_created_step_does_not_ttl_before_backend_acceptance(kubernetes_job, cpu_execution_provider, test_step_pending):
@@ -880,16 +881,16 @@ def test_created_step_does_not_ttl_before_backend_acceptance(kubernetes_job, cpu
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
     test_step_pending.created_at = old_timestamp
     test_step_pending.updated_at = old_timestamp
-    test_step_pending.status = PlatformJobStatus.CREATED
+    test_step_pending.status = HelixJobStatus.CREATED
 
     update = kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     kubernetes_job._batch_v1.create_namespaced_job.assert_called_once()
 
 
 def test_kubernetes_job_profile_environment_applied(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     mock_platform_config,
@@ -901,13 +902,13 @@ def test_kubernetes_job_profile_environment_applied(
         **{**kubernetes_execution_profile_config.model_dump(), "env": {"HOME": "/tmp"}}
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nmp_client, profile_config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nhx_client, profile_config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
 
@@ -923,14 +924,14 @@ def test_kubernetes_job_profile_environment_applied(
 
 
 def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     cpu_execution_provider,
     test_step_pending,
 ):
     """Job pods use routable service_discovery URLs instead of local in-process service URLs."""
-    platform_config = PlatformConfig(  # type: ignore[abstract]
+    platform_config = HelixConfig(  # type: ignore[abstract]
         base_url="http://127.0.0.1:8080",
         services="jobs,files,models,secrets",
         service_discovery={
@@ -940,14 +941,14 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
         loopback_address="nemo-gateway",
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=platform_config,
         ),
     ):
         backend = CPUKubernetesJobBackend(
-            mock_nmp_client,
+            mock_nhx_client,
             kubernetes_execution_profile_config,
             profile_name="default",
         )
@@ -962,13 +963,13 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
     main_container = job_body.spec.template.spec.containers[0]
     env_vars = {env.name: env.value for env in main_container.env}
 
-    assert env_vars["NMP_BASE_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_AUTH_URL"] == "https://nemo-auth:8080"
-    assert env_vars["NMP_JOBS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_FILES_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_MODELS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars["NMP_SECRETS_URL"] == "https://nemo-gateway:8080"
-    assert env_vars[NMP_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR].startswith("https://nemo-gateway:8080/apis/files/")
+    assert env_vars["NHX_BASE_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_AUTH_URL"] == "https://nemo-auth:8080"
+    assert env_vars["NHX_JOBS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_FILES_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_MODELS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars["NHX_SECRETS_URL"] == "https://nemo-gateway:8080"
+    assert env_vars[NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR].startswith("https://nemo-gateway:8080/apis/files/")
 
 
 def test_kubernetes_job_execution_profile_config_rejects_reserved_env_vars():
@@ -985,7 +986,7 @@ def test_kubernetes_job_execution_profile_config_rejects_reserved_env_vars():
 
 def test_kubernetes_job_rejects_reserved_step_auth_env_vars(kubernetes_job, cpu_execution_provider, test_step_pending):
     test_step_pending.step_spec.environment.append(
-        PlatformJobEnvironmentVariable(name="NEMO_WORKFLOW_TOKEN", value="token")
+        HelixJobEnvironmentVariable(name="NEMO_WORKFLOW_TOKEN", value="token")
     )
 
     with pytest.raises(ValueError, match="NEMO_WORKFLOW_TOKEN"):
@@ -999,7 +1000,10 @@ def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_
     kubernetes_job._execution_profile_config.workload_identity.token_audience = "test-audience"
     auth_config = SimpleNamespace(oidc=SimpleNamespace(workload_token_exchange_enabled=True))
 
-    with patch("nmp.common.config.get_auth_config", return_value=auth_config):
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=auth_config),
+        patch.object(kubernetes_job._workload_delegations, "ensure_for_target_after_initial_pod_wait"),
+    ):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending_with_auth_context)
 
     call_args = kubernetes_job._batch_v1.create_namespaced_job.call_args
@@ -1009,7 +1013,7 @@ def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_
 
     env_vars = {env.name: env.value for env in main_container.env}
     assert env_vars[WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR] == WORKLOAD_IDENTITY_TOKEN_FILE_PATH
-    assert NMP_PRINCIPAL_ENVVAR not in env_vars
+    assert NHX_PRINCIPAL_ENVVAR not in env_vars
 
     workload_identity_volume = next(
         volume for volume in pod_spec.volumes if volume.name == WORKLOAD_IDENTITY_VOLUME_NAME
@@ -1024,12 +1028,37 @@ def test_kubernetes_job_injects_projected_workload_identity_token_when_exchange_
     assert mount.read_only is True
 
 
+def test_kubernetes_job_waits_for_initial_pod_uid_workload_delegation(
+    kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context, workload_exchange_auth_config
+):
+    kubernetes_job._batch_v1.create_namespaced_job.return_value = MagicMock()
+    kubernetes_job._execution_profile_config.workload_identity.token_audience = "test-audience"
+
+    with (
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch.object(
+            kubernetes_job._workload_delegations,
+            "ensure_for_target_after_initial_pod_wait",
+            return_value=True,
+        ) as ensure_delegation,
+    ):
+        update = kubernetes_job.schedule(cpu_execution_provider, test_step_pending_with_auth_context)
+
+    assert update.status == HelixJobStatus.PENDING
+    ensure_delegation.assert_called_once()
+    step_arg, target_arg = ensure_delegation.call_args.args
+    assert step_arg is test_step_pending_with_auth_context
+    assert target_arg.namespace == "test-namespace"
+    assert target_arg.name == name_for_step(test_step_pending_with_auth_context)
+    assert target_arg.service_account_name == "default"
+
+
 def test_kubernetes_job_does_not_mount_workload_identity_without_auth_context(
     kubernetes_job, cpu_execution_provider, test_step_pending
 ):
     auth_config = SimpleNamespace(oidc=SimpleNamespace(workload_token_exchange_enabled=True))
 
-    with patch("nmp.common.config.get_auth_config", return_value=auth_config):
+    with patch("nhx.common.config.get_auth_config", return_value=auth_config):
         kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
 
     call_args = kubernetes_job._batch_v1.create_namespaced_job.call_args
@@ -1063,7 +1092,7 @@ def test_schedule_job_with_args(kubernetes_job, cpu_execution_provider, test_ste
 
 def test_schedule_job_with_custom_service_account_name(kubernetes_job, cpu_execution_provider, test_step_pending):
     """Test that a custom service_account_name from config is set on the job pod spec."""
-    kubernetes_job._execution_profile_config.service_account_name = "nmp-jobs-sa"
+    kubernetes_job._execution_profile_config.service_account_name = "nhx-jobs-sa"
     kubernetes_job._batch_v1.create_namespaced_job.return_value = MagicMock()
 
     kubernetes_job.schedule(cpu_execution_provider, test_step_pending)
@@ -1072,7 +1101,7 @@ def test_schedule_job_with_custom_service_account_name(kubernetes_job, cpu_execu
     job_body = call_args.kwargs["body"]
     pod_spec = job_body.spec.template.spec
 
-    assert pod_spec.service_account_name == "nmp-jobs-sa"
+    assert pod_spec.service_account_name == "nhx-jobs-sa"
 
 
 def test_schedule_job_api_exception(kubernetes_job, cpu_execution_provider, test_step_pending):
@@ -1128,7 +1157,7 @@ def test_sync_job_active(kubernetes_job, test_step_pending):
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return running pods
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1143,7 +1172,7 @@ def test_sync_job_active(kubernetes_job, test_step_pending):
         # Sync the job
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.ACTIVE
+    assert job_update.status == HelixJobStatus.ACTIVE
 
 
 def test_sync_job_completed(kubernetes_job, test_step_pending):
@@ -1165,7 +1194,7 @@ def test_sync_job_completed(kubernetes_job, test_step_pending):
     # Sync the job
     job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.COMPLETED
+    assert job_update.status == HelixJobStatus.COMPLETED
 
 
 def test_sync_job_pausing(kubernetes_job, test_step_pending):
@@ -1187,7 +1216,7 @@ def test_sync_job_pausing(kubernetes_job, test_step_pending):
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return running pods (still terminating)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1202,7 +1231,7 @@ def test_sync_job_pausing(kubernetes_job, test_step_pending):
         # Sync the job
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PAUSING
+    assert job_update.status == HelixJobStatus.PAUSING
 
 
 def test_sync_job_paused(kubernetes_job, test_step_pending):
@@ -1224,12 +1253,12 @@ def test_sync_job_paused(kubernetes_job, test_step_pending):
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return no running pods (paused)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = []
         # Sync the job
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PAUSED
+    assert job_update.status == HelixJobStatus.PAUSED
 
 
 def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, test_step_pausing, test_step_pending):
@@ -1251,7 +1280,7 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return running pods (still active)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1266,7 +1295,7 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
         # Sync the job
         job_update = kubernetes_job.sync(test_step_active)
 
-    assert job_update.status == PlatformJobStatus.PAUSING
+    assert job_update.status == HelixJobStatus.PAUSING
 
     # The Job should now be paused after the status is no longer active
     mock_job_status.active = None
@@ -1274,11 +1303,11 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return no running pods (paused)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = []
         # Sync the job again
         job_update = kubernetes_job.sync(test_step_pausing)
-    assert job_update.status == PlatformJobStatus.PAUSED
+    assert job_update.status == HelixJobStatus.PAUSED
 
     # Externally we resume the job, so the job spec is no longer suspended
     mock_job_spec.suspend = False
@@ -1286,7 +1315,7 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return pending pods (resuming)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1300,7 +1329,7 @@ def test_sync_job_active_to_paused_to_resumed(kubernetes_job, test_step_active, 
         ]
         # Sync the job again, it should now be in pending state
         job_update = kubernetes_job.sync(test_step_pending)
-    assert job_update.status == PlatformJobStatus.PENDING
+    assert job_update.status == HelixJobStatus.PENDING
 
 
 def test_sync_job_paused_with_errored_pods_from_sigterm(kubernetes_job, test_step_pending):
@@ -1328,7 +1357,7 @@ def test_sync_job_paused_with_errored_pods_from_sigterm(kubernetes_job, test_ste
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Pod was killed by SIGTERM during suspension — has errors but no running containers
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1342,7 +1371,7 @@ def test_sync_job_paused_with_errored_pods_from_sigterm(kubernetes_job, test_ste
         ]
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PAUSED
+    assert job_update.status == HelixJobStatus.PAUSED
 
 
 def test_sync_job_paused_ignores_task_errors_from_suspend(kubernetes_job, test_step_pending):
@@ -1363,8 +1392,8 @@ def test_sync_job_paused_ignores_task_errors_from_suspend(kubernetes_job, test_s
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks") as mock_update_all_tasks,
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status,
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks") as mock_update_all_tasks,
     ):
         mock_list_pod_status.return_value = [
             PodStatus(
@@ -1381,7 +1410,7 @@ def test_sync_job_paused_ignores_task_errors_from_suspend(kubernetes_job, test_s
 
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PAUSED
+    assert job_update.status == HelixJobStatus.PAUSED
 
 
 def test_sync_job_pausing_with_errored_pods_from_sigterm(kubernetes_job, test_step_pending):
@@ -1407,7 +1436,7 @@ def test_sync_job_pausing_with_errored_pods_from_sigterm(kubernetes_job, test_st
     mock_job.spec = mock_job_spec
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task-1",
@@ -1430,7 +1459,7 @@ def test_sync_job_pausing_with_errored_pods_from_sigterm(kubernetes_job, test_st
         ]
         job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.PAUSING
+    assert job_update.status == HelixJobStatus.PAUSING
 
 
 def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancelling):
@@ -1455,7 +1484,7 @@ def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancell
     mock_job.spec = mock_job_spec
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1469,7 +1498,7 @@ def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancell
         ]
         job_update = kubernetes_job.sync(test_step_cancelling)
 
-    assert job_update.status == PlatformJobStatus.CANCELLED
+    assert job_update.status == HelixJobStatus.CANCELLED
 
 
 def test_sync_job_cancelled_ignores_task_errors_from_termination(kubernetes_job, test_step_cancelling):
@@ -1490,8 +1519,8 @@ def test_sync_job_cancelled_ignores_task_errors_from_termination(kubernetes_job,
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks") as mock_update_all_tasks,
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status,
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks") as mock_update_all_tasks,
     ):
         mock_list_pod_status.return_value = [
             PodStatus(
@@ -1508,7 +1537,7 @@ def test_sync_job_cancelled_ignores_task_errors_from_termination(kubernetes_job,
 
         job_update = kubernetes_job.sync(test_step_cancelling)
 
-    assert job_update.status == PlatformJobStatus.CANCELLED
+    assert job_update.status == HelixJobStatus.CANCELLED
 
 
 def test_sync_job_cancelling(kubernetes_job, test_step_cancelling):
@@ -1529,7 +1558,7 @@ def test_sync_job_cancelling(kubernetes_job, test_step_cancelling):
     kubernetes_job._batch_v1.read_namespaced_job.return_value = mock_job
 
     # Mock pod status to return running pods (still terminating)
-    with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.list_pod_status") as mock_list_pod_status:
         mock_list_pod_status.return_value = [
             PodStatus(
                 task_id="test-task",
@@ -1544,7 +1573,7 @@ def test_sync_job_cancelling(kubernetes_job, test_step_cancelling):
         # Sync the job
         job_update = kubernetes_job.sync(test_step_cancelling)
 
-    assert job_update.status == PlatformJobStatus.CANCELLING
+    assert job_update.status == HelixJobStatus.CANCELLING
 
 
 def test_sync_job_cancelling_to_cancelled(kubernetes_job, test_step_cancelling):
@@ -1568,7 +1597,7 @@ def test_sync_job_cancelling_to_cancelled(kubernetes_job, test_step_cancelling):
     # Sync the job
     job_update = kubernetes_job.sync(test_step_cancelling)
 
-    assert job_update.status == PlatformJobStatus.CANCELLED
+    assert job_update.status == HelixJobStatus.CANCELLED
 
 
 def test_sync_job_failed(kubernetes_job, test_step_pending):
@@ -1592,7 +1621,7 @@ def test_sync_job_failed(kubernetes_job, test_step_pending):
     # Sync the job
     job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
 
 
 def test_sync_job_not_found(kubernetes_job, test_step_pending):
@@ -1603,7 +1632,7 @@ def test_sync_job_not_found(kubernetes_job, test_step_pending):
     # Sync the job
     job_update = kubernetes_job.sync(test_step_pending)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
 
 
 def test_sync_active_when_k8s_job_not_found(kubernetes_job, test_step_active):
@@ -1613,12 +1642,12 @@ def test_sync_active_when_k8s_job_not_found(kubernetes_job, test_step_active):
     'NoneType' object has no attribute 'metadata'. Instead we fall through to
     sync_active(step, None) which returns ERROR.
     """
-    test_step_active.status = PlatformJobStatus.ACTIVE
+    test_step_active.status = HelixJobStatus.ACTIVE
     kubernetes_job._batch_v1.read_namespaced_job.side_effect = ApiException(status=404)
 
     job_update = kubernetes_job.sync(test_step_active)
 
-    assert job_update.status == PlatformJobStatus.ERROR
+    assert job_update.status == HelixJobStatus.ERROR
     assert job_update.error_details is not None
     assert "Job not found" in job_update.error_details.get("message", "")
     # Must not attempt to delete a non-existent job (would have been terminate_job(None))
@@ -1680,23 +1709,23 @@ def test_get_kubernetes_job_list_by_labels_exception_returns_empty(kubernetes_jo
 def test_name_for_job_truncation(kubernetes_job):
     """Test job name truncation for very long job IDs."""
     # Create a job with a very long ID
-    long_job = PlatformJobStepWithContext(
+    long_job = HelixJobStepWithContext(
         id="jobstep-a" * 100 + "-",  # Very long ID with trailing dash
         job="test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step-",  # Job name with trailing dash.
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu", profile="k8s_profile", container=ContainerSpec(image="test-image")
             ),
             config={"command": ["echo", "Hello"]},
-            environment=[PlatformJobEnvironmentVariable(name="TEST_VAR", value="test_value")],
+            environment=[HelixJobEnvironmentVariable(name="TEST_VAR", value="test_value")],
         ),
         status_details={},
-        status=PlatformJobStatus.CREATED,
+        status=HelixJobStatus.CREATED,
     )
 
     job_name = name_for_step(long_job)
@@ -1706,7 +1735,7 @@ def test_name_for_job_truncation(kubernetes_job):
     assert not job_name.endswith("-")
 
 
-def test_schedule_kubernetes_gpu(mock_nmp_client, kubernetes_execution_profile_config):
+def test_schedule_kubernetes_gpu(mock_nhx_client, kubernetes_execution_profile_config):
     """Test successful job scheduling."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1722,7 +1751,7 @@ def test_schedule_kubernetes_gpu(mock_nmp_client, kubernetes_execution_profile_c
             },
         }
     )
-    step = PlatformJobStepWithContext.model_validate(
+    step = HelixJobStepWithContext.model_validate(
         {
             "id": "test-step-id",
             "job": "test-job-id",
@@ -1744,7 +1773,7 @@ def test_schedule_kubernetes_gpu(mock_nmp_client, kubernetes_execution_profile_c
     with patch("kubernetes.config.load_incluster_config"):
         assert step is not None
         executor = GPUKubernetesJobBackend(
-            nmp_sdk=mock_nmp_client,
+            nhx_sdk=mock_nhx_client,
             execution_profile_config=kubernetes_execution_profile_config,
             profile_name="default",
         )
@@ -1836,7 +1865,7 @@ def test_schedule_kubernetes_gpu(mock_nmp_client, kubernetes_execution_profile_c
         assert env_vars["ENV_VAR"] == "test_value"
         assert env_vars[NEMO_JOB_WORKSPACE_ENVVAR] == "default"
         assert env_vars[NEMO_JOB_FILESET_ENVVAR] == "test-logs-fileset"
-        assert "NMP_BASE_URL" in env_vars
+        assert "NHX_BASE_URL" in env_vars
 
 
 def test_schedule_with_storage_integration(kubernetes_job, cpu_execution_provider, test_step_pending):
@@ -1891,31 +1920,31 @@ def test_schedule_nemo_job_secrets_format_same_and_cross_workspace(kubernetes_jo
     Jobs can reference secrets from other workspaces when the user has permissions.
     Format must be ENV_VAR=workspace/secret_name; cross-workspace refs use explicit workspace/secret_name.
     """
-    test_step = PlatformJobStepWithContext(
+    test_step = HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
         workspace="default",
         attempt_id="test-job-attempt-id",
         name="test-step",
         fileset="test-logs-fileset",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu", profile="default", container=ContainerSpec(image="test-image")
             ),
             config={},
             environment=[
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(
                     name="LOCAL_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="local-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="local-secret"),
                 ),
-                PlatformJobEnvironmentVariable(
+                HelixJobEnvironmentVariable(
                     name="CROSS_WORKSPACE_SECRET",
-                    from_secret=PlatformJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
+                    from_secret=HelixJobSecretEnvironmentVariableRef(name="other-ws/shared-secret"),
                 ),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     kubernetes_job.schedule(cpu_execution_provider, test_step)
@@ -1994,26 +2023,26 @@ def test_schedule_omits_opensandbox_env_when_cluster_not_capable(
 def test_schedule_without_storage_no_label(kubernetes_job, cpu_execution_provider):
     """Test that scheduling without persistent storage sets the persistent storage label to 'false'."""
     # Create a step without PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-    test_step_no_storage = PlatformJobStepWithContext(
+    test_step_no_storage = HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
         workspace="default",
         attempt_id="test-job-attempt-id",
         name="test-step",
         fileset="test-logs-fileset",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu", profile="default", container=ContainerSpec(image="test-image")
             ),
             config={},
             environment=[
-                PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
+                HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
                 # Note: NO PERSISTENT_JOB_STORAGE_PATH_ENVVAR here
-                PlatformJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
+                HelixJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
     )
 
     mock_create_job = kubernetes_job._batch_v1.create_namespaced_job
@@ -2187,7 +2216,7 @@ def test_cleanup_pending_by_ttl(kubernetes_job, test_step_pending):
     ttl_seconds = kubernetes_job._execution_profile_config.ttl_seconds_before_active
 
     # Set the step to PENDING status
-    test_step_pending.status = PlatformJobStatus.PENDING
+    test_step_pending.status = HelixJobStatus.PENDING
 
     # Create a step with an created_at timestamp that exceeds the TTL (35 minutes ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 300)
@@ -2207,12 +2236,12 @@ def test_cleanup_pending_by_ttl(kubernetes_job, test_step_pending):
     # Mock get_kube_job_events to return some events
     with patch.object(kubernetes_job, "get_kube_job_events", return_value=[]):
         # Mock update_all_tasks
-        with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"):
+        with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"):
             # Call sync which should detect the TTL timeout
             result = kubernetes_job.sync(test_step_pending)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details["message"] == "Job timed out after reaching max TTL of 1800 seconds"
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 1800 seconds"}
 
@@ -2229,7 +2258,7 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     ttl_seconds = kubernetes_job._execution_profile_config.ttl_seconds_active
 
     # Set the step to ACTIVE status
-    test_step_active.status = PlatformJobStatus.ACTIVE
+    test_step_active.status = HelixJobStatus.ACTIVE
 
     # Create a step with an created_at timestamp that exceeds the TTL (25 hours ago)
     old_timestamp = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=ttl_seconds + 3600)
@@ -2248,12 +2277,12 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
     # Mock get_kube_job_events to return some events
     with patch.object(kubernetes_job, "get_kube_job_events", return_value=[]):
         # Mock update_all_tasks
-        with patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"):
+        with patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks"):
             # Call sync which should detect the TTL timeout
             result = kubernetes_job.sync(test_step_active)
 
     # Verify that it returns an ERROR status with timeout message
-    assert result.status == PlatformJobStatus.ERROR.value
+    assert result.status == HelixJobStatus.ERROR.value
     assert result.status_details["message"] == "Job timed out after reaching max TTL of 86400 seconds"
     assert result.error_details == {"message": "Job timed out after reaching max TTL of 86400 seconds"}
 
@@ -2270,18 +2299,18 @@ def test_cleanup_active_by_ttl(kubernetes_job, test_step_active):
 
 
 @pytest.fixture
-def test_step_pending_with_auth_context() -> PlatformJobStepWithContext:
+def test_step_pending_with_auth_context() -> HelixJobStepWithContext:
     """Create a test job step with auth context for testing."""
-    from nmp.common.auth import AuthContext
+    from nhx.common.auth import AuthContext
 
-    return PlatformJobStepWithContext(
+    return HelixJobStepWithContext(
         id="test-step-id",
         job="test-job-id",
         attempt_id="test-job-attempt-id",
         fileset="test-logs-fileset",
         workspace="default",
         name="test-step",
-        step_spec=PlatformJobStepSpec(
+        step_spec=HelixJobStepSpec(
             name="test-step",
             executor=CPUExecutionProvider(
                 provider="cpu",
@@ -2290,12 +2319,12 @@ def test_step_pending_with_auth_context() -> PlatformJobStepWithContext:
             ),
             config={},
             environment=[
-                PlatformJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
-                PlatformJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
-                PlatformJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
+                HelixJobEnvironmentVariable(name="ENV_VAR", value="test_value"),
+                HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/var/test"),
+                HelixJobEnvironmentVariable(name=EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, value="/var/tmp"),
             ],
         ),
-        status=PlatformJobStatus.PENDING,
+        status=HelixJobStatus.PENDING,
         auth_context=AuthContext(
             principal_id="creator@example.com",
             principal_email="creator@example.com",
@@ -2307,15 +2336,15 @@ def test_step_pending_with_auth_context() -> PlatformJobStepWithContext:
 def test_kubernetes_job_schedule_with_auth_context(
     kubernetes_job, cpu_execution_provider, test_step_pending_with_auth_context
 ):
-    """Test that scheduling sets NMP_PRINCIPAL and launcher OTLP headers when auth_context is present.
+    """Test that scheduling sets NHX_PRINCIPAL and launcher OTLP headers when auth_context is present.
 
     Verifies GitLab issue #3390 Gap 2: job tasks should run with the creating
-    user's auth context, propagated via the NMP_PRINCIPAL environment variable
+    user's auth context, propagated via the NHX_PRINCIPAL environment variable
     and private launcher OTLP headers for authenticated telemetry export.
     """
     import json
 
-    from nmp.common.auth.models import NMP_PRINCIPAL_ENVVAR
+    from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 
     # Mock successful job creation
     kubernetes_job._batch_v1.create_namespaced_job.return_value = MagicMock()
@@ -2334,21 +2363,23 @@ def test_kubernetes_job_schedule_with_auth_context(
     env_vars = {env.name: env.value for env in main_container.env if env.value is not None}
     env_var_names = {env.name for env in main_container.env}
 
-    # Verify NMP_PRINCIPAL env var is set
-    assert NMP_PRINCIPAL_ENVVAR in env_vars
-    principal_json = env_vars[NMP_PRINCIPAL_ENVVAR]
+    # Verify NHX_PRINCIPAL env var is set
+    assert NHX_PRINCIPAL_ENVVAR in env_vars
+    principal_json = env_vars[NHX_PRINCIPAL_ENVVAR]
     principal_data = json.loads(principal_json)
 
     assert principal_data == {
         "id": "creator@example.com",
         "email": "creator@example.com",
         "groups": ["engineering", "ml-team"],
+        "authz_aliases": [],
+        "on_behalf_of_authz_aliases": [],
     }
 
     # Verify launcher application log auth is not configured through env headers.
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env_var_names
-    assert "NMP_JOB_LAUNCHER_LOGS_EXPORTER" not in env_var_names
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env_var_names
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env_var_names
+    assert "NHX_JOB_LAUNCHER_LOGS_EXPORTER" not in env_var_names
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env_var_names
 
     # Verify no globally scoped OTEL header environment variables are set
     assert "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env_var_names
@@ -2378,16 +2409,16 @@ def test_kubernetes_job_schedule_without_auth_context(kubernetes_job, cpu_execut
     env_var_names = {env.name for env in main_container.env}
 
     # Verify auth env vars are NOT set
-    assert NMP_PRINCIPAL_ENVVAR not in env_vars
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env_var_names
-    assert "NMP_JOB_LAUNCHER_LOGS_EXPORTER" not in env_var_names
-    assert "NMP_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env_var_names
+    assert NHX_PRINCIPAL_ENVVAR not in env_vars
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_HEADERS" not in env_var_names
+    assert "NHX_JOB_LAUNCHER_LOGS_EXPORTER" not in env_var_names
+    assert "NHX_JOB_LAUNCHER_OTLP_LOGS_PROTOCOL" not in env_var_names
 
 
 def test_kubernetes_job_registers_pod_uid_workload_delegation(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     ttl_seconds_active = 900
     kubernetes_job._execution_profile_config.ttl_seconds_active = ttl_seconds_active
     pod = _kubernetes_pod("pod-uid-123")
@@ -2397,26 +2428,26 @@ def test_kubernetes_job_registers_pod_uid_workload_delegation(
     before_sync = datetime.datetime.now(datetime.timezone.utc)
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_register_workload_delegation") as register_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
     register_delegation.assert_called_once()
     delegation = register_delegation.call_args.args[0]
     assert delegation.name == expected_name
     assert delegation.workload_subject == "system:serviceaccount:test-namespace:default"
-    assert delegation.workload_audience == "nemo-platform"
+    assert delegation.workload_audience == "nemo-helix"
     assert delegation.workload_workspace == test_step_pending_with_auth_context.workspace
     assert delegation.workload_kind == "job"
     assert delegation.workload_id == test_step_pending_with_auth_context.job
@@ -2441,7 +2472,7 @@ def test_kubernetes_job_registers_pod_uid_workload_delegation(
 def test_kubernetes_job_skips_workload_delegation_when_pod_uid_is_missing(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     pod = _kubernetes_pod("pod-uid-123")
     pod.metadata.uid = None
     k8s_job = _kubernetes_job_for_step(test_step_pending_with_auth_context)
@@ -2449,88 +2480,88 @@ def test_kubernetes_job_skips_workload_delegation_when_pod_uid_is_missing(
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_register_workload_delegation") as register_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.ACTIVE
+    assert update.status == HelixJobStatus.ACTIVE
     register_delegation.assert_not_called()
 
 
 def test_kubernetes_job_skips_workload_delegation_when_job_labels_are_missing(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     k8s_job = _kubernetes_job_for_step(test_step_pending_with_auth_context)
     del k8s_job.metadata.labels[JOB_STEP_ID_LABEL]
     kubernetes_job._batch_v1.read_namespaced_job.return_value = k8s_job
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_register_workload_delegation") as register_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.PENDING
+    assert update.status == HelixJobStatus.PENDING
     register_delegation.assert_not_called()
 
 
 def test_kubernetes_job_workload_delegation_conflict_is_not_recreated(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     pod = _kubernetes_pod("pod-uid-123")
     k8s_job = _kubernetes_job_for_step(test_step_pending_with_auth_context)
     kubernetes_job._batch_v1.read_namespaced_job.return_value = k8s_job
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(
             kubernetes_job._workload_delegations,
             "_register_workload_delegation",
             side_effect=WorkloadDelegationConflictError("exists"),
         ) as register_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         first_update = kubernetes_job.sync(test_step_pending_with_auth_context)
         second_update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert first_update.status == PlatformJobStatus.ACTIVE
-    assert second_update.status == PlatformJobStatus.ACTIVE
+    assert first_update.status == HelixJobStatus.ACTIVE
+    assert second_update.status == HelixJobStatus.ACTIVE
     register_delegation.assert_called_once()
 
 
 def test_kubernetes_job_registration_failure_does_not_block_status_and_retries(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.PENDING
+    test_step_pending_with_auth_context.status = HelixJobStatus.PENDING
     pod = _kubernetes_pod("pod-uid-123")
     k8s_job = _kubernetes_job_for_step(test_step_pending_with_auth_context)
     kubernetes_job._batch_v1.read_namespaced_job.return_value = k8s_job
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(
             kubernetes_job._workload_delegations,
             "_register_workload_delegation",
             side_effect=RuntimeError("store offline"),
         ) as register_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         first_update = kubernetes_job.sync(test_step_pending_with_auth_context)
         second_update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert first_update.status == PlatformJobStatus.ACTIVE
-    assert second_update.status == PlatformJobStatus.ACTIVE
+    assert first_update.status == HelixJobStatus.ACTIVE
+    assert second_update.status == HelixJobStatus.ACTIVE
     assert register_delegation.call_count == 2
     job_key = f"test-namespace/{name_for_step(test_step_pending_with_auth_context)}"
     assert kubernetes_job._workload_delegations._delegations_by_target_key.get(job_key, set()) == set()
@@ -2539,7 +2570,7 @@ def test_kubernetes_job_registration_failure_does_not_block_status_and_retries(
 def test_kubernetes_job_revokes_pod_uid_workload_delegation_when_job_finishes(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.ACTIVE
+    test_step_pending_with_auth_context.status = HelixJobStatus.ACTIVE
     pod = _kubernetes_pod("pod-uid-123", phase="Succeeded")
     k8s_job = _kubernetes_job_for_step(
         test_step_pending_with_auth_context,
@@ -2554,28 +2585,28 @@ def test_kubernetes_job_revokes_pod_uid_workload_delegation_when_job_finishes(
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     revoke_delegation.assert_called_once_with(expected_name)
 
 
 def test_kubernetes_job_revokes_recorded_workload_delegation_when_pods_are_gone(
     kubernetes_job, test_step_pending_with_auth_context, workload_exchange_auth_config
 ):
-    test_step_pending_with_auth_context.status = PlatformJobStatus.ACTIVE
+    test_step_pending_with_auth_context.status = HelixJobStatus.ACTIVE
     k8s_job = _kubernetes_job_for_step(
         test_step_pending_with_auth_context,
         status=client.V1JobStatus(
@@ -2591,14 +2622,14 @@ def test_kubernetes_job_revokes_recorded_workload_delegation_when_pods_are_gone(
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[])
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
-        patch("nmp.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job.update_all_tasks", return_value=False),
         patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
     ):
         update = kubernetes_job.sync(test_step_pending_with_auth_context)
 
-    assert update.status == PlatformJobStatus.COMPLETED
+    assert update.status == HelixJobStatus.COMPLETED
     revoke_delegation.assert_called_once_with("ref:recorded-delegation")
     assert job_key not in kubernetes_job._workload_delegations._delegations_by_target_key
 
@@ -2611,14 +2642,14 @@ def test_kubernetes_job_revokes_pod_uid_workload_delegation_when_job_deleted(
     kubernetes_job._core_v1.list_namespaced_pod.return_value = client.V1PodList(items=[pod])
 
     expected_name = reference_delegation_name(
-        workload_audience="nemo-platform",
+        workload_audience="nemo-helix",
         workload_subject="system:serviceaccount:test-namespace:default",
         bound_reference_name=KUBERNETES_POD_UID_REFERENCE_NAME,
         bound_reference_value="pod-uid-123",
     )
 
     with (
-        patch("nmp.common.config.get_auth_config", return_value=workload_exchange_auth_config),
+        patch("nhx.common.config.get_auth_config", return_value=workload_exchange_auth_config),
         patch.object(kubernetes_job._workload_delegations, "_revoke_workload_delegation") as revoke_delegation,
     ):
         kubernetes_job.terminate_job(k8s_job)
@@ -2703,7 +2734,7 @@ def test_cleanup_steps_with_multi_step_job_only_first_step_complete(kubernetes_j
     kubernetes_job._batch_v1.list_namespaced_job.return_value = mock_jobv1list
 
     # Mock the cleanup_job_persistent_storage function to track if it's called
-    from nmp.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
+    from nhx.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
 
     with patch.object(k8s_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         # Run cleanup
@@ -2809,7 +2840,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
     mock_jobv1list.items = [mock_job]
     kubernetes_job._batch_v1.list_namespaced_job.return_value = mock_jobv1list
 
-    from nmp.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
+    from nhx.core.jobs.controllers.backends.kubernetes import kubernetes_job as k8s_job_module
 
     with patch.object(k8s_job_module, "cleanup_job_persistent_storage") as mock_cleanup_storage:
         kubernetes_job.cleanup_steps()
@@ -2822,7 +2853,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
 
 def test_scheduler_name_applied_to_pod_spec(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     mock_platform_config,
     cpu_execution_provider,
@@ -2844,13 +2875,13 @@ def test_scheduler_name_applied_to_pod_spec(
         ),
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nmp_client, config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nhx_client, config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
         backend.schedule(cpu_execution_provider, test_step_pending)
@@ -2861,7 +2892,7 @@ def test_scheduler_name_applied_to_pod_spec(
 
 
 def test_scheduler_name_not_set_by_default(
-    mock_nmp_client,
+    mock_nhx_client,
     kubernetes_client_mock,
     mock_platform_config,
     cpu_execution_provider,
@@ -2876,13 +2907,13 @@ def test_scheduler_name_not_set_by_default(
         storage=DEFAULT_STORAGE,
     )
     with (
-        patch("nmp.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
+        patch("nhx.core.jobs.controllers.backends.kubernetes.common.config.load_incluster_config"),
         patch(
-            "nmp.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
+            "nhx.core.jobs.controllers.backends.kubernetes.common.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nmp_client, config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nhx_client, config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
         backend.schedule(cpu_execution_provider, test_step_pending)
@@ -2890,3 +2921,237 @@ def test_scheduler_name_not_set_by_default(
     backend._batch_v1.create_namespaced_job.assert_called_once()
     job_body = backend._batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert job_body.spec.template.spec.scheduler_name is None
+
+
+def _cancellation_step() -> HelixJobStepWithContext:
+    return HelixJobStepWithContext(
+        id="test-step-id",
+        job="test-job-id",
+        workspace="default",
+        attempt_id="test-job-attempt-id",
+        name="test-step",
+        fileset="test-logs-fileset",
+        step_spec=HelixJobStepSpec(
+            name="test-step",
+            executor=CPUExecutionProvider(
+                provider="cpu", profile="default", container=ContainerSpec(image="test-image")
+            ),
+            config={},
+        ),
+    )
+
+
+def _active_task_jobs_client() -> MagicMock:
+    active_task = MagicMock()
+    active_task.name = "test-task"
+    active_task.status = HelixJobStatus.ACTIVE
+    jobs = MagicMock()
+    jobs.list_job_step_tasks.return_value.data.return_value.data = [active_task]
+    return jobs
+
+
+def test_cancel_sweeps_active_task_when_kubernetes_job_still_exists(kubernetes_job):
+    """update_all_tasks only visits tasks that still have a pod, so an orphan stays ACTIVE.
+
+    Once this pass returns a terminal status the step is never reconciled again, so the
+    sweep has to happen here rather than on a later `job is None` pass.
+    """
+    from nhx.core.jobs.controllers.backends.base import JobUpdate
+
+    kubernetes_job._jobs = _active_task_jobs_client()
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=HelixJobStatus.CANCELLED, status_details={})
+    )
+
+    update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    assert update.status == HelixJobStatus.CANCELLED
+    kwargs = kubernetes_job._jobs.update_job_step_task.call_args.kwargs
+    assert kwargs["name"] == "test-task"
+    assert kwargs["body"].status == HelixJobStatus.CANCELLED
+
+
+def test_cancel_leaves_tasks_alone_while_step_is_still_cancelling(kubernetes_job):
+    """A non-terminal pass gets reconciled again; cancelling its tasks now would be premature."""
+    from nhx.core.jobs.controllers.backends.base import JobUpdate
+
+    kubernetes_job._jobs = _active_task_jobs_client()
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=HelixJobStatus.CANCELLING, status_details={})
+    )
+
+    kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    kubernetes_job._jobs.update_job_step_task.assert_not_called()
+
+
+def test_cancel_sweep_attempts_every_task_when_one_update_fails(kubernetes_job):
+    """One failed task update must not stop the remaining tasks from being cancelled."""
+    from nhx.core.jobs.controllers.backends.base import JobUpdate
+
+    first, second = MagicMock(), MagicMock()
+    first.name, first.status = "task-1", HelixJobStatus.ACTIVE
+    second.name, second.status = "task-2", HelixJobStatus.ACTIVE
+
+    jobs = MagicMock()
+    jobs.list_job_step_tasks.return_value.data.return_value.data = [first, second]
+    jobs.update_job_step_task.side_effect = [RuntimeError("boom"), None]
+    kubernetes_job._jobs = jobs
+    kubernetes_job.terminate_job = MagicMock()
+    kubernetes_job.create_step_update = MagicMock(
+        return_value=JobUpdate(status=HelixJobStatus.CANCELLED, status_details={})
+    )
+
+    update = kubernetes_job.sync_terminate_job(_cancellation_step(), MagicMock())
+
+    assert [call.kwargs["name"] for call in jobs.update_job_step_task.call_args_list] == ["task-1", "task-2"]
+    # The pod is gone, so the step still reaches a terminal status and stays deletable.
+    assert update.status == HelixJobStatus.CANCELLED
+
+
+# ---------------------------------------------------------------------------
+# Image-pull backoff
+# ---------------------------------------------------------------------------
+
+_KJ = "nhx.core.jobs.controllers.backends.kubernetes.kubernetes_job"
+# The decision itself lives in common, shared with the Volcano backend; patch it
+# there so these still exercise the real backoff-age and message logic.
+_COMMON = "nhx.core.jobs.controllers.backends.kubernetes.common"
+_PULL_DETAIL = (
+    'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": '
+    "failed to resolve reference: dial tcp: lookup registry.invalid: no such host"
+)
+
+
+def _backing_off_pod(reason: str = "ImagePullBackOff") -> PodStatus:
+    """A pod held up only by a pull the kubelet keeps retrying."""
+    return PodStatus(
+        task_id="task-1",
+        name="platform-job-step-abc-xyz",
+        errors={},
+        completed=set(),
+        active=set(),
+        waiting={"nemo-job-task": reason},
+        phase="Pending",
+    )
+
+
+def _pod_details(backoff_age_seconds: float | None):
+    """get_pod_details output for a pod that began failing to pull *N* seconds ago."""
+    if backoff_age_seconds is None:
+        return ({"events": []}, {}, "")
+    started = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=backoff_age_seconds)
+    events = [
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": _PULL_DETAIL,
+            "first_timestamp": str(started),
+            "last_timestamp": str(datetime.datetime.now(datetime.timezone.utc)),
+        },
+        {
+            "type": "Warning",
+            "reason": "Failed",
+            "message": "Error: ImagePullBackOff",
+            "first_timestamp": str(started),
+            "last_timestamp": str(datetime.datetime.now(datetime.timezone.utc)),
+        },
+    ]
+    return ({"events": events}, {"failed": "Error: ImagePullBackOff"}, "")
+
+
+def _pending_step(step, age_seconds: int = 30) -> None:
+    old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=age_seconds)
+    step.created_at = old
+    step.updated_at = old
+    step.status = HelixJobStatus.PENDING
+
+
+def _sync_with(kubernetes_job, step, pods, details):
+    with (
+        patch(f"{_COMMON}.list_pod_status", return_value=pods),
+        patch(f"{_COMMON}.get_pod_details", return_value=details),
+        patch(f"{_KJ}.update_all_tasks", return_value=False),
+        patch.object(kubernetes_job, "get_job_by_name", return_value=MagicMock()),
+        patch.object(kubernetes_job, "terminate_job") as terminate,
+        patch.object(kubernetes_job, "get_kube_job_events", return_value=[]),
+        patch.object(kubernetes_job, "sync_pending", return_value=JobUpdate(status=HelixJobStatus.PENDING)),
+    ):
+        return kubernetes_job._sync(step), terminate
+
+
+def test_stuck_image_pull_fails_the_step_and_names_the_image(kubernetes_job, test_step_pending):
+    """A pull that never succeeds must fail well before ttl_seconds_before_active.
+
+    Regression: ImagePullBackOff is classified recoverable, so such a step used
+    to sit in ``pending`` for the full 30-minute scheduling TTL and then report
+    a timeout that never mentioned the image.
+    """
+    ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
+    assert ttl < kubernetes_job._execution_profile_config.ttl_seconds_before_active
+    _pending_step(test_step_pending)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(ttl + 5))
+
+    assert update.status == HelixJobStatus.ERROR
+    message = update.error_details["message"]
+    assert "ImagePullBackOff" in message
+    assert "registry.invalid/nhx-e2e/no-such-image:missing" in message
+    assert f"within {ttl}s" in message
+    terminate.assert_called_once()
+
+
+def test_image_pull_ttl_does_not_fire_inside_the_grace_period(kubernetes_job, test_step_pending):
+    """A transient registry fault must be given time to clear."""
+    ttl = kubernetes_job._execution_profile_config.ttl_seconds_image_pull
+    _pending_step(test_step_pending)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(ttl - 5))
+
+    assert update.status == HelixJobStatus.PENDING
+    terminate.assert_not_called()
+
+
+def test_slow_scheduling_does_not_consume_the_image_pull_budget(kubernetes_job, test_step_pending):
+    """The budget runs from the first failed pull, not from when the step went pending.
+
+    Regression: measuring the step's pending age meant a pod that waited a long
+    time to be scheduled had already spent its budget, so its first
+    ImagePullBackOff failed it immediately with no grace at all.
+    """
+    config = kubernetes_job._execution_profile_config
+    ttl = config.ttl_seconds_image_pull
+    # Long past the pull budget but still inside the scheduling TTL, so this
+    # pins the pull budget rather than the one enforce_sync_ttl owns.
+    assert ttl < config.ttl_seconds_before_active
+    _pending_step(test_step_pending, age_seconds=(ttl + config.ttl_seconds_before_active) // 2)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(2))
+
+    assert update.status == HelixJobStatus.PENDING
+    terminate.assert_not_called()
+
+
+def test_image_pull_ttl_ignores_a_step_pending_for_another_reason(kubernetes_job, test_step_pending):
+    """Only a backing-off pull is fatal here; other pending states keep their own TTL."""
+    unschedulable = _backing_off_pod()
+    unschedulable.waiting = {"nemo-job-task": "waiting"}
+    _pending_step(test_step_pending)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [unschedulable], _pod_details(600))
+
+    assert update.status == HelixJobStatus.PENDING
+    terminate.assert_not_called()
+
+
+def test_image_pull_ttl_can_be_disabled(kubernetes_job, test_step_pending):
+    """Zero restores the old behaviour: only ttl_seconds_before_active applies."""
+    kubernetes_job._execution_profile_config.ttl_seconds_image_pull = 0
+    _pending_step(test_step_pending)
+
+    update, terminate = _sync_with(kubernetes_job, test_step_pending, [_backing_off_pod()], _pod_details(6000))
+
+    assert update.status == HelixJobStatus.PENDING
+    terminate.assert_not_called()

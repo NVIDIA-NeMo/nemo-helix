@@ -3,13 +3,13 @@
 
 import unittest
 
-from nmp.guardrails.app.schemas.utils.generation_options import (
+from nhx.guardrails.app.schemas.utils.generation_options import (
     get_activated_rails_logging_options,
     is_activated_rails_logging_enabled,
     update_generation_options,
 )
-from nmp.guardrails.entities.values._private import GenerationOptions
-from nmp.guardrails.entities.values.common import GuardrailsDataInput
+from nhx.guardrails.entities.values._private import GenerationOptions
+from nhx.guardrails.entities.values.common import GuardrailsDataInput
 
 
 class TestGenerationOptions(unittest.TestCase):

@@ -7,12 +7,15 @@ import importlib
 import json
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -22,7 +25,7 @@ from harbor_fixtures import ErrorAwareQualityMetric, write_harbor_trial_result
 from nemo_evaluator_sdk.agent_eval.evaluator import AgentEvaluator
 from nemo_evaluator_sdk.agent_eval.metrics import AgentPhaseSuccessMetric
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalSummary
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
     HarborAgentTaskRunner,
     HarborRewardMetric,
     HarborRuntimeConfig,
@@ -32,8 +35,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
     discover_harbor_tasks,
     scoped_harbor_agent_import,
 )
-from nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter import (
-    _final_agent_message,
+from nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter import (
     _rewards_mapping,
     _trial_from_harbor_result,
 )
@@ -43,11 +45,18 @@ from nemo_evaluator_sdk.agent_eval.tasks import (
     SemanticReducer,
     SemanticView,
     ViewSignal,
+    as_base_task,
 )
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialError
 from nemo_evaluator_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
-from nemo_evaluator_sdk.values.evidence import ATIFTraceHandle, OTLPTraceHandle, read_atif
+from nemo_evaluator_sdk.values.common import SecretRef
+from nemo_evaluator_sdk.values.evidence import (
+    ATIFTraceHandle,
+    OTLPTraceHandle,
+    final_agent_message,
+    read_atif,
+)
 from pydantic import BaseModel, ValidationError
 
 _HELLO_WORLD_DATASET = Path(__file__).resolve().parents[2] / "examples" / "harbor" / "hello_world_dataset"
@@ -56,6 +65,90 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 _HARBOR_ERROR_RESULT = _FIXTURES / "harbor_error_result.json"
 _EXPECTED_MAX_TRACEBACK_CHARS = 8192
 _MISSING = object()
+
+
+@pytest.mark.parametrize("directory", ["omitted", "none", "path"])
+def test_jobs_dir_is_optional_until_execution(directory, tmp_path):
+    options = {} if directory == "omitted" else {"jobs_dir": None if directory == "none" else tmp_path}
+    config = HarborRuntimeConfig(**options)
+    assert config.jobs_dir == (tmp_path if directory == "path" else None)
+    info = HarborAgentTaskRunner(config=config).runner_info()
+    assert info.config["jobs_dir"] == (str(tmp_path) if directory == "path" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["runner", "convenience"])
+async def test_missing_jobs_dir_fails_before_loading_or_running(entrypoint, tmp_path, monkeypatch):
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    config = HarborRuntimeConfig()
+    dependencies = [
+        (harbor_runtime, "_dataset_path_from_tasks"),
+        (harbor_runtime.HarborTasksetLoader, "load"),
+        (harbor_runtime, "_cache_stamp"),
+        (harbor_runtime, "_build_native_job"),
+    ]
+    guards = []
+    for owner, name in dependencies:
+        guard = Mock(side_effect=AssertionError(f"unexpected {name}"))
+        monkeypatch.setattr(owner, name, guard)
+        guards.append(guard)
+    with pytest.raises(ValueError, match="jobs_dir is required for local Harbor execution"):
+        if entrypoint == "runner":
+            await HarborAgentTaskRunner(config=config).run_tasks([])
+        else:
+            await harbor_runtime.run_harbor_eval(config, tmp_path / "missing-dataset")
+    for guard in guards:
+        guard.assert_not_called()
+
+
+@pytest.mark.parametrize("helper", ["resolve", "cache", "build", "build_named"])
+def test_native_helpers_require_jobs_dir(helper, tmp_path):
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    config = HarborRuntimeConfig()
+    with pytest.raises(ValueError, match="jobs_dir is required for local Harbor execution"):
+        if helper == "resolve":
+            harbor_runtime._resolve_job_dir(config)
+        elif helper == "cache":
+            harbor_runtime._cache_stamp(config, tmp_path, [])
+        else:
+            harbor_runtime._build_native_job(
+                config, tmp_path, None, job_name="named" if helper == "build_named" else None, env_templates={}
+            )
+
+
+@pytest.mark.asyncio
+async def test_native_job_captures_validated_jobs_dir(tmp_path, monkeypatch):
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    jobs_dir = tmp_path / "jobs"
+    config = HarborRuntimeConfig(jobs_dir=jobs_dir, agent_import_path="wrapper:Agent", agent_dir=tmp_path)
+    captured = []
+
+    async def create(job_config):
+        captured.append(job_config)
+        return _FakeJob()
+
+    _stub_harbor(monkeypatch, create)
+
+    class StorageConfig(_DriftConfig):
+        jobs_dir: Path
+
+    monkeypatch.setattr(sys.modules["harbor.job"], "JobConfig", StorageConfig)
+    exclusions = []
+
+    @contextmanager
+    def scoped_import(agent_dir, import_path, *, exclude):
+        exclusions.append(exclude)
+        yield import_path
+
+    monkeypatch.setattr(harbor_runtime, "scoped_harbor_agent_import", scoped_import)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="named", env_templates={})
+    config.jobs_dir = None
+    await run_job()
+    assert captured[0].jobs_dir == jobs_dir
+    assert exclusions == [frozenset({jobs_dir.resolve()})]
 
 
 class _BadFloat(float):
@@ -193,6 +286,7 @@ async def test_primary_reward_matrix_survives_adaptation_and_metric_diagnostics(
     if raw is not _MISSING:
         rewards["score"] = raw
     trial = _adapt_raw_trial(tmp_path, rewards=rewards, reward_key="score")
+    assert trial.metadata["harbor_primary_reward_key"] == "score"
     result = await HarborRewardMetric(output_name="score", reward_keys=("score",)).compute_scores(
         MetricInput(row=DatasetRow(data={}), candidate=CandidateOutput(metadata=trial.metadata))
     )
@@ -478,6 +572,8 @@ async def test_errored_harbor_rewards_and_metric_owned_exclusions_are_independen
 
     result = await AgentEvaluator().run(tasks=[task], target=HarborAgentTaskRunner(job_dir=job_dir))
 
+    assert all(trial.metadata["harbor_primary_reward_key"] == "reward" for trial in result.trials)
+
     assert [(trial.id, trial.status) for trial in result.trials] == [
         ("t__a_success", AgentEvalTrialStatus.COMPLETED),
         ("t__b_runtime_reward", AgentEvalTrialStatus.PARTIAL),
@@ -717,7 +813,7 @@ def test_task_discovery_and_taskset_loader_over_bundled_dataset() -> None:
 
 
 def test_harbor_folder_names_prefer_task_directories() -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _harbor_folder_names
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _harbor_folder_names
 
     tasks = discover_harbor_tasks(_HELLO_WORLD_DATASET)
     assert set(_harbor_folder_names(tasks) or []) == {"hello-world"}
@@ -767,7 +863,7 @@ def test_runtime_config_refuses_plaintext_credentials_in_agent_kwargs() -> None:
             agent_kwargs={"fabric_environment_env": {"OPENAI_API_KEY": "nvapi-not-a-real-key"}},
         )
 
-    with pytest.raises(ValidationError, match="agent_env_from_host"):
+    with pytest.raises(ValidationError, match="env_secrets"):
         HarborRuntimeConfig(jobs_dir=Path("/jobs"), agent_kwargs={"auth": {"token": "tok"}})
 
 
@@ -807,7 +903,7 @@ async def test_run_refuses_credentials_injected_after_validation(tmp_path: Path)
     completed.mkdir(parents=True)
     (completed / "result.json").write_text("{}", encoding="utf-8")
     _, run_job = _build_native_job(
-        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j"
+        config.model_copy(update={"force_rerun": True}), tmp_path / "dataset", None, job_name="j", env_templates={}
     )
 
     with pytest.raises(ValueError, match="api_key"):
@@ -831,7 +927,7 @@ def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> Non
             "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
             "api_key": None,
             # An issued-token prefix counts only on a value long enough to be one.
-            "fabric_package": "nemo-fabric[codex]==0.3.0",
+            "fabric_package": "nemo-fabric[codex]==0.4.0",
             "model": "sk-tiny",
             # A marker must stand as a word in the path, so a tokenizer is not a token.
             "tokenizer": "o200k_base",
@@ -854,7 +950,7 @@ def _cached_task(dataset_path: Path, task_dir: Path, task_id: str = "t") -> Agen
 
 def _seed_cached_job(tmp_path: Path, *, task_id: str = "t") -> tuple[HarborRuntimeConfig, Path, AgentEvalTask]:
     """A complete job dir plus the config/task that produced it, stamped as a real run would."""
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp, _write_cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp, _write_cache_stamp
 
     dataset_path = tmp_path / "dataset"
     task_dir = dataset_path / task_id
@@ -879,7 +975,7 @@ async def test_metric_selection_changes_cached_scoring_but_not_execution_cache_i
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp
 
     config, _job_dir, task = _seed_cached_job(tmp_path)
     dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
@@ -938,7 +1034,7 @@ async def test_cached_trials_finalize_sparse_reward_outputs(tmp_path: Path) -> N
 
 def _stamp_for(config: HarborRuntimeConfig, task: AgentEvalTask, job_dir: Path) -> None:
     """Stamp ``job_dir`` as though ``config`` had just produced it."""
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp, _write_cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp, _write_cache_stamp
 
     dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
     _write_cache_stamp(job_dir, _cache_stamp(config, dataset_path, [task]))
@@ -949,9 +1045,9 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
 
     Records whether the run was attempted and what force_rerun it was built with.
     """
-    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1030,11 +1126,11 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "agent_env_from_host", "task", "option"])
+@pytest.mark.parametrize("mutation", ["agent", "agent_kwargs", "env_secrets", "env_vars", "task", "option"])
 async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str) -> None:
     # Each of these changes what a run would produce, so the stamped dir must not be
     # served. Reaching run_job (and failing there) is the observable signal.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_is_stale, _cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_is_stale, _cache_stamp
 
     config, job_dir, task = _seed_cached_job(tmp_path)
     dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
@@ -1048,8 +1144,10 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
         )
     elif mutation == "agent_kwargs":
         config = config.model_copy(update={"agent_kwargs": {"fabric_telemetry": "relay"}})
-    elif mutation == "agent_env_from_host":
-        config = config.model_copy(update={"agent_env_from_host": ["AGENT_MODE"]})
+    elif mutation == "env_secrets":
+        config = config.model_copy(update={"env_secrets": {"OPENAI_API_KEY": SecretRef("openai-api-key")}})
+    elif mutation == "env_vars":
+        config = config.model_copy(update={"env_vars": {"AGENT_MODE": "fast"}})
     elif mutation == "task":
         (dataset_path / "t" / "task.toml").write_text('[task]\nname = "t"\nchanged = true\n')
     else:
@@ -1063,7 +1161,7 @@ async def test_changed_inputs_invalidate_the_cache(tmp_path: Path, mutation: str
 async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_shape: str
 ) -> None:
-    """``agent_kwargs`` and ``agent_env_from_host`` must land on Harbor's ``AgentConfig`` for every agent shape.
+    """``agent_kwargs``, ``env_secrets`` and ``env_vars`` must land on Harbor's ``AgentConfig`` for every agent shape.
 
     Harbor merges ``AgentConfig.kwargs`` into the agent constructor and resolves ``AgentConfig.env``
     templates from the host environment for built-in and import-path agents alike, so a shape that
@@ -1076,7 +1174,8 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     jobs_dir.mkdir()
     agent_options: dict[str, object] = {
         "agent_kwargs": agent_kwargs,
-        "agent_env_from_host": ["OPENAI_API_KEY", "FABRIC_LOG"],
+        "env_secrets": {"OPENAI_API_KEY": SecretRef("my-workspace/openai-api-key")},
+        "env_vars": {"FABRIC_LOG": "debug"},
     }
     if agent_shape == "installed_import_path":
         agent_options["agent_import_path"] = "mypkg.agent:WrappedAgent"
@@ -1099,13 +1198,19 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
             return None
 
     monkeypatch.setattr(harbor.job, "Job", FakeJob)
-    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="kwargs-job")
+    _, run_job = _build_native_job(
+        config,
+        tmp_path / "dataset",
+        None,
+        job_name="kwargs-job",
+        env_templates={"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}"},
+    )
     await run_job()
 
     assert len(created) == 1
     (agent_config,) = created[0].agents
     assert agent_config.kwargs == agent_kwargs
-    assert agent_config.env == {"OPENAI_API_KEY": "${OPENAI_API_KEY}", "FABRIC_LOG": "${FABRIC_LOG}"}
+    assert agent_config.env == {"OPENAI_API_KEY": "${MY_WORKSPACE_OPENAI_API_KEY}", "FABRIC_LOG": "debug"}
     if agent_shape == "builtin":
         assert agent_config.name == "oracle"
     else:
@@ -1116,7 +1221,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
 async def test_cosmetic_options_do_not_evict_the_cache(tmp_path: Path) -> None:
     # Presentation and placement knobs change nothing about the results; evicting on
     # them would cost a full Docker re-run for nothing.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_is_stale, _cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_is_stale, _cache_stamp
 
     config, job_dir, task = _seed_cached_job(tmp_path)
     dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
@@ -1129,7 +1234,7 @@ async def test_cosmetic_options_do_not_evict_the_cache(tmp_path: Path) -> None:
 async def test_task_subset_of_a_cached_run_still_hits(tmp_path: Path) -> None:
     # Stamping per task (not one job-wide hash) means evaluating a subset of a
     # previously cached job is still a hit.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
         _cache_is_stale,
         _cache_stamp,
         _write_cache_stamp,
@@ -1147,10 +1252,34 @@ async def test_task_subset_of_a_cached_run_still_hits(tmp_path: Path) -> None:
     assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task_a])) is False
 
 
+def test_unfiltered_stamp_covers_whole_dataset_for_untyped_subset(tmp_path: Path) -> None:
+    # A hand-built base task (no harbor_task_dir, so no task_names filter) makes
+    # Harbor run the whole dataset. The discovered siblings are typed Harbor tasks;
+    # merging them unchanged with the base request made _cache_stamp raise
+    # "Cannot mix discovered Harbor tasks with plain AgentEvalTask objects" before Harbor started.
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp, _stamp_coverage
+
+    dataset_path = tmp_path / "dataset"
+    for name in ("t", "u"):
+        task_dir = dataset_path / name
+        shutil.copytree(_HELLO_WORLD_DATASET / "hello-world", task_dir)
+        config_path = task_dir / "task.toml"
+        config_path.write_text(config_path.read_text().replace("harbor/hello-world", f"harbor/{name}"))
+    requested = AgentEvalTask(id="harbor/t", intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="cached-job")
+
+    coverage = _stamp_coverage(dataset_path, [requested], None)
+    stamp = _cache_stamp(config, dataset_path, coverage)
+
+    assert [type(task) for task in coverage] == [AgentEvalTask, AgentEvalTask]
+    assert set(stamp["tasks"]) == {"harbor/t", "harbor/u"}
+    assert "<unresolved>" not in stamp["tasks"].values()
+
+
 def test_unpinned_job_name_writes_no_stamp_and_reads_no_files(tmp_path: Path) -> None:
     # The default timestamped job name can never hit the cache, so the fingerprint
     # must not be computed at all — this is the path plugins/nemo-evaluator takes.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _resolve_job_dir
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _resolve_job_dir
 
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
     first = _resolve_job_dir(config)[1]
@@ -1164,7 +1293,7 @@ def test_unpinned_job_name_writes_no_stamp_and_reads_no_files(tmp_path: Path) ->
 def test_resolve_job_dir_rejects_paths_outside_jobs_dir(tmp_path: Path, job_name: str) -> None:
     # force_rerun shutil.rmtree's this path. A job_name that escapes jobs_dir would
     # delete arbitrary directories; Harbor's native evaluator already refuses that.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _resolve_job_dir
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _resolve_job_dir
 
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -1175,7 +1304,7 @@ def test_resolve_job_dir_rejects_paths_outside_jobs_dir(tmp_path: Path, job_name
 
 
 def test_resolve_job_dir_accepts_a_nested_descendant(tmp_path: Path) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _resolve_job_dir
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _resolve_job_dir
 
     jobs_dir = tmp_path / "jobs"
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="debug-rerun")
@@ -1202,13 +1331,13 @@ def test_build_native_job_rejects_escaping_job_name_before_rmtree(
 
     rmtree_calls: list[Path] = []
     monkeypatch.setattr(
-        "nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime.shutil.rmtree",
+        "nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime.shutil.rmtree",
         lambda path, **kwargs: rmtree_calls.append(Path(path)),
     )
 
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="../outside", force_rerun=True)
     with pytest.raises(ValueError, match="strict descendant"):
-        _build_native_job(config, tmp_path / "dataset", None, job_name="../outside", force_rerun=True)
+        _build_native_job(config, tmp_path / "dataset", None, job_name="../outside", force_rerun=True, env_templates={})
 
     assert rmtree_calls == []
     assert marker.read_text(encoding="utf-8") == "do not delete"
@@ -1217,7 +1346,7 @@ def test_build_native_job_rejects_escaping_job_name_before_rmtree(
 def test_cache_stamp_survives_harbors_stray_directory_sweep(tmp_path: Path) -> None:
     # Harbor rmtree's any *directory* in a job dir lacking result.json. The stamp must
     # therefore be a file, or it would be silently deleted on the next Harbor run.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import CACHE_STAMP_FILENAME
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import CACHE_STAMP_FILENAME
 
     _config, job_dir, _task = _seed_cached_job(tmp_path)
     stamp = job_dir / CACHE_STAMP_FILENAME
@@ -1228,7 +1357,7 @@ def test_cache_stamp_survives_harbors_stray_directory_sweep(tmp_path: Path) -> N
 
 def test_cache_stamp_handles_a_missing_agent_dir(tmp_path: Path) -> None:
     # agent_dir is None for every built-in-agent caller (including nemo-evaluator).
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp
 
     config, _job_dir, task = _seed_cached_job(tmp_path)
     stamp = _cache_stamp(config, Path(str(task.metadata["harbor_dataset_path"])), [task])
@@ -1240,7 +1369,7 @@ def test_cache_stamp_handles_a_missing_agent_dir(tmp_path: Path) -> None:
 def test_unresolvable_task_dir_is_always_stale(tmp_path: Path) -> None:
     # A task we cannot locate on disk must never be silently omitted from the
     # fingerprint — that would be a stale-cache hole.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _cache_is_stale, _cache_stamp
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_is_stale, _cache_stamp
 
     config, job_dir, _task = _seed_cached_job(tmp_path)
     orphan = AgentEvalTask(id="ghost", intent="x", inputs={"instruction": "x"}, metrics=[HarborRewardMetric()])
@@ -1267,7 +1396,7 @@ def test_multiple_attempts_map_to_one_trial_each(tmp_path: Path) -> None:
 
 
 def test_cache_counts_harbor_valid_physical_attempts(tmp_path: Path) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _all_tasks_cached
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _all_tasks_cached
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -1314,7 +1443,7 @@ def test_digest_ignores_an_exclusion_that_contains_the_whole_tree(tmp_path: Path
     # jobs_dir sitting *above* the agent/task dir is a legitimate layout. Applying the
     # exclusion there would match every entry and yield an empty digest, silently
     # disabling invalidation for the entire directory.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     work = tmp_path / "work"
     (work / "agent").mkdir(parents=True)
@@ -1330,7 +1459,7 @@ def test_digest_ignores_an_exclusion_that_contains_the_whole_tree(tmp_path: Path
 def test_digest_still_ignores_a_jobs_dir_nested_inside_the_tree(tmp_path: Path) -> None:
     # The case the exclusion actually exists for: results written under the hashed
     # tree must not make the fingerprint move on every run.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     agent = tmp_path / "agent"
     (agent / "jobs").mkdir(parents=True)
@@ -1345,7 +1474,7 @@ def test_digest_still_ignores_a_jobs_dir_nested_inside_the_tree(tmp_path: Path) 
 def test_task_dir_outside_the_active_dataset_is_rediscovered(tmp_path: Path) -> None:
     # `dataset_path` can be overridden on the runner, so a task stamped during
     # discovery under dataset A must not be fingerprinted when Harbor runs dataset B.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _task_dirs_for
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _task_dirs_for
 
     dataset_a, dataset_b = tmp_path / "dsA", tmp_path / "dsB"
     for dataset in (dataset_a, dataset_b):
@@ -1365,7 +1494,7 @@ def test_task_dir_outside_the_active_dataset_is_rediscovered(tmp_path: Path) -> 
 
 
 def test_vanished_task_dir_is_rediscovered(tmp_path: Path) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _task_dirs_for
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _task_dirs_for
 
     dataset = tmp_path / "ds"
     (dataset / "t").mkdir(parents=True)
@@ -1396,7 +1525,7 @@ def test_symlink_loop_degrades_the_stamp_instead_of_killing_the_run(tmp_path: Pa
     for a loop, so a looping path never reaches them. Those calls use
     ``_safe_resolve`` for consistency, not because a live crash was demonstrated.
     """
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import HarborRuntimeConfig, _cache_stamp, _safe_resolve
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, _cache_stamp, _safe_resolve
 
     dataset = tmp_path / "ds"
     task_dir = dataset / "t"
@@ -1432,7 +1561,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     # If the candidate is edited while Harbor is running, the results came from the
     # OLD sources. Stamping the new fingerprint onto them would let a later run serve
     # them as if they matched — so the job dir is deliberately left unstamped.
-    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     config, job_dir, task = _seed_cached_job(tmp_path)
     agent_dir = tmp_path / "agent"
@@ -1441,7 +1570,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None):
+    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -1468,7 +1597,7 @@ def test_digest_is_injective_over_separator_bearing_contents(tmp_path: Path) -> 
     every tree below is structurally different, so every digest must differ. The
     contents are chosen to embed the separators an unframed encoding would rely on.
     """
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     trees: dict[str, dict[str, bytes]] = {
         "two_files_empty_then_z": {"a": b"", "b": b"Z"},
@@ -1496,7 +1625,7 @@ def test_digest_is_injective_over_separator_bearing_contents(tmp_path: Path) -> 
 def test_digest_tracks_the_execute_bit(tmp_path: Path) -> None:
     # Harbor discovers and runs tests/test.sh; flipping +x changes what happens
     # without changing a single byte of content.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     task = tmp_path / "task"
     task.mkdir()
@@ -1512,7 +1641,7 @@ def test_digest_tracks_the_execute_bit(tmp_path: Path) -> None:
 def test_digest_ignores_read_write_permission_noise(tmp_path: Path) -> None:
     # Only the execute bit is tracked, mirroring git: umask differences between two
     # checkouts of the same sources must not evict a usable cache.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     task = tmp_path / "task"
     task.mkdir()
@@ -1528,7 +1657,7 @@ def test_digest_ignores_read_write_permission_noise(tmp_path: Path) -> None:
 def test_digest_covers_vendored_dependencies_but_not_the_environment(tmp_path: Path) -> None:
     # node_modules ships with the agent and changes what it does, so it counts.
     # .venv is environment the Harbor wrapper never uploads, so it does not.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     agent = tmp_path / "agent"
     (agent / "node_modules" / "lib").mkdir(parents=True)
@@ -1550,7 +1679,7 @@ def test_digest_survives_a_dangling_symlink(tmp_path: Path) -> None:
     # A link whose *target* is missing: is_dir()/is_file() are both False, so it is
     # recorded as a marker. (readlink still succeeds here - see the test below for
     # the case where readlink itself fails.)
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     agent = tmp_path / "agent"
     agent.mkdir()
@@ -1561,7 +1690,7 @@ def test_digest_survives_a_dangling_symlink(tmp_path: Path) -> None:
 
 
 def test_digest_distinguishes_a_file_from_a_directory_of_the_same_name(tmp_path: Path) -> None:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     as_file = tmp_path / "as_file"
     as_file.mkdir()
@@ -1578,7 +1707,7 @@ def test_digest_survives_readlink_failing_mid_walk(tmp_path: Path, monkeypatch: 
     # The link itself disappearing between is_symlink() and readlink is a real race
     # against any process cleaning up the tree. It must degrade to a marker rather
     # than raise out of run_tasks and kill an otherwise-good evaluation.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _digest_directory
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     agent = tmp_path / "agent"
     agent.mkdir()
@@ -1594,7 +1723,7 @@ def test_digest_survives_readlink_failing_mid_walk(tmp_path: Path, monkeypatch: 
 
 
 def _scoped_path(agent_dir: Path) -> str:
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import scoped_harbor_agent_import
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import scoped_harbor_agent_import
 
     with scoped_harbor_agent_import(agent_dir, "wrapper:Agent") as scoped:
         return scoped
@@ -1638,7 +1767,7 @@ def test_distinct_agents_do_not_share_a_scoped_package(tmp_path: Path) -> None:
 def test_overlapping_scopes_on_one_agent_survive_the_inner_exit(tmp_path: Path) -> None:
     # Identical contents now share a package name, so teardown is refcounted: the inner
     # scope exiting must not strip sys.modules out from under the outer one.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import scoped_harbor_agent_import
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import scoped_harbor_agent_import
 
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
@@ -1665,7 +1794,7 @@ def test_same_named_identical_agents_do_not_repoint_an_open_scope(tmp_path: Path
     # different path would produce a different JobConfig and Harbor would refuse to
     # resume — reintroducing AALGO-430. The trees are byte-identical here, so keeping
     # the first path is correct.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _AGENT_PACKAGE_REFCOUNTS
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _AGENT_PACKAGE_REFCOUNTS
 
     first = tmp_path / "one" / "agent"
     second = tmp_path / "two" / "agent"
@@ -1689,7 +1818,7 @@ def test_same_named_identical_agents_do_not_repoint_an_open_scope(tmp_path: Path
 
 def test_scoped_import_teardown_is_complete_after_overlap(tmp_path: Path) -> None:
     # Refcounting must not leak: no stray refcount entries or sys.modules residue.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
         _AGENT_IMPORT_ROOT,
         _AGENT_PACKAGE_REFCOUNTS,
         scoped_harbor_agent_import,
@@ -1734,8 +1863,8 @@ def test_failed_scoped_import_install_does_not_wedge_the_refcount(
     # The refcount is taken only once the sys.modules injection has succeeded. Taking
     # it first would strand the count at 1 when the injection raises — no scope ever
     # opened, so nothing decrements it, and the package could never be torn down again.
-    from nemo_evaluator_sdk.agent_eval.runtimes import harbor_runtime
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _AGENT_IMPORT_ROOT, _AGENT_PACKAGE_REFCOUNTS
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _AGENT_IMPORT_ROOT, _AGENT_PACKAGE_REFCOUNTS
 
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
@@ -1850,7 +1979,9 @@ async def test_harbor_refusing_to_resume_discards_and_reruns(
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with caplog.at_level(logging.WARNING):
         await run_job()
@@ -1873,7 +2004,9 @@ async def test_trace_dir_is_published_to_the_verifier_as_trace_dir_env(
 
     _stub_harbor(monkeypatch, create, verifier_calls)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="pinned", trace_dir="/app/traces")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     await run_job()
 
@@ -1893,7 +2026,9 @@ async def test_file_exists_error_without_a_job_dir_propagates(tmp_path: Path, mo
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with pytest.raises(FileExistsError, match="something unrelated"):
         await run_job()
@@ -1924,7 +2059,9 @@ async def test_unrelated_file_exists_error_mid_run_leaves_the_job_dir_alone(
 
     _stub_harbor(monkeypatch, create)
     config = HarborRuntimeConfig(jobs_dir=jobs_dir, job_name="pinned")
-    _built, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False)
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="pinned", force_rerun=False, env_templates={}
+    )
 
     with pytest.raises(FileExistsError):
         await run_job()
@@ -1951,7 +2088,7 @@ def test_only_harbors_resume_refusal_authorises_deleting_the_job_dir(
     # Deleting a job dir is the one irreversible thing this runtime does, so the
     # predicate that authorises it is pinned directly. Anything unrecognised must
     # answer False and let the error propagate — the safe direction if Harbor rewords.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _is_harbor_resume_refusal
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _is_harbor_resume_refusal
 
     job_dir = tmp_path / "jobs" / "pinned"
     rendered = message.format(job_dir=job_dir)
@@ -1966,7 +2103,7 @@ def test_job_config_drift_names_the_field_that_forced_the_discard(tmp_path: Path
     # ignores is not, and a field left at its default is not — the last only holds
     # because the persisted JSON (written with exclude_defaults=True) is re-validated
     # rather than compared raw, which would see a missing key as a difference.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _describe_job_config_drift
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _describe_job_config_drift
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -1982,7 +2119,7 @@ def test_job_config_drift_is_silent_when_it_cannot_tell(tmp_path: Path) -> None:
     # No config.json is the lock.json-refusal case: there is no JobConfig difference to
     # report. Diagnostics must degrade to silence, never to a raised exception that
     # would mask the FileExistsError being explained.
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _describe_job_config_drift
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _describe_job_config_drift
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -2030,11 +2167,11 @@ def test_harbor_still_words_its_resume_refusals_the_way_we_match_them() -> None:
     # If Harbor rewords, the predicate stops matching and the refusal propagates as a
     # crash — the safe direction, but a silent loss of the graceful re-run. Catch that
     # at upgrade time here instead of in someone's failed experiment.
-    pytest.importorskip("harbor.job", reason="harbor needs python >= 3.12")
+    pytest.importorskip("harbor.job", reason="needs the harbor extra")
     import inspect
 
     from harbor.job import Job
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import _HARBOR_RESUME_REFUSALS
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _HARBOR_RESUME_REFUSALS
 
     source = inspect.getsource(Job)
     for phrase in _HARBOR_RESUME_REFUSALS:
@@ -2049,7 +2186,7 @@ def test_harbor_job_config_equality_still_behaves_as_the_retry_assumes() -> None
     # The FileExistsError retry exists because Harbor compares its whole JobConfig and
     # ignores only identity/logging fields. Pin that behaviourally, so a Harbor upgrade
     # that changes the rule surfaces here rather than as a mystery re-run in production.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
 
     baseline = job_config.JobConfig(job_name="a")
     assert baseline == job_config.JobConfig(job_name="b"), "job_name must stay outside Harbor's comparison"
@@ -2063,8 +2200,8 @@ def test_every_harbor_job_config_field_is_classified_against_the_sdk_stamp() -> 
     # comparison, but only in ways we have reasoned about. A Harbor upgrade that adds a
     # compared field would silently widen that gap into unexplained full re-runs, so
     # every field must land in exactly one bucket before it can ship.
-    job_config = pytest.importorskip("harbor.models.job.config", reason="harbor needs python >= 3.12")
-    from nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime import (
+    job_config = pytest.importorskip("harbor.models.job.config", reason="needs the harbor extra")
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
         _CACHE_IRRELEVANT_OPTIONS,
         _HARBOR_EQ_IGNORED_FIELDS,
     )
@@ -2813,12 +2950,12 @@ def test_a_trial_with_no_trace_artifact_has_no_standard_trace(tmp_path: Path) ->
     ("source_name", "legacy_name"),
     [
         (
-            "nemo_evaluator_sdk.agent_eval.runtimes.harbor_trial_adapter",
-            "nemo_platform.beta.evaluator.agent_eval.runtimes.harbor_trial_adapter",
+            "nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter",
+            "nemo_helix.beta.evaluator.agent_eval.runtimes.harbor.trial_adapter",
         ),
         (
             "nemo_evaluator_sdk.agent_eval.trials",
-            "nemo_platform.beta.evaluator.agent_eval.trials",
+            "nemo_helix.beta.evaluator.agent_eval.trials",
         ),
     ],
 )
@@ -2968,7 +3105,7 @@ def test_output_text_falls_back_to_atif_when_the_otlp_trace_carries_no_answer(tm
 
     trial = _adapt_evidence_trial(job_dir)
 
-    atif_answer = _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    atif_answer = final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
     assert atif_answer
     assert trial.output is not None
     assert trial.output.output_text == atif_answer
@@ -3002,7 +3139,7 @@ def test_an_unreadable_otlp_trace_does_not_lose_the_atif_answer(
 
     assert "Ignoring unreadable OTLP trace" in caplog.text
     assert trial.output is not None
-    assert trial.output.output_text == _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    assert trial.output.output_text == final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
 
 
 def test_an_empty_message_envelope_falls_back_to_the_atif_answer(tmp_path: Path) -> None:
@@ -3032,7 +3169,7 @@ def test_an_empty_message_envelope_falls_back_to_the_atif_answer(tmp_path: Path)
     trial = _adapt_evidence_trial(job_dir)
 
     assert trial.output is not None
-    assert trial.output.output_text == _final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
+    assert trial.output.output_text == final_agent_message(read_atif(trial_dir / "agent" / "trajectory.json"))
 
 
 @pytest.mark.asyncio
@@ -3054,3 +3191,313 @@ async def test_an_unreadable_otlp_trace_is_not_promoted_over_a_valid_atif_one(tm
     assert isinstance(await trial.evidence.trace(), ATIFTraceHandle)
     # The malformed file is demoted, not hidden.
     assert trial.get_evidence("trace:otlp") is not None
+
+
+def test_typed_sources_reject_mixed_tasks(tmp_path: Path) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _typed_task_dirs
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
+
+    typed = HarborAgentEvalTask(id="typed", intent="typed", inputs={}, source_dir=tmp_path)
+    base = AgentEvalTask(id="base", intent="base", inputs={})
+    with pytest.raises(ValueError, match="Cannot mix discovered Harbor tasks") as excinfo:
+        _typed_task_dirs([typed, base])
+    # The message names the offending plain tasks and both ways out.
+    assert "['base']" in str(excinfo.value)
+    assert "discover_harbor_tasks()" in str(excinfo.value)
+    assert "as_base_task()" in str(excinfo.value)
+
+
+def test_as_base_task_downcasts_a_discovered_task_for_a_plain_run() -> None:
+    # A discovered task cannot be rebuilt through the base model: source_dir is an extra field.
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _task_dirs_for
+
+    task = discover_harbor_tasks(_HELLO_WORLD_DATASET)[0]
+    with pytest.raises(ValidationError, match="source_dir"):
+        AgentEvalTask.model_validate(dict(task))
+
+    plain = as_base_task(task)
+
+    assert type(plain) is AgentEvalTask
+    assert plain.metrics == task.metrics
+    assert plain.metadata == task.metadata
+    assert as_base_task(plain) is plain
+    # A plain run resolves the package through dataset_path, as the error message suggests.
+    assert _task_dirs_for(_HELLO_WORLD_DATASET, [plain]) == {plain.id: _HELLO_WORLD_DATASET / "hello-world"}
+
+
+@pytest.mark.parametrize("constructed", [False, True])
+@pytest.mark.parametrize("invalid", ["missing_config", "symlink"])
+def test_typed_sources_reject_invalid_directories(tmp_path: Path, constructed: bool, invalid: str) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _typed_task_dirs
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.tasks import HarborAgentEvalTask
+
+    source = tmp_path / "task"
+    source.mkdir()
+    if invalid == "symlink":
+        (source / "task.toml").write_text("")
+        link = tmp_path / "link"
+        link.symlink_to(source, target_is_directory=True)
+        source = link
+    fields = dict(id="task", intent="task", inputs={}, source_dir=source)
+    task = (
+        HarborAgentEvalTask.model_construct(id="task", intent="task", inputs={}, source_dir=source)
+        if constructed
+        else HarborAgentEvalTask.model_validate(fields)
+    )
+    with pytest.raises(ValueError, match="Invalid Harbor source directory"):
+        _typed_task_dirs([task])
+
+
+# --- env_secrets / env_vars -------------------------------------------------------------------------
+
+_WS_REF = SecretRef("my-workspace/probe-api-key")
+_PREFIXED = "MY_WORKSPACE_PROBE_API_KEY"
+_BARE = "PROBE_API_KEY"
+
+
+@pytest.fixture
+def clean_probe_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    for name in (_PREFIXED, _BARE, "LLM_API_KEY", "CUSTOM_SRC"):
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mapping[str, str]]) -> None:
+    """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+        captured.append(dict(env_templates))
+
+        async def run_job() -> None:
+            return None
+
+        return config.jobs_dir / (job_name or "job"), run_job
+
+    monkeypatch.setattr(harbor_runtime, "_build_native_job", fake)
+
+
+def _forced_run_config(tmp_path: Path, **update: object) -> tuple[HarborRuntimeConfig, Path, AgentEvalTask]:
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    config = HarborRuntimeConfig.model_validate({**config.model_dump(), "force_rerun": True, **update})
+    return config, job_dir, task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("env", "env_secrets", "expected"),
+    [
+        ({_PREFIXED: "a"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}),
+        ({_BARE: "b"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}),
+        ({_PREFIXED: "a", _BARE: "b"}, {"OPENAI_API_KEY": _WS_REF}, {"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}),
+        ({_BARE: "b"}, {"OPENAI_API_KEY": SecretRef("probe-api-key")}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}),
+        # A stray export under the agent's key is never read: the template names the secret's source.
+        ({_PREFIXED: "a", "LLM_API_KEY": "z"}, {"LLM_API_KEY": _WS_REF}, {"LLM_API_KEY": f"${{{_PREFIXED}}}"}),
+    ],
+)
+async def test_env_secrets_are_templated_from_their_source_without_touching_os_environ(
+    tmp_path: Path,
+    clean_probe_env: pytest.MonkeyPatch,
+    env: dict[str, str],
+    env_secrets: dict[str, SecretRef],
+    expected: dict[str, str],
+) -> None:
+    for name, value in env.items():
+        clean_probe_env.setenv(name, value)
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets=env_secrets)
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    environ_before = dict(os.environ)
+
+    await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    assert captured == [expected]
+    assert dict(os.environ) == environ_before
+
+
+@pytest.mark.asyncio
+async def test_missing_secret_fails_before_the_job_dir_is_touched(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
+
+    config, job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    build = Mock(side_effect=AssertionError("the job was built despite a missing secret"))
+    clean_probe_env.setattr(harbor_runtime, "_build_native_job", build)
+
+    with pytest.raises(ValueError, match=r"set the MY_WORKSPACE_PROBE_API_KEY \(or PROBE_API_KEY\) env var"):
+        await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    build.assert_not_called()
+    assert any(job_dir.rglob("result.json")), "force_rerun must not have cleared completed trials"
+
+
+class _FixedSource:
+    def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+        return "CUSTOM_SRC"
+
+
+class _ValueOnlyResolver:
+    async def resolve_secret(self, secret_ref: SecretRef) -> str | None:
+        return "value"
+
+
+@pytest.mark.asyncio
+async def test_constructor_secret_resolver_is_used(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+
+    await HarborAgentTaskRunner(config=config, secret_resolver=_FixedSource()).run_tasks([task])
+
+    assert captured == [{"OPENAI_API_KEY": "${CUSTOM_SRC}"}]
+
+
+def test_a_resolver_that_cannot_name_an_env_var_is_refused_at_construction(tmp_path: Path) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    value_only = cast(Any, _ValueOnlyResolver())
+
+    with pytest.raises(TypeError, match="_ValueOnlyResolver can't name an env var"):
+        HarborAgentTaskRunner(config=config, secret_resolver=value_only)
+    # Without env_secrets the resolver is never consulted.
+    HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path), secret_resolver=value_only)
+
+
+@pytest.mark.asyncio
+async def test_a_reused_runner_looks_secrets_up_on_every_execution(
+    tmp_path: Path, clean_probe_env: pytest.MonkeyPatch
+) -> None:
+    config, _job_dir, task = _forced_run_config(tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    runner = HarborAgentTaskRunner(config=config)
+
+    clean_probe_env.setenv(_PREFIXED, "a")
+    await runner.run_tasks([task])
+    clean_probe_env.delenv(_PREFIXED)
+    clean_probe_env.setenv(_BARE, "b")
+    await runner.run_tasks([task])
+    clean_probe_env.delenv(_BARE)
+    with pytest.raises(ValueError, match="is not found"):
+        await runner.run_tasks([task])
+
+    assert captured == [{"OPENAI_API_KEY": f"${{{_PREFIXED}}}"}, {"OPENAI_API_KEY": f"${{{_BARE}}}"}]
+
+
+@pytest.mark.asyncio
+async def test_a_cache_hit_needs_no_credentials(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _cache_stamp, _write_cache_stamp
+
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    config = config.model_copy(update={"env_secrets": {"OPENAI_API_KEY": _WS_REF}})
+    _write_cache_stamp(job_dir, _cache_stamp(config, Path(str(task.metadata["harbor_dataset_path"])), [task]))
+    calls: list[bool] = []
+    _spy_on_run_job(clean_probe_env, calls)
+
+    trials = await HarborAgentTaskRunner(config=config).run_tasks([task])
+
+    assert calls == [] and len(trials) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_template_their_own_sources(tmp_path: Path, clean_probe_env: pytest.MonkeyPatch) -> None:
+    clean_probe_env.setenv("TEAM_A_PROBE_API_KEY", "a")
+    clean_probe_env.setenv("TEAM_B_PROBE_API_KEY", "b")
+    config_a, _, task_a = _forced_run_config(tmp_path / "a", env_secrets={"K": SecretRef("team-a/probe-api-key")})
+    config_b, _, task_b = _forced_run_config(tmp_path / "b", env_secrets={"K": SecretRef("team-b/probe-api-key")})
+    captured: list[Mapping[str, str]] = []
+    _capture_env_templates(clean_probe_env, captured)
+    environ_before = dict(os.environ)
+
+    await asyncio.gather(
+        HarborAgentTaskRunner(config=config_a).run_tasks([task_a]),
+        HarborAgentTaskRunner(config=config_b).run_tasks([task_b]),
+    )
+
+    assert sorted(t["K"] for t in captured) == ["${TEAM_A_PROBE_API_KEY}", "${TEAM_B_PROBE_API_KEY}"]
+    assert dict(os.environ) == environ_before
+
+
+def test_build_native_job_requires_templates_for_exactly_the_env_secrets(tmp_path: Path) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path, env_secrets={"OPENAI_API_KEY": _WS_REF})
+    with pytest.raises(ValueError, match="don't match env_secrets keys"):
+        _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+
+@pytest.mark.asyncio
+async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import harbor.job
+
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", env_vars={"DOCKER_HOST": "tcp://agent-only:2375"})
+    created: list[Any] = []
+
+    class FakeJob:
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            created.append(job_config)
+            assert "DOCKER_HOST" not in os.environ
+            return cls()
+
+        async def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+    await run_job()
+
+    assert created[0].agents[0].env == {"DOCKER_HOST": "tcp://agent-only:2375"}
+    assert "DOCKER_HOST" not in os.environ
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "env_vars", [{"X": "${WORKER_VAR}"}, {"TOKENIZERS_PARALLELISM": "false"}, {"MODEL_CREDS": "sk-not-a-real-key-01"}]
+)
+async def test_run_refuses_env_vars_injected_after_validation(tmp_path: Path, env_vars: dict[str, str]) -> None:
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="j").model_copy(
+        update={"env_vars": env_vars, "force_rerun": True}
+    )
+    completed = tmp_path / "jobs" / "j" / "trial"
+    completed.mkdir(parents=True)
+    (completed / "result.json").write_text("{}", encoding="utf-8")
+    _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
+
+    with pytest.raises(ValueError, match="env_vars"):
+        await run_job()
+
+    assert (completed / "result.json").exists()
+
+
+def test_agent_env_from_host_is_gone() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden|Extra inputs are not permitted"):
+        HarborRuntimeConfig.model_validate({"agent_env_from_host": ["OPENAI_API_KEY"]})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"env_vars": {"MODEL_CREDS": "sk-not-a-real-key-0123"}}, {"agent_kwargs": {"api_key": "sk-not-a-real-key-0123"}}],
+)
+def test_config_errors_do_not_echo_the_credential(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        HarborRuntimeConfig.model_validate(fields)
+    assert "sk-not-a-real-key-0123" not in str(excinfo.value)
+
+
+def test_a_cache_stamp_from_an_older_version_is_stale(tmp_path: Path) -> None:
+    """Existing job dirs re-run once after a stamp version bump, rather than serving results from other inputs."""
+    from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import (
+        CACHE_STAMP_FILENAME,
+        CACHE_STAMP_VERSION,
+        _cache_is_stale,
+        _cache_stamp,
+    )
+
+    config, job_dir, task = _seed_cached_job(tmp_path)
+    dataset_path = Path(str(task.metadata["harbor_dataset_path"]))
+    stamp_file = job_dir / CACHE_STAMP_FILENAME
+    assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task])) is False
+
+    stamp_file.write_text(json.dumps({**json.loads(stamp_file.read_text()), "version": CACHE_STAMP_VERSION - 1}))
+
+    assert _cache_is_stale(job_dir, _cache_stamp(config, dataset_path, [task])) is True

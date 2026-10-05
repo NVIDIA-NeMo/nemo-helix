@@ -18,7 +18,7 @@ real services.
 """
 
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -53,8 +53,8 @@ def _make_basic_job_config() -> DataDesignerJobConfig:
     return DataDesignerJobConfig(num_records=3, config=builder.build())
 
 
-@asynccontextmanager
-async def _completed_job() -> AsyncGenerator[u.CreateJobTestContext]:
+@pytest.fixture
+async def completed_job() -> AsyncGenerator[u.CreateJobTestContext]:
     """Stand up a real job and run it to completion (writes results, emits logs)."""
     job_config = await u.compile_create_job(_make_basic_job_config(), workspace="default")
     async with u.task_context(job_config, _JOB_NAME) as ctx:
@@ -63,12 +63,27 @@ async def _completed_job() -> AsyncGenerator[u.CreateJobTestContext]:
         yield ctx
 
 
-@asynccontextmanager
-async def _pending_job() -> AsyncGenerator[u.CreateJobTestContext]:
+@pytest.fixture
+async def pending_job() -> AsyncGenerator[u.CreateJobTestContext]:
     """Stand up a real job without running it (no results populated)."""
     job_config = await u.compile_create_job(_make_basic_job_config(), workspace="default")
     async with u.task_context(job_config, _JOB_NAME) as ctx:
         yield ctx
+
+
+@pytest.fixture
+def completed_job_resource(completed_job: u.CreateJobTestContext) -> DataDesignerJobResource:
+    return DataDesignerResource(completed_job.client).get_job_resource(_JOB_NAME, workspace="default")
+
+
+@pytest.fixture
+async def async_completed_job_resource(completed_job: u.CreateJobTestContext) -> AsyncDataDesignerJobResource:
+    return await AsyncDataDesignerResource(completed_job.async_client).get_job_resource(_JOB_NAME, workspace="default")
+
+
+@pytest.fixture
+def pending_job_resource(pending_job: u.CreateJobTestContext) -> DataDesignerJobResource:
+    return DataDesignerResource(pending_job.client).get_job_resource(_JOB_NAME, workspace="default")
 
 
 @contextmanager
@@ -100,27 +115,21 @@ def _no_pause() -> Generator[None]:
 
 
 @pytest.mark.asyncio
-async def test_get_job_resource_returns_job_for_real_job() -> None:
-    async with _completed_job() as ctx:
-        dd_client = DataDesignerResource(ctx.sdk)
-        job_resource = dd_client.get_job_resource(_JOB_NAME, workspace="default")
+async def test_get_job_resource_returns_job_for_real_job(completed_job_resource: DataDesignerJobResource) -> None:
+    assert isinstance(completed_job_resource, DataDesignerJobResource)
 
-        assert isinstance(job_resource, DataDesignerJobResource)
-
-        job = job_resource.get_job()
-        assert job["name"] == _JOB_NAME
+    job = completed_job_resource.get_job()
+    assert job["name"] == _JOB_NAME
 
 
 @pytest.mark.asyncio
-async def test_get_job_resource_async_returns_job_for_real_job() -> None:
-    async with _completed_job() as ctx:
-        dd_client = AsyncDataDesignerResource(ctx.async_sdk)
-        job_resource = await dd_client.get_job_resource(_JOB_NAME, workspace="default")
+async def test_get_job_resource_async_returns_job_for_real_job(
+    async_completed_job_resource: AsyncDataDesignerJobResource,
+) -> None:
+    assert isinstance(async_completed_job_resource, AsyncDataDesignerJobResource)
 
-        assert isinstance(job_resource, AsyncDataDesignerJobResource)
-
-        job = await job_resource.get_job()
-        assert job["name"] == _JOB_NAME
+    job = await async_completed_job_resource.get_job()
+    assert job["name"] == _JOB_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +138,11 @@ async def test_get_job_resource_async_returns_job_for_real_job() -> None:
 
 
 @pytest.mark.asyncio
-async def test_check_if_complete_returns_true_for_completed_status() -> None:
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-        with _patch_status(job_resource, "completed"):
-            assert job_resource.check_if_complete() is True
+async def test_check_if_complete_returns_true_for_completed_status(
+    pending_job_resource: DataDesignerJobResource,
+) -> None:
+    with _patch_status(pending_job_resource, "completed"):
+        assert pending_job_resource.check_if_complete() is True
 
 
 @pytest.mark.asyncio
@@ -152,14 +161,12 @@ async def test_check_if_complete_returns_false_with_friendly_message_for_non_com
     simulated_status: str,
     expected_log_fragment: str,
     caplog: pytest.LogCaptureFixture,
+    pending_job_resource: DataDesignerJobResource,
 ) -> None:
     """Non-raising path should log a user-friendly message for every non-completed status."""
 
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, simulated_status), caplog.at_level("WARNING"):
-            assert job_resource.check_if_complete(raise_if_not_complete=False) is False
+    with _patch_status(pending_job_resource, simulated_status), caplog.at_level("WARNING"):
+        assert pending_job_resource.check_if_complete(raise_if_not_complete=False) is False
 
     assert any(expected_log_fragment in record.message for record in caplog.records), (
         f"expected log message containing {expected_log_fragment!r}, got: {[r.message for r in caplog.records]}"
@@ -168,13 +175,12 @@ async def test_check_if_complete_returns_false_with_friendly_message_for_non_com
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("simulated_status", ["active", "created", "pending", "error", "cancelled", "frobnicated"])
-async def test_check_if_complete_raises_when_requested(simulated_status: str) -> None:
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, simulated_status):
-            with pytest.raises(DataDesignerJobError):
-                job_resource.check_if_complete(raise_if_not_complete=True)
+async def test_check_if_complete_raises_when_requested(
+    simulated_status: str, pending_job_resource: DataDesignerJobResource
+) -> None:
+    with _patch_status(pending_job_resource, simulated_status):
+        with pytest.raises(DataDesignerJobError):
+            pending_job_resource.check_if_complete(raise_if_not_complete=True)
 
 
 # ---------------------------------------------------------------------------
@@ -183,22 +189,21 @@ async def test_check_if_complete_raises_when_requested(simulated_status: str) ->
 
 
 @pytest.mark.asyncio
-async def test_wait_until_done_logs_success_when_status_completes(caplog: pytest.LogCaptureFixture) -> None:
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-        with _no_pause(), _patch_status(job_resource, "completed"), caplog.at_level("INFO"):
-            job_resource.wait_until_done()
+async def test_wait_until_done_logs_success_when_status_completes(
+    caplog: pytest.LogCaptureFixture, completed_job_resource: DataDesignerJobResource
+) -> None:
+    with _no_pause(), _patch_status(completed_job_resource, "completed"), caplog.at_level("INFO"):
+        completed_job_resource.wait_until_done()
 
     assert any("completed successfully" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_wait_until_done_async_logs_success_when_status_completes(caplog: pytest.LogCaptureFixture) -> None:
-    async with _completed_job() as ctx:
-        async_dd_client = AsyncDataDesignerResource(ctx.async_sdk)
-        job_resource = await async_dd_client.get_job_resource(_JOB_NAME, workspace="default")
-        with _no_pause(), _patch_async_status(job_resource, "completed"), caplog.at_level("INFO"):
-            await job_resource.wait_until_done()
+async def test_wait_until_done_async_logs_success_when_status_completes(
+    caplog: pytest.LogCaptureFixture, async_completed_job_resource: AsyncDataDesignerJobResource
+) -> None:
+    with _no_pause(), _patch_async_status(async_completed_job_resource, "completed"), caplog.at_level("INFO"):
+        await async_completed_job_resource.wait_until_done()
 
     assert any("completed successfully" in record.message for record in caplog.records)
 
@@ -206,12 +211,10 @@ async def test_wait_until_done_async_logs_success_when_status_completes(caplog: 
 @pytest.mark.asyncio
 async def test_wait_until_done_logs_terminal_failure_for_cancelled_status(
     caplog: pytest.LogCaptureFixture,
+    pending_job_resource: DataDesignerJobResource,
 ) -> None:
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _no_pause(), _patch_status(job_resource, "cancelled"), caplog.at_level("ERROR"):
-            job_resource.wait_until_done()
+    with _no_pause(), _patch_status(pending_job_resource, "cancelled"), caplog.at_level("ERROR"):
+        pending_job_resource.wait_until_done()
 
     assert any("Terminating generation job" in record.message for record in caplog.records)
     assert any("cancelled" in record.message for record in caplog.records)
@@ -234,11 +237,11 @@ async def test_wait_until_done_logs_terminal_failure_for_cancelled_status(
 
 
 @pytest.mark.asyncio
-async def test_download_artifacts_extracts_dataset_and_loads_analysis(tmp_path: Path) -> None:
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-        with _patch_status(job_resource, "completed"):
-            results = job_resource.download_artifacts(tmp_path)
+async def test_download_artifacts_extracts_dataset_and_loads_analysis(
+    tmp_path: Path, completed_job_resource: DataDesignerJobResource
+) -> None:
+    with _patch_status(completed_job_resource, "completed"):
+        results = completed_job_resource.download_artifacts(tmp_path)
 
     assert isinstance(results, DataDesignerJobResults)
 
@@ -253,23 +256,22 @@ async def test_download_artifacts_extracts_dataset_and_loads_analysis(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_download_artifacts_async_extracts_dataset_and_loads_analysis(tmp_path: Path) -> None:
-    async with _completed_job() as ctx:
-        async_dd_client = AsyncDataDesignerResource(ctx.async_sdk)
-        job_resource = await async_dd_client.get_job_resource(_JOB_NAME, workspace="default")
-        with _patch_async_status(job_resource, "completed"):
-            results = await job_resource.download_artifacts(tmp_path)
+async def test_download_artifacts_async_extracts_dataset_and_loads_analysis(
+    tmp_path: Path, async_completed_job_resource: AsyncDataDesignerJobResource
+) -> None:
+    with _patch_async_status(async_completed_job_resource, "completed"):
+        results = await async_completed_job_resource.download_artifacts(tmp_path)
 
     assert isinstance(results, DataDesignerJobResults)
     assert results.load_analysis().num_records == 3
 
 
 @pytest.mark.asyncio
-async def test_load_processor_dataset_raises_for_unknown_processor(tmp_path: Path) -> None:
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-        with _patch_status(job_resource, "completed"):
-            results = job_resource.download_artifacts(tmp_path)
+async def test_load_processor_dataset_raises_for_unknown_processor(
+    tmp_path: Path, completed_job_resource: DataDesignerJobResource
+) -> None:
+    with _patch_status(completed_job_resource, "completed"):
+        results = completed_job_resource.download_artifacts(tmp_path)
 
     with pytest.raises(DataDesignerClientError, match="No artifacts found for processor"):
         results.load_processor_dataset("undefined-processor")
@@ -281,38 +283,33 @@ async def test_load_processor_dataset_raises_for_unknown_processor(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_load_analysis_returns_profiler_results_for_completed_status() -> None:
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-        with _patch_status(job_resource, "completed"):
-            analysis = job_resource.load_analysis()
+async def test_load_analysis_returns_profiler_results_for_completed_status(
+    completed_job_resource: DataDesignerJobResource,
+) -> None:
+    with _patch_status(completed_job_resource, "completed"):
+        analysis = completed_job_resource.load_analysis()
 
     assert isinstance(analysis, DatasetProfilerResults)
     assert analysis.num_records == 3
 
 
 @pytest.mark.asyncio
-async def test_load_analysis_raises_when_status_is_unknown() -> None:
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, "frobnicated"):
-            with pytest.raises(DataDesignerJobError, match="frobnicated"):
-                job_resource.load_analysis()
+async def test_load_analysis_raises_when_status_is_unknown(pending_job_resource: DataDesignerJobResource) -> None:
+    with _patch_status(pending_job_resource, "frobnicated"):
+        with pytest.raises(DataDesignerJobError, match="frobnicated"):
+            pending_job_resource.load_analysis()
 
 
 @pytest.mark.asyncio
 async def test_load_analysis_when_active_uses_completed_result_if_available(
     caplog: pytest.LogCaptureFixture,
+    completed_job_resource: DataDesignerJobResource,
 ) -> None:
     """``_check_if_result_available`` allows fetching completed results from an ``active`` job
     and emits a 'still cooking' info message.
     """
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, "active"), caplog.at_level("INFO"):
-            analysis = job_resource.load_analysis()
+    with _patch_status(completed_job_resource, "active"), caplog.at_level("INFO"):
+        analysis = completed_job_resource.load_analysis()
 
     assert analysis.num_records == 3
     assert any("still cooking" in record.message.lower() for record in caplog.records)
@@ -321,27 +318,24 @@ async def test_load_analysis_when_active_uses_completed_result_if_available(
 @pytest.mark.asyncio
 async def test_load_analysis_when_terminally_incomplete_warns_and_returns_partial(
     caplog: pytest.LogCaptureFixture,
+    completed_job_resource: DataDesignerJobResource,
 ) -> None:
-    async with _completed_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, "error"), caplog.at_level("WARNING"):
-            analysis = job_resource.load_analysis()
+    with _patch_status(completed_job_resource, "error"), caplog.at_level("WARNING"):
+        analysis = completed_job_resource.load_analysis()
 
     assert analysis.num_records == 3
     assert any("error" in record.message and "analysis" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_load_analysis_raises_friendly_error_when_active_but_result_missing() -> None:
+async def test_load_analysis_raises_friendly_error_when_active_but_result_missing(
+    pending_job_resource: DataDesignerJobResource,
+) -> None:
     """An ``active`` job whose analysis result hasn't been written yet returns a 404 from the
     Jobs service; ``_check_if_result_available`` translates that into a friendly
     ``"'analysis' result is not available."`` message instead of leaking the underlying
     HTTP error.
     """
-    async with _pending_job() as ctx:
-        job_resource = DataDesignerResource(ctx.sdk).get_job_resource(_JOB_NAME, workspace="default")
-
-        with _patch_status(job_resource, "active"):
-            with pytest.raises(DataDesignerJobError, match="'analysis' result is not available"):
-                job_resource.load_analysis()
+    with _patch_status(pending_job_resource, "active"):
+        with pytest.raises(DataDesignerJobError, match="'analysis' result is not available"):
+            pending_job_resource.load_analysis()

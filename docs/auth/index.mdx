@@ -5,18 +5,18 @@
 title: "Authentication and Authorization"
 description: ""
 ---
-NeMo Platform includes a built-in security layer that lets you control who can access your platform and what they can do. When multiple teams or users share a NeMo Platform deployment, authentication and authorization ensure that each user sees only the workspaces and resources they are permitted to access, and can only perform actions appropriate to their role.
+NeMo Helix includes a built-in security layer that lets you control who can access your platform and what they can do. When multiple teams or users share a NeMo Helix deployment, authentication and authorization ensure that each user sees only the workspaces and resources they are permitted to access, and can only perform actions appropriate to their role.
 
 Access control has two layers:
 
--   **Authentication** — Prove your identity. NeMo Platform validates a JWT issued by your OpenID Connect (OIDC) identity provider.
+-   **Authentication** — Prove your identity. NeMo Helix validates a JWT issued by your OpenID Connect (OIDC) identity provider.
 -   **Authorization** — Control what you can do. Workspace-scoped RBAC with roles (Viewer, Editor, Admin) and optional API scopes on tokens.
 
 Both layers are opt-in. When `auth.enabled` is `false` (the default), all requests are allowed without checks. This lets you get started quickly and add security when you are ready for multi-user or production deployments.
 
 ## How Authentication Works
 
-NeMo Platform authenticates every request using a JWT from your OIDC identity provider. The token is sent in the `Authorization: Bearer <token>` header, and NeMo Platform validates the signature, issuer, audience, and expiry. Refer to [OIDC Setup](/documentation/access-control/authentication/oidc-setup) to connect your identity provider.
+NeMo Helix authenticates every request using a JWT from your OIDC identity provider. The token is sent in the `Authorization: Bearer <token>` header, and NeMo Helix validates the signature, issuer, audience, and expiry. Refer to [OIDC Setup](/documentation/access-control/authentication/oidc-setup) to connect your identity provider.
 
 How you **obtain** the token depends on your context:
 
@@ -27,7 +27,7 @@ How you **obtain** the token depends on your context:
 
 <Tip>
 
-**Quickstart shortcut** — When running NeMo Platform quickstart without an OIDC provider, you can use an unsigned JWT:
+**Quickstart shortcut** — When running NeMo Helix quickstart without an OIDC provider, you can use an unsigned JWT:
 
 `nemo auth login --unsigned-token --email <email>`
 
@@ -43,7 +43,7 @@ Unsigned JWT login only works for quickstart and must not be used in production.
 
 #### Step 1: Enable Authorization
 
-Run `nemo quickstart configure` and select **Configure advanced options** → **Yes** for authentication. Provide an admin email — it receives the **PlatformAdmin** role with full platform access.
+Run `nemo quickstart configure` and select **Configure advanced options** → **Yes** for authentication. Provide an admin email — it receives the **HelixAdmin** role with full platform access.
 
 ```bash
 $ nemo quickstart configure
@@ -54,7 +54,7 @@ $ nemo quickstart configure
 <Accordion title="Full quickstart configure output">
 
 ```text
-NeMo Platform Quickstart Configuration
+NeMo Helix Quickstart Configuration
 ...
 Step 3 of 3: Save Config
 Save configuration?
@@ -71,7 +71,7 @@ Enable authentication/authorization?
 
 ✓ Authorization enabled
 
-Admin email (grants PlatformAdmin role): admin@example.com
+Admin email (grants HelixAdmin role): admin@example.com
 ✓ Admin: admin@example.com
 
 ℹ All CLI requests will be authenticated as admin@example.com.
@@ -106,12 +106,12 @@ nemo auth login --unsigned-token --email other-user@example.com
 <Tab title="Python SDK">
 
 ```python
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
 # No arguments needed — the SDK reads base_url, workspace, and credentials
 # from the active CLI context (set by `nemo auth login` or `nemo quickstart configure`).
 # See: Initializing the CLI and SDK in the quickstart for other init options.
-client = NeMoPlatform()
+client = NeMoHelix()
 
 workspaces = client.workspaces.list()
 print(f"Found {len(workspaces.data)} workspaces")
@@ -130,12 +130,12 @@ For production or Helm-based deployments, enable auth by setting `platformConfig
 
 <Card title="Security Model" href="/documentation/access-control/security-model">
 
-Understand how NeMo Platform authentication and authorization work together — trust boundaries, principal model, and authorization layers.
+Understand how NeMo Helix authentication and authorization work together — trust boundaries, principal model, and authorization layers.
 
 </Card>
 <Card title="Connect an Identity Provider" href="/documentation/access-control/authentication/oidc-setup">
 
-Configure NeMo Platform to authenticate users using your OIDC identity provider.
+Configure NeMo Helix to authenticate users using your OIDC identity provider.
 
 </Card>
 <Card title="Manage Workspace Access" href="/documentation/access-control/authorization/managing-access">

@@ -7,7 +7,7 @@ import duckdb
 from data_designer.engine.resources.seed_reader import SeedReader
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.filesystem import make_filesystem
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.client.adapter import SyncHelixClient
 
 workspace_cvar = ContextVar[str | None]("workspace_cvar", default=None)
 
@@ -16,14 +16,14 @@ class FilesetFileSeedReader(SeedReader[FilesetFileSeedSource]):
     # The Data Designer library discovers seed-reader plugins by instantiating them with no args.
     # Within this plugin we always inject an SDK and pass a collection of readers that replaces
     # any library-produced default collection of readers.
-    def __init__(self, sdk: NeMoPlatform | None = None) -> None:
-        self._sdk = sdk
+    def __init__(self, client: SyncHelixClient | None = None) -> None:
+        self._client = client
 
     def create_duckdb_connection(self) -> duckdb.DuckDBPyConnection:
-        if self._sdk is None:
-            raise RuntimeError("FilesetFileSeedReader requires an injected NeMo Platform SDK")
+        if self._client is None:
+            raise RuntimeError("FilesetFileSeedReader requires an injected NeMo Helix SDK")
 
-        filesystem = make_filesystem(self._sdk)
+        filesystem = make_filesystem(self._client)
         conn = duckdb.connect()
         conn.register_filesystem(filesystem)
         return conn

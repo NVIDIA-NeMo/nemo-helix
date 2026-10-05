@@ -19,6 +19,9 @@ from nemo_evaluator.api.fields import (
     REF_FRAGMENT_SEPARATOR as REF_FRAGMENT_SEPARATOR,
 )
 from nemo_evaluator.api.fields import (
+    AgentRef as AgentRef,
+)
+from nemo_evaluator.api.fields import (
     CloudpickleMetricPayload as CloudpickleMetricPayload,
 )
 from nemo_evaluator.api.fields import (
@@ -70,13 +73,13 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 )
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
-from nemo_platform_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
-from nemo_platform_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
-from nemo_platform_plugin.refs import (
+from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
+from nemo_helix_plugin.api.parsed_filter import ENTITY_BASE_FIELDS
+from nemo_helix_plugin.refs import (
     FILESET_REF_PATTERN as FILESET_REF_PATTERN,
 )
-from nemo_platform_plugin.schema import DatetimeFilter, Filter
-from pydantic import BaseModel, ConfigDict, Field
+from nemo_helix_plugin.schema import DatetimeFilter, Filter
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: A stored task's content, discriminated by which runner executes it. Widen with more members as
 #: runners land — the same way ``AgentRunnerTarget`` does on the target side.
@@ -89,7 +92,7 @@ class DataFilter(Filter):
     Implements the duck-typed hooks ``make_filter_dep`` looks for, so a custom-field filter (e.g.
     ``metric_type`` or ``job_id``) is rewritten to ``data.<field>`` for the entity store. The plain
     ``Filter`` does no translation, so an un-prefixed custom field reaches the store unresolved and
-    500s. (The richer ``nmp.common`` filter does this, but plugins can't depend on it — minimal port.)
+    500s. (The richer ``nhx.common`` filter does this, but plugins can't depend on it — minimal port.)
     """
 
     @classmethod
@@ -306,7 +309,7 @@ class Taskset(BaseModel):
     )
     files_ref: TasksetFilesRef | None = Field(
         default=None,
-        description="Files reference to the taskset's own files — shared by its members, owned by none.",
+        description="Reference to taskset-level files shared across member tasks, such as a common scoring script.",
     )
     metadata: TaskMetadataList = Field(default_factory=list, description="Key/value annotations for the taskset.")
     revision: int = Field(
@@ -330,7 +333,10 @@ class TasksetInput(BaseModel):
     timestamps).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"oneOf": [{"required": ["tasks"]}, {"required": ["task_ids"]}]},
+    )
 
     description: str | None = Field(default=None, description="Human-readable description of the grouping.")
     tasks: TaskRefList = Field(
@@ -341,6 +347,26 @@ class TasksetInput(BaseModel):
         "Because membership is a set, the stored order is canonical rather than the submitted order: "
         "reordering the same members is not a content change and publishes no revision.",
     )
+    task_ids: list[Annotated[str, Field(min_length=1)]] = Field(
+        default_factory=list, description="Stored task record IDs; mutually exclusive with tasks. Resolved on write."
+    )
+
+    @model_validator(mode="after")
+    def exclusive_membership(self) -> TasksetInput:
+        """Require exactly one membership representation and reject duplicate task IDs.
+
+        Returns:
+            The validated taskset input.
+
+        Raises:
+            ValueError: Both or neither membership fields are supplied, or task IDs repeat.
+        """
+        if len(self.model_fields_set & {"tasks", "task_ids"}) != 1:
+            raise ValueError("Supply exactly one of tasks or task_ids")
+        if len(set(self.task_ids)) != len(self.task_ids):
+            raise ValueError("Duplicate task IDs")
+        return self
+
     files_ref: TasksetFilesRef | None = Field(
         default=None,
         description="Files reference to the taskset's own files — shared by its members, owned by none. "

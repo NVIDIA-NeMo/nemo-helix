@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nmp.core.models.sidecars.adapters.main import ADAPTER_META_FILENAME, AdaptersController
+from nhx.core.models.sidecars.adapters.main import ADAPTER_META_FILENAME, AdaptersController
 
 
 def _make_adapter(

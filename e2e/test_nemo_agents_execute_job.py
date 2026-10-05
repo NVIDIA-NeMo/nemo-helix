@@ -12,16 +12,16 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.entities import NEMO_AGENTS_SPEC_CONFIG_FORMAT
-from nemo_platform import NeMoPlatform
-from nemo_platform_plugin.client.adapter import client_from_platform
-from nemo_platform_plugin.files.client import FilesClient
-from nemo_platform_plugin.files.types import CreateFilesetRequest
-from nemo_platform_plugin.jobs.client import JobsClient
-from nmp.testing import MockProviderResponse, add_mock_provider
-from nmp.testing.e2e import wait_for_platform_job
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.jobs.client import JobsClient
+from nhx.testing import MockProviderResponse, add_mock_provider
+from nhx.testing.e2e import wait_for_platform_job
 
 from e2e.agents_deploy_helpers import (
     TEST_AGENT_RESPONSE,
+    agents_resource,
     delete_agent_if_exists,
     mock_backed_fabric_agent_config,
     unique_name,
@@ -33,30 +33,34 @@ pytestmark = [pytest.mark.timeout(600)]
 # A well-formed reference that can never resolve: ``.invalid`` is reserved by
 # RFC 2606 and guaranteed not to exist, so the node fails the pull immediately
 # on NXDOMAIN rather than burning the test timeout on registry retries.
-_UNRESOLVABLE_IMAGE = "registry.invalid/nmp-e2e/no-such-image:missing"
+# Uppercase in the repository path makes this ref malformed, not merely
+# missing. A missing image is retried by both backends until
+# ``ttl_seconds_before_active`` (30 minutes by default), which is longer than
+# any test budget; a malformed one is rejected on the first attempt: the
+# kubelet reports ``InvalidImageName`` and Docker refuses to create the container.
+_UNRESOLVABLE_IMAGE = "registry.invalid/nhx-e2e/No-Such-Image:missing"
 
-# Evidence that the failure was about the image. The first three are the
-# waiting-state reasons the Kubernetes backend maps to a job error
-# (``kubernetes/common.py``); the last two are fragments of the ref itself,
-# which the Docker backend's pull error embeds. Matching any one of them keeps
-# the assertion specific to the image without pinning either backend's wording.
+# Evidence that the failure was about the image. The first is the waiting-state
+# reason the Kubernetes backend maps to a job error (``kubernetes/common.py``);
+# the rest are fragments of the ref itself, which both backends' errors embed.
+# Matching any one of them keeps the assertion specific to the image without
+# pinning either backend's wording.
 _IMAGE_FAILURE_MARKERS = (
-    "imagepullbackoff",
-    "errimagepull",
     "invalidimagename",
+    "invalid reference format",
     "registry.invalid",
     "no-such-image",
 )
 
 
-def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix: str) -> str:
+def _job_diagnostic_message(client: NemoClient, job: Any, workspace: str, prefix: str) -> str:
     parts = [prefix]
     if job.status_details:
         parts.append(f"Status details: {job.status_details}")
     if job.error_details:
         parts.append(f"Error details: {job.error_details}")
     try:
-        logs = client_from_platform(sdk, JobsClient).list_job_logs(workspace=workspace, name=job.name)
+        logs = JobsClient.from_client(client).list_job_logs(workspace=workspace, name=job.name)
         entries = list(logs.items())
         if entries:
             parts.append(f"Job logs ({len(entries)} entries):")
@@ -67,12 +71,12 @@ def _job_diagnostic_message(sdk: NeMoPlatform, job: Any, workspace: str, prefix:
     return "\n".join(parts)
 
 
-def _list_execute_job_results(sdk: NeMoPlatform, workspace: str, job_name: str) -> dict[str, Any]:
-    return dict(sdk.agents.jobs.execute.list_results(job_name, workspace=workspace))
+def _list_execute_job_results(client: NemoClient, workspace: str, job_name: str) -> dict[str, Any]:
+    return dict(agents_resource(client).jobs.execute.list_results(job_name, workspace=workspace))
 
 
-def _download_execute_job_result(sdk: NeMoPlatform, workspace: str, job_name: str, result_name: str) -> bytes:
-    return sdk.agents.jobs.execute.download_result(result_name, job=job_name, workspace=workspace)
+def _download_execute_job_result(client: NemoClient, workspace: str, job_name: str, result_name: str) -> bytes:
+    return agents_resource(client).jobs.execute.download_result(result_name, job=job_name, workspace=workspace)
 
 
 def _result_names(results: dict[str, Any]) -> set[str]:
@@ -166,7 +170,7 @@ def _mock_backed_workspace_agent_config(agent_name: str, model_name: str) -> dic
     return config
 
 
-def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, workspace: str) -> None:
+def test_fabric_agent_invocation_job_runs_and_saves_results(client: NemoClient, workspace: str) -> None:
     agent_name = unique_name("execute-agent")
     job_name = unique_name("execute-job")
     model_name = unique_name("invoke-model")
@@ -174,7 +178,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
     generated_report = "Fabric wrote this deterministic e2e report.\n"
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("invoke-provider"),
         mock_response_body_by_model={
@@ -192,7 +196,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         served_models={model_name: model_name},
     )
 
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace=workspace)
     files.upload_file(
         name=fileset_name,
@@ -201,7 +205,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         content=b"This file proves the input workdir was staged.\n",
     )
 
-    sdk.agents.create(
+    agents_resource(client).create(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_workspace_agent_config(agent_name, f"{workspace}/{model_name}"),
@@ -209,7 +213,7 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
     )
 
     try:
-        sdk.agents.jobs.execute.create(
+        agents_resource(client).jobs.execute.create(
             name=job_name,
             workspace=workspace,
             spec={
@@ -219,15 +223,15 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
             },
         )
 
-        completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
+        completed_job = wait_for_platform_job(client, job_name, workspace, timeout=300)
         assert completed_job.status == "completed", _job_diagnostic_message(
-            sdk,
+            client,
             completed_job,
             workspace,
             f"Execute job failed with status: {completed_job.status}",
         )
 
-        results = _list_execute_job_results(sdk, workspace, job_name)
+        results = _list_execute_job_results(client, workspace, job_name)
         assert {
             "input_workdir",
             "output_workdir",
@@ -236,26 +240,26 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         }.issubset(_result_names(results))
 
         # The input snapshot contains the original file, but not the agent-generated one
-        input_workdir = _download_execute_job_result(sdk, workspace, job_name, "input_workdir")
+        input_workdir = _download_execute_job_result(client, workspace, job_name, "input_workdir")
         input_members = _tar_member_names(input_workdir)
         assert _tar_contains(input_members, "context.txt")
         assert not _tar_contains(input_members, "generated-report.md")
 
         # The output snapshot contains the original file AND the agent-generated one
-        output_workdir = _download_execute_job_result(sdk, workspace, job_name, "output_workdir")
+        output_workdir = _download_execute_job_result(client, workspace, job_name, "output_workdir")
         output_members = _tar_member_names(output_workdir)
         assert _tar_contains(output_members, "context.txt")
         assert _tar_contains(output_members, "generated-report.md")
         assert _tar_text_by_suffix(output_workdir, "generated-report.md") == generated_report
 
         # The output artifacts contains Fabric-produced files
-        artifacts = _download_execute_job_result(sdk, workspace, job_name, "output_artifacts")
+        artifacts = _download_execute_job_result(client, workspace, job_name, "output_artifacts")
         artifacts_members = _tar_member_names(artifacts)
         assert _tar_contains(artifacts_members, "adapter-invocation.json")
         assert _tar_contains(artifacts_members, "stdout.txt")
 
         # The run result captures platform-normalized Fabric RunResult details
-        run_result = json.loads(_download_execute_job_result(sdk, workspace, job_name, "fabric_run_result"))
+        run_result = json.loads(_download_execute_job_result(client, workspace, job_name, "fabric_run_result"))
         assert run_result["status"] == "succeeded"
         assert run_result["runtime_id"].startswith("runtime-")
         assert run_result["invocation_id"]
@@ -271,14 +275,14 @@ def test_fabric_agent_invocation_job_runs_and_saves_results(sdk: NeMoPlatform, w
         # Nobody configured an export: the job wires the agent's trajectory to
         # this workspace's Intake, using the platform URL reachable from the
         # task pod and the identity the platform gave the job.
-        spans = wait_for_agent_spans(sdk, workspace=workspace, agent_name=agent_name)
+        spans = wait_for_agent_spans(client, workspace=workspace, agent_name=agent_name)
         assert spans, "the agent ran but no trajectory reached Intake"
     finally:
-        delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)
+        delete_agent_if_exists(client, workspace=workspace, name=agent_name)
 
 
 def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs(
-    sdk: NeMoPlatform,
+    client: NemoClient,
     workspace: str,
 ) -> None:
     agent_name = unique_name("execute-agent")
@@ -288,7 +292,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
     partial_report = "Fabric wrote this file before the model failed.\n"
 
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("invoke-provider"),
         mock_response_body_by_model={
@@ -310,7 +314,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         served_models={model_name: model_name},
     )
 
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     files.create_fileset(body=CreateFilesetRequest(name=fileset_name), workspace=workspace)
     files.upload_file(
         name=fileset_name,
@@ -319,7 +323,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         content=b"This file proves the failed invocation still saves the input snapshot.\n",
     )
 
-    sdk.agents.create(
+    agents_resource(client).create(
         workspace=workspace,
         name=agent_name,
         config=_mock_backed_workspace_agent_config(agent_name, f"{workspace}/{model_name}"),
@@ -327,7 +331,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
     )
 
     try:
-        sdk.agents.jobs.execute.create(
+        agents_resource(client).jobs.execute.create(
             name=job_name,
             workspace=workspace,
             spec={
@@ -337,15 +341,15 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
             },
         )
 
-        completed_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
+        completed_job = wait_for_platform_job(client, job_name, workspace, timeout=300)
         assert completed_job.status == "error", _job_diagnostic_message(
-            sdk,
+            client,
             completed_job,
             workspace,
             f"Execute job unexpectedly finished with status: {completed_job.status}",
         )
 
-        results = _list_execute_job_results(sdk, workspace, job_name)
+        results = _list_execute_job_results(client, workspace, job_name)
         assert {
             "input_workdir",
             "output_workdir",
@@ -355,20 +359,20 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         assert "fabric_error" not in _result_names(results)
 
         # The input snapshot is as expected
-        input_workdir = _download_execute_job_result(sdk, workspace, job_name, "input_workdir")
+        input_workdir = _download_execute_job_result(client, workspace, job_name, "input_workdir")
         assert _tar_contains(_tar_member_names(input_workdir), "context.txt")
         assert not _tar_contains(_tar_member_names(input_workdir), "partial-before-error.txt")
 
         # We do still get an output snapshot even when Fabric fails, and it does contain
         # the file that Fabric created before failing
-        output_workdir = _download_execute_job_result(sdk, workspace, job_name, "output_workdir")
+        output_workdir = _download_execute_job_result(client, workspace, job_name, "output_workdir")
         output_members = _tar_member_names(output_workdir)
         assert _tar_contains(output_members, "context.txt")
         assert _tar_contains(output_members, "partial-before-error.txt")
         assert _tar_text_by_suffix(output_workdir, "partial-before-error.txt") == partial_report
 
         # The run result includes status=failed and error details
-        run_result = json.loads(_download_execute_job_result(sdk, workspace, job_name, "fabric_run_result"))
+        run_result = json.loads(_download_execute_job_result(client, workspace, job_name, "fabric_run_result"))
         assert run_result["status"] == "failed"
         assert run_result["request_id"] == job_name
         assert run_result["runtime_id"].startswith("runtime-")
@@ -378,7 +382,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
         assert "InternalServerError" in error_message
         assert "Error code: 500" in error_message
     finally:
-        delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)
+        delete_agent_if_exists(client, workspace=workspace, name=agent_name)
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +391,7 @@ def test_fabric_agent_invocation_job_saves_failed_run_result_and_partial_outputs
 
 
 @pytest.fixture
-def container_backed_execute(sdk: NeMoPlatform) -> None:
+def container_backed_execute(client: NemoClient) -> None:
     """Skip unless ``agents.execute`` actually runs in a container.
 
     The jobs API rewrites a ``cpu``/``default`` container step into a host
@@ -395,18 +399,18 @@ def container_backed_execute(sdk: NeMoPlatform) -> None:
     (``translate_cpu_container_steps_to_subprocess``), and that rewrite drops
     ``container.image`` on the floor. Every assertion about which image a job
     ran on is vacuous in that mode, so gate on the precise condition rather
-    than on the harness shape: ``container_only`` only proves ``NMP_BASE_URL``
+    than on the harness shape: ``container_only`` only proves ``NHX_BASE_URL``
     is set, which an already-running local (subprocess) platform also satisfies.
     """
-    profiles = client_from_platform(sdk, JobsClient).list_execution_profiles()
+    profiles = JobsClient.from_client(client).list_execution_profiles()
     if any(profile.provider == "subprocess" and profile.profile == "default" for profile in profiles):
         pytest.skip("cpu/default is diverted to the subprocess backend, which discards container.image")
 
 
-def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name: str, model_name: str) -> None:
+def _register_mock_backed_agent(client: NemoClient, workspace: str, *, agent_name: str, model_name: str) -> None:
     """Register a deterministic agent whose single model is served by the mock provider."""
     add_mock_provider(
-        sdk,
+        client,
         workspace=workspace,
         name=unique_name("image-provider"),
         mock_response_body_by_model={
@@ -416,7 +420,7 @@ def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name
         },
         served_models={model_name: model_name},
     )
-    sdk.agents.create(
+    agents_resource(client).create(
         workspace=workspace,
         name=agent_name,
         config=mock_backed_fabric_agent_config(agent_name, f"{workspace}/{model_name}"),
@@ -426,7 +430,7 @@ def _register_mock_backed_agent(sdk: NeMoPlatform, workspace: str, *, agent_name
 
 @pytest.mark.container_only
 def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
-    sdk: NeMoPlatform,
+    client: NemoClient,
     workspace: str,
     container_backed_execute: None,
 ) -> None:
@@ -435,9 +439,9 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
     Failure is the only outcome that can prove this today. A job that silently
     ignored ``image`` would run on the inherited task image and succeed, so a
     passing run says nothing -- and every image this test could legitimately
-    ask for is the one it would have inherited anyway. Because this ref cannot
-    resolve anywhere, an error whose diagnostics name the image or a pull
-    failure can only happen if the string travelled from the request through
+    ask for is the one it would have inherited anyway. Because this ref is
+    malformed, an error whose diagnostics name the image or reject its format
+    can only happen if the string travelled from the request through
     ``compile`` into the pod/container spec.
 
     The discriminating *positive* test needs an image that holds something the
@@ -449,10 +453,10 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
     job_name = unique_name("image-job")
     model_name = unique_name("image-model")
 
-    _register_mock_backed_agent(sdk, workspace, agent_name=agent_name, model_name=model_name)
+    _register_mock_backed_agent(client, workspace, agent_name=agent_name, model_name=model_name)
 
     try:
-        sdk.agents.jobs.execute.create(
+        agents_resource(client).jobs.execute.create(
             name=job_name,
             workspace=workspace,
             spec={
@@ -462,9 +466,9 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
             },
         )
 
-        finished_job = wait_for_platform_job(sdk, job_name, workspace, timeout=300)
+        finished_job = wait_for_platform_job(client, job_name, workspace, timeout=300)
         diagnostics = _job_diagnostic_message(
-            sdk,
+            client,
             finished_job,
             workspace,
             f"Execute job with an unresolvable image finished as: {finished_job.status}",
@@ -474,4 +478,4 @@ def test_execute_job_fails_when_the_requested_image_cannot_be_pulled(
             f"Job failed, but not demonstrably because of the requested image.\n{diagnostics}"
         )
     finally:
-        delete_agent_if_exists(sdk, workspace=workspace, name=agent_name)
+        delete_agent_if_exists(client, workspace=workspace, name=agent_name)

@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from nemo_deployments_plugin.entities import Container, Deployment, DeploymentConfig, Volume
-from nemo_platform_plugin.entity_client import NemoPaginationInfo
+from nemo_helix_plugin.entity_client import NemoPaginationInfo
 
 NOW = datetime.now(timezone.utc)
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { EvaluateJob, PlatformJobStatus } from '@nemo/sdk/generated/evaluator/schema';
+import type { EvaluateJob, HelixJobStatus } from '@nemo/sdk/generated/evaluator/schema';
 
 /** Alias used by hooks that work with the v2 evaluator API. */
 export type EvaluationJobV2 = EvaluateJob;
@@ -40,15 +40,15 @@ export const getEvaluationJobCustomFields = (job: EvaluateJob) => {
   return Object.keys(job?.custom_fields || {}) || [];
 };
 
-export const isEvaluationJobCreated = (status: PlatformJobStatus | undefined) => {
+export const isEvaluationJobCreated = (status: HelixJobStatus | undefined) => {
   return status === 'created';
 };
 
-export const isEvaluationJobSucceeded = (status: PlatformJobStatus | undefined) => {
+export const isEvaluationJobSucceeded = (status: HelixJobStatus | undefined) => {
   return status === 'completed';
 };
 
-export const isEvaluationJobInProgress = (status: PlatformJobStatus | undefined) => {
+export const isEvaluationJobInProgress = (status: HelixJobStatus | undefined) => {
   return status === 'active';
 };
 

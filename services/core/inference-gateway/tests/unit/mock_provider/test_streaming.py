@@ -6,7 +6,7 @@
 import json
 
 import pytest
-from nmp.core.inference_gateway.api.mock_provider.streaming import convert_to_streaming_chunks
+from nhx.core.inference_gateway.api.mock_provider.streaming import convert_to_streaming_chunks
 
 
 @pytest.mark.asyncio

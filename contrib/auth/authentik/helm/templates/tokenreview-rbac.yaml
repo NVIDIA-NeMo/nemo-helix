@@ -22,5 +22,5 @@ roleRef:
   name: nemo-authentik-workload-token-reviewer
 subjects:
   - kind: ServiceAccount
-    name: {{ .Values.integration.nemoPlatform.apiServiceAccountName }}
-    namespace: {{ include "nemo-platform-authentik.namespace" . }}
+    name: {{ .Values.integration.nemoHelix.apiServiceAccountName }}
+    namespace: {{ include "nemo-helix-authentik.namespace" . }}

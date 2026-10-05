@@ -4,7 +4,7 @@
 version = "1.0"
 
 [metadata]
-author_name = "NMP Team"
+author_name = "NHX Team"
 difficulty = "easy"
 category = "evaluator-agent-benchmark"
 suite_id = "evaluator_agent_benchmark"

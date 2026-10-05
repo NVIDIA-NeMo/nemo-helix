@@ -129,12 +129,83 @@ def test_rejects_a_config_with_no_optimizer_enabled(tmp_path: Path) -> None:
         preflight_bundle(tmp_path, "optimize.yml")
 
 
+def test_rejects_non_mapping_optimizer_phase_section(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {"numeric": "enabled"}
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.numeric must be a mapping"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_non_boolean_optimizer_enabled(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {"numeric": {"enabled": "false"}}
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.numeric.enabled must be a boolean"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
 def test_rejects_numeric_optimization_with_an_empty_search_space(tmp_path: Path) -> None:
     config = full_config()
     config["optimizer"] = {"numeric": {"enabled": True}}
     make_bundle(tmp_path, config, files={"dataset.json": DATASET})
 
     with pytest.raises(BundlePreflightError, match="search_space is empty"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_legacy_optimizable_params_with_migration_guidance(tmp_path: Path) -> None:
+    config = full_config()
+    config["optimizer"] = {
+        "numeric": {"enabled": True},
+        "optimizable_params": {"temperature": {"path": "models.default.temperature", "values": [0.0, 0.2]}},
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="rename it to optimizer.search_space"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_prompt_optimization_without_model_reference(tmp_path: Path) -> None:
+    config = full_config()
+    config["instructions"] = {"system": {"content": "Base prompt."}}
+    config["optimizer"] = {
+        "prompt": {"enabled": True},
+        "search_space": {
+            "system_prompt": {
+                "type": "fabric",
+                "path": "instructions.system.content",
+                "is_prompt": True,
+                "purpose": "Answer accurately.",
+            }
+        },
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="optimizer.prompt.model"):
+        preflight_bundle(tmp_path, "optimize.yml")
+
+
+def test_rejects_prompt_optimization_when_inline_prompt_path_is_not_string(tmp_path: Path) -> None:
+    config = full_config()
+    config["models"]["prompt_optimizer"] = {"provider": "openai", "model": "gpt-5-mini"}
+    config["instructions"] = {"system": {"content": {"text": "Base prompt."}}}
+    config["optimizer"] = {
+        "prompt": {"enabled": True, "model": "prompt_optimizer"},
+        "search_space": {
+            "system_prompt": {
+                "type": "fabric",
+                "path": "instructions.system.content",
+                "is_prompt": True,
+                "purpose": "Answer accurately.",
+            }
+        },
+    }
+    make_bundle(tmp_path, config, files={"dataset.json": DATASET})
+
+    with pytest.raises(BundlePreflightError, match="must resolve to a string"):
         preflight_bundle(tmp_path, "optimize.yml")
 
 

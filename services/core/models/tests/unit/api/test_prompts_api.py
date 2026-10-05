@@ -9,11 +9,11 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from nmp.common.api.common import Page, PaginationData
-from nmp.common.entities.client import EntityConflictError, EntityValidationError
-from nmp.core.models.api.service.prompt_service import PromptService
-from nmp.core.models.api.v2.prompts import router
-from nmp.core.models.schemas import Prompt, PromptMessage, PromptMessageRole
+from nhx.common.api.common import Page, PaginationData
+from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.api.v2.prompts import router
+from nhx.core.models.schemas import Prompt, PromptMessage, PromptMessageRole
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def mock_prompt_service():
 @pytest.fixture
 def test_app(mock_prompt_service):
     """Create a FastAPI test app with the prompt service dependency overridden."""
-    from nmp.core.models.api.dependencies import get_prompt_service
+    from nhx.core.models.api.dependencies import get_prompt_service
 
     app = FastAPI()
     app.dependency_overrides[get_prompt_service] = lambda: mock_prompt_service

@@ -14,14 +14,15 @@ from nemo_evaluator.api.schemas import Revision, Task, TaskFilter, TaskInput, Ta
 from nemo_evaluator.api.service.task_service import MetricRefNotFoundError, TaskService
 from nemo_evaluator.authz import scope
 from nemo_evaluator.entities import MAX_NAME_LENGTH, NAME_PATTERN
+from nemo_evaluator.harbor.materialization import HarborArtifactError
 from nemo_evaluator.revisions import RevisionConflictError, RevisionNotFoundError
-from nemo_platform_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
-from nemo_platform_plugin.authz import CallerKind, PermissionSet, path_rule, perm
-from nemo_platform_plugin.entities import EntityValidationError
-from nemo_platform_plugin.entity_client import NemoEntityConflictError
-from nemo_platform_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_platform_plugin.log_utils import sanitize_for_log
-from nemo_platform_plugin.schema import Page
+from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
+from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.entities import EntityValidationError
+from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
+from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.schema import Page
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ async def create_task(
     try:
         created, _ = await service.create_task(name, task, workspace=workspace, project=project)
         return created
+    except HarborArtifactError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during task creation: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
@@ -163,6 +166,8 @@ async def replace_task(
     logger.info(f"Replacing task: {safe_workspace}/{safe_name}")
     try:
         replaced, published = await service.replace_task(name, task, workspace=workspace, project=project)
+    except HarborArtifactError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during task replace: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))

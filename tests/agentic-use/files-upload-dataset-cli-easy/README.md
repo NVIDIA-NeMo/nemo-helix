@@ -3,7 +3,7 @@
 
 # Upload Dataset to Files Service (CLI)
 
-Tests the agent's ability to create JSONL dataset files and upload them to the NeMo Platform Files service using the CLI.
+Tests the agent's ability to create JSONL dataset files and upload them to the NeMo Helix Files service using the CLI.
 
 ## What This Tests
 

@@ -21,15 +21,15 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from nemo_platform_plugin.client.errors import ConflictError, NotFoundError
-from nemo_platform_plugin.inference_middleware import InferenceMiddlewareError, NemoInferenceMiddleware
-from nemo_platform_plugin.virtual_models.client import AsyncVirtualModelsClient
-from nemo_platform_plugin.virtual_models.types import CreateVirtualModelRequest, UpdateVirtualModelRequest
-from nmp.core.inference_gateway.api.dependencies import global_middleware_registry
-from nmp.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
-from nmp.core.inference_gateway.config import InferenceGatewayConfig
-from nmp.core.inference_gateway.service import InferenceGatewayService
-from nmp.testing import create_test_client
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, NemoInferenceMiddleware
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, UpdateVirtualModelRequest
+from nhx.core.inference_gateway.api.dependencies import global_middleware_registry
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
+from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.testing import create_test_client
 
 # Base URL prefix for the inference-gateway service
 BASE = "/apis/inference-gateway/v2/workspaces/default/virtual-models"
@@ -70,6 +70,7 @@ def _create(client: TestClient, name: str, **kwargs) -> dict:
 
 def _make_plugin() -> NemoInferenceMiddleware:
     plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.supports_middleware_phase.return_value = True
     plugin.get_middleware_config = AsyncMock(return_value={"stored": True})
     plugin.validate_middleware_config = AsyncMock(side_effect=lambda _config_type, config: config)
     return plugin
@@ -258,6 +259,25 @@ class TestCreateVirtualModel:
         plugin.validate_middleware_config.assert_any_await("resp", {"phase": "response"})
         plugin.validate_middleware_config.assert_any_await("post", {"phase": "post"})
 
+    def test_create_rejects_unsupported_middleware_phase(self, client: TestClient):
+        plugin = _make_plugin()
+        plugin.supports_middleware_phase.side_effect = lambda phase: phase == "request"
+        _install_registry(client, {"request-only": plugin})
+
+        response = client.post(
+            BASE,
+            json={
+                "name": "vm-invalid-phase",
+                "response_middleware": [
+                    {"name": "request-only", "config_type": "route", "config": {}},
+                ],
+            },
+        )
+
+        assert response.status_code == 422
+        assert "does not support response_middleware" in response.text
+        plugin.validate_middleware_config.assert_not_awaited()
+
     def test_create_resolves_config_id_before_validation(self, client: TestClient):
         """POST resolves config_id through the plugin and validates the returned config."""
         plugin = _make_plugin()
@@ -388,7 +408,7 @@ class TestCreateVirtualModel:
         validation failures (422). It also lines up with the same exception
         being the eviction trigger for IGW's resolved-middleware cache.
         """
-        from nemo_platform_plugin.inference_middleware import MiddlewareConfigNotFoundError
+        from nemo_helix_plugin.inference_middleware import MiddlewareConfigNotFoundError
 
         plugin = _make_plugin()
         plugin.get_middleware_config = AsyncMock(side_effect=MiddlewareConfigNotFoundError("default/missing"))

@@ -30,7 +30,7 @@ All three schemas use `extra="forbid"` — unknown keys raise validation errors.
 
 ## Integrations (all backends)
 
-**All three backends** (automodel, unsloth, rl) accept the same `integrations` object on job JSON (`IntegrationsSpec` in `nemo_platform_plugin.integrations`) — **W&B** and **MLflow**. A non-null `wandb` / `mlflow` block **requests** that integration; the training runtime **activates** it only when credentials/URIs are available (W&B needs `WANDB_API_KEY`, MLflow needs a tracking URI). Omit the field or set a block to `null` to disable. There is no `enabled` flag and no `report_to` on input — `report_to` is derived at runtime from activated integrations. The compiler logs a warning when W&B is requested without `api_key_secret` or MLflow without `tracking_uri`.
+**All three backends** (automodel, unsloth, rl) accept the same `integrations` object on job JSON (`IntegrationsSpec` in `nemo_helix_plugin.integrations`) — **W&B** and **MLflow**. A non-null `wandb` / `mlflow` block **requests** that integration; the training runtime **activates** it only when credentials/URIs are available (W&B needs `WANDB_API_KEY`, MLflow needs a tracking URI). Omit the field or set a block to `null` to disable. There is no `enabled` flag and no `report_to` on input — `report_to` is derived at runtime from activated integrations. The compiler logs a warning when W&B is requested without `api_key_secret` or MLflow without `tracking_uri`.
 
 ```json
 "integrations": {
@@ -106,14 +106,14 @@ stale. Say so rather than following the fixture.
 | **Batch / multi-GPU / 48 GB LoRA (automodel)** | `batch-sizing.md` § Batch sizing — automodel, § Multi-GPU | Choosing `micro`, GBS, LR, TP vs data parallel |
 | **Batch (unsloth, single GPU)** | `batch-sizing.md` § Batch sizing — unsloth | `per_device_train_batch_size` × `gradient_accumulation_steps` starting points |
 | Submit schema (automodel) | `plugins/nemo-automodel/src/nemo_automodel_plugin/schema.py` | Allowed JSON fields |
-| Schema → compiler mapping (automodel) | `services/automodel/src/nmp/automodel/adapter.py` | `dataset.training` → compiler `dataset` string |
-| API field descriptions (automodel) | `services/automodel/src/nmp/automodel/api/v2/jobs/schemas.py` | Compiler-internal shape (not submit JSON) |
+| Schema → compiler mapping (automodel) | `services/automodel/src/nhx/automodel/adapter.py` | `dataset.training` → compiler `dataset` string |
+| API field descriptions (automodel) | `services/automodel/src/nhx/automodel/api/v2/jobs/schemas.py` | Compiler-internal shape (not submit JSON) |
 | Submit schema (unsloth) | `plugins/nemo-unsloth/src/nemo_unsloth_plugin/schema.py` | Allowed JSON fields (`UnslothJobInput`) |
-| Canonical schema (unsloth) | `services/unsloth/src/nmp/unsloth/schemas.py` | Post-`to_spec` shape; what `train_sft` consumes |
-| Training driver (unsloth) | `services/unsloth/src/nmp/unsloth/tasks/training/backends/unsloth_sft.py` | Field → call-site mapping (FastLanguageModel.from_pretrained, SFTTrainer, save_pretrained{,_merged}) |
+| Canonical schema (unsloth) | `services/unsloth/src/nhx/unsloth/schemas.py` | Post-`to_spec` shape; what `train_sft` consumes |
+| Training driver (unsloth) | `services/unsloth/src/nhx/unsloth/tasks/training/backends/unsloth_sft.py` | Field → call-site mapping (FastLanguageModel.from_pretrained, SFTTrainer, save_pretrained{,_merged}) |
 | Submit schema (rl / DPO) | `plugins/nemo-rl/src/nemo_rl_plugin/schema.py` | Allowed JSON fields (`RlJobInput` / `DPOTraining`) |
-| Canonical schema (rl / DPO) | `services/rl/src/nmp/rl/schemas.py` | Post-transform shape (`RlJobOutput`); divisibility validator |
-| DPO config builder (rl) | `services/rl/src/nmp/rl/tasks/training/backends/nemo_rl/dpo_config.py` | Field → NeMo-RL YAML mapping |
+| Canonical schema (rl / DPO) | `services/rl/src/nhx/rl/schemas.py` | Post-transform shape (`RlJobOutput`); divisibility validator |
+| DPO config builder (rl) | `services/rl/src/nhx/rl/tasks/training/backends/nemo_rl/dpo_config.py` | Field → NeMo-RL YAML mapping |
 
 ## Illustrative — shape only, never the contract
 

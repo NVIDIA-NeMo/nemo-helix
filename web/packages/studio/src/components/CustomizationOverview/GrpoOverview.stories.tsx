@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { PlatformJobStepStatusResponse } from '@nemo/sdk/generated/customizer/schema';
+import type { HelixJobStepStatusResponse } from '@nemo/sdk/generated/customizer/schema';
 import { Stack } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { GrpoRewardPanel } from '@studio/components/CustomizationOverview/GrpoRewardPanel';
@@ -80,7 +80,7 @@ export const Failed: Story = {
       failedGrpoCustomizationJob.status_details as CustomizationStatusDetailsWithMetrics;
     const failure = resolveCustomizationFailure(
       failedGrpoCustomizationJob,
-      failedGrpoJobSteps as unknown as PlatformJobStepStatusResponse[]
+      failedGrpoJobSteps as unknown as HelixJobStepStatusResponse[]
     );
 
     return (

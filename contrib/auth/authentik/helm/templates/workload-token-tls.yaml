@@ -6,12 +6,12 @@ SPDX-License-Identifier: Apache-2.0
 {{- if .Values.workloadTokenTls.create }}
 {{- $secretName := required "workloadTokenTls.secretName is required" .Values.workloadTokenTls.secretName -}}
 {{- $durationDays := .Values.workloadTokenTls.durationDays | int -}}
-{{- $nemoPlatformValues := index .Values "nemo-platform" -}}
-{{- $serviceName := .Values.integration.nemoPlatform.envoyServiceName -}}
-{{- $serviceNamespace := $nemoPlatformValues.envoyProxy.serviceNamespace | default .Release.Namespace -}}
-{{- $serviceDnsNames := (include "nemo-platform-authentik.serviceDnsNames" (dict "root" . "serviceName" $serviceName "namespace" $serviceNamespace) | fromYaml).names -}}
+{{- $nemoHelixValues := index .Values "nemo-helix" -}}
+{{- $serviceName := .Values.integration.nemoHelix.envoyServiceName -}}
+{{- $serviceNamespace := $nemoHelixValues.envoyProxy.serviceNamespace | default .Release.Namespace -}}
+{{- $serviceDnsNames := (include "nemo-helix-authentik.serviceDnsNames" (dict "root" . "serviceName" $serviceName "namespace" $serviceNamespace) | fromYaml).names -}}
 {{- $dnsNames := concat $serviceDnsNames (.Values.workloadTokenTls.dnsNames | default (list)) | uniq -}}
-{{- $existingData := include "nemo-platform-authentik.existingSecretData" (dict "root" . "secretName" $secretName) | fromJson -}}
+{{- $existingData := include "nemo-helix-authentik.existingSecretData" (dict "root" . "secretName" $secretName) | fromJson -}}
 {{- $hasExistingTls := and (hasKey $existingData "tls.crt") (hasKey $existingData "tls.key") (hasKey $existingData "ca.crt") -}}
 {{- $ca := genCA (printf "%s-ca" $secretName) $durationDays -}}
 {{- $cert := genSignedCert $secretName .Values.workloadTokenTls.ipAddresses $dnsNames $durationDays $ca -}}
@@ -19,7 +19,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: {{ $secretName }}
-  namespace: {{ include "nemo-platform-authentik.namespace" . }}
+  namespace: {{ include "nemo-helix-authentik.namespace" . }}
   labels:
     app.kubernetes.io/component: workload-token-tls
 type: kubernetes.io/tls

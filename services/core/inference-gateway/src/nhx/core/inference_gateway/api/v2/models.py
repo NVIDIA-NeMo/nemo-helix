@@ -1,0 +1,152 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import logging
+from typing import Annotated
+
+from aiohttp import ClientSession
+from fastapi import APIRouter, Depends, Request, Response, status
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nhx.common.service.dependencies import get_nemo_client
+from nhx.core.inference_gateway.api.authz import (
+    MODEL_EXEC_PERMISSION,
+    enforce_delegated_workspace_access,
+)
+from nhx.core.inference_gateway.api.dependencies import (
+    global_http_client,
+    global_middleware_registry,
+    global_model_cache,
+    global_virtual_model_cache,
+)
+from nhx.core.inference_gateway.api.errors import raise_virtual_model_not_found
+from nhx.core.inference_gateway.api.middleware_registry import (
+    MiddlewareRegistry,
+)
+from nhx.core.inference_gateway.api.mock_provider import (
+    handle_mock_request,
+    is_mock_request,
+)
+from nhx.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.api.proxy import (
+    PROXY_OPENAPI_EXTRA,
+    virtual_model_proxy,
+)
+from nhx.core.inference_gateway.api.v2.openai import resolve_vm_for_model
+from nhx.core.inference_gateway.api.validation import validate_entity_name, validate_model_entity_name
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/model/{name:path}/-/{trailing_uri:path}",
+    summary="Model Inference Proxy GET",
+    response_description="Proxy GET request to model entity inference endpoint",
+    operation_id="gateway_proxy_get",
+    status_code=status.HTTP_200_OK,
+)
+@router.post(
+    "/v2/workspaces/{workspace}/model/{name:path}/-/{trailing_uri:path}",
+    summary="Model Inference Proxy POST",
+    response_description="Proxy POST request to model entity inference endpoint",
+    operation_id="gateway_proxy_post",
+    status_code=status.HTTP_200_OK,
+    openapi_extra=PROXY_OPENAPI_EXTRA,
+)
+@router.put(
+    "/v2/workspaces/{workspace}/model/{name:path}/-/{trailing_uri:path}",
+    summary="Model Inference Proxy PUT",
+    response_description="Proxy PUT request to model entity inference endpoint",
+    operation_id="gateway_proxy_put",
+    status_code=status.HTTP_200_OK,
+    openapi_extra=PROXY_OPENAPI_EXTRA,
+)
+@router.delete(
+    "/v2/workspaces/{workspace}/model/{name:path}/-/{trailing_uri:path}",
+    summary="Model Inference Proxy DELETE",
+    response_description="Proxy DELETE request to model entity inference endpoint",
+    operation_id="gateway_proxy_delete",
+    status_code=status.HTTP_200_OK,
+)
+@router.patch(
+    "/v2/workspaces/{workspace}/model/{name:path}/-/{trailing_uri:path}",
+    summary="Model Inference Proxy PATCH",
+    response_description="Proxy PATCH request to model entity inference endpoint",
+    operation_id="gateway_proxy_patch",
+    status_code=status.HTTP_200_OK,
+    openapi_extra=PROXY_OPENAPI_EXTRA,
+)
+async def model_entity_proxy(
+    request: Request,
+    workspace: str,
+    name: str,
+    trailing_uri: str,
+    http_client: Annotated[ClientSession, Depends(global_http_client)],
+    nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
+    model_cache: Annotated[ModelCache, Depends(global_model_cache)],
+    virtual_model_cache: Annotated[VirtualModelCache, Depends(global_virtual_model_cache)],
+    registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
+) -> Response:
+    """
+    Proxy requests to model entity inference endpoints.
+
+    All inference requests must resolve to a `VirtualModel`. The platform's
+    provider reconciler auto-creates an implicit `autoprovisioned` VirtualModel
+    for every served model entity (named after the entity, with
+    `default_model_entity` set to the entity ref) so this is the typical case;
+    operators can also create custom VirtualModels for routing, plugin chains,
+    LoRA escape-hatches, etc. Requests for which no VirtualModel can be found
+    return `404`.
+    """
+    # Scope delegated (on-behalf-of) service-principal calls to the target
+    # workspace before any routing — including the mock short-circuit — so a
+    # delegated workload cannot reach a workspace its creator cannot.
+    validate_entity_name(workspace, field_name="workspace")
+    await enforce_delegated_workspace_access(workspace, MODEL_EXEC_PERMISSION)
+
+    # If mock mode enabled and request has explicit mock response, skip model lookup
+    if is_mock_request(request):
+        return await handle_mock_request(request=request, trailing_uri=trailing_uri)
+
+    # ``name`` may be a composite LoRA model_entity_name like
+    # ``base&adapters/{adapter_ws}/{adapter_name}``; ``validate_model_entity_name``
+    # accepts that shape (per-segment NAME_PATTERN) while still rejecting bare
+    # invalid names.
+    validate_model_entity_name(name, field_name="name")
+    logger.info(f"Model entity proxy request: {workspace}/{name}/-/{trailing_uri}")
+
+    virtual_model = resolve_vm_for_model(virtual_model_cache, workspace, name)
+
+    if virtual_model is None or virtual_model.name is None:
+        raise_virtual_model_not_found(workspace, name)
+
+    # Parse body before handing off — bodyless requests (e.g. GET) get an
+    # empty dict; virtual_model_proxy handles the rest.
+    try:
+        json_body: dict = await request.json()
+    except Exception:
+        json_body = {}
+
+    # For a LoRA composite URL name (``base&adapters/{ws}/{adapter}``), the routing intent
+    # is the URL ``name``, not the body model — seed it into ``body["model"]`` so the
+    # ``default_model_entity`` splice in virtual_model_proxy can preserve the adapter suffix
+    # when routing through the base model's VM. For a plain (non-composite) name, leave the
+    # body untouched: a custom VM with no ``default_model_entity`` relies on the client's
+    # qualified body model for entity resolution, and overwriting it with a bare URL name
+    # would regress that path to a 422 (bare name, no default workspace).
+    if "&adapters/" in name:
+        json_body["model"] = name
+
+    return await virtual_model_proxy(
+        request=request,
+        workspace=workspace,
+        vm_name=virtual_model.name,
+        virtual_model=virtual_model,
+        trailing_uri=trailing_uri,
+        json_body=json_body,
+        http_client=http_client,
+        model_cache=model_cache,
+        registry=registry,
+        request_nemo_client=nemo_client,
+    )

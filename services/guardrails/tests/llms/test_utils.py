@@ -5,12 +5,12 @@
 
 from unittest.mock import MagicMock
 
-from nmp.guardrails.app.llms.utils import (
+from nhx.guardrails.app.llms.utils import (
     DEFAULT_PROVIDER_NAME,
     get_main_model_api_key,
     get_provider_from_context,
 )
-from nmp.guardrails.app.utils.context_utils import (
+from nhx.guardrails.app.utils.context_utils import (
     api_key_var,
     request_main_model_var,
     set_main_model_into_context,

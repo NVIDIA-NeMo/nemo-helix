@@ -14,14 +14,18 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.entities import AgentEvalResultEntity, EvaluateResultEntity
 from nemo_evaluator.jobs import result_persistence
 from nemo_evaluator.jobs.agent_spec import (
     AgentTarget,
+    FabricConfigSource,
     FabricRunnerTarget,
     GymRunnerTarget,
+    HarborImportedAgentSource,
     HarborRunnerTarget,
     ModelTarget,
+    RegisteredAgentSource,
 )
 from nemo_evaluator.jobs.result_persistence import (
     _agent_target_fields,
@@ -34,11 +38,11 @@ from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSumm
 from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.entities import EntityBase, EntityClient
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.entities import EntityBase, EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
 from pytest_mock import MockerFixture
 
 _ASYNC_SDK = AsyncNemoClient(
@@ -83,17 +87,36 @@ def _agent() -> Agent:
         (AgentTarget(agent=_agent()), ("agent", "my-agent", "http://agent.test")),
         (
             FabricRunnerTarget(
-                config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-                model="openai/gpt-5.4",
+                source=FabricConfigSource(
+                    config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+                    model="openai/gpt-5.4",
+                )
             ),
             ("fabric", "openai/gpt-5.4", None),
+        ),
+        (
+            FabricRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                resolved_config={"harness": {"adapter_id": "x"}},
+            ),
+            ("fabric", "calculator-agent", None),
         ),
         (
             GymRunnerTarget(agent="simple_agent", agent_config="conf/agent.yaml", resources_server="mcqa"),
             ("gym", "simple_agent", None),
         ),
-        (HarborRunnerTarget(agent_name="oracle"), ("harbor", "oracle", None)),
-        (HarborRunnerTarget(agent_import_path="wrapper:Agent"), ("harbor", "wrapper:Agent", None)),
+        (HarborRunnerTarget(), ("harbor", "oracle", None)),
+        (
+            HarborRunnerTarget(source=HarborImportedAgentSource(import_path="wrapper:Agent")),
+            ("harbor", "wrapper:Agent", None),
+        ),
+        (
+            HarborRunnerTarget(
+                source=RegisteredAgentSource(agent=AgentRef(root="dev/calculator-agent")),
+                agent_kwargs={"fabric_config": {"harness": {"adapter_id": "x"}}},
+            ),
+            ("harbor", "calculator-agent", None),  # not the shared FabricInstalledAgent import path
+        ),
         (None, (None, None, None)),
     ],
 )
@@ -178,8 +201,10 @@ def test_persist_agent_eval_result_builds_entity_and_saves(tmp_path: Path, mocke
     persist_agent_eval_result(
         _agent_result(),
         target=FabricRunnerTarget(
-            config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
-            model="openai/gpt-5.4",
+            source=FabricConfigSource(
+                config={"metadata": {"name": "a"}, "harness": {"adapter_id": "nvidia.fabric.codex"}},
+                model="openai/gpt-5.4",
+            )
         ),
         ctx=_ctx(tmp_path, "job-1"),
         bundle_ref="fileset://dev/agent-eval-results#b",

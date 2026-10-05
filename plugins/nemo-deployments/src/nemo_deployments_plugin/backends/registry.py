@@ -13,7 +13,7 @@ from nemo_deployments_plugin.backends.base import DeploymentBackend, MissingBack
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 from nemo_deployments_plugin.backends.openshell.backend import OpenShellDeploymentBackend
-from nemo_platform import AsyncNeMoPlatform
+from nemo_helix import AsyncNeMoHelix
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class ExecutorRegistry:
     @classmethod
     def from_config(
         cls,
-        sdk: AsyncNeMoPlatform,
+        sdk: AsyncNeMoHelix,
         specs: list[ExecutorSpec],
         *,
         default_executor: str | None = None,

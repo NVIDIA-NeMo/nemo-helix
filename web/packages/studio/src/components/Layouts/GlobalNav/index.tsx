@@ -90,9 +90,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
             {shouldMountAssistantTopBarChat && <AssistantTopBarChat />}
             <ThemeSwitch />
             <DocumentationLink />
-            <span data-tour="nav-user">
-              <UserPopover />
-            </span>
+            <UserPopover />
           </Flex>
         }
       />

@@ -14,7 +14,7 @@ function createSourceTree() {
   const sourceRoot = fs.mkdtempSync(
     path.join(os.tmpdir(), "nemo-release-artifacts-"),
   );
-  fs.mkdirSync(path.join(sourceRoot, "packages", "nemo_platform"), {
+  fs.mkdirSync(path.join(sourceRoot, "packages", "nemo_helix"), {
     recursive: true,
   });
   fs.mkdirSync(
@@ -22,12 +22,12 @@ function createSourceTree() {
     { recursive: true },
   );
   fs.writeFileSync(
-    path.join(sourceRoot, "packages", "nemo_platform", "pyproject.toml"),
-    '[project]\nname = "nemo-platform"\n',
+    path.join(sourceRoot, "packages", "nemo_helix", "pyproject.toml"),
+    '[project]\nname = "nemo-helix"\n',
   );
   fs.writeFileSync(
     path.join(sourceRoot, "docker-bake.hcl"),
-    'target "nmp-api-docker" {}\n',
+    'target "nhx-api-docker" {}\n',
   );
   fs.writeFileSync(
     path.join(
@@ -36,7 +36,7 @@ function createSourceTree() {
       "assets",
       "ngc",
       "containers",
-      "nmp-api.md",
+      "nhx-api.md",
     ),
     "# API\n",
   );
@@ -47,12 +47,12 @@ function selectedArtifacts() {
   return {
     wheels: [
       {
-        id: "nemo-platform",
-        package: "nemo-platform",
-        path: "packages/nemo_platform",
+        id: "nemo-helix",
+        package: "nemo-helix",
+        path: "packages/nemo_helix",
       },
     ],
-    containers: [{ id: "nmp-api", target: "nmp-api-docker" }],
+    containers: [{ id: "nhx-api", target: "nhx-api-docker" }],
   };
 }
 
@@ -63,8 +63,8 @@ test("validates selected wheel and container artifacts", (t) => {
   assert.deepEqual(
     validateReleaseArtifacts({ ...selectedArtifacts(), sourceRoot }),
     {
-      wheels: "nemo-platform",
-      containers: "nmp-api",
+      wheels: "nemo-helix",
+      containers: "nhx-api",
     },
   );
 });
@@ -73,7 +73,7 @@ test("rejects a wheel whose project name does not match the release catalog", (t
   const sourceRoot = createSourceTree();
   t.after(() => fs.rmSync(sourceRoot, { recursive: true, force: true }));
   fs.writeFileSync(
-    path.join(sourceRoot, "packages", "nemo_platform", "pyproject.toml"),
+    path.join(sourceRoot, "packages", "nemo_helix", "pyproject.toml"),
     '[project]\nname = "other-package"\n',
   );
 
@@ -93,7 +93,7 @@ test("rejects a container without matching NGC metadata", (t) => {
       "assets",
       "ngc",
       "containers",
-      "nmp-api.md",
+      "nhx-api.md",
     ),
   );
 

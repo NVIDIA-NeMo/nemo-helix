@@ -10,8 +10,8 @@ context behind the current choices isn't lost. Architecture rationale lives in
 
 ## Layout
 
-- **`queue_worker.py`** — shared build execution. Platform Jobs calls it for one
-  persisted revision; the legacy worker can still claim rows when Platform Jobs
+- **`queue_worker.py`** — shared build execution. NeMo Helix Jobs calls it for one
+  persisted revision; the legacy worker can still claim rows when NeMo Helix Jobs
   is disabled.
 - **`worker.py`** — legacy synchronous primitives retained for compatibility.
 - **`buildkit.py`** — local fallback builds via `buildctl`/gRPC.
@@ -25,7 +25,7 @@ context behind the current choices isn't lost. Architecture rationale lives in
   run image-builder-service builds, Google Cloud Build builds from GCS to GAR,
   prebuilt-image registry verification, or local BuildKit fallback.
 - **Scheduling is durable.** Finalize stores backend parameters and credential
-  IDs on `task_revisions`; the Platform Jobs controller claims rows with
+  IDs on `task_revisions`; the NeMo Helix Jobs controller claims rows with
   `FOR UPDATE SKIP LOCKED` and binds each attempt to a deterministic Job.
   Decrypted credentials never enter the queue. Stale leases are reclaimed and
   failures retry up to the configured attempt limit.

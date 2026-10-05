@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
-from nmp.core.entities.app.repository import SQLAlchemyEntityRepository, SQLAlchemyWorkspaceRepository
+from nhx.core.entities.app.repository import SQLAlchemyEntityRepository, SQLAlchemyWorkspaceRepository
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 

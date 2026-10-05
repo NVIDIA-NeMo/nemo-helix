@@ -14,8 +14,8 @@ from typing import Optional, Tuple
 
 import typer
 import yaml
-from nmp.common.api.utils import tweak_spec
-from nmp.common.version import OPENAPI_SPEC_VERSION
+from nhx.common.api.utils import tweak_spec
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from rich.console import Console
 from rich.table import Table
 

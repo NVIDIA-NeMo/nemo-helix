@@ -14,8 +14,8 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.validation import PrerequisiteCycleError, detect_prerequisite_cycle
-from nemo_platform_plugin.auth import AuthContext
-from nemo_platform_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
+from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from pydantic import ValidationError
 
 
@@ -102,7 +102,7 @@ def test_deployment_config_accepts_workload_identity_aliases() -> None:
                 "enabled": True,
                 "workloadKind": "agent_deployment",
                 "workloadId": "dep1",
-                "tokenAudience": "nemo-platform",
+                "tokenAudience": "nemo-helix",
                 "serviceAccountName": "dep-sa",
                 "tokenExpirationSeconds": 900,
             },
@@ -113,7 +113,7 @@ def test_deployment_config_accepts_workload_identity_aliases() -> None:
     assert cfg.workload_identity.enabled is True
     assert cfg.workload_identity.workload_kind == "agent_deployment"
     assert cfg.workload_identity.workload_id == "dep1"
-    assert cfg.workload_identity.token_audience == "nemo-platform"
+    assert cfg.workload_identity.token_audience == "nemo-helix"
     assert cfg.workload_identity.service_account_name == "dep-sa"
     assert cfg.workload_identity.token_expiration_seconds == 900
 

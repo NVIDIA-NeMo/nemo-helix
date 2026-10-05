@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-from nemo_platform import NeMoPlatform
+from filesets import transfer
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from typing_extensions import Self
 
@@ -42,7 +44,7 @@ def _merge_config(config: _ConfigInput, kwargs: dict[str, Any]) -> dict[str, Any
 class SafeSynthesizerJobBuilder:
     """Fluent builder for Safe Synthesizer plugin jobs."""
 
-    def __init__(self, client: NeMoPlatform, workspace: str = "default"):
+    def __init__(self, client: NemoClient, workspace: str = "default"):
         self._client = client
         self._workspace = workspace
 
@@ -232,7 +234,8 @@ class SafeSynthesizerJobBuilder:
 
     def _upload_to_fileset(self, dataset_path: str | Path, filename: str, fileset_name: str) -> str:
         dataset_path = self._validate_dataset_path(dataset_path)
-        self._client.files.upload(
+        transfer.upload(
+            FilesClient.from_client(self._client),
             local_path=str(dataset_path),
             remote_path=filename,
             fileset=fileset_name,

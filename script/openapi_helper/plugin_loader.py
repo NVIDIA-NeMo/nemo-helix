@@ -10,7 +10,7 @@ FastAPI), wrap it in ``NemoServiceAdapter`` to obtain the per-service FastAPI
 app, and mount that app's router under ``/apis/<plugin-name>`` on a parent
 FastAPI so the generated OpenAPI paths match production routing (the platform
 runner mounts plugins at the same prefix at startup — see
-``nmp.platform_runner.server`` ``include_router(prefix=f"/apis/{service_instance.name}")``).
+``nhx.platform_runner.server`` ``include_router(prefix=f"/apis/{service_instance.name}")``).
 
 A plugin that needs special construction (e.g. constructor args, env-var
 preconditions) sets ``factory_override`` on its ``PluginConfig`` instead of
@@ -18,9 +18,9 @@ relying on this loader.
 """
 
 from fastapi import FastAPI
-from nemo_platform_plugin.discovery import discover_services
-from nmp.common.api.utils import install_query_param_schema_openapi_hook
-from nmp.platform_runner.plugin_adapter import NemoServiceAdapter
+from nemo_helix_plugin.discovery import discover_services
+from nhx.common.api.utils import install_query_param_schema_openapi_hook
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 
 
 def build_plugin_app(plugin_name: str) -> FastAPI:

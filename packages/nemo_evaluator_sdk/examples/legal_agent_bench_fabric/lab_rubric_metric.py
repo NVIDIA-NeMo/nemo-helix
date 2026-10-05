@@ -206,7 +206,7 @@ class OpenAICompatibleJudge:
 
     Reuses LAB's exact rubric prompts (passed in as ``{prompt_name: template}`` + ``str.format(**variables)``)
     and JSON extraction, but calls ``chat.completions`` instead of LAB's native routing — so a namespaced
-    NVIDIA model id (e.g. ``openai/gpt-oss-120b``) against an OpenAI-compatible endpoint works. LAB's native
+    NVIDIA model id (e.g. ``nvidia/nemotron-3-super-120b-a12b``) against an OpenAI-compatible endpoint works. LAB's native
     Judge can't: it rejects non-``gpt-*`` names and uses the OpenAI *Responses* API, which NVIDIA doesn't serve.
     """
 

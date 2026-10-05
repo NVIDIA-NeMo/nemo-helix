@@ -13,31 +13,31 @@ Checks:
 import os
 
 import pytest
-from nemo_platform import NeMoPlatform
+from nemo_helix_plugin.auditor.client import AuditorClient
 from trace_reader import get_session
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
-def client() -> NeMoPlatform:
-    nmp_base_url = os.environ.get("NMP_BASE_URL", "http://localhost:8080")
-    return NeMoPlatform(base_url=nmp_base_url, workspace=WORKSPACE)
+def client() -> AuditorClient:
+    nhx_base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
+    return AuditorClient(base_url=nhx_base_url, workspace=WORKSPACE)
 
 
-def test_original_target_was_deleted(client: NeMoPlatform) -> None:
+def test_original_target_was_deleted(client: AuditorClient) -> None:
     """Verify that harbor-audit-target was successfully deleted."""
-    targets = client.auditor.targets.list(workspace=WORKSPACE)
-    target_names = [t["name"] for t in targets["data"]]
+    targets = client.list_audit_targets(workspace=WORKSPACE)
+    target_names = [t.name for t in targets.items()]
 
     assert "harbor-audit-target" not in target_names, (
         f"Target 'harbor-audit-target' should have been deleted but still exists! Found targets: {target_names}"
     )
 
 
-def test_final_target_exists(client: NeMoPlatform) -> None:
+def test_final_target_exists(client: AuditorClient) -> None:
     """Verify that harbor-audit-target-final was created with correct config."""
-    target = client.auditor.targets.get(workspace=WORKSPACE, name="harbor-audit-target-final")
+    target = client.get_audit_target(workspace=WORKSPACE, name="harbor-audit-target-final").data()
 
     assert target is not None, "Target 'harbor-audit-target-final' was not found!"
     assert target.name == "harbor-audit-target-final", (

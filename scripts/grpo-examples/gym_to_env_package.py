@@ -6,17 +6,18 @@
 
 This is an **example helper**, not part of the customizer's functionality. Nothing in the
 platform calls it: the supported contract is the environment FileSet layout itself, which
-`nmp.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
+`nhx.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
 get a working package quickly, or as a starting point for your own build.
 
     uv run scripts/grpo-examples/gym_to_env_package.py \\
         --gym-root ~/workspace/Gym \\
+        --nemo-rl-root ~/workspace/RL \\
         --server resources_servers/math_with_judge \\
         --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
 Then validate and upload:
 
-    uv run --package nmp-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+    uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
     nemo files filesets create my-env -w default --purpose environment --exist-ok
     nemo files upload /tmp/mwj-env/ my-env -w default
 
@@ -27,22 +28,26 @@ the job starts, so the cluster needs egress. `wheels-v1` vendors the closure and
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import yaml
+from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
 
 GYM_REPO = "https://github.com/NVIDIA-NeMo/Gym"
 
-# Matches the interpreter the training image builds Gym server venvs with.
-TARGET_PYTHON_VERSION = "3.13"
+# Gym 0.7 requires Python>=3.13.14. A bare "3.13" resolves as 3.13.0 and rejects
+# that wheel. The training image is CPython 3.13.15, so 3.13.14 is a compatible target.
+TARGET_PYTHON_VERSION = "3.13.14"
 # The training images are published for both linux/amd64 and linux/arm64, so wheel
 # architecture is a property of the cluster's nodes. Several glibc floors are listed per arch
 # because pip matches these tags literally rather than expanding a compatibility range.
@@ -59,12 +64,6 @@ REQUIRED_WHEEL_SPECS = {
     canonicalize_name("omegaconf"): SpecifierSet(OMEGACONF_SPEC),
 }
 
-# native-v1 requires every config_path under a Gym server prefix; wheels-v1 allows configs/.
-POLICY_MODEL_RELPATH = {
-    "wheels-v1": Path("configs") / "policy_model.yaml",
-    "native-v1": Path("responses_api_models") / "vllm_model" / "configs" / "policy_model.yaml",
-}
-
 # validate_package_layout rejects any *.jsonl anywhere under the package, and prompts ship as
 # their own dataset FileSet -- so a server's bundled data never travels with it.
 SKIP_DIRS = {"data", "tests", "__pycache__", ".venv", ".pytest_cache"}
@@ -76,7 +75,7 @@ def resolve_gym_root(raw: str | None) -> Path:
         raise SystemExit(
             "--gym-root is required.\n\n"
             "This script packages a server out of a NeMo Gym source tree, and Gym is not vendored\n"
-            "in nemo-platform. Clone it first, then point --gym-root at the checkout:\n\n"
+            "in nemo-helix. Clone it first, then point --gym-root at the checkout:\n\n"
             f"    git clone {GYM_REPO} ~/workspace/Gym\n"
             "    --gym-root ~/workspace/Gym\n"
         )
@@ -190,15 +189,26 @@ def strip_inline_datasets(pkg_server_dir: Path) -> list[str]:
     return touched
 
 
-def write_policy_model_config(out_dir: Path, fmt: str) -> Path:
+def policy_model_relpath(fmt: str, server: Path) -> Path:
+    """Where ``policy_model.yaml`` is written.
+
+    ``wheels-v1`` allows ``configs/`` at the package root. ``native-v1`` only allows a Gym
+    server tree, so the file sits beside the server configs already being packaged.
+    """
+    if fmt == "wheels-v1":
+        return Path("configs") / "policy_model.yaml"
+    return server / "configs" / "policy_model.yaml"
+
+
+def write_policy_model_config(out_dir: Path, fmt: str, server: Path) -> Path:
     """Ship the ``policy_model`` server every config's refs resolve against.
 
     Reuses the platform's own builder so a hand-built package and pi-to-gym-conversion cannot
     drift on the interpolations, which resolve against the config NeMo-RL injects at spin-up.
     """
-    from nmp.rl.tasks.environment.package import build_policy_model_yaml
+    from nhx.rl.tasks.environment.package import build_policy_model_yaml
 
-    target = out_dir / POLICY_MODEL_RELPATH[fmt]
+    target = out_dir / policy_model_relpath(fmt, server)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(build_policy_model_yaml(), sort_keys=False), encoding="utf-8")
     return target
@@ -268,6 +278,16 @@ def _download_with_sdist_fallback(download_cmd: list[str], wheels: Path, max_bui
         builds += 1
 
 
+def drop_image_gym_wheel(wheels: Path) -> None:
+    """Remove the nemo-gym wheel after the closure has been resolved against it.
+
+    The training image already has Gym. Installing this wheel shadows that tree
+    and its patched verifiers pin.
+    """
+    for wheel in wheels.glob("nemo_gym-*.whl"):
+        wheel.unlink()
+
+
 def validate_required_wheel_versions(wheels: Path) -> None:
     """Reject a wheelhouse whose resolver backtracked to pre-1.3 Hydra."""
     found: dict[str, set] = {name: set() for name in REQUIRED_WHEEL_SPECS}
@@ -293,6 +313,102 @@ def validate_required_wheel_versions(wheels: Path) -> None:
         raise SystemExit("invalid wheels-v1 dependency closure: " + "; ".join(problems))
 
 
+def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
+    """Read the uv limits the Gym host applies when it installs the wheelhouse.
+
+    The host starts in the NeMo-RL tree, so ``uv pip install`` honors that checkout's
+    ``[tool.uv]`` override-dependencies and constraint-dependencies. A closure resolved
+    without them installs versions the host then rejects.
+    """
+    pyproject = nemo_rl_root / "pyproject.toml"
+    if not pyproject.is_file():
+        raise SystemExit(
+            f"--nemo-rl-root has no pyproject.toml: {nemo_rl_root}\n"
+            "Point it at the NeMo-RL checkout NEMO_RL_REF pins. The training image is built "
+            "from that commit, and the Gym host installs this wheelhouse under its uv policy."
+        )
+    uv_config = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {}).get("uv", {})
+    missing = [key for key in ("override-dependencies", "constraint-dependencies") if not uv_config.get(key)]
+    if missing:
+        raise SystemExit(
+            f"{pyproject} has no [tool.uv] {', '.join(missing)}. Those tables are what the Gym "
+            "host applies during the offline install."
+        )
+    return (
+        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
+        list(uv_config["constraint-dependencies"]),
+    )
+
+
+def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
+    """Intersect a setuptools override with Gym's ``setuptools<81`` server-venv dep."""
+    ceiling = SpecifierSet(f"<{SETUPTOOLS_PKG_RESOURCES_CEILING}")
+    clamped: list[str] = []
+    for item in overrides:
+        requirement = Requirement(item)
+        if canonicalize_name(requirement.name) != "setuptools":
+            clamped.append(item)
+            continue
+        requirement.specifier &= ceiling
+        clamped.append(str(requirement))
+    return clamped
+
+
+def nemo_gym_version_text(text: str) -> str:
+    """Read ``__version__`` from Gym's ``package_info.py`` without importing it."""
+
+    def grab(name: str) -> str:
+        match = re.search(rf"^{name} = (.+)$", text, re.M)
+        if not match:
+            raise SystemExit(f"package_info.py has no {name}")
+        value = ast.literal_eval(match.group(1))
+        return "" if value is None else str(value)
+
+    return f"{grab('MAJOR')}.{grab('MINOR')}.{grab('PATCH')}{grab('PRE_RELEASE')}"
+
+
+def nemo_gym_version(gym_root: Path) -> str:
+    """Version this Gym checkout builds, from its ``package_info.py``."""
+    info = gym_root / "nemo_gym" / "package_info.py"
+    if not info.is_file():
+        raise SystemExit(f"{gym_root} has no nemo_gym/package_info.py")
+    return nemo_gym_version_text(info.read_text(encoding="utf-8"))
+
+
+def locked_distribution_versions(rl_root: Path) -> tuple[str, str]:
+    """Ray and openai versions the image's nemo-gym environment installs.
+
+    ``uv.lock`` can carry more than one openai (sglang pins another). The version on the
+    nemo-gym package is the one Gym stamps into every per-server venv. Ray has a single
+    locked version, and nemo-gym does not repeat it on the dependency edge.
+    """
+    packages = tomllib.loads((rl_root / "uv.lock").read_text(encoding="utf-8")).get("package", [])
+    nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
+    if nemo_gym is None:
+        raise SystemExit(f"{rl_root / 'uv.lock'} has no nemo-gym package")
+
+    def dep_version(name: str) -> str | None:
+        versions = {
+            dep["version"] for dep in nemo_gym.get("dependencies", []) if dep.get("name") == name and "version" in dep
+        }
+        if len(versions) == 1:
+            return versions.pop()
+        return None
+
+    def unique_version(name: str) -> str | None:
+        versions = {pkg["version"] for pkg in packages if pkg.get("name") == name and "version" in pkg}
+        if len(versions) == 1:
+            return versions.pop()
+        return None
+
+    ray = dep_version("ray") or unique_version("ray")
+    openai = dep_version("openai") or unique_version("openai")
+    missing = [name for name, value in (("ray", ray), ("openai", openai)) if not value]
+    if missing:
+        raise SystemExit(f"{rl_root / 'uv.lock'} does not pin a single {' and '.join(missing)} version for nemo-gym")
+    return ray, openai
+
+
 def vendor_wheels(
     out_dir: Path,
     gym_root: Path,
@@ -301,6 +417,7 @@ def vendor_wheels(
     expect_version: str | None,
     ray_version: str,
     openai_version: str,
+    nemo_rl_root: Path,
 ) -> Path:
     """Resolve and download the offline closure for the training nodes.
 
@@ -311,9 +428,9 @@ def vendor_wheels(
 
     Beyond the server's own requirements the closure needs:
 
-    * ``nemo-gym[dev]`` at the image's version, built from ``gym_root`` so a fork is not
-      replaced by the same-versioned upstream release. The ``dev`` extra is required because
-      the image's own servers depend on it;
+    * ``nemo-gym[dev]`` at the image's version, built from ``gym_root`` so the resolve
+      matches this checkout rather than an index release. The wheel is deleted afterwards:
+      the training image's Gym is the one the sandbox imports;
     * ``ray[default]`` and ``openai`` at the image's versions, which Gym appends to every
       per-server install;
     * ``pip``, installed by ``uv venv --seed`` into each venv before anything else;
@@ -349,10 +466,17 @@ def vendor_wheels(
         # The editable nemo-gym line is meaningless outside a checkout; Gym rewrites it.
         requirements += [ln for ln in reqs.read_text(encoding="utf-8").splitlines() if ln.strip() and "../.." not in ln]
 
+    overrides, constraints = rl_dependency_policy(nemo_rl_root)
     with tempfile.TemporaryDirectory(prefix="closure-") as tmp:
         req_in = Path(tmp) / "requirements.in"
         req_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
+        override = Path(tmp) / "override.txt"
+        constraint = Path(tmp) / "constraint.txt"
+        override.write_text("\n".join(overrides) + "\n", encoding="utf-8")
+        constraint.write_text("\n".join(constraints) + "\n", encoding="utf-8")
         pinned = Path(tmp) / "requirements.txt"
+        # --no-config ignores this repo's [tool.uv]. The host applies the RL checkout's,
+        # passed as the override and constraint files.
         compile_cmd = [
             "uv",
             "pip",
@@ -361,8 +485,11 @@ def vendor_wheels(
             "--output-file",
             str(pinned),
             "--no-header",
-            # Ignore the ambient project's [tool.uv] policy, which would repin the closure.
             "--no-config",
+            "--override",
+            str(override),
+            "--constraint",
+            str(constraint),
             "--python-platform",
             f"{arch}-unknown-linux-gnu",
             "--python-version",
@@ -404,16 +531,19 @@ def vendor_wheels(
         _download_with_sdist_fallback(download_cmd, wheels)
 
     validate_required_wheel_versions(wheels)
+    drop_image_gym_wheel(wheels)
     stray = [f.name for f in wheels.iterdir() if f.is_file() and f.suffix != ".whl"]
     if stray:
         raise SystemExit(f"wheels/ must contain only .whl files, got: {stray}")
     return wheels
 
 
-def write_manifest(out_dir: Path, fmt: str, config_paths: list[str], name: str, description: str) -> Path:
+def write_manifest(
+    out_dir: Path, fmt: str, policy_model: Path, config_paths: list[str], name: str, description: str
+) -> Path:
     manifest = out_dir / "nemo-environment.yaml"
     # policy_model first: it defines the server the other configs' refs resolve against.
-    entries = "".join(f"  - {p}\n" for p in [POLICY_MODEL_RELPATH[fmt].as_posix(), *config_paths])
+    entries = "".join(f"  - {p}\n" for p in [policy_model.as_posix(), *config_paths])
     body = f"format: {fmt}\nconfig_paths:\n{entries}metadata:\n  name: {name}\n"
     if description:
         body += f"  description: {description}\n"
@@ -442,7 +572,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--format",
-        choices=tuple(POLICY_MODEL_RELPATH),
+        choices=("wheels-v1", "native-v1"),
         default="wheels-v1",
         help="wheels-v1 vendors the closure and needs no egress at spin-up. native-v1 ships no "
         "wheels and resolves from a package index, so the cluster must allow internet.",
@@ -456,18 +586,11 @@ def main() -> int:
         "-- amd64 maps to x86_64, arm64 to aarch64.",
     )
     parser.add_argument(
-        "--expect-nemo-gym-version",
-        help="Fail unless the checkout builds this exact version. Read it from the Gym submodule "
-        "of a NeMo-RL checkout at the commit NEMO_RL_REF pins.",
-    )
-    parser.add_argument(
-        "--ray-version",
-        help="ray version the training image runs (wheels-v1 only). Gym appends "
-        "'ray[default]==<this>' to every per-server venv install.",
-    )
-    parser.add_argument(
-        "--openai-version",
-        help="openai version the training image runs (wheels-v1 only). Appended the same way.",
+        "--nemo-rl-root",
+        type=Path,
+        help="NeMo-RL checkout the training image is built from (wheels-v1). Its "
+        "[tool.uv] limits the wheelhouse, and its uv.lock supplies the ray and openai pins. "
+        "The caller fetches the commit NEMO_RL_REF pins.",
     )
     parser.add_argument(
         "--reference-only",
@@ -488,27 +611,6 @@ def main() -> int:
             "no server code does not have."
         )
 
-    if args.format == "wheels-v1":
-        missing = [
-            flag
-            for flag, value in (
-                ("--expect-nemo-gym-version", args.expect_nemo_gym_version),
-                ("--ray-version", args.ray_version),
-                ("--openai-version", args.openai_version),
-            )
-            if not value
-        ]
-        if missing:
-            raise SystemExit(
-                f"wheels-v1 needs {', '.join(missing)}.\n\n"
-                "Gym pins each per-server venv to the training image's nemo-gym, ray and openai\n"
-                "versions. A closure built against different ones is ignored and resolved from an\n"
-                "index instead, which defeats the point of vendoring. Read them from a NeMo-RL\n"
-                "checkout at the commit NEMO_RL_REF pins: nemo-gym from the Gym submodule,\n"
-                "ray/openai from NeMo-RL's uv.lock (not Gym's, which pins different versions).\n\n"
-                "Use --format native-v1 if you do not need an offline closure.\n"
-            )
-
     gym_root = resolve_gym_root(args.gym_root)
     rel = resolve_server(gym_root, args.server)
     name = args.name or rel.parts[1].replace("_", "-")
@@ -522,21 +624,32 @@ def main() -> int:
     config_paths = [
         c.relative_to(args.out_dir).as_posix() for c in select_configs(pkg_server_dir, rel.parts[1], args.config)
     ]
-    policy_model = write_policy_model_config(args.out_dir, args.format)
-    wheels = (
-        vendor_wheels(
+    policy_relpath = policy_model_relpath(args.format, rel)
+    policy_model = write_policy_model_config(args.out_dir, args.format, rel)
+    nemo_rl_root = None
+    ray_version = openai_version = gym_version = None
+    wheels = None
+    if args.format == "wheels-v1":
+        if args.nemo_rl_root is None:
+            raise SystemExit("wheels-v1 needs --nemo-rl-root, the NeMo-RL checkout at the commit NEMO_RL_REF pins.")
+        nemo_rl_root = args.nemo_rl_root.expanduser().resolve()
+        ray_version, openai_version = locked_distribution_versions(nemo_rl_root)
+        gym_version = nemo_gym_version(gym_root)
+        print(
+            f"image pins: nemo-gym={gym_version} ray={ray_version} openai={openai_version} from {nemo_rl_root}",
+            flush=True,
+        )
+        wheels = vendor_wheels(
             args.out_dir,
             gym_root,
             pkg_server_dir,
             args.arch,
-            args.expect_nemo_gym_version,
-            args.ray_version,
-            args.openai_version,
+            gym_version,
+            ray_version,
+            openai_version,
+            nemo_rl_root,
         )
-        if args.format == "wheels-v1"
-        else None
-    )
-    manifest = write_manifest(args.out_dir, args.format, config_paths, name, args.description)
+    manifest = write_manifest(args.out_dir, args.format, policy_relpath, config_paths, name, args.description)
 
     stray = [str(p.relative_to(args.out_dir)) for p in args.out_dir.rglob("*.jsonl")]
     if stray:
@@ -552,11 +665,15 @@ def main() -> int:
                 "server": rel.as_posix(),
                 "manifest": str(manifest),
                 "policy_model_config": str(policy_model),
-                "config_paths": [POLICY_MODEL_RELPATH[args.format].as_posix(), *config_paths],
+                "config_paths": [policy_relpath.as_posix(), *config_paths],
                 "datasets_blocks_stripped": stripped,
                 "arch": args.arch if wheels else None,
+                "nemo_rl_root": str(nemo_rl_root) if nemo_rl_root else None,
+                "nemo_gym_version": gym_version,
+                "ray_version": ray_version,
+                "openai_version": openai_version,
                 "wheel_count": len(list(wheels.glob("*.whl"))) if wheels else 0,
-                "next": [f"uv run --package nmp-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
+                "next": [f"uv run --package nhx-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
             },
             indent=2,
         )

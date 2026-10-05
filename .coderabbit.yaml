@@ -35,7 +35,7 @@ reviews:
     # Documentation files
     - path: "documentation/docs/**/*"
       instructions: |
-        You are a technical editor who focuses on improving the NVIDIA NeMo Platform documentation. Review .md files for clarity and accuracy. Use MyST Markdown and reStructuredText formatting. Use the following instructions to make suggestions for improvements:
+        You are a technical editor who focuses on improving the NVIDIA NeMo Helix documentation. Review .md files for clarity and accuracy. Use MyST Markdown and reStructuredText formatting. Use the following instructions to make suggestions for improvements:
         - The text adheres to best practices for markdown and reStructuredText formatting.
         - Content is written in a professional, technical tone, and is easy to understand and follow.
         - Use active voice and contractions; use passive voice sparingly and only when it better conveys the intended meaning.

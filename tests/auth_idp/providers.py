@@ -54,6 +54,7 @@ class ProviderManifestSummary:
 
 def load_provider_config(manifest_path: Path) -> ProviderConfig:
     data = yaml.safe_load(manifest_path.read_text())
+    token_acquisition = data.get("token_acquisition", {})
     return ProviderConfig(
         name=data["provider"],
         mode=data["mode"],
@@ -63,7 +64,7 @@ def load_provider_config(manifest_path: Path) -> ProviderConfig:
         discovery_url=data["discovery_url"],
         nemo_config=manifest_path.parent / data["nemo_config"],
         interactive_user_username=data["interactive_user_identity"]["username"],
-        interactive_user_password=data["interactive_user_identity"]["password"],
+        interactive_user_password=_resolve_interactive_user_password(data["interactive_user_identity"]),
         interactive_user_expected_email=data["interactive_user_identity"]["expected_email"],
         workload_principal_id=data["workload_identity"]["principal_id"],
         workload_expected_groups=list(data["workload_identity"]["expected_groups"]),
@@ -73,13 +74,16 @@ def load_provider_config(manifest_path: Path) -> ProviderConfig:
         workload_groups_format=data["workload_contract"]["groups_format"],
         workload_token_env_vars=list(data["workload_contract"]["token_env_vars"]),
         workload_forwarded_headers=dict(data["workload_contract"]["forwarded_headers"]),
-        token_endpoint=data.get("token_acquisition", {}).get("token_endpoint"),
-        e2e_setup_password_grant=_resolve_grant(data.get("token_acquisition", {}).get("e2e_setup_password_grant")),
+        token_endpoint=token_acquisition.get("token_endpoint"),
+        e2e_setup_password_grant=_resolve_grant(
+            token_acquisition.get("e2e_setup_grant") or token_acquisition.get("e2e_setup_password_grant")
+        ),
         interactive_user_password_grant=_resolve_grant(
-            data.get("token_acquisition", {}).get("interactive_user_password_grant")
+            token_acquisition.get("interactive_user_grant") or token_acquisition.get("interactive_user_password_grant")
         ),
         workload_provider_password_grant=_resolve_grant(
-            data.get("token_acquisition", {}).get("workload_provider_password_grant")
+            token_acquisition.get("workload_provider_grant")
+            or token_acquisition.get("workload_provider_password_grant")
         ),
         healthchecks=list(data.get("healthchecks", [])),
         startup_timeouts=dict(data.get("startup_timeouts", {})),
@@ -99,6 +103,13 @@ def _load_provider_runtimes(data: dict) -> tuple[ProviderRuntimeConfig, ...]:
     )
 
 
+def _resolve_interactive_user_password(identity: dict[str, str]) -> str:
+    password_env_var = identity.get("password_env_var")
+    if password_env_var:
+        return os.environ.get(password_env_var, "")
+    return identity["password"]
+
+
 def _resolve_grant(grant: dict[str, str] | None) -> dict[str, str] | None:
     if grant is None:
         return None
@@ -110,6 +121,13 @@ def _resolve_grant(grant: dict[str, str] | None) -> dict[str, str] | None:
             resolved["password_env_var"] = password_env_var
             return resolved
         resolved["password"] = password
+    client_secret_env_var = resolved.pop("client_secret_env_var", None)
+    if client_secret_env_var and "client_secret" not in resolved:
+        client_secret = os.environ.get(client_secret_env_var)
+        if not client_secret:
+            resolved["client_secret_env_var"] = client_secret_env_var
+            return resolved
+        resolved["client_secret"] = client_secret
     return resolved
 
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { jobsGetJob } from '@nemo/sdk/generated/platform/jobs';
-import type { PlatformJobResponse } from '@nemo/sdk/generated/platform/schema';
+import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { JOB_PROGRESS_JOB_TYPE } from '@studio/routes/agents/AssistantChatRoute/jobProgressConsts';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
@@ -18,7 +18,7 @@ vi.mock('@nemo/sdk/generated/platform/jobs', async (importOriginal) => ({
 const jobsGetJobMock = vi.mocked(jobsGetJob);
 const workspace = 'default';
 
-const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobResponse =>
+const createJob = (overrides: Partial<HelixJobResponse> = {}): HelixJobResponse =>
   ({
     attempt_id: 'attempt-1',
     description: 'Import data into the workspace',
@@ -30,7 +30,7 @@ const createJob = (overrides: Partial<PlatformJobResponse> = {}): PlatformJobRes
     status: 'completed',
     workspace,
     ...overrides,
-  }) as PlatformJobResponse;
+  }) as HelixJobResponse;
 
 const renderToolCall = (args: AssistantToolArgs) =>
   renderRoute(<JobProgressToolCall args={args} />, {

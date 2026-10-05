@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { usePlatformSdk } from '@agent-hardener/api/platform';
+import { useHelixSdk } from '@agent-hardener/api/platform';
 import { ConfigDiff } from '@agent-hardener/components/ConfigDiff';
 import { SanityCheckReport } from '@agent-hardener/components/SanityCheckReport';
 import {
@@ -205,7 +205,7 @@ export const HardenPanel: FC<HardenPanelProps> = ({
   const effectiveSanityJob = sanityJob ?? persistedJob;
   // The sanity job's status is what tells us a check died without writing a report — without it a
   // failed job leaves this panel spinning forever.
-  const { useJobsGetJob } = usePlatformSdk();
+  const { useJobsGetJob } = useHelixSdk();
   const { data: sanityJobDetail } = useJobsGetJob(workspace, effectiveSanityJob ?? '', {
     query: {
       enabled: Boolean(effectiveSanityJob),

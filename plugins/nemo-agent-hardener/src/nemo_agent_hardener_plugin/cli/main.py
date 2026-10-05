@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import typer
 from nemo_agent_hardener_plugin.cli import lifecycle, manifest, war_game
-from nemo_platform_plugin.cli import NemoCLI
+from nemo_helix_plugin.cli import NemoCLI
 
 
 class AgentHardenerCLI(NemoCLI):

@@ -44,8 +44,8 @@ from nemo_agents_plugin.entities import (
     SessionStatus,
 )
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_platform_plugin.dependencies import get_effective_principal_id
-from nemo_platform_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 OWNER_PRINCIPAL_ID = "session-owner"
 

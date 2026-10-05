@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_platform_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
-from nmp.common.config import PlatformConfig
+from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nhx.common.config import HelixConfig
 
 
 def platform_config(
@@ -17,14 +17,14 @@ def platform_config(
     base_url: str = "http://localhost:8080",
     service_discovery: dict[str, str] | None = None,
     **kwargs,
-) -> PlatformConfig:
-    """Create a real PlatformConfig for testing."""
+) -> HelixConfig:
+    """Create a real HelixConfig for testing."""
     if service_discovery is None:
         service_discovery = {
             "files": "http://files-service:8000",
             "models": "http://models-api:8000",
         }
-    return PlatformConfig(  # type: ignore[abstract]
+    return HelixConfig(  # type: ignore[abstract]
         base_url=base_url,
         service_discovery=service_discovery,
         **kwargs,
@@ -33,7 +33,7 @@ def platform_config(
 
 @pytest.fixture
 def mock_platform_config():
-    """Create a platform config for testing (real PlatformConfig instance)."""
+    """Create a platform config for testing (real HelixConfig instance)."""
     return platform_config()
 
 
@@ -41,16 +41,16 @@ def mock_platform_config():
 def mock_get_config_patch(mock_platform_config):
     """Patch get_platform_config to return mock config.
 
-    Patches in nmp.core.models.config (used when loading backends) and
-    nmp.core.models.controllers.main (used in run() for server ready check).
+    Patches in nhx.core.models.config (used when loading backends) and
+    nhx.core.models.controllers.main (used in run() for server ready check).
     """
     with (
         patch(
-            "nmp.core.models.config.get_platform_config",
+            "nhx.core.models.config.get_platform_config",
             return_value=mock_platform_config,
         ),
         patch(
-            "nmp.core.models.controllers.main.get_platform_config",
+            "nhx.core.models.controllers.main.get_platform_config",
             return_value=mock_platform_config,
         ),
     ):
@@ -60,7 +60,7 @@ def mock_get_config_patch(mock_platform_config):
 @pytest.fixture
 def mock_sdk_class_patch():
     """Patch get_async_platform_sdk factory function."""
-    with patch("nmp.core.models.controllers.models_controller.get_async_platform_sdk") as mock:
+    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk") as mock:
         mock.return_value.close = AsyncMock()
         yield mock
 
@@ -77,13 +77,13 @@ def mock_asyncio_run_patch():
         return mock_loop.run_until_complete.return_value
 
     mock_loop.run_until_complete.side_effect = _run_until_complete
-    with patch("nmp.core.models.controllers.models_controller.asyncio.new_event_loop", return_value=mock_loop):
+    with patch("nhx.core.models.controllers.models_controller.asyncio.new_event_loop", return_value=mock_loop):
         yield mock_loop.run_until_complete
 
 
 @pytest.fixture
 def mock_models_sdk():
-    """Create a mock AsyncNeMoPlatform SDK for testing."""
+    """Create a mock AsyncNeMoHelix SDK for testing."""
     mock_sdk = MagicMock()
     return mock_sdk
 
@@ -157,12 +157,14 @@ def _assert_controller_healthy(controller, is_healthy=True):
 
 def _assert_sdk_initialized_correctly(mock_sdk_class_patch):
     """Assert that get_async_platform_sdk was called with correct args for Models API."""
-    # Controller initializes ONE SDK for Models API (base_url is resolved from config inside the factory)
+    # Controller initializes one SDK for Models API; endpoint and client ownership live in the factory.
     assert mock_sdk_class_patch.call_count == 1
     call_kwargs = mock_sdk_class_patch.call_args.kwargs
     assert call_kwargs["as_service"] == "models"
     assert call_kwargs["internal"] is True
-    assert "http_client" in call_kwargs
+    assert isinstance(call_kwargs["timeout"], httpx.Timeout)
+    assert isinstance(call_kwargs["limits"], httpx.Limits)
+    assert call_kwargs["follow_redirects"] is True
 
 
 def _assert_asyncio_run_called_once(mock_asyncio_run_patch):
@@ -267,11 +269,11 @@ async def patch_models_client(mock_models_client):
     controller modules back to :data:`mock_models_client`."""
     with (
         patch(
-            "nmp.core.models.controllers.entity_cache.client_from_platform",
+            "nhx.core.models.controllers.entity_cache.client_from_platform",
             return_value=mock_models_client,
         ),
         patch(
-            "nmp.core.models.sidecars.adapters.main.client_from_platform",
+            "nhx.core.models.sidecars.adapters.main.client_from_platform",
             return_value=mock_models_client,
         ),
     ):

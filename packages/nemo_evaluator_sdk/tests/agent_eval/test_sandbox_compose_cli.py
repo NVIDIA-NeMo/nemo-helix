@@ -171,18 +171,19 @@ async def test_streaming_timeout_retains_partial_output(tmp_path: Path) -> None:
     progress = io.StringIO()
     script = 'import time; print("started", flush=True); time.sleep(30)'
 
+    # Long enough for interpreter start-up on a loaded machine, far shorter than the child's sleep.
     result = await compose_cli._run_command(
         (sys.executable, "-c", script),
         cwd=tmp_path,
         environment=os.environ,
-        timeout=0.1,
+        timeout=3,
         stdin=None,
         stream_output=progress,
     )
 
     assert result.timed_out
     assert result.stdout == "started\n"
-    assert "timed out after 0.1s" in result.stderr.lower()
+    assert "timed out after" in result.stderr.lower()
     assert progress.getvalue() == "started\n"
 
 

@@ -3,7 +3,7 @@
 
 """Tests for hello world API schemas."""
 
-from nmp.hello_world.api.v1.hello.schemas import HelloResponse
+from nhx.hello_world.api.v1.hello.schemas import HelloResponse
 
 
 class TestHelloResponse:

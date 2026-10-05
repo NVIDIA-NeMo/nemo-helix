@@ -26,16 +26,17 @@ from nemo_evaluator.jobs.agent_spec import (
     HarborRunnerTarget,
     ModelTarget,
     Target,
+    registered_agent_name,
 )
 from nemo_evaluator.jobs.utils import run_with_isolated_async_client
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult
 from nemo_evaluator_sdk.values import Agent, AgentBase, Model
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import EvaluationResult
-from nemo_platform_plugin.client.client import AsyncNemoClient
-from nemo_platform_plugin.entities import EntityBase, EntityClient
-from nemo_platform_plugin.entities.client import AsyncEntitiesClient
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.entities import EntityBase, EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +88,12 @@ def _agent_target_fields(target: Target | None) -> tuple[str | None, str | None,
     if isinstance(target, AgentTarget):
         return "agent", target.agent.name, _safe_target_url(target.agent.url)
     if isinstance(target, FabricRunnerTarget):
-        return "fabric", target.model, None
+        return "fabric", registered_agent_name(target) or target.model, None
     if isinstance(target, GymRunnerTarget):
         return "gym", target.agent, None
     if isinstance(target, HarborRunnerTarget):
-        return "harbor", target.agent_import_path or target.agent_name, None
+        # A registered agent runs as the shared installed-Fabric import path; its own name is the identity.
+        return "harbor", registered_agent_name(target) or target.agent_import_path or target.agent_name, None
     return None, None, None
 
 

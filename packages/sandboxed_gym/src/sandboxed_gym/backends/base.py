@@ -18,7 +18,7 @@ from sandboxed_gym.sandbox_types import SandboxExecResult, SandboxStatus
 from sandboxed_gym.wire import EpisodeResources
 
 
-class PlatformMount(BaseModel):
+class HelixMount(BaseModel):
     """A mount the platform owns and the broker injects. Callers can never supply one."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -48,7 +48,7 @@ class SanitizedEpisodeSpec(BaseModel):
     metadata: dict[str, str] = Field(default_factory=dict)
     resources: EpisodeResources = Field(default_factory=EpisodeResources)
     entrypoint: tuple[str, ...] | None = None
-    mounts: tuple[PlatformMount, ...] = ()
+    mounts: tuple[HelixMount, ...] = ()
     # Egress is deliberately absent: it is not per-request. The policy is fixed for the life of
     # the broker and belongs to the backend that applies it (``EpisodeSandboxBackend.egress``).
     # A copy here was built separately from the backend's, and construction is not deterministic

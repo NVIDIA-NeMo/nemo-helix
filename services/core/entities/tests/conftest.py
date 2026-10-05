@@ -4,9 +4,9 @@
 """Test fixtures for entities service."""
 
 import pytest
-from nmp.common.config import Configuration
-from nmp.core.entities.config import EntitiesConfig
-from nmp.testing.blockbuster import blockbuster_fixture
+from nhx.common.config import Configuration
+from nhx.core.entities.config import EntitiesConfig
+from nhx.testing.blockbuster import blockbuster_fixture
 
 
 @pytest.fixture(autouse=True)

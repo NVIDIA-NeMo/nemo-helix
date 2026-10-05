@@ -3,19 +3,21 @@
 
 """SDK resources for the auditor plugin.
 
-Mounted on :class:`~nemo_platform.NeMoPlatform` as ``client.auditor`` via the
-``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
+Registered as the ``auditor`` ``nemo.sdk`` entry point. ``client.auditor`` on a
+:class:`~nemo_helix_plugin.client.client.NemoClient` is the typed auditor service client,
+so build this resource explicitly: ``auditor = AuditorPluginResource(client)`` (or
+``AsyncAuditorPluginResource(async_client)``). Exposes:
 
-- ``client.auditor.plugin_status()`` — service healthz check.
-- ``client.auditor.configs.{create,list,get,update,delete}`` — ``AuditConfig`` CRUD.
-- ``client.auditor.targets.{create,list,get,update,delete}`` — ``AuditTarget`` CRUD.
-- ``client.auditor.submit(config=..., target=..., workspace=...)`` — submit a K8s
+- ``auditor.plugin_status()`` — service healthz check.
+- ``auditor.configs.{create,list,get,update,delete}`` — ``AuditConfig`` CRUD.
+- ``auditor.targets.{create,list,get,update,delete}`` — ``AuditTarget`` CRUD.
+- ``auditor.submit(config=..., target=..., workspace=...)`` — submit a K8s
   audit job and return an :class:`~nemo_auditor.sdk_resources.job_resources.AuditorJobResource`
   handle. Call ``.wait_until_done()`` on the handle to block until the job completes,
   then ``.download_artifacts()`` to fetch the garak report tarball.
-- ``client.auditor.list_jobs(workspace=...)`` — list submitted audit jobs.
-- ``client.auditor.get_job(job_name, workspace=...)`` — fetch a single audit job.
-- ``client.auditor.run(config=..., target=..., workspace=...)`` — in-process
+- ``auditor.list_jobs(workspace=...)`` — list submitted audit jobs.
+- ``auditor.get_job(job_name, workspace=...)`` — fetch a single audit job.
+- ``auditor.run(config=..., target=..., workspace=...)`` — in-process
   audit using :class:`~nemo_auditor.jobs.audit.AuditJob`.
 """
 
@@ -30,11 +32,11 @@ from nemo_auditor.jobs.audit import AuditInputSpec, AuditJob
 from nemo_auditor.sdk_resources.configs import _AsyncConfigResource, _ConfigResource
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
 from nemo_auditor.sdk_resources.targets import _AsyncTargetResource, _TargetResource
-from nemo_platform import AsyncNeMoPlatform, NeMoPlatform
-from nemo_platform_plugin.entities import parse_qualified_name
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.sdk import NemoPluginSDKResources
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.entities import parse_qualified_name
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 def _local_job_context(*, workspace: str, job_name: str) -> JobContext:
@@ -50,9 +52,9 @@ def _local_job_context(*, workspace: str, job_name: str) -> JobContext:
 
 
 class AuditorPluginResource:
-    """Sync SDK namespace mounted as ``client.auditor``."""
+    """Sync auditor plugin SDK namespace, built from a :class:`NemoClient`."""
 
-    def __init__(self, platform: NeMoPlatform) -> None:
+    def __init__(self, platform: NemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _ConfigResource | None = None
@@ -175,9 +177,9 @@ class AuditorPluginResource:
 
 
 class AsyncAuditorPluginResource:
-    """Async SDK namespace mounted as ``client.auditor``."""
+    """Async auditor plugin SDK namespace, built from an :class:`AsyncNemoClient`."""
 
-    def __init__(self, platform: AsyncNeMoPlatform) -> None:
+    def __init__(self, platform: AsyncNemoClient) -> None:
         self._platform = platform
         self._http_client = platform._client
         self._configs: _AsyncConfigResource | None = None

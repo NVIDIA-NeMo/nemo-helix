@@ -23,7 +23,7 @@ These tests close that gap by driving the runtime's own composition against the 
   adapter registry via the planner. A suffixed ``nvidia.fabric.codex.cli`` would raise instead.
 
 ``importorskip('nemo_fabric')`` makes the whole module inert wherever the native Fabric wheels are not
-installed (the hermetic-only 3.11 lanes), so it never competes with the fake-backed unit tests. It is
+installed (the hermetic lanes), so it never competes with the fake-backed unit tests. It is
 meant to run where the ``fabric`` extra is present — e.g. the Linux ``fabric-wheel-smoke`` CI job, or a
 local ``uv sync --extra fabric`` (Fabric publishes a macOS arm64 wheel as of 0.1.0rc2).
 """
@@ -157,9 +157,8 @@ def test_compose_config_is_a_complete_config_fabric_accepts(tmp_path: Path) -> N
     workspace_dir = evidence_dir / "workspace"
     workspace_dir.mkdir(parents=True)
 
-    composed = runtime._compose_config(
-        FabricConfig.from_mapping(_CODEX_CONFIG), evidence_dir, workspace_dir, task=_SURFACE_TASK
-    )
+    _, prepared = runtime._open_host()
+    composed = runtime._compose_config(prepared, evidence_dir, workspace_dir, task=_SURFACE_TASK)
     composed.add_skill_path(str(tmp_path / "staged-skill"))
 
     # Evaluator-owned per-task settings live on the config itself, not in a trailing overlay.
@@ -263,7 +262,6 @@ def _composed_container_config() -> Any:
         provider=DockerSandboxProvider(),
         image="unused",
         env={},
-        model=None,
         timeout_s=600,
         capture_trajectory=True,
         trajectory_extra=None,

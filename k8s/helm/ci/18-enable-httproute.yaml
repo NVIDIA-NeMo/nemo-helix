@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# CI validates by running: helm template nemo-platform . -f ci/18-enable-httproute.yaml
+# CI validates by running: helm template nemo-helix . -f ci/18-enable-httproute.yaml
 # Tests that enabling Gateway API HTTPRoute renders a valid HTTPRoute (parentRefs required when enabled).
 
 httpRoute:

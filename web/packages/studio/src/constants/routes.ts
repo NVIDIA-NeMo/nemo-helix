@@ -61,11 +61,20 @@ export const ROUTES = {
     dashboard: `/workspaces/:${P.workspace}/dashboard`,
     jobs: `/workspaces/:${P.workspace}/jobs`,
     jobDetail: `/workspaces/:${P.workspace}/jobs/:${P.jobName}`,
-    newCustomizationJob: `/workspaces/:${P.workspace}/customizations/fine-tuned/new`,
+    newCustomizationJob: `/workspaces/:${P.workspace}/fine-tune/new`,
+    /**
+     * The full fine-tuning form. A sibling route rather than a step inside
+     * `newCustomizationJob`, so it survives a reload and answers to browser back.
+     * Named for the "build from scratch" tile that reaches it, but it also serves
+     * the template hand-off, `?model=` deep links, and Clone.
+     */
+    newCustomizationJobScratch: `/workspaces/:${P.workspace}/fine-tune/new/scratch`,
     baseModels: `/workspaces/:${P.workspace}/base-models`,
     /** Base models list with a specific model panel open (model name in path) */
     baseModelsModel: `/workspaces/:${P.workspace}/base-models/:${P.modelName}`,
     evaluation: `/workspaces/:${P.workspace}/evaluation`,
+    /** Dataset-driven model evaluation builder. */
+    evaluationNew: `/workspaces/:${P.workspace}/evaluation/new`,
     evaluationMetrics: `/workspaces/:${P.workspace}/evaluation/metrics`,
     evaluationMetricNew: `/workspaces/:${P.workspace}/evaluation/metrics/new`,
     /** Run panel without a pre-selected metric — user picks from within the panel */
@@ -81,8 +90,8 @@ export const ROUTES = {
     experimentDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}`,
     evaluationDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}/:${P.evaluationName}`,
     evaluationSessionDetail: `/workspaces/:${P.workspace}/experiment/:${P.experimentName}/:${P.evaluationName}/sessions/:${P.sessionId}`,
-    customizationJobList: `/workspaces/:${P.workspace}/customizations`,
-    customizationJobDetails: `/workspaces/:${P.workspace}/customizations/:${P.customizationJobName}`,
+    customizationJobList: `/workspaces/:${P.workspace}/fine-tune`,
+    customizationJobDetails: `/workspaces/:${P.workspace}/fine-tune/:${P.customizationJobName}`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
     filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,

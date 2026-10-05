@@ -29,7 +29,7 @@ from nemo_deployments_plugin.entities import (
     VolumeStatus,
     WorkloadIdentitySpec,
 )
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 

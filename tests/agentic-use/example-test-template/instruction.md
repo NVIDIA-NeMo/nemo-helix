@@ -5,7 +5,7 @@
 
 <!-- TODO: Write a brief description of what the agent should accomplish -->
 
-You have access to NeMo Platform, with a running MCP server, with various tools.
+You have access to NeMo Helix, with a running MCP server, with various tools.
 
 ## Task
 

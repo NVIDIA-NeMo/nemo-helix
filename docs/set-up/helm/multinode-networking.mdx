@@ -18,12 +18,12 @@ Multi-node GPU training requires high-bandwidth, low-latency east-west networkin
 
 <Note>
 
-The NeMo Platform does not provision or manage the underlying cloud networking infrastructure. Each cloud provider section below lists the cluster-level prerequisites your administrator must configure. Refer to your cloud provider's documentation for setup instructions.
+The NeMo Helix does not provision or manage the underlying cloud networking infrastructure. Each cloud provider section below lists the cluster-level prerequisites your administrator must configure. Refer to your cloud provider's documentation for setup instructions.
 
 </Note>
 ## How It Works
 
-When a job requests more than one node, the jobs controller annotates the pod with `nmp.nvidia.com/enable-multi-node-networking: "true"`. Kyverno watches for this annotation and mutates the pod spec to inject the cloud-specific device requests, environment variables, and volume mounts that NCCL needs for high-performance inter-node communication.
+When a job requests more than one node, the jobs controller annotates the pod with `nhx.nvidia.com/enable-multi-node-networking: "true"`. Kyverno watches for this annotation and mutates the pod spec to inject the cloud-specific device requests, environment variables, and volume mounts that NCCL needs for high-performance inter-node communication.
 
 ## Configuration
 

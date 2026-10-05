@@ -7,11 +7,11 @@ description: ""
 ---
 <a id="anonymizer"></a>
 
-The Anonymizer service detects personally identifiable information (PII) in text data on the NeMo Platform and replaces or rewrites it.
+The Anonymizer service detects personally identifiable information (PII) in text data on the NeMo Helix and replaces or rewrites it.
 
 ## Overview
 
-The service wraps the open-source [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer) and exposes it through the NeMo Platform's Python SDK and CLI. The library still owns PII detection, replacement, rewrite, and config validation. The platform adds inference routing through the Inference Gateway, fileset-backed inputs, SDK/service execution for streaming preview, and a Jobs-worker path for full anonymization runs.
+The service wraps the open-source [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer) and exposes it through the NeMo Helix's Python SDK and CLI. The library still owns PII detection, replacement, rewrite, and config validation. The platform adds inference routing through the Inference Gateway, fileset-backed inputs, SDK/service execution for streaming preview, and a Jobs-worker path for full anonymization runs.
 
 ## How It Works: Library + Platform
 
@@ -41,13 +41,13 @@ config = AnonymizerConfig(
 
 ### 2. Execute on the platform
 
-Submit the config to the Anonymizer service with the NeMo Platform SDK:
+Submit the config to the Anonymizer service with the NeMo Helix SDK:
 
 ```python
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
-from nemo_platform import NeMoPlatform
+from nemo_helix import NeMoHelix
 
-sdk = NeMoPlatform(base_url="...", workspace="default")
+sdk = NeMoHelix(base_url="...", workspace="default")
 anonymizer = sdk.anonymizer
 
 preview_result = anonymizer.preview(PreviewRequest(
@@ -80,15 +80,15 @@ The SDK equivalent is `sdk.anonymizer.run(request)`, which returns an `Anonymize
 
 ## Key Differences from Standalone Library
 
-When using Anonymizer as a NeMo Platform service:
+When using Anonymizer as a NeMo Helix service:
 
-| Feature           | Standalone Library                                  | NeMo Platform Service                                                                                       |
+| Feature           | Standalone Library                                  | NeMo Helix Service                                                                                       |
 |-------------------|-----------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | **Inference**     | Direct calls to NVIDIA Build defaults               | Routes through the Inference Gateway via `model_configs`                                                        |
 | **Execution**     | Local Python process                                | Streaming preview runs through the SDK/service; full runs execute on the Jobs worker |
-| **Input sources** | Local file, `http(s)` URL                           | `http(s)` URL or NeMo Platform Fileset                                        |
-| **Artifacts**     | Local filesystem                                    | NeMo Platform job artifact storage for `run` |
-| **Authentication**| Direct API keys                                     | NeMo Platform Secrets service                                                                               |
+| **Input sources** | Local file, `http(s)` URL                           | `http(s)` URL or NeMo Helix Fileset                                        |
+| **Artifacts**     | Local filesystem                                    | NeMo Helix job artifact storage for `run` |
+| **Authentication**| Direct API keys                                     | NeMo Helix Secrets service                                                                               |
 
 ## Replacement Strategies
 
@@ -111,7 +111,7 @@ This package is a thin wrapper around the [NVIDIA NeMo Anonymizer library](https
 - A `nemo anonymizer` CLI with `validate`, `preview`, and `run` commands.
 - An `sdk.anonymizer` SDK accessor (`AnonymizerResource`, `AsyncAnonymizerResource`).
 - A streaming `anonymizer.preview` function that emits `preview_dataset`, `trace_dataset`, and `failed_records` frames from the plugin service.
-- An `anonymizer.run` job that writes `dataset.parquet`, `trace.parquet`, `metadata.json`, and optional `failed_records.json`. The job executes on the NeMo Platform Jobs worker (`nemo anonymizer run` / `sdk.anonymizer.run`).
+- An `anonymizer.run` job that writes `dataset.parquet`, `trace.parquet`, `metadata.json`, and optional `failed_records.json`. The job executes on the NeMo Helix Jobs worker (`nemo anonymizer run` / `sdk.anonymizer.run`).
 - Fileset input handling (`fileset://<workspace>/<fileset>#<path>`).
 - Inference Gateway routing for model providers referenced from `model_configs`.
 

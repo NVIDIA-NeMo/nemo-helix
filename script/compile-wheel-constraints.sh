@@ -7,7 +7,7 @@
 # (.github/wheel-constraints/*.txt).
 #
 # Why partial (constraints, not a full lock): the smoke test installs the freshly
-# built nemo-platform / nemo-platform-plugin wheels. Without any pin it resolves
+# built nemo-helix / nemo-helix-plugin wheels. Without any pin it resolves
 # the whole tree fresh from PyPI (non-reproducible, supply-chain risk). A FULL
 # lock does not work here — the vendored-SDK wheel needs newer deps than
 # uv.lock. So we pin each wheel's DIRECT external deps (the versions we've
@@ -18,9 +18,9 @@
 # Usage:
 #   script/compile-wheel-constraints.sh <dir-with-both-wheels>
 #
-# Wheels come from `uv build --package nemo-platform[-plugin]` (nemo-platform
+# Wheels come from `uv build --package nemo-helix[-plugin]` (nemo-helix
 # needs the Studio/node toolchain) or a CI "<pkg>-wheel-py3.12" artifact
-# (`gh run download <run-id> -n nemo-platform-wheel-py3.12 -D <dir>`).
+# (`gh run download <run-id> -n nemo-helix-wheel-py3.12 -D <dir>`).
 set -euo pipefail
 
 WHEEL_DIR="${1:?usage: script/compile-wheel-constraints.sh <dir-with-built-wheels>}"
@@ -68,7 +68,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         if line.startswith("Requires-Dist:"):
             dep=line.split(":",1)[1].strip()
             name=re.split(r"[<>=!~;\[ ]", dep, 1)[0].strip()
-            if name and not name.startswith("nemo-platform"):
+            if name and not name.startswith("nemo-helix"):
                 names.add(name)
 print("\n".join(sorted(names)))
 PY
@@ -90,10 +90,10 @@ PY
   echo "wrote ${out} ($(grep -cE '^[a-z0-9].*==' "${out}") pins)"
 }
 
-np_wheel="$(find "${WHEEL_DIR}" -name 'nemo_platform-*.whl' | head -1)"
-pl_wheel="$(find "${WHEEL_DIR}" -name 'nemo_platform_plugin-*.whl' | head -1)"
-[[ -n "${np_wheel}" ]] || { echo "no nemo_platform-*.whl in ${WHEEL_DIR}" >&2; exit 1; }
-[[ -n "${pl_wheel}" ]] || { echo "no nemo_platform_plugin-*.whl in ${WHEEL_DIR}" >&2; exit 1; }
+np_wheel="$(find "${WHEEL_DIR}" -name 'nemo_helix-*.whl' | head -1)"
+pl_wheel="$(find "${WHEEL_DIR}" -name 'nemo_helix_plugin-*.whl' | head -1)"
+[[ -n "${np_wheel}" ]] || { echo "no nemo_helix-*.whl in ${WHEEL_DIR}" >&2; exit 1; }
+[[ -n "${pl_wheel}" ]] || { echo "no nemo_helix_plugin-*.whl in ${WHEEL_DIR}" >&2; exit 1; }
 
-emit_constraints "${np_wheel}" "${np_wheel}[services]" "nemo-platform[services]" "${OUT_DIR}/nemo-platform-services.txt"
-emit_constraints "${pl_wheel}" "${pl_wheel}" "nemo-platform-plugin" "${OUT_DIR}/nemo-platform-plugin.txt"
+emit_constraints "${np_wheel}" "${np_wheel}[services]" "nemo-helix[services]" "${OUT_DIR}/nemo-helix-services.txt"
+emit_constraints "${pl_wheel}" "${pl_wheel}" "nemo-helix-plugin" "${OUT_DIR}/nemo-helix-plugin.txt"

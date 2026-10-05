@@ -50,7 +50,7 @@ export const DashboardCard: FC<DashboardCardProps> = ({
 
         {/* Description with Docs link */}
         <Stack gap="density-md" className="flex-1">
-          <Text kind="body/regular/md" color="secondary">
+          <Text className="text-secondary" kind="body/regular/md">
             {description}{' '}
             {docsUrl && (
               <Anchor href={docsUrl} target="_blank" rel="noopener noreferrer">

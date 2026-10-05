@@ -3,7 +3,7 @@
 
 """Tests for the training container entrypoint.
 
-The container ``CMD`` is ``python -m nmp.unsloth.tasks.training``. It
+The container ``CMD`` is ``python -m nhx.unsloth.tasks.training``. It
 expects the platform Jobs runner to mount a step-config JSON file via
 ``NEMO_JOB_STEP_CONFIG_FILE_PATH`` and then invokes
 ``train_sft`` against the paths the file_io step downloaded to.
@@ -22,8 +22,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from nmp.unsloth.app.jobs.training.schemas import TrainingStepConfig
-from nmp.unsloth.schemas import (
+from nhx.unsloth.app.jobs.training.schemas import TrainingStepConfig
+from nhx.unsloth.schemas import (
     DatasetSpec,
     LoRAParams,
     ModelLoadSpec,
@@ -31,7 +31,7 @@ from nmp.unsloth.schemas import (
     TrainingSpec,
     UnslothJobOutput,
 )
-from nmp.unsloth.tasks.training.__main__ import main
+from nhx.unsloth.tasks.training.__main__ import main
 
 
 def _step_config() -> TrainingStepConfig:
@@ -60,8 +60,8 @@ class TestEntrypointCachePaths:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from nmp.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-        from nmp.unsloth.tasks.training.backends import unsloth_sft
+        from nhx.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+        from nhx.unsloth.tasks.training.backends import unsloth_sft
 
         config_file = tmp_path / "step.json"
         config_file.write_text(json.dumps(_step_config().model_dump(mode="json")))
@@ -97,8 +97,8 @@ class TestEntrypointCachePaths:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from nmp.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-        from nmp.unsloth.tasks.training.backends import unsloth_sft
+        from nhx.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+        from nhx.unsloth.tasks.training.backends import unsloth_sft
 
         config = _step_config().model_copy(
             update={
@@ -147,12 +147,12 @@ class TestEntrypointCachePaths:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from nmp.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-        from nmp.customization_common.service.path_utils import (
+        from nhx.common.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+        from nhx.customization_common.service.path_utils import (
             CURRENT_PERSISTENT_JOB_STORAGE_PATH_ENVVAR,
             LEGACY_PERSISTENT_JOB_STORAGE_PATH_ENVVARS,
         )
-        from nmp.unsloth.tasks.training.backends import unsloth_sft
+        from nhx.unsloth.tasks.training.backends import unsloth_sft
 
         config_file = tmp_path / "step.json"
         config_file.write_text(json.dumps(_step_config().model_dump(mode="json")))
@@ -196,11 +196,11 @@ class TestEntrypointWithoutStepConfig:
         assert "nemo customization unsloth submit" in err
 
     def test_module_invocation_exits_2(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Smoke: ``python -m nmp.unsloth.tasks.training`` exits 2 without a step config."""
+        """Smoke: ``python -m nhx.unsloth.tasks.training`` exits 2 without a step config."""
         env = {k: v for k, v in __import__("os").environ.items()}
         env.pop("NEMO_JOB_STEP_CONFIG_FILE_PATH", None)
         result = subprocess.run(
-            [sys.executable, "-m", "nmp.unsloth.tasks.training"],
+            [sys.executable, "-m", "nhx.unsloth.tasks.training"],
             capture_output=True,
             text=True,
             check=False,

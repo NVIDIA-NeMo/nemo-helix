@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mongo-style comparison operators accepted by NeMo Platform's unified filter
+ * Mongo-style comparison operators accepted by NeMo Helix's unified filter
  * syntax (e.g. `{ name: { $like: '%foo%' } }`, `{ created_at: { $gte, $lte } }`).
  *
  * The OpenAPI-generated SDK types model filter fields as bare scalars

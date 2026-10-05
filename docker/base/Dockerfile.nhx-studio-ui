@@ -1,0 +1,104 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+ARG NODE_VERSION=22
+ARG DOCKERHUB_MIRROR=docker.io/library
+
+# --------------- BASE --------------- #
+# dist/ is architecture-independent JS/CSS/HTML, so build it once on the builder's
+# native arch. Emulated arm64 builds hang in Vite chunk rendering under QEMU.
+FROM --platform=$BUILDPLATFORM ${DOCKERHUB_MIRROR}/node:${NODE_VERSION}-bookworm AS base
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+
+# Preserve the Platform repository layout so SDK generation can resolve
+# repository-root-relative OpenAPI paths from web/packages/sdk.
+WORKDIR /app/web
+
+# Setup pnpm through corepack (rarely changes, cache this early)
+RUN npm i -g corepack@0.31.0 && \
+  corepack enable pnpm
+
+# ---- Dependencies (changes less frequently) ----
+# Copy workspace config and lockfiles first
+COPY web/pnpm-lock.yaml pnpm-lock.yaml
+COPY web/pnpm-workspace.yaml pnpm-workspace.yaml
+COPY web/package.json package.json
+
+# Copy package.json from each workspace package for dependency resolution.
+COPY web/packages/sdk/package.json packages/sdk/package.json
+COPY web/packages/common/package.json packages/common/package.json
+COPY web/packages/testing/package.json packages/testing/package.json
+COPY web/packages/studio/package.json packages/studio/package.json
+
+# The root web postinstall runs `pnpm --filter @nemo/sdk gen:all`, so the SDK
+# generator and its OpenAPI inputs must exist before dependency installation.
+COPY web/packages/sdk/generateAll.ts packages/sdk/generateAll.ts
+COPY web/packages/sdk/orval.config.ts packages/sdk/orval.config.ts
+COPY web/packages/sdk/orval packages/sdk/orval
+COPY openapi /app/openapi
+COPY plugins/nemo-anonymizer/openapi /app/plugins/nemo-anonymizer/openapi
+COPY plugins/nemo-data-designer/openapi /app/plugins/nemo-data-designer/openapi
+COPY plugins/nemo-agents/openapi /app/plugins/nemo-agents/openapi
+COPY plugins/nemo-safe-synthesizer/openapi /app/plugins/nemo-safe-synthesizer/openapi
+COPY plugins/nemo-evaluator/openapi /app/plugins/nemo-evaluator/openapi
+COPY plugins/nemo-customizer/openapi /app/plugins/nemo-customizer/openapi
+COPY plugins/nemo-agent-hardener/openapi /app/plugins/nemo-agent-hardener/openapi
+COPY plugins/nemo-insights/openapi /app/plugins/nemo-insights/openapi
+COPY plugins/nemo-agent-optimization/openapi /app/plugins/nemo-agent-optimization/openapi
+
+# Install pnpm modules and generate SDK artifacts during postinstall.
+RUN pnpm install --frozen-lockfile
+
+# ---- Source files (changes more frequently) ----
+# Copy workspace package source files.
+COPY web/packages/sdk packages/sdk
+COPY web/packages/common packages/common
+COPY web/packages/testing packages/testing
+
+# Copy UI package source files
+COPY web/packages/studio/public packages/studio/public
+COPY web/packages/studio/src packages/studio/src
+COPY web/packages/studio/*.ts packages/studio/
+COPY web/packages/studio/*.json packages/studio/
+COPY web/packages/studio/index.html packages/studio/index.html
+
+# --------------- BUILD --------------- #
+FROM base AS build
+
+# Uses a single env file across all envs. FastAPI handles find/replace for values.
+ARG ENV_FILE=".env.fastapi"
+ARG NODE_ENV=production
+ARG VITE_VERSION_SHA=""
+RUN echo "Building Studio using env file ${ENV_FILE}"
+COPY web/packages/studio/env/${ENV_FILE} packages/studio/env/.env
+
+# Build the UI with mode set for FastAPI env replacement for subpath routing.
+# QEMU arm64 builds occasionally hang in Vite chunk rendering; bound each attempt
+# so the Dockerfile can retry before the GitHub job-level timeout cancels the run.
+RUN set -eu; \
+  for attempt in 1 2 3; do \
+    status=0; \
+    VITE_VERSION_SHA="${VITE_VERSION_SHA}" NODE_ENV="${NODE_ENV}" \
+      timeout --kill-after=30s 15m \
+      pnpm --filter nemo-studio-ui --fail-if-no-match build:fastapi || status="$?"; \
+    if [ "${status}" = "0" ]; then \
+      if [ ! -f /app/web/packages/studio/dist/index.html ]; then \
+        echo "Studio UI build reported success but dist/index.html is missing"; \
+        exit 1; \
+      fi; \
+      exit 0; \
+    fi; \
+    if [ "${status}" != "124" ] && [ "${status}" != "137" ]; then \
+      exit "${status}"; \
+    fi; \
+    echo "Studio UI build timed out on attempt ${attempt}; retrying..."; \
+    sleep "$((attempt * 10))"; \
+  done; \
+  echo "Studio UI build timed out after 3 attempts"; \
+  exit 124
+
+# Output stage - just the built assets
+FROM scratch AS artifacts
+WORKDIR /artifacts
+COPY --from=build /app/web/packages/studio/dist .

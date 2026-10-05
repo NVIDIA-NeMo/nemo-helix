@@ -6,17 +6,17 @@ from __future__ import annotations
 import httpx
 import pytest
 from nemo_evaluator.sdk.resources import AsyncEvaluator, Evaluator, evaluator_sdk_resources
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform, NeMoPlatform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE = "http://test"
 
 
-def test_evaluator_sdk_sync_resource_accepts_generated_platform_client() -> None:
+def test_evaluator_sdk_sync_resource_accepts_typed_platform_client() -> None:
     http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    platform = NeMoPlatform(
+    platform = NemoClient(
         base_url=BASE,
         workspace="default",
-        default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+        default_headers={"X-NHX-Principal-Id": "service:evaluator"},
         http_client=http_client,
     )
 
@@ -26,18 +26,18 @@ def test_evaluator_sdk_sync_resource_accepts_generated_platform_client() -> None
 
     assert isinstance(resource, Evaluator)
     assert resource._client._http is http_client
-    assert resource._client.default_headers["X-NMP-Principal-Id"] == "service:evaluator"
+    assert resource._client.default_headers["X-NHX-Principal-Id"] == "service:evaluator"
 
 
 @pytest.mark.asyncio
-async def test_evaluator_sdk_async_resource_accepts_generated_platform_client() -> None:
+async def test_evaluator_sdk_async_resource_accepts_typed_platform_client() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request))
     ) as http_client:
-        platform = AsyncNeMoPlatform(
+        platform = AsyncNemoClient(
             base_url=BASE,
             workspace="default",
-            default_headers={"X-NMP-Principal-Id": "service:evaluator"},
+            default_headers={"X-NHX-Principal-Id": "service:evaluator"},
             http_client=http_client,
         )
 
@@ -47,4 +47,4 @@ async def test_evaluator_sdk_async_resource_accepts_generated_platform_client() 
 
         assert isinstance(resource, AsyncEvaluator)
         assert resource._client._http is http_client
-        assert resource._client.default_headers["X-NMP-Principal-Id"] == "service:evaluator"
+        assert resource._client.default_headers["X-NHX-Principal-Id"] == "service:evaluator"

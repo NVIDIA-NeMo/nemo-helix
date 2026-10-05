@@ -28,7 +28,7 @@ decide what to promote.
 
 ### Requirements
 
-- A NeMo Platform environment with the `intake` service running.
+- A NeMo Helix environment with the `intake` service running.
 - The platform entity store (Postgres).
 - A reachable ClickHouse database.
 - A producer that creates Evaluations and sends their telemetry: the NeMo Optimizer, a benchmark or
@@ -122,21 +122,21 @@ Two Experiment-level behaviors are worth knowing:
 
 ### Setup
 
-Experiments are part of the `intake` service, so any running NeMo Platform already serves them. Point
+Experiments are part of the `intake` service, so any running NeMo Helix already serves them. Point
 at whatever you have, whether a deployed platform or a local one from `nemo setup` or
 `nemo quickstart up`:
 
 ```bash
-export NMP_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080
 export WORKSPACE=default
-export NMP_STUDIO_URL="$NMP_BASE_URL/studio"
-export NMP_ACCESS_TOKEN="$(nemo auth token)"
+export NHX_STUDIO_URL="$NHX_BASE_URL/studio"
+export NHX_ACCESS_TOKEN="$(nemo auth token)"
 ```
 
-Set `NMP_STUDIO_URL` explicitly if Studio uses a different origin or path.
+Set `NHX_STUDIO_URL` explicitly if Studio uses a different origin or path.
 The examples use bearer-token authentication and stop on HTTP errors. For a local development
 deployment with authentication disabled, omit the `Authorization` header and the
-`NMP_ACCESS_TOKEN` command.
+`NHX_ACCESS_TOKEN` command.
 
 ClickHouse must be reachable either way, since the leaderboard rollups are computed from it at read
 time.
@@ -145,7 +145,7 @@ time.
 
 If you are bringing the pieces up yourself from a repository checkout, make sure Docker Desktop or
 the Docker daemon is running. Intake automatically provisions and reuses a local ClickHouse
-container for the resolved NeMo data directory unless `NMP_INTAKE_CLICKHOUSE_URL` explicitly points
+container for the resolved NeMo data directory unless `NHX_INTAKE_CLICKHOUSE_URL` explicitly points
 to an external instance.
 
 1. **Backend services**: `intake` plus its `auth` and `entities` dependencies. `--port` defaults to
@@ -169,11 +169,11 @@ Confirm that the entity read path and ClickHouse rollups are reachable:
 
 ```bash
 curl --fail-with-body -i \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments?sort=-created_at&page=1&page_size=1"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments?sort=-created_at&page=1&page_size=1"
 curl --fail-with-body -i \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?sort=-cost_usd.mean&page=1&page_size=1"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?sort=-cost_usd.mean&page=1&page_size=1"
 ```
 
 The first request checks the entity store and can return `200` while ClickHouse is unavailable. The
@@ -188,8 +188,8 @@ Create an Experiment, add an Evaluation, send it telemetry, then see it in Studi
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "name": "reranker-prompt-iteration",
@@ -201,8 +201,8 @@ Capture its `id` for the next step:
 
 ```bash
 export EXPERIMENT_ID=$(curl --fail-with-body --silent \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
 echo "experiment id: $EXPERIMENT_ID"
 ```
@@ -212,8 +212,8 @@ existing Experiments:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "name": "reranker-add-cross-encoder",
@@ -259,11 +259,11 @@ List the Experiment's Evaluations and confirm the new row is present:
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&page=1&page_size=20"
 ```
 
-Then open `$NMP_STUDIO_URL/workspaces/$WORKSPACE/experiment`, then open
+Then open `$NHX_STUDIO_URL/workspaces/$WORKSPACE/experiment`, then open
 **reranker-prompt-iteration**.
 
 A successful result opens the Experiment in Studio and shows your Evaluation as a row. After
@@ -280,8 +280,8 @@ Create the Evaluation with the Experiment's `id` in `experiment_ids`:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "name": "reranker-bge-large",
@@ -300,8 +300,8 @@ first create the second Experiment and capture its ID:
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "name": "reranker-cross-project-benchmark",
@@ -309,8 +309,8 @@ curl --fail-with-body -X POST \
       }'
 
 export OTHER_EXPERIMENT_ID=$(curl --fail-with-body --silent \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-cross-project-benchmark" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-cross-project-benchmark" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
 ```
 
@@ -318,8 +318,8 @@ Then `PATCH` the existing Evaluation's `experiment_ids` with both IDs. The list 
 
 ```bash
 curl --fail-with-body -X PATCH \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "experiment_ids": ["'"$EXPERIMENT_ID"'", "'"$OTHER_EXPERIMENT_ID"'"] }'
 ```
@@ -331,8 +331,8 @@ Use `PATCH` for partial updates: only the fields you send change. `name`, `datas
 
 ```bash
 curl --fail-with-body -X PATCH \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "status": "winner", "root_cause": "Best groundedness at acceptable cost." }'
 ```
@@ -346,8 +346,8 @@ List an Experiment's Evaluations sorted by a metric. Prefix the field with `-` f
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&sort=-evaluators.solved.mean&page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&sort=-evaluators.solved.mean&page=1&page_size=20"
 ```
 
 You can sort by an entity column (`name`, `created_at`) or any rollup metric (`test_case_count`,
@@ -362,8 +362,8 @@ is under $0.50:
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&filter[cost_usd.mean][\$lte]=0.5"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[experiment_id]=$EXPERIMENT_ID&filter[cost_usd.mean][\$lte]=0.5"
 ```
 
 Metric filters use the same grammar as sort, such as `filter[test_case_count][\$gte]=5` or
@@ -378,8 +378,8 @@ Store the ordering the team should see first so no one has to re-sort each visit
 
 ```bash
 curl --fail-with-body -X PUT \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "name": "reranker-prompt-iteration", "default_sort": "-evaluators.solved.mean" }'
 ```
@@ -392,8 +392,8 @@ Keep the current baseline, or any reference run, at the top of the Experiment fo
 
 ```bash
 curl --fail-with-body -X POST \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
         "name": "reranker-main-baseline",
@@ -404,13 +404,13 @@ curl --fail-with-body -X POST \
       }'
 
 curl --fail-with-body -X POST \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-main-baseline/pin"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-main-baseline/pin"
 
 # Unpin:
 curl --fail-with-body -X DELETE \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-main-baseline/pin"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-main-baseline/pin"
 ```
 
 Pinned Evaluations float to the top of the leaderboard regardless of the active sort. List only the
@@ -423,8 +423,8 @@ scores:
 
 ```bash
 curl --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-add-cross-encoder/sessions?page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-add-cross-encoder/sessions?page=1&page_size=20"
 ```
 
 Use this to move from "this candidate scores lower" to "these specific cases regressed." In Studio,
@@ -439,8 +439,8 @@ create or update:
 
 ```bash
 curl --fail-with-body -X PUT \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration" \
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{ "name": "reranker-prompt-iteration",
         "pareto": { "x_metric": "cost_usd", "y_metric": "evaluators.solved" } }'
@@ -454,14 +454,14 @@ soft-deleted. A shared Evaluation remains active, and the deleted Experiment is 
 
 ```bash
 curl --fail-with-body -X DELETE \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations/reranker-bge-large"
 curl --fail-with-body -X DELETE \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-cross-project-benchmark"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-cross-project-benchmark"
 curl --fail-with-body -X DELETE \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/experiments/reranker-prompt-iteration"
 ```
 
 Soft deletion renames the stored record. A `GET` request that uses the original name does not return
@@ -469,8 +469,8 @@ the deleted record. To audit deleted records, use `filter[is_deleted]=true` on a
 
 ```bash
 curl -g --fail-with-body \
-  -H "Authorization: Bearer $NMP_ACCESS_TOKEN" \
-  "$NMP_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[is_deleted]=true&page=1&page_size=20"
+  -H "Authorization: Bearer $NHX_ACCESS_TOKEN" \
+  "$NHX_BASE_URL/apis/intake/v2/workspaces/$WORKSPACE/evaluations?filter[is_deleted]=true&page=1&page_size=20"
 ```
 
 ### Where Evaluations Come From

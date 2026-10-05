@@ -7,23 +7,32 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from nemo_platform_plugin.integrations import IntegrationsSpec
-from nmp.customization_common.schema import NamespacedModel
-from nmp.customization_common.training.reporting import ProgressReportingConfig
+from nemo_helix_plugin.deployment import (
+    DEPLOYMENT_CONFIG_DESCRIPTION,
+    DeploymentParams,
+    ToolCallParams,
+    reject_lora_without_lora_enabled,
+)
+from nemo_helix_plugin.integrations import IntegrationsSpec
+from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.training.reporting import ProgressReportingConfig
 from pydantic import Field, model_validator
 
 __all__ = [
     "AutomodelJobInput",
     "AutomodelJobOutput",
+    "BackendSpec",
     "BatchSpec",
     "DatasetSpec",
     "DeploymentParams",
     "ExportSpec",
     "LoRAParams",
+    "MTPSpec",
     "OptimizerSpec",
     "OutputRequest",
     "OutputResponse",
     "ParallelismSpec",
+    "PipelineSpec",
     "RetrievalSpec",
     "ScheduleSpec",
     "ToolCallParams",
@@ -55,12 +64,36 @@ class LoRAParams(AutomodelSchema):
         default=None, description="Module name patterns to exclude from LoRA (e.g. ['*.out_proj'])."
     )
     use_triton: bool = Field(default=True, description="Use the optimized Triton LoRA kernel.")
+    use_memory_efficient_lora: bool | None = Field(
+        default=None,
+        description="Use Automodel's lower-memory LoRA path. Recommended for large MoE checkpoints. Omit to use Automodel's default, which is on.",
+    )
+
+    @model_validator(mode="after")
+    def _module_filters_are_mutually_exclusive(self) -> Self:
+        """Automodel's PeftConfig takes one filter or the other, never both.
+
+        It raises "target_modules and exclude_modules are mutually exclusive" inside the
+        training container, which is an expensive place to learn the job spec named both.
+        """
+        if self.target_modules and self.exclude_modules:
+            raise ValueError(
+                "lora.target_modules and lora.exclude_modules are mutually exclusive; "
+                "name the modules to adapt, or the ones to skip, but not both."
+            )
+        return self
 
 
 class DatasetSpec(AutomodelSchema):
-    training: str = Field(description="Training fileset as 'name' or 'workspace/name'.")
+    training: str = Field(
+        description="Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory."
+    )
     validation: str | None = None
     prompt_template: str | None = None
+    shuffle: bool = Field(
+        default=True,
+        description="Reshuffle training examples each epoch. Disable only for a deliberate curriculum order.",
+    )
 
 
 class ExportSpec(AutomodelSchema):
@@ -92,12 +125,116 @@ class RetrievalSpec(AutomodelSchema):
     train_n_passages: int = Field(default=5, ge=2)
     eval_negative_size: int | None = Field(default=None, ge=1)
     do_gradient_checkpointing: bool = False
+    do_distributed_inbatch_negative: bool = Field(
+        default=False,
+        description=(
+            "Score each query against every passage in the global batch rather than only its own "
+            "train_n_passages. Ignored for cross_encoder."
+        ),
+    )
     query_max_length: int = Field(default=512, ge=1)
     passage_max_length: int = Field(default=512, ge=1)
-    query_prefix: str = Field(default="query:", description="Collator-side prefix; BiEncoderCollator adds a space.")
-    passage_prefix: str = Field(default="passage:", description="Collator-side prefix; BiEncoderCollator adds a space.")
+    query_prefix: str = Field(
+        default="query: ",
+        description="Literal prefix prepended to each query. Empty string disables prefixing.",
+    )
+    passage_prefix: str = Field(
+        default="passage: ",
+        description="Literal prefix prepended to each passage. Empty string disables prefixing.",
+    )
     export: ExportSpec | None = Field(
         default=None, description="Artifact layout and ONNX export settings. Defaults are applied when omitted."
+    )
+
+
+class MTPSpec(AutomodelSchema):
+    """Multi-Token Prediction overrides for checkpoints trained with MTP heads, e.g. Nemotron 3.5 Lightning.
+
+    Automodel builds MTP from the checkpoint's own config; each field here overrides one
+    setting, and only the fields that are set reach the model. Support differs per model.
+    """
+
+    num_nextn_predict_layers: int | None = Field(
+        default=None, gt=0, description="How many tokens ahead to predict. Omit to keep the checkpoint's own value."
+    )
+    use_repeated_layer: bool | None = Field(
+        default=None,
+        description=(
+            "Share one weight-tied layer across the prediction depths. Only some Automodel models accept it "
+            "(Nemotron-H in r0.6.0); omit it for others."
+        ),
+    )
+    loss_scaling_factor: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Weight of the MTP loss term relative to the main loss. Omit to keep the model's default (0.1).",
+    )
+
+
+class BackendSpec(AutomodelSchema):
+    """Which implementation Automodel uses for each model component.
+
+    Every field defaults to ``None``, meaning "leave it to Automodel". Its own defaults
+    depend on what the training node has available (Transformer Engine, DeepEP, CUDA), so
+    only explicitly set values are forwarded.
+    """
+
+    attn: Literal["te", "sdpa", "flex", "eager", "tilelang"] | None = Field(
+        default=None,
+        description="Attention kernel. 'te' uses Transformer Engine (Hopper or newer); "
+        "'sdpa' is the portable PyTorch implementation.",
+    )
+    linear: Literal["torch", "te", "quack"] | None = Field(default=None, description="Linear-layer kernel.")
+    rms_norm: Literal["torch", "torch_fp32", "te", "quack"] | None = Field(
+        default=None, description="RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical stability."
+    )
+    rope: Literal["torch", "quack"] | None = Field(default=None, description="Rotary position embedding kernel.")
+    rope_fusion: bool | None = Field(default=None, description="Fuse the rotary embedding into the attention kernel.")
+    experts: Literal["torch", "te", "gmm", "torch_mm", "torch_mm_mxfp8"] | None = Field(
+        default=None,
+        description="MoE expert compute kernel. 'gmm' is the grouped-matmul path used by the large MoE recipes.",
+    )
+    dispatcher: Literal["torch", "deepep", "hybridep", "uccl_ep"] | None = Field(
+        default=None,
+        description="How MoE tokens are routed between expert-parallel ranks. 'deepep' is the "
+        "high-throughput path and requires the DeepEP library on the node.",
+    )
+    fake_balanced_gate: bool | None = Field(
+        default=None,
+        description="Route tokens evenly across experts instead of using the trained router. Benchmarking aid.",
+    )
+    enable_hf_state_dict_adapter: bool | None = Field(
+        default=None,
+        description="Save and load checkpoints in HuggingFace layout. Needed when the trained model "
+        "is consumed by HuggingFace tooling.",
+    )
+    enable_fsdp_optimizations: bool | None = Field(
+        default=None, description="Enable Automodel's additional FSDP2 sharding optimizations."
+    )
+
+
+class PipelineSpec(AutomodelSchema):
+    """How work is scheduled across pipeline stages. Read only when pipeline_parallel_size > 1."""
+
+    pp_schedule: str | None = Field(
+        default=None,
+        description="Pipeline schedule name, e.g. '1f1b', 'interleaved1f1b', 'gpipe'. Defaults to 'interleaved1f1b'.",
+    )
+    pp_microbatch_size: int | None = Field(
+        default=None, gt=0, description="Micro-batch size flowing through each pipeline stage."
+    )
+    round_virtual_stages_to_pp_multiple: Literal["up", "down"] | None = Field(
+        default=None,
+        description="Round the number of virtual stages to a multiple of the pipeline size, in the given direction.",
+    )
+    scale_grads_in_schedule: bool | None = Field(
+        default=None, description="Scale gradients inside the schedule rather than afterwards."
+    )
+    patch_inner_model: bool | None = Field(
+        default=None, description="Apply Automodel's pipeline patch to the inner transformer module."
+    )
+    patch_causal_lm_model: bool | None = Field(
+        default=None, description="Apply Automodel's pipeline patch to the causal-LM wrapper."
     )
 
 
@@ -133,6 +270,21 @@ class TrainingSpec(AutomodelSchema):
         default=None,
         description="Retrieval dataset, collator, and export knobs. Used when recipe is bi_encoder or cross_encoder.",
     )
+    activation_checkpointing: bool = Field(
+        default=False,
+        description="Recompute intermediate activations in the backward pass instead of storing them. "
+        "Substantially lowers memory use for a modest slowdown, and is commonly enabled when training "
+        "large MoE models.",
+    )
+    mtp: MTPSpec | None = Field(
+        default=None,
+        description="Multi-Token Prediction settings. Omit for checkpoints trained without MTP heads.",
+    )
+    backend: BackendSpec | None = Field(
+        default=None,
+        description="Low-level kernel selection for the model's components. Omit to let Automodel "
+        "choose based on the hardware it lands on.",
+    )
 
     @model_validator(mode="after")
     def _training_type_fields(self) -> Self:
@@ -155,6 +307,14 @@ class ScheduleSpec(AutomodelSchema):
         lt=1,
         description="Validation split to use when a validation dataset is not provided.",
     )
+    checkpoint_selection: Literal["best", "last", "both"] = Field(
+        default="best",
+        description=(
+            "Checkpoint(s) to publish: 'best' selects the lowest validation loss, "
+            "'last' preserves the end of training, and 'both' publishes best at the root "
+            "with last under alternates/last."
+        ),
+    )
     seed: int | None = None
     progress_reporting: ProgressReportingConfig = Field(default_factory=ProgressReportingConfig)
 
@@ -175,6 +335,19 @@ class BatchSpec(AutomodelSchema):
     sequence_packing_max_samples: int = Field(
         default=1000, gt=0, description="Samples analyzed to estimate the optimal pack size when packing is enabled."
     )
+    packed_sequence_size: int | None = Field(
+        default=None,
+        gt=0,
+        description="Pin the packed sequence length instead of estimating it. Requires sequence_packing.",
+    )
+
+    @model_validator(mode="after")
+    def _explicit_pack_size_needs_packing(self) -> Self:
+        # Automodel reads packed_sequence_size only when packing is on, so a size set
+        # against packing=false is silently ignored -- and the run is slower than asked for.
+        if self.packed_sequence_size is not None and not self.sequence_packing:
+            raise ValueError("batch.packed_sequence_size requires batch.sequence_packing=true.")
+        return self
 
 
 class OptimizerSpec(AutomodelSchema):
@@ -207,6 +380,10 @@ class ParallelismSpec(AutomodelSchema):
     context_parallel_size: int = Field(default=1, gt=0)
     expert_parallel_size: int | None = Field(default=None, gt=0)
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
+    pipeline: PipelineSpec | None = Field(
+        default=None,
+        description="Pipeline schedule settings. Only read when pipeline_parallel_size is greater than 1.",
+    )
 
 
 class OutputRequest(AutomodelSchema):
@@ -219,60 +396,6 @@ class OutputResponse(AutomodelSchema):
     type: Literal["model", "adapter"]
     fileset: str
     description: str | None = None
-
-
-class ToolCallParams(AutomodelSchema):
-    """Tool calling configuration for NIM deployments."""
-
-    tool_call_parser: str | None = Field(
-        default=None,
-        description=(
-            "Name of the tool call parser to use (e.g., 'openai', 'hermes', 'pythonic', 'llama3_json', 'mistral')."
-        ),
-    )
-    tool_call_plugin: str | None = Field(
-        default=None,
-        pattern=r"^[\w\-.]+/[\w\-.]+$",
-        description=(
-            "Reference to a fileset containing the custom tool call plugin Python file. "
-            "Expected format: '{workspace}/{fileset_name}'."
-        ),
-    )
-    auto_tool_choice: bool | None = Field(
-        default=None,
-        description="Whether to enable automatic tool choice.",
-    )
-
-
-class DeploymentParams(AutomodelSchema):
-    """Inline deployment parameters for auto-deploying a trained model.
-
-    Used in :class:`AutomodelJobInput.deployment_config` and passed through to
-    the model_entity task at compile time. When unset, no deployment is launched.
-    """
-
-    gpu: int = Field(default=1, gt=0, description="Number of GPUs required for the deployment.")
-    additional_envs: dict[str, str] | None = Field(
-        default=None,
-        description="Additional environment variables for the deployment.",
-    )
-    disk_size: str | None = Field(default=None, description="Disk size for the deployment.")
-    image_name: str | None = Field(
-        default=None,
-        description="Container image name from NGC. If not specified, defaults to multi-llm.",
-    )
-    image_tag: str | None = Field(default=None, description="Container image tag from NGC.")
-    lora_enabled: bool = Field(
-        default=True,
-        description=(
-            "When auto-deploying a full SFT training, setting this true allows subsequent "
-            "LoRA adapters to be deployed against it."
-        ),
-    )
-    tool_call_config: ToolCallParams | None = Field(
-        default=None,
-        description="Tool calling configuration override for the NIM deployment.",
-    )
 
 
 class AutomodelJobInput(AutomodelSchema):
@@ -290,12 +413,7 @@ class AutomodelJobInput(AutomodelSchema):
     integrations: IntegrationsSpec | None = None
     deployment_config: str | DeploymentParams | None = Field(
         default=None,
-        description=(
-            "Deployment configuration for auto-deploying the model after training. "
-            "Pass a string to reference an existing ModelDeploymentConfig by name "
-            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
-            "deployment parameters. Omit to skip deployment."
-        ),
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
 
     @model_validator(mode="before")
@@ -316,19 +434,10 @@ class AutomodelJobInput(AutomodelSchema):
 
     @model_validator(mode="after")
     def _reject_lora_without_lora_enabled(self) -> Self:
-        # A LoRA adapter cannot be served by a base deployment with lora_enabled=false --
-        # the deployed NIM would refuse to load it. Surface this at submit time rather
-        # than after training has already burned the GPU hours.
-        if (
-            self.trains_standalone_lora_adapter()
-            and isinstance(self.deployment_config, DeploymentParams)
-            and not self.deployment_config.lora_enabled
-        ):
-            raise ValueError(
-                "deployment_config.lora_enabled must be true (or omitted) when training a LoRA adapter. "
-                "Setting lora_enabled=false would deploy the base model without LoRA support, "
-                "making the trained adapter unservable."
-            )
+        reject_lora_without_lora_enabled(
+            self.deployment_config,
+            trains_lora_adapter=self.trains_standalone_lora_adapter(),
+        )
         return self
 
     def with_resolved_recipe(self, checkpoint_head_type: str) -> Self:
@@ -385,12 +494,7 @@ class AutomodelJobOutput(AutomodelSchema):
     integrations: IntegrationsSpec | None = None
     deployment_config: str | DeploymentParams | None = Field(
         default=None,
-        description=(
-            "Deployment configuration for auto-deploying the model after training. "
-            "Pass a string to reference an existing ModelDeploymentConfig by name "
-            "('my-config' or 'workspace/my-config'). An object provides inline NIM "
-            "deployment parameters. Omit to skip deployment."
-        ),
+        description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
 
     def validate_for_training(self) -> None:

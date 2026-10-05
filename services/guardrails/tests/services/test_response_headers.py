@@ -7,8 +7,8 @@ from contextvars import ContextVar
 from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import HumanMessage
-from nmp.guardrails.app.llms.chat.nim import ChatNIM
-from nmp.guardrails.app.utils.context_utils import (
+from nhx.guardrails.app.llms.chat.nim import ChatNIM
+from nhx.guardrails.app.utils.context_utils import (
     _response_headers,
     get_x_model_response_headers_from_context,
     http_request_uid_var,
@@ -29,7 +29,7 @@ class TestXModelResponseHeader(unittest.TestCase):
 
         # Patch the HTTP request uid context var
         self.http_request_uid_patcher = patch(
-            "nmp.guardrails.app.utils.context_utils.http_request_uid_var",
+            "nhx.guardrails.app.utils.context_utils.http_request_uid_var",
             new=self.request_uid_var,
         )
         self.http_request_uid_patcher.start()
@@ -73,13 +73,13 @@ class TestXModelResponseHeader(unittest.TestCase):
 
         # Mock get_x_model_auth_token to return a valid auth token
         self.auth_token_patcher = patch(
-            "nmp.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
+            "nhx.guardrails.app.llms.utils.get_x_model_auth_token_from_context",
             return_value="test-auth-token",
         )
         self.auth_token_patcher.start()
 
         # Mock get_main_model_from_context to return None by default
-        self.main_model_patcher = patch("nmp.guardrails.app.llms.utils.get_main_model_from_context")
+        self.main_model_patcher = patch("nhx.guardrails.app.llms.utils.get_main_model_from_context")
         self.mock_get_main_model_from_context = self.main_model_patcher.start()
         self.mock_get_main_model_from_context.return_value = None
 

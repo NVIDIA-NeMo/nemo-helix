@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 apiVersion: v2
-name: nemo-platform
+name: nemo-helix
 maintainers:
   - name: NVIDIA, Inc.
     url: https://www.nvidia.com
-description: NeMo Platform Helm Chart
+description: NeMo Helix Helm Chart
 type: application
 # version is the version of the Helm chart, and can be different from the appVersion.
 version: 0.0.0
 # appVersion is the version of the application deployed in the chart.
 # This is overwritten on release, for regular releases
-# See https://catalog.ngc.nvidia.com/orgs/nvidia/nemo-platform/helm-charts/nemo-platform/-
+# See https://catalog.ngc.nvidia.com/orgs/nvidia/nemo-helix/helm-charts/nemo-helix/-
 appVersion: "0.0.0"
 home: https://nvidia.com

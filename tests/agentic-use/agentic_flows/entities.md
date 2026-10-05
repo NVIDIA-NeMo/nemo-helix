@@ -3,7 +3,7 @@
 
 # Entities Service Agentic Flows
 
-The Entities service provides a generic storage layer for metadata about resources in NeMo Platform. Entities can represent models, datasets, and other platform objects.
+The Entities service provides a generic storage layer for metadata about resources in NeMo Helix. Entities can represent models, datasets, and other platform objects.
 
 **PIC**: Max Dubrinsky
 **Priority**: High
@@ -32,7 +32,7 @@ The Entities service provides a generic storage layer for metadata about resourc
 - Delete entity
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 
 **Entity Types**:

@@ -16,7 +16,7 @@ from typing import Any
 from nemo_agent_hardener_plugin.api.v2.events import _events_path
 from nemo_agent_hardener_plugin.filesets import download_fileset, upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.errors import CATEGORY_FILESET, AgentHardenerRunError
-from nemo_platform_plugin.job_context import JobContext
+from nemo_helix_plugin.job_context import JobContext
 
 logger = logging.getLogger(__name__)
 

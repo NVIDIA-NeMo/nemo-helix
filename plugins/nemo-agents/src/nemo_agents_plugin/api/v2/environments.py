@@ -34,16 +34,16 @@ from nemo_agents_plugin.schema import (
     EnvironmentSpecFilter,
     EnvironmentSpecPage,
 )
-from nemo_platform_plugin.api.filters import make_filter_obj_dep
-from nemo_platform_plugin.authz import CallerKind, path_rule
-from nemo_platform_plugin.entity import NemoEntity
-from nemo_platform_plugin.entity_client import (
+from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entity import NemoEntity
+from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
-from nemo_platform_plugin.schema import NemoFilter, NemoListResponse, PaginationData
+from nemo_helix_plugin.schema import NemoFilter, NemoListResponse, PaginationData
 
 logger = logging.getLogger(__name__)
 

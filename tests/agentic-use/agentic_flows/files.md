@@ -34,7 +34,7 @@ The Files service provides artifact storage through filesets. This replaces the 
 - Delete fileset
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 
 **Success Criteria**:
@@ -58,7 +58,7 @@ The Files service provides artifact storage through filesets. This replaces the 
 5. Register as dataset entity (optional)
 
 **Prerequisites**:
-- NeMo Platform running
+- NeMo Helix running
 - Workspace exists
 - JSONL files prepared in correct format
 

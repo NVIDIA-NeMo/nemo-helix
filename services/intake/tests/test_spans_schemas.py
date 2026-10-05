@@ -7,17 +7,17 @@ import json
 from datetime import datetime, timezone
 
 import pytest
-from nmp.intake.spans.api.spans_schemas import SPAN_SUMMARY_ERROR_MESSAGE_CHAR_LIMIT, Span, SpanGroup
-from nmp.intake.spans.api.traces_schemas import Trace
-from nmp.intake.spans.domain import INTAKE_PREVIEW_PAYLOAD_CHAR_LIMIT, IntakeSpan, IntakeTrace, SpanKind, SpanStatus
-from nmp.intake.spans.domain import SpanGroup as IntakeSpanGroup
-from nmp.intake.spans.ingest.spans import (
+from nhx.intake.spans.api.spans_schemas import SPAN_SUMMARY_ERROR_MESSAGE_CHAR_LIMIT, Span, SpanGroup
+from nhx.intake.spans.api.traces_schemas import Trace
+from nhx.intake.spans.domain import INTAKE_PREVIEW_PAYLOAD_CHAR_LIMIT, IntakeSpan, IntakeTrace, SpanKind, SpanStatus
+from nhx.intake.spans.domain import SpanGroup as IntakeSpanGroup
+from nhx.intake.spans.ingest.spans import (
     DIRECT_SPAN_IDENTIFIER_MAX_LENGTH,
     DIRECT_SPAN_NAME_MAX_LENGTH,
     DirectSpanInput,
 )
-from nmp.intake.spans.span_attribute_bags import DIRECT_INGEST_RAW_ATTRIBUTES_KEY, SpanAttributeBags
-from nmp.intake.spans.storage import json_dumps_preserve
+from nhx.intake.spans.span_attribute_bags import DIRECT_INGEST_RAW_ATTRIBUTES_KEY, SpanAttributeBags
+from nhx.intake.spans.storage import json_dumps_preserve
 from pydantic import ValidationError
 
 

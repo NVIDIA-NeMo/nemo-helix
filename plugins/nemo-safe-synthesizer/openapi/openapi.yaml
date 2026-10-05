@@ -269,7 +269,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobResultResponse'
+                $ref: '#/components/schemas/HelixJobResultResponse'
         '422':
           description: Validation Error
           content:
@@ -457,7 +457,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobLogPage'
+                $ref: '#/components/schemas/HelixJobLogPage'
         '422':
           description: Validation Error
           content:
@@ -489,7 +489,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobListResultResponse'
+                $ref: '#/components/schemas/HelixJobListResultResponse'
         '422':
           description: Validation Error
           content:
@@ -521,7 +521,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PlatformJobStatusResponse'
+                $ref: '#/components/schemas/HelixJobStatusResponse'
         '422':
           description: Validation Error
           content:
@@ -824,7 +824,7 @@ components:
         spec:
           $ref: '#/components/schemas/SafeSynthesizerJobConfig'
         status:
-          $ref: '#/components/schemas/PlatformJobStatus'
+          $ref: '#/components/schemas/HelixJobStatus'
         status_details:
           title: Status Details
           additionalProperties: true
@@ -904,7 +904,7 @@ components:
           type: string
         status:
           allOf:
-          - $ref: '#/components/schemas/PlatformJobStatus'
+          - $ref: '#/components/schemas/HelixJobStatus'
           description: The current status.
         spec:
           description: Filter on a path within the job's spec, e.g. `spec.target.format`.
@@ -986,6 +986,12 @@ components:
           description: The fraction of invalid records that will stop generation after
             the ``patience`` limit is reached. Must be in [0, 1].
           default: 0.8
+        max_tokens_multiplier:
+          type: number
+          title: max_tokens_multiplier
+          description: Multiplier on the longest training example when sizing per-sample
+            max_tokens. Must be a finite value > 0. Default 1.2.
+          default: 1.2
         structured_generation:
           allOf:
           - $ref: '#/components/schemas/StructuredGenerationParameters'
@@ -1103,6 +1109,248 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    HelixJobListResultResponse:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobResultResponse'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: HelixJobListResultResponse
+    HelixJobLog:
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        job:
+          type: string
+          title: Job
+        job_step:
+          type: string
+          title: Job Step
+        job_task:
+          type: string
+          title: Job Task
+        message:
+          type: string
+          title: Message
+      type: object
+      required:
+      - timestamp
+      - job
+      - job_step
+      - job_task
+      - message
+      title: HelixJobLog
+    HelixJobLogPage:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/HelixJobLog'
+          type: array
+          title: Data
+        total:
+          type: integer
+          title: Total
+        next_page:
+          title: Next Page
+          type: string
+        prev_page:
+          title: Prev Page
+          type: string
+      type: object
+      required:
+      - data
+      - total
+      - next_page
+      - prev_page
+      title: HelixJobLogPage
+    HelixJobResultResponse:
+      properties:
+        name:
+          type: string
+          title: Name
+        job:
+          type: string
+          title: Job
+        workspace:
+          type: string
+          title: Workspace
+        project:
+          title: Project
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        artifact_url:
+          type: string
+          title: Artifact Url
+        artifact_storage_type:
+          $ref: '#/components/schemas/FileStorageType'
+        download_url:
+          title: Download Url
+          type: string
+      type: object
+      required:
+      - name
+      - job
+      - workspace
+      - artifact_url
+      - artifact_storage_type
+      title: HelixJobResultResponse
+    HelixJobStatus:
+      type: string
+      enum:
+      - created
+      - pending
+      - active
+      - cancelled
+      - cancelling
+      - error
+      - completed
+      - paused
+      - pausing
+      - resuming
+      title: HelixJobStatus
+      description: 'Enumeration of possible job statuses.
+
+
+        This enum represents the various states a job can be in during its lifecycle,
+
+        from creation to a terminal state.'
+    HelixJobStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        steps:
+          items:
+            $ref: '#/components/schemas/HelixJobStepStatusResponse'
+          type: array
+          title: Steps
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - steps
+      - created_at
+      - updated_at
+      title: HelixJobStatusResponse
+    HelixJobStepStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        tasks:
+          items:
+            $ref: '#/components/schemas/HelixJobTaskStatusResponse'
+          type: array
+          title: Tasks
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - tasks
+      - created_at
+      - updated_at
+      title: HelixJobStepStatusResponse
+    HelixJobTaskStatusResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        status:
+          $ref: '#/components/schemas/HelixJobStatus'
+        status_details:
+          additionalProperties: true
+          type: object
+          title: Status Details
+        error_details:
+          title: Error Details
+          additionalProperties: true
+          type: object
+        error_stack:
+          title: Error Stack
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - status
+      - status_details
+      - error_details
+      - error_stack
+      - created_at
+      - updated_at
+      title: HelixJobTaskStatusResponse
     NERConfig:
       properties:
         ner_threshold:
@@ -1187,248 +1435,6 @@ components:
 
 
         Defines how PII data should be detected and replaced in a dataset.'
-    PlatformJobListResultResponse:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobResultResponse'
-          type: array
-          title: Data
-      type: object
-      required:
-      - data
-      title: PlatformJobListResultResponse
-    PlatformJobLog:
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-          title: Timestamp
-        job:
-          type: string
-          title: Job
-        job_step:
-          type: string
-          title: Job Step
-        job_task:
-          type: string
-          title: Job Task
-        message:
-          type: string
-          title: Message
-      type: object
-      required:
-      - timestamp
-      - job
-      - job_step
-      - job_task
-      - message
-      title: PlatformJobLog
-    PlatformJobLogPage:
-      properties:
-        data:
-          items:
-            $ref: '#/components/schemas/PlatformJobLog'
-          type: array
-          title: Data
-        total:
-          type: integer
-          title: Total
-        next_page:
-          title: Next Page
-          type: string
-        prev_page:
-          title: Prev Page
-          type: string
-      type: object
-      required:
-      - data
-      - total
-      - next_page
-      - prev_page
-      title: PlatformJobLogPage
-    PlatformJobResultResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        job:
-          type: string
-          title: Job
-        workspace:
-          type: string
-          title: Workspace
-        project:
-          title: Project
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-        artifact_url:
-          type: string
-          title: Artifact Url
-        artifact_storage_type:
-          $ref: '#/components/schemas/FileStorageType'
-        download_url:
-          title: Download Url
-          type: string
-      type: object
-      required:
-      - name
-      - job
-      - workspace
-      - artifact_url
-      - artifact_storage_type
-      title: PlatformJobResultResponse
-    PlatformJobStatus:
-      type: string
-      enum:
-      - created
-      - pending
-      - active
-      - cancelled
-      - cancelling
-      - error
-      - completed
-      - paused
-      - pausing
-      - resuming
-      title: PlatformJobStatus
-      description: 'Enumeration of possible job statuses.
-
-
-        This enum represents the various states a job can be in during its lifecycle,
-
-        from creation to a terminal state.'
-    PlatformJobStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        steps:
-          items:
-            $ref: '#/components/schemas/PlatformJobStepStatusResponse'
-          type: array
-          title: Steps
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - steps
-      - created_at
-      - updated_at
-      title: PlatformJobStatusResponse
-    PlatformJobStepStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        tasks:
-          items:
-            $ref: '#/components/schemas/PlatformJobTaskStatusResponse'
-          type: array
-          title: Tasks
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - tasks
-      - created_at
-      - updated_at
-      title: PlatformJobStepStatusResponse
-    PlatformJobTaskStatusResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        name:
-          type: string
-          title: Name
-        status:
-          $ref: '#/components/schemas/PlatformJobStatus'
-        status_details:
-          additionalProperties: true
-          type: object
-          title: Status Details
-        error_details:
-          title: Error Details
-          additionalProperties: true
-          type: object
-        error_stack:
-          title: Error Stack
-          type: string
-        created_at:
-          type: string
-          format: date-time
-          title: Created At
-        updated_at:
-          type: string
-          format: date-time
-          title: Updated At
-      type: object
-      required:
-      - id
-      - name
-      - status
-      - status_details
-      - error_details
-      - error_stack
-      - created_at
-      - updated_at
-      title: PlatformJobTaskStatusResponse
     PreflightParameters:
       properties:
         disabled_checks:
@@ -1609,6 +1615,16 @@ components:
           title: Emit Telemetry
           description: Whether to emit anonymous Safe Synthesizer telemetry events.
             Defaults from NEMO_TELEMETRY_ENABLED when unset.
+        unknown_fields:
+          type: string
+          enum:
+          - ignore
+          - reject
+          title: Unknown Fields
+          description: How unknown configuration keys are handled recursively. Use
+            'ignore' only for compatibility with stale configurations and notebooks
+            or mismatched client and service versions.
+          default: reject
         enable_synthesis:
           type: boolean
           title: Enable Synthesis
@@ -1623,7 +1639,7 @@ components:
           default: true
       type: object
       title: SafeSynthesizerParameters
-      description: NMP-facing Safe Synthesizer parameters with SDK convenience flags.
+      description: NHX-facing Safe Synthesizer parameters with SDK convenience flags.
     SafeSynthesizerSummary:
       properties:
         synthetic_data_quality_score:
@@ -1856,6 +1872,11 @@ components:
           description: Whether to use a regex that matches exactly one sequence or
             record if ``max_sequences_per_example`` is 1.
           default: false
+        max_records_per_sequence:
+          title: max_records_per_sequence
+          description: Max records per grouped sequence under structured generation.
+            None uses the largest training group size. Must be None or >= 1.
+          type: integer
       type: object
       title: StructuredGenerationParameters
       description: 'Configuration for vLLM structured generation.
@@ -1952,12 +1973,18 @@ components:
           description: The weight decay to apply to all layers except all bias and
             LayerNorm weights in the AdamW optimizer. Must be in (0, 1).
           default: 0.01
-        warmup_ratio:
+        warmup_steps:
           type: number
-          title: warmup_ratio
-          description: Ratio of total training steps used for a linear warmup from
-            0 to the learning rate. Must be > 0.
+          title: warmup_steps
+          description: Linear warmup from 0 to the learning rate. A whole number of
+            1 or more sets the exact number of warmup steps; a float in (0, 1) is
+            treated as a ratio of total training steps; 0 disables warmup. Must be
+            finite and >= 0, and cannot be fractional at or above 1.
           default: 0.05
+        warmup_ratio:
+          title: warmup_ratio
+          description: Deprecated. Use warmup_steps instead.
+          type: number
         lr_scheduler:
           type: string
           title: lr_scheduler
@@ -2141,6 +2168,12 @@ components:
           description: Whether to automatically fix unordered records in a sequence
             by sorting the records.
           default: false
+        enforce_numeric_range:
+          type: boolean
+          title: enforce_numeric_range
+          description: When True, reject floats outside the training-observed min/max.
+            Set False to skip float range checks (integers/enums still enforced).
+          default: true
       type: object
       title: ValidationParameters
       description: 'Configuration for record and sequence validation.

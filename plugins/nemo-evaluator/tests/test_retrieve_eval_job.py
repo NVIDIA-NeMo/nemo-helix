@@ -24,14 +24,19 @@ from nemo_evaluator_sdk.values.models import Model, ModelRef, RankingInference
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateRangeScore
 from nemo_evaluator_sdk.values.retrieval import Retrieval
-from nemo_platform_plugin.client.client import NemoClient
-from nemo_platform_plugin.job_context import JobContext, StoragePaths
-from nemo_platform_plugin.job_results import LocalJobResults
-from nemo_platform_plugin.jobs.api_factory import CPUExecutionProviderSpec
-from nemo_platform_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_platform_plugin.sdk import AsyncNeMoPlatform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.job_context import JobContext, StoragePaths
+from nemo_helix_plugin.job_results import LocalJobResults
+from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
+
+
+def _beir_dataset(mocker: MockerFixture, *, dropped_qrel_rows: int = 0) -> BeirDataset:
+    dataset = mocker.Mock(spec=BeirDataset)
+    dataset.dropped_qrel_rows = dropped_qrel_rows
+    return dataset
 
 
 def _context(tmp_path: Path) -> JobContext:
@@ -53,8 +58,8 @@ def _spec() -> RetrieveEvalSpec:
     )
 
 
-def _async_platform() -> AsyncNeMoPlatform:
-    return AsyncNeMoPlatform(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _result(*, ndcg: float = 0.75, recall: float = 1.0) -> BenchmarkEvaluationResult:
@@ -108,6 +113,8 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
             batch_size=16,
             embedding_in_flight=3,
             embedding_dimensions=1024,
+            query_prefix="query:",
+            passage_prefix="passage:",
         ),
     )
 
@@ -125,6 +132,8 @@ async def test_to_spec_forwards_retrieval_pipeline_fields() -> None:
     assert canonical.target.batch_size == 16
     assert canonical.target.embedding_in_flight == 3
     assert canonical.target.embedding_dimensions == 1024
+    assert canonical.target.query_prefix == "query:"
+    assert canonical.target.passage_prefix == "passage:"
 
 
 async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFixture) -> None:
@@ -135,7 +144,7 @@ async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFi
     )
     stamped = resolved.model_copy(update={"inference": RankingInference(contract="hosted-rerank-v1", path="/rerank")})
     resolve = mocker.patch(
-        "nemo_evaluator.jobs.retrieve_eval.PlatformMetricModelResolver.resolve_model",
+        "nemo_evaluator.jobs.retrieve_eval.HelixMetricModelResolver.resolve_model",
         new=mocker.AsyncMock(return_value=resolved),
     )
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.client_from_platform")
@@ -166,7 +175,7 @@ async def test_to_spec_preflights_and_stamps_reranker_model_ref(mocker: MockerFi
 async def test_to_spec_rejects_incompatible_reranker_model_ref(mocker: MockerFixture) -> None:
     resolved = Model(url="https://igw.example.test/v1", name="reranker")
     mocker.patch(
-        "nemo_evaluator.jobs.retrieve_eval.PlatformMetricModelResolver.resolve_model",
+        "nemo_evaluator.jobs.retrieve_eval.HelixMetricModelResolver.resolve_model",
         new=mocker.AsyncMock(return_value=resolved),
     )
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.client_from_platform")
@@ -223,11 +232,11 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
         return_value=downloaded,
     )
-    dataset = mocker.Mock(spec=BeirDataset)
+    dataset = _beir_dataset(mocker)
     load = mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=dataset)
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     sdk = mocker.Mock(spec=NemoClient)
 
     output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=sdk)
@@ -242,6 +251,7 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
         "recall_10": 1.0,
         "P_10": 0.1,
         "map_cut_10": 0.7,
+        "dropped_qrel_rows": 0,
     }
     assert json.loads((ctx.storage.persistent / EVAL_RESULTS_FILE_NAME).read_text()) == output["eval_results"]
     assert (ctx.storage.persistent / "results" / EVAL_RESULTS_RESULT_NAME).exists()
@@ -255,7 +265,7 @@ def test_run_reports_relative_baseline_scores(tmp_path: Path, mocker: MockerFixt
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(
@@ -264,7 +274,7 @@ def test_run_reports_relative_baseline_scores(tmp_path: Path, mocker: MockerFixt
             _result(ndcg=0.5, recall=0.75),
         ]
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={"baseline": Retrieval(embeddings=Model(url="https://igw.example.test/v1", name="baseline"))}
     )
@@ -287,7 +297,7 @@ def test_run_scores_baseline_concurrently(tmp_path: Path, mocker: MockerFixture)
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     in_flight = 0
     max_in_flight = 0
@@ -306,7 +316,7 @@ def test_run_scores_baseline_concurrently(tmp_path: Path, mocker: MockerFixture)
 
     evaluator = mocker.Mock()
     evaluator.run = _run
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={"baseline": Retrieval(embeddings=Model(url="https://igw.example.test/v1", name="baseline"))}
     )
@@ -324,7 +334,7 @@ def test_run_includes_cutoff_10_when_baseline_omits_it(tmp_path: Path, mocker: M
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(
@@ -333,7 +343,7 @@ def test_run_includes_cutoff_10_when_baseline_omits_it(tmp_path: Path, mocker: M
             _result(ndcg=0.5, recall=0.75),
         ]
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={
             "k": [1],
@@ -363,13 +373,13 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
     )
     mocker.patch(
         "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
-        return_value=mocker.Mock(spec=BeirDataset),
+        return_value=_beir_dataset(mocker),
     )
     started = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.datetime", wraps=datetime).now.return_value = started
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
 
     RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
 
@@ -384,10 +394,10 @@ def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, m
         "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
         return_value=tmp_path / "downloaded",
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=mocker.Mock(spec=BeirDataset))
+    mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=_beir_dataset(mocker))
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     client = NemoClient(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
     ctx = _context(tmp_path)
 
@@ -399,3 +409,24 @@ def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, m
 
     assert download.call_args.kwargs["client"] is client
     assert output["eval_results"]["ndcg_cut_10"] == 0.75
+    assert output["eval_results"]["dropped_qrel_rows"] == 0
+
+
+def test_run_includes_dropped_qrel_rows_in_eval_results(tmp_path: Path, mocker: MockerFixture) -> None:
+    ctx = _context(tmp_path)
+    mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.download_dataset_sync",
+        return_value=tmp_path / "downloaded",
+    )
+    mocker.patch(
+        "nemo_evaluator.jobs.retrieve_eval.load_beir_dataset",
+        return_value=_beir_dataset(mocker, dropped_qrel_rows=1),
+    )
+    evaluator = mocker.Mock()
+    evaluator.run = mocker.AsyncMock(return_value=_result())
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
+
+    output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
+
+    assert output["eval_results"]["dropped_qrel_rows"] == 1
+    assert json.loads((ctx.storage.persistent / EVAL_RESULTS_FILE_NAME).read_text())["dropped_qrel_rows"] == 1

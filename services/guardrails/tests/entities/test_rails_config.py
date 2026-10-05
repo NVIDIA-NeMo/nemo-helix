@@ -4,7 +4,7 @@
 """Tests for RailsConfig and Model entity behavior."""
 
 import pytest
-from nmp.guardrails.entities.values._private import _UNSUPPORTED_MODEL_TASKS, Model, RailsConfig
+from nhx.guardrails.entities.values._private import _UNSUPPORTED_MODEL_TASKS, Model, RailsConfig
 from pydantic import ValidationError
 
 

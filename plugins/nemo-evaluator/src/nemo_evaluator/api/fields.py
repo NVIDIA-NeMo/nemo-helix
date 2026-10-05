@@ -8,8 +8,8 @@ without importing the module that composes them into DTOs — the definitions ar
 ``schemas``, so they cannot import from it.
 
 What counts as a ``workspace/name`` reference is **not** decided here: the shape
-(:data:`~nemo_platform_plugin.refs.ENTITY_REF_PATTERN`) and the parser
-(:func:`~nemo_platform_plugin.refs.parse_entity_ref`) are the platform's, shared with every other
+(:data:`~nemo_helix_plugin.refs.ENTITY_REF_PATTERN`) and the parser
+(:func:`~nemo_helix_plugin.refs.parse_entity_ref`) are the platform's, shared with every other
 plugin. This module only adds what is specific to a *revisioned* evaluator entity — the ``#fragment``
 that selects a revision.
 
@@ -27,7 +27,7 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
     MetricMetadata,
 )
 from nemo_evaluator_sdk.values.common import SecretRef
-from nemo_platform_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FILESET_REF_PATTERN, parse_entity_ref
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator
 
 
@@ -141,7 +141,7 @@ LATEST_TAG = "latest"
 def parse_subentity_ref(root: str, default_workspace: str) -> tuple[str, str, str]:
     """Split a reference into ``(workspace, name, fragment)``.
 
-    The ``workspace/name`` split is delegated to the platform's :func:`~nemo_platform_plugin.refs.
+    The ``workspace/name`` split is delegated to the platform's :func:`~nemo_helix_plugin.refs.
     parse_entity_ref`; this only adds the revision fragment on top, so evaluator refs and every other
     plugin's refs agree on what a ``workspace/name`` is. Callers that don't care about revisions
     discard the third element — that, rather than a second parser, is how a pinned ref is read
@@ -162,6 +162,20 @@ class MetricRef(RootModel[str]):
     root: str = Field(
         pattern=ENTITY_REF_PATTERN,
         description="Reference to a stored metric (format: workspace/metric-name, or metric-name in the job workspace).",
+    )
+
+
+class AgentRef(RootModel[str]):
+    """Reference to an agent registered on the platform (format: ``workspace/name`` or ``name``).
+
+    Names an ``Agent`` entity (``nemo agents create``) so an evaluation can run it without repeating
+    its configuration. Same shape as :class:`MetricRef`: a bare name resolves in the job workspace.
+    Agents carry no revision fragment — the entity is looked up as it is at submit time.
+    """
+
+    root: str = Field(
+        pattern=ENTITY_REF_PATTERN,
+        description="Reference to a registered agent (format: workspace/agent-name, or agent-name in the job workspace).",
     )
 
 
@@ -258,7 +272,7 @@ TaskMetadataList: TypeAlias = Annotated[list[MetadataItem], AfterValidator(_reje
 #: says everything a list of per-file entries would — while making it impossible for the two to
 #: disagree about what the taskset ships.
 #:
-#: Same shape as ``bundle_ref`` and ``archive_ref``, so the fragment is required; here it names the
+#: Same shape as ``bundle_ref`` and Harbor tree references, so the fragment is required; here it names the
 #: prefix the files sit under rather than a single file. Use a prefix such as ``#files`` to mean
 #: "the whole of this fileset's file area".
 #:
