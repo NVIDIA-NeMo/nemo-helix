@@ -160,3 +160,34 @@ def test_native_v1_requires_an_install_marker_too() -> None:
         validate_environment_manifest_against_listing(
             manifest, ["nemo-environment.yaml", "resources_servers/custom/configs/custom.yaml"]
         )
+
+
+def test_an_extras_only_wheels_v1_listing_is_accepted() -> None:
+    """A FileSet may carry just the extra wheels a built-in environment needs, and no component."""
+    manifest = parse_environment_manifest("format: wheels-v1\nconfig_paths: []\nmetadata:\n  name: extras\n")
+    validate_environment_manifest_against_listing(
+        manifest, ["nemo-environment.yaml", "wheels/extra_dep-1.0-py3-none-any.whl"]
+    )
+
+
+def test_native_v1_without_config_paths_is_rejected() -> None:
+    with pytest.raises(GymEnvironmentPackageError, match="at least one config"):
+        parse_environment_manifest("format: native-v1\nconfig_paths: []\nmetadata:\n  name: x\n")
+
+
+def test_a_shipped_server_directory_needs_its_marker_even_when_the_config_lives_elsewhere() -> None:
+    """Gym runs the directory the YAML names, not the directory the YAML sits in."""
+    manifest = parse_environment_manifest(
+        "format: wheels-v1\nconfig_paths:\n  - configs/custom.yaml\nmetadata:\n  name: custom\n"
+    )
+    listing = [
+        "nemo-environment.yaml",
+        "configs/custom.yaml",
+        "resources_servers/custom/app.py",
+        "wheels/d-1.0-py3-none-any.whl",
+    ]
+
+    with pytest.raises(GymEnvironmentPackageError, match="resources_servers/custom"):
+        validate_environment_manifest_against_listing(manifest, listing)
+
+    validate_environment_manifest_against_listing(manifest, [*listing, "resources_servers/custom/requirements.txt"])

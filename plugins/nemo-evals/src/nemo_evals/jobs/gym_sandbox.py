@@ -392,9 +392,7 @@ def serve_config(
         "job_id": job_id,
         "host_provider": plan.host_provider,
         "environment_path": "/job/environment" if fileset_environment else None,
-        # Evaluator's wheels-v1 contract: the image provides Gym and Gym's dependencies; the
-        # wheelhouse provides only what the package's own servers add. The host then runs those
-        # servers on the image's Gym install instead of rebuilding Gym's closure from an index.
+        # GRPO leaves this off: its documented wheels-v1 contract vendors Gym's own closure.
         "reuse_image_gym_install": True,
         "sandbox": {
             "image": plan.runtime_image,

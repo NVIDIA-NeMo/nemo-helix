@@ -92,12 +92,30 @@ With `requirements.txt` listing `emoji==2.14.1`, this is enough:
 pip download emoji==2.14.1 --only-binary :all: --python-version 3.13 --platform manylinux2014_x86_64 -d my-gym-environment/wheels
 ```
 
+A `wheels-v1` package may also carry no servers at all, only wheels. Use this when a built-in
+environment needs an extra package the image does not ship. Leave `config_paths` empty; the job
+runs the agent and resources server it selects, and the wheels are importable by both.
+
+```text
+mcqa-extras/
+├── nemo-environment.yaml
+└── wheels/
+    └── some_dependency-1.0.0-py3-none-any.whl
+```
+
+```yaml
+format: wheels-v1
+config_paths: []
+metadata:
+  name: mcqa-extras
+```
+
 The package must follow these rules:
 
 - Every `config_paths` entry is relative to the FileSet root and names an uploaded file.
 - `native-v1` config paths stay under `resources_servers/` or `responses_api_agents/`.
-- Each agent and resources-server directory has exactly one of `requirements.txt` or
-  `pyproject.toml`.
+- Every `resources_servers/<name>/` and `responses_api_agents/<name>/` directory in the package has
+  exactly one of `requirements.txt` or `pyproject.toml`, wherever its config file lives.
 - `wheels/` is flat and contains only `.whl` files.
 - Do not include `responses_api_models/`; model configuration is operator-owned.
 - Do not include dataset `.jsonl` files. Store evaluation rows in a separate taskset.

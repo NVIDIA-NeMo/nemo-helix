@@ -518,3 +518,39 @@ def test_rejects_cross_type_namespace_collisions() -> None:
 
     with pytest.raises(EnvironmentPackageError, match="both agents and resources servers"):
         validate_environment_namespaces(package_namespaces)
+
+
+def test_wheels_v1_may_declare_no_config_paths(tmp_path: Path) -> None:
+    """An extras-only package: wheels for the image's built-in servers, no component of its own."""
+    _write_manifest(tmp_path, "format: wheels-v1\nconfig_paths: []\nmetadata:\n  name: extras\n")
+    (tmp_path / "wheels").mkdir()
+    (tmp_path / "wheels" / "extra-1.0-py3-none-any.whl").write_bytes(b"")
+
+    package = load_environment_package(tmp_path)
+
+    assert isinstance(package, WheelsV1Package)
+    assert package.config_paths == ()
+    assert inspect_environment_components(package) == inspect_environment_components(package)
+
+
+def test_native_v1_still_needs_a_config_path() -> None:
+    """native-v1 ships source, so a package with nothing to run is a mistake, not an extras bundle."""
+    with pytest.raises(EnvironmentPackageError, match="at least one config"):
+        parse_environment_manifest("format: native-v1\nconfig_paths: []\nmetadata:\n  name: x\n")
+
+
+def test_listing_checks_shipped_server_directories_even_when_the_config_lives_elsewhere() -> None:
+    """Gym runs the directory the YAML names, not the directory the YAML sits in.
+
+    A wheels-v1 package may keep its config under `configs/`; the server it ships under
+    `resources_servers/` still needs its install marker or Gym never sees it.
+    """
+    manifest = parse_environment_manifest(_complete_manifest("wheels-v1", "configs/custom.yaml"))
+    listing = ["configs/custom.yaml", "resources_servers/custom/app.py", "wheels/dep-1.0-py3-none-any.whl"]
+
+    with pytest.raises(
+        EnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml.*resources_servers/custom"
+    ):
+        validate_environment_manifest_against_listing(manifest, listing)
+
+    validate_environment_manifest_against_listing(manifest, [*listing, "resources_servers/custom/requirements.txt"])

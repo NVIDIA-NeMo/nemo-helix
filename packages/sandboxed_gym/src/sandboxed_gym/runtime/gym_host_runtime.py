@@ -51,8 +51,6 @@ GYM_GLOBAL_CONFIG_ENV_KEY = "NHX_GYM_GLOBAL_CONFIG"
 #: FileSet error instead of a silent fallback to the image-shipped environment.
 ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY = "NHX_ENVIRONMENT_PACKAGE_REQUIRED"
 ENVIRONMENT_OFFLINE_ENV_KEY = "NHX_ENVIRONMENT_OFFLINE"
-# Opt-in from the caller: wheels-v1 package servers run on the image's Gym install (see
-# `_link_wheels_v1_component_venvs`). Off, Gym builds each one its own venv from a package index.
 REUSE_IMAGE_GYM_INSTALL_ENV_KEY = "NHX_REUSE_IMAGE_GYM_INSTALL"
 HF_CACHE_DIRNAME = ".huggingface"
 UV_CACHE_DIR_KEY = "uv_cache_dir"
@@ -73,11 +71,9 @@ MODEL_CALL_CAPTURE_DIR_KEY = "model_call_capture_dir"
 MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 # uv setting that points Gym's per-server dependency resolver at the staged wheelhouse.
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
-# Gym's own key: when true, a component whose venv already exists is activated, not rebuilt.
+# Gym's config key; the name must match Gym's.
 SKIP_VENV_IF_PRESENT_KEY = "skip_venv_if_present"
-# Name Gym gives each component venv under ``uv_venv_dir/<kind>/<server>/``.
 COMPONENT_VENV_DIRNAME = ".venv"
-# Writable /job/work subdirectory that stands in for ``uv_venv_dir`` when the image's is read-only.
 COMPONENT_VENV_ROOT_SUBDIR = "gym_venvs"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
@@ -535,9 +531,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         check=True,
     )
 
-    # A component Gym still builds a venv for (one this host did not link to the container's
-    # Gym install, see `_link_wheels_v1_component_venvs`) prefers the staged wheels for anything
-    # its requirements name.
+    # For any component Gym still builds a venv for.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
 
     if _environment_offline():
@@ -644,8 +638,6 @@ def _link_wheels_v1_component_venvs(
     if not isinstance(package, WheelsV1Package) or not _reuse_image_gym_install():
         return
     if not global_config.get(SKIP_VENV_IF_PRESENT_KEY):
-        # Without the skip, Gym would run `uv venv --allow-existing` *into* the link target and
-        # install on top of the container's Gym install. Leave Gym's own venv build in place.
         print(
             f"gym-host: {SKIP_VENV_IF_PRESENT_KEY} is off; wheels-v1 servers will build their own venvs",
             flush=True,
@@ -655,6 +647,16 @@ def _link_wheels_v1_component_venvs(
     if container_venv is None:
         print("gym-host: no activatable container venv found; wheels-v1 servers will build their own venvs", flush=True)
         return
+    server_dirs = [
+        (kind, server_dir)
+        for kind in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR)
+        if (package.root / kind).is_dir()
+        for server_dir in sorted(path for path in (package.root / kind).iterdir() if path.is_dir())
+        if any((server_dir / marker).is_file() for marker in SERVER_INSTALL_MARKERS)
+    ]
+    if not server_dirs:
+        return
+
     configured_root = global_config.get(UV_VENV_DIR_KEY) or os.environ.get("NEMO_GYM_VENV_DIR")
     if not configured_root:
         # Gym's default is `<server dir>/.venv`, which is inside the read-only environment mount.
@@ -662,25 +664,18 @@ def _link_wheels_v1_component_venvs(
         global_config[UV_VENV_DIR_KEY] = configured_root
     venv_root = _writable_component_venv_root(configured_root, work_path, global_config)
 
-    for kind in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR):
-        kind_dir = package.root / kind
-        if not kind_dir.is_dir():
+    for kind, server_dir in server_dirs:
+        venv_path = venv_root / kind / server_dir.name / COMPONENT_VENV_DIRNAME
+        if venv_path.exists() or venv_path.is_symlink():
+            print(f"gym-host: keeping existing venv for {kind}/{server_dir.name} at {venv_path}", flush=True)
             continue
-        for server_dir in sorted(path for path in kind_dir.iterdir() if path.is_dir()):
-            if not any((server_dir / marker).is_file() for marker in SERVER_INSTALL_MARKERS):
-                # Not a server to Gym's discovery either; nothing will be built for it.
-                continue
-            venv_path = venv_root / kind / server_dir.name / COMPONENT_VENV_DIRNAME
-            if venv_path.exists() or venv_path.is_symlink():
-                print(f"gym-host: keeping existing venv for {kind}/{server_dir.name} at {venv_path}", flush=True)
-                continue
-            venv_path.parent.mkdir(parents=True, exist_ok=True)
-            os.symlink(container_venv, venv_path)
-            print(
-                f"gym-host: {kind}/{server_dir.name} uses the container's Gym install ({container_venv}); "
-                "its extra dependencies come from the wheelhouse",
-                flush=True,
-            )
+        venv_path.parent.mkdir(parents=True, exist_ok=True)
+        os.symlink(container_venv, venv_path)
+        print(
+            f"gym-host: {kind}/{server_dir.name} uses the container's Gym install ({container_venv}); "
+            "its extra dependencies come from the wheelhouse",
+            flush=True,
+        )
 
 
 def _prepend_environment_search_root(environment_root: str) -> None:

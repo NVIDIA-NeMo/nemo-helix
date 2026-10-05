@@ -2166,3 +2166,52 @@ def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeyp
     # ...beside the package server's link to the container venv.
     linked = mirrored_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
     assert linked.is_symlink() and linked.resolve() == container_venv.resolve()
+
+
+def _extras_only_wheels_package(tmp_path, monkeypatch):
+    """A wheels-v1 package that adds wheels for the image's built-in servers and declares no component."""
+    import yaml
+
+    (tmp_path / runtime.ENVIRONMENT_MANIFEST_FILENAME).write_text(
+        yaml.safe_dump({"format": "wheels-v1", "config_paths": [], "metadata": {"name": "extras-only"}}),
+        encoding="utf-8",
+    )
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir()
+    (wheels_dir / "extra_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def test_an_extras_only_wheels_package_runs_the_selected_built_in_components(tmp_path, monkeypatch):
+    """Expectation: a FileSet may carry just the extra wheels a built-in environment needs."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    agent_config = "responses_api_agents/simple_agent/configs/simple_agent.yaml"
+
+    configured = runtime._compose_gym_config_with_environment_package(
+        _component_selection(agent_config=agent_config), package
+    )
+
+    assert configured["config_paths"] == [
+        agent_config,
+        "responses_api_models/inference_provider/configs/inference_provider.yaml",
+        "resources_servers/selected_resources/configs/selected_resources.yaml",
+    ]
+
+
+def test_an_extras_only_wheels_package_links_no_venv_but_still_stages_its_wheels(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """Nothing to link (no package server), yet the wheels must reach the built-in servers via PYTHONPATH."""
+    package = _extras_only_wheels_package(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    work = tmp_path / "work"
+
+    runtime._install_wheels_v1_dependencies(package, str(work))
+    runtime._link_wheels_v1_component_venvs(
+        package, {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}, str(work)
+    )
+
+    assert not venv_root.exists()
+    assert runtime.os.environ["PYTHONPATH"].split(runtime.os.pathsep)[0] == str(work / runtime.WHEELS_V1_INSTALL_SUBDIR)

@@ -30,8 +30,6 @@ CUSTOM_AGENT_SUBDIR = "responses_api_agents"
 CUSTOM_RESOURCES_SERVER_SUBDIR = "resources_servers"
 #: Gym model configs. A native-v1 ``config_paths`` entry may name one; other files in this tree are rejected.
 OPERATOR_MODEL_SUBDIR = "responses_api_models"
-# Gym only treats a component directory as a server when one of these is present; a directory
-# without one is invisible to `gym env start` and `_resolve_server_dir` falls through to the image.
 SERVER_INSTALL_MARKERS = ("requirements.txt", "pyproject.toml")
 
 
@@ -78,7 +76,7 @@ class _ManifestBase(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    config_paths: tuple[str, ...] = Field(min_length=1)
+    config_paths: tuple[str, ...] = Field(default=())
     metadata: EnvironmentMetadata
 
     @field_validator("config_paths")
@@ -100,6 +98,8 @@ class NativeV1Manifest(_ManifestBase):
     @classmethod
     def _under_gym_component_directories(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         """Keep native-v1 configs under a Gym server tree."""
+        if not values:
+            raise ValueError("native-v1 config_paths must name at least one config")
         allowed = (
             f"{CUSTOM_AGENT_SUBDIR}/",
             f"{CUSTOM_RESOURCES_SERVER_SUBDIR}/",
@@ -112,7 +112,11 @@ class NativeV1Manifest(_ManifestBase):
 
 
 class WheelsV1Manifest(_ManifestBase):
-    """A complete environment whose dependencies resolve from its wheelhouse."""
+    """A complete environment whose dependencies resolve from its wheelhouse.
+
+    ``config_paths`` may be empty: the package then adds only wheels, and the job runs the
+    built-in agent and resources server it selected.
+    """
 
     format: Literal[EnvironmentFormat.WHEELS_V1] = EnvironmentFormat.WHEELS_V1
 
@@ -223,15 +227,15 @@ def load_environment_manifest(environment_root: str | Path) -> EnvironmentManife
     return parse_environment_manifest(manifest_path.read_bytes())
 
 
-def server_directories_from_config_paths(config_paths: Iterable[str]) -> list[str]:
-    """Component directories (``<kind>/<name>``) the manifest's config paths point into.
+def shipped_server_directories(entries: Iterable[str]) -> list[str]:
+    """``<kind>/<name>`` directories the package ships under the agent and resources-server trees.
 
-    Model configs are operator-owned and never built, so only agent and resources-server
-    trees count.
+    Gym starts a server from the directory its config YAML names, which need not be where the
+    YAML itself lives, so the package's directories are what count, not the config paths.
     """
     directories: list[str] = []
-    for config_path in config_paths:
-        parts = PurePosixPath(config_path).parts
+    for entry in entries:
+        parts = PurePosixPath(entry).parts
         if len(parts) >= 3 and parts[0] in (CUSTOM_RESOURCES_SERVER_SUBDIR, CUSTOM_AGENT_SUBDIR):
             directory = f"{parts[0]}/{parts[1]}"
             if directory not in directories:
@@ -239,15 +243,15 @@ def server_directories_from_config_paths(config_paths: Iterable[str]) -> list[st
     return directories
 
 
-def missing_server_install_markers(config_paths: Iterable[str], entries: set[str]) -> list[str]:
-    """Server directories with no ``requirements.txt`` or ``pyproject.toml``, or with both.
+def missing_server_install_markers(entries: set[str]) -> list[str]:
+    """Shipped server directories with no ``requirements.txt`` or ``pyproject.toml``, or with both.
 
-    Gym recognises a server directory only by one of those files, whatever the package format,
-    and refuses a directory that has both. Checked at submit so the job fails here with the
-    directory named, not inside the sandbox with Gym's own error.
+    Gym recognises a server directory only by one of those files and refuses a directory that has
+    both. A directory without one is invisible: Gym silently runs a same-named built-in instead, or
+    fails at startup with its own error.
     """
     problems: list[str] = []
-    for directory in server_directories_from_config_paths(config_paths):
+    for directory in shipped_server_directories(entries):
         present = [marker for marker in SERVER_INSTALL_MARKERS if f"{directory}/{marker}" in entries]
         if len(present) != 1:
             problems.append(directory)
@@ -288,7 +292,7 @@ def validate_environment_manifest_against_listing(
             f"The `config_paths` field references files that are not in the package: {', '.join(missing_configs)}"
         )
 
-    bad_server_dirs = missing_server_install_markers(manifest.config_paths, entries)
+    bad_server_dirs = missing_server_install_markers(entries)
     if bad_server_dirs:
         raise EnvironmentPackageError(
             "each agent and resources-server directory needs exactly one of requirements.txt or pyproject.toml "
