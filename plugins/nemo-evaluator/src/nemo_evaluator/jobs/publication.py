@@ -7,7 +7,7 @@ Covers both shapes: ``publish_agent_eval_result`` for an agent-eval run, and
 ``publish_row_eval_result`` for a dataset-driven one, which is adapted to the same
 ``AgentEvalResult`` shape first (see ``intake.row_adapter``).
 
-``publish_to_intake`` is deliberately not a side effect of ``AgentEvaluator.run()`` (AALGO-290):
+``publish_to_intake`` is deliberately not a side effect of ``AgentEvaluator.run()``:
 optionality is structural, you call it or you don't. ``spec.publication.intake`` keeps that shape —
 absent means no publish, and nothing here runs — while giving the job API a way to request it, which
 is what Studio needs to get evaluation runs into Experiments.

@@ -321,8 +321,8 @@ def docker_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 
     Gates on a reachable Docker daemon only — a runner executes *inside* the task container, not on
     the host, so the host toolchain is irrelevant here. The agent-eval step runs in the ``cpu-tasks``
-    image; runner targets aren't expected to succeed there yet (the image carries no agent harness —
-    see AALGO-301), which is why the test using this fixture is marked xfail.
+    image; runner targets aren't expected to succeed there yet (the image carries no agent harness),
+    which is why the test using this fixture is marked xfail.
     """
     if not _docker_available():
         pytest.skip("docker daemon not available")

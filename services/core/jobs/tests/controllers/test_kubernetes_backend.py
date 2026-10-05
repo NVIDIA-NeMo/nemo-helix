@@ -1339,7 +1339,7 @@ def test_sync_job_paused_with_errored_pods_from_sigterm(kubernetes_job, test_ste
     show up with errors (non-zero exit code). The reconciler must recognise this as
     a normal part of suspension and return PAUSED rather than ERROR.
 
-    Regression test for AIRCORE-853.
+    Regression test.
     """
     mock_job_spec = MagicMock()
     mock_job_spec.suspend = True
@@ -1419,7 +1419,7 @@ def test_sync_job_pausing_with_errored_pods_from_sigterm(kubernetes_job, test_st
     During suspension, some pods may already be terminated (errored) while others
     are still running. The reconciler should report PAUSING.
 
-    Regression test for AIRCORE-853.
+    Regression test.
     """
     mock_job_spec = MagicMock()
     mock_job_spec.suspend = True
@@ -1467,7 +1467,7 @@ def test_sync_job_cancelling_with_errored_pods(kubernetes_job, test_step_cancell
 
     Same race as suspension — K8s kills pods during cancellation.
 
-    Regression test for AIRCORE-853.
+    Regression test.
     """
     mock_job_spec = MagicMock()
     mock_job_spec.suspend = False

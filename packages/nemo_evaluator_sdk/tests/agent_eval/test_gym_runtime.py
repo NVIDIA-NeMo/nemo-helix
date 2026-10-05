@@ -126,7 +126,7 @@ def test_render_instruction_is_empty_rather_than_fatal_when_the_row_carries_no_p
     ],
 )
 def test_discover_gym_tasks_ingests_rows_with_no_prompt(name: str, row: dict, tmp_path: Path) -> None:
-    # AALGO-498: these environments could not be ingested at all — discovery raised before a run began.
+    # These environments could not be ingested at all — discovery raised before a run began.
     dataset = tmp_path / f"{name}.jsonl"
     dataset.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
@@ -1053,7 +1053,7 @@ def test_gym_executable_reports_how_to_install_when_absent(monkeypatch: pytest.M
         gym_executable()
 
 
-#: Verbatim from a real `legal_agent_bench` startup timeout (AALGO-485 coverage sweep). Gym polls
+#: Verbatim from a real `legal_agent_bench` startup timeout. Gym polls
 #: repeatedly, so the *last* line is the live one — earlier lines name servers that have since come
 #: up, and reporting those would send the reader after servers that are fine.
 _REAL_ENV_LOG = """\

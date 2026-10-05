@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""AALGO-428: ``AgentEvalSummary.error_trial_ids`` — Harbor's ``exception_stats`` shape."""
+"""``AgentEvalSummary.error_trial_ids`` — Harbor's ``exception_stats`` shape."""
 
 from __future__ import annotations
 

@@ -423,7 +423,7 @@ class HarborAgentTaskRunner:
                     # Harbor resumes per trial and keeps completed work — including
                     # with `agent_dir` set, now that the scoped import path is
                     # content-addressed rather than a fresh uuid per run and Harbor's
-                    # JobConfig comparison can therefore match (AALGO-430).
+                    # JobConfig comparison can therefore match.
                     force_rerun=(self._config.force_rerun or stale),
                     env_templates=env_templates,
                 )
@@ -1193,7 +1193,7 @@ def scoped_harbor_agent_import(
     when deciding whether an existing job directory may be resumed. A random suffix
     made that comparison fail on every rerun, so Harbor raised ``FileExistsError``
     instead of resuming and its per-trial resume was unreachable for any caller that
-    sets ``agent_dir`` (AALGO-430). Content-addressing keeps distinct agents isolated
+    sets ``agent_dir``. Content-addressing keeps distinct agents isolated
     while letting an unchanged agent resume — and makes an *edited* agent invalidate
     the job dir on Harbor's own terms.
 

@@ -68,7 +68,7 @@ async def test_a_real_harbor_timeout_lands_in_the_summary_error_rollup(tmp_path:
     assert trial.error.type == "AgentTimeoutError"
     assert trial.error.message is not None and "timed out" in trial.error.message
 
-    # The point of AALGO-428: no re-walking result.trials, no reconstruction helper -- the summary
+    # The point: no re-walking result.trials, no reconstruction helper -- the summary
     # already carries Harbor's exception_stats shape, keyed by trial id.
     assert result.summary.error_trial_ids == {"AgentTimeoutError": [trial.id]}
     assert result.summary.error_count == 1

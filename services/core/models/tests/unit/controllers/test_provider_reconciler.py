@@ -3134,7 +3134,7 @@ def test_deployment_lora_qualified_double_dash_decodes_same_name_across_workspac
 def test_deployment_lora_no_double_dash_falls_back_to_base_model_workspace(reconciler, caplog):
     """Backward compat: a LoRA id without ``--`` anchors on the BASE MODEL's workspace.
 
-    Pre-AALGO-129 sidecars nested adapters under the model entity (so the
+    Legacy sidecars nested adapters under the model entity (so the
     adapter shared the model's workspace), and the new sidecar's
     ``_resolve_adapter_workspace`` fallback also collapses missing
     ``adapter.workspace`` onto the base model's workspace. Either way, the

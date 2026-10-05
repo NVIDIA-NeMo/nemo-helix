@@ -1881,7 +1881,7 @@ async def test_list_jobs_filter_status_not_eq_returns_complement(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$not/$eq on status (AIRCORE-324) returns jobs whose status is NOT the value."""
+    """$not/$eq on status returns jobs whose status is NOT the value."""
     await _make_job(mock_dispatcher, mock_store, "job-active", HelixJobStatus.ACTIVE)
     completed = await _make_job(mock_dispatcher, mock_store, "job-completed", HelixJobStatus.COMPLETED)
     error = await _make_job(mock_dispatcher, mock_store, "job-error", HelixJobStatus.ERROR)
@@ -1924,7 +1924,7 @@ async def test_list_jobs_filter_status_nin_returns_complement(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$nin on status (AIRCORE-324) returns jobs whose status is none of the values."""
+    """$nin on status returns jobs whose status is none of the values."""
     await _make_job(mock_dispatcher, mock_store, "job-active", HelixJobStatus.ACTIVE)
     completed = await _make_job(mock_dispatcher, mock_store, "job-completed", HelixJobStatus.COMPLETED)
     error = await _make_job(mock_dispatcher, mock_store, "job-error", HelixJobStatus.ERROR)
@@ -1945,7 +1945,7 @@ async def test_list_jobs_filter_or_status_with_non_status(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$or mixing status with a non-status field (AIRCORE-324) returns the union.
+    """$or mixing status with a non-status field returns the union.
 
     Matches jobs that are ACTIVE *or* whose name contains "special", regardless
     of the other condition.
@@ -1972,7 +1972,7 @@ async def test_list_jobs_filter_not_and_status_with_non_status(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$not wrapping a status+name subtree (AIRCORE-324) returns the negation.
+    """$not wrapping a status+name subtree returns the negation.
 
     NOT (status == active AND name ~ "eval") keeps every job except the one that
     is both ACTIVE and name-matches "eval".
@@ -1999,7 +1999,7 @@ async def test_list_jobs_filter_or_with_status_in_each_branch(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
 ):
-    """$or where each branch mixes status with a name term (AIRCORE-324).
+    """$or where each branch mixes status with a name term.
 
     (active AND name~foo) OR (completed AND name~bar) returns exactly the jobs
     matching either full branch.

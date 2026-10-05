@@ -547,7 +547,7 @@ class TestUpdateLoraAdaptersRedownload:
 
 
 class TestUpdateLoraAdaptersCrossWorkspace:
-    """Tests for the new ``{adapter_ws}--{adapter_name}`` on-disk encoding (AALGO-129)."""
+    """Tests for the new ``{adapter_ws}--{adapter_name}`` on-disk encoding."""
 
     def test_two_adapters_same_name_different_workspaces_coexist(self, controller, tmp_path):
         """Two adapters sharing ``adapter.name`` but in different workspaces materialize to distinct dirs."""
@@ -930,9 +930,9 @@ class TestEagerVllmAdapterLoad:
 class TestResolveAdapterWorkspaceFallback:
     """Tests for the temporary ``Adapter.workspace`` SDK-schema gap.
 
-    AALGO-117 introduces first-class :class:`Adapter` entities with their own
+    First-class :class:`Adapter` entities have their own
     ``workspace`` in the entity store, but at the time of writing the public
-    SDK ``Adapter`` schema does not yet expose the field. AALGO-129 needs the
+    SDK ``Adapter`` schema does not yet expose the field. Cross-workspace adapter resolution needs the
     adapter workspace to encode the directory layout, so the sidecar falls
     back to the base model's workspace until the SDK schema gains
     ``workspace``. These tests pin both halves of that contract: the fallback

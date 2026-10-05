@@ -280,8 +280,8 @@ class ModelEntityService:
         """Resolve adapters parented to the given model entity ``ids``.
 
         Adapters are queried with ``ALL_WORKSPACES`` because cross-workspace
-        adapters can be parented to a base model in a different workspace
-        (AALGO-129). Constraining the entity-store query to a single
+        adapters can be parented to a base model in a different workspace.
+        Constraining the entity-store query to a single
         ``workspace`` would silently drop those rows from the response, so the
         sidecar would never see them and the corresponding ``{adapter_ws}--{name}``
         directories would never be materialized. Parent ids are globally unique
@@ -290,8 +290,8 @@ class ModelEntityService:
 
         ``workspace`` is retained as the **legacy** schema fallback passed to
         :func:`_adapter_to_adapter_schema` for adapter rows whose own
-        ``workspace`` field is unset (rows written before AALGO-117 introduced
-        first-class adapter workspaces). New rows carry their own ``workspace``
+        ``workspace`` field is unset (rows written before first-class adapter
+        workspaces were introduced). New rows carry their own ``workspace``
         which takes precedence over this fallback.
         """
         if len(ids) == 0:

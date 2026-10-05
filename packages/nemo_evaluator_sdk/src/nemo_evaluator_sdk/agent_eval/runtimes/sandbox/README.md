@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Sandbox seam (AALGO-321)
+# Sandbox seam
 
 A provider-neutral sandbox contract for running agent-eval harnesses **inside a container**,
 injecting context and retrieving artifacts across the boundary. Built for
@@ -14,7 +14,7 @@ this seam deliberately mirrors it so a Gym backend could be adapted later. We do
 the package because it pulls `ray`/`wandb`/`mlflow`;
 importing it monkeypatches builtin `print` and mutates `sys.path`/HF env; and neither shipped Gym
 backend (Apptainer, OpenSandbox) matches nemo-helix's Docker-local / Kubernetes-scale target — so
-we write the providers ourselves regardless. See AALGO-321 for the full analysis.
+we write the providers ourselves regardless.
 
 ## The contract
 

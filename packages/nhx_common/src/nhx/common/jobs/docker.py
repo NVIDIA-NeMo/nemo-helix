@@ -18,6 +18,6 @@ def validate_gpu_available_for_docker(job: HelixJobSpecLike) -> None:
 
     Delegates to :func:`nemo_helix_plugin.jobs.docker.validate_gpu_available_for_docker`
     so soft-downgraded ``Runtime.NONE`` with a reachable Docker daemon still
-    enforces reserved-GPU checks (AIRCORE-971).
+    enforces reserved-GPU checks.
     """
     _plugin_validate(job)
