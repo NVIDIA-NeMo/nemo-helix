@@ -73,6 +73,13 @@ def test_bitsandbytes_importable():
 
 
 @pytest.mark.smoke_nhx_automodel_training
+def test_nvshmem_importable():
+    # magi-attention records an RPATH into this package. The training image installs
+    # the same nvidia-nvshmem-cu13 the wheel was built against.
+    import nvidia.nvshmem  # noqa: F401
+
+
+@pytest.mark.smoke_nhx_automodel_training
 def test_magi_attention_extensions_importable():
     # magi_attention's __init__ only warns when its compiled extensions fail to load,
     # so import them directly to surface a missing .so or torch ABI mismatch. Loading
