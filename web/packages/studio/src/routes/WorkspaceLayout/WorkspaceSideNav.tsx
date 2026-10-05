@@ -10,7 +10,7 @@ import type {
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getPluginIcon } from '@studio/plugins/iconMap';
+import { isPluginIconName } from '@studio/plugins/iconMap';
 import {
   usePluginInstalled,
   usePlugins,
@@ -39,6 +39,7 @@ import {
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
 import { getAgentsListRoute } from '@studio/routes/utils';
+import { DynamicIcon } from 'lucide-react/dynamic';
 import { useMemo } from 'react';
 import { useLocation } from 'react-router';
 
@@ -197,17 +198,16 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         try {
           return plugin.navItems(workspace).map((group) => ({
             group: group.group,
-            items: group.items.map((item) => {
-              const Icon = getPluginIcon(item.iconName);
-              return {
-                // Namespaced: ids are React keys and accordion-state keys, and
-                // merging puts plugin items in the same array as core ones.
-                id: `${plugin.name}:${item.id}`,
-                slotIcon: Icon ? <Icon className={iconColorClass} /> : undefined,
-                slotLabel: item.label,
-                href: item.href,
-              };
-            }),
+            items: group.items.map((item) => ({
+              // Namespaced: ids are React keys and accordion-state keys, and
+              // merging puts plugin items in the same array as core ones.
+              id: `${plugin.name}:${item.id}`,
+              slotIcon: isPluginIconName(item.iconName) ? (
+                <DynamicIcon name={item.iconName} className={iconColorClass} />
+              ) : undefined,
+              slotLabel: item.label,
+              href: item.href,
+            })),
           }));
         } catch (err) {
           logger.warn(`[plugins] navItems() threw for plugin "${plugin.name}":`, err);

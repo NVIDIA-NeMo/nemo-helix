@@ -1,34 +1,30 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getPluginIcon } from '@studio/plugins/iconMap';
+import { isPluginIconName } from '@studio/plugins/iconMap';
 
-describe('getPluginIcon', () => {
-  it('returns a known Lucide component for a valid kebab-case name', () => {
-    const icon = getPluginIcon('flask-conical');
-    expect(icon).toBeDefined();
-    // Lucide components may be objects or functions depending on the version
-    expect(icon).toBeTruthy();
+describe('isPluginIconName', () => {
+  it('accepts a multi-word kebab-case Lucide name', () => {
+    expect(isPluginIconName('flask-conical')).toBe(true);
   });
 
-  it('returns a known single-word icon', () => {
-    const icon = getPluginIcon('settings');
-    expect(icon).toBeDefined();
+  it('accepts a single-word Lucide name', () => {
+    expect(isPluginIconName('settings')).toBe(true);
   });
 
-  it('returns undefined for an unknown icon name', () => {
-    expect(getPluginIcon('this-icon-does-not-exist')).toBeUndefined();
+  it('rejects an unknown icon name', () => {
+    expect(isPluginIconName('this-icon-does-not-exist')).toBe(false);
   });
 
-  it('returns undefined for non-icon lucide exports like the generic Icon', () => {
-    expect(getPluginIcon('icon')).toBeUndefined();
+  it('rejects non-icon lucide exports like the generic Icon', () => {
+    expect(isPluginIconName('icon')).toBe(false);
   });
 
-  it('returns undefined for an empty string', () => {
-    expect(getPluginIcon('')).toBeUndefined();
+  it('rejects an empty string', () => {
+    expect(isPluginIconName('')).toBe(false);
   });
 
-  it('returns undefined for a name with a trailing hyphen', () => {
-    expect(getPluginIcon('flask-')).toBeUndefined();
+  it('rejects a name with a trailing hyphen', () => {
+    expect(isPluginIconName('flask-')).toBe(false);
   });
 });
