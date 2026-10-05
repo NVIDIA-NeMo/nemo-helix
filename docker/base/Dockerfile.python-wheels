@@ -367,8 +367,8 @@ RUN git config --global http.version HTTP/1.1 && \
     git clone --filter=blob:none --sparse --no-checkout https://github.com/NVIDIA/cutlass.git /src/magi-attention/magi_attention/csrc/cutlass && \
     git -C /src/magi-attention/magi_attention/csrc/cutlass sparse-checkout set include tools/util/include && \
     git -C /src/magi-attention/magi_attention/csrc/cutlass fetch --depth 1 origin "$cutlass_sha" && \
-    git -C /src/magi-attention/magi_attention/csrc/cutlass checkout --detach FETCH_HEAD && \
-    mkdir -p /wheels && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass checkout --detach FETCH_HEAD
+RUN mkdir -p /wheels && \
     pip install --no-cache-dir versioningit && \
     cd /src/magi-attention && \
     MAGI_ATTENTION_BUILD_COMPUTE_CAPABILITY="90,100" \
