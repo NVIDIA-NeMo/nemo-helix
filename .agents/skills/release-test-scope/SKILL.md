@@ -197,13 +197,13 @@ Before finalizing draft release notes in an interactive run, present all otherwi
 
 Read [the shared release test-scope template](references/ticket-template.md). Use [the deterministic Git evidence collector](references/collect-git-evidence.sh) when available instead of manually retyping the Git collection commands; the generated files are analysis inputs, not the user-facing artifact.
 
-Write:
+Write the reviewable test plan into the repository:
 
 ```text
-release-artifacts/<version>/qa-test-scope.md
+tests/plans/<version>.md
 ```
 
-The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, applicable Studio or CLI entry points, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
+Use the exact release version string for `<version>`, including the patch component when provided. The artifact must be readable by all release stakeholders. Use one section per consolidated feature and include the description, user impact, release-snapshot docs, applicable Studio or CLI entry points, expected result, risks, and draft release-note text. State clearly that it is a consolidated feature scope, not an exhaustive PR manifest.
 
 Draft release notes must use one structured block per included user-visible capability: `Description`, `Documentation`, and `Use it`. Under `Use it`, include verified CLI commands and/or Studio navigation as applicable; state explicitly when neither surface applies. Keep internal-only maintenance compact and do not invent an interface to fill the template.
 
