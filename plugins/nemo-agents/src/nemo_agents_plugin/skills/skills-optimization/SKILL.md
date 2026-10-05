@@ -4,7 +4,7 @@
 
 name: skills-optimization
 description: >-
-  Improve agent skills via the `nemo agents` plugin (evaluate-suite / analyze / optimize-skills). Use when the user wants to improve an agent's skills using a Harbor or NAT eval suite, run a batch of agentic tests, analyze why evals fail, or kick off an automated skill-optimization
+  Improve agent skills via the `nemo agents` plugin (evaluate-suite / analyze / the nemo-optimize-skills strategy). Use when the user wants to improve an agent's skills using a Harbor or NAT eval suite, run a batch of agentic tests, analyze why evals fail, or kick off an automated skill-optimization
   loop. Trigger keywords - optimize skills, evaluate agent suite, analyze eval batch, skills optimizer, harbor evals.
 allowed-tools: Bash
 metadata:
@@ -20,35 +20,39 @@ already has an eval suite (Harbor `task.toml` or NAT `workflow.yml` tasks):
 |---------|---------|
 | `nemo agents evaluate-suite` | Run a directory of containerized eval tasks against the agent |
 | `nemo agents analyze` | Cluster failures, surface regressions, generate hypotheses |
-| `nemo agents optimize-skills` | Full loop: run evals → analyze → have Claude edit skills → verify → keep or discard |
+| `nemo agents optimize run-strategy --strategy nemo-optimize-skills` | Full loop: run evals → analyze → have Claude edit skills → verify → keep or discard |
 
-All three are direct NemoJob submit commands. The spec is supplied via
-`--spec-file <path.yml>` (YAML or JSON file) or `--spec '{...}'` (JSON inline).
-When both are given, `--spec-file` wins.
+`evaluate-suite` and `analyze` are direct NemoJob submit commands; the skills
+loop is an optimization strategy dispatched by `nemo agents optimize run-strategy`.
+For all three the spec is supplied via `--spec-file <path.yml>` (YAML or JSON
+file) or `--spec '{...}'` (JSON inline). When both are given, `--spec-file`
+wins. `run-strategy` only has flags for the router's shared fields (`--agent`,
+`--output`, ...); strategy fields such as `evals`, `anthropic_api_key_secret`
+and `anthropic_base_url` go in the spec.
 
 ## When to recommend each command
 
 - "How are my agent's evals doing?" → `evaluate-suite` (collect data) then `analyze` (interpret it).
 - "Why did these evals fail?" / "What's slow?" → `analyze` on an existing batch directory.
-- "Improve / optimize / fix my agent" → `optimize-skills` (only after confirming a `.agent-improver.yml` exists or asking the user for the `evals` / `agent` / `skills_path` values).
+- "Improve / optimize / fix my agent" → the `nemo-optimize-skills` strategy (only after confirming a `.agent-improver.yml` exists or asking the user for the `evals` / `agent` / `skills_path` values).
 
 ## Self-referential example: improve NeMo itself
 
-The NeMo Helix repo ships a canonical `.agent-improver.yml` at its root. Running
-`nemo agents optimize-skills --spec-file .agent-improver.yml` with absolute
-path overrides from the repo root improves the skills under `.agents/skills/`
-based on the `tests/agentic-use/` Harbor evals. This supplants the older
-standalone tools/self_improve/ package.
+The NeMo Helix repo ships a canonical `.agent-improver.yml` at its root. Copy
+it, make `evals` absolute and add the Anthropic fields, then run the
+`nemo-optimize-skills` strategy from the repo root to improve the skills under
+`.agents/skills/` based on the `tests/agentic-use/` Harbor evals. This supplants
+the older standalone tools/self_improve/ package.
 
 ```bash
 export ANTHROPIC_API_KEY='<key>'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
 printf '%s' "$ANTHROPIC_API_KEY" | nemo secrets create anthropic-api-key --from-file -
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic-use" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+cp .agent-improver.yml /tmp/agent-improver.yml   # set evals: $(pwd)/tests/agentic-use,
+                                                 # anthropic_api_key_secret, anthropic_base_url
+nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file /tmp/agent-improver.yml \
+  --agent "$(pwd)"
 ```
 
 When the user wants to improve **another** agent, they copy
@@ -57,20 +61,18 @@ repo, retarget the paths, and run the same command.
 
 ## Important constraints — surface these proactively
 
-- **The optimize-skills loop spawns `claude --print` as a subprocess.** The
+- **The nemo-optimize-skills loop spawns `claude --print` as a subprocess.** The
   loop strips `CLAUDE_CODE_*` env markers internally, so it can be invoked
   from inside an active Claude Code session — `evaluate-suite`, `analyze`,
-  and `optimize-skills` all work the same way whether you're in CC or not.
+  and `nemo-optimize-skills` all work the same way whether you're in CC or not.
   For long unattended runs (full suite, multiple iterations), wrap in
   `tmux` so the user can detach:
 
   ```bash
   tmux new -s improve
-  nemo agents optimize-skills --spec-file .agent-improver.yml \
-    --evals "$(pwd)/tests/agentic-use" \
-    --agent "$(pwd)" \
-    --anthropic-api-key-secret anthropic-api-key \
-    --anthropic-base-url "$ANTHROPIC_BASE_URL"
+  nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+    --spec-file /tmp/agent-improver.yml \
+    --agent "$(pwd)"
   # detach: Ctrl-B D
   # reattach: tmux attach -t improve
   ```
@@ -94,12 +96,12 @@ repo, retarget the paths, and run the same command.
 
 ## Prerequisites — check / surface in the order most likely to fail
 
-1. `claude` CLI on PATH and authenticated (only needed for `optimize-skills`).
+1. `claude` CLI on PATH and authenticated (only needed for `nemo-optimize-skills`).
 2. `docker` daemon running and `harbor` CLI on PATH.
 3. `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL` exported.
 4. Eval directory exists with at least one task containing `task.toml` or
    `workflow.yml` plus `instruction.md` and `tests/test_outputs.py`.
-5. For `optimize-skills`: the directory at `skills_path` exists inside
+5. For `nemo-optimize-skills`: the directory at `skills_path` exists inside
    `agent`.
 
 The plugin's preflight checks fail fast with actionable error messages, so
@@ -107,7 +109,8 @@ reading the first error in any failure is usually enough.
 
 ## Reading the output
 
-`optimize-skills` prints a JSON `LoopState` at the end. Key fields:
+`nemo-optimize-skills` returns a JSON `LoopState` and registers it as the job's
+`optimize_skills` result (`loop_state.json`). Key fields:
 
 - `iterations[].status`: `improved`, `regressed`, `neutral`, or `error`
 - `iterations[].hypotheses[]`: what the LLM analyzer proposed (root_cause,
@@ -155,24 +158,20 @@ nemo agents analyze --spec "{
 
 # Scope to one eval — edit `filter_glob` / `iterations` in the YAML
 # (or copy and edit a copy), then:
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic-use" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file /tmp/agent-improver.yml \
+  --agent "$(pwd)"
 
 # Full loop with auto-PR — set `open_pr: true` in the YAML, then:
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic-use" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file /tmp/agent-improver.yml \
+  --agent "$(pwd)"
 ```
 
 ## Don't do
 
 - Don't suggest editing files under the `evals` directory. Strategies are
   scoped to write only under `skills_path`; eval files are reverted.
-- Don't recommend `optimize-skills` without confirming the agent has skills
+- Don't recommend `nemo-optimize-skills` without confirming the agent has skills
   to improve. If the agent is stateless / has no skill files, the loop has
   no writable surface.

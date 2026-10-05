@@ -5,7 +5,7 @@
 #
 # This config improves NeMo itself — the "agent under improvement" is Claude
 # Code using NeMo Helix's CLI/SDK via the skills under .agents/skills/. The
-# optimize-skills loop runs the Harbor agentic-use evals, analyzes failures
+# nemo-optimize-skills loop runs the Harbor agentic-use evals, analyzes failures
 # and inefficiencies, and asks Claude to update the skills. It supplants the
 # in-tree tools/self_improve/ package from PR #38 — same workflow, now
 # packaged as a NeMo plugin command.
@@ -14,20 +14,19 @@
 #   - docker (daemon running) and the harbor CLI on PATH
 #   - claude CLI authenticated locally (the loop spawns it as a subprocess)
 #   - ANTHROPIC_API_KEY exported locally to create the platform Secret below
-#   - ANTHROPIC_BASE_URL exported locally and passed to platform submissions
 #
-# Usage (from the repo root):
+# Usage (from the repo root). The loop is the `nemo-optimize-skills` optimization
+# strategy; `--agent` is a router flag, every other field comes from the spec
+# file, so copy this file and set `evals` to "$(pwd)/tests/agentic-use" plus
+# `anthropic_api_key_secret: anthropic-api-key` and
+# `anthropic_base_url: https://inference-api.nvidia.com` before submitting:
 #   export ANTHROPIC_API_KEY='<your-key>'
-#   export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
 #   printf '%s' "$ANTHROPIC_API_KEY" | nemo secrets create anthropic-api-key --from-file -
-#   nemo agents optimize-skills --spec-file .agent-improver.yml \
-#     --evals "$(pwd)/tests/agentic-use" \
-#     --agent "$(pwd)" \
-#     --anthropic-api-key-secret anthropic-api-key \
-#     --anthropic-base-url "$ANTHROPIC_BASE_URL"
+#   nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+#     --spec-file /tmp/agent-improver.yml \
+#     --agent "$(pwd)"
 #
-# Single-eval debug run — edit `filter_glob` and `iterations` in this file,
-# or copy it and pass the copy via --spec-file.
+# Single-eval debug run — edit `filter_glob` and `iterations` in your copy.
 #
 # Use as a template for any other agent: copy this file into your agent's
 # repo, retarget evals and agent to absolute paths, and point skills_path at
@@ -38,12 +37,12 @@
 # ---------------------------------------------------------------------------
 
 # The Harbor agentic-use eval suite — discovered as task.toml-marked dirs.
-# Override with --evals "$(pwd)/tests/agentic-use" when submitting this checked-in
-# config through the direct platform command.
+# Platform submissions need an absolute path: set "$(pwd)/tests/agentic-use"
+# in your copy of this file.
 evals: tests/agentic-use
 
 # Agent root: this repo. Override with --agent "$(pwd)" when submitting this
-# checked-in config through the direct platform command. The optimize-skills
+# checked-in config through run-strategy. The nemo-optimize-skills
 # strategy is allowed to write only under skills_path; the loop's post-edit
 # guard reverts any change outside it (and the eval directory is invariant for
 # all strategies).

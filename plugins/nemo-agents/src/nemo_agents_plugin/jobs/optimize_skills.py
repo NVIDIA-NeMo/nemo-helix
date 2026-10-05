@@ -1,23 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OptimizeSkillsJob — the optimize-skills loop.
+"""OptimizeSkillsJob — the ``nemo-optimize-skills`` optimization strategy.
 
-Registered under ``nemo.jobs`` as ``agents.optimize-skills``.
+Registered under ``nemo.jobs`` as ``agent-optimization.nemo-optimize-skills``.
 
-The CLI command ``nemo agents optimize-skills --spec '{...}'`` submits it to
-the platform; the jobs controller dispatches a subprocess on the same host
-that runs the platform and the result lands in ``nemo jobs list`` / Studio's
-Jobs view.
+Reached as ``nemo agents optimize run-strategy --strategy nemo-optimize-skills``:
+the router job in nemo-agent-optimization-plugin finds this class through the
+``nemo_agent_optimization_strategy`` class variable below and delegates
+``compile`` / ``run`` to it.  The jobs controller dispatches a subprocess on the
+same host that runs the platform; the loop state lands in the job's results.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
+from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_agents_plugin.jobs.evaluate_suite import _require_absolute
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
@@ -75,13 +79,17 @@ class OptimizeSkillsConfig(BaseModel):
 
 
 class OptimizeSkillsJob(NemoJob):
-    """Run the optimize-skills loop end-to-end."""
+    """Run the nemo-optimize-skills loop end-to-end."""
 
-    name: ClassVar[str] = "optimize-skills"
+    name: ClassVar[str] = "nemo-optimize-skills"
     description: ClassVar[str] = "Optimize an agent's skills against eval failures via a coding agent (Claude)."
     container: ClassVar[str] = "cpu-tasks"
     generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = OptimizeSkillsConfig
+    nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
+        name="nemo-optimize-skills",
+        description="Improve an agent's skill files against eval failures with a Claude coding-agent loop.",
+    )
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]
@@ -152,7 +160,7 @@ class OptimizeSkillsJob(NemoJob):
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
-                    name="optimize-skills",
+                    name="nemo-optimize-skills",
                     executor=SubprocessExecutionProviderSpec(
                         provider="subprocess",
                         command=["python", "-m", "nemo_agents_plugin.tasks.optimize_skills"],
@@ -163,7 +171,7 @@ class OptimizeSkillsJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext | None = None) -> dict[str, Any]:
+    def run(self, config: dict, *, ctx: JobContext) -> dict[str, Any]:
         from nemo_agents_plugin.improvement import preflight
         from nemo_agents_plugin.improvement.coding_agents.claude import ClaudeCodingAgent
         from nemo_agents_plugin.improvement.loop import run_analyze_only, run_loop
@@ -189,7 +197,7 @@ class OptimizeSkillsJob(NemoJob):
                     trace_parser=cfg.trace_parser,
                 )
             )
-            return _serialize_dict(state)
+            return _publish(ctx, _serialize_dict(state), suggestions=initial / "optimize-suggestions.json")
 
         # Preflight: fail fast before any slow work
         preflight.check_evals_dir(evals_dir)
@@ -227,4 +235,17 @@ class OptimizeSkillsJob(NemoJob):
                 trace_parser=cfg.trace_parser,
             )
         )
-        return _serialize_dict(state)
+        return _publish(ctx, _serialize_dict(state))
+
+
+def _publish(ctx: JobContext, state: dict[str, Any], *, suggestions: Path | None = None) -> dict[str, Any]:
+    """Register the loop state (and, in analyze-only mode, the suggestions) as the job's result."""
+    results_dir = ctx.storage.ephemeral / "nemo-optimize-skills" / "results"
+    if results_dir.exists():
+        shutil.rmtree(results_dir)
+    results_dir.mkdir(parents=True)
+    (results_dir / "loop_state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    if suggestions is not None:
+        shutil.copy(suggestions, results_dir / suggestions.name)
+    result_ref = ctx.results.save("optimize_skills", results_dir)
+    return {**state, "result": result_ref.model_dump(mode="json")}

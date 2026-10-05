@@ -97,7 +97,7 @@ const extractAllPathResources = (pathPart: string): string[] => {
  *     the subtype trails the action noun and is moved in front so each
  *     subtype yields a distinct name. Without this, every subtype under one
  *     service collapses to the same generated name (e.g. all of
- *     analyze/evaluate/evaluate-suite/optimize/optimize-skills -> "createJob").
+ *     analyze/evaluate/evaluate-suite/execute/package -> "createJob").
  *
  * e.g., actionResource="job", pathResource="benchmark_jobs" -> "benchmark_job"
  * e.g., actionResource="benchmark", pathResource="benchmarks" -> "benchmark"

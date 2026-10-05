@@ -17,7 +17,7 @@ Dockerfile.bake
 **/node_modules
 web/packages/sdk/generated/
 sdk/python/nemo-helix/_dev/nhx
-# nemo-agents optimize-skills artifacts. These ephemeral run outputs can
+# nemo-optimize-skills strategy artifacts. These ephemeral run outputs can
 # contain root-owned files (the harbor agent runs as root inside the
 # container) that fail docker build context scanning with permission
 # denied; they're also pure noise in the build context regardless.

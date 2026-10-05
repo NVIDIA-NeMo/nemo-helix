@@ -271,6 +271,7 @@ nemo-agent-optimization-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin = [
   "nemo-helix-plugin",
+  "nemo-agent-optimization-plugin",
   "nemo-deployments-plugin",
   "nemo-agent-config-example-email-security-triage",
   "nvidia-nat-core>=1.9.0a20260811,<1.10",
@@ -753,7 +754,6 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agents.evaluate" = "nemo_agents_plugin.jobs.evaluate_agent:EvaluateAgentJob"
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "anonymizer.run" = "nemo_anonymizer_plugin.jobs.run:RunJob"
 "auditor.audit" = "nemo_auditor.jobs.audit:AuditJob"
 "data-designer.create" = "nemo_data_designer_plugin.jobs.create:CreateJob"
@@ -771,6 +771,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agent-optimization.run-strategy" = "nemo_agent_optimization_plugin.jobs.run_strategy:RunStrategyJob"
 "evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
 "agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"agent-optimization.nemo-optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.logging_provider"]

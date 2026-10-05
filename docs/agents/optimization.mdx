@@ -23,7 +23,7 @@ evaluation result before promotion.
 | Suggestion type     | Signal                                                                                                        | Result                                                                                                      |
 | ------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Model optimization  | An agent uses a single frontier model where a smaller model or route split may preserve quality at lower cost | Suggests a model swap or Switchyard random-routing virtual model                                            |
-| Skill optimization  | The agent uses skills and has an evaluation suite                                                             | Suggests running `nemo agents optimize-skills` to improve skill files and keep changes that pass evaluation |
+| Skill optimization  | The agent uses skills and has an evaluation suite                                                             | Suggests running `nemo agents optimize run-strategy --strategy nemo-optimize-skills` to improve skill files and keep changes that pass evaluation |
 | Prompt optimization | The agent has an optimization config and baseline dataset                                                     | Suggests staging with `nemo agents optimize prepare-fileset`, then running `nemo agents optimize run-strategy` for Fabric-backed tuning |
 | New model scan      | Difference between the current model list and the previous optimizer snapshot                                 | Suggests evaluating or auditing newly available models                                                      |
 
@@ -201,11 +201,13 @@ and keeps the change only when the evaluation result improves.
 <Tab title="CLI">
 
 ```bash
-nemo agents optimize-skills --spec-file .agent-improver.yml
+nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml
 ```
 
-Set `open_pr: true` in the YAML when you want the loop to prepare a
-reviewable branch.
+The spec file carries the strategy's fields (`evals`, `agent`, `skills_path`,
+`anthropic_api_key_secret`, `anthropic_base_url`, ...); `--agent` is also a
+flag of the router. Set `open_pr: true` in the YAML when you want the loop to
+prepare a reviewable branch.
 
 A sample `.agent-improver.yml` is in
 `plugins/nemo-agents/examples/agent-improver.example.yml`.
@@ -226,9 +228,9 @@ nemo skills show agents-optimize
 
 What it does under the hood:
 
-- Confirms the agent uses skills (a `--skills-path`, a `.agent-improver.yml`,
+- Confirms the agent uses skills (a `skills_path` in its spec, a `.agent-improver.yml`,
   or skill files referenced from the config).
-- Runs `nemo agents optimize-skills` against the configured skills directory.
+- Runs `nemo agents optimize run-strategy --strategy nemo-optimize-skills` against the configured skills directory.
 - Re-runs evaluation and keeps the change only when scores improve.
 - Persists outcomes to the `nemo-agent-optimizer` fileset.
 
@@ -240,13 +242,13 @@ import os
 import yaml
 from pathlib import Path
 
-from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
+from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
 spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
 result = NemoJobScheduler().submit_remote(
-    OptimizeSkillsJob,
-    spec,
+    RunStrategyJob,
+    {"strategy": "nemo-optimize-skills", **spec},
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )

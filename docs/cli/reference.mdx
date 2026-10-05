@@ -5943,7 +5943,6 @@ nemo agents [OPTIONS] [COMMAND] [ARGS]...
 * `evaluate`: Evaluate an agent workflow against a dataset as a...
 * `evaluate-suite`: Run a directory of containerized eval tasks (Harbor or...
 * `execute`: Execute an agent to completion as a scheduled platform job.
-* `optimize-skills`: Optimize an agent's skills against eval failures via a...
 * `package-agent`: Build a container image for an agent stored on the platform.
 
 *Local commands:*
@@ -7060,76 +7059,6 @@ Show input/output schemas.
 
 ```shell
 nemo agents execute explain [OPTIONS]
-```
-
-**Options:**
-
-* `--profile`: Annotate the bundle with this profile.
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-#### nemo agents optimize-skills
-
-Optimize an agent's skills against eval failures via a coding agent (Claude).
-
-**Usage:**
-
-```shell
-nemo agents optimize-skills [OPTIONS] [COMMAND] [ARGS]...
-```
-
-**Help:**
-
-* `--help, -h`: Show this message and exit.
-
-**Job Spec:**
-
-* `--evals`: Path to the directory of eval tasks.
-* `--agent`: Agent root (where the loop runs from; skills live under it).
-* `--skills-path`: Relative path inside agent where skills live.
-* `--filter-glob`: Glob filter on eval names (e.g. 'files-*').
-* `--iterations <INTEGER>`: Override `iterations` in the spec.
-* `--concurrency <INTEGER>`: Override `concurrency` in the spec.
-* `--state`: Path to loop_state.json; default: \<agent>/loop_state.json.
-* `--initial-batch`: Existing batch dir to seed from.
-* `--full-verification`: Override `full_verification` in the spec.
-* `--open-pr`: Override `open_pr` in the spec.
-* `--repeats <INTEGER>`: Override `repeats` in the spec.
-* `--analyze-only`: Analyze-only mode: consume an existing --initial-batch, generate suggestions, exit. Skips worktree, apply, verify, MR. Works with any AUT (Harbor or NAT).
-* `--anthropic-api-key-secret`: Name of a platform Secret holding the Anthropic API key.  When set on a platform submission, the value is injected as ``ANTHROPIC_API_KEY`` into the dispatched subprocess so the loop's ``check_anthropic_api`` / Claude analyzer preflights pass.  Local (in-process) runs read ``ANTHROPIC_API_KEY`` from the calling shell as before.
-* `--anthropic-base-url`: Anthropic-compatible API base URL injected as ``ANTHROPIC_BASE_URL`` for platform submissions.  Local (in-process) runs read ``ANTHROPIC_BASE_URL`` from the calling shell as before.
-
-**Spec Source:**
-
-* `--spec`: Spec as a JSON string. [default: \{}]
-* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
-
-**Submission:**
-
-* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
-* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
-* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
-* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-
-Job Spec flags are generated from the OptimizeSkillsConfig Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
-
-Some spec fields cannot be represented as CLI flags: `trace_parser`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
-​
-
-**Commands:**
-
-* `explain`: Show input/output schemas.
-
-##### nemo agents optimize-skills explain
-
-Show input/output schemas.
-
-**Usage:**
-
-```shell
-nemo agents optimize-skills explain [OPTIONS]
 ```
 
 **Options:**

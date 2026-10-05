@@ -1,20 +1,18 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Template config for nemo agents optimize-skills.
+# Template config for the nemo-optimize-skills optimization strategy.
 #
 # Copy this file into your own agent's repo as ``.agent-improver.yml``,
-# retarget the paths to absolute paths, and submit:
+# retarget the paths to absolute paths, fill in the Anthropic fields at the
+# bottom, and submit:
 #
-#   nemo agents optimize-skills --spec-file .agent-improver.yml \
-#     --anthropic-api-key-secret anthropic-api-key \
-#     --anthropic-base-url "$ANTHROPIC_BASE_URL"
+#   nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml
 #
 # To submit to another configured context (cluster and credentials):
 #
-#   nemo --context <name> agents optimize-skills --spec-file .agent-improver.yml \
-#     --anthropic-api-key-secret anthropic-api-key \
-#     --anthropic-base-url "$ANTHROPIC_BASE_URL"
+#   nemo --context <name> agents optimize run-strategy --strategy nemo-optimize-skills \
+#     --spec-file .agent-improver.yml
 
 # ---------------------------------------------------------------------------
 # Agent + evals
@@ -26,7 +24,7 @@
 # example.
 evals: /path/to/my-agent/agent-evals
 
-# Your agent's repo root. The optimize-skills strategy is allowed to write
+# Your agent's repo root. The nemo-optimize-skills strategy is allowed to write
 # only under skills_path; everything else is reverted.
 agent: /path/to/my-agent
 
@@ -73,6 +71,16 @@ full_verification: false
 # Detect gh / glab and auto-open a PR/MR on improvement. Default false:
 # the loop produces a local branch + diff for human review.
 open_pr: false
+
+# ---------------------------------------------------------------------------
+# Anthropic credentials for the platform-dispatched subprocess
+# ---------------------------------------------------------------------------
+
+# Platform Secret holding the Anthropic API key, injected as ANTHROPIC_API_KEY:
+#   printf '%s' "$ANTHROPIC_API_KEY" | nemo secrets create anthropic-api-key --from-file -
+anthropic_api_key_secret: anthropic-api-key
+# Anthropic-compatible endpoint, injected as ANTHROPIC_BASE_URL.
+anthropic_base_url: https://inference-api.nvidia.com
 
 # ---------------------------------------------------------------------------
 # Optional: scope to a subset

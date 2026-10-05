@@ -15,8 +15,8 @@ ships `.agent-improver.yml` as an annotated config.
 | Tool | What for | Required for |
 |------|----------|--------------|
 | `docker` (daemon running) | Building / running eval container | All commands |
-| `harbor` CLI on PATH | Harbor task execution | `evaluate-suite`, `optimize-skills` |
-| `claude` CLI authenticated | The coding agent that edits skills | `optimize-skills` only |
+| `harbor` CLI on PATH | Harbor task execution | `evaluate-suite`, `nemo-optimize-skills` |
+| `claude` CLI authenticated | The coding agent that edits skills | `nemo-optimize-skills` only |
 | `ANTHROPIC_API_KEY` + `ANTHROPIC_BASE_URL` | Agent-under-test inference + LLM analyzer pass | All commands |
 
 The plugin runs preflight checks before any slow work, so missing prereqs
@@ -50,8 +50,9 @@ cp plugins/nemo-agents/examples/agent-improver.example.yml \
    /path/to/my-agent/.agent-improver.yml
 ```
 
-Edit it to point at your eval directory and skills path. The fields are
-documented inline.
+Edit it to point at your eval directory and skills path, and set
+`anthropic_api_key_secret` / `anthropic_base_url`. The fields are documented
+inline.
 
 ### 2. Run an eval suite (sanity check)
 
@@ -93,19 +94,19 @@ BATCH_DIR="$(ls -td "$(pwd)"/runs/batch-* | head -n1)"
 nemo agents analyze --spec "{\"batch\": \"$BATCH_DIR\", \"mechanical_only\": true}"
 ```
 
-### 4. Run the optimize-skills loop
+### 4. Run the nemo-optimize-skills loop
 
 ```bash
 cd /path/to/my-agent
 export ANTHROPIC_API_KEY='<key>'
 export ANTHROPIC_BASE_URL='https://inference-api.nvidia.com'
 
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml
 ```
+
+The loop is an optimization strategy, so it runs through the shared
+`nemo agents optimize` group; `--agent` is a flag there, every other field
+(`evals`, `anthropic_api_key_secret`, ...) comes from the spec file.
 
 The loop strips `CLAUDE_CODE_*` env markers when spawning `claude --print`,
 so it works whether or not it's launched from inside an active Claude Code
@@ -132,22 +133,21 @@ What it does, per iteration:
    discards
 
 The final `loop_state.json` records every iteration's hypothesis, files
-changed, before/after metrics, and verdict.
+changed, before/after metrics, and verdict; it is also registered as the
+job's `optimize_skills` result.
 
 ## Common patterns
 
 ### Improve NeMo itself
 
-NeMo Helix ships an annotated `.agent-improver.yml` at the repo root. Run from
-the repo root and override the checked-in relative paths with absolute host
-paths:
+NeMo Helix ships an annotated `.agent-improver.yml` at the repo root. Copy it,
+replace the checked-in relative `evals` with an absolute host path, add the
+Anthropic fields, and run from the repo root:
 
 ```bash
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic-use" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file /tmp/agent-improver.yml \
+  --agent "$(pwd)"
 ```
 
 This is also the cheapest way to validate the workflow end-to-end on a
@@ -196,7 +196,7 @@ With neither installed, falls back to "branch pushed; open manually."
 ### "Coding agent 'claude' not found on PATH"
 
 Install Claude Code (https://claude.com/claude-code) and authenticate.
-Affects `optimize-skills` only; other commands work without it.
+Affects `nemo-optimize-skills` only; other commands work without it.
 
 ### "ANTHROPIC_API_KEY environment variable must be set"
 
@@ -205,10 +205,10 @@ credentials to reach the LLM. Same key drives the LLM analyzer pass.
 
 ### "evals_dir must be inside agent_root for v0"
 
-The optimize-skills loop creates a worktree from `agent_root` and re-runs
+The nemo-optimize-skills loop creates a worktree from `agent_root` and re-runs
 the evals from inside it; this requires the eval directory to live
 within the agent's repo. (For evaluate-suite alone, this constraint
-doesn't apply — but optimize-skills does require it.)
+doesn't apply — but nemo-optimize-skills does require it.)
 
 ### "No eval tasks found in <path>"
 
@@ -262,23 +262,16 @@ implementation, gated on plumbing ``workspace`` / ``agent_name`` /
 
 ## Command verbs
 
-Each improvement command is a direct NemoJob submit command:
+The skills loop is submitted through the shared optimize group:
 
 ```bash
 # Submit to the active platform
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml
 
-# Submit to a configured cluster
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL" \
-  --cluster <name>
+# Submit to a configured context
+nemo --context <name> agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file .agent-improver.yml
 ```
 
-`evaluate-suite` and `analyze` follow the same direct-command pattern.
+`evaluate-suite` and `analyze` are direct NemoJob submit commands
+(`nemo agents evaluate-suite --spec-file ...`).

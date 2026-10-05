@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Optimize-skills loop: run evals -> analyze -> fix -> verify -> repeat.
+"""nemo-optimize-skills loop: run evals -> analyze -> fix -> verify -> repeat.
 
-POC shape:
-- Operates against an explicit ``--evals`` directory and ``--agent`` directory
+POC shape (spec fields of the ``nemo-optimize-skills`` strategy):
+- Operates against an explicit ``evals`` directory and ``agent`` directory
   (no more hardcoded ``tests/agentic-use/`` or ``.agents/skills/``).
-- ``--skills-path`` is the strategy's writable scope inside the agent dir.
-- ``--repeats`` opt-in for noise reduction (median/majority aggregation).
-- ``--open-pr`` opt-in for auto-opening a GitLab MR (default: print diff, user
+- ``skills_path`` is the strategy's writable scope inside the agent dir.
+- ``repeats`` opt-in for noise reduction (median/majority aggregation).
+- ``open_pr`` opt-in for auto-opening a GitLab MR (default: print diff, user
   pushes manually).
 """
 
@@ -558,7 +558,7 @@ async def run_loop(
     runner: Runner | None = None,
     trace_parser: str = "claude-code",
 ) -> LoopState:
-    """Run the optimize-skills loop.
+    """Run the nemo-optimize-skills loop.
 
     Args:
         agent_root: Root of the agent's repo / directory. The strategy is
@@ -1058,7 +1058,7 @@ async def run_loop(
             all_changed_files.append("baselines.json")
 
             if open_pr:
-                console.print("[bold]Opening MR (--open-pr)...[/bold]")
+                console.print("[bold]Opening MR (open_pr)...[/bold]")
                 mr_url = await create_mr(
                     worktree_path=worktree_path,
                     branch_name=branch_name,
@@ -1077,7 +1077,7 @@ async def run_loop(
             else:
                 console.print(
                     f"[green]Branch {branch_name} kept locally. "
-                    f"Run with --open-pr to auto-open a PR/MR, or push manually.[/green]"
+                    f"Set open_pr: true to auto-open a PR/MR, or push manually.[/green]"
                 )
             batch = after_batch
         else:

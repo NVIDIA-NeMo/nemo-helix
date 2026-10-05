@@ -32,7 +32,6 @@ AgentJobCollection: TypeAlias = Literal[
     "evaluate-suite",
     "execute",
     "optimize",
-    "optimize-skills",
     "package",
 ]
 

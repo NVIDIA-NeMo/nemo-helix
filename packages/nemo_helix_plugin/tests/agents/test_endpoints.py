@@ -45,7 +45,6 @@ _COLLECTIONS: tuple[AgentJobCollection, ...] = (
     "evaluate-suite",
     "execute",
     "optimize",
-    "optimize-skills",
     "package",
 )
 

@@ -95,11 +95,12 @@ optimizes, in the words of the plugin that ships it:
 ```bash
 $ nemo agents optimize list-strategies
 Targeting http://localhost:8080
-┏━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Name   ┃ Description                                ┃
-┡━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ legacy │ Hyperparameter and GA prompt optimization. │
-└────────┴────────────────────────────────────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Name                 ┃ Description                                                                               ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ legacy               │ Hyperparameter and GA prompt optimization.                                                │
+│ nemo-optimize-skills │ Improve an agent's skill files against eval failures with a Claude coding-agent loop.    │
+└──────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Like every `nemo` list command it takes `--output-format` / `-f`, and prints

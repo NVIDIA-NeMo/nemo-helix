@@ -11,7 +11,7 @@ description: >-
   the user asks to optimize, accelerate, tune, route, or reduce the cost of an
   agent or its underlying model. Trigger keywords - agent optimization,
   optimize agent, accelerate agent, smaller model, switchyard router,
-  routing split, agents optimize-skills, agents optimize, agents evaluate,
+  routing split, nemo-optimize-skills, agents optimize, agents evaluate,
   new model scan, nemotron, frontier model.
 allowed-tools: Bash
 metadata:
@@ -82,19 +82,19 @@ This is pure config inspection — no telemetry download required.
 
 ### 2. Skill optimization
 
-If the agent uses skills (its repo has a `--skills-path`, or
+If the agent uses skills (its spec has a `skills_path`, or
 `.agent-improver.yml` is present, or its config references skill files) **and**
-`nemo agents optimize-skills` has not been run since the last optimizer
+the `nemo-optimize-skills` strategy has not been run since the last optimizer
 snapshot, suggest running it.
 
 Suggested actions:
 
-- `nemo agents optimize-skills --spec-file .agent-improver.yml`
+- `nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml`
   (or pass an inline JSON spec via `--spec '{...}'` if no config file exists)
 - After it returns, apply the resulting skill diff to the agent and redeploy.
 
-See **the `nemo-agent-skills-optimization` skill** for the full optimize-skills loop
-(variance, repeats, branch handling, `--open-pr`).
+See **the `nemo-agent-skills-optimization` skill** for the full nemo-optimize-skills loop
+(variance, repeats, branch handling, `open_pr: true` in the spec file).
 
 ### 3. Prompt + hyperparameter tuning
 
@@ -214,7 +214,7 @@ survives across reads.
 | `type` value | Meaning |
 |--------------|---------|
 | `model_optimization` | Switchyard routing split or smaller-model fit |
-| `skill_optimization` | `nemo agents optimize-skills` is recommended |
+| `skill_optimization` | `nemo agents optimize run-strategy --strategy nemo-optimize-skills` is recommended |
 | `prompt_optimization` | `nemo agents optimize run-strategy` is recommended |
 | `new_model_scan` | New model appeared since last snapshot |
 
@@ -322,7 +322,7 @@ nemo models list --filter.name nemotron   # find Nemotron candidates
 nemo agents evaluate --agent <name> --eval-config <yaml>
 nemo agents optimize prepare-fileset --source <bundle-dir> --optimize-config <bundle-relative-yaml> --fileset <name>
 nemo agents optimize run-strategy --strategy legacy --agent <name> --optimize-config-fileset <workspace/name> --optimize-config <config-path-in-fileset>
-nemo agents optimize-skills --spec-file .agent-improver.yml
+nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file .agent-improver.yml
 nemo agents evaluate-suite --spec '{"evals": "<dir>", "agent": "<name>"}'
 
 # Files service
@@ -347,8 +347,8 @@ nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<ta
 - **New model diff**: set subtraction between current model list and prior
   snapshot model list. Pure computation.
 - **Skill / prompt optimization gating**: check whether
-  `iterations[].timestamp` from a prior `nemo agents optimize-skills` /
-  `nemo agents optimize run-strategy` run is newer than the last snapshot.
+  `iterations[].timestamp` from a prior `nemo agents optimize run-strategy`
+  run is newer than the last snapshot.
 
 **Requires execution:**
 
@@ -389,7 +389,7 @@ nemo auditor audit --spec '{"config": "default/<config>", "target": "default/<ta
   alongside this skill when the user wants both a perf-and-safety pass.
 - `inference` — exact `nemo virtual-models create … --request-middleware …`
   syntax for switchyard routing/passthrough/translate.
-- `nemo-agent-skills-optimization` — full reference for `nemo agents
-  optimize-skills` / `evaluate-suite` / `analyze`.
+- `nemo-agent-skills-optimization` — full reference for the
+  `nemo-optimize-skills` strategy / `evaluate-suite` / `analyze`.
 - `nemo-agents-optimize-sync-web` — keeps the web-side optimizer hook in
   parity with this skill's JSONL/apply spec.

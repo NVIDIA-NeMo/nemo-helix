@@ -222,7 +222,6 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
     from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
     from nemo_helix_plugin.commands import add_job_commands
     from nemo_helix_plugin.job import NemoJob
@@ -233,7 +232,6 @@ def test_agent_jobs_do_not_register_legacy_run_submit_verbs() -> None:
         "agents.evaluate": EvaluateAgentJob,
         "agents.evaluate-suite": EvaluateSuiteJob,
         "agents.execute": ExecuteAgentJob,
-        "agents.optimize-skills": OptimizeSkillsJob,
         "agents.package-agent": PackageAgentJob,
     }
 

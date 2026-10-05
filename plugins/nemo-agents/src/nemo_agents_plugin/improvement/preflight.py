@@ -4,7 +4,7 @@
 """Preflight checks — fail fast with actionable errors before slow operations.
 
 Each check raises ``PreflightError`` with a clear remediation message. Callers
-should run preflights at the start of evaluate-suite / optimize-skills so users
+should run preflights at the start of evaluate-suite / nemo-optimize-skills so users
 don't wait for a docker build before learning ``harbor`` isn't installed.
 """
 
@@ -127,13 +127,13 @@ def check_skills_path(agent_root: Path, skills_path: str) -> None:
     p = agent_root / skills_path
     if not p.exists():
         raise PreflightError(
-            f"--skills-path resolves to {p} which does not exist. The optimize-skills "
+            f"skills_path resolves to {p} which does not exist. The nemo-optimize-skills "
             f"strategy needs to write skill files there. Either:\n"
             f"  - create the directory: mkdir -p {p}\n"
-            f"  - or pass --skills-path pointing at an existing skills directory."
+            f"  - or set skills_path to an existing skills directory."
         )
     if not p.is_dir():
-        raise PreflightError(f"--skills-path resolves to {p} which is a file, not a directory.")
+        raise PreflightError(f"skills_path resolves to {p} which is a file, not a directory.")
 
 
 def check_evals_inside_agent(agent_root: Path, evals_dir: Path) -> None:
@@ -142,8 +142,8 @@ def check_evals_inside_agent(agent_root: Path, evals_dir: Path) -> None:
         evals_dir.resolve().relative_to(agent_root.resolve())
     except ValueError as exc:
         raise PreflightError(
-            f"--evals ({evals_dir}) must be inside --agent ({agent_root}) for v0. "
-            "The optimize-skills loop creates a worktree from agent_root and re-runs "
+            f"evals ({evals_dir}) must be inside agent ({agent_root}) for v0. "
+            "The nemo-optimize-skills loop creates a worktree from agent_root and re-runs "
             "the evals from inside it; this requires the evals to live in the agent's repo."
         ) from exc
 
@@ -167,7 +167,7 @@ def check_anthropic_api() -> None:
     """Verify Anthropic API credentials are present in the environment.
 
     Used by callers that hit the Anthropic API directly — the LLM analyzer
-    in optimize-skills and analyze-batch. The Claude CLI invoked by the
+    in nemo-optimize-skills and analyze. The Claude CLI invoked by the
     loop's coding-agent step uses OAuth and is checked separately by
     ``ClaudeCodingAgent.preflight()``.
 

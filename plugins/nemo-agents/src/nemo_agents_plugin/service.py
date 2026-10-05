@@ -31,7 +31,6 @@ class _JobCollection(NamedTuple):
 # Sub-names are concise and stable and need not match the job's URL path segment:
 #   EvaluateAgentJob   /jobs/evaluate        -> agents.evaluate
 #   EvaluateSuiteJob   /jobs/evaluate-suite  -> agents.suite
-#   OptimizeSkillsJob  /jobs/optimize-skills -> agents.optimize-skills
 #   AnalyzeBatchJob    /jobs/analyze         -> agents.analyze
 #   ExecuteAgentJob /jobs/execute          -> agents.execute
 #   PackageAgentJob    /jobs/package         -> agents.package
@@ -43,7 +42,6 @@ def _job_collections() -> list[_JobCollection]:
     from nemo_agents_plugin.jobs.evaluate_agent import EvaluateAgentJob
     from nemo_agents_plugin.jobs.evaluate_suite import EvaluateSuiteJob
     from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
     from nemo_agents_plugin.jobs.package_agent import PackageAgentJob
 
     return [
@@ -59,12 +57,6 @@ def _job_collections() -> list[_JobCollection]:
             "suite",
             "nemo-agents-plugin-evaluate-suite",
             "Submit and track evaluate-suite jobs (Harbor / NAT eval runner).",
-        ),
-        _JobCollection(
-            OptimizeSkillsJob,
-            "optimize-skills",
-            "nemo-agents-plugin-optimize-skills",
-            "Submit and track optimize-skills jobs (skills-improvement loop).",
         ),
         _JobCollection(
             AnalyzeBatchJob,

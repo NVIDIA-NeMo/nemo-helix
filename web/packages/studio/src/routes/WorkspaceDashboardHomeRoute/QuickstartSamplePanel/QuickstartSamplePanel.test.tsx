@@ -289,8 +289,8 @@ describe('QuickstartSamplePanel', () => {
       renderPanel({ defaultView: 'cli' });
       await waitForAllSnippets();
 
-      // `optimize` alone is a command group, and `optimize-skills` jobs never reach the
-      // Optimizations tab that "View results" opens. Exact text, so the one-flag-per-line
+      // `optimize` alone is a command group; only `run-strategy` runs reach the Optimizations
+      // tab that "View results" opens. Exact text, so the one-flag-per-line
       // `\` continuations are checked too — a stray character after one breaks the paste.
       expect(within(stepAt(3)).getByTestId('nv-code-snippet-code').textContent).toBe(
         [

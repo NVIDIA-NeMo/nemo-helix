@@ -11,14 +11,13 @@ agent skills via a coding agent (Claude).
 **Replaces `tools/self_improve/` from PR #38.** The standalone `nhx-eval-run`
 / `nhx-eval-analyze` / `nhx-self-improve` CLI tools are subsumed by these
 plugin commands; the canonical NeMo self-improvement config lives at
-`.agent-improver.yml` in the repo root and is invoked from the repo root as:
+`.agent-improver.yml` in the repo root. Copy it, make `evals` absolute and add
+`anthropic_api_key_secret` / `anthropic_base_url`, then submit from the repo root:
 
 ```bash
-nemo agents optimize-skills --spec-file .agent-improver.yml \
-  --evals "$(pwd)/tests/agentic-use" \
-  --agent "$(pwd)" \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file /tmp/agent-improver.yml \
+  --agent "$(pwd)"
 ```
 
 **New here?** Read [`GETTING_STARTED.md`](./GETTING_STARTED.md) for the
@@ -39,12 +38,14 @@ asks to "improve the agent" / "run agent evals" / etc.
   and `initial_batch` paths when those fields are present.
 - Create the `anthropic-api-key` platform secret before LLM-backed analysis:
   `printf '%s' "$ANTHROPIC_API_KEY" | nemo secrets create anthropic-api-key --from-file -`.
-- Pass `--anthropic-base-url "$ANTHROPIC_BASE_URL"` on submitted jobs when
-  using an Anthropic-compatible proxy endpoint.
+- Set `anthropic_base_url` in the spec when using an Anthropic-compatible
+  proxy endpoint.
 
 ## CLI surface
 
-Three direct NemoJob commands extend `nemo agents`:
+Two direct NemoJob commands extend `nemo agents`; the skills loop is the
+`nemo-optimize-skills` optimization strategy, dispatched by
+`nemo agents optimize run-strategy` (its Anthropic fields live in the spec file):
 
 ```bash
 # Submit to the active platform
@@ -53,15 +54,11 @@ nemo agents evaluate-suite --spec-file ./.agent-improver.yml \
   --anthropic-api-key-secret anthropic-api-key \
   --anthropic-base-url "$ANTHROPIC_BASE_URL"
 nemo agents analyze         --spec-file ./analyze-batch.yml
-nemo agents optimize-skills --spec-file ./.agent-improver.yml \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL"
+nemo agents optimize run-strategy --strategy nemo-optimize-skills --spec-file ./.agent-improver.yml
 
-# Submit to a configured cluster
-nemo agents optimize-skills --spec-file ./.agent-improver.yml \
-  --anthropic-api-key-secret anthropic-api-key \
-  --anthropic-base-url "$ANTHROPIC_BASE_URL" \
-  --cluster <name>
+# Submit to a configured context
+nemo --context <name> agents optimize run-strategy --strategy nemo-optimize-skills \
+  --spec-file ./.agent-improver.yml
 ```
 
 You can pass the spec inline as JSON instead of a file:
@@ -92,6 +89,8 @@ Example `.agent-improver.yml`:
 evals: /path/to/my-agent/tests/agentic
 agent: /path/to/my-agent
 skills_path: .agents/skills
+anthropic_api_key_secret: anthropic-api-key
+anthropic_base_url: https://inference-api.nvidia.com
 
 iterations: 3
 concurrency: 4
@@ -110,7 +109,7 @@ open_pr: false          # set true to auto-open a GitLab MR via glab
 improvement/
 ├── models.py                      # shared dataclasses (ported from PR #38)
 ├── baselines.py                   # baseline tracking with history
-├── loop.py                        # optimize-skills orchestration
+├── loop.py                        # nemo-optimize-skills loop orchestration
 ├── worktree.py                    # git worktree helpers
 ├── runners/
 │   ├── base.py                    # Runner protocol
@@ -148,10 +147,10 @@ improvement/
   gated on plumbing ``workspace`` / ``agent_name`` / ``run_id`` through
   ``EvalResult``.
 - **Variance.** Default verdicts are single-trial (PR #38 thresholds: ±5%
-  duration, ±10% tokens). Pass `--repeats N` for median aggregation.
+  duration, ±10% tokens). Set `repeats: N` in the spec for median aggregation.
 - **Coding agent is hardcoded to Claude.** Codex is the named v1 deliverable;
   the `CodingAgent` protocol is in place so it slots in as a sibling file.
-- **Verified diff producer by default.** Pass `--open-pr` to auto-open a
+- **Verified diff producer by default.** Set `open_pr: true` in the spec to auto-open a
   GitLab MR via `glab` on improvement.
 
 See [PR #141](https://github.com/NVIDIA-NeMo/nemo-helix/pull/141) for the full
@@ -161,9 +160,9 @@ design rationale.
 
 The bulk of the v0 logic — eval discovery, parallel Harbor execution, result
 parsing, baseline tracking, mechanical analyzer, LLM analyzer, the
-optimize-skills loop, hypothesis selection, verdict computation — is ported
+skills-optimization loop, hypothesis selection, verdict computation — is ported
 verbatim from `tools/self_improve/` in PR #38, with import-path renames and
-hardcoded paths generalized behind `--evals` / `--agent` / `--skills-path`.
+hardcoded paths generalized behind the `evals` / `agent` / `skills_path` spec fields.
 
 The new code in this POC:
 - `runners/{base,nat,detect}.py` — the runner protocol, NAT runner (subprocess
@@ -171,4 +170,4 @@ The new code in this POC:
 - `strategies/{base,skills}.py` — formalized strategy protocol + skills impl
 - `coding_agents/{base,claude}.py` — `CodingAgent` protocol + Claude wrapper
 - `traces/{base,claude_code_parser}.py` — `TraceParser` protocol + `ClaudeCodeTraceParser` (the only impl today)
-- New NemoJobs: `evaluate-suite`, `analyze`, `optimize-skills`
+- New NemoJobs: `evaluate-suite`, `analyze`, and the `nemo-optimize-skills` strategy

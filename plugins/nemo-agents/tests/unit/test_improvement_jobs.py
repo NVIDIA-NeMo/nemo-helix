@@ -17,10 +17,17 @@ def test_jobs_discovered_via_entry_points() -> None:
     jobs = discover_jobs()
     assert "agents.evaluate-suite" in jobs
     assert "agents.analyze" in jobs
-    assert "agents.optimize-skills" in jobs
-    # Optimization is not an agents job: nemo-agent-optimization-plugin owns the
-    # `nemo agents optimize` group and registers its own job and routes.
     assert "agents.optimize" not in jobs
+    assert "agents.optimize-skills" not in jobs
+    assert "agent-optimization.nemo-optimize-skills" in jobs
+
+
+def test_optimize_skills_discovered_as_strategy() -> None:
+    from nemo_agent_optimization_plugin.discovery import discover_strategy_jobs
+    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
+
+    discover_strategy_jobs.cache_clear()
+    assert discover_strategy_jobs()["nemo-optimize-skills"] is OptimizeSkillsJob
 
 
 def test_evaluate_suite_job_metadata() -> None:
@@ -40,7 +47,7 @@ def test_analyze_job_metadata() -> None:
 def test_optimize_skills_job_metadata() -> None:
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
 
-    assert OptimizeSkillsJob.name == "optimize-skills"
+    assert OptimizeSkillsJob.name == "nemo-optimize-skills"
     assert OptimizeSkillsJob.container == "cpu-tasks"
 
 
@@ -222,7 +229,7 @@ async def test_optimize_skills_compile_produces_single_subprocess_step() -> None
     steps = list(platform_spec["steps"])
     assert len(steps) == 1
     step = steps[0]
-    assert step["name"] == "optimize-skills"
+    assert step["name"] == "nemo-optimize-skills"
     executor = step["executor"]
     assert executor.get("provider") == "subprocess"
     assert executor.get("command") == ["python", "-m", "nemo_agents_plugin.tasks.optimize_skills"]

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Task entrypoint for ``agents.optimize-skills`` (``python -m nemo_agents_plugin.tasks.optimize_skills``).
+"""Task entrypoint for the ``nemo-optimize-skills`` strategy (``python -m nemo_agents_plugin.tasks.optimize_skills``).
 
 See :mod:`nemo_agents_plugin.tasks.evaluate_suite` for the shared pattern.
 """

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the ``--analyze-only`` mode of optimize-skills.
+"""Tests for the ``analyze_only`` mode of nemo-optimize-skills.
 
 Analyze-only consumes a pre-existing batch directory, runs the gap-analysis
 pipeline (mechanical + LLM clustering + hypothesis generation), writes the
@@ -229,32 +229,15 @@ def test_optimize_skills_job_analyze_only_requires_initial_batch() -> None:
         OptimizeSkillsJob().run(cfg, ctx=MagicMock())
 
 
-def _agents_cli_with_jobs():
-    """Build the agents CLI with ``nemo.jobs`` commands mounted.
-
-    ``AgentsCLI.get_cli()`` alone does not mount job subcommands — the platform
-    CLI loader injects them via :func:`add_job_commands`.  Replicate that here so
-    ``optimize-skills`` is exercised through the real generated CLI surface
-    rather than a hand-written wrapper.
-    """
-    from nemo_agents_plugin.cli import AgentsCLI
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-    from nemo_helix_plugin.commands import add_job_commands
-
-    app = AgentsCLI().get_cli()
-    add_job_commands(app, {"optimize-skills": OptimizeSkillsJob})
-    return app
-
-
 def _guard_message(result) -> str:
     """CLI output plus any surfaced exception message, for guard assertions."""
     exc = "" if result.exception is None else str(result.exception)
     return f"{result.output}\n{exc}"
 
 
-def test_cli_analyze_only_flag_flows_through_direct_command() -> None:
-    """`optimize-skills --analyze-only` without --initial-batch is submitted for server validation."""
-    from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
+def test_cli_analyze_only_dispatches_through_run_strategy() -> None:
+    from nemo_agent_optimization_plugin.cli import AgentOptimizeCLI
+    from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
     from typer.testing import CliRunner
 
     captured: dict[str, object] = {}
@@ -262,70 +245,60 @@ def test_cli_analyze_only_flag_flows_through_direct_command() -> None:
     def _submit_remote(_self, job_cls, spec, **kwargs):
         captured["job_cls"] = job_cls
         captured["spec"] = spec
-        captured["base_url"] = kwargs["base_url"]
-        return {"name": "optimize-skills-123"}
+        return {"name": "run-strategy-123"}
 
-    app = _agents_cli_with_jobs()
     with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
         result = CliRunner().invoke(
-            app,
+            AgentOptimizeCLI().get_cli(),
             [
-                "optimize-skills",
+                "run-strategy",
+                "--strategy",
+                "nemo-optimize-skills",
                 "--agent",
                 "/tmp/agent",
-                "--evals",
-                "/tmp/x",
-                "--analyze-only",
+                "--spec",
+                '{"evals": "/tmp/x", "analyze_only": true}',
             ],
             obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
         )
 
     assert result.exit_code == 0, _guard_message(result)
-    assert captured["job_cls"] is OptimizeSkillsJob
-    assert captured["base_url"] == "http://test"
+    assert captured["job_cls"] is RunStrategyJob
     assert captured["spec"] == {
+        "strategy": "nemo-optimize-skills",
         "agent": "/tmp/agent",
         "evals": "/tmp/x",
         "analyze_only": True,
     }
 
-    legacy_result = CliRunner().invoke(app, ["optimize-skills", "run"])
-    assert legacy_result.exit_code != 0
 
-
-def test_cli_analyze_only_from_spec_file_flows_through_direct_command(tmp_path: Path) -> None:
-    """analyze_only=true in a --spec-file YAML flows through the direct command."""
+def test_run_registers_loop_state_as_result(tmp_path: Path) -> None:
+    from nemo_agents_plugin.improvement.models import LoopState
     from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
-    from typer.testing import CliRunner
+    from nemo_helix_plugin.job_context import JobContext, StoragePaths
+    from nemo_helix_plugin.job_results import LocalJobResults
 
-    config = tmp_path / "config.yml"
-    config.write_text("analyze_only: true\nagent: /tmp/agent\nevals: /tmp/x\n")
+    batch = tmp_path / "batch"
+    batch.mkdir()
+    (batch / "optimize-suggestions.json").write_text("{}")
+    ctx = JobContext(
+        workspace="default",
+        storage=StoragePaths(ephemeral=tmp_path / "ephemeral"),
+        results=LocalJobResults(root=tmp_path / "job-results"),
+    )
+    cfg = {"evals": str(tmp_path), "agent": str(tmp_path), "analyze_only": True, "initial_batch": str(batch)}
 
-    captured: dict[str, object] = {}
+    with (
+        patch("nemo_agents_plugin.improvement.preflight.check_evals_dir"),
+        patch("nemo_agents_plugin.improvement.preflight.check_anthropic_api"),
+        patch(
+            "nemo_agents_plugin.improvement.loop.run_analyze_only",
+            return_value=LoopState(current_baseline_batch="batch"),
+        ),
+    ):
+        out = OptimizeSkillsJob().run(cfg, ctx=ctx)
 
-    def _submit_remote(_self, job_cls, spec, **kwargs):
-        captured["job_cls"] = job_cls
-        captured["spec"] = spec
-        captured["base_url"] = kwargs["base_url"]
-        return {"name": "optimize-skills-123"}
-
-    app = _agents_cli_with_jobs()
-    with patch("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _submit_remote):
-        result = CliRunner().invoke(
-            app,
-            [
-                "optimize-skills",
-                "--spec-file",
-                str(config),
-            ],
-            obj=SimpleNamespace(get_base_url=lambda default=None: "http://test"),
-        )
-
-    assert result.exit_code == 0, _guard_message(result)
-    assert captured["job_cls"] is OptimizeSkillsJob
-    assert captured["base_url"] == "http://test"
-    assert captured["spec"] == {
-        "agent": "/tmp/agent",
-        "evals": "/tmp/x",
-        "analyze_only": True,
-    }
+    saved = tmp_path / "job-results" / "optimize_skills"
+    assert out["result"] == {"name": "optimize_skills", "artifact_url": f"file://{saved.resolve()}"}
+    assert json.loads((saved / "loop_state.json").read_text())["current_baseline_batch"] == "batch"
+    assert (saved / "optimize-suggestions.json").exists()

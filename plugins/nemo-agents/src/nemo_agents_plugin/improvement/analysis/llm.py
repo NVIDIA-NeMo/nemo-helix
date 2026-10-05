@@ -80,7 +80,7 @@ Each eval is a containerized task: an instruction, a verifier, and a pass/fail o
 
 ## Available Improvement Levers
 
-1. **Agent skills** under `{skills_path}` — markdown files that provide contextual guidance to the agent when triggered by keywords or task patterns. **This is the ONLY writable scope for the optimize-skills strategy.**
+1. **Agent skills** under `{skills_path}` — markdown files that provide contextual guidance to the agent when triggered by keywords or task patterns. **This is the ONLY writable scope for the nemo-optimize-skills strategy.**
 2. (Future strategies may also touch CLI tooling, agent config, or prompts — but the current loop only writes skills.)
 
 ## Your Task

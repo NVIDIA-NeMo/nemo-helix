@@ -200,14 +200,6 @@ describe('operationNameOverride', () => {
     ).toBe('agentsCreateOptimizeJob');
   });
 
-  it('agents create optimize-skills job', () => {
-    expect(
-      operationNameOverride({
-        operationId: 'create_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills_post',
-      })
-    ).toBe('agentsCreateOptimizeSkillsJob');
-  });
-
   it('agents list evaluate jobs', () => {
     expect(
       operationNameOverride({
@@ -216,13 +208,12 @@ describe('operationNameOverride', () => {
     ).toBe('agentsListEvaluateJobs');
   });
 
-  it('agents get optimize-skills job', () => {
+  it('agents get evaluate-suite job', () => {
     expect(
       operationNameOverride({
-        operationId:
-          'get_job_apis_agents_v2_workspaces__workspace__jobs_optimize_skills__name__get',
+        operationId: 'get_job_apis_agents_v2_workspaces__workspace__jobs_evaluate_suite__name__get',
       })
-    ).toBe('agentsGetOptimizeSkillsJob');
+    ).toBe('agentsGetEvaluateSuiteJob');
   });
 
   it('agents get optimize job logs (sub-resource)', () => {

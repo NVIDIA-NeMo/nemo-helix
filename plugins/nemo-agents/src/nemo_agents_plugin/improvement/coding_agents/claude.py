@@ -29,7 +29,7 @@ class ClaudeCodingAgent:
             raise RuntimeError(
                 "Coding agent 'claude' not found on PATH. Install Claude Code "
                 "(https://claude.com/claude-code) and authenticate before running "
-                "the optimize-skills loop."
+                "the nemo-optimize-skills loop."
             )
 
     async def invoke(self, prompt: str, worktree: Path, *, timeout: float = 600.0) -> InvocationResult:
