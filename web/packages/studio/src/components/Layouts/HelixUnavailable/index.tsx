@@ -47,7 +47,7 @@ export const HelixUnavailable: FC<HelixUnavailableProps> = ({
   const { heading, explanation } = COPY[status];
 
   return (
-    <Stack gap="density-md" align="center" justify="center" className="h-screen px-density-lg">
+    <Stack gap="density-xl" align="center" justify="center" className="h-screen px-density-lg">
       <StatusMessage
         className="max-w-[640px]"
         slotMedia={<GlobeX className="size-16 stroke-2" />}
