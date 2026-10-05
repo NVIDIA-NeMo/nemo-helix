@@ -33,7 +33,6 @@ Subprocess agent deploy does **not** mean the platform can start without Docker.
 | `nemo agents deploy --mode docker` / `k8s` | Deployments plugin | **Yes** (or cluster) |
 | On-platform model deployments | Deployments plugin → `local-docker` | **Yes** |
 | Intake with managed ClickHouse (`NHX_INTAKE_CLICKHOUSE_URL` unset) | Local ClickHouse container | **Yes** when intake is selected |
-| `nemo quickstart` | Platform runs in containers | **Yes** (separate from host `nemo services run`) |
 | Remote / Kubernetes deployment, CLI-only against a remote base URL | Operator or remote cluster | No on the laptop |
 
 Inspect what your running platform registered:
@@ -77,15 +76,6 @@ Configure profiles under `jobs.executors` and related knobs such as `jobs.enable
 | Model deployments | Deployments plugin only | Default executor `local-docker`; no subprocess backend |
 
 See [Deploy Agents](/documentation/agents/deploy-agents) and [Deploy Models](/documentation/models-and-inference/deploy-models).
-
-## `nemo quickstart` vs `nemo services run`
-
-These are different local shapes:
-
-- **`nemo services run`** (and `nemo setup --start-services`): platform processes on the host, using the bundled local YAML. Jobs often use subprocess; deployments still default to Docker.
-- **`nemo quickstart`**: runs the platform itself in containers and always needs Docker.
-
-Do not assume quickstart's Docker-centric job story applies to a host `nemo services run` install.
 
 ## Escape hatches
 

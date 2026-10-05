@@ -126,8 +126,6 @@ NeMo Helix currently supports the following execution backends:
 
 For when the **platform** itself needs Docker (deployments preflight) versus when jobs use subprocess, see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors). Inspect registered profiles with `nemo jobs list-execution-profiles -f json`.
 
-Do not confuse host `nemo services run` (often `subprocess/default` for CPU plugin steps) with `nemo quickstart` (platform in containers). They are different local shapes.
-
 ### Subprocess
 
 The subprocess backend runs job commands directly on the Platform host. It is useful for trusted local development workloads, but it does not provide container isolation and should not run untrusted code.
