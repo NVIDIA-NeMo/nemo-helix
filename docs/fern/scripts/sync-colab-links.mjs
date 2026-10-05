@@ -28,7 +28,7 @@ const TARGET_DOCS_ROOT = docsRootArg ? resolve(docsRootArg) : DOCS_ROOT;
 const COLAB_REF = colabRefArg ?? detectColabRef();
 
 const TOP_COLAB_LINK_RE = /^\n*\[Run in Google Colab\]\(https:\/\/colab\.research\.google\.com\/github\/NVIDIA-NeMo\/nemo-helix\/blob\/[^\s)]+\)\n{1,2}/;
-const NOTEBOOK_ACTIONS_RE = /^\n*<div className="notebook-actions">[\s\S]*?<\/div>\n{1,2}/;
+const NOTEBOOK_ACTIONS_RE = /^\n*(?:<NotebookActions\b[\s\S]*?\/>|<div className="notebook-actions">[\s\S]*?<\/div>)\n{1,2}/;
 const NOTEBOOK_VIEWER_RE = /<NotebookViewer\b[\s\S]*?\/>/g;
 const COLAB_URL_PROP_RE = /\n\s*colabUrl="[^"]*"/;
 const DOWNLOAD_URL_PROP_RE = /\n\s*downloadUrl="[^"]*"/;
@@ -92,19 +92,20 @@ function colabUrlFor(notebookPath) {
 }
 
 function downloadUrlFor(notebookPath) {
-  return `https://github.com/NVIDIA-NeMo/nemo-helix/raw/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
+  return `https://raw.githubusercontent.com/NVIDIA-NeMo/nemo-helix/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
+}
+
+function notebookFilename(notebookPath) {
+  return notebookPath.split(sep).pop() ?? "notebook.ipynb";
 }
 
 function notebookActionsFor(notebookPath) {
   return [
-    '<div className="notebook-actions">',
-    `  <a href="${colabUrlFor(notebookPath)}" target="_blank" rel="noopener noreferrer" className="fern-button success filled notebook-actions__link">`,
-    '    <span className="fern-button-content"><span aria-hidden="true">&#9654;</span><span className="fern-button-text">Run in Google Colab</span></span>',
-    '  </a>',
-    `  <a href="${downloadUrlFor(notebookPath)}" className="fern-button outlined notebook-actions__link" download>`,
-    '    <span className="fern-button-content"><span className="fern-button-text">Download notebook</span></span>',
-    '  </a>',
-    '</div>',
+    "<NotebookActions",
+    `  colabUrl="${colabUrlFor(notebookPath)}"`,
+    `  downloadUrl="${downloadUrlFor(notebookPath)}"`,
+    `  filename="${notebookFilename(notebookPath)}"`,
+    "/>",
   ].join("\n");
 }
 

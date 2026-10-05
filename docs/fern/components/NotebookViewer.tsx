@@ -12,6 +12,7 @@ import embeddingTripletDataset from "./notebooks/embedding-triplet-dataset";
 import loraCustomizationJob from "./notebooks/lora-customization-job";
 import optimizeThroughput from "./notebooks/optimize-throughput";
 import retrievalGenerate from "./notebooks/retrieval-generate";
+import { NotebookActions } from "./NotebookActions";
 import sftCustomizationJob from "./notebooks/sft-customization-job";
 import toolCalling from "./notebooks/tool-calling";
 
@@ -436,30 +437,7 @@ export const NotebookViewer = ({
 
   return (
     <div className="notebook-viewer">
-      {(colabUrl || downloadUrl) && (
-        <div className="notebook-actions notebook-viewer__colab-banner">
-          {colabUrl && (
-            <a
-              href={colabUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="fern-button success filled notebook-actions__link"
-            >
-              <span className="fern-button-content">
-                <span aria-hidden="true">&#9654;</span>
-                <span className="fern-button-text">Run in Google Colab</span>
-              </span>
-            </a>
-          )}
-          {downloadUrl && (
-            <a href={downloadUrl} className="fern-button outlined notebook-actions__link" download>
-              <span className="fern-button-content">
-                <span className="fern-button-text">Download notebook</span>
-              </span>
-            </a>
-          )}
-        </div>
-      )}
+      <NotebookActions colabUrl={colabUrl} downloadUrl={downloadUrl} />
 
       <div className="notebook-viewer__cells">
         {cells.map((cell, index) => renderCell(cell, index, showOutputs))}
