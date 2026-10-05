@@ -42,12 +42,13 @@ adjacent `.ipynb` files during Fern preparation.
 
 ## `sync-colab-links.mjs`
 
-Keeps "Run in Google Colab" affordances consistent across Fern docs:
+Keeps notebook actions consistent across Fern docs:
 
-- Inline MDX pages with an adjacent `.ipynb` get a top-of-page Colab link.
-- `NotebookViewer` wrapper pages with an adjacent `.ipynb` get a generated
-  `colabUrl` prop so the viewer renders its banner.
-- Pages without an adjacent `.ipynb` do not get a generated Colab affordance.
+- Inline MDX pages with an adjacent `.ipynb` get top-of-page buttons for
+  running in Colab and downloading the source notebook.
+- `NotebookViewer` wrapper pages with an adjacent `.ipynb` get generated
+  `colabUrl` and `downloadUrl` props so the viewer renders the same actions.
+- Pages without an adjacent `.ipynb` do not get generated notebook actions.
 
 `npm run prepare` runs this hook automatically. For `Latest`, generated URLs point at
 `main` by default, or at the current `release/*` ref when preparing docs from a

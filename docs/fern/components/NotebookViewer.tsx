@@ -99,6 +99,8 @@ export interface NotebookViewerProps {
   notebook?: NotebookData | null;
   /** Optional Colab URL for "Run in Colab" badge */
   colabUrl?: string;
+  /** Optional URL for downloading the source notebook */
+  downloadUrl?: string;
   /** Show code cell outputs (default: true) */
   showOutputs?: boolean;
 }
@@ -399,6 +401,7 @@ export const NotebookViewer = ({
   name,
   notebook,
   colabUrl,
+  downloadUrl,
   showOutputs = true,
 }: NotebookViewerProps) => {
   const resolved = (name != null ? (notebooks[name] as NotebookData | undefined) : notebook) ?? null;
@@ -433,19 +436,28 @@ export const NotebookViewer = ({
 
   return (
     <div className="notebook-viewer">
-      {colabUrl && (
-        <div className="notebook-viewer__colab-banner">
-          <a
-            href={colabUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fern-button success filled notebook-viewer__colab-link"
-          >
-            <span className="fern-button-content">
-              <span aria-hidden="true">&#9654;</span>
-              <span className="fern-button-text">Run in Google Colab</span>
-            </span>
-          </a>
+      {(colabUrl || downloadUrl) && (
+        <div className="notebook-actions notebook-viewer__colab-banner">
+          {colabUrl && (
+            <a
+              href={colabUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="fern-button success filled notebook-actions__link"
+            >
+              <span className="fern-button-content">
+                <span aria-hidden="true">&#9654;</span>
+                <span className="fern-button-text">Run in Google Colab</span>
+              </span>
+            </a>
+          )}
+          {downloadUrl && (
+            <a href={downloadUrl} className="fern-button outlined notebook-actions__link" download>
+              <span className="fern-button-content">
+                <span className="fern-button-text">Download notebook</span>
+              </span>
+            </a>
+          )}
         </div>
       )}
 

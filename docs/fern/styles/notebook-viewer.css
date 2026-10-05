@@ -7,21 +7,30 @@
   margin: 1.5rem 0;
 }
 
-/* Colab banner – uses Fern's .fern-button styling */
-.notebook-viewer__colab-banner {
+/* Notebook action buttons – uses Fern's .fern-button styling */
+.notebook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-bottom: 1rem;
 }
 
-/* Override prose/link color so Colab link renders as a button, not a green link */
-.notebook-viewer__colab-link,
-.notebook-viewer__colab-link:hover,
-.notebook-viewer__colab-link:visited,
-.notebook-viewer__colab-link:focus-visible {
-  color: white;
+/* Override prose/link color so notebook action links render as buttons, not green links */
+.notebook-actions__link,
+.notebook-actions__link:hover,
+.notebook-actions__link:visited,
+.notebook-actions__link:focus-visible {
   text-decoration: none;
 }
 
-.notebook-viewer__colab-link .fern-button-text {
+.notebook-actions__link.filled,
+.notebook-actions__link.filled:hover,
+.notebook-actions__link.filled:visited,
+.notebook-actions__link.filled:focus-visible {
+  color: white;
+}
+
+.notebook-actions__link .fern-button-text {
   color: inherit;
 }
 
