@@ -10,7 +10,6 @@ import type {
 } from '@studio/components/Layouts/NavigationDrawer/types';
 import { isGroup } from '@studio/components/Layouts/NavigationDrawer/utils';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getPluginIcon } from '@studio/plugins/iconMap';
 import {
   usePluginInstalled,
   usePlugins,
@@ -39,8 +38,20 @@ import {
   getVirtualModelsSideNavItems,
 } from '@studio/routes/groups';
 import { getAgentsListRoute } from '@studio/routes/utils';
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useLocation } from 'react-router';
+
+const NoPluginNavIcon = () => null;
+
+// Without the catch, a failed chunk (e.g. after a redeploy) reaches the root errorElement.
+const PluginNavIcon = lazy(() =>
+  import('@studio/plugins/PluginNavIcon')
+    .then((m) => ({ default: m.PluginNavIcon }))
+    .catch((err: unknown) => {
+      logger.warn('[plugins] Failed to load plugin nav icons:', err);
+      return { default: NoPluginNavIcon };
+    })
+);
 
 // The parent rows stand for the entity their landing page lists, so they take
 // that entity's canonical glyph. `Datasets` only groups the data jobs today,
@@ -197,17 +208,18 @@ export const WorkspaceSideNav = ({ collapsed }: { collapsed?: boolean }) => {
         try {
           return plugin.navItems(workspace).map((group) => ({
             group: group.group,
-            items: group.items.map((item) => {
-              const Icon = getPluginIcon(item.iconName);
-              return {
-                // Namespaced: ids are React keys and accordion-state keys, and
-                // merging puts plugin items in the same array as core ones.
-                id: `${plugin.name}:${item.id}`,
-                slotIcon: Icon ? <Icon className={iconColorClass} /> : undefined,
-                slotLabel: item.label,
-                href: item.href,
-              };
-            }),
+            items: group.items.map((item) => ({
+              // Namespaced: ids are React keys and accordion-state keys, and
+              // merging puts plugin items in the same array as core ones.
+              id: `${plugin.name}:${item.id}`,
+              slotIcon: (
+                <Suspense>
+                  <PluginNavIcon iconName={item.iconName} className={iconColorClass} />
+                </Suspense>
+              ),
+              slotLabel: item.label,
+              href: item.href,
+            })),
           }));
         } catch (err) {
           logger.warn(`[plugins] navItems() threw for plugin "${plugin.name}":`, err);
