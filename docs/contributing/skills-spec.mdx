@@ -31,7 +31,7 @@ They don't overlap. We need both. This doc proposes a unified spec so future ski
 
 ### Journey A: "I want to build an agent for my use case"
 
-Entry point: the coding agent of your choice opened inside a freshly installed NeMo Helix repo. The user has just run `make bootstrap` and `nemo setup` in their shell.
+Entry point: a coding agent (Claude Code, Cursor, Codex, OpenCode) opened inside a freshly installed NeMo Helix repo. The user has just run `make bootstrap` and `nemo setup` in their shell.
 
 **What they care about:**
 - Going from a fuzzy idea to a working, testable agent in their preferred coding agent.
@@ -87,7 +87,7 @@ Without a coherent post-setup CTA, the user finishes A and never starts B. They 
 
 ## Required frontmatter fields
 
-Every skill ships with the following YAML frontmatter at the top of `SKILL.md`. Coding agents read these fields directly: `description` and `triggers` drive routing, `not-for` prevents collisions, `allowed-tools` tells the agent harness which tools the skill expects to invoke.
+Every skill ships with the following YAML frontmatter at the top of `SKILL.md`. Coding agents (Claude Code, Cursor, Codex, OpenCode) read these fields directly: `description` and `triggers` drive routing, `not-for` prevents collisions, `allowed-tools` tells the agent harness which tools the skill expects to invoke.
 
 | Field | Required | Purpose |
 |---|---|---|

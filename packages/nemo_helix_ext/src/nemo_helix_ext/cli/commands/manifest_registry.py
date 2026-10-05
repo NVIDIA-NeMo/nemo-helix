@@ -69,7 +69,7 @@ Examples:
         help="""\
 Install AI agent skill files for Nemo.
 
-Supported agents: claude, codex, cursor
+Supported agents: claude, codex, cursor, opencode
 
 Examples:
 # List available skills.

@@ -13,6 +13,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     DuplicateSkillError,
     UnsupportedAgentError,
     get_installer,
+    list_agent_names,
     load_skills,
 )
 from nemo_helix_ext.cli.core.context import CLIContext
@@ -30,12 +31,14 @@ from nemo_helix_ext.cli.core.types import (
     StreamOutputOption,
 )
 
+_AGENT_NAMES = ", ".join(list_agent_names())
+
 app = create_typer_app(
     name="skills",
-    help="""\
+    help=f"""\
 Install AI agent skill files for Nemo.
 
-Install skills for the agent of your choice.
+Supported agents: {_AGENT_NAMES}
 
 Examples:
 # List available skills.
@@ -223,7 +226,7 @@ def show(
     ],
     agent: Annotated[
         str | None,
-        typer.Option("--agent", "-a", help="Agent to format for. Supported: claude, codex, cursor"),
+        typer.Option("--agent", "-a", help=f"Agent to format for. Supported: {_AGENT_NAMES}"),
     ] = None,
 ) -> None:
     """Print skill content to stdout.
@@ -265,7 +268,7 @@ def show(
 def install(
     agent: Annotated[
         str | None,
-        typer.Option("--agent", "-a", help="Agent to install for. Supported: claude, codex, cursor"),
+        typer.Option("--agent", "-a", help=f"Agent to install for. Supported: {_AGENT_NAMES}"),
     ] = None,
     skill: Annotated[
         list[str] | None,
