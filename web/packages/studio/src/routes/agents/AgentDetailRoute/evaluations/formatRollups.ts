@@ -22,6 +22,8 @@ export interface EvaluatorScore {
   key: string;
   label: string;
   value: string;
+  /** Runs whose evaluator recorded a FAILED result; they count as 0 in `value`. */
+  failedCount: number;
 }
 
 /** Mean per evaluator. An evaluation names its own evaluators, so these vary row to row and
@@ -31,4 +33,5 @@ export const evaluatorScores = (evaluation: AgentEvaluationRow): EvaluatorScore[
     key,
     label: evaluatorLabel(key),
     value: formatScore(aggregate?.mean),
+    failedCount: aggregate?.failed_count ?? 0,
   }));
