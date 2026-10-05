@@ -130,10 +130,11 @@ The primary entrypoint. Evaluates whether the request should be allowed based on
 
 Services use this for fine-grained authorization beyond the middleware.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 if await auth_client.has_permissions(workspace_id, ["models.create"]):
     # Allow model creation
-    ...
+    pass
 ```
 
 ### `has_role` — Role Checks
