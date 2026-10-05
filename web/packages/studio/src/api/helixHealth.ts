@@ -12,7 +12,8 @@ import axios, { AxiosError } from 'axios';
  * - `not-ready`: the platform process answered 503 with its `not_ready` body, so it is
  *   reachable but still starting (or a service is down).
  * - `unreachable`: no usable response — connection refused, DNS failure, timeout, a dev
- *   proxy that could not reach its target, or any response that is not the platform's.
+ *   proxy that could not reach its target, or any response (even a 200) that is not the
+ *   platform's.
  */
 export type HelixHealthStatus = 'ready' | 'not-ready' | 'unreachable';
 
@@ -35,13 +36,18 @@ const isNotReadyResponse = (error: unknown): boolean => {
   );
 };
 
+const isReadyResponse = (data: unknown): boolean =>
+  typeof data === 'object' && data !== null && 'status' in data && data.status === 'ready';
+
 export const checkHelixHealth = async (): Promise<HelixHealthStatus> => {
   try {
-    await axios.get(getHelixHealthUrl(), {
+    const { data } = await axios.get<unknown>(getHelixHealthUrl(), {
       timeout: HEALTH_TIMEOUT_MS,
       validateStatus: (status) => status === 200,
     });
-    return 'ready';
+    // A 200 without Helix's body (e.g. a dev server's SPA fallback serving index.html) is
+    // not the platform answering, so it must not unblock the app.
+    return isReadyResponse(data) ? 'ready' : 'unreachable';
   } catch (error) {
     return isNotReadyResponse(error) ? 'not-ready' : 'unreachable';
   }

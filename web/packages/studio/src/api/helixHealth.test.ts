@@ -14,6 +14,15 @@ describe('checkHelixHealth', () => {
     await expect(checkHelixHealth()).resolves.toBe('ready');
   });
 
+  it('resolves "unreachable" on a 200 that is not the platform readiness body (e.g. SPA fallback)', async () => {
+    server.use(
+      http.get(getHelixHealthUrl(), () =>
+        HttpResponse.html('<!doctype html><html><body>Studio</body></html>')
+      )
+    );
+    await expect(checkHelixHealth()).resolves.toBe('unreachable');
+  });
+
   it('resolves "not-ready" when the platform answers 503 with its not_ready body', async () => {
     server.use(
       http.get(getHelixHealthUrl(), () =>
