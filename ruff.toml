@@ -43,6 +43,8 @@ exclude = [
     "packages/garak_api/garakapi/exception.py",
     "packages/garak_api/garakapi/_selection.py",
     "packages/garak_api/garakapi/_spec.py",
+    # upstream labs-eval-author skills, vendored byte-identical
+    "plugins/nemo-eval-author/src/nemo_eval_author_plugin/vendor",
 ]
 
 line-length = 120

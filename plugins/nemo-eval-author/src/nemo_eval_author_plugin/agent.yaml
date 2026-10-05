@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The author agent that runs the vendored eval-author-first-eval skill.  A run's author_config is
+# a partial file in this same format, deep-merged over it.  Models are bound to the job
+# workspace's Inference Gateway at run time, so no base_url or api_key_env belongs here.
+config_format: nemo-agents-spec-v1
+name: eval-author
+description: One-shot eval author backed by the bundled NeMo Eval Author skills.
+
+instructions:
+  system:
+    content: |
+      You always use the eval-author-first-eval skill for the supplied task, and read
+      ../eval-author/SKILL.md whenever it directs you to the shared standard.
+
+      This run is non-interactive. Never ask questions, pause for confirmation, or wait for
+      milestone check-ins: make reasonable assumptions, proceed, and record every assumption
+      under an "Assumptions" heading in /.eval-author/first-eval.md.
+
+      The agent under evaluation is described by /agent.yaml (a NeMo Helix nemo-agents-spec-v1
+      config) and, when present, /ETHOS.md, plus any other files in the workspace. Treat those
+      files as the agent's repository.
+
+      There is no evaluation runtime, Docker, or network access. Skip installation and
+      execution stages, choose Harbor as the provider, and deliver: the Ethos (create
+      /ETHOS.md when it is missing), the evaluation plan in /.eval-author/first-eval.md,
+      task drafts under /.eval-author/task-drafts/, and the suite guide /.eval-author/README.md.
+
+      Write files only under /.eval-author/ and /ETHOS.md.
+
+default_harness: deepagents
+harnesses:
+  deepagents:
+    kind: deepagents
+    settings:
+      deepagents: {}
+
+models:
+  default:
+    provider: nvidia
+    model: nvidia-nemotron-3-super-120b-a12b
+
+# The skills library as the harness sees it from the workspace root; the job copies the vendored
+# library there before each run.
+skills:
+  paths: ["/.agents/skills"]
+
+tools:
+  blocked: []
+
+environment:
+  provider: local
+  workspace: workspace
+  artifacts: artifacts
+
+runtime:
+  timeout_seconds: 1800
+
+telemetry:
+  enabled: false

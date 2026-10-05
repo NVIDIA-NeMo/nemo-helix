@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "nemo-eval-author-plugin"
+version = "0.1.0"
+description = "`nemo evaluator author`: authors a platform agent's first evals with the vendored NeMo Eval Author skill in one Fabric run."
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "fastapi>=0.115",
+  "nemo-agents-plugin",
+  "nemo-helix",
+  "nemo-helix-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.2",
+  "typer>=0.20.0",
+]
+
+[project.entry-points."nemo.services"]
+eval-author = "nemo_eval_author_plugin.service:EvalAuthorService"
+
+[project.entry-points."nemo.jobs"]
+"eval-author.first-eval" = "nemo_eval_author_plugin.jobs.first_eval:FirstEvalJob"
+
+# Mounted at `nemo evaluator author`; there is deliberately no top-level `nemo.cli` entry, which
+# would also mount the job at `nemo eval-author first-eval`.
+[project.entry-points."nemo.cli.evaluator"]
+author = "nemo_eval_author_plugin.cli:EvalAuthorCLI"
+
+[tool.nemo.openapi]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nemo_eval_author_plugin"]
+
+[tool.uv.sources]
+nemo-agents-plugin = { workspace = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
+
+[dependency-groups]
+dev = ["pytest>=8.3.4", "pytest-asyncio>=0.25.3"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]

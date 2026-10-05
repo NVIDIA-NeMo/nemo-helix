@@ -1,0 +1,52 @@
+{
+  "skill_name": "eval-author",
+  "evals": [
+    {
+      "id": "router-explicit-discovery",
+      "prompt": "Use eval-author to tell me which sub-flow should check whether an inherited repository of Harbor tasks is runnable. Only give the route and the evidence that would justify a runnable verdict; do not execute it or create files.",
+      "expected_output": "Select eval-author-discover. Harbor validators and execution evidence, rather than merely finding task files, establish readiness. Do not claim any checks ran.",
+      "assertions": [
+        "Selects eval-author-discover.",
+        "Does not claim the suite is runnable without evidence.",
+        "Does not modify the workspace."
+      ],
+      "expected_skill": "eval-author",
+      "files": []
+    },
+    {
+      "id": "router-implicit-first-eval",
+      "prompt": "My agent has no evaluation suite and no ETHOS.md. For now, just tell me the appropriate workflow for building my first evals and its first prerequisite. Do not run commands or create files.",
+      "expected_output": "Route to eval-author-first-eval and establish intended behavior through a required local Ethos before constructing a starter suite. Production traces and an existing coverage audit are not prerequisites.",
+      "assertions": [
+        "Selects eval-author-first-eval.",
+        "Identifies local Ethos as the first prerequisite.",
+        "Does not claim evaluations were built or executed."
+      ],
+      "expected_skill": "eval-author",
+      "files": []
+    },
+    {
+      "id": "router-contextual-trace",
+      "prompt": "We previously discussed interpreting a failed run, but my request has changed: I now want to turn one recorded interaction into a private reproducible Harbor task. Only identify the right sub-flow and evidence needed before calling the result ready. Do not fetch traces or build anything.",
+      "expected_output": "Select eval-author-trace-environment rather than trace inspection. Trace evidence grounds the task; retained Harbor proof and required review establish readiness. A successful original trace alone is insufficient.",
+      "assertions": [
+        "Honors the latest request to derive an environment.",
+        "Selects eval-author-trace-environment.",
+        "Does not invent successful proof or claim readiness."
+      ],
+      "expected_skill": "eval-author",
+      "files": []
+    },
+    {
+      "id": "router-negative",
+      "prompt": "What is 17 plus 25? Reply with just the number.",
+      "expected_output": "42",
+      "assertions": [
+        "Answers 42.",
+        "Does not invoke an evaluation authoring workflow or create files."
+      ],
+      "expected_skill": null,
+      "files": []
+    }
+  ]
+}

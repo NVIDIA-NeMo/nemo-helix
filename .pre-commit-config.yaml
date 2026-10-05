@@ -59,6 +59,8 @@ repos:
         name: Verify NeMo Helix rename consistency
         entry: tools/rename/verify-nemo-helix-rename.sh
         language: system
+        # Upstream labs-eval-author skills are vendored byte-identical and mention legacy env names.
+        args: ["--exclude-glob", "plugins/nemo-eval-author/src/nemo_eval_author_plugin/vendor/**"]
       - id: config-reference-docs
         name: Check config reference doc is up to date
         entry: bash -c 'uv run generate-config-docs && git diff --exit-code docs/set-up/config-reference.mdx'

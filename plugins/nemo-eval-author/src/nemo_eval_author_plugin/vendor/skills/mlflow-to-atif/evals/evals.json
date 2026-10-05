@@ -1,0 +1,64 @@
+{
+  "skill_name": "mlflow-to-atif",
+  "evals": [
+    {
+      "id": "mlflow-explicit-conversion",
+      "prompt": "Use mlflow-to-atif to convert the synthetic export in /workspace/input/valid.json to one canonical ATIF v1.7 trajectory under /workspace/output/atif. Use agent name fixture-agent and version 1.0. Keep source and output private and report only paths and content-free counts. Work offline.",
+      "expected_output": "Creates one ATIF v1.7 trajectory retaining the human instruction, retriever call arguments and paired observation, and MLflow provenance. Output directory permissions are 0700 and trajectory file permissions are 0600. Reports paths and content-free status only.",
+      "assertions": [
+        "Writes one .atif.json file under /workspace/output/atif.",
+        "Preserves the retriever call and paired result.",
+        "Emits ATIF v1.7.",
+        "Keeps output directory and file owner-private.",
+        "Does not print the trace payload or contact a live service."
+      ],
+      "expected_skill": "mlflow-to-atif",
+      "files": [
+        "files/valid.json"
+      ],
+      "expected_script": "convert_mlflow_to_atif.py"
+    },
+    {
+      "id": "mlflow-implicit-conversion",
+      "prompt": "I have a synthetic MLflow Trace.to_dict export in /workspace/input/valid.json. Prepare it as canonical ATIF v1.7 for an audit tool under /workspace/output/converted, using agent name fixture-agent and version 1.0. Work offline, keep the files owner-private, and report paths and counts only.",
+      "expected_output": "Converts directly to one ATIF v1.7 file without Intake ingestion or installing MLflow. Retains the human request and paired retriever evidence, with private output permissions.",
+      "assertions": [
+        "Produces one canonical ATIF trajectory.",
+        "Does not ingest through Intake or install MLflow.",
+        "Preserves recorded tool evidence.",
+        "Does not echo raw trace contents."
+      ],
+      "expected_skill": "mlflow-to-atif",
+      "files": [
+        "files/valid.json"
+      ],
+      "expected_script": "convert_mlflow_to_atif.py"
+    },
+    {
+      "id": "mlflow-missing-instruction",
+      "prompt": "Convert /workspace/input/missing-instruction.json from exported MLflow data to ATIF v1.7 under /workspace/output/rejected, using agent name fixture-agent and version 1.0. Do not invent missing evidence or contact external systems. Keep your response content-free.",
+      "expected_output": "Reports that conversion cannot establish a complete human instruction and does not invent one or produce a successful trajectory. An agent answer is not substituted for the user request.",
+      "assertions": [
+        "Refuses to invent a human instruction.",
+        "Does not emit a successful ATIF trajectory.",
+        "Explains the missing-instruction limitation without copying payloads."
+      ],
+      "expected_skill": "mlflow-to-atif",
+      "files": [
+        "files/missing-instruction.json"
+      ],
+      "expected_script": "convert_mlflow_to_atif.py"
+    },
+    {
+      "id": "mlflow-negative",
+      "prompt": "Alphabetize these words: zebra, apple, mango. Reply with the three words only.",
+      "expected_output": "apple, mango, zebra",
+      "assertions": [
+        "Returns apple, mango, zebra in that order.",
+        "Does not run trace conversion or create trace artifacts."
+      ],
+      "expected_skill": null,
+      "files": []
+    }
+  ]
+}

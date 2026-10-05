@@ -23,3 +23,4 @@ services/guardrails/callouts/internal/server/callout_server.go
 services/guardrails/callouts/internal/server/callout_server_test.go
 # needs a README ignore instead
 k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl
+plugins/nemo-eval-author/src/nemo_eval_author_plugin/vendor/

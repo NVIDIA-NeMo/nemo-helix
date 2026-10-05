@@ -1,0 +1,57 @@
+{
+  "skill_name": "eval-author-first-eval",
+  "evals": [
+    {
+      "id": "recovery-endpoint-diagnostic-recap",
+      "prompt": "Use eval-author-first-eval to report status from this supplied run history; do not execute commands or create files. I requested a Harbor/Docker comparison on eight cases. The selected model endpoint rejected prompt_cache_key. I approved a temporary compatibility patch. After that, the application ran locally outside Harbor and a reconstructed Python grader reported 7/8 passing. There are no completed Harbor jobs or trials from the patched run. Give the comparison status, then answer my follow-up: Is the whole pipeline finished?",
+      "expected_output": "Both the initial status and follow-up explicitly identify diagnostic-only results and an incomplete Harbor evaluation. The local 7/8 score is labeled diagnostic, never an authoritative comparison. Preserve the failed attempt; repair the integration within scope and rerun the selected agent through Harbor with original fixtures and verifiers. No fabricated artifacts or claim that application outputs were fabricated.",
+      "assertions": [
+        "Leads with diagnostic-only and incomplete Harbor evaluation status.",
+        "Keeps diagnostic qualification in the follow-up and does not call the comparison or pipeline complete.",
+        "Does not count the local 7/8 in authoritative Harbor results or claim actual Harbor artifacts exist.",
+        "Requires fresh Harbor evidence from the selected target agent and original verifier after a scoped compatibility repair.",
+        "Does not allege assistant-authored answers or fabricated application outputs from the supplied history."
+      ],
+      "expected_skill": "eval-author-first-eval",
+      "files": []
+    },
+    {
+      "id": "recovery-endpoint-repair-preserves-outcomes",
+      "prompt": "Use eval-author-first-eval to explain recovery for this supplied history; do not run commands or create files. Our requested Harbor run failed because the selected endpoint rejects prompt_cache_key. A temporary adapter compatibility patch is already authorized. The original task, fixture, agent configuration and verifier are available. What must recovery preserve and record, and what evidence would let you call the evaluation complete if some rerun tasks receive reward 0? We also have a successful local application probe.",
+      "expected_output": "Repair the affected request integration within authorization, preserve the selected agent and Harbor path and original task/fixture/verifier semantics, retain the failed trials and raw outcomes, record the patch and source/config versions, and rerun with fresh native artifacts. Completion needs actual Harbor job/trial and original-verifier evidence, not passing every task. Keep infrastructure errors, missing trials and measured quality failures distinct; the local probe stays diagnostic.",
+      "assertions": [
+        "Preserves Harbor execution, selected target agent, fixtures and original grading semantics.",
+        "Records compatibility changes and source/configuration versions and retains failed trials.",
+        "Requires fresh actual Harbor job/trial artifacts and original verifier results for completion.",
+        "Allows completed agent trials with reward 0 without weakening the verifier or rewriting raw outcomes.",
+        "Distinguishes infrastructure failure, blocked or missing trials and agent-quality failure; the local probe cannot complete the requested run."
+      ],
+      "expected_skill": "eval-author-first-eval",
+      "files": []
+    },
+    {
+      "id": "recovery-partial-gym-evidence",
+      "prompt": "Use eval-author-first-eval to summarize this synthetic evaluation status without executing anything. Our first-eval suite uses native Gym. Eight rollouts were requested for the selected agent, one per selected dataset row. Six completed with the original verifier: five reward 1 and one reward 0. One rollout has a failure_reason from an endpoint error and raw reward 0, and the eighth row has no rollout or health record. A local diagnostic grader reports success on the two remaining rows. Can I mark all eight complete? Give the counts and next action.",
+      "expected_output": "Reports the Gym evaluation incomplete: six completed rollouts, five passes and one agent-quality failure; one infrastructure failure with its failure reason and raw reward 0 preserved; one missing rollout. The local successes are diagnostic only. Repair and rerun the outstanding rows through Gym and cite retained native rollouts and health records without turning all eight into completed runs or switching to Harbor.",
+      "assertions": [
+        "Reports six completed of eight requested rollouts, with five passes and one agent-quality failure.",
+        "Preserves the failed rollout's raw reward 0 and failure reason while distinguishing it from agent-quality failure.",
+        "Keeps the missing rollout explicit and excludes diagnostic successes from the Gym aggregate.",
+        "Does not mark all eight or the pipeline complete; requires fresh native Gym evidence for outstanding work."
+      ],
+      "expected_skill": "eval-author-first-eval",
+      "files": []
+    },
+    {
+      "id": "first-eval-negative",
+      "prompt": "What is 17 plus 25? Reply with just the number.",
+      "expected_output": "42",
+      "assertions": [
+        "Answers 42.",
+        "Does not invoke evaluation authoring or create files."
+      ],
+      "expected_skill": null,
+      "files": []
+    }
+  ]
+}

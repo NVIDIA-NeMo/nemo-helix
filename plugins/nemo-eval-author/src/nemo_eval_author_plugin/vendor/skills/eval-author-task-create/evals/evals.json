@@ -1,0 +1,59 @@
+{
+  "skill_name": "eval-author-task-create",
+  "evals": [
+    {
+      "id": "gym-proposal-version-plan",
+      "prompt": "Use eval-author-task-create to propose a Gym task for an existing audit gap. All evidence for this synthetic exercise is inline: the aggregate audit marks ledger.transfer as not_covered_by_any_input_report; inspection of the two existing tasks found only balance reads; the local Ethos requires a successful transfer to debit and credit exactly once and an insufficient-funds attempt to leave both balances unchanged. The team's inventory says Gym v0.6.0, Python 3.13 on Linux, requests>=2, image gym-host:latest, dataset ledger-v2, and model acme-chat-latest at temperature 0.2. Nobody has recorded source commits, image or dataset digests, lockfiles, or an immutable model revision. A teammate suggests labeling this inventory 'locked and repeatable.' Give the proposal and version/rerun plan in your response only. This is proposal-only: do not create files, install anything, invoke commands, or run evaluations. Do not fetch additional evidence.",
+      "expected_output": "Proposes a ledger.transfer outcome-based task grounded in the inspected coverage gap, with success and insufficient-funds controls. Treats the inventory as reported information, not a verified lock. Separates observed/reported, proposed, and unresolved identities; identifies the missing immutable runtime/image, Python patch/platform, consumed dependency locks, task/verifier/config, dataset bytes/ordering/reset, and model/settings identities. Supplies a proposed repeat/reset protocol with commands or command placeholders, output retention and unresolved runtime paths, without presenting it as executed. Mutable model aliases and stochastic outputs remain explicit reproducibility limits. Stops at a proposal.",
+      "assertions": [
+        "Keeps Gym as the provider and proposes grading balance changes and unchanged balances on failure, rather than rewarding a tool call alone.",
+        "Does not call the supplied version labels, dependency range, latest image tag, or mutable model alias a verified lock; distinguishes known inventory from proposed and unresolved pins without inventing hashes or revisions.",
+        "Identifies missing runtime/Python/platform identity, dependency lock inputs, task/verifier/config identity, dataset bytes and ordering, and model revision/settings.",
+        "Plans fixture reset and isolation, repeat count, concurrency, timeouts/retries, rerun commands or unresolved command inputs, and retained results for each attempt.",
+        "Does not promise identical stochastic outputs or measured coverage closure, and does not execute commands, create files, install dependencies, or run evaluations."
+      ],
+      "expected_skill": "eval-author-task-create",
+      "files": []
+    },
+    {
+      "id": "gym-rerun-lock-and-evidence-review",
+      "prompt": "Review this synthetic Gym task handoff using eval-author-task-create. Answer from these notes only; do not execute commands or change files. The draft runs a stateful ledger task on Gym v0.6.0. Its parent runtime has uv.lock. Each child server currently has an unconstrained requirements.txt; the author proposes adding pyproject.toml at the draft root solely to hold another lock. The package passes layout validation and its top-level wheel install passed with --no-index, but child setup used a warm cache with network enabled. Verifier controls passed once. Since the retained run, the dataset row order changed and the container tag now resolves to a different image. Only the successful second attempt's result was kept, balances were not reset between attempts, and the author says the same seed makes the results identical. They want to mark this portable, offline, repeatable, and ready to compare with the earlier run. Give a prioritized correction and evidence plan for that verdict.",
+      "expected_output": "Withholds those readiness/comparability claims. Explains that parent locks do not constrain child servers and recommends per-component locks in reproducibility/locks/<component>/, with pins exported or constrained into each component's actual dependency entrypoint, avoiding the Gym v0.6.0 root pyproject install-mode trap. Plans target Python/OS/architecture closure including injected host dependencies, fresh host and child import/version checks, and fully offline startup verification. Resolves drift or records a new plan revision, restores fixture state, retains all attempts and run-plan identities, repeats real-agent measurements and controls, and distinguishes scripted verifier success from model performance.",
+      "assertions": [
+        "Rejects parent uv.lock as sufficient for child environments and requires each server to consume its selected pins through its actual dependency entrypoint.",
+        "Avoids adding a draft-root pyproject.toml just for locking; places lock projects separately under reproducibility/locks/ and explains the Gym install-mode risk.",
+        "Requires target-compatible dependency closure including host-injected packages, fresh host and child environment verification, and complete startup with fresh caches and disabled network before claiming offline support.",
+        "Treats changed dataset order and image identity as drift to resolve or as a new recorded plan revision, preserving earlier evidence instead of silently comparing incompatible runs.",
+        "Requires restored fixture state, repeat settings, retained results including errors/retries, and actual run identities; does not treat a seed or one verifier pass as proof of identical outputs or real-agent coverage closure."
+      ],
+      "expected_skill": "eval-author-task-create",
+      "files": []
+    },
+    {
+      "id": "gym-helix-evaluator-export-review",
+      "prompt": "Use eval-author-task-create to review a proposed export of an existing native Gym ledger draft to Helix Evaluator. Do not create files, run commands, upload anything, or contact services; return a corrected export plan from the supplied facts. The target is the Helix Evaluator contract at a101f9523e20867e0a1c511189951484c3327056, not RL/Customizer. The draft contains environments/ledger/manifest.yaml, environments/ledger/data/example.jsonl, tests/verifier_cases.jsonl, resources_servers/ledger/app.py, resources_servers/ledger/requirements.txt, resources_servers/ledger/configs/ledger.yaml, and responses_api_models/provider/config.yaml. The resource config also embeds a model-server block. The proposed export copies the entire draft, reuses the Gym manifest as its package descriptor, and lists ../shared/agent.yaml in config_paths. Its wheels/ directory has two versions of the same distribution, a source tarball, and wheels only tested on the author's laptop. A colleague says an existing RL adapter package proves Evaluator compatibility. What should be exported, kept separate, validated, and handed off before any separately authorized deployment?",
+      "expected_output": "Preserves the native draft and fixtures and prepares a separate exports/helix package plan. Uses nemo-environment.yaml with native-v1 or corrected wheels-v1 and contained, existing relative config_paths under resources_servers or responses_api_agents. Includes selected custom code and consumed dependencies; excludes all JSONL and supplies evaluation rows separately, excludes responses_api_models and embedded model blocks while recording the operator-owned model/settings in the run plan. Corrects wheels-v1 closure/compatibility or chooses native-v1 with explicit network requirements. Uses target Evaluator package/component/namespace validation followed by fresh runtime and control execution evidence, including read-only mounts with writable work paths if deployed that way. Does not equate an RL adapter, layout validation, or wheel presence with Evaluator readiness or offline proof.",
+      "assertions": [
+        "Keeps the native draft and verifier fixtures intact and plans a separate exports/helix package with a nemo-environment.yaml descriptor distinct from the Gym manifest.",
+        "Requires present, contained relative config_paths under resources_servers or responses_api_agents and rejects ../shared/agent.yaml.",
+        "Excludes every JSONL file from the environment export, retaining local fixtures in the draft and supplying evaluation rows as a separate dataset/taskset.",
+        "Excludes responses_api_models and embedded model-server blocks from the export, leaving model configuration operator-owned and recording model/settings in the run plan.",
+        "Either corrects wheels-v1 to a flat compatible wheel-only dependency closure with one version per distribution and retained digests, or selects native-v1 with explicit installation/network requirements; does not claim offline startup from wheel presence.",
+        "Uses the selected Evaluator contract and validator, component/namespace checks, and fresh execution evidence rather than treating an RL adapter as interchangeable; hands off paths, digests, runtime/dataset identities and pending validation without claiming deployment or running anything."
+      ],
+      "expected_skill": "eval-author-task-create",
+      "files": []
+    },
+    {
+      "id": "gym-task-create-negative",
+      "prompt": "What is 14 multiplied by 3? Reply with just the number.",
+      "expected_output": "42",
+      "assertions": [
+        "Answers 42.",
+        "Does not invoke a task-authoring workflow, create artifacts, install dependencies, or run evaluations."
+      ],
+      "expected_skill": null,
+      "files": []
+    }
+  ]
+}

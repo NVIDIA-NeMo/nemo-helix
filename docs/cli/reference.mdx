@@ -9127,6 +9127,10 @@ nemo evaluator [OPTIONS] COMMAND [ARGS]...
 * `info`: Print the current plugin status.
 * `metric-types`: Print available evaluator metric names or a metric JSON...
 
+*Contributed:*
+
+* `author`: Author evaluations for a platform agent with NeMo Eval...
+
 *Jobs:*
 
 * `agent-evaluate`: Run agent evaluation over tasks against a model, agent,...
@@ -9160,6 +9164,87 @@ nemo evaluator metric-types [OPTIONS] [<metric-name>]
 **Arguments:**
 
 * `<<metric-name>>`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+#### nemo evaluator author
+
+Author evaluations for a platform agent with NeMo Eval Author.
+
+**Usage:**
+
+```shell
+nemo evaluator author [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+*Jobs:*
+
+* `first-eval`: Author a platform agent's first evaluation suite with...
+
+##### nemo evaluator author first-eval
+
+Author a platform agent's first evaluation suite with NeMo Eval Author.
+
+**Usage:**
+
+```shell
+nemo evaluator author first-eval [OPTIONS] [COMMAND] [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Job Spec:**
+
+* `--agent`: Platform agent whose first evals are authored ('name' or 'workspace/name').  The stored agent is read, never modified.
+* `--agent-fileset FILESET_REF`: Fileset staged into the author's workspace as the agent's repository (ETHOS.md, docs).  Defaults to the agent's '\<name>-ethos' fileset when it exists.
+* `--output FILESET_REF`: Fileset receiving .eval-author/** and ETHOS.md; created when missing.  Defaults to '\<name>-evals' in the agent's workspace.
+* `--author-config`: Optional overrides for the author agent: a partial agent.yaml (nemo-agents-spec-v1) whose fields replace the bundled defaults, as a path relative to the root of author_config_fileset.
+* `--author-config-fileset FILESET_REF`: Fileset holding author_config ('name' or 'workspace/name').
+
+**Spec Source:**
+
+* `--spec`: Spec as a JSON string. [default: \{}]
+* `--spec-file <PATH>`: Path to a YAML or JSON spec file (used as base; per-flag values override).
+
+**Submission:**
+
+* `-o`: Backend option override, 'backend.key=value' (repeatable). [default: ]
+* `--options-file <PATH>`: Path to a YAML or JSON options file (nested by backend name).
+* `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
+* `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+Job Spec flags are generated from the FirstEvalSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+
+Some spec fields cannot be represented as CLI flags: `workspace`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
+​
+
+**Commands:**
+
+* `explain`: Show input/output schemas.
+
+###### nemo evaluator author first-eval explain
+
+Show input/output schemas.
+
+**Usage:**
+
+```shell
+nemo evaluator author first-eval explain [OPTIONS]
+```
+
+**Options:**
+
+* `--profile`: Annotate the bundle with this profile.
 
 **Help:**
 

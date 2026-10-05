@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit_coverage.schema.json",
+  "title": "NeMo Eval Author audit coverage report",
+  "description": "Shared per-trace coverage result consumed by audit coverage aggregation. This file records which stable audit item names one measurement method covered for one measured subject.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "audit",
+    "subject",
+    "method",
+    "item_kind",
+    "item_kind_count",
+    "covered"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for the shared audit coverage format.",
+      "const": "nemo.eval_author.audit_coverage.v1"
+    },
+    "audit": {
+      "description": "Audit spec metadata for the denominator used by this measurement.",
+      "$ref": "#/$defs/audit"
+    },
+    "subject": {
+      "description": "Provider-neutral identity of the measured task/run artifact.",
+      "$ref": "#/$defs/subject"
+    },
+    "method": {
+      "description": "Measurement method that produced this coverage file.",
+      "$ref": "#/$defs/method"
+    },
+    "item_kind": {
+      "description": "Audit item kind this coverage file covers.",
+      "enum": [
+        "capability",
+        "failure_case",
+        "tool"
+      ]
+    },
+    "item_kind_count": {
+      "description": "Number of audit items in the denominator with this item_kind. Aggregators use this as the method-specific denominator.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "covered": {
+      "description": "Stable audit item names this trace covered according to the selected method.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "itemName": {
+      "description": "Stable machine-readable audit item or tool name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "pathString": {
+      "description": "Local file or directory path recorded as a string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "audit": {
+      "description": "Identity and status of the audit denominator used for this measurement. Aggregators use this to detect mixed agents, draft denominators, or reports produced against different audit files.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "schema",
+        "agent",
+        "status",
+        "item_count"
+      ],
+      "properties": {
+        "path": {
+          "description": "Path to the audit.md file measured against.",
+          "$ref": "#/$defs/pathString"
+        },
+        "schema": {
+          "description": "Schema version of the audit denominator.",
+          "const": "nemo.eval_author.audit.v1"
+        },
+        "agent": {
+          "description": "Agent name declared by the audit denominator.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "description": "Review state of the audit denominator when this measurement was produced.",
+          "enum": [
+            "draft",
+            "approved"
+          ]
+        },
+        "item_count": {
+          "description": "Number of audit items in the denominator when this measurement was produced.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "subject": {
+      "description": "The measured task or run. Keep this provider-neutral so aggregation can group coverage without understanding the runner that produced the trace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace",
+        "trace_format",
+        "task_id",
+        "run_id"
+      ],
+      "properties": {
+        "trace": {
+          "description": "Path to the interaction trace that was measured.",
+          "$ref": "#/$defs/pathString"
+        },
+        "trace_format": {
+          "description": "Trace serialization format understood by the measurement method.",
+          "const": "atif"
+        },
+        "task_id": {
+          "description": "Stable task, scenario, or case identifier for grouping measurements.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "description": "Identifier for the specific run, trial, attempt, or repetition measured.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/itemName"
+        }
+      }
+    }
+  }
+}

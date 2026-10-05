@@ -1,0 +1,408 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit_coverage_report.schema.json",
+  "title": "NeMo Eval Author aggregate audit coverage report",
+  "description": "Aggregate coverage report built from one audit denominator and many per-trace coverage.json files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "audit",
+    "measured_kinds",
+    "warnings",
+    "input_reports",
+    "coverage",
+    "covered",
+    "uncovered",
+    "uncovered_items"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for the aggregate audit coverage report format.",
+      "const": "nemo.eval_author.audit_coverage_report.v1"
+    },
+    "audit": {
+      "description": "Audit spec metadata for the denominator used by this aggregate report.",
+      "$ref": "#/$defs/audit"
+    },
+    "measured_kinds": {
+      "description": "Audit item kinds that at least one input coverage report attempted to measure.",
+      "$ref": "#/$defs/itemKindList"
+    },
+    "warnings": {
+      "description": "Non-fatal compatibility notes for inputs included in this aggregate report.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/warning"
+      }
+    },
+    "input_reports": {
+      "description": "Per-trace coverage files included in this aggregate report.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/inputReport"
+      }
+    },
+    "coverage": {
+      "description": "Overall and per-kind aggregate count summaries.",
+      "$ref": "#/$defs/coverageSummary"
+    },
+    "covered": {
+      "description": "Stable audit item names covered by at least one input report.",
+      "$ref": "#/$defs/nameList"
+    },
+    "uncovered": {
+      "description": "Stable audit item names not covered by any input report.",
+      "$ref": "#/$defs/nameList"
+    },
+    "uncovered_items": {
+      "description": "Uncovered audit items formatted as direct input to a future task-generation step.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/uncoveredItem"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "itemName": {
+      "description": "Stable machine-readable audit item, method, source, or tool name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "itemKind": {
+      "description": "Audit item kind.",
+      "enum": [
+        "capability",
+        "failure_case",
+        "tool"
+      ]
+    },
+    "auditStatus": {
+      "description": "Review state of an audit denominator.",
+      "enum": [
+        "draft",
+        "approved"
+      ]
+    },
+    "itemKindList": {
+      "description": "Unique audit item kinds, usually derived from input report item_kind values.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/itemKind"
+      }
+    },
+    "nameList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "pathString": {
+      "description": "Local file or directory path recorded as a string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "itemCounts": {
+      "description": "Audit item counts keyed by item kind.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "failure_case",
+        "tool"
+      ],
+      "properties": {
+        "capability": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure_case": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "audit": {
+      "description": "Identity, review state, and counts for the audit denominator.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "schema",
+        "agent",
+        "status",
+        "item_count",
+        "item_counts"
+      ],
+      "properties": {
+        "path": {
+          "description": "Path to the audit.md file aggregated against.",
+          "$ref": "#/$defs/pathString"
+        },
+        "schema": {
+          "description": "Schema version of the audit denominator.",
+          "const": "nemo.eval_author.audit.v1"
+        },
+        "agent": {
+          "description": "Agent name declared by the audit denominator.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "description": "Review state of the audit denominator when this report was produced.",
+          "$ref": "#/$defs/auditStatus"
+        },
+        "item_count": {
+          "description": "Total number of audit items in the denominator.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "item_counts": {
+          "$ref": "#/$defs/itemCounts"
+        }
+      }
+    },
+    "warning": {
+      "description": "One non-fatal condition observed while building the aggregate report.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "coverage",
+        "input_status",
+        "current_status"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Warning discriminator.",
+          "const": "audit_status_mismatch"
+        },
+        "coverage": {
+          "description": "Input coverage file that carried the mismatched status.",
+          "$ref": "#/$defs/pathString"
+        },
+        "input_status": {
+          "description": "Audit status recorded in the input coverage file.",
+          "$ref": "#/$defs/auditStatus"
+        },
+        "current_status": {
+          "description": "Audit status in the current denominator.",
+          "$ref": "#/$defs/auditStatus"
+        }
+      }
+    },
+    "subject": {
+      "description": "Provider-neutral identity of one measured task/run artifact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace",
+        "trace_format",
+        "task_id",
+        "run_id"
+      ],
+      "properties": {
+        "trace": {
+          "description": "Path to the interaction trace that was measured.",
+          "$ref": "#/$defs/pathString"
+        },
+        "trace_format": {
+          "description": "Trace serialization format understood by the measurement method.",
+          "const": "atif"
+        },
+        "task_id": {
+          "description": "Stable task, scenario, or case identifier for grouping measurements.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "description": "Identifier for the specific run, trial, attempt, or repetition measured.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "inputReport": {
+      "description": "Compact summary of one input coverage.json file included in aggregation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "method",
+        "item_kind",
+        "item_kind_count",
+        "subject",
+        "covered",
+        "covered_count"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/pathString"
+        },
+        "method": {
+          "$ref": "#/$defs/itemName"
+        },
+        "item_kind": {
+          "$ref": "#/$defs/itemKind"
+        },
+        "item_kind_count": {
+          "description": "Denominator for this input report's item kind.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "covered": {
+          "$ref": "#/$defs/nameList"
+        },
+        "covered_count": {
+          "description": "Number of item names covered by this input report.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "coverageSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall",
+        "by_kind"
+      ],
+      "properties": {
+        "overall": {
+          "$ref": "#/$defs/countSummary"
+        },
+        "by_kind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capability",
+            "failure_case",
+            "tool"
+          ],
+          "properties": {
+            "capability": {
+              "$ref": "#/$defs/countSummary"
+            },
+            "failure_case": {
+              "$ref": "#/$defs/countSummary"
+            },
+            "tool": {
+              "$ref": "#/$defs/countSummary"
+            }
+          }
+        }
+      }
+    },
+    "countSummary": {
+      "description": "Coverage counts for a denominator subset.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_count",
+        "covered_count",
+        "uncovered_count"
+      ],
+      "properties": {
+        "item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "covered_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncovered_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "evidenceList": {
+      "description": "Evidence predicates copied from the uncovered audit item.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object"
+      }
+    },
+    "uncoveredItem": {
+      "description": "One uncovered audit item, preserving the original audit item and adding generation-oriented context.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "reason",
+        "description",
+        "source_refs",
+        "generation",
+        "audit_item"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/itemName"
+        },
+        "kind": {
+          "$ref": "#/$defs/itemKind"
+        },
+        "reason": {
+          "description": "Why this item appears in the uncovered list.",
+          "enum": [
+            "not_covered_by_any_input_report",
+            "not_measured_by_any_method"
+          ]
+        },
+        "description": {
+          "description": "Description copied from the audit item.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source_refs": {
+          "description": "Source references copied from the audit item, or an empty list.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "generation": {
+          "description": "Compact context a downstream task generator can use to close this gap.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "focus",
+            "needed_tools",
+            "evidence_required"
+          ],
+          "properties": {
+            "focus": {
+              "description": "One-sentence target behavior or failure condition to exercise.",
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "needed_tools": {
+              "description": "Declared tool names likely needed to generate a task for this gap.",
+              "$ref": "#/$defs/nameList"
+            },
+            "evidence_required": {
+              "$ref": "#/$defs/evidenceList"
+            }
+          }
+        },
+        "audit_item": {
+          "description": "Original validated audit item copied verbatim for kind-specific generation details.",
+          "type": "object"
+        }
+      }
+    }
+  }
+}

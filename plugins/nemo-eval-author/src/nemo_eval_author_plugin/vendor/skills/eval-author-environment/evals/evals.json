@@ -1,0 +1,57 @@
+{
+  "skill_name": "eval-author-environment",
+  "evals": [
+    {
+      "id": "env-repo-services-reuse",
+      "prompt": "Use eval-author-environment; eval-author first-eval routed here at Prepare the execution environment. All evidence for this synthetic exercise is inline. The agent is a Python LangGraph support assistant whose Ethos says it may cancel unshipped orders and refund only to the original payment method. Its tools are orders.lookup (GET /orders/{id}), orders.cancel (POST /orders/{id}/cancel), and refunds.issue (POST /refunds), which call an in-repository FastAPI service through ORDERS_API_URL, plus kb.search, which reads Markdown under docs/policies/. The repository has docker-compose.yml with orders-api and postgres:16, Alembic migrations, and tests/factories.py, which creates three orders. A .env file exists. The two agreed cases need a customer with two similar headphone orders, one shipped and one unshipped, and expect only the unshipped order to be cancelled and refunded. Harbor 0.20.0 and Docker are available; no agent run is authorized yet. Give the environment plan in your response only: do not create files, run commands, or read further files.",
+      "expected_output": "Classifies the agent as an application whose tools call backends and plans to run it in Harbor's main container with the repository's own orders-api and Postgres copied into the kit as Compose sidecars, reached through ORDERS_API_URL and similar environment settings, without editing the user's files. Builds a seeded, schema-faithful base population from the migrations rather than relying on the three-order factory, layers each case's headphone orders per task, treats the shipped order as a hidden but discoverable decoy, and checks data integrity. Exports end state through a database collect hook and service artifact graded by a separate no-network verifier, ignoring volatile fields. Limits the agent phase network to the model provider, keeps expected state and decoy labels out of the agent's view, references credentials only by variable name without opening .env, and proves the environment with a smoke task (NOP plus two reference-solution runs, each doing a read and a write per dependency) before task controls. Records choices and gaps in a fidelity card and leaves agent tool discovery unproven until a run is authorized.",
+      "assertions": [
+        "Runs the agent in Harbor's main container and reuses the repository's orders-api and Postgres as Compose sidecars copied into .eval-author, pointing the agent's clients at them through environment settings without editing the user's files.",
+        "Plans a seeded, schema-faithful base population larger than the factory's three orders, layers the two cases' records per task, and keeps which order is the decoy out of names, ordering, and agent-visible files.",
+        "Makes the end state readable through a database collect hook and service artifact graded by a separate no-network verifier, not through the agent's own report.",
+        "Does not open .env or print secret values, limits the agent-phase network to the model provider, and keeps the verifier offline or records isolation as unproven when the runtime cannot enforce it.",
+        "Proves the environment with a smoke task (NOP plus repeated reference-solution runs with a read and a write per dependency) before task controls, and does not claim an agent run that was not authorized."
+      ],
+      "expected_skill": "eval-author-environment",
+      "files": []
+    },
+    {
+      "id": "env-external-saas-fidelity",
+      "prompt": "Use eval-author-environment; eval-author task-create routed here while completing a Harbor draft. All evidence for this synthetic exercise is inline. The agent is a billing assistant whose tools are payments.get_charge and payments.refund (Stripe Python SDK) and tickets.comment (a Zendesk REST client). Its client code retries on HTTP 429, maps card_declined and charge_already_refunded errors to user messages, and sends idempotency keys with refunds. The repository contains only client code; there is no runnable payments or ticketing service. Production keys are in .env. The team has a Stripe test-mode account but no Zendesk sandbox, and nobody has authorized using either account for evaluations. The drafted case expects one partial refund on an existing charge and one ticket comment. Give the dependency choices and fidelity card in your response only: do not create files, run commands, or read further files.",
+      "expected_output": "Rejects production services and does not open .env. Treats Stripe test mode as an option that needs explicit authorization, an agent-phase allowlist limited to Stripe's hosts, and credentials supplied by variable name; without that authorization, plans a stateful payments fake built from the SDK contract that keeps charges and refunds across calls and reproduces the rate-limit, decline, already-refunded, and idempotent-replay behavior the client handles. Plans a stateful Zendesk comment fake because no sandbox exists. Keeps the agent's own SDK clients pointed at the fakes or sandbox rather than replacing its tools, makes fake state exportable to the verifier, and records each realization, its source, its known gaps (for example webhooks, real rate-limit timing, and unmodeled endpoints), and the affected case in a fidelity card. Asks for the authorization decision instead of assuming it.",
+      "assertions": [
+        "Does not use production endpoints and does not open or quote .env values.",
+        "Treats Stripe test mode as an option requiring explicit authorization, an allowlist, and credentials referenced by variable name, and does not assume authorization was given.",
+        "Specifies stateful fakes that keep state across calls and return the 429, card_declined, charge_already_refunded, and idempotent-replay behavior the client handles.",
+        "Produces a fidelity card naming each dependency's realization, source, known gaps, and the cases those gaps affect.",
+        "Keeps the agent's own SDK clients, pointed at the fake or sandbox through supported configuration without editing the agent's source, and makes fake state readable by the verifier."
+      ],
+      "expected_skill": "eval-author-environment",
+      "files": []
+    },
+    {
+      "id": "env-hosted-agent-fit",
+      "prompt": "Use eval-author-environment; eval-author first-eval routed here. All evidence for this synthetic exercise is inline. The agent is a vendor-hosted assistant reached only through an HTTPS chat endpoint; the repository contains a thin SDK wrapper, prompts, and configuration, but no agent runtime. The assistant acts on the company's hosted CRM APIs, for which only production credentials exist, and the CRM vendor offers no sandbox. A teammate proposes a Harbor task whose solution script posts the instruction to the hosted endpoint and whose verifier queries the production CRM afterwards. Gym v0.6.0 is installed. Recommend the environment approach in your response only: do not create files, run commands, or call any service.",
+      "expected_output": "Identifies a hosted agent acting on hosted APIs as a poor Harbor fit, explaining that the proposed task controls neither the starting state nor trial isolation and would read and write production data. Declines to build the proposed task and plans no production credential use or writes. Offers concrete alternatives with their conditions: a Gym environment whose resources server wraps a stateful CRM fake built from the API contract with the agent's real tool schemas, usable only if the agent's CRM calls can be pointed at environment-provided tools; obtaining a runnable agent build or a vendor sandbox; or reporting the limit. Records the fit decision and the open questions that would change it, without claiming an environment was built or proven.",
+      "assertions": [
+        "Identifies a hosted agent acting on hosted APIs as a poor Harbor fit, citing missing control of starting state and trial isolation.",
+        "Declines the proposed Harbor task that forwards requests to the hosted endpoint and checks production, and plans no production credential use or writes.",
+        "Offers conditional alternatives: a Gym environment over a stateful CRM fake with the agent's real tool schemas only if its calls can be pointed at environment tools, a runnable build or vendor sandbox, or reporting the limit.",
+        "Records the fit decision and the open questions that would change it, without claiming an environment was built or proven."
+      ],
+      "expected_skill": "eval-author-environment",
+      "files": []
+    },
+    {
+      "id": "env-negative",
+      "prompt": "In two sentences, explain the difference between Harbor's shared and separate verifier modes. Do not create files or run commands.",
+      "expected_output": "Explains briefly that shared mode runs the verifier in the agent's container after the agent finishes, while separate mode starts a fresh verifier environment that receives only declared artifacts, which improves isolation. Does not start an environment-building workflow.",
+      "assertions": [
+        "Answers in about two sentences, distinguishing shared and separate verifier modes.",
+        "Does not invoke an environment-preparation workflow, create files, or run commands."
+      ],
+      "expected_skill": null,
+      "files": []
+    }
+  ]
+}
