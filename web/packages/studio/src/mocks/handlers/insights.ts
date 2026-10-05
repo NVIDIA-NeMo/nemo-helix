@@ -14,7 +14,7 @@ const ANALYSIS_CONFIG_URL = mockApiUrl(
   ':agent'
 );
 
-/** Stored per-agent analysis config, as the Details tab's Insights analysis panel reads it. */
+/** Stored per-agent analysis config, as the agent Insights tab's analysis panel reads it. */
 export const mockAnalysisConfig = {
   id: 'insights-analysis-config-1',
   name: 'react-agent',

@@ -15,6 +15,7 @@ import {
   Button,
   Flex,
   FormField,
+  Grid,
   Stack,
   Switch,
   Text,
@@ -156,44 +157,46 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
             onCheckedChange={setEnabled}
             slotLabel="Run periodic analysis"
           />
-          <FormField
-            slotLabel="Default model"
-            slotHelp="Used for quality-critical analysis work."
-            slotError={
-              defaultModel && !isQualifiedModelRef(defaultModel)
-                ? `Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`
-                : undefined
-            }
-          >
-            <WorkspaceModelSelect
-              workspace={workspace}
-              value={defaultModel ? { model: defaultModel } : null}
-              onValueChange={({ model }) => setDefaultModel(model)}
-              placeholder="Select a default model"
-              hideAdapters
-              fullWidth
-              aria-label="Default model"
-            />
-          </FormField>
-          <FormField
-            slotLabel="Fast model"
-            slotHelp="Used for latency-sensitive analysis work."
-            slotError={
-              fastModel && !isQualifiedModelRef(fastModel)
-                ? `Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`
-                : undefined
-            }
-          >
-            <WorkspaceModelSelect
-              workspace={workspace}
-              value={fastModel ? { model: fastModel } : null}
-              onValueChange={({ model }) => setFastModel(model)}
-              placeholder="Select a fast model"
-              hideAdapters
-              fullWidth
-              aria-label="Fast model"
-            />
-          </FormField>
+          <Grid cols={{ base: 1, md: 2 }} gap="4">
+            <FormField
+              slotLabel="Default model"
+              slotHelp="Used for quality-critical analysis work."
+              slotError={
+                defaultModel && !isQualifiedModelRef(defaultModel)
+                  ? `Stored value "${defaultModel}" is not workspace-qualified. Pick a model to replace it.`
+                  : undefined
+              }
+            >
+              <WorkspaceModelSelect
+                workspace={workspace}
+                value={defaultModel ? { model: defaultModel } : null}
+                onValueChange={({ model }) => setDefaultModel(model)}
+                placeholder="Select a default model"
+                hideAdapters
+                fullWidth
+                aria-label="Default model"
+              />
+            </FormField>
+            <FormField
+              slotLabel="Fast model"
+              slotHelp="Used for latency-sensitive analysis work."
+              slotError={
+                fastModel && !isQualifiedModelRef(fastModel)
+                  ? `Stored value "${fastModel}" is not workspace-qualified. Pick a model to replace it.`
+                  : undefined
+              }
+            >
+              <WorkspaceModelSelect
+                workspace={workspace}
+                value={fastModel ? { model: fastModel } : null}
+                onValueChange={({ model }) => setFastModel(model)}
+                placeholder="Select a fast model"
+                hideAdapters
+                fullWidth
+                aria-label="Fast model"
+              />
+            </FormField>
+          </Grid>
         </Stack>
       ) : notFound ? (
         <Text className="text-secondary" kind="body/regular/sm">
@@ -201,8 +204,9 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
           <code>nemo insights analysis enable --agent {agent}</code>.
         </Text>
       ) : (
-        <Stack gap="2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <KVPair
+            orientation="vertical"
             label="Periodic analysis"
             value={
               <Badge kind="solid" color={config?.enabled ? 'green' : 'gray'}>
@@ -210,12 +214,14 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
               </Badge>
             }
           />
-          <KVPair label="Default model" value={config?.default_model} />
-          <KVPair label="Fast model" value={config?.fast_model} />
-          {config?.updated_at && (
-            <KVPair label="Updated" value={<RelativeTime datetime={config.updated_at} />} />
-          )}
-        </Stack>
+          <KVPair
+            orientation="vertical"
+            label="Updated"
+            value={config?.updated_at && <RelativeTime datetime={config.updated_at} />}
+          />
+          <KVPair orientation="vertical" label="Default model" value={config?.default_model} />
+          <KVPair orientation="vertical" label="Fast model" value={config?.fast_model} />
+        </div>
       )}
     </DetailPanel>
   );
