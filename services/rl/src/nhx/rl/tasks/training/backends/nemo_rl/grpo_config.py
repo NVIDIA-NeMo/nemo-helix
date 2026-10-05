@@ -31,6 +31,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _megatron_cfg_disabled,
 )
 from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    SANDBOX_CREATE_REQUEST_TIMEOUT_S,
     NemoGymSandboxedConfig,
     SandboxConfig,
     SandboxNetworkPolicy,
@@ -277,9 +278,10 @@ def _resolve_gym_paths(
 
 def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
     """``create.resource`` must match ``sandbox.resources``."""
-    options: dict[str, Any] = {}
+    connection: dict[str, Any] = {"request_timeout_s": SANDBOX_CREATE_REQUEST_TIMEOUT_S}
     if gym.sandbox_server_protocol:
-        options["connection"] = {"protocol": gym.sandbox_server_protocol}
+        connection["protocol"] = gym.sandbox_server_protocol
+    options: dict[str, Any] = {"connection": connection}
     if gym.sandbox_resources:
         options["create"] = {"resource": dict(gym.sandbox_resources)}
     return options
