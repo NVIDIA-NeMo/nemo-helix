@@ -185,6 +185,7 @@ Platform job specs use `GymRunnerTarget`, the serializable counterpart of the lo
 - `agent_ref_name` identifies the agent instance registered inside the sandbox when that instance
   name differs from the `agent` component name.
 
+
 They live on the placement because the local `gym` CLI has no equivalent of either — it stages
 no packages and resolves its agent from Hydra config — so a runner carrying them would hold fields
 that do nothing wherever it actually runs.
