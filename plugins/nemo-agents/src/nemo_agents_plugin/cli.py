@@ -1717,6 +1717,8 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "GET agent API",
             lambda: _json_from_page(client.list_deployments(workspace=workspace)),
         )
+        if _resolve_list_output_format(ctx, output_format) in _TABULAR_LIST_FORMATS:
+            _project_deployment_display_endpoints(resp)
         _print_list_response(
             ctx,
             resp,
@@ -2209,17 +2211,47 @@ def _register_environment_commands(app: typer.Typer) -> None:
 # ---------------------------------------------------------------------------
 
 _TERMINAL_STATUSES = {"running", "failed"}
+_TABULAR_LIST_FORMATS = frozenset({"table", "markdown", "csv"})
+_HTTP_ENDPOINT_PROTOCOLS = frozenset({"http", "https"})
 
 
 def _deployment_address(dep: dict[str, Any]) -> str:
-    """Best-effort address for CLI output (loopback endpoint or first projected URL)."""
+    """Address shown for a deployment: scalar endpoint, else a projected URL.
+
+    Container modes leave ``endpoint`` empty and store the routable address in
+    ``endpoints``. Prefer the first HTTP(S) URL, then any URL, so displayed
+    output matches the address invoke would use.
+    """
     endpoint = dep.get("endpoint")
     if isinstance(endpoint, str) and endpoint:
         return endpoint
+    fallback = ""
     for ep in dep.get("endpoints") or []:
-        if isinstance(ep, dict) and ep.get("url"):
-            return str(ep["url"])
-    return ""
+        if not isinstance(ep, dict):
+            continue
+        url = ep.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if ep.get("protocol") in _HTTP_ENDPOINT_PROTOCOLS:
+            return url
+        if not fallback:
+            fallback = url
+    return fallback
+
+
+def _project_deployment_display_endpoints(response: Any) -> None:
+    """Copy a display URL onto in-memory list rows. Does not persist the entity."""
+    if not isinstance(response, dict):
+        return
+    items = response.get("data")
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        address = _deployment_address(item)
+        if address:
+            item["endpoint"] = address
 
 
 def _wait_for_deployment(
