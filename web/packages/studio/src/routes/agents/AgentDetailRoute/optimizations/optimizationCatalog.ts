@@ -4,7 +4,7 @@
 /** Config prefix every swept parameter hangs off. The study overlays a Fabric agent config
  *  (`nemo-agents-spec-v1`), whose sampling knobs live under `models.<role>` — and `default` is the
  *  role the build path scaffolds, so it is the only one we can assume without reading the agent's
- *  config. The Advanced section is where a different role gets fixed. */
+ *  config. */
 export const LLM_CONFIG_PREFIX = 'models.default';
 
 export interface SearchParameter {
@@ -38,13 +38,12 @@ export interface OptimizationIntent {
  * What the user is tuning for, and the search space that follows from it.
  *
  * Picking an intent is the only way the form sets a search space, so the user never has to know
- * which config key moves their objective. The Advanced section edits the result; it does not
- * replace this choice.
+ * which config key moves their objective.
  *
- * Every intent sweeps temperature and nothing else. It is the only sampling knob a Fabric agent
- * exposes — `ModelConfig` forbids unknown keys, and the deepagents adapter forwards temperature
- * alone — so an intent differs from its neighbours in the range it searches, not in the parameters
- * it touches. Add a parameter here only once the adapter actually reads it.
+ * Every intent sweeps temperature plus the one other knob its objective leans on. Fabric 0.4.0's
+ * `ModelConfig` takes `temperature`, `top_p` and `max_tokens` and forbids anything else, and those
+ * three are what the deepagents adapter forwards to the model. Add a parameter here only once the
+ * adapter actually reads it.
  */
 export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
   {
@@ -53,7 +52,7 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     description:
       'Pick when a wrong answer costs more than a long one — triage, extraction, anything with a right answer.',
     objective: "Maximize the evaluation's average score, searching the near-deterministic range.",
-    parameters: [parameter('temperature', 'float', 0, 0.6)],
+    parameters: [parameter('temperature', 'float', 0, 0.6), parameter('top_p', 'float', 0.7, 1)],
   },
   {
     id: 'brevity',
@@ -61,7 +60,10 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     description:
       'Pick when answers are already correct but rambling, and length is driving your token bill or losing readers.',
     objective: "Maximize the evaluation's average score across the low-to-middle range.",
-    parameters: [parameter('temperature', 'float', 0, 0.8)],
+    parameters: [
+      parameter('temperature', 'float', 0, 0.8),
+      parameter('max_tokens', 'int', 128, 768),
+    ],
   },
   {
     id: 'creativity',
@@ -69,7 +71,7 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     description:
       'Pick when outputs feel repetitive or templated and you want more variety across similar prompts.',
     objective: "Maximize the evaluation's average score across the high range, where outputs vary.",
-    parameters: [parameter('temperature', 'float', 0.3, 1.5)],
+    parameters: [parameter('temperature', 'float', 0.3, 1.5), parameter('top_p', 'float', 0.8, 1)],
   },
   {
     id: 'cost',
@@ -77,7 +79,10 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     description:
       'Pick when quality already clears the bar and you want the cheapest config that still holds the line.',
     objective: "Maximize the evaluation's average score across the full range.",
-    parameters: [parameter('temperature', 'float', 0, 1)],
+    parameters: [
+      parameter('temperature', 'float', 0, 1),
+      parameter('max_tokens', 'int', 256, 1024),
+    ],
   },
 ];
 

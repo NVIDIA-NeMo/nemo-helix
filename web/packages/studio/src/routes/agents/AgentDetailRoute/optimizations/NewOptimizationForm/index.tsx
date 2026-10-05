@@ -4,7 +4,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Button, FormField, Stack, Stepper, Text, TextInput } from '@nvidia/foundations-react-core';
-import { AdvancedAccordion } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/AdvancedAccordion';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';
 import {
@@ -217,8 +216,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
                 },
               ]}
             />
-
-            <AdvancedAccordion searchSpace={searchSpace} />
           </Stack>
 
           <RunSummaryPanel
