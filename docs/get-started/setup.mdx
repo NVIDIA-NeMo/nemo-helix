@@ -229,10 +229,6 @@ nemo setup --auto --no-start-services
 nemo setup --no-install-skills
 ```
 
-## When you need Docker
-
-Helix's default local operating mode needs Docker because deployments default to the Docker executor. Many jobs and default agent deploys still use subprocess on the host. Read [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) before assuming "no Docker" is enough for a full local platform.
-
 ## What to explore next
 
 | Goal | Command or link |
@@ -242,6 +238,7 @@ Helix's default local operating mode needs Docker because deployments default to
 | List available models | `nemo models list` |
 | Open the Studio UI | [http://localhost:8080](http://localhost:8080) |
 | Browse docs from the CLI | `nemo docs --list` |
+| Understand Docker vs subprocess locally | [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) |
 | Evaluate a model | [Run LLM-as-a-Judge Evaluation](/documentation/evaluate-models/tutorials/run-llm-as-a-judge-evaluation) |
 | Generate synthetic data | [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) |
 | Optimize an agent | [Optimize Agents](/documentation/agents/optimize-agents) |
