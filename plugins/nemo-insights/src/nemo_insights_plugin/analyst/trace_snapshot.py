@@ -61,7 +61,12 @@ async def load_trace_snapshot(
             _normalize_trace(
                 _IntakeTrace.model_validate(trace.model_dump(mode="json")),
                 [_IntakeSpan.model_validate(span.model_dump(mode="json")) async for span in spans.items()],
-                [_EvaluatorResult.model_validate(result.model_dump(mode="json")) async for result in results.items()],
+                [
+                    _EvaluatorResult.model_validate(result.model_dump(mode="json"))
+                    async for result in results.items()
+                    # A FAILED result carries no value, which the snapshot model has no shape for.
+                    if result.status != "FAILED"
+                ],
                 base_url=base_url,
                 workspace=workspace,
             )

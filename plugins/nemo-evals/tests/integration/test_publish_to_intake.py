@@ -404,9 +404,9 @@ def _nan_result() -> AgentEvalResult:
     )
 
 
-async def test_publish_skips_nan_and_failed_scores(intake: AsyncIntakeClient) -> None:
-    # A NaN value is not representable in JSON and a FAILED score is not a real measurement; neither
-    # should reach Intake. Only the finite, completed output should be stored.
+async def test_publish_records_nan_and_failed_scores_as_failed_rows(intake: AsyncIntakeClient) -> None:
+    # A NaN value is not representable in JSON and a FAILED score is not a real measurement. Neither
+    # carries a value to Intake, but both are recorded as FAILED rows so the gap is visible there.
     await _ensure_evaluation(intake, name=NAN_EXPERIMENT_NAME, dataset_name="intake-it-nan-dataset")
 
     report = await publish_to_intake(
@@ -419,14 +419,14 @@ async def test_publish_skips_nan_and_failed_scores(intake: AsyncIntakeClient) ->
 
     published = report.published_trials[0]
     rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
-    assert {row.name for row in rows} == {"accuracy.score"}
-    assert report.evaluator_result_count == 1
-
-    # The dropped outputs are surfaced (not silently lost) until Intake can model failure.
-    assert {(skip.name, skip.reason) for skip in report.skipped} == {
-        ("accuracy.broken", "non-finite value"),
-        ("judge.verdict", "scoring failed"),
+    # The NaN output and the FAILED score land as FAILED rows with no value, not as omissions.
+    assert {(row.name, row.status, row.value) for row in rows} == {
+        ("accuracy.score", "SCORED", 0.5),
+        ("accuracy.broken", "FAILED", None),
+        ("judge.verdict", "FAILED", None),
     }
+    assert report.evaluator_result_count == 3
+    assert report.skipped == []
 
 
 def _idempotency_result() -> AgentEvalResult:

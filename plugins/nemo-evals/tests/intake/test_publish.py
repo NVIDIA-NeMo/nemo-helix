@@ -370,9 +370,8 @@ async def test_ingest_failure_propagates() -> None:
         await publish_to_intake(result, client=client, experiment_id="exp-1")
 
 
-async def test_failed_and_non_finite_scores_are_skipped_and_reported() -> None:
-    # NaN can't be sent (not JSON-serializable) and a FAILED score is not a real measurement; both
-    # are omitted but surfaced in the report so the omission is explicit, not silent (X6).
+async def test_failed_and_non_finite_scores_publish_as_failed_rows() -> None:
+    """Intake counts a failed attempt from an explicit FAILED row, so nothing is dropped any more."""
     result = _result(
         trials=[_trial("t-1")],
         scores=[
@@ -385,13 +384,13 @@ async def test_failed_and_non_finite_scores_are_skipped_and_reported() -> None:
     client = _FakeClient()
     report = await publish_to_intake(result, client=client, experiment_id="exp-1")
 
-    # Only the finite, completed output is sent to Intake.
-    assert {call["name"] for call in client.eval_calls} == {"accuracy.score"}
-    # The omissions are reported, with reasons.
-    assert {(skip.name, skip.reason) for skip in report.skipped} == {
-        ("accuracy.broken", "non-finite value"),
-        ("judge.verdict", "scoring failed"),
+    assert {(call["name"], call.get("status", "SCORED")) for call in client.eval_calls} == {
+        ("accuracy.score", "SCORED"),
+        ("accuracy.broken", "FAILED"),
+        ("judge.verdict", "FAILED"),
     }
+    assert report.skipped == []
+    assert report.published_trials[0].evaluator_result_count == 3
 
 
 async def test_one_trial_failure_does_not_block_others_and_is_reported() -> None:

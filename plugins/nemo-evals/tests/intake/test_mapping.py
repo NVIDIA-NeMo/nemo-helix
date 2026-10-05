@@ -303,33 +303,51 @@ def test_comment_absent_without_diagnostics() -> None:
     assert "comment" not in row
 
 
-# --- score_to_evaluator_results: skipped outputs ----------------------------
+# --- score_to_evaluator_results: failed outputs -----------------------------
 
 
-def test_non_finite_outputs_are_skipped_not_dropped_silently() -> None:
+def test_non_finite_outputs_become_failed_rows() -> None:
+    """NaN is the SDK's placeholder for a tolerated failure, so Intake gets a FAILED row, not silence."""
     rows, skipped = score_to_evaluator_results(
         _score(outputs=[MetricOutput(name="score", value=1.0), MetricOutput(name="broken", value=math.nan)]),
         session_id="s",
         span_id="sp",
     )
-    assert [row["name"] for row in rows] == ["accuracy.score"]
-    assert [(item.name, item.reason) for item in skipped] == [("accuracy.broken", "non-finite value")]
+    assert skipped == []
+    assert [(row["name"], row.get("status", "SCORED")) for row in rows] == [
+        ("accuracy.score", "SCORED"),
+        ("accuracy.broken", "FAILED"),
+    ]
+    failed = rows[1]
+    assert "value" not in failed and "string_value" not in failed
+    assert failed["comment"] == "non-finite value"
 
 
-def test_failed_score_yields_no_rows_and_skips_every_output() -> None:
+def test_failed_score_becomes_one_failed_row_per_declared_output() -> None:
+    """A FAILED score has no outputs of its own, so the metric's declared outputs name the rows."""
+    diagnostic = AgentEvalDiagnostic(
+        severity=AgentEvalDiagnosticSeverity.ERROR, message="judge endpoint unreachable", source="accuracy"
+    )
     rows, skipped = score_to_evaluator_results(
-        _score(
-            outputs=[MetricOutput(name="score", value=1.0), MetricOutput(name="passed", value=True)],
-            status=AgentEvalScoreStatus.FAILED,
-        ),
+        _score(outputs=[], status=AgentEvalScoreStatus.FAILED, diagnostics=[diagnostic]),
         session_id="s",
         span_id="sp",
+        output_names=["score", "passed"],
     )
-    assert rows == []
-    assert [(item.name, item.reason) for item in skipped] == [
-        ("accuracy.score", "scoring failed"),
-        ("accuracy.passed", "scoring failed"),
+    assert skipped == []
+    assert [(row["name"], row["status"], row["comment"]) for row in rows] == [
+        ("accuracy.score", "FAILED", "judge endpoint unreachable"),
+        ("accuracy.passed", "FAILED", "judge endpoint unreachable"),
     ]
+    assert all("value" not in row for row in rows)
+
+
+def test_failed_score_without_declared_outputs_names_the_metric_itself() -> None:
+    rows, _ = score_to_evaluator_results(
+        _score(outputs=[], status=AgentEvalScoreStatus.FAILED), session_id="s", span_id="sp"
+    )
+    assert [(row["name"], row["status"]) for row in rows] == [("accuracy", "FAILED")]
+    assert "comment" not in rows[0]
 
 
 def _atif_document() -> dict[str, Any]:
