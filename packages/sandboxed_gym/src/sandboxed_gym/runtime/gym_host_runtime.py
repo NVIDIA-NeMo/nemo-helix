@@ -505,9 +505,6 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
 
     # --target keeps mutable packages under the writable work mount. --only-binary closes the
     # source-distribution path opened by --find-links, including for transitive dependencies.
-    # --no-config: gym_host.sh starts the host in the image's git root (/opt/nemo-rl in the
-    # NeMo-RL image), and uv would apply that project's [tool.uv] overrides and constraints to the
-    # environment's own wheelhouse, which pins its own versions.
     # Output is captured because uv writes to the process's own file descriptors, which bypass
     # the output tail, so a failure would otherwise reach the caller with no reason.
     result = subprocess.run(
@@ -515,7 +512,6 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
             "uv",
             "pip",
             "install",
-            "--no-config",
             "--target",
             wheels_install_dir,
             "--no-index",
