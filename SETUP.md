@@ -262,12 +262,12 @@ Plugin-provided (appear once the plugin is installed):
 
 ### Installing skills into the coding agent on demand
 
-`nemo skills list` lists every skill the **platform** can install — but that's not the same as what's currently loaded in the coding agent (Claude Code, Cursor, Codex, OpenCode). After `make bootstrap` finishes, the relevant subset must still be **installed into the coding agent** for it to actually use them.
+`nemo skills list` lists every skill the **platform** can install — but that's not the same as what's currently loaded in the coding agent of your choice. After `make bootstrap` finishes, the relevant subset must still be **installed into the coding agent** for it to actually use them.
 
 Default flow (already wired into `nemo setup`):
 
 ```bash
-nemo skills install --agent <claude|cursor|codex|opencode>
+nemo skills install --agent <claude|cursor|codex>
 ```
 
 For another Agent Skills-compatible harness, install to its skills directory explicitly, or have setup do the same with `--skills-path`:
