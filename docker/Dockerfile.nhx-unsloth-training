@@ -8,8 +8,10 @@
 #
 # Install steps:
 #   1. `uv pip install unsloth --torch-backend=auto` plus explicit
-#      `transformers==5.5.0` and `huggingface-hub==1.5.0` pins. Unsloth's
-#      resolver allows transformers 5.5.0, and the explicit pins keep later
+#      `transformers==5.17.0` and `huggingface-hub==1.33.0` pins.
+#      Published unsloth 2026.9.14 still declares transformers<=5.5.0; the
+#      install override forces 5.17.0, the newest release unsloth-zoo 2026.9.9
+#      allows (5.18.0 is newer and outside that ceiling). The pins keep later
 #      platform glue installs from re-solving the HF stack.
 #      Unsloth's resolver still pulls unsloth_zoo
 #      and the rest of the HF stack (trl, peft, accelerate, datasets,
@@ -19,8 +21,8 @@
 #   1b. bitsandbytes — compiled from source against the NGC base CUDA (same pattern
 #       as docker/automodel/Dockerfile.nhx-automodel-base). PyPI wheels only ship through
 #       cuda130; source build replaces the wheel from step 1.
-#   1c. mamba-ssm + causal-conv1d — prebuilt cu13.3 / cp312 wheels (shared with
-#       docker/automodel/Dockerfile.nhx-automodel-base).
+#   1c. mamba-ssm + causal-conv1d — prebuilt cu13.4 / cp312 wheels built on this
+#       same NGC 26.09 torch. Automodel stays on the cu13.3 wheels.
 #   1d. flash-attn — optional for unsloth and currently NOT installed (see the
 #       commented TODO below). Without it Unsloth falls back when xformers is
 #       also missing (common on newer CUDA stacks), logging "FA2 = False /
@@ -31,13 +33,14 @@
 # Publish target: nhx-unsloth-training
 # Default tag:    `local` (override via BAKE_TAG at build time).
 
-# NGC PyTorch base. 26.07-py3 ships PyTorch + CUDA 13.3 + Python 3.12 (aligned with
-# docker/automodel/Dockerfile.nhx-automodel-base). Override at build time:
+# NGC PyTorch base. 26.09-py3 ships PyTorch 2.14 + CUDA 13.4.1 + Python 3.12.
+# Automodel stays on 26.07 (CUDA 13.3). Override at build time:
 # --set nhx-unsloth-training.args.PYTORCH_BASE=...
-ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.07-py3
+ARG PYTORCH_BASE=nvcr.io/nvidia/pytorch:26.09-py3
 
-# Prebuilt CUDA-extension wheels (mamba-ssm + causal-conv1d), shared with
-# docker/automodel/Dockerfile.nhx-automodel-base. The bake `nhx-unsloth-training` target
+# Prebuilt CUDA-extension wheels (mamba-ssm + causal-conv1d). The wheel images
+# are shared with automodel; this image installs the cu13.4 builds. The bake
+# `nhx-unsloth-training` target
 # resolves these contexts to the causal-conv1d-wheel / mamba-ssm-wheel images
 # (see docker-bake.hcl + docker/base/Dockerfile.python-wheels). Local builds need
 # `USE_LOCAL_WHEELS=1` (build the wheel targets) or a reachable WHEELS_REGISTRY.
@@ -86,10 +89,10 @@ FROM base AS runtime
 ARG USERNAME=ubuntu
 ARG USER_UID=1000
 ARG USER_GID=1000
-ARG UNSLOTH_VERSION=2026.6.1
-ARG TRANSFORMERS_VERSION=5.5.0
-ARG HF_HUB_VERSION=1.5.0
-ARG BITSANDBYTES_VERSION=0.49.2
+ARG UNSLOTH_VERSION=2026.9.14
+ARG TRANSFORMERS_VERSION=5.17.0
+ARG HF_HUB_VERSION=1.33.0
+ARG BITSANDBYTES_VERSION=0.50.2
 ARG BNB_MAX_JOBS=10
 
 WORKDIR /app
@@ -104,10 +107,16 @@ RUN mkdir -p /home/${USERNAME}/.cache && \
 # to detect the existing torch's CUDA build (from --system-site-packages
 # inheritance) and pick the matching xformers / bitsandbytes wheels.
 # preserve_base_torch.txt prevents uv from replacing the NGC torch stack.
+# hf-stack-overrides.txt replaces unsloth 2026.9.14's transformers<=5.5.0 cap
+# so the resolver can install the zoo-tested 5.17.0 ceiling.
 RUN --mount=type=cache,target=/root/.cache/uv \
+    printf 'transformers==%s\nhuggingface-hub==%s\n' \
+      "${TRANSFORMERS_VERSION}" "${HF_HUB_VERSION}" > /opt/docker/hf-stack-overrides.txt && \
+    cat /opt/docker/preserve_base_torch.txt /opt/docker/hf-stack-overrides.txt \
+      > /opt/docker/unsloth-install-overrides.txt && \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --torch-backend=auto \
-    --overrides /opt/docker/preserve_base_torch.txt \
+    --overrides /opt/docker/unsloth-install-overrides.txt \
     unsloth==${UNSLOTH_VERSION} \
     transformers==${TRANSFORMERS_VERSION} \
     huggingface-hub==${HF_HUB_VERSION}
@@ -115,13 +124,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Re-pin transformers + huggingface-hub without touching torch.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
-    --overrides /opt/docker/preserve_base_torch.txt \
+    --overrides /opt/docker/unsloth-install-overrides.txt \
     --reinstall-package transformers \
     --reinstall-package huggingface-hub \
     transformers==${TRANSFORMERS_VERSION} \
     huggingface-hub==${HF_HUB_VERSION}
 
-# Step 1b: bitsandbytes from source — matches automodel base CUDA.
+# Step 1b: bitsandbytes from source — against this image's NGC CUDA 13.4.
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git /tmp/bitsandbytes && \
     cd /tmp/bitsandbytes && \
@@ -135,12 +144,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip uninstall --python ${VIRTUAL_ENV}/bin/python scikit-build-core && \
     rm -rf /tmp/bitsandbytes
 
-# Step 1c: mamba-ssm + causal-conv1d — cu13.3 / cp312 wheels shared with automodel base.
+# Step 1c: mamba-ssm + causal-conv1d — cu13.4 / cp312 wheels built on NGC 26.09.
 RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,readonly \
     --mount=from=mamba-ssm-wheel-src,target=/tmp/mamba-ssm-wheel-src,readonly \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-deps \
-    /tmp/causal-conv1d-wheel-src/wheels/cu13.3/causal_conv1d-*cp312*.whl \
-    /tmp/mamba-ssm-wheel-src/wheels/cu13.3/mamba_ssm-2.3.0-cp312*.whl
+    /tmp/causal-conv1d-wheel-src/wheels/cu13.4/causal_conv1d-*cp312*.whl \
+    /tmp/mamba-ssm-wheel-src/wheels/cu13.4/mamba_ssm-2.3.0-cp312*.whl
 
 # TODO: Step 1d: Flash Attention 2 — compiled from source against the NGC 26.02 torch.
 # /usr/local/cuda symlinks to an older toolkit; use /usr/local/cuda-13.1 instead.
@@ -177,15 +186,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e /app/packages/nhx_customization_common \
     -e "/app/services/unsloth[integrations]"
 
-# hf-transfer can pull huggingface-hub 1.x — install then re-pin hub + transformers.
+# hf-transfer can pull a newer huggingface-hub — keep the HF pins in place.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
-    --overrides /opt/docker/preserve_base_torch.txt \
+    --overrides /opt/docker/unsloth-install-overrides.txt \
     "hf-transfer>=0.1.8,<0.2"
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
-    --overrides /opt/docker/preserve_base_torch.txt \
+    --overrides /opt/docker/unsloth-install-overrides.txt \
     --reinstall-package huggingface-hub \
     --reinstall-package transformers \
     huggingface-hub==${HF_HUB_VERSION} \

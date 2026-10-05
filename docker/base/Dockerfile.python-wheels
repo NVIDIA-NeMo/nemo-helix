@@ -114,8 +114,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
 
-# special builder for CUDA 13.3 (Automodel/Customizer/Unsloth on NGC 26.07)
+# special builder for CUDA 13.3 (Automodel/Customizer on NGC 26.07)
 FROM nvcr.io/nvidia/pytorch:26.07-py3 AS mamba-wheel-base-py312-cu13.3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+
+# special builder for CUDA 13.4 (Unsloth on NGC 26.09)
+FROM nvcr.io/nvidia/pytorch:26.09-py3 AS mamba-wheel-base-py312-cu13.4
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -182,6 +193,20 @@ RUN mkdir -p /wheels && \
     CAUSAL_CONV1D_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
     rm -rf /src/causal-conv1d
 
+# =============================================================================
+# causal-conv1d wheel — Python 3.12 - Using CUDA 13.4 (NGC PyTorch 26.09)
+# =============================================================================
+FROM  mamba-wheel-base-py312-cu13.4 AS causal-conv1d-wheel-builder-py312-cu13.4
+
+ARG CAUSAL_CONV1D_VERSION=v1.5.3
+
+RUN mkdir -p /wheels && \
+    git clone --depth 1 --branch ${CAUSAL_CONV1D_VERSION} \
+    https://github.com/Dao-AILab/causal-conv1d.git /src/causal-conv1d && \
+    cd /src/causal-conv1d && \
+    CAUSAL_CONV1D_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/causal-conv1d
+
 # The final causal-conv1d-wheel image contains:
 #   - causal_conv1d-*-cp311-*.whl  (for Python 3.11 consumers)
 #   - causal_conv1d-*-cp312-*.whl  (for Python 3.12 consumers)
@@ -191,6 +216,7 @@ COPY --from=causal-conv1d-wheel-builder /wheels /wheels
 COPY --from=causal-conv1d-wheel-builder-py312 /wheels /wheels
 COPY --from=causal-conv1d-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=causal-conv1d-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
+COPY --from=causal-conv1d-wheel-builder-py312-cu13.4 /wheels /wheels/cu13.4
 
 # =============================================================================
 # mamba-ssm 2.2.5 wheel — Python 3.11 (for nhx-safe-synthesizer-tasks)
@@ -277,12 +303,30 @@ RUN mkdir -p /wheels && \
     rm -rf /src/mamba
 
 
+# =============================================================================
+# mamba-ssm 2.3.0 wheel — Python 3.12 - Using CUDA 13.4 (NGC PyTorch 26.09)
+# =============================================================================
+FROM mamba-wheel-base-py312-cu13.4 AS mamba-ssm-23-wheel-builder-py312-cu13.4
+
+ARG MAMBA_23_COMMIT=v2.3.0
+
+RUN mkdir -p /wheels && \
+    git clone https://github.com/state-spaces/mamba.git /src/mamba && \
+    cd /src/mamba && \
+    git checkout ${MAMBA_23_COMMIT} && \
+    sed -i "/triton/d" setup.py && \
+    sed -i "/triton/d" pyproject.toml && \
+    uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/mamba
+
+
 # The final mamba-ssm-wheel image contains:
 #   - mamba_ssm-2.2.5-cp311-*.whl  (from MAMBA_22_COMMIT=6b32be06, for Python 3.11 consumers)
 #   - mamba_ssm-2.2.5-cp312-*.whl  (from MAMBA_22_COMMIT=6b32be06, for Python 3.12 consumers)
 #   - mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Python 3.12 consumers)
 #   - cu13.1.1/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Unsloth on CUDA 13.1.1)
-#   - cu13.3/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Automodel/Customizer/Unsloth on CUDA 13.3)
+#   - cu13.3/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Automodel/Customizer on CUDA 13.3)
+#   - cu13.4/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Unsloth on CUDA 13.4 / NGC 26.09)
 # Consumers must pin both version AND Python tag glob to select the correct wheel.
 FROM scratch AS mamba-ssm-wheel
 COPY --from=mamba-ssm-wheel-builder /wheels /wheels
@@ -290,6 +334,7 @@ COPY --from=mamba-ssm-25-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
+COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.4 /wheels /wheels/cu13.4
 
 # =============================================================================
 # magi-attention wheel — Python 3.12 (for Python 3.12 consumers) - Using CUDA 13.3
