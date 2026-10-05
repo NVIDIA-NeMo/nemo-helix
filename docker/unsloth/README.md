@@ -47,7 +47,8 @@ docker buildx bake \
 
 > **Prebuilt wheels (local builds).** The image installs `mamba-ssm` +
 > `causal-conv1d` from the shared `causal-conv1d-wheel` / `mamba-ssm-wheel`
-> bake contexts (same wheels as `nhx-automodel-base`). A **local** bake must
+> bake contexts, using the `cu13.4` wheels built on NGC PyTorch 26.09
+> (automodel keeps the `cu13.3` wheels in the same images). A **local** bake must
 > build those wheels first — prepend `USE_LOCAL_WHEELS=1` (or point
 > `WHEELS_REGISTRY`/`WHEELS_TAG` at prebuilt wheels), otherwise bake tries to
 > pull `${WHEELS_REGISTRY}/causal-conv1d-wheel:${WHEELS_TAG}` and fails. To
@@ -56,16 +57,18 @@ docker buildx bake \
 
 The build pulls the NGC PyTorch base, then:
 
-1. `uv pip install unsloth --torch-backend=auto transformers==5.5.0 huggingface-hub==1.5.0` with
+1. `uv pip install unsloth==2026.9.14 --torch-backend=auto transformers==5.17.0 huggingface-hub==1.33.0` with
    `preserve_base_torch.txt` overrides so the NGC base's PyTorch + CUDA are not
    replaced. Unsloth's resolver still pulls `unsloth_zoo`, trl, peft,
    accelerate, datasets, bitsandbytes, and xformers. **transformers is pinned
-   explicitly** to `5.5.0` (override at build time via
-   `--build-arg TRANSFORMERS_VERSION=...`).
-1b. bitsandbytes — compiled from source against the NGC CUDA 13.1 toolkit
+   explicitly** to `5.17.0` (override at build time via
+   `--build-arg TRANSFORMERS_VERSION=...`). Published unsloth `2026.9.14`
+   still declares `transformers<=5.5.0`; the image overrides that cap.
+   `5.17.0` is the newest release `unsloth-zoo` `2026.9.9` allows.
+1b. bitsandbytes `0.50.2` — compiled from source against the NGC CUDA 13.4 toolkit
     (PyPI wheels only ship through cuda130), replacing the wheel from step 1.
-1c. mamba-ssm + causal-conv1d — installed from the prebuilt `cu13.1.1` / `cp312`
-    wheels shared with `nhx-automodel-base` (see the **Prebuilt wheels** note
+1c. mamba-ssm + causal-conv1d — installed from the prebuilt `cu13.4` / `cp312`
+    wheels built on NGC PyTorch 26.09 (see the **Prebuilt wheels** note
     above). Required by hybrid Mamba/SSM models (e.g. NVIDIA Nemotron-H `*-A3B`).
 1d. Flash Attention 2 — **not currently installed** (commented TODO in the
     Dockerfile). Unsloth does not depend on it; without it you may see
@@ -104,9 +107,8 @@ node, a CI cluster runner, or a customer's air-gapped lab.
 
 ### 0. Prereqs on the host
 
-- NVIDIA driver compatible with the NGC PyTorch base (CUDA 13.1 at the
-  time of writing; check `docker/automodel/Dockerfile.nhx-automodel-base` for the latest
-  pin if unsure).
+- NVIDIA driver compatible with the NGC PyTorch base (CUDA 13.4.1 / `26.09-py3`
+  at the time of writing).
 - `nvidia-container-toolkit` installed so Docker can mount GPUs.
 - Network access to your image registry (`nvcr.io` by default).
 - A running NeMo Helix install (`make bootstrap` + `nemo services run`)
@@ -291,7 +293,7 @@ nemo models adapters retrieve qwen-unsloth-smoke-out \
 | `compile()` errors with "platform.runtime: docker" | Set `platform.runtime: docker` in `~/.nemo/config.yaml` and restart services. |
 | `compile()` errors with "Docker daemon unreachable" | Confirm `docker info` works as the user running `nemo services`. |
 | First job step errors with `Model 'X' has no fileset attached` | Attach a fileset to the model entity (`nemo models update --fileset ...`). |
-| `training` step errors with `bitsandbytes`/CUDA mismatch (`libbitsandbytes_cuda131.so` not found) | Rebuild `nhx-unsloth-training` — the image compiles bitsandbytes from source against NGC CUDA 13.1 (same pattern as `nhx-automodel-base`). Override `BNB_MAX_JOBS` at build time if nvcc OOMs. |
+| `training` step errors with `bitsandbytes`/CUDA mismatch (`libbitsandbytes_cuda*.so` not found) | Rebuild `nhx-unsloth-training` — the image compiles bitsandbytes from source against NGC CUDA 13.4 (same pattern as `nhx-automodel-base`). Override `BNB_MAX_JOBS` at build time if nvcc OOMs. |
 | `WandbCallback requires wandb to be installed` | Rebuild `nhx-unsloth-training` — the image installs `wandb` and `mlflow-skinny` for integrations. |
 | `training` step OOMs on a small GPU | Reduce `model.max_seq_length` and / or set `model.load_in_4bit: true`. |
 | `model-entity-creation` errors with "Adapter already exists" | Pick a fresh `output.name` (the unsloth compiler is "always create"; no overwrite). |
@@ -317,13 +319,15 @@ nemo files filesets delete qwen-unsloth-smoke-out -w default
   separate ML stack. If you need both backends on the same cluster, run
   both images side by side; jobs from each backend route to their own
   `nhx-{backend}-training` image via env-var overrides.
-- **transformers + huggingface-hub pins** — the training image pins `transformers==5.5.0`
-  and `huggingface-hub==1.5.0` in
-  `docker/Dockerfile.nhx-unsloth-training` (compatible with unsloth's upstream
-  blocklists). Other HF deps (trl, peft, bitsandbytes, etc.) still come from
-  unsloth's resolver. **PyTorch + CUDA** stay on the NGC base stack via
+- **transformers + huggingface-hub pins** — the training image pins `transformers==5.17.0`
+  and `huggingface-hub==1.33.0` in
+  `docker/Dockerfile.nhx-unsloth-training`. `5.17.0` is past `5.12.0` and is the newest
+  release `unsloth-zoo` `2026.9.9` allows (`<=5.17.0`). Published unsloth `2026.9.14`
+  still caps transformers at `<=5.5.0`, so the install uses a uv override. Other HF deps
+  (trl, peft, bitsandbytes, etc.) still come from unsloth's resolver (`trl` stays at
+  `0.24.0`, unsloth's own ceiling). **PyTorch + CUDA** stay on the NGC 26.09 stack via
   `--system-site-packages` and `preserve_base_torch.txt` / `no_override_requirements.txt`
   overrides (same impossible-marker pattern as automodel).
-- **bitsandbytes** — compiled from source in the image (v0.49.1, same approach as
-  `nhx-automodel-base`) because NGC 26.02 is CUDA 13.1 and PyPI only ships
+- **bitsandbytes** — compiled from source in the image (`0.50.2`, same approach as
+  `nhx-automodel-base`) because NGC 26.09 is CUDA 13.4 and PyPI only ships
   prebuilt libs through cuda130.
