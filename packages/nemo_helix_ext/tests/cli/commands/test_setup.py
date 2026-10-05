@@ -32,6 +32,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _SERVICE_STARTUP_TIMEOUT_SECONDS,
     KNOWN_PROVIDERS,
     KeyValidationResult,
+    KeyValidationStatus,
     ModelPair,
     SetupClients,
     _agent_exists,
@@ -720,7 +721,7 @@ class TestCreateProvider:
 # Auto setup
 # ---------------------------------------------------------------------------
 
-_VALID_KEY_RESULT = KeyValidationResult(passed=True, message="")
+_VALID_KEY_RESULT = KeyValidationResult(status=KeyValidationStatus.VALID)
 
 
 @pytest.fixture(autouse=False)
@@ -2503,6 +2504,10 @@ class TestInteractiveModelPairSelection:
                 f"{self._MOD}._interactive_collect_provider",
                 return_value=("my-ollama-custom", "http://localhost:11434/v1", "ollama", None, None),
             ),
+            patch(
+                f"{self._MOD}._confirm_interactive_api_key",
+                side_effect=lambda **kwargs: kwargs["api_key"],
+            ),
             patch(f"{self._MOD}._register_provider_interactive"),
             patch(f"{self._MOD}._wait_for_models", return_value=[]),
             patch(f"{self._MOD}._select_model_pair") as mock_select_model_pair,
@@ -2537,6 +2542,10 @@ class TestInteractiveModelPairSelection:
             patch(
                 f"{self._MOD}._interactive_collect_provider",
                 return_value=("my-ollama-custom", "http://localhost:11434/v1", "ollama", None, None),
+            ),
+            patch(
+                f"{self._MOD}._confirm_interactive_api_key",
+                side_effect=lambda **kwargs: kwargs["api_key"],
             ),
             patch(f"{self._MOD}._register_provider_interactive"),
             patch(f"{self._MOD}._wait_for_models", return_value=[]),
@@ -3321,22 +3330,24 @@ class TestValidateApiKey:
     _MOD = "nemo_helix_ext.cli.commands.setup"
 
     @pytest.mark.parametrize(
-        "provider_name,status_code,expected_passed",
+        "provider_name,status_code,expected_status",
         [
-            ("nvidia-build", 400, True),
-            ("nvidia-build", 401, False),
-            ("nvidia-build", 403, False),
-            ("nvidia-build", 200, True),
-            ("openai", 200, True),
-            ("openai", 401, False),
+            ("nvidia-build", 400, KeyValidationStatus.INCONCLUSIVE),
+            ("nvidia-build", 401, KeyValidationStatus.REJECTED),
+            ("nvidia-build", 403, KeyValidationStatus.REJECTED),
+            ("nvidia-build", 200, KeyValidationStatus.VALID),
+            ("openai", 200, KeyValidationStatus.VALID),
+            ("openai", 401, KeyValidationStatus.REJECTED),
+            ("openai", 403, KeyValidationStatus.REJECTED),
         ],
     )
-    def test_http_responses(self, provider_name, status_code, expected_passed):
+    def test_http_responses(self, provider_name, status_code, expected_status):
         host_url = _KNOWN_PROVIDERS_BY_NAME[provider_name].host_url
         mock_resp = _http_response(status_code, {"data": [{"id": "nvidia/nemotron-3-nano-30b-a3b"}]})
         with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
             result = _validate_api_key(provider_name, host_url, "test-key")
-        assert result.passed is expected_passed
+        assert result.status is expected_status
+        assert result.passed is (expected_status != KeyValidationStatus.REJECTED)
 
     def test_nvidia_build_lists_catalog_then_posts_preferred_nvidia_chat_model(self):
         catalog = _http_response(
@@ -3362,9 +3373,33 @@ class TestValidateApiKey:
 
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect) as mock_req:
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
-        assert result.passed is True
+        assert result.status is KeyValidationStatus.VALID
         assert result.message == ""
         assert mock_req.call_count == 2
+
+    def test_nvidia_build_prefers_smaller_nvidia_chat_model_first(self):
+        catalog = _http_response(
+            200,
+            {
+                "data": [
+                    {"id": "nvidia/nemotron-3-super-120b-a12b"},
+                    {"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"},
+                ]
+            },
+        )
+        chat_ok = _http_response(200, {})
+        posts: list[str] = []
+
+        def side_effect(method, url, **kwargs):
+            if method == "GET":
+                return catalog
+            posts.append(kwargs["json"]["model"])
+            return chat_ok
+
+        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+            result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
+        assert result.status is KeyValidationStatus.VALID
+        assert posts == ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
 
     def test_nvidia_build_skips_gone_model_and_accepts_next(self):
         catalog = _http_response(
@@ -3378,7 +3413,7 @@ class TestValidateApiKey:
         )
         gone = _http_response(
             410,
-            {"detail": "The model 'nvidia/nemotron-3-super-120b-a12b' has reached its end of life."},
+            {"detail": "The model 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning' has reached its end of life."},
         )
         chat_ok = _http_response(200, {})
         posts: list[str] = []
@@ -3387,18 +3422,48 @@ class TestValidateApiKey:
             if method == "GET":
                 return catalog
             posts.append(kwargs["json"]["model"])
-            if kwargs["json"]["model"] == "nvidia/nemotron-3-super-120b-a12b":
+            if kwargs["json"]["model"] == "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning":
                 return gone
             return chat_ok
 
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
-        assert result.passed is True
+        assert result.status is KeyValidationStatus.VALID
         assert result.message == ""
         assert posts == [
-            "nvidia/nemotron-3-super-120b-a12b",
             "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+            "nvidia/nemotron-3-super-120b-a12b",
         ]
+
+    def test_nvidia_build_caps_chat_probe_attempts_at_three(self):
+        catalog = _http_response(
+            200,
+            {
+                "data": [
+                    {"id": "nvidia/model-1b"},
+                    {"id": "nvidia/model-2b"},
+                    {"id": "nvidia/model-3b"},
+                    {"id": "nvidia/model-4b"},
+                    {"id": "nvidia/model-5b"},
+                ]
+            },
+        )
+        gone = _http_response(410, {"detail": "gone"})
+        posts: list[str] = []
+
+        def side_effect(method, url, **kwargs):
+            if method == "GET":
+                return catalog
+            posts.append(kwargs["json"]["model"])
+            return gone
+
+        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+            result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
+        assert result.status is KeyValidationStatus.INCONCLUSIVE
+        assert len(posts) == 3
+        assert posts == ["nvidia/model-1b", "nvidia/model-2b", "nvidia/model-3b"]
+        assert "Could not verify API key" in result.message
+        assert "neither accepted nor rejected" in result.message
 
     def test_rejected_key_does_not_blame_probe_target(self):
         catalog = _http_response(200, {"data": [{"id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"}]})
@@ -3409,22 +3474,24 @@ class TestValidateApiKey:
 
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "bad-key")
-        assert result.passed is False
-        assert "credentials" in result.message.lower()
+        assert result.status is KeyValidationStatus.REJECTED
+        assert "rejected the credentials" in result.message.lower()
         assert "Invalid API key" in result.message
-        assert "unavailable" not in result.message
+        assert "Could not verify" not in result.message
 
     @pytest.mark.parametrize("status_code", [404, 405, 410, 429, 500, 502])
-    def test_non_2xx_non_rejection_returns_warning(self, status_code):
+    def test_non_2xx_non_rejection_returns_inconclusive(self, status_code):
         mock_resp = _http_response(status_code)
         with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
             result = _validate_api_key("openai", "https://api.openai.com/v1", "test-key")
+        assert result.status is KeyValidationStatus.INCONCLUSIVE
         assert result.passed is True
+        assert "Could not verify API key" in result.message
         assert f"HTTP {status_code}" in result.message
-        assert "credentials" not in result.message.lower()
-        assert "API key" not in result.message
+        assert "neither accepted nor rejected" in result.message
+        assert "rejected the credentials" not in result.message.lower()
 
-    def test_gone_probe_includes_upstream_detail_and_does_not_fail(self):
+    def test_gone_probe_includes_upstream_detail_and_is_inconclusive(self):
         detail = (
             "The model 'nvidia/nemotron-3-nano-30b-a3b' has reached its end of life "
             "on 2026-09-01T09:00:00Z and is no longer available."
@@ -3437,26 +3504,26 @@ class TestValidateApiKey:
 
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
-        assert result.passed is True
+        assert result.status is KeyValidationStatus.INCONCLUSIVE
+        assert "Could not verify API key" in result.message
         assert "HTTP 410" in result.message
         assert "end of life" in result.message
-        assert "credentials" not in result.message.lower()
-        assert "API key" not in result.message
+        assert "rejected the credentials" not in result.message.lower()
 
     @pytest.mark.parametrize(
-        "provider_name,api_key,side_effect,expected_passed",
+        "provider_name,api_key,side_effect,expected_status",
         [
-            ("nvidia-build", "k", httpx.TimeoutException("timeout"), True),
-            ("nvidia-build", "k", httpx.ConnectError("refused"), True),
-            ("custom-thing", "k", None, True),
-            ("nvidia-build", None, None, True),
+            ("nvidia-build", "k", httpx.TimeoutException("timeout"), KeyValidationStatus.INCONCLUSIVE),
+            ("nvidia-build", "k", httpx.ConnectError("refused"), KeyValidationStatus.INCONCLUSIVE),
+            ("custom-thing", "k", None, KeyValidationStatus.INCONCLUSIVE),
+            ("nvidia-build", None, None, KeyValidationStatus.VALID),
         ],
         ids=["timeout", "connect-error", "unknown-provider", "no-api-key"],
     )
-    def test_skip_and_error_paths(self, provider_name, api_key, side_effect, expected_passed):
+    def test_skip_and_error_paths(self, provider_name, api_key, side_effect, expected_status):
         with patch(f"{self._MOD}.httpx.request", side_effect=side_effect) as mock_req:
             result = _validate_api_key(provider_name, "https://example.com", api_key)
-        assert result.passed is expected_passed
+        assert result.status is expected_status
         if api_key is None or provider_name not in _PROBE_CONFIGS:
             mock_req.assert_not_called()
 
@@ -3496,21 +3563,26 @@ class TestValidateApiKeyIntegration:
 
     _MOD = "nemo_helix_ext.cli.commands.setup"
 
-    def test_interactive_invalid_key_blocks_discovery(self):
-        """When key validation fails, _wait_for_models must not be called."""
+    def test_interactive_rejected_key_reprompts_and_proceeds(self):
+        """Rejected key re-prompts; a later valid key continues into discovery."""
+        validate_results = [
+            KeyValidationResult(status=KeyValidationStatus.REJECTED, message="API key rejected"),
+            KeyValidationResult(status=KeyValidationStatus.VALID),
+        ]
         with (
             patch(
                 f"{self._MOD}._interactive_collect_provider",
                 return_value=("nvidia-build", "https://integrate.api.nvidia.com", "bad-key", None, None),
             ),
-            patch(f"{self._MOD}._register_provider_interactive"),
-            patch(
-                f"{self._MOD}._validate_api_key",
-                return_value=KeyValidationResult(passed=False, message="API key rejected"),
-            ),
-            patch(f"{self._MOD}._wait_for_models") as mock_wait,
+            patch(f"{self._MOD}._register_provider_interactive") as mock_register,
+            patch(f"{self._MOD}._validate_api_key", side_effect=validate_results),
+            patch(f"{self._MOD}._reprompt_api_key", return_value="good-key") as mock_reprompt,
+            patch(f"{self._MOD}._wait_for_models", return_value=[]),
+            patch(f"{self._MOD}._select_model_pair", return_value=None),
+            patch(f"{self._MOD}._maybe_install_skills"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="explore"),
             patch(f"{self._MOD}.console"),
-            pytest.raises(ClickExit) as exc_info,
         ):
             cli_ctx = MagicMock()
             _run_interactive_mode(
@@ -3520,7 +3592,71 @@ class TestValidateApiKeyIntegration:
                 "http://localhost:8080",
                 None,
             )
+        mock_reprompt.assert_called_once()
+        mock_register.assert_called_once()
+        assert mock_register.call_args.kwargs["api_key"] == "good-key"
+
+    def test_interactive_inconclusive_continue_registers(self):
+        with (
+            patch(
+                f"{self._MOD}._interactive_collect_provider",
+                return_value=("nvidia-build", "https://integrate.api.nvidia.com", "maybe-key", None, None),
+            ),
+            patch(f"{self._MOD}._register_provider_interactive") as mock_register,
+            patch(
+                f"{self._MOD}._validate_api_key",
+                return_value=KeyValidationResult(
+                    status=KeyValidationStatus.INCONCLUSIVE,
+                    message="Could not verify API key: probe received HTTP 410. Credentials were neither accepted nor rejected.",
+                ),
+            ),
+            patch(f"{self._MOD}.prompt_choice", return_value="continue") as mock_choice,
+            patch(f"{self._MOD}._wait_for_models", return_value=[]),
+            patch(f"{self._MOD}._select_model_pair", return_value=None),
+            patch(f"{self._MOD}._maybe_install_skills"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="explore"),
+            patch(f"{self._MOD}.console"),
+        ):
+            _run_interactive_mode(
+                MagicMock(),
+                _make_mock_client(),
+                "default",
+                "http://localhost:8080",
+                None,
+            )
+        mock_choice.assert_called_once()
+        mock_register.assert_called_once()
+        assert mock_register.call_args.kwargs["api_key"] == "maybe-key"
+
+    def test_interactive_inconclusive_abort_exits(self):
+        with (
+            patch(
+                f"{self._MOD}._interactive_collect_provider",
+                return_value=("nvidia-build", "https://integrate.api.nvidia.com", "maybe-key", None, None),
+            ),
+            patch(f"{self._MOD}._register_provider_interactive") as mock_register,
+            patch(
+                f"{self._MOD}._validate_api_key",
+                return_value=KeyValidationResult(
+                    status=KeyValidationStatus.INCONCLUSIVE,
+                    message="Could not verify API key: probe timed out.",
+                ),
+            ),
+            patch(f"{self._MOD}.prompt_choice", return_value="abort"),
+            patch(f"{self._MOD}._wait_for_models") as mock_wait,
+            patch(f"{self._MOD}.console"),
+            pytest.raises(ClickExit) as exc_info,
+        ):
+            _run_interactive_mode(
+                MagicMock(),
+                _make_mock_client(),
+                "default",
+                "http://localhost:8080",
+                None,
+            )
         assert exc_info.value.exit_code == 1
+        mock_register.assert_not_called()
         mock_wait.assert_not_called()
 
     def test_auto_invalid_key_raises_exit(self):
@@ -3530,7 +3666,7 @@ class TestValidateApiKeyIntegration:
             patch.dict("os.environ", {"NVIDIA_API_KEY": "bad-key"}, clear=True),
             patch(
                 f"{self._MOD}._validate_api_key",
-                return_value=KeyValidationResult(passed=False, message="API key rejected"),
+                return_value=KeyValidationResult(status=KeyValidationStatus.REJECTED, message="API key rejected"),
             ),
             patch(f"{self._MOD}.console"),
             pytest.raises(ClickExit) as exc_info,
@@ -3565,6 +3701,8 @@ class TestValidateApiKeyIntegration:
         printed = " ".join(str(call) for call in print_message.call_args_list)
         assert "Check the value of $NVIDIA_API_KEY" not in printed
         assert "Could not validate API key" not in printed
+        assert "Could not verify API key" in printed
+        assert "neither accepted nor rejected" in printed
         assert "end of life" in printed
 
     def test_auto_rejected_key_still_points_at_env_var(self):
