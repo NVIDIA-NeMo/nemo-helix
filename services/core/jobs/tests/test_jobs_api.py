@@ -693,6 +693,53 @@ async def test_job_lifecycle_single_step(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_job_accepts_both_id_and_name(test_client: AsyncClient):
+    """GET /jobs/{name} resolves by the job's ID as well as its name.
+
+    ``jobs list`` leads with the ``id`` field, so passing that ``id`` to GET
+    must not 404 just because the endpoint is keyed by name.
+    """
+    req = CreateHelixJobRequest(
+        name="id-or-name-job",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
+    assert response.status_code == 201
+    created = response.json()
+    job_id = created["id"]
+    job_name = created["name"]
+    assert job_id != job_name
+
+    # By name (the documented path).
+    by_name = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
+    assert by_name.status_code == 200
+    assert by_name.json()["id"] == job_id
+
+    # By ID (the value `jobs list` surfaces first) — previously a 404.
+    by_id = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}")
+    assert by_id.status_code == 200
+    assert by_id.json()["id"] == job_id
+    assert by_id.json()["name"] == job_name
+
+    # The /status subresource resolves by ID too, since it shares get_job.
+    status_by_id = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}/status")
+    assert status_by_id.status_code == 200
+
+    # A mutation endpoint (cancel) resolves by ID as well — not just name.
+    cancel_by_id = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}/cancel")
+    assert cancel_by_id.status_code == 200
+    assert cancel_by_id.json()["id"] == job_id
+
+    # A genuinely-unknown identifier still 404s.
+    missing = await test_client.get("/apis/jobs/v2/workspaces/default/jobs/platform-job-nope")
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_job_lifecycle_multi_step(test_client: AsyncClient):
     req = CreateHelixJobRequest(
         name="test-job",

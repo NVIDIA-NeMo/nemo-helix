@@ -21,8 +21,6 @@ import logging
 import os
 import sys
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
@@ -78,21 +76,20 @@ DEFAULT_WORKSPACE = "default"
 
 
 def create_filesets(
-    sdk: NeMoHelix,
+    files: FilesClient,
     workspace: str,
     dry_run: bool = False,
 ) -> list[str]:
     """Create model filesets in the Files API.
 
     Args:
-        sdk: NeMo Helix SDK client
+        files: Typed Files client
         workspace: Workspace to create filesets in
         dry_run: If True, only print what would be created
 
     Returns:
         List of created fileset names
     """
-    files = client_from_platform(sdk, FilesClient)
     created = []
     for fileset_config in MODEL_FILESETS:
         name = fileset_config["name"]
@@ -156,8 +153,8 @@ def main() -> int:
     if args.dry_run:
         logger.info("DRY RUN - no filesets will be created")
 
-    sdk = NeMoHelix(base_url=args.files_api_url)
-    created = create_filesets(sdk, args.workspace, dry_run=args.dry_run)
+    files = FilesClient(base_url=args.files_api_url)
+    created = create_filesets(files, args.workspace, dry_run=args.dry_run)
 
     if created:
         logger.info("\nCreated %d filesets:", len(created))

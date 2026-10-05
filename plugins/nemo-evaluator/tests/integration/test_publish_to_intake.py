@@ -27,7 +27,7 @@ import socket
 import subprocess
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from importlib.util import find_spec
 from pathlib import Path
@@ -42,10 +42,16 @@ from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialS
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
-from nemo_helix_plugin.intake.types import Trace, TraceFilterParam
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
+from nemo_helix_plugin.intake.types import (
+    EvaluationCreateRequest,
+    ExperimentCreateRequest,
+    Trace,
+    TraceFilterParam,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -269,78 +275,95 @@ def _result() -> AgentEvalResult:
     )
 
 
+async def _ensure_evaluation(intake: AsyncIntakeClient, *, name: str, dataset_name: str) -> None:
+    """Create the Experiment and Evaluation the publish step expects to exist."""
+    group = (
+        await intake.create_experiment(
+            workspace=WORKSPACE,
+            body=ExperimentCreateRequest(name=GROUP_NAME, description="Intake IT"),
+            exist_ok=True,
+        )
+    ).data()
+    try:
+        await intake.create_evaluation(
+            workspace=WORKSPACE,
+            body=EvaluationCreateRequest(
+                name=name,
+                experiment_ids=[group.id],
+                dataset_name=dataset_name,
+                dataset_version="v1",
+            ),
+        )
+    except ConflictError:
+        pass
+
+
+@pytest.fixture
+async def intake(platform_base_url: str) -> AsyncIterator[AsyncIntakeClient]:
+    async with AsyncNemoClient(base_url=platform_base_url, retry=RetryPolicy(max_retries=2)) as async_client:
+        yield AsyncIntakeClient.from_client(async_client)
+
+
 async def _list_traces(intake: AsyncIntakeClient, trace_filter: TraceFilterParam) -> list[Trace]:
     traces = await intake.list_traces(workspace=WORKSPACE, query_params={"filter": trace_filter})
     return [trace async for trace in traces.items()]
 
 
-async def test_publish_to_intake_round_trip(platform_base_url: str) -> None:
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        # Precondition: the Experiment must exist before ingest.
-        group = await async_sdk.experiments.create(
-            workspace=WORKSPACE, name=GROUP_NAME, description="Intake IT", exist_ok=True
-        )
-        await async_sdk.evaluations.create(
-            workspace=WORKSPACE,
-            name=EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-dataset",
-            dataset_version="v1",
-            exist_ok=True,
-        )
+async def test_publish_to_intake_round_trip(intake: AsyncIntakeClient) -> None:
+    # Precondition: the Experiment must exist before ingest.
+    await _ensure_evaluation(intake, name=EXPERIMENT_NAME, dataset_name="intake-it-dataset")
 
-        report = await publish_to_intake(
-            _result(),
-            client=intake,
-            experiment_id=EXPERIMENT_NAME,
-            workspace=WORKSPACE,
-            agent_name="intake-it-agent",
-            model_name="intake-it-model",
-        )
+    report = await publish_to_intake(
+        _result(),
+        client=intake,
+        experiment_id=EXPERIMENT_NAME,
+        workspace=WORKSPACE,
+        agent_name="intake-it-agent",
+        model_name="intake-it-model",
+    )
 
-        assert report.trial_count == 2
-        assert report.evaluator_result_count == 5
-        published = {trial.trial_id: trial for trial in report.published_trials}
+    assert report.trial_count == 2
+    assert report.evaluator_result_count == 5
+    published = {trial.trial_id: trial for trial in report.published_trials}
 
-        # --- trial-1: trajectory + experiment-context propagation, read back via the Intake API.
-        t1 = published["trial-1"]
-        trace_filter: TraceFilterParam = {"session_id": t1.session_id}
-        traces = await _list_traces(intake, trace_filter)
-        assert len(traces) == 1
-        trace = traces[0]
-        assert trace.session_id == t1.session_id
-        assert trace.root_span_id == t1.span_id
-        assert trace.evaluation_context is not None
-        evaluation_context = trace.evaluation_context
-        assert evaluation_context["evaluation_name"] == EXPERIMENT_NAME
-        assert evaluation_context["test_case_name"] == "task-1"
+    # --- trial-1: trajectory + experiment-context propagation, read back via the Intake API.
+    t1 = published["trial-1"]
+    trace_filter: TraceFilterParam = {"session_id": t1.session_id}
+    traces = await _list_traces(intake, trace_filter)
+    assert len(traces) == 1
+    trace = traces[0]
+    assert trace.session_id == t1.session_id
+    assert trace.root_span_id == t1.span_id
+    assert trace.evaluation_context is not None
+    evaluation_context = trace.evaluation_context
+    assert evaluation_context["evaluation_name"] == EXPERIMENT_NAME
+    assert evaluation_context["test_case_name"] == "task-1"
 
-        # --- trial-1 scores: every field, every data_type coercion.
-        rows = await intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
-        by_name = {row.name: row for row in rows}
-        assert set(by_name) == {"accuracy.score", "accuracy.passed", "judge.verdict"}
-        for row in rows:
-            assert row.session_id == t1.session_id
-            assert row.span_id == t1.span_id
-            assert row.workspace == WORKSPACE
-        assert by_name["accuracy.score"].data_type == "NUMERIC"
-        assert by_name["accuracy.score"].value == 1.0
-        assert by_name["accuracy.passed"].data_type == "BOOLEAN"
-        assert by_name["accuracy.passed"].value == 1.0
-        assert by_name["judge.verdict"].data_type == "TEXT"
-        assert by_name["judge.verdict"].string_value == "correct"
+    # --- trial-1 scores: every field, every data_type coercion.
+    rows = await intake.spans.evaluator_results.list(t1.span_id, workspace=WORKSPACE)
+    by_name = {row.name: row for row in rows}
+    assert set(by_name) == {"accuracy.score", "accuracy.passed", "judge.verdict"}
+    for row in rows:
+        assert row.session_id == t1.session_id
+        assert row.span_id == t1.span_id
+        assert row.workspace == WORKSPACE
+    assert by_name["accuracy.score"].data_type == "NUMERIC"
+    assert by_name["accuracy.score"].value == 1.0
+    assert by_name["accuracy.passed"].data_type == "BOOLEAN"
+    assert by_name["accuracy.passed"].value == 1.0
+    assert by_name["judge.verdict"].data_type == "TEXT"
+    assert by_name["judge.verdict"].string_value == "correct"
 
-        # --- trial-2: distinct session/span; BOOLEAN false coerces to 0.0.
-        t2 = published["trial-2"]
-        assert t2.session_id != t1.session_id
-        assert t2.span_id != t1.span_id
-        rows2 = await intake.spans.evaluator_results.list(t2.span_id, workspace=WORKSPACE)
-        by_name2 = {row.name: row for row in rows2}
-        assert set(by_name2) == {"accuracy.score", "accuracy.passed"}
-        assert by_name2["accuracy.passed"].data_type == "BOOLEAN"
-        assert by_name2["accuracy.passed"].value == 0.0
-        assert by_name2["accuracy.score"].value == 0.0
+    # --- trial-2: distinct session/span; BOOLEAN false coerces to 0.0.
+    t2 = published["trial-2"]
+    assert t2.session_id != t1.session_id
+    assert t2.span_id != t1.span_id
+    rows2 = await intake.spans.evaluator_results.list(t2.span_id, workspace=WORKSPACE)
+    by_name2 = {row.name: row for row in rows2}
+    assert set(by_name2) == {"accuracy.score", "accuracy.passed"}
+    assert by_name2["accuracy.passed"].data_type == "BOOLEAN"
+    assert by_name2["accuracy.passed"].value == 0.0
+    assert by_name2["accuracy.score"].value == 0.0
 
 
 def _nan_result() -> AgentEvalResult:
@@ -381,39 +404,29 @@ def _nan_result() -> AgentEvalResult:
     )
 
 
-async def test_publish_skips_nan_and_failed_scores(platform_base_url: str) -> None:
+async def test_publish_skips_nan_and_failed_scores(intake: AsyncIntakeClient) -> None:
     # A NaN value is not representable in JSON and a FAILED score is not a real measurement; neither
     # should reach Intake. Only the finite, completed output should be stored.
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
-        await async_sdk.evaluations.create(
-            workspace=WORKSPACE,
-            name=NAN_EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-nan-dataset",
-            dataset_version="v1",
-            exist_ok=True,
-        )
+    await _ensure_evaluation(intake, name=NAN_EXPERIMENT_NAME, dataset_name="intake-it-nan-dataset")
 
-        report = await publish_to_intake(
-            _nan_result(),
-            client=intake,
-            experiment_id=NAN_EXPERIMENT_NAME,
-            workspace=WORKSPACE,
-            agent_name="intake-it-agent",
-        )
+    report = await publish_to_intake(
+        _nan_result(),
+        client=intake,
+        experiment_id=NAN_EXPERIMENT_NAME,
+        workspace=WORKSPACE,
+        agent_name="intake-it-agent",
+    )
 
-        published = report.published_trials[0]
-        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
-        assert {row.name for row in rows} == {"accuracy.score"}
-        assert report.evaluator_result_count == 1
+    published = report.published_trials[0]
+    rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
+    assert {row.name for row in rows} == {"accuracy.score"}
+    assert report.evaluator_result_count == 1
 
-        # The dropped outputs are surfaced (not silently lost) until Intake can model failure.
-        assert {(skip.name, skip.reason) for skip in report.skipped} == {
-            ("accuracy.broken", "non-finite value"),
-            ("judge.verdict", "scoring failed"),
-        }
+    # The dropped outputs are surfaced (not silently lost) until Intake can model failure.
+    assert {(skip.name, skip.reason) for skip in report.skipped} == {
+        ("accuracy.broken", "non-finite value"),
+        ("judge.verdict", "scoring failed"),
+    }
 
 
 def _idempotency_result() -> AgentEvalResult:
@@ -445,47 +458,37 @@ def _idempotency_result() -> AgentEvalResult:
     )
 
 
-async def test_republishing_the_same_result_is_idempotent(platform_base_url: str) -> None:
+async def test_republishing_the_same_result_is_idempotent(intake: AsyncIntakeClient) -> None:
     # A job worker can publish successfully and die before recording completion, so a retry must not
     # double-count. Intake's spans table is a ReplacingMergeTree keyed on start_time, which is only
     # stable because the trajectory carries the run's started_at (see mapping.trial_to_atif_ingest);
     # without it each publish lands a second, uncollapsible row per trial.
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
-        await async_sdk.evaluations.create(
+    await _ensure_evaluation(intake, name=IDEMPOTENCY_EXPERIMENT_NAME, dataset_name="intake-it-idempotency-dataset")
+
+    async def publish() -> PublishReport:
+        return await publish_to_intake(
+            _idempotency_result(),
+            client=intake,
+            experiment_id=IDEMPOTENCY_EXPERIMENT_NAME,
             workspace=WORKSPACE,
-            name=IDEMPOTENCY_EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-idempotency-dataset",
-            dataset_version="v1",
-            exist_ok=True,
+            agent_name="intake-it-agent",
         )
 
-        async def publish() -> PublishReport:
-            return await publish_to_intake(
-                _idempotency_result(),
-                client=intake,
-                experiment_id=IDEMPOTENCY_EXPERIMENT_NAME,
-                workspace=WORKSPACE,
-                agent_name="intake-it-agent",
-            )
+    first = await publish()
+    second = await publish()
 
-        first = await publish()
-        second = await publish()
+    # Same identities both times — nothing is minted per-publish.
+    assert first.trial_count == second.trial_count == 1
+    assert first.published_trials[0].session_id == second.published_trials[0].session_id
+    assert first.published_trials[0].span_id == second.published_trials[0].span_id
 
-        # Same identities both times — nothing is minted per-publish.
-        assert first.trial_count == second.trial_count == 1
-        assert first.published_trials[0].session_id == second.published_trials[0].session_id
-        assert first.published_trials[0].span_id == second.published_trials[0].span_id
+    session_id = second.published_trials[0].session_id
+    trace_filter: TraceFilterParam = {"session_id": session_id}
+    traces = await _list_traces(intake, trace_filter)
+    assert len(traces) == 1, "re-publish duplicated the trajectory instead of replacing it"
 
-        session_id = second.published_trials[0].session_id
-        trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = await _list_traces(intake, trace_filter)
-        assert len(traces) == 1, "re-publish duplicated the trajectory instead of replacing it"
-
-        rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
-        assert [row.name for row in rows] == ["accuracy.score"]
+    rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
+    assert [row.name for row in rows] == ["accuracy.score"]
 
 
 def _row_result() -> EvaluationResult:
@@ -504,53 +507,43 @@ def _row_result() -> EvaluationResult:
     )
 
 
-async def test_row_result_publishes_and_is_idempotent(platform_base_url: str) -> None:
+async def test_row_result_publishes_and_is_idempotent(intake: AsyncIntakeClient) -> None:
     # The dataset-driven path adapts rows into the publisher's shape rather than using a second
     # mapping, so it inherits the same idempotency guarantee: re-publishing replaces rather than
     # duplicating. Row identity comes from the configured column, not the row's position.
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
-        await async_sdk.evaluations.create(
+    await _ensure_evaluation(intake, name=ROW_EXPERIMENT_NAME, dataset_name="intake-it-row-dataset")
+
+    async def publish() -> PublishReport:
+        adapted = row_result_to_agent_eval_result(
+            _row_result(),
+            run_id=ROW_RUN_ID,
+            started_at=STARTED_AT,
+            test_case_id_field="qid",
+        )
+        return await publish_to_intake(
+            adapted,
+            client=intake,
+            experiment_id=ROW_EXPERIMENT_NAME,
             workspace=WORKSPACE,
-            name=ROW_EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-row-dataset",
-            dataset_version="v1",
-            exist_ok=True,
+            agent_name="intake-it-row-agent",
         )
 
-        async def publish() -> PublishReport:
-            adapted = row_result_to_agent_eval_result(
-                _row_result(),
-                run_id=ROW_RUN_ID,
-                started_at=STARTED_AT,
-                test_case_id_field="qid",
-            )
-            return await publish_to_intake(
-                adapted,
-                client=intake,
-                experiment_id=ROW_EXPERIMENT_NAME,
-                workspace=WORKSPACE,
-                agent_name="intake-it-row-agent",
-            )
+    first = await publish()
+    second = await publish()
 
-        first = await publish()
-        second = await publish()
+    assert first.trial_count == second.trial_count == 1
+    session_id = second.published_trials[0].session_id
+    assert session_id == f"{ROW_RUN_ID}:q-1"
+    assert first.published_trials[0].span_id == second.published_trials[0].span_id
 
-        assert first.trial_count == second.trial_count == 1
-        session_id = second.published_trials[0].session_id
-        assert session_id == f"{ROW_RUN_ID}:q-1"
-        assert first.published_trials[0].span_id == second.published_trials[0].span_id
+    trace_filter: TraceFilterParam = {"session_id": session_id}
+    traces = await _list_traces(intake, trace_filter)
+    assert len(traces) == 1, "re-publish duplicated the row instead of replacing it"
+    assert traces[0].evaluation_context is not None
+    assert traces[0].evaluation_context["test_case_id"] == "q-1"
 
-        trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = await _list_traces(intake, trace_filter)
-        assert len(traces) == 1, "re-publish duplicated the row instead of replacing it"
-        assert traces[0].evaluation_context is not None
-        assert traces[0].evaluation_context["test_case_id"] == "q-1"
-
-        rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
-        assert [row.name for row in rows] == ["exact_match.score"]
+    rows = await intake.spans.evaluator_results.list(second.published_trials[0].span_id, workspace=WORKSPACE)
+    assert [row.name for row in rows] == ["exact_match.score"]
 
 
 def _otlp_result() -> AgentEvalResult:
@@ -601,20 +594,39 @@ def _otlp_result() -> AgentEvalResult:
     )
 
 
-async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_base_url: str) -> None:
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
-        await async_sdk.evaluations.create(
-            workspace=WORKSPACE,
-            name=OTLP_EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-otlp-dataset",
-            dataset_version="v1",
-            exist_ok=True,
-        )
+async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(intake: AsyncIntakeClient) -> None:
+    await _ensure_evaluation(intake, name=OTLP_EXPERIMENT_NAME, dataset_name="intake-it-otlp-dataset")
 
-        report = await publish_to_intake(
+    report = await publish_to_intake(
+        _otlp_result(),
+        client=intake,
+        experiment_id=OTLP_EXPERIMENT_NAME,
+        workspace=WORKSPACE,
+        agent_name="intake-it-agent",
+    )
+
+    published = report.published_trials[0]
+    # The span id is the producer's own, read off the payload rather than queried back.
+    assert published.span_id == OTLP_ROOT_SPAN_ID
+    assert published.session_id == f"{OTLP_RUN_ID}:trial-1"
+
+    # The stamped session id is what Intake indexed the spans under.
+    spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": published.session_id})).page()
+    assert [span.name for span in spans.items] == ["agent run"]
+
+    assert {span.source for span in spans.items} == {"otel"}
+
+    rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
+    assert [row.name for row in rows] == ["accuracy.score"]
+
+
+async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(intake: AsyncIntakeClient) -> None:
+    # The session id we stamp is part of the ReplacingMergeTree key, so getting it wrong or
+    # letting it vary per publish inserts a second uncollapsible row instead of replacing.
+    await _ensure_evaluation(intake, name=OTLP_EXPERIMENT_NAME, dataset_name="intake-it-otlp-dataset")
+
+    async def publish() -> PublishReport:
+        return await publish_to_intake(
             _otlp_result(),
             client=intake,
             experiment_id=OTLP_EXPERIMENT_NAME,
@@ -622,55 +634,16 @@ async def test_publishing_a_trial_with_an_otlp_trace_lands_its_spans(platform_ba
             agent_name="intake-it-agent",
         )
 
-        published = report.published_trials[0]
-        # The span id is the producer's own, read off the payload rather than queried back.
-        assert published.span_id == OTLP_ROOT_SPAN_ID
-        assert published.session_id == f"{OTLP_RUN_ID}:trial-1"
+    first = await publish()
+    second = await publish()
 
-        # The stamped session id is what Intake indexed the spans under.
-        spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": published.session_id})).page()
-        assert [span.name for span in spans.items] == ["agent run"]
+    assert first.published_trials[0].session_id == second.published_trials[0].session_id
+    assert first.published_trials[0].span_id == second.published_trials[0].span_id
 
-        assert {span.source for span in spans.items} == {"otel"}
+    session_id = second.published_trials[0].session_id
+    trace_filter: TraceFilterParam = {"session_id": session_id}
+    traces = await _list_traces(intake, trace_filter)
+    assert len(traces) == 1, "re-publish duplicated the OTLP trace instead of replacing it"
 
-        rows = await intake.spans.evaluator_results.list(published.span_id, workspace=WORKSPACE)
-        assert [row.name for row in rows] == ["accuracy.score"]
-
-
-async def test_republishing_an_otlp_result_replaces_rather_than_duplicates(platform_base_url: str) -> None:
-    # The session id we stamp is part of the ReplacingMergeTree key, so getting it wrong or
-    # letting it vary per publish inserts a second uncollapsible row instead of replacing.
-    async with AsyncNeMoHelix(base_url=platform_base_url, max_retries=2) as async_sdk:
-        intake = client_from_platform(async_sdk, AsyncIntakeClient)
-        group = await async_sdk.experiments.create(workspace=WORKSPACE, name=GROUP_NAME, exist_ok=True)
-        await async_sdk.evaluations.create(
-            workspace=WORKSPACE,
-            name=OTLP_EXPERIMENT_NAME,
-            experiment_ids=[group.id],
-            dataset_name="intake-it-otlp-dataset",
-            dataset_version="v1",
-            exist_ok=True,
-        )
-
-        async def publish() -> PublishReport:
-            return await publish_to_intake(
-                _otlp_result(),
-                client=intake,
-                experiment_id=OTLP_EXPERIMENT_NAME,
-                workspace=WORKSPACE,
-                agent_name="intake-it-agent",
-            )
-
-        first = await publish()
-        second = await publish()
-
-        assert first.published_trials[0].session_id == second.published_trials[0].session_id
-        assert first.published_trials[0].span_id == second.published_trials[0].span_id
-
-        session_id = second.published_trials[0].session_id
-        trace_filter: TraceFilterParam = {"session_id": session_id}
-        traces = await _list_traces(intake, trace_filter)
-        assert len(traces) == 1, "re-publish duplicated the OTLP trace instead of replacing it"
-
-        spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": session_id})).page()
-        assert len(spans.items) == 1, "re-publish duplicated the span instead of replacing it"
+    spans = (await intake.spans.list(workspace=WORKSPACE, filter={"session_id": session_id})).page()
+    assert len(spans.items) == 1, "re-publish duplicated the span instead of replacing it"

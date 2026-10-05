@@ -420,6 +420,100 @@ def test_wait_for_provider_status_timeout() -> None:
 
 
 # ---------------------------------------------------------------------------
+# OpenAI clients and gateway readiness
+# ---------------------------------------------------------------------------
+
+
+def _capture_openai_request(seen: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"object": "list", "data": []})
+
+    return httpx.MockTransport(handler)
+
+
+def test_get_openai_client_targets_gateway_route_with_token_provider() -> None:
+    client = ModelsClient(base_url=BASE, workspace="default", auth="tok-1", default_headers={"X-Team": "a"})
+    seen: list[httpx.Request] = []
+
+    oai = client.get_openai_client(workspace="team")
+    oai.with_options(http_client=httpx.Client(transport=_capture_openai_request(seen))).models.list()
+
+    assert str(seen[0].url) == f"{BASE}/apis/inference-gateway/v2/workspaces/team/openai/-/v1/models"
+    assert seen[0].headers["Authorization"] == "Bearer tok-1"
+    assert seen[0].headers["X-Team"] == "a"
+
+
+def test_get_openai_client_without_auth_sends_placeholder_key() -> None:
+    seen: list[httpx.Request] = []
+
+    oai = ModelsClient(base_url=BASE, workspace="default").get_openai_client()
+    oai.with_options(http_client=httpx.Client(transport=_capture_openai_request(seen))).models.list()
+
+    assert str(seen[0].url) == f"{BASE}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/models"
+    assert seen[0].headers["Authorization"] == "Bearer not-used"
+
+
+@pytest.mark.asyncio
+async def test_get_async_openai_client_sends_token_provider_bearer() -> None:
+    client = AsyncModelsClient(base_url=BASE, workspace="default", auth="tok-2")
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"object": "list", "data": []})
+
+    oai = client.get_async_openai_client()
+    transport = httpx.MockTransport(handler)
+    await oai.with_options(http_client=httpx.AsyncClient(transport=transport)).models.list()
+
+    assert str(seen[0].url) == f"{BASE}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/models"
+    assert seen[0].headers["Authorization"] == "Bearer tok-2"
+
+
+def test_wait_for_gateway_retries_until_provider_routes() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "unknown provider"}),
+        httpx.Response(503, request=httpx.Request("GET", BASE), json={"detail": "warming up"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"workspace": "default", "name": "p"}),
+    ]
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert client.wait_for_gateway("p", poll_interval=0.0) is True
+    url = http.request.call_args.args[1]
+    assert url == f"{BASE}/apis/inference-gateway/v2/workspaces/default/provider/p/ready"
+
+
+def test_wait_for_gateway_stops_on_non_transient_error() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.return_value = httpx.Response(403, request=httpx.Request("GET", BASE), json={"detail": "denied"})
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert client.wait_for_gateway("p", poll_interval=0.0) is False
+
+
+def test_wait_for_gateway_timeout() -> None:
+    http = MagicMock(spec=httpx.Client)
+    http.request.return_value = httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "x"})
+    client = ModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert client.wait_for_gateway("p", timeout=0, poll_interval=0.0) is False
+
+
+@pytest.mark.asyncio
+async def test_async_wait_for_gateway_returns_true_when_ready() -> None:
+    http = AsyncMock(spec=httpx.AsyncClient)
+    http.request.side_effect = [
+        httpx.Response(404, request=httpx.Request("GET", BASE), json={"detail": "x"}),
+        httpx.Response(200, request=httpx.Request("GET", BASE), json={"workspace": "default", "name": "p"}),
+    ]
+    client = AsyncModelsClient(base_url=BASE, workspace="default", http_client=http)
+
+    assert await client.wait_for_gateway("p", poll_interval=0.0) is True
+
+
+# ---------------------------------------------------------------------------
 # Async
 # ---------------------------------------------------------------------------
 

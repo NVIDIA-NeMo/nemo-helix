@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -208,3 +209,17 @@ class FakeSecretsClient(AsyncSecretsClient):
 def make_secrets_client():
     """Return a factory for Secrets clients seeded with ``(workspace, name) -> value``."""
     return FakeSecretsClient
+
+
+@pytest.fixture(autouse=True)
+def _guard_codex_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``CODEX_HOME`` and the temp root at a pytest temp dir.
+
+    Codex-adapter trials link the base ``auth.json`` into a temp Codex home; without this guard, unit
+    tests would link the developer's real ``~/.codex`` login.
+    """
+    guard = tmp_path_factory.mktemp("codex-home-guard")
+    monkeypatch.setenv("CODEX_HOME", str(guard / "base-codex-home"))
+    temp_root = guard / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))

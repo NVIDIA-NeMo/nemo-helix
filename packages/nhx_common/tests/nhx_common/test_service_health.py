@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -132,6 +133,65 @@ def test_wait_for_service_ready_skips_service_absent_from_status() -> None:
     assert ready is True
     client.get.assert_called_once_with("http://platform.local/status", headers=MARK_INTERNAL_REQUEST_HEADERS)
     client.close.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_async_wait_for_service_ready_timeout_records_readiness_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    message = "Docker daemon is unavailable"
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"services": {"ready": [], "not_ready": [{"name": "intake", "message": message}]}},
+        )
+
+    caplog.set_level(logging.WARNING, logger="nhx.common.service.api.health")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ready = await async_wait_for_service_ready(
+            HelixConfig(base_url="http://platform.local"),
+            "intake",
+            timeout=0.05,
+            poll_interval=0,
+            http_client=client,
+        )
+
+    assert ready is False
+    timeout_records = [
+        record for record in caplog.records if record.message == "Timeout waiting for service to be ready"
+    ]
+    assert timeout_records
+    assert timeout_records[-1].readiness_message == message
+
+
+def test_wait_for_service_ready_timeout_records_readiness_message(caplog: pytest.LogCaptureFixture) -> None:
+    message = "Docker daemon is unavailable"
+    client = MagicMock()
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"services": {"ready": [], "not_ready": [{"name": "intake", "message": message}]}}
+    client.get.return_value = response
+    endpoint = MagicMock()
+    endpoint.connect_base_url = "http://platform.local"
+    endpoint.sync_http_client.return_value = client
+
+    caplog.set_level(logging.WARNING, logger="nhx.common.service.api.health")
+    with patch("nhx.common.service.api.health.resolve_service_endpoint", return_value=endpoint):
+        ready = wait_for_service_ready(
+            HelixConfig(base_url="http://platform.local"),
+            "intake",
+            threading.Event(),
+            timeout=0.05,
+            poll_interval=0,
+        )
+
+    assert ready is False
+    timeout_records = [
+        record for record in caplog.records if "Timeout waiting for service to be ready" in record.message
+    ]
+    assert timeout_records
+    assert timeout_records[-1].readiness_message == message
 
 
 def test_wait_for_service_ready_returns_false_when_stop_signal_is_set() -> None:

@@ -27,7 +27,7 @@ from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
 from nemo_evaluator_sdk.values import Model, ModelRef, SecretRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 def _resolved_task(*, metrics=(), views=None):
@@ -202,9 +202,9 @@ async def test_offline_selection_rejects_mixed_kinds_and_duplicate_native_ids(en
     with pytest.raises(ValueError, match="cannot mix" if mixed else "task ids must be unique"):
         loaded = await load_tasks(
             refs if direct else TasksetRef("default/suite"),
-            SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS),
+            SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS),
         )
-        ctx = SubmitContext(workspace="default", entity_client=entity_store, async_sdk=None, adapters=KIND_ADAPTERS)
+        ctx = SubmitContext(workspace="default", entity_client=entity_store, async_client=None, adapters=KIND_ADAPTERS)
         snapshots = [await snapshot_task(item, ctx) for item in loaded]
         validate_execution_support(snapshots, target=None, adapters=KIND_ADAPTERS)
 
@@ -247,7 +247,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
         return Model(name="judge", url="https://example.test/v1/chat/completions")
 
     monkeypatch.setattr(HelixMetricModelResolver, "resolve_model", resolve)
-    async with AsyncNeMoHelix(base_url="http://platform.test", workspace="default") as async_sdk:
+    async with AsyncNemoClient(base_url="http://platform.test", workspace="default") as async_client:
         spec = await AgentEvalJob.to_spec(
             AgentEvalInputSpec(
                 tasks=[TaskRef(f"default/task#{revision.content_hash}")],
@@ -265,7 +265,7 @@ async def test_harbor_judge_model_is_resolved_before_canonical_job(entity_store,
             ),
             workspace="default",
             entity_client=entity_store,
-            async_sdk=async_sdk,
+            async_sdk=async_client,
             is_local=False,
         )
     assert calls == ["default/judge"]

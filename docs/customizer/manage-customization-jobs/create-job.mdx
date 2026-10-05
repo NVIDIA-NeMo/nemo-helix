@@ -37,14 +37,16 @@ Build an `AutomodelJobInput` spec and submit it to the `automodel` backend. The 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 # Initialize the client
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+customization = Customization.from_client(client)
 
 # Build the job spec (SFT + LoRA)
 spec = AutomodelJobInput(
@@ -64,7 +66,7 @@ spec = AutomodelJobInput(
 )
 
 # Submit the job
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name="my-lora-job")
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-lora-job")
 
 print(f"Submitted job: {job.job.name}")
 print(f"Job status: {job.job.status}")
@@ -113,13 +115,15 @@ The Unsloth backend runs on a single GPU and supports 4-bit / 8-bit quantized lo
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 from nemo_unsloth_plugin.schema import UnslothJobInput
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+customization = Customization.from_client(client)
 
 spec = UnslothJobInput(
     model={"name": "default/qwen3-1.7b", "load_in_4bit": True},
@@ -131,7 +135,7 @@ spec = UnslothJobInput(
     output={"save_method": "lora"},
 )
 
-job = client.customization.unsloth.jobs.create(spec=spec, workspace="default", name="my-unsloth-lora-job")
+job = customization.unsloth.jobs.create(spec=spec, workspace="default", name="my-unsloth-lora-job")
 
 print(f"Submitted job: {job.job.name}")
 ```
@@ -144,13 +148,15 @@ Knowledge distillation is an Automodel feature. Set `training.training_type` to 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(
     model="default/qwen3-1.7b",  # Student model
@@ -169,7 +175,7 @@ spec = AutomodelJobInput(
     parallelism={"num_gpus_per_node": 1},
 )
 
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name="my-kd-job")
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-kd-job")
 ```
 
 <Note>

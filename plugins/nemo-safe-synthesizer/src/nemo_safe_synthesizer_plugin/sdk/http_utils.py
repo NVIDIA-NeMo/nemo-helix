@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from urllib.parse import quote, urljoin
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
-HelixClient = NeMoHelix | AsyncNeMoHelix
+HelixClient = NemoClient | AsyncNemoClient
 
 _API_PREFIX = "/apis/safe-synthesizer"
 

@@ -210,8 +210,8 @@ Wait for the platform job to reach a terminal state before reading either result
 
 ```python
 job.wait_until_done()
-stored = client.evaluator.agent_eval_results.retrieve("<result-name>")
-client.files.download(remote_path=stored.bundle_ref, local_path="agent-eval-run")
+stored = evaluator.agent_eval_results.retrieve("<result-name>")
+sdk.files.download(remote_path=stored.bundle_ref, local_path="agent-eval-run")
 ```
 
 You can also download the bundle through the Jobs CLI:

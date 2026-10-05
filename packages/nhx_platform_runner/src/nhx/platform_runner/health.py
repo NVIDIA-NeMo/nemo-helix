@@ -56,7 +56,7 @@ async def _get_service_status_breakdown(services: list[Service]) -> tuple[list[s
         if await service.is_ready():
             ready.append(service.name)
         else:
-            not_ready.append({"name": service.name})
+            not_ready.append({"name": service.name, "message": service.readiness_message})
     return ready, not_ready
 
 
@@ -104,7 +104,7 @@ def create_platform_health_router(
             status_value = "degraded"
 
         manager = ControllerManager.get_instance()
-        all_healthy, controllers = manager.validate_all_healthy(detailed=True)
+        all_healthy, controllers = manager.health_by_component()
         if not all_healthy:
             # Keep the aggregate signal consistent with /health/ready. A caller
             # looking only at the top-level field must not miss a controller or

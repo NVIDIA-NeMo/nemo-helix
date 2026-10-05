@@ -19,12 +19,12 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import TextIO
 from urllib.parse import urlparse
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_ext.client.bootstrap import build_async_nemo_client, build_direct_async_nemo_client
 from nemo_helix_ext.config.config import Config
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -34,18 +34,18 @@ TRACE_EXPORT_CONCURRENCY = 8
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
 
 
-def make_client(base_url: str) -> AsyncNeMoHelix:
-    """Async SDK client; platform auth only for remote URLs (mirrors ingest's client)."""
+def make_client(base_url: str) -> AsyncNemoClient:
+    """Async typed platform client; platform auth only for remote URLs."""
     host = (urlparse(base_url).hostname or "").lower()
     config_path = Config.get_default_config_path()
     if host in _LOOPBACK_HOSTS or not config_path.exists():
-        return AsyncNeMoHelix(base_url=base_url, timeout=60.0)
-    return AsyncNeMoHelix(base_url=base_url, config_path=config_path, timeout=60.0)
+        return build_direct_async_nemo_client(base_url=base_url, timeout=60.0)
+    return build_async_nemo_client(base_url=base_url, config_path=config_path, timeout=60.0)
 
 
-def _intake_client(client: AsyncNeMoHelix) -> AsyncIntakeClient:
+def _intake_client(client: AsyncNemoClient) -> AsyncIntakeClient:
     """Typed Intake client sharing the platform client's transport and auth."""
-    return client_from_platform(client, AsyncIntakeClient)
+    return AsyncIntakeClient.from_client(client)
 
 
 async def _items(paginator) -> AsyncIterator:
@@ -129,7 +129,7 @@ def export_workspaces(
     since: datetime | None,
     experiment: str | None = None,
     selection: dict | None = None,
-    client: AsyncNeMoHelix | None = None,
+    client: AsyncNemoClient | None = None,
 ) -> dict:
     """Drain spans/annotations/evaluator-results per workspace into JSONL files.
 
@@ -152,7 +152,6 @@ def export_workspaces(
 
 
 async def _resolve_experiment_scope(
-    client: AsyncNeMoHelix,
     intake: AsyncIntakeClient,
     *,
     workspace: str,
@@ -160,18 +159,16 @@ async def _resolve_experiment_scope(
     lower: str,
 ) -> ExperimentScope:
     """Resolve an Experiment to complete traces and their expected span count."""
-    experiment = await client.experiments.retrieve(experiment_name, workspace=workspace)
-    evaluation_names = sorted(
-        [
-            evaluation.name
-            async for evaluation in client.evaluations.list(
-                workspace=workspace,
-                filter=cast(Any, {"experiment_id": experiment.id}),
-                page_size=PAGE_SIZE,
-                sort="name",
-            )
-        ]
+    experiment = (await intake.get_experiment(name=experiment_name, workspace=workspace)).data()
+    evaluations = intake.list_evaluations(
+        workspace=workspace,
+        query_params={
+            "filter": {"experiment_id": experiment.id},
+            "page_size": PAGE_SIZE,
+            "sort": "name",
+        },
     )
+    evaluation_names = sorted([evaluation.name async for evaluation in _items(evaluations)])
     if experiment.evaluation_count is not None and len(evaluation_names) != experiment.evaluation_count:
         raise RuntimeError(
             f"{workspace}/{experiment_name}: Experiment reports {experiment.evaluation_count} evaluations "
@@ -293,7 +290,7 @@ async def _export_workspaces(
     since: datetime | None,
     experiment: str | None = None,
     selection: dict | None = None,
-    client: AsyncNeMoHelix | None = None,
+    client: AsyncNemoClient | None = None,
 ) -> dict:
     if (experiment is not None or selection is not None) and len(workspaces) != 1:
         raise ValueError("experiment-scoped export requires exactly one workspace")
@@ -311,7 +308,6 @@ async def _export_workspaces(
             ws_dir.mkdir(parents=True, exist_ok=True)
             scope = (
                 await _resolve_experiment_scope(
-                    client,
                     intake,
                     workspace=workspace,
                     experiment_name=experiment,

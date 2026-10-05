@@ -164,6 +164,10 @@ single-path optimize flow to `nemo agents optimize run-strategy --strategy
 legacy` (or another installed strategy), staging remote bundles first with
 `nemo agents optimize prepare-fileset`.
 
+If you have platform-owned agent intent packages, use the `nemo-ethos`
+coding-agent skill to write `ETHOS.md`. After the user approves `ETHOS.md`,
+remove the legacy spec package before using newer optimization workflows.
+
 ## Compatibility
 
 - Python 3.12, 3.13, or 3.14
@@ -196,9 +200,10 @@ legacy` (or another installed strategy), staging remote bundles first with
   or retrieval corpus inputs and configured embedding or ranking model access.
 - **GRPO runtime.** GRPO jobs require Kubernetes/Ray execution and sandboxed
   Gym configuration. They do not have a local Docker fallback.
-- **GRPO environment packaging.** `adapter-wheels-v1` packages require network
-  access at job start for the built-in `verifiers_agent` path. Fully offline
-  `wheels-v1` jobs need a complete wheel closure for the training image's
+- **GRPO environment packaging.** Converter-built `adapter-wheels-v1` packages
+  include a complete wheel closure and do not require network access at job
+  start. Conversion still requires an internet-connected host. Offline
+  `wheels-v1` jobs likewise need a complete closure for the training image's
   Python and node architecture.
 - **DPO runtime.** Customizer `rl` DPO jobs run on Kubernetes/Ray and do not
   have a local Docker fallback. DPO remains full-weight only.

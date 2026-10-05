@@ -35,6 +35,50 @@ class ControllerLifecycleState(str, Enum):
     STOPPING = "stopping"
 
 
+def _reported_failure_reason(
+    state: ControllerLifecycleState,
+    *,
+    ever_registered: bool,
+    failure_reason: str | None,
+) -> str:
+    """Return the reason recorded for a component that is not RUNNING."""
+    if failure_reason is not None:
+        return failure_reason
+    if state is ControllerLifecycleState.STARTING:
+        return "controller has not registered a control loop"
+    if state is ControllerLifecycleState.STOPPING:
+        return "controller is still stopping"
+    if ever_registered:
+        return "controller exited unexpectedly after registering a control loop"
+    return "controller failed before registering a control loop"
+
+
+def _roll_up_component_health(
+    controllers: dict[str, tuple[ControllerLifecycleState, bool, str | None]],
+    loop_owners: dict[str, str],
+    loop_health: dict[str, bool],
+) -> tuple[bool, dict[str, bool]]:
+    """Fold loop health onto the component that owns each loop."""
+    owned_health: dict[str, list[bool]] = {name: [] for name in controllers}
+    unowned: dict[str, bool] = {}
+    for loop_name, is_healthy in loop_health.items():
+        component_name = loop_owners.get(loop_name)
+        if component_name is None:
+            unowned[loop_name] = is_healthy
+            continue
+        owned_health.setdefault(component_name, []).append(is_healthy)
+
+    rolled = {
+        name: state is ControllerLifecycleState.RUNNING and all(owned_health.get(name, []))
+        for name, (state, _ever_registered, _failure_reason) in controllers.items()
+    }
+    for name, is_healthy in unowned.items():
+        rolled.setdefault(name, is_healthy)
+    for component_name, flags in owned_health.items():
+        rolled.setdefault(component_name, all(flags))
+    return all(rolled.values()), rolled
+
+
 @dataclass
 class _ControllerRecord:
     generation: int
@@ -362,6 +406,72 @@ class ControllerManager:
         with self._lock:
             return self._loops.copy()
 
+    def _collect_loop_health(self, loops: dict[str, Loop], *, skip_names: set[str]) -> dict[str, bool]:
+        """Probe loop health outside the manager lock.
+
+        ``skip_names`` are component names that already own the unhealthy
+        lifecycle record. When a loop uses that same name, logging it healthy
+        would clear the component's unhealthy transition.
+        """
+        loop_health: dict[str, bool] = {}
+        for name, loop in loops.items():
+            try:
+                is_healthy = loop.is_healthy if _has_attr(loop, "is_healthy") else True
+                unhealthy_reason = loop.unhealthy_reason if _has_attr(loop, "unhealthy_reason") else None
+            except Exception as error:
+                is_healthy = False
+                unhealthy_reason = f"health check raised: {error}"
+                logger.error("Error checking health of loop '%s': %s", name, error, exc_info=True)
+            loop_health[name] = is_healthy
+            if name in skip_names:
+                continue
+            if not is_healthy:
+                logger.debug("Loop '%s' is unhealthy", name)
+            self._log_health_transition(name, is_healthy, None if is_healthy else unhealthy_reason)
+        return loop_health
+
+    def health_by_component(self) -> tuple[bool, dict[str, bool]]:
+        """Aggregate loop health onto runner component names.
+
+        Keys are the ``--controllers`` and ``--sidecars`` selectors recorded when
+        each loop was registered. A component is healthy only when its lifecycle
+        state is ``RUNNING`` and every loop it owns is healthy. A loop registered
+        outside a component context keeps its own name.
+
+        Loop objects, lifecycle records, and loop ownership are copied under one
+        lock before any ``is_healthy`` call so the fold uses one consistent view.
+        """
+        with self._lock:
+            loops = self._loops.copy()
+            controllers = {
+                name: (record.state, record.ever_registered, record.failure_reason)
+                for name, record in self._controllers.items()
+            }
+            loop_owners = {
+                loop_name: component_name for loop_name, (component_name, _generation) in self._loop_controllers.items()
+            }
+
+        if not loops and not controllers:
+            logger.debug("No loops registered for health validation")
+            return True, {}
+
+        unhealthy_names = {
+            name
+            for name, (state, _ever, _reason) in controllers.items()
+            if state is not ControllerLifecycleState.RUNNING
+        }
+        loop_health = self._collect_loop_health(loops, skip_names=unhealthy_names)
+        for name, (state, ever_registered, failure_reason) in controllers.items():
+            if state is ControllerLifecycleState.RUNNING:
+                continue
+            self._log_health_transition(
+                name,
+                False,
+                _reported_failure_reason(state, ever_registered=ever_registered, failure_reason=failure_reason),
+            )
+
+        return _roll_up_component_health(controllers, loop_owners, loop_health)
+
     def validate_all_healthy(self, detailed: bool = True) -> tuple[bool, dict[str, bool]]:
         """Validate runner lifecycle state and every registered loop."""
         with self._lock:
@@ -380,17 +490,11 @@ class ControllerManager:
         all_healthy = not unhealthy_controllers
 
         for name, (state, ever_registered, failure_reason) in unhealthy_controllers.items():
-            reason = failure_reason
-            if reason is None:
-                if state is ControllerLifecycleState.STARTING:
-                    reason = "controller has not registered a control loop"
-                elif state is ControllerLifecycleState.STOPPING:
-                    reason = "controller is still stopping"
-                elif ever_registered:
-                    reason = "controller exited unexpectedly after registering a control loop"
-                else:
-                    reason = "controller failed before registering a control loop"
-            self._log_health_transition(name, False, reason)
+            self._log_health_transition(
+                name,
+                False,
+                _reported_failure_reason(state, ever_registered=ever_registered, failure_reason=failure_reason),
+            )
 
         for name, loop in loops.items():
             if name in unhealthy_controllers:

@@ -605,3 +605,75 @@ def test_clear_resets_transition_state(caplog):
 
     assert [r for r in caplog.records if "recycled" in r.getMessage()]
     manager.clear()
+
+
+def test_health_by_component_is_healthy_when_nothing_is_tracked():
+    manager = ControllerManager.get_instance()
+
+    assert manager.health_by_component() == (True, {})
+
+
+def test_health_by_component_rolls_jobs_loops_into_the_selector():
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("jobs"):
+        manager.register("job_scheduler", _ToggleLoop(healthy=True))
+        manager.register("job_reconciler", _ToggleLoop(healthy=True))
+
+    assert manager.health_by_component() == (True, {"jobs": True})
+    assert manager.validate_all_healthy() == (
+        True,
+        {"job_scheduler": True, "job_reconciler": True},
+    )
+
+
+def test_health_by_component_fails_the_selector_when_one_loop_is_unhealthy():
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("jobs"):
+        manager.register("job_scheduler", _ToggleLoop(healthy=True))
+        manager.register("job_reconciler", _ToggleLoop(healthy=False))
+
+    assert manager.health_by_component() == (False, {"jobs": False})
+
+
+def test_health_by_component_uses_plugin_selector_not_prefixed_loop_name():
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("deployments"):
+        manager.register("controller-plugin-deployments", _ToggleLoop(healthy=True))
+
+    assert manager.health_by_component() == (True, {"deployments": True})
+
+
+def test_health_by_component_keeps_a_selector_that_failed_before_registering():
+    manager = ControllerManager.get_instance()
+    manager.mark_controller_failed("scaled-evals-jobs", reason="startup failed")
+
+    assert manager.health_by_component() == (False, {"scaled-evals-jobs": False})
+
+
+def test_health_by_component_hides_a_still_healthy_loop_when_the_selector_failed():
+    manager = ControllerManager.get_instance()
+    manager.await_controller_registration("models")
+    with manager.controller_registration_context("models"):
+        manager.register("models_controller", _ToggleLoop(healthy=True))
+    manager.mark_controller_failed("models")
+
+    assert manager.health_by_component() == (False, {"models": False})
+    assert manager.validate_all_healthy() == (
+        False,
+        {"models": False, "models_controller": True},
+    )
+
+
+def test_health_by_component_keeps_unowned_loop_names():
+    manager = ControllerManager.get_instance()
+    manager.register("legacy", _ToggleLoop(healthy=True))
+
+    assert manager.health_by_component() == (True, {"legacy": True})
+
+
+def test_health_by_component_rolls_sidecar_loops_onto_the_sidecar_name():
+    manager = ControllerManager.get_instance()
+    with manager.controller_registration_context("adapters"):
+        manager.register("adapters_controller", _ToggleLoop(healthy=True))
+
+    assert manager.health_by_component() == (True, {"adapters": True})

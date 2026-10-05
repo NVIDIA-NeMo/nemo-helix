@@ -127,14 +127,21 @@ nemo anonymizer preview \
 `AsyncAnonymizerResource.preview` has the same signature and return type:
 
 ```python
+import asyncio
 import os
 from nemo_helix import AsyncNeMoHelix
 
-async_sdk = AsyncNeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-preview = await async_sdk.anonymizer.preview(request)
+async def run_preview():
+    async_sdk = AsyncNeMoHelix(
+        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+        workspace=WORKSPACE,
+    )
+    try:
+        return await async_sdk.anonymizer.preview(request)
+    finally:
+        await async_sdk.close()
+
+preview = asyncio.run(run_preview())
 ```
 
 </Accordion>

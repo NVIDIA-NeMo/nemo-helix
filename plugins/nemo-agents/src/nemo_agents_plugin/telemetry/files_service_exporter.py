@@ -41,8 +41,7 @@ from nat.observability.processor.intermediate_step_serializer import (  # type: 
     IntermediateStepSerializer,
 )
 from nemo_agents_plugin.utils import get_base_url
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from pydantic import Field
@@ -181,9 +180,10 @@ async def nemo_files_telemetry_exporter(config: NemoFilesTelemetryExporterConfig
     """Build an exporter that uploads telemetry to the Nemo Files service."""
     del builder  # unused; required by NAT registration signature
 
-    async_sdk = AsyncNeMoHelix(base_url=get_base_url())
+    # Failed uploads are only re-buffered, so retry transient gateway errors first.
+    files_client = AsyncFilesClient(base_url=get_base_url(), retry=PLATFORM_DEFAULT_RETRY_POLICY)
     exporter = NemoFilesServiceRawExporter(
-        files_client=client_from_platform(async_sdk, AsyncFilesClient),
+        files_client=files_client,
         workspace=config.workspace,
         agent_name=config.agent_name,
         batch_size=config.batch_size,
@@ -192,4 +192,4 @@ async def nemo_files_telemetry_exporter(config: NemoFilesTelemetryExporterConfig
     try:
         yield exporter
     finally:
-        await async_sdk.close()
+        await files_client.close()

@@ -42,7 +42,7 @@ from data_designer_nemo.context.execution import create_execution_context
 from nemo_data_designer_plugin.sdk._engine_logs import LogCallback, forward_engine_logs
 from nemo_data_designer_plugin.sdk._engine_pass import run_engine_pass
 from nemo_data_designer_plugin.sdk.logging import ensure_library_logging_handler
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from pydantic import BaseModel, Field, computed_field
 
 # Mirrors what ``PreviewFunction.run`` treats as a failed health check.
@@ -90,12 +90,12 @@ def _make_engine_context_factory(config_builder: dd.DataDesignerConfigBuilder):
     """
 
     def factory(
-        sdk: NeMoHelix | None,
+        client: NemoClient | None,
         workspace: str,
         validated_roots: set[str],
     ) -> DataDesignerEngineContext | None:
-        if sdk is not None:
-            return create_execution_context(sdk, workspace, validated_roots=validated_roots)
+        if client is not None:
+            return create_execution_context(client, workspace, validated_roots=validated_roots)
         return create_check_models_context(seed_type=_seed_type(config_builder))
 
     return factory
@@ -111,8 +111,8 @@ def _check_models(data_designer: DataDesigner, config_builder: dd.DataDesignerCo
 async def check_models_config(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoHelix | None = None,
-    async_sdk: AsyncNeMoHelix | None = None,
+    client: NemoClient | None = None,
+    async_client: AsyncNemoClient | None = None,
     workspace: str,
     config_source: str | None = None,
     on_log: LogCallback | None = None,
@@ -130,8 +130,8 @@ async def check_models_config(
 
     Args:
         config_builder: The Data Designer config whose model aliases are probed.
-        sdk: Sync NeMoHelix SDK. Used for the engine context when present.
-        async_sdk: Async NeMoHelix SDK. Derived from ``sdk`` when omitted.
+        client: Sync typed platform client. Used for the engine context when present.
+        async_client: Async typed platform client. Derived from ``client`` when omitted.
             An async-only caller still probes, via a probe-only engine context.
         workspace: Workspace used to resolve provider references and seed
             sources. Pass ``"default"`` if you have no better value.
@@ -145,7 +145,7 @@ async def check_models_config(
         A ``CheckModelsReport``.
 
     Raises:
-        ValueError: If neither ``sdk`` nor ``async_sdk`` is provided.
+        ValueError: If neither ``client`` nor ``async_client`` is provided.
     """
     # The engine names each alias as it probes it, and that is the only place
     # that identity appears. A caller supplying ``on_log`` renders those records
@@ -155,8 +155,8 @@ async def check_models_config(
     with log_ctx:
         result = await run_engine_pass(
             config_builder,
-            sdk=sdk,
-            async_sdk=async_sdk,
+            client=client,
+            async_client=async_client,
             workspace=workspace,
             engine_call=_check_models,
             engine_errors=_ENGINE_ERRORS,
@@ -173,8 +173,8 @@ async def check_models_config(
 def check_models_config_sync(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoHelix | None = None,
-    async_sdk: AsyncNeMoHelix | None = None,
+    client: NemoClient | None = None,
+    async_client: AsyncNemoClient | None = None,
     workspace: str,
     config_source: str | None = None,
     on_log: LogCallback | None = None,
@@ -183,8 +183,8 @@ def check_models_config_sync(
     return asyncio.run(
         check_models_config(
             config_builder,
-            sdk=sdk,
-            async_sdk=async_sdk,
+            client=client,
+            async_client=async_client,
             workspace=workspace,
             config_source=config_source,
             on_log=on_log,

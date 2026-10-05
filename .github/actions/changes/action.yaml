@@ -234,7 +234,7 @@ runs:
           guardrails-benchmark:
             - 'plugins/nemo-guardrails/**'
             - 'services/guardrails/**'
-            - 'sdk/python/nemo-helix/src/nemo_helix/**'
+            - 'packages/nemo_helix_plugin/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'

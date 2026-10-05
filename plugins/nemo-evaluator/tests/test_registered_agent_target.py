@@ -41,10 +41,10 @@ from nemo_evaluator_sdk import ExactMatchMetric
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
 from nemo_helix_plugin.agents.types import EnvironmentSpecInline, McpFulfillment
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -70,8 +70,8 @@ def _platform_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("NHX_BASE_URL", "http://platform.test")
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(
         base_url="http://platform.test",
         workspace="default",
         http_client=AsyncMock(spec=httpx.AsyncClient),

@@ -3,9 +3,9 @@
 
 """Shared helpers for composing HTTP requests against the platform client."""
 
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
-HelixClient = NeMoHelix | AsyncNeMoHelix
+HelixClient = NemoClient | AsyncNemoClient
 
 _API_PREFIX = "/apis/data-designer/v2/workspaces"
 

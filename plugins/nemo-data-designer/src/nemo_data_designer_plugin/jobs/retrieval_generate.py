@@ -83,7 +83,7 @@ class RetrievalGenerateJob(NemoJob):
                     "nemo_data_designer_plugin.jobs.retrieval_generate",
                     canonical_spec,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                     hf_token_secret=canonical_spec.job_config.hf_token_secret,
                 )
             ]
@@ -99,7 +99,7 @@ class RetrievalGenerateJob(NemoJob):
         corpus_dir = materialize_corpus(
             job.corpus,
             dest=ctx.storage.ephemeral / "corpus",
-            sdk=sdk,
+            client=sdk,
             workspace=ctx.workspace,
             hf_token=hf_token_from_env(),
         )
