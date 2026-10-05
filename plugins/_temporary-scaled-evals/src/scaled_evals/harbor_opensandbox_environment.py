@@ -14,6 +14,8 @@ This subclass keeps all of that and changes what the sandbox is allowed to reach
   if it cannot be read at all.
 * Every create attempt is labelled, so a sandbox the server created but whose handle was lost to a
   failed or retried request can still be found and killed.
+* Before Harbor deletes a sandbox, a sandbox container that already died (for example OOMKilled) is
+  recorded in the trial directory, because the delete removes the only evidence of why.
 
 Loaded by Harbor through ``environment.import_path``; see ``NEMO_OPENSANDBOX_IMPORT_PATH`` in
 ``scaled_evals.dispatch.harbor_opensandbox``. This is the interim home until ``nhx-sandbox`` owns
@@ -28,6 +30,7 @@ from pathlib import Path
 from typing import Any, override
 from uuid import uuid4
 
+import httpx
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.environments.opensandbox import OpenSandboxEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
@@ -41,7 +44,8 @@ from nhx_sandbox.opensandbox_policy import (
     verify_applied_egress,
 )
 
-from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME
+from scaled_evals.harbor_opensandbox_cleanup import APPLIED_EGRESS_FILENAME, SANDBOX_EXIT_FILENAME_PREFIX
+from scaled_evals.opensandbox_diagnostics import sandbox_exit_from_inspect
 
 # Sandbox metadata label marking which NeMo component manages the sandbox.
 MANAGED_BY_METADATA_KEY = "nemo-managed-by"
@@ -49,6 +53,8 @@ MANAGED_BY_METADATA_KEY = "nemo-managed-by"
 MANAGED_BY_METADATA_VALUE = "scaled-evals"
 # Sandbox metadata label shared by every sandbox one create call made, including Harbor's retries.
 CREATE_ATTEMPT_METADATA_KEY = "nemo-scaled-evals-create-attempt"
+# How long stop() waits for OpenSandbox's diagnostics before deleting the sandbox without them.
+DIAGNOSTICS_TIMEOUT_SECONDS = 10.0
 
 
 class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
@@ -62,6 +68,9 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
         egress_verification: How strictly to compare the applied policy with the requested one;
             see ``verify_applied_egress``. Readback itself is always required.
     """
+
+    # Tests replace this to serve the diagnostics route without a server.
+    _diagnostics_transport: httpx.AsyncBaseTransport | None = None
 
     def __init__(
         self,
@@ -198,6 +207,69 @@ class NemoOpenSandboxEnvironment(OpenSandboxEnvironment):
             (self.trial_paths.trial_dir / APPLIED_EGRESS_FILENAME).write_text(json.dumps(record, indent=2))
         except OSError:
             self.logger.warning("Could not record the applied egress policy", exc_info=True)
+
+    @override
+    async def stop(self, delete: bool) -> None:
+        """Record why the sandbox container died, if it did, then let Harbor stop the sandbox."""
+        try:
+            if self._sandbox is not None:
+                await self._record_sandbox_exit(_sandbox_id(self._sandbox))
+        finally:
+            await super().stop(delete)
+
+    async def _record_sandbox_exit(self, sandbox_id: str | None) -> None:
+        """Write the sandbox container's terminated state into the trial directory, if it has terminated.
+
+        Best effort: a diagnostics report that can't be fetched or read is logged, and the trial's
+        outcome is left unchanged.
+        """
+        if not sandbox_id:
+            return
+
+        try:
+            inspect_text = await self._read_diagnostics_inspect(sandbox_id)
+        except httpx.HTTPError:
+            self.logger.warning("Could not read OpenSandbox diagnostics for sandbox %s", sandbox_id, exc_info=True)
+            return
+
+        try:
+            termination = sandbox_exit_from_inspect(inspect_text)
+        except ValueError:
+            self.logger.warning("Could not read OpenSandbox diagnostics for sandbox %s", sandbox_id, exc_info=True)
+            return
+        if termination is None:
+            return
+
+        record = {
+            "sandbox_id": sandbox_id,
+            "session_id": self.session_id,
+            "role": "agent" if self.session_id.endswith("__env") else "verifier",
+            **termination,
+            "inspect": inspect_text,
+        }
+
+        try:
+            self.trial_paths.trial_dir.mkdir(parents=True, exist_ok=True)
+            path = self.trial_paths.trial_dir / f"{SANDBOX_EXIT_FILENAME_PREFIX}{sandbox_id}.json"
+            path.write_text(json.dumps(record, indent=2))
+        except OSError:
+            self.logger.warning("Could not record the exit of sandbox %s", sandbox_id, exc_info=True)
+
+    async def _read_diagnostics_inspect(self, sandbox_id: str) -> str:
+        """Return OpenSandbox's plain-text pod report for the sandbox.
+
+        The SDK's diagnostics client calls the stable JSON routes, which OpenSandbox v0.2.1 answers
+        with 501, so this calls the plain-text route the server does implement.
+        """
+        headers = {"OPEN-SANDBOX-API-KEY": self._api_key} if self._api_key else {}
+        async with httpx.AsyncClient(
+            transport=self._diagnostics_transport, timeout=DIAGNOSTICS_TIMEOUT_SECONDS
+        ) as client:
+            response = await client.get(
+                f"{self._protocol}://{self._domain}/v1/sandboxes/{sandbox_id}/diagnostics/inspect", headers=headers
+            )
+            response.raise_for_status()
+            return response.text
 
     async def _kill_create_attempt(self, sdk: dict[str, Any], attempt_id: str, *, keep: str | None) -> None:
         """Best-effort kill of every sandbox labelled with ``attempt_id`` except ``keep``."""
