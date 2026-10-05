@@ -20,6 +20,7 @@ GITIGNORE_PATH = Path(".gitignore")
 # upgrading from an earlier release. Archived release-notes pages do not need
 # this exception once they stop being the current release.
 CURRENT_RELEASE_NOTE_PATH = Path("docs/about/release-notes/current-release.mdx")
+RELEASE_TEST_SCOPE_REFERENCES_PATH = Path(".agents/skills/release-test-scope/references")
 IGNORE_PATHS = {
     # These are existing GitHub team slugs, not product identifiers to rename.
     Path(".github/CODEOWNERS"),
@@ -31,6 +32,7 @@ IGNORE_PATHS = {
     TEST_PATH,
     GITIGNORE_PATH,
     CURRENT_RELEASE_NOTE_PATH,
+    RELEASE_TEST_SCOPE_REFERENCES_PATH,
 }
 
 PRODUCT_REPLACEMENTS = [
@@ -167,10 +169,14 @@ def git_file_set(
     return filter_paths(candidates, include_globs, exclude_globs)
 
 
+def ignored_path(path: Path) -> bool:
+    return any(path == ignored or ignored in path.parents for ignored in IGNORE_PATHS)
+
+
 def content_paths(
     include_globs: tuple[str, ...] = (), exclude_globs: tuple[str, ...] = (), paths: list[Path] | None = None
 ) -> list[Path]:
-    return [path for path in git_file_set(include_globs, exclude_globs, paths=paths) if path not in IGNORE_PATHS]
+    return [path for path in git_file_set(include_globs, exclude_globs, paths=paths) if not ignored_path(path)]
 
 
 def read_text(path: Path) -> str | None:

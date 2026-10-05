@@ -56,13 +56,16 @@ from nemo_evaluator_sdk.values import (
     Model,
     ModelRef,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.evaluator.client import AsyncEvaluatorClient, EvaluatorClient
-from nemo_helix_plugin.sdk import AsyncNeMoHelix, NeMoHelix, NemoPluginSDKResources
+from nemo_helix_plugin.sdk import NemoPluginSDKResources
 
 
 class Evaluator:
-    """Sync SDK namespace mounted as ``client.evaluator``."""
+    """Sync evaluator plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evaluator`` is the typed evaluator service client.
+    """
 
     def __init__(self, client: EvaluatorClient) -> None:
         """Store the typed evaluator client used for evaluator plugin HTTP calls."""
@@ -75,8 +78,8 @@ class Evaluator:
         self.tasksets = EvaluatorTasksetsResource(self._client)
 
     @classmethod
-    def from_sdk(cls, sdk: NeMoHelix) -> Evaluator:
-        return cls(client_from_platform(sdk, EvaluatorClient))
+    def from_client(cls, client: NemoClient) -> Evaluator:
+        return cls(EvaluatorClient.from_client(client))
 
     def plugin_status(self) -> dict[str, object]:
         """Return evaluator plugin health information from the service."""
@@ -253,7 +256,10 @@ class Evaluator:
 
 
 class AsyncEvaluator:
-    """Async SDK namespace mounted as ``client.evaluator``."""
+    """Async evaluator plugin SDK namespace.
+
+    Build it with :meth:`from_client`; ``client.evaluator`` is the typed evaluator service client.
+    """
 
     def __init__(self, client: AsyncEvaluatorClient) -> None:
         """Store the typed async evaluator client used for evaluator plugin HTTP calls."""
@@ -266,8 +272,8 @@ class AsyncEvaluator:
         self.tasksets = AsyncEvaluatorTasksetsResource(self._client)
 
     @classmethod
-    def from_sdk(cls, async_sdk: AsyncNeMoHelix) -> AsyncEvaluator:
-        return cls(client_from_platform(async_sdk, AsyncEvaluatorClient))
+    def from_client(cls, async_client: AsyncNemoClient) -> AsyncEvaluator:
+        return cls(AsyncEvaluatorClient.from_client(async_client))
 
     async def plugin_status(self) -> dict[str, object]:
         """Return evaluator plugin health information from the service."""
@@ -442,6 +448,6 @@ class AsyncEvaluator:
 
 
 evaluator_sdk_resources = NemoPluginSDKResources(
-    sync_resource=Evaluator.from_sdk,
-    async_resource=AsyncEvaluator.from_sdk,
+    sync_resource=Evaluator.from_client,
+    async_resource=AsyncEvaluator.from_client,
 )

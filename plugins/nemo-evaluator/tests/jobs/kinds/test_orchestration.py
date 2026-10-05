@@ -17,10 +17,9 @@ from nemo_evaluator.jobs.agent_spec import (
 from nemo_evaluator.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 
 
 class Prepared(Exception):
@@ -68,14 +67,14 @@ async def test_injected_registry_dispatches_submission_and_validates_before_work
         pass
 
     TestJob.adapters = adapters
-    async with AsyncNeMoHelix(base_url="http://unused.test") as sdk:
+    async with AsyncNemoClient(base_url="http://unused.test") as async_client:
         spec = await TestJob.to_spec(
             AgentEvalInputSpec(
                 tasks=[AgentEvalTaskInput(id=name, intent=name) for name in ("second", "first")], trials=[]
             ),
             workspace="default",
             entity_client=None,
-            async_sdk=sdk,
+            async_sdk=async_client,
             is_local=True,
         )
     assert isinstance(spec, AgentEvalSpec)

@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import nemo_evaluator.cli as evaluator_cli
 import pytest
-from models import ResolvedModelReference
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.evaluate import (
@@ -45,6 +44,7 @@ from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.f1 import F1Metric
 from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import (
     Agent,
@@ -67,6 +67,7 @@ from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.models.client import AsyncModelsClient
+from nemo_helix_plugin.models.refs import ResolvedModelReference
 from pydantic import BaseModel, ConfigDict
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -1107,9 +1108,10 @@ def _assert_job_secret_resolver(backend: LocalBackend) -> None:
         mp.delenv("DEFAULT_OPENAI_API_KEY", raising=False)
         mp.setenv("OPENAI_API_KEY", "target-key")
         mp.setenv("NVIDIA_BUILD_API_KEY", "metric-key")
-        assert resolver.find_env_name(SecretRef("default/openai-api-key")) is None
+        with pytest.raises(MissingSecretError):
+            resolver.env_var_for(SecretRef("default/openai-api-key"))
         # A bare ref's own names are still searched.
-        assert resolver.find_env_name(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
+        assert resolver.env_var_for(SecretRef("nvidia-build-api-key")) == "NVIDIA_BUILD_API_KEY"
 
 
 class TestEvaluateJobRun:

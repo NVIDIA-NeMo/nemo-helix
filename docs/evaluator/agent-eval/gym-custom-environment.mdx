@@ -164,7 +164,7 @@ nemo evaluator agent-evaluate \
 
 Submit the runner object rather than the spec file. The runner carries the evaluation and a
 `GymPlacement` carries the deployment, so the configuration is written once and
-`client.evaluator.submit` returns a job handle that polls itself:
+`evaluator.submit` returns a job handle that polls itself:
 
 ```python
 from nemo_evaluator.api.schemas import TasksetRef
@@ -172,9 +172,11 @@ from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import GymPlacement
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRuntimeConfig
 from nemo_evaluator_sdk.values import SecretRef
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_evaluator.sdk import Evaluator
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+evaluator = Evaluator.from_client(client)
 
 runner = GymAgentTaskRunner(
     config=GymRuntimeConfig(
@@ -185,7 +187,7 @@ runner = GymAgentTaskRunner(
     )
 )
 
-job = client.evaluator.submit(
+job = evaluator.submit(
     tasks=TasksetRef("my-gym-taskset"),
     target=runner,
     placement=GymPlacement(environment=FilesetRef(root="default/my-gym-environment")),

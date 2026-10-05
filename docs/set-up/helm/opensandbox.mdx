@@ -40,6 +40,7 @@ Training and other job pods are OpenSandbox **clients**. They do not need a kube
 | API key | `OPEN_SANDBOX_API_KEY` | Kubernetes Secret in the **job** namespace (not `opensandbox-system`) |
 | Scheme | `platform.sandbox_server_protocol` / Gym `host_provider_options.connection.protocol` | Set **`http`** for the in-cluster Service. If unset, NeMo-RL health URLs default to **https** and stall |
 | Proxy | `use_server_proxy` | Leave true. Jobs cannot reach sandbox pod IPs |
+| Request timeout | `host_provider_options.connection.request_timeout_s` | For the create call, defaults to the Gym host's ready wait plus 30s; later calls use the SDK default of 30s. Must be longer than the server's `sandbox_create_timeout_seconds`, because the create request stays open while the sandbox image is pulled |
 | Capability | `sandboxClusterCapable` / `platform.sandbox_cluster_capable` | Defaults to `false` (sandboxed GRPO fail-closes) |
 | Job PVC | `rl.job_storage_pvc_claim` or `evaluator.sandbox_job_storage_pvc_claim` | Sandboxes remount the same claim used by the selected Jobs execution profile |
 

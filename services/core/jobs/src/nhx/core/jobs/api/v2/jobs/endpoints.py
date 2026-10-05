@@ -355,6 +355,8 @@ async def get_job(
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Get a platform job by name."""
+    # The {name} path parameter also accepts the job id (the value jobs list
+    # leads with); get_job resolves either identifier.
     with scoped_app_ctx(JobContext(id=name)):
         job = await dispatcher.get_job(name, workspace)
         if not job:

@@ -15,8 +15,7 @@ from typing import Iterator
 
 import httpx
 import pandas as pd
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
@@ -57,11 +56,11 @@ class ReportHtml:
 class SafeSynthesizerJob:
     """Convenience wrapper for a Safe Synthesizer platform job."""
 
-    def __init__(self, job_name: str, client: NeMoHelix, workspace: str = "default"):
+    def __init__(self, job_name: str, client: NemoClient, workspace: str = "default"):
         self.job_name = job_name
         self._client = client
         self._workspace = workspace
-        self._jobs = client_from_platform(client, JobsClient)
+        self._jobs = JobsClient.from_client(client)
 
     def fetch_status(self) -> str:
         """Fetch the current job status."""

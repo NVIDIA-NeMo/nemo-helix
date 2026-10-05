@@ -18,6 +18,7 @@ and how they render the result.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,16 +30,15 @@ from data_designer_nemo.context.execution import create_execution_context
 from data_designer_nemo.context.validation import create_validation_context
 from data_designer_nemo.errors import NDDError
 from data_designer_nemo.runnable import resolve_runnable_config
-from data_designer_nemo.sdk_translation import sync_to_async_sdk
 from nemo_data_designer_plugin._data_designer import create_data_designer
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 EngineCall = Callable[[DataDesigner, dd.DataDesignerConfigBuilder], None]
 
 # Given the sync SDK (if any), the workspace, and the filesystem roots the
 # validation pass cleared, produce the context to run the engine against —
 # or ``None`` to skip the engine entirely.
-EngineContextFactory = Callable[[NeMoHelix | None, str, set[str]], DataDesignerEngineContext | None]
+EngineContextFactory = Callable[[NemoClient | None, str, set[str]], DataDesignerEngineContext | None]
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,8 @@ class EnginePassResult:
 async def run_engine_pass(
     config_builder: dd.DataDesignerConfigBuilder,
     *,
-    sdk: NeMoHelix | None = None,
-    async_sdk: AsyncNeMoHelix | None = None,
+    client: NemoClient | None = None,
+    async_client: AsyncNemoClient | None = None,
     workspace: str,
     engine_call: EngineCall,
     engine_errors: tuple[type[Exception], ...],
@@ -79,9 +79,9 @@ async def run_engine_pass(
 
     Args:
         config_builder: The Data Designer config to inspect.
-        sdk: Sync NeMoHelix SDK. Required for the engine pass, and used to
-            derive ``async_sdk`` when one is not supplied.
-        async_sdk: Async NeMoHelix SDK. Built from ``sdk`` when omitted.
+        client: Sync typed platform client. Required for the engine pass, and used
+            to derive ``async_client`` when one is not supplied.
+        async_client: Async typed platform client. Built from ``client`` when omitted.
         workspace: Workspace used to resolve provider references and seed
             sources. Pass ``"default"`` if you have no better value.
         engine_call: Invoked as ``engine_call(data_designer, config_builder)``
@@ -90,30 +90,30 @@ async def run_engine_pass(
         engine_errors: Exception types to capture and return rather than
             propagate. Anything else is a genuine bug and is left to raise.
         engine_context_factory: Builds the context the engine runs against.
-            Defaults to a real execution context, which requires a sync ``sdk``
+            Defaults to a real execution context, which requires a sync ``client``
             and yields no engine pass without one.
 
     Returns:
         An :class:`EnginePassResult`.
 
     Raises:
-        ValueError: If neither ``sdk`` nor ``async_sdk`` is provided.
+        ValueError: If neither ``client`` nor ``async_client`` is provided.
     """
-    if async_sdk is None:
-        if sdk is None:
-            raise ValueError("run_engine_pass requires either sdk= or async_sdk=")
-        async_sdk = sync_to_async_sdk(sdk)
+    async with contextlib.AsyncExitStack() as stack:
+        if async_client is None:
+            if client is None:
+                raise ValueError("run_engine_pass requires either client= or async_client=")
+            async_client = await stack.enter_async_context(client.to_async())
 
-    config = config_builder.build()
-
-    validation_ctx = create_validation_context(async_sdk, workspace)
-    resolution_errors, _model_configs, model_providers = await resolve_runnable_config(validation_ctx, config)
+        config = config_builder.build()
+        validation_ctx = create_validation_context(async_client, workspace)
+        resolution_errors, _model_configs, model_providers = await resolve_runnable_config(validation_ctx, config)
 
     if resolution_errors:
         return EnginePassResult(resolution_errors=resolution_errors, engine_error=None)
 
     factory = engine_context_factory or _execution_context_factory
-    engine_ctx = factory(sdk, workspace, validation_ctx.validated_filesystem_roots)
+    engine_ctx = factory(client, workspace, validation_ctx.validated_filesystem_roots)
     if engine_ctx is None:
         return EnginePassResult(resolution_errors=resolution_errors, engine_error=None)
 
@@ -132,11 +132,11 @@ async def run_engine_pass(
 
 
 def _execution_context_factory(
-    sdk: NeMoHelix | None,
+    client: NemoClient | None,
     workspace: str,
     validated_roots: set[str],
 ) -> DataDesignerEngineContext | None:
-    """Default factory: a real execution context, which needs a sync SDK."""
-    if sdk is None:
+    """Default factory: a real execution context, which needs a sync client."""
+    if client is None:
         return None
-    return create_execution_context(sdk, workspace, validated_roots=validated_roots)
+    return create_execution_context(client, workspace, validated_roots=validated_roots)

@@ -237,12 +237,6 @@ jobs-service = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
-models = [
-  "nemo-helix-sdk",
-  "openai",
-]
-
-# Generated from [tool.bundle-package]; do not edit by hand.
 models-service = [
   "fastapi>=0.115.8",
   "pydantic>=2.10.6",
@@ -474,17 +468,17 @@ nemo-helix-sdk = [
 nemo-insights-plugin = [
   "fastapi>=0.115",
   "httpx",
-  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137",
+  "insight-agent @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137",
   "nemo-fabric-adapter-contract>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-common>=0.4.0,<0.5.0",
   "nemo-helix-plugin",
   "nemo-relay>=0.9.3,<0.10",
-  "nooa>=0.0.9",
+  "nooa>=0.0.10,<0.0.11",
   "opentelemetry-exporter-otlp>=1.42.1",
   "opentelemetry-sdk>=1.42.1",
   "pydantic>=2.12.0",
   "pyyaml>=6.0.3",
-  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-trace-intel.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
+  "trace-ingest @ git+https://github.com/NVIDIA-NeMo/labs-nemo-compass.git@cd639d223e06ee9d27783df6b461d302ceb09137#subdirectory=packages/trace-ingest",
   "typer>=0.20.0",
   "tzdata==2026.2",
 ]
@@ -834,7 +828,6 @@ customizer = "nemo_customizer.skills:get_skills_path"
 [tool.uv.sources]
 nemo-helix-ext = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
-models = { workspace = true }
 filesets = { workspace = true }
 nhx-build-tools = { workspace = true }
 
@@ -880,7 +873,6 @@ nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_
 # The CLI. nemo-helix-ext registers its own scripts under private names so the
 # workspace venv only exposes one `nemo`; the wrapper publishes the public names.
 nemo-helix-ext = { source = "../../packages/nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", inherit = { "entry-points" = ["nemo.*"] }, scripts = [{ name = "nemo", value = "nemo_helix_ext.cli.app:cli" }, { name = "nhx", value = "nemo_helix_ext.cli.app:cli" }], force_include = { "../../../../docs" = "nemo_helix_ext/cli/docs" } }
-models = { source = "../../packages/models/src/models", module = "models" }
 filesets = { source = "../../packages/filesets/src/filesets", module = "filesets" }
 nemo-evaluator-sdk = { source = "../../packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk", module = "nemo_evaluator_sdk", inherit = { "optional-dependencies" = ["harbor"] } }
 data-designer-nemo = { source = "../../packages/data_designer_nemo/src/data_designer_nemo", module = "data_designer_nemo" }

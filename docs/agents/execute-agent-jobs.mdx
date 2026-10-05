@@ -83,14 +83,16 @@ use to track it.
 ```python
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_agents_plugin.sdk import AgentsResource
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+agents = AgentsResource(client)
 
-job = client.agents.jobs.execute.create(
+job = agents.jobs.execute.create(
     spec={
         "agent": "calculator-agent",
         "input": "What is 12 multiplied by 8?",
@@ -172,8 +174,8 @@ nemo jobs get-status calc-run-1
 nemo jobs tail calc-run-1 -n 200
 
 # List what the run produced, then download one result
-nemo jobs results list --job calc-run-1
-nemo jobs results download output_workdir --job calc-run-1 -o output_workdir.tar.gz
+nemo jobs results list calc-run-1
+nemo jobs results download output_artifacts --job calc-run-1 -o output_artifacts.tar.gz
 ```
 
 </Tab>
@@ -184,25 +186,25 @@ import json
 import tarfile
 from io import BytesIO
 
-job = client.agents.jobs.execute.get("calc-run-1")
+job = agents.jobs.execute.get("calc-run-1")
 print(job["status"])
 
-results = client.agents.jobs.execute.list_results("calc-run-1")
+results = agents.jobs.execute.list_results("calc-run-1")
 for result in results["data"]:
     print(result["name"])
 
 # Directory results arrive as a gzipped tarball...
-workdir = client.agents.jobs.execute.download_result("output_workdir", job="calc-run-1")
+workdir = agents.jobs.execute.download_result("output_workdir", job="calc-run-1")
 with tarfile.open(fileobj=BytesIO(workdir), mode="r:gz") as tar:
     print(tar.getnames())
 
 # ...and the run record as JSON.
-run = json.loads(client.agents.jobs.execute.download_result("fabric_run_result", job="calc-run-1"))
+run = json.loads(agents.jobs.execute.download_result("fabric_run_result", job="calc-run-1"))
 print(run["status"], run["response"])
 ```
 
 `download_result` returns bytes rather than writing a file, so results can be
-read in memory. The same calls exist on `AsyncNeMoHelix`.
+read in memory. The same calls exist on `AsyncAgentsResource`.
 
 </Tab>
 

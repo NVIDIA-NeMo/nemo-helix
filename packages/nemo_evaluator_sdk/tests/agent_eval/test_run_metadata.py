@@ -94,6 +94,7 @@ def test_every_shipped_runner_reports_a_stable_name_and_result_shaping_config() 
                 "num_repeats",
                 "bind_resources_server",
                 "hydra_params",
+                "env_secrets",
                 "reward_key",
             },
         ),

@@ -23,7 +23,6 @@ members = [
     "data-designer-nemo",
     "filesets",
     "garak-api",
-    "models",
     "nemo-agent-config-example-calculator",
     "nemo-agent-config-example-email-security-triage",
     "nemo-agent-hardener-plugin",
@@ -2634,7 +2633,7 @@ wheels = [
 [[package]]
 name = "insight-agent"
 version = "0.1.0rc1"
-source = { git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
+source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
 dependencies = [
     { name = "jsonschema", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "litellm", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -3920,24 +3919,6 @@ wheels = [
 ]
 
 [[package]]
-name = "models"
-version = "0.0.0"
-source = { editable = "packages/models" }
-dependencies = [
-    { name = "nemo-helix-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "nemo-helix-sdk", editable = "sdk/python/nemo-helix" },
-    { name = "openai" },
-]
-
-[package.metadata.requires-dev]
-dev = []
-
-[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4619,7 +4600,7 @@ requires-dist = [
     { name = "kubernetes", marker = "extra == 'k8s'", specifier = ">=30.1.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-helix-sdk", editable = "sdk/python/nemo-helix" },
-    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.0.92" },
+    { name = "openshell", marker = "extra == 'openshell'", specifier = ">=0.1.2" },
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -5281,10 +5262,6 @@ jobs-service = [
     { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sqlmodel", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "uvicorn", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-]
-models = [
-    { name = "nemo-helix-sdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 models-service = [
     { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6085,10 +6062,10 @@ requires-dist = [
     { name = "hvac", marker = "extra == 'jobs-service'", specifier = ">=2.3.0" },
     { name = "hvac", marker = "extra == 'nhx-common'", specifier = ">=2.3.0" },
     { name = "hvac", marker = "extra == 'services'", specifier = ">=2.3.0" },
-    { name = "insight-agent", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'harbor'", specifier = ">=3.1.6" },
     { name = "jinja2", marker = "extra == 'nemo-agents-plugin'", specifier = ">=3.1" },
@@ -6280,7 +6257,6 @@ requires-dist = [
     { name = "nemo-helix-sdk", marker = "extra == 'all'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-helix-sdk", marker = "extra == 'core-service'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-helix-sdk", marker = "extra == 'entities-service'", editable = "sdk/python/nemo-helix" },
-    { name = "nemo-helix-sdk", marker = "extra == 'models'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-helix-sdk", marker = "extra == 'nemo-deployments-plugin'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-helix-sdk", marker = "extra == 'nemo-helix-ext'", editable = "sdk/python/nemo-helix" },
     { name = "nemo-helix-sdk", marker = "extra == 'nemo-helix-plugin'", editable = "sdk/python/nemo-helix" },
@@ -6367,10 +6343,10 @@ requires-dist = [
     { name = "nhx-unsloth", marker = "extra == 'nemo-unsloth-plugin'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'plugins'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'services'", editable = "services/unsloth" },
-    { name = "nooa", marker = "extra == 'all'", specifier = ">=0.0.9" },
-    { name = "nooa", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.0.9" },
-    { name = "nooa", marker = "extra == 'plugins'", specifier = ">=0.0.9" },
-    { name = "nooa", marker = "extra == 'services'", specifier = ">=0.0.9" },
+    { name = "nooa", marker = "extra == 'all'", specifier = ">=0.0.10,<0.0.11" },
+    { name = "nooa", marker = "extra == 'nemo-insights-plugin'", specifier = ">=0.0.10,<0.0.11" },
+    { name = "nooa", marker = "extra == 'plugins'", specifier = ">=0.0.10,<0.0.11" },
+    { name = "nooa", marker = "extra == 'services'", specifier = ">=0.0.10,<0.0.11" },
     { name = "numpy", marker = "extra == 'all'", specifier = ">=1.26.0" },
     { name = "numpy", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=1.26.0" },
     { name = "numpy", marker = "extra == 'plugins'", specifier = ">=1.26.0" },
@@ -6423,7 +6399,6 @@ requires-dist = [
     { name = "openai", marker = "extra == 'all'", specifier = ">=1.61.0" },
     { name = "openai", marker = "extra == 'guardrails-service'", specifier = ">=1.61.0" },
     { name = "openai", marker = "extra == 'harbor'", specifier = ">=1.61.0" },
-    { name = "openai", marker = "extra == 'models'" },
     { name = "openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.61.0" },
     { name = "openai", marker = "extra == 'nemo-helix-plugin'", specifier = ">=1.109.1" },
     { name = "openai", marker = "extra == 'nemo-helix-sdk'" },
@@ -6680,10 +6655,10 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'rl-service'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'services'", specifier = ">=8.5.0" },
     { name = "tenacity", marker = "extra == 'unsloth-service'", specifier = ">=8.5.0" },
-    { name = "trace-ingest", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
-    { name = "trace-ingest", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", marker = "extra == 'all'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", marker = "extra == 'nemo-insights-plugin'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", marker = "extra == 'plugins'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", marker = "extra == 'services'", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.12.5" },
     { name = "typer", marker = "extra == 'all'", specifier = ">=0.20.0" },
@@ -6754,7 +6729,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.1" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.1" },
 ]
-provides-extras = ["all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-helix-sdk", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auditor-service", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-anonymizer-plugin", "nemo-auditor-plugin", "nemo-automodel-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evaluator-plugin", "nemo-evaluator-sdk", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-helix-sdk", "nemo-insights-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -7124,18 +7099,18 @@ dependencies = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx" },
-    { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "insight-agent", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "nemo-fabric-adapter-contract", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-fabric-adapters-common", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-relay", specifier = ">=0.9.3,<0.10" },
-    { name = "nooa", specifier = ">=0.0.9" },
+    { name = "nooa", specifier = ">=0.0.10,<0.0.11" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.42.1" },
     { name = "opentelemetry-sdk", specifier = ">=1.42.1" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "trace-ingest", git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
+    { name = "trace-ingest", git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "tzdata", specifier = "==2026.2" },
 ]
@@ -7581,7 +7556,6 @@ dependencies = [
     { name = "h11", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "hvac", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "models", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "mypy-extensions", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-ext", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7839,7 +7813,6 @@ requires-dist = [
     { name = "h11", specifier = ">=0.16.0" },
     { name = "hvac", specifier = ">=2.3.0" },
     { name = "jinja2", specifier = "==3.1.6" },
-    { name = "models", editable = "packages/models" },
     { name = "mypy-extensions", specifier = "==1.0.0" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-ext", editable = "packages/nemo_helix_ext" },
@@ -8847,7 +8820,6 @@ dependencies = [
 dev = [
     { name = "aiosqlite", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "datamodel-code-generator", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "models", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "openai", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pytest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pytest-asyncio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -8874,7 +8846,6 @@ requires-dist = [
 dev = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "datamodel-code-generator", specifier = ">=0.71.0" },
-    { name = "models", editable = "packages/models" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=0.25.3" },
@@ -8889,7 +8860,6 @@ version = "0.0.0"
 source = { editable = "packages/nhx_platform" }
 dependencies = [
     { name = "fastapi", extra = ["standard"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "models", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-auth", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -8909,7 +8879,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.4" },
-    { name = "models", editable = "packages/models" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
@@ -9743,18 +9712,17 @@ wheels = [
 
 [[package]]
 name = "openshell"
-version = "0.0.99"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cloudpickle", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "googleapis-common-protos", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "grpcio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "protobuf", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/d5/8f6c394c1129ae01637fb1c9f56b8f5a10a988d667e0e4bd5fecc5e44067/openshell-0.0.99-py3-none-macosx_13_0_arm64.whl", hash = "sha256:f7db8eb284fa0815c0ab375016def8524873ee033049940f071ffef4d0c1a61e", size = 8440178, upload-time = "2026-08-05T15:33:31.493Z" },
-    { url = "https://files.pythonhosted.org/packages/db/29/7ddde3ec2d44357d7f911484b9df5fed814758922b241acd045ebe5a54a2/openshell-0.0.99-py3-none-manylinux_2_39_aarch64.whl", hash = "sha256:b06e062563201d4f98a87e8de23e10e40733b548e12891623982ca5b120bccf2", size = 8506339, upload-time = "2026-08-05T15:33:52.563Z" },
-    { url = "https://files.pythonhosted.org/packages/76/cb/8520cd87729942de875ce6af08953e9d1e19296a5db0a1da92d76a77a682/openshell-0.0.99-py3-none-manylinux_2_39_x86_64.whl", hash = "sha256:72f8f14c304f5da233755ae285ee8c4c19aaf7fb7b40b14f6c6b17ef9752141f", size = 8988885, upload-time = "2026-08-05T15:34:12.529Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/0d/9f0c2e133bd4bfc96b9e261b870d58230d7d98fc6c51ae8f7f71f8520157/openshell-0.1.2-py3-none-any.whl", hash = "sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf", size = 150901, upload-time = "2026-09-28T03:58:28.39Z" },
 ]
 
 [[package]]
@@ -12567,7 +12535,7 @@ wheels = [
 [[package]]
 name = "trace-ingest"
 version = "0.1.0"
-source = { git = "https://github.com/NVIDIA-NeMo/labs-trace-intel.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
+source = { git = "https://github.com/NVIDIA-NeMo/labs-nemo-compass.git?subdirectory=packages%2Ftrace-ingest&rev=cd639d223e06ee9d27783df6b461d302ceb09137#cd639d223e06ee9d27783df6b461d302ceb09137" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },

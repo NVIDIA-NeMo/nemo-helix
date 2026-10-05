@@ -18,7 +18,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.sdk import AgentsResource, AsyncAgentsResource, agents_sdk_resources
 from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 _Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -34,22 +34,20 @@ def _platform(
     *,
     workspace: str | None = "team-a",
     default_headers: Mapping[str, str] | None = None,
-) -> NeMoHelix:
-    return NeMoHelix(
+) -> NemoClient:
+    return NemoClient(
         base_url="https://test",
         workspace=workspace,
         default_headers=default_headers,
         http_client=httpx.Client(transport=httpx.MockTransport(handler)),
-        max_retries=0,
     )
 
 
-def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(
+def _async_platform(handler: _Handler, *, workspace: str | None = "team-a") -> AsyncNemoClient:
+    return AsyncNemoClient(
         base_url="https://test",
         workspace=workspace,
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        max_retries=0,
     )
 
 
@@ -168,6 +166,16 @@ def test_deployments_create_rejects_image_entrypoint_for_subprocess() -> None:
 
     with pytest.raises(ValueError, match="use_image_entrypoint"):
         client.deployments.create(agent="calc", use_image_entrypoint=True)
+
+
+def test_deployments_create_rejects_image_entrypoint_for_openshell() -> None:
+    def handler(_req: httpx.Request) -> httpx.Response:
+        raise AssertionError("should not POST image entrypoint mode for openshell")
+
+    client = AgentsResource(_platform(handler))
+
+    with pytest.raises(ValueError, match="use_image_entrypoint"):
+        client.deployments.create(agent="calc", deployment_mode="openshell", use_image_entrypoint=True)
 
 
 def test_invoke_sends_session_id_as_header() -> None:

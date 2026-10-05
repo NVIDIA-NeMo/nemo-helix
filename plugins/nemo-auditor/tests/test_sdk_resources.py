@@ -19,7 +19,7 @@ import io
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -34,15 +34,14 @@ from nemo_auditor.entities import (
 )
 from nemo_auditor.sdk import AsyncAuditorPluginResource, AuditorPluginResource
 from nemo_auditor.sdk_resources.job_resources import AsyncAuditorJobResource, AuditorJobResource
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext
 
 NOW = datetime.now(timezone.utc)
 
 
-class _SyncHelix(NeMoHelix):
-    """Generated sync SDK over a mocked ``httpx.Client`` (exposed as ``http``)."""
+class _SyncHelix(NemoClient):
+    """Sync typed client over a mocked ``httpx.Client`` (exposed as ``http``)."""
 
     http: MagicMock
 
@@ -51,8 +50,8 @@ class _SyncHelix(NeMoHelix):
         super().__init__(base_url="http://test:8000", http_client=self.http)
 
 
-class _AsyncHelix(AsyncNeMoHelix):
-    """Generated async SDK over a mocked ``httpx.AsyncClient`` (exposed as ``http``)."""
+class _AsyncHelix(AsyncNemoClient):
+    """Async typed client over a mocked ``httpx.AsyncClient`` (exposed as ``http``)."""
 
     http: AsyncMock
 
@@ -114,7 +113,7 @@ class TestSyncConfigs:
     def test_create_posts_to_workspace_route_with_full_body(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         cfg = resource.configs.create(
             workspace="default",
@@ -140,7 +139,7 @@ class TestSyncConfigs:
     def test_create_fills_default_subblocks_when_omitted(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_config_payload(), status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         resource.configs.create(workspace="default", name="cfg-1")
 
@@ -160,7 +159,7 @@ class TestSyncConfigs:
                 "sort": "name",
             }
         )
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         body = resource.configs.list(workspace="prod", page=2, page_size=5, sort="name")
 
@@ -173,7 +172,7 @@ class TestSyncConfigs:
     def test_get_hits_named_route_and_returns_entity(self) -> None:
         platform = _SyncHelix()
         platform.http.get.return_value = _ok_response(_config_payload(name="cfg-1"))
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         cfg = resource.configs.get(workspace="default", name="cfg-1")
 
@@ -186,7 +185,7 @@ class TestSyncConfigs:
     def test_update_puts_full_body(self) -> None:
         platform = _SyncHelix()
         platform.http.put.return_value = _ok_response(_config_payload(name="cfg-1", description="new"))
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         cfg = resource.configs.update(workspace="default", name="cfg-1", description="new")
 
@@ -202,7 +201,7 @@ class TestSyncConfigs:
         response.status_code = 204
         response.raise_for_status.return_value = None
         platform.http.delete.return_value = response
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         result = resource.configs.delete(workspace="default", name="cfg-1")
 
@@ -221,7 +220,7 @@ class TestSyncTargets:
     def test_create_posts_to_workspace_route(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_target_payload(name="tgt-1"), status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         tgt = resource.targets.create(
             workspace="default",
@@ -253,7 +252,7 @@ class TestSyncTargets:
         delete_response.status_code = 204
         delete_response.raise_for_status.return_value = None
         platform.http.delete.return_value = delete_response
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         tgt = resource.targets.get(workspace="default", name="tgt-1")
         resource.targets.delete(workspace="default", name="tgt-1")
@@ -272,7 +271,7 @@ class TestSyncTargets:
             {"data": [_target_payload(name="a"), _target_payload(name="b")], "pagination": None, "sort": "-created_at"}
         )
         platform.http.put.return_value = _ok_response(_target_payload(name="tgt-1", model="new-model"))
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         listed = resource.targets.list(workspace="default")
         assert [t["name"] for t in listed["data"]] == ["a", "b"]
@@ -293,7 +292,7 @@ class TestSyncTargets:
 
 def test_configs_and_targets_properties_are_cached() -> None:
     platform = _SyncHelix()
-    resource = AuditorPluginResource(cast(NeMoHelix, platform))
+    resource = AuditorPluginResource(platform)
 
     cached_configs = resource.configs
     cached_targets = resource.targets
@@ -317,7 +316,7 @@ class TestSyncRun:
         job.run.return_value = {"status": "completed", "returncode": 0, "results": {}}
 
         with patch("nemo_auditor.sdk.AuditJob", return_value=job):
-            resource = AuditorPluginResource(cast(NeMoHelix, platform))
+            resource = AuditorPluginResource(platform)
             result = resource.run(config="my-cfg", target="my-tgt", workspace="default")
 
         assert result["status"] == "completed"
@@ -353,7 +352,7 @@ class TestSyncRun:
         inline_target = AuditTarget(name="inline-tgt", workspace="default", type="nim", model="m")
 
         with patch("nemo_auditor.sdk.AuditJob", return_value=job):
-            resource = AuditorPluginResource(cast(NeMoHelix, platform))
+            resource = AuditorPluginResource(platform)
             resource.run(config=inline_config, target=inline_target)
 
         # No HTTP roundtrip — inline entities go straight to the job.
@@ -375,7 +374,7 @@ class TestSyncRun:
         job.run.return_value = {"status": "completed", "returncode": 0, "results": {}}
 
         with patch("nemo_auditor.sdk.AuditJob", return_value=job):
-            resource = AuditorPluginResource(cast(NeMoHelix, platform))
+            resource = AuditorPluginResource(platform)
             resource.run(config="prod/cfg-1", target="staging/tgt-1", workspace="default")
 
         # GETs must use the workspace from the qualified name, not the default.
@@ -411,7 +410,7 @@ class TestSyncJobMethods:
     def test_submit_with_string_refs_posts_correct_url_and_body(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         result = resource.submit(config="ws/my-cfg", target="ws/my-tgt", workspace="ws")
 
@@ -429,7 +428,7 @@ class TestSyncJobMethods:
     def test_submit_with_inline_entities_serialises_full_dict(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         cfg = AuditConfig(name="cfg-1", workspace="default")
         tgt = AuditTarget(name="tgt-1", workspace="default", type="nim", model="llama")
@@ -445,7 +444,7 @@ class TestSyncJobMethods:
     def test_submit_defaults_workspace_to_default(self) -> None:
         platform = _SyncHelix()
         platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         result = resource.submit(config="my-cfg", target="my-tgt")
 
@@ -456,7 +455,7 @@ class TestSyncJobMethods:
     def test_list_jobs_hits_collection_url_with_pagination(self) -> None:
         platform = _SyncHelix()
         platform.http.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         result = resource.list_jobs(workspace="ws", page=2, page_size=5)
 
@@ -469,7 +468,7 @@ class TestSyncJobMethods:
     def test_get_job_hits_named_url(self) -> None:
         platform = _SyncHelix()
         platform.http.get.return_value = _ok_response(_JOB_PAYLOAD)
-        resource = AuditorPluginResource(cast(NeMoHelix, platform))
+        resource = AuditorPluginResource(platform)
 
         result = resource.get_job("audit-job-abc123", workspace="ws")
 
@@ -484,7 +483,7 @@ class TestAsyncJobMethods:
     async def test_submit_posts_correct_url_and_body(self) -> None:
         platform = _AsyncHelix()
         platform.http.post.return_value = _ok_response(_JOB_PAYLOAD, status_code=201)
-        resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
+        resource = AsyncAuditorPluginResource(platform)
 
         result = await resource.submit(config="ws/my-cfg", target="ws/my-tgt", workspace="ws")
 
@@ -499,7 +498,7 @@ class TestAsyncJobMethods:
     async def test_list_jobs_hits_collection_url(self) -> None:
         platform = _AsyncHelix()
         platform.http.get.return_value = _ok_response(_JOBS_LIST_PAYLOAD)
-        resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
+        resource = AsyncAuditorPluginResource(platform)
 
         result = await resource.list_jobs(workspace="ws")
 
@@ -510,7 +509,7 @@ class TestAsyncJobMethods:
     async def test_get_job_hits_named_url(self) -> None:
         platform = _AsyncHelix()
         platform.http.get.return_value = _ok_response(_JOB_PAYLOAD)
-        resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
+        resource = AsyncAuditorPluginResource(platform)
 
         result = await resource.get_job("audit-job-abc123", workspace="ws")
 
@@ -529,7 +528,7 @@ class TestAsyncJobMethods:
 async def test_async_configs_create_posts_to_workspace_route() -> None:
     platform = _AsyncHelix()
     platform.http.post.return_value = _ok_response(_config_payload(name="cfg-1"), status_code=201)
-    resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
+    resource = AsyncAuditorPluginResource(platform)
 
     cfg = await resource.configs.create(workspace="default", name="cfg-1", description="hi")
 
@@ -554,7 +553,7 @@ async def test_async_run_resolves_names_and_calls_job_in_thread() -> None:
         patch("nemo_auditor.sdk.AuditJob", return_value=job) as audit_job_cls,
         patch("nemo_auditor.sdk.asyncio.to_thread", new=AsyncMock(return_value=job.run.return_value)) as to_thread,
     ):
-        resource = AsyncAuditorPluginResource(cast(AsyncNeMoHelix, platform))
+        resource = AsyncAuditorPluginResource(platform)
         result = await resource.run(config="my-cfg", target="my-tgt", workspace="default")
 
     assert result["status"] == "completed"
@@ -596,7 +595,7 @@ class TestAuditorJobResource:
         platform = _SyncHelix()
         resource = AuditorJobResource(
             job_name="audit-job-abc123",
-            platform=cast(NeMoHelix, platform),
+            platform=platform,
             workspace="default",
         )
         return platform, resource
@@ -727,7 +726,7 @@ class TestAsyncAuditorJobResource:
         platform = _AsyncHelix()
         resource = AsyncAuditorJobResource(
             job_name="audit-job-abc123",
-            platform=cast(AsyncNeMoHelix, platform),
+            platform=platform,
             workspace="default",
         )
         return platform, resource

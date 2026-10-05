@@ -270,9 +270,13 @@ class HarborAgentTaskRunner:
     ``job_dir`` is the directory Harbor writes its per-trial
     ``<task>__<hash>/result.json`` files into.
 
-    ``secret_resolver`` names the env var holding each ``env_secrets`` entry; it must implement
-    :class:`~nemo_evaluator_sdk.resolver_protocols.EnvSecretSource`. Defaults to
-    :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver`; platform jobs pass their own.
+    ``secret_resolver`` must implement
+    :class:`~nemo_evaluator_sdk.resolver_protocols.EnvSecretSource` when ``config.env_secrets``
+    is set. ``None`` (the default) uses :class:`~nemo_evaluator_sdk.resolvers.LocalSecretResolver`
+    to find each secret in this process's environment. Platform jobs pass a source that names
+    the variable injected under each ``env_secrets`` key. Harbor receives a ``${NAME}`` template
+    for that variable, so a value-only :class:`~nemo_evaluator_sdk.resolver_protocols.SecretResolver`
+    cannot be used here.
     """
 
     def __init__(

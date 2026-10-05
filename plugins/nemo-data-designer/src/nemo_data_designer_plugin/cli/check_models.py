@@ -12,7 +12,7 @@ from data_designer.cli.ui import print_error, print_header, print_success
 from nemo_data_designer_plugin.cli._context import (
     OutputFormat,
     load_builder_or_exit,
-    resolve_sdks_or_exit,
+    resolve_clients_or_exit,
     resolve_workspace,
 )
 from nemo_data_designer_plugin.sdk.check_models import CheckModelsReport, check_models_config_sync
@@ -67,8 +67,8 @@ def check_models_command(
     reporting every problem at once.
     """
     config_builder = load_builder_or_exit(config_source)
-    sdk, async_sdk = resolve_sdks_or_exit(typer_ctx)
-    resolved_workspace = resolve_workspace(workspace, sdk=sdk, async_sdk=async_sdk)
+    client, async_client = resolve_clients_or_exit(typer_ctx)
+    resolved_workspace = resolve_workspace(workspace, client=client, async_client=async_client)
 
     if output == "text":
         print_header("Data Designer Check Models")
@@ -77,8 +77,8 @@ def check_models_command(
 
     report = check_models_config_sync(
         config_builder,
-        sdk=sdk,
-        async_sdk=async_sdk,
+        client=client,
+        async_client=async_client,
         workspace=resolved_workspace,
         config_source=config_source,
         # The engine names each alias as it probes it, which is the only place

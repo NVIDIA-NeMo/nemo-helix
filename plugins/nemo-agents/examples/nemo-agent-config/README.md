@@ -149,7 +149,7 @@ In this example, Claude uses its harness-local Anthropic model config.
 
 Hermes Agent has dependencies that conflict with the NeMo Helix environment, so
 use the repository helper to install Fabric's pinned Hermes source and matching
-adapter in a separate Python 3.12 environment:
+adapter in a separate Python 3.14 environment:
 
 ```bash
 script/dev-install-hermes.sh

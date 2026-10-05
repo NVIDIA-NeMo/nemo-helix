@@ -64,7 +64,7 @@ each `[task] name`).
 
 ## Under the hood
 
-The runtime is [`harbor_runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor/runtime.py):
+The runtime is [`runtime.py`](../../src/nemo_evaluator_sdk/agent_eval/runtimes/harbor/runtime.py):
 
 - `HarborRuntimeConfig` — declarative config (agent, attempts, concurrency,
   timeouts, artifacts) mapped onto Harbor's `JobConfig` lazily.

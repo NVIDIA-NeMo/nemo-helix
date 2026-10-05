@@ -12,7 +12,7 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
 logger = logging.getLogger(__name__)
 
 
-async def validate_secret(sdk: AsyncHelixClient, secret: str, default_workspace: str) -> None:
+async def validate_secret(client: AsyncHelixClient, secret: str, default_workspace: str) -> None:
     """Validate a secret reference with an async SDK instance.
     The SDK instance should carry end user authentication headers,
     so that this function validate existence and access in API
@@ -21,7 +21,7 @@ async def validate_secret(sdk: AsyncHelixClient, secret: str, default_workspace:
     NHXSecretResolver).
     """
     workspace, name = parse_secret_reference(secret, default_workspace)
-    secrets = client_from_platform(sdk, AsyncSecretsClient)
+    secrets = client_from_platform(client, AsyncSecretsClient)
     try:
         await secrets.access_secret(name=name, workspace=workspace)
     except NotFoundError as e:
@@ -46,14 +46,14 @@ class NHXSecretResolver:
     sync. Secrets should be validated in advance using :func:`validate_secret`.
     """
 
-    def __init__(self, sdk: SyncHelixClient, default_workspace: str):
-        self._sdk = sdk
+    def __init__(self, client: SyncHelixClient, default_workspace: str):
+        self._client = client
         self._default_workspace = default_workspace
 
     def resolve(self, secret: str) -> str:
         try:
             workspace, name = parse_secret_reference(secret, self._default_workspace)
-            secrets = client_from_platform(self._sdk, SecretsClient)
+            secrets = client_from_platform(self._client, SecretsClient)
             result = secrets.access_secret(name=name, workspace=workspace).data()
             return result.value
         except Exception as e:

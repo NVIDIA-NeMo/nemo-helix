@@ -454,7 +454,7 @@ nemo services run [OPTIONS]
 
 * `--services`: Comma-separated services to run, e.g. models,entities,jobs. Defaults to all available services.
 * `--service-group`: Run a predefined service group. Cannot be combined with --services.
-* `--controllers`: Comma-separated controllers to run, e.g. jobs,models.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models.
 * `--controller-group`: Run a predefined controller group. Cannot be combined with --controllers.
 * `--sidecars`: Comma-separated sidecars to run, e.g. adapters,cache.
 * `--config`: Path to a platform configuration YAML file.
@@ -478,6 +478,7 @@ Detaches the process, polls /status, then returns.
 ```shell
 nemo services start
 nemo services start --services entities,models --port 9090
+nemo services start --ready-timeout 360
 ```
 
 **Usage:**
@@ -490,7 +491,7 @@ nemo services start [OPTIONS]
 
 * `--services`: Comma-separated services to run, e.g. models,entities,jobs.
 * `--service-group`: Run a predefined service group. Cannot be combined with --services.
-* `--controllers`: Comma-separated controllers to run, e.g. jobs,models.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models.
 * `--controller-group`: Run a predefined controller group. Cannot be combined with --controllers.
 * `--sidecars`: Comma-separated sidecars to run, e.g. adapters,cache.
 * `--config`: Path to a platform configuration YAML file.
@@ -498,6 +499,7 @@ nemo services start [OPTIONS]
 * `--port <INTEGER>`: Port to bind to. [default: 8080]
 * `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. [default: 5]
 * `--instance`: Instance name. Defaults to a name derived from the working directory and port.
+* `--ready-timeout <INTEGER RANGE>`: Seconds to wait for platform readiness. [default: 240]
 
 **Help:**
 
@@ -548,6 +550,7 @@ instance exists for the computed scope; does not start a fresh instance.
 ```shell
 nemo services restart
 nemo services restart --services entities,models,agents
+nemo services restart --ready-timeout 360
 ```
 
 **Usage:**
@@ -560,7 +563,7 @@ nemo services restart [OPTIONS]
 
 * `--services`: Comma-separated services to run. Overrides previous service set.
 * `--service-group`: Run a predefined service group. Overrides previous setting.
-* `--controllers`: Comma-separated controllers to run. Overrides previous controller set.
+* `--controllers`: Comma-separated controller names. These match GET /status controllers.status keys, for example jobs,models. Overrides the previous controller set.
 * `--controller-group`: Run a predefined controller group. Overrides previous setting.
 * `--sidecars`: Comma-separated sidecars to run. Overrides previous setting.
 * `--config`: Path to a platform configuration YAML file.
@@ -568,6 +571,7 @@ nemo services restart [OPTIONS]
 * `--port <INTEGER>`: Port to bind to. Defaults to previous value or 8080.
 * `--keep-alive-timeout-seconds <INTEGER RANGE>`: Seconds Uvicorn keeps idle HTTP connections open. Defaults to the previous value or 5.
 * `--instance`: Instance name. Defaults to a name derived from the working directory and port.
+* `--ready-timeout <INTEGER RANGE>`: Seconds to wait for platform readiness. [default: 240]
 
 **Help:**
 
@@ -3989,16 +3993,16 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 **Commands:**
 
-* `cancel`: Cancel a platform job.
+* `cancel`: Cancel a platform job by name or ID.
 * `create`: Create a new platform job.
-* `delete`: Delete a platform job.
+* `delete`: Delete a platform job by name or ID.
 * `get-logs`: Get paginated logs for a platform job.
 * `get-status`: Get the status of a platform job.
 * `list`: List platform jobs with filtering and pagination.
 * `list-execution-profiles`: Get all currently configured execution profiles.
-* `pause`: Pause a platform job.
-* `resume`: Resume a paused platform job.
-* `get`: Get a platform job by name.
+* `pause`: Pause a platform job by name or ID.
+* `resume`: Resume a paused platform job by name or ID.
+* `get`: Get a platform job by name or ID.
 * `update-status-details`: Update the status details of a platform job.
 * `watch`: Watch a platform job until it reaches a terminal status.
 * `tail`: Print the newest lines from a platform job log.
@@ -4008,7 +4012,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 
 #### nemo jobs cancel
 
-Cancel a platform job.
+Cancel a platform job by name or ID.
 
 **Usage:**
 
@@ -4018,7 +4022,7 @@ nemo jobs cancel [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4091,7 +4095,7 @@ nemo jobs create [OPTIONS] [NAME]
 
 #### nemo jobs delete
 
-Delete a platform job.
+Delete a platform job by name or ID.
 
 **Usage:**
 
@@ -4101,7 +4105,7 @@ nemo jobs delete [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4244,7 +4248,7 @@ nemo jobs list-execution-profiles [OPTIONS]
 
 #### nemo jobs pause
 
-Pause a platform job.
+Pause a platform job by name or ID.
 
 **Usage:**
 
@@ -4254,7 +4258,7 @@ nemo jobs pause [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4270,7 +4274,7 @@ nemo jobs pause [OPTIONS] NAME
 
 #### nemo jobs resume
 
-Resume a paused platform job.
+Resume a paused platform job by name or ID.
 
 **Usage:**
 
@@ -4280,7 +4284,7 @@ nemo jobs resume [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -4296,7 +4300,7 @@ nemo jobs resume [OPTIONS] NAME
 
 #### nemo jobs get
 
-Get a platform job by name.
+Get a platform job by name or ID.
 
 **Usage:**
 
@@ -4306,7 +4310,7 @@ nemo jobs get [OPTIONS] NAME
 
 **Arguments:**
 
-* `<NAME>`
+* `<NAME>`: Job name or ID (both are accepted).
 
 **Options:**
 
@@ -6070,9 +6074,9 @@ outcome of runtime startup instead of merely the API call.  Use
 scripted pipelines that prefer to poll separately via ``nemo agents
 deployments wait``.
 
-Container modes (``--mode docker|k8s``) compile to the nemo-deployments
+Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
 plugin. Requires a configured deployments executor (``deployments.executors``
-/ ``agents.deployments.docker_executor`` or ``k8s_executor``). Container
+/ ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
 endpoint gateway routing and the full k8s runtime contract (in-cluster
 inference gateway, wheel staging) are still evolving — docker mode is the
 supported local path today.
@@ -6087,8 +6091,8 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess (default), docker, or k8s. [default: subprocess]
-* `--image, -i`: Container image for docker/k8s modes (falls back to deployments.default_image).
+* `--mode`: Runtime backend: subprocess (default), docker, k8s, or openshell. [default: subprocess]
+* `--image, -i`: Container image for docker/k8s/openshell modes (falls back to deployments.default_image).
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass --no-wait for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
@@ -6124,8 +6128,8 @@ nemo agents redeploy [OPTIONS]
 * `--agent-config, -c <FILE>`: Path to the new agent YAML config file to redeploy from.
 * `--description`: Agent description (as on create). [default: ]
 * `--name, -n`: Deployment name for the new deployment (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted.
-* `--image, -i`: Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.
+* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Auto-detected from the existing deployment when omitted.
+* `--image, -i`: Container image for docker/k8s/openshell modes. Auto-detected from the existing deployment when omitted.
 * `--use-image-entrypoint, --no-use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command. Auto-detected from the existing deployment when omitted.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass --no-wait to return the pending deployment immediately as JSON.

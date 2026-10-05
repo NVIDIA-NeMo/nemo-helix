@@ -119,7 +119,7 @@ def _build_runtime(args: argparse.Namespace):
     return FabricAgentRuntime(
         config,
         sandbox=DockerSandboxProvider(),
-        secrets={args.agent_api_key_env: SecretRef(root=args.agent_api_key_env)},
+        env_secrets={args.agent_api_key_env: SecretRef(root=args.agent_api_key_env)},
         image=args.image,  # None -> build-if-missing stock image
         work_root=args.work_root,
         capture_trajectory=not args.no_trajectory,

@@ -70,6 +70,7 @@ from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskK
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
+from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
 from nemo_evaluator.task_refs import (
@@ -86,7 +87,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym import GymAgentTaskRunner, GymRu
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTarget
-from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values import RunConfigOnline, RunConfigOnlineModel
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
@@ -149,7 +150,7 @@ async def _resolve_gym_environment(
     target: GymRunnerTarget,
     *,
     workspace: str,
-    async_sdk: AsyncHelixClient | None,
+    async_client: AsyncHelixClient | None,
 ) -> GymRunnerTarget:
     """Validate and qualify a Gym environment FileSet through the Files service."""
     if target.environment is None:
@@ -166,7 +167,7 @@ async def _resolve_gym_environment(
     if file_path:
         raise ValueError("Gym environment FileSet references must not include a file fragment")
 
-    files = client_from_platform(async_sdk, AsyncFilesClient)
+    files = client_from_platform(async_client, AsyncFilesClient)
     try:
         environment = (
             await files.get_fileset(
@@ -281,31 +282,7 @@ async def prepare_gym_submission(
             inputs=task.spec.inputs.model_dump(exclude_none=True),
             metadata={item.key: item.value for item in task.metadata},
         )
-    return await _resolve_gym_environment(target, workspace=ctx.workspace, async_sdk=ctx.async_sdk)
-
-
-class JobEnvSecretResolver:
-    """Name the env var holding each Harbor ``env_secrets`` entry inside a platform job.
-
-    The service injected every secret into this process's environment under its ``env_secrets`` key at
-    compile time, so the key *is* the source variable. No other variable is consulted.
-    """
-
-    def __init__(self, *, workspace: str) -> None:
-        self._workspace = workspace
-
-    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
-        """``env_name`` when the service injected a non-empty value under it, else ``None``."""
-        return env_name if os.environ.get(env_name) else None
-
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
-        """Point at the secret in its workspace: the ref's own, or the job's for a bare ref."""
-        workspace, sep, name = secret_ref.root.rpartition("/")
-        workspace = workspace if sep else self._workspace
-        return (
-            f"secret {secret_ref.root!r} was not injected into this job's environment. Check the secret exists "
-            f"in workspace {workspace!r}: nemo secrets get {name} --workspace {workspace}"
-        )
+    return await _resolve_gym_environment(target, workspace=ctx.workspace, async_client=ctx.async_client)
 
 
 def _require_fabric_env_secrets_resolved(target: FabricRunnerTarget) -> None:
@@ -364,7 +341,7 @@ class _AgentEvalJobBase(NemoJob):
         ctx = SubmitContext(
             workspace=workspace,
             entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
             adapters=cls.adapters,
         )
         loaded_tasks = await load_tasks(submit_spec.tasks, ctx)
@@ -411,7 +388,7 @@ class _AgentEvalJobBase(NemoJob):
                 evaluator_config is not None and evaluator_config.sandbox_host_provider == "opensandbox"
             )
             execution_profile = await cls._execution_profile(
-                async_sdk=async_sdk,
+                async_client=async_sdk,
                 profile=profile or "default",
                 require_pvc_storage=require_pvc_storage,
             )
@@ -431,7 +408,7 @@ class _AgentEvalJobBase(NemoJob):
             compilation = _compile_agent_eval_cpu_job(canonical_spec, profile=profile)
             compilation.eval_step["executor"] = await cls._resolve_harbor_subprocess_executor(
                 executor=compilation.executor,
-                async_sdk=async_sdk,
+                async_client=async_sdk,
             )
             platform_spec = compilation.platform_spec
         else:
@@ -445,13 +422,13 @@ class _AgentEvalJobBase(NemoJob):
     @staticmethod
     async def _execution_profile(
         *,
-        async_sdk: AsyncHelixClient | None,
+        async_client: AsyncHelixClient | None,
         profile: str,
         require_pvc_storage: bool = False,
     ) -> BaseExecutionProfile | None:
         """Resolve the profile that Jobs will use for this submission."""
         try:
-            profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
         if require_pvc_storage:
@@ -480,12 +457,12 @@ class _AgentEvalJobBase(NemoJob):
 
     @staticmethod
     async def _resolve_harbor_subprocess_executor(
-        *, executor: CPUExecutionProviderSpec, async_sdk: AsyncHelixClient | None
+        *, executor: CPUExecutionProviderSpec, async_client: AsyncHelixClient | None
     ) -> SubprocessExecutionProviderSpec:
         """Resolve Harbor's selected profile to an explicit host subprocess executor."""
         profile = executor.profile
         try:
-            profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
+            profiles = (await client_from_platform(async_client, AsyncJobsClient).get_execution_profiles()).data()
         except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
             raise _profile_dependency_unavailable(profile) from exc
 
@@ -581,6 +558,8 @@ class _AgentEvalJobBase(NemoJob):
                 capture_trajectory=target.capture_trajectory,
                 work_root=ctx.storage.persistent / "fabric",
                 base_dir=_staged_agent_files(target, ctx),
+                env_secrets=target.env_secrets,
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
@@ -630,13 +609,15 @@ class _AgentEvalJobBase(NemoJob):
                     bind_resources_server=target.bind_resources_server,
                     hydra_params=target.hydra_params,
                     env_vars=target.env_vars,
+                    env_secrets=target.env_secrets,
                     num_repeats=target.num_repeats,
                     concurrency=target.concurrency,
                     startup_timeout_s=target.startup_timeout_s,
                     collection_timeout_s=target.collection_timeout_s,
                     shutdown_grace_s=target.shutdown_grace_s,
                     reward_key=target.reward_key,
-                )
+                ),
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return gym_runtime, None, None
         if isinstance(target, HarborRunnerTarget):
@@ -662,7 +643,7 @@ class _AgentEvalJobBase(NemoJob):
                     agent_setup_timeout_multiplier=target.agent_setup_timeout_multiplier,
                     agent_timeout_multiplier=target.agent_timeout_multiplier,
                 ),
-                secret_resolver=JobEnvSecretResolver(workspace=ctx.workspace),
+                secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
             )
             return harbor_runtime, None, None
         return None, None, None

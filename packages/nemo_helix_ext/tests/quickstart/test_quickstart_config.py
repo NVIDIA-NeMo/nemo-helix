@@ -259,10 +259,6 @@ class TestIsInternalTag:
 class TestResolveBestImage:
     """Tests for QuickstartConfig.resolve_best_image()."""
 
-    NIGHTLY_IMAGE = "nvcr.io/nvidia/platform-api:nightly-20260223"
-    MILESTONE_IMAGE = "nvcr.io/nvidia/platform-api:26.02-k10"
-    PUBLIC_IMAGE = "nvcr.io/nvidia/nemo-microservices/nhx-api:26.03"
-
     @pytest.fixture
     def config_with_key(self) -> QuickstartConfig:
         return QuickstartConfig(ngc_api_key="test-key")  # type: ignore[arg-type]
@@ -272,11 +268,6 @@ class TestResolveBestImage:
         # Explicitly pass None so the fixture is not affected by a NGC_API_KEY
         # environment variable that may be set in the developer's shell.
         return QuickstartConfig(ngc_api_key=None)
-
-    def _mock_sdk(self, image_tag: str) -> MagicMock:
-        mock = MagicMock()
-        mock.__image_tag__ = image_tag
-        return mock
 
     # ------------------------------------------------------------------
     # Short-circuit: explicit image is always returned as-is
@@ -291,18 +282,15 @@ class TestResolveBestImage:
     # No tag available
     # ------------------------------------------------------------------
 
-    def test_returns_empty_when_sdk_not_installed(self, config_with_key: QuickstartConfig) -> None:
-        """When nemo-helix is not installed, empty string is returned."""
-        with patch.dict("sys.modules", {"nemo_helix._version": None}):
-            assert config_with_key.resolve_best_image() == ""
-
-    def test_returns_empty_when_image_tag_is_none(self, config_with_key: QuickstartConfig) -> None:
-        """When __image_tag__ is None, empty string is returned."""
-        with patch.dict("sys.modules", {"nemo_helix._version": self._mock_sdk(None)}):  # type: ignore[arg-type]
-            assert config_with_key.resolve_best_image() == ""
+    def test_returns_empty_without_image_tag(
+        self, config_with_key: QuickstartConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without NHX_IMAGE_TAG, empty string is returned."""
+        monkeypatch.delenv("NHX_IMAGE_TAG", raising=False)
+        assert config_with_key.resolve_best_image() == ""
 
     # ------------------------------------------------------------------
-    # Internal tags — returned directly without key or access check
+    # NHX_IMAGE_TAG
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize(
@@ -312,34 +300,16 @@ class TestResolveBestImage:
             ("26.02-k10", "nvcr.io/nvidia/platform-api:26.02-k10"),
         ],
     )
-    def test_internal_tag_returned_directly(
+    def test_internal_tag_returned_without_key(
         self,
         image_tag: str,
         expected_image: str,
         config_without_key: QuickstartConfig,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Internal tags are returned directly — no NGC key or Docker access check required."""
-        with patch.dict("sys.modules", {"nemo_helix._version": self._mock_sdk(image_tag)}):
-            assert config_without_key.resolve_best_image() == expected_image
-
-    # ------------------------------------------------------------------
-    # Public GA tags — no key required, returned directly
-    # ------------------------------------------------------------------
-
-    @pytest.mark.parametrize("image_tag", ["26.03", "25.10"])
-    def test_public_tag_returns_empty_without_key(self, image_tag: str, config_without_key: QuickstartConfig) -> None:
-        """Public GA tags on nvcr.io still require an NGC key; empty string returned without one."""
-        with patch.dict("sys.modules", {"nemo_helix._version": self._mock_sdk(image_tag)}):
-            assert config_without_key.resolve_best_image() == ""
-
-    def test_public_tag_returned_with_key(self, config_with_key: QuickstartConfig) -> None:
-        """Public GA tags are returned when an NGC key is present."""
-        with patch.dict("sys.modules", {"nemo_helix._version": self._mock_sdk("26.03")}):
-            assert config_with_key.resolve_best_image() == self.PUBLIC_IMAGE
-
-    # ------------------------------------------------------------------
-    # NHX_IMAGE_TAG env var override
-    # ------------------------------------------------------------------
+        """Internal tags are returned directly, with no NGC key or Docker access check."""
+        monkeypatch.setenv("NHX_IMAGE_TAG", image_tag)
+        assert config_without_key.resolve_best_image() == expected_image
 
     @pytest.mark.parametrize(
         "image_tag,expected_image",
@@ -349,40 +319,19 @@ class TestResolveBestImage:
             ("26.03", "nvcr.io/nvidia/nemo-microservices/nhx-api:26.03"),
         ],
     )
-    def test_env_var_overrides_sdk_image_tag(
+    def test_image_tag_resolves_image_with_key(
         self,
         image_tag: str,
         expected_image: str,
         config_with_key: QuickstartConfig,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """NHX_IMAGE_TAG is used instead of the SDK-baked tag; SDK is never imported."""
+        """Internal and public tags resolve to their registry image when an NGC key is present."""
         monkeypatch.setenv("NHX_IMAGE_TAG", image_tag)
-        with patch.dict("sys.modules", {"nemo_helix._version": None}):
-            result = config_with_key.resolve_best_image()
+        assert config_with_key.resolve_best_image() == expected_image
 
-        assert result == expected_image
-
-    def test_env_var_takes_precedence_over_sdk(
-        self, config_with_key: QuickstartConfig, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """NHX_IMAGE_TAG takes precedence over __image_tag__ in the SDK."""
-        monkeypatch.setenv("NHX_IMAGE_TAG", "nightly-20260223")
-        with patch.dict("sys.modules", {"nemo_helix._version": self._mock_sdk("26.02-k10")}):
-            result = config_with_key.resolve_best_image()
-
-        assert result == self.NIGHTLY_IMAGE
-
-    def test_public_env_var_returns_empty_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A public GA tag in NHX_IMAGE_TAG still requires an NGC key for nvcr.io."""
-        monkeypatch.setenv("NHX_IMAGE_TAG", "26.03")
-        config = QuickstartConfig(ngc_api_key=None)
-        with patch.dict("sys.modules", {"nemo_helix._version": None}):
-            assert config.resolve_best_image() == ""
-
-    def test_public_env_var_returned_with_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A public GA tag in NHX_IMAGE_TAG is returned when an NGC key is present."""
-        monkeypatch.setenv("NHX_IMAGE_TAG", "26.03")
-        config = QuickstartConfig(ngc_api_key="test-key")  # type: ignore[arg-type]
-        with patch.dict("sys.modules", {"nemo_helix._version": None}):
-            assert config.resolve_best_image() == self.PUBLIC_IMAGE
+    @pytest.mark.parametrize("image_tag", ["26.03", "25.10"])
+    def test_public_tag_returns_empty_without_key(self, image_tag: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Public GA tags on nvcr.io still require an NGC key."""
+        monkeypatch.setenv("NHX_IMAGE_TAG", image_tag)
+        assert QuickstartConfig(ngc_api_key=None).resolve_best_image() == ""

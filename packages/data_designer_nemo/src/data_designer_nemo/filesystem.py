@@ -6,5 +6,5 @@ from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platfo
 from nemo_helix_plugin.files.client import FilesClient
 
 
-def make_filesystem(sdk: SyncHelixClient) -> FilesetFileSystem:
-    return FilesetFileSystem(client=client_from_platform(sdk, FilesClient))
+def make_filesystem(client: SyncHelixClient) -> FilesetFileSystem:
+    return FilesetFileSystem(client=client_from_platform(client, FilesClient))

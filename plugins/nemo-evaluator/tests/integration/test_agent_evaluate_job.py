@@ -63,13 +63,12 @@ from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
+from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.evaluator.client import EvaluatorClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.scheduler import NemoJobScheduler
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing import add_mock_provider
@@ -448,7 +447,7 @@ def test_submit_over_taskset_ref_resolves_and_scores(subprocess_platform: str, t
     # taskset, expand BOTH member tasks, and resolve each task's stored MetricRef — all against the
     # live entity store — before the job runs. A Model target -> IGW mock provider keeps it hermetic.
     client = NemoClient(base_url=subprocess_platform, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2))
-    evaluator = Evaluator(EvaluatorClient.from_client(client))
+    evaluator = Evaluator.from_client(client)
     WorkspacesClient.from_client(client).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -633,7 +632,7 @@ def test_submit_model_target_under_auth_forwards_identity_to_igw(auth_subprocess
     # (get_async_task_nemo_client) as service:evaluator on-behalf-of the creator. A retrievable record here
     # proves that delegated identity actually authorized the entity write end-to-end (not just the
     # IGW inference call) — the key validation of the async task-SDK identity parity.
-    result = Evaluator(EvaluatorClient.from_client(client)).agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
+    result = Evaluator.from_client(client).agent_eval_results.retrieve(job_name, workspace=WORKSPACE)
     assert result.job_id == job_name
     assert (result.target_kind, result.target_name) == ("model", model_name)
     assert result.bundle_ref

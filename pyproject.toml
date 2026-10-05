@@ -55,7 +55,6 @@ dependencies = [
   # Core services needed for OpenAPI generation (platform imports these dynamically)
   "nhx-auth",
   "nhx-models",
-  "models",
   "nhx-files",
   "nhx-inference-gateway",
   "nhx-jobs",
@@ -406,7 +405,6 @@ nhx-models = { workspace = true }
 nhx-inference-gateway = { workspace = true }
 nhx-files = { workspace = true }
 nhx-entities = { workspace = true }
-models = { workspace = true }
 nemo-helix-sdk = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-helix-ext = { workspace = true }
@@ -487,7 +485,6 @@ members = [
   "packages/nemo_helix_ext",
   "packages/nemo_evaluator_sdk",
   "packages/filesets",
-  "packages/models",
   "plugins/nemo-guardrails",
   "plugins/nemo-evaluator",
   "plugins/nemo-auditor",

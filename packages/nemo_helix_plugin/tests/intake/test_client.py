@@ -91,6 +91,39 @@ def test_sync_patch_evaluation_uses_typed_transport() -> None:
     assert response.data().name == "eval-1"
 
 
+def test_sync_list_evaluations_serializes_filter_and_pages() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/apis/intake/v2/workspaces/default/evaluations"
+        assert json.loads(request.url.params["filter"]) == {"experiment_id": "experiment-1"}
+        assert request.url.params["sort"] == "name"
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "data": [_evaluation_json()],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 100,
+                    "current_page_size": 1,
+                    "total_pages": 1,
+                    "total_results": 1,
+                },
+            },
+        )
+
+    client = IntakeClient(
+        base_url=BASE,
+        workspace="default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    page = client.list_evaluations(query_params={"filter": {"experiment_id": "experiment-1"}, "sort": "name"}).page()
+
+    assert [item.name for item in page.items] == ["eval-1"]
+    assert page.metadata["total_results"] == 1
+
+
 @pytest.mark.asyncio
 async def test_async_create_atif_uses_typed_transport() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:

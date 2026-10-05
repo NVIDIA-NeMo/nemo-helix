@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from scaled_evals.api import s3
+from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.db import Database, get_db, get_stream_database_factory
@@ -330,13 +330,12 @@ def _archive_response(row: Mapping[str, Any]) -> EvaluationArchiveResponse:
     object_key = row.get("archive_object_key")
     download = None
     if status == "ready" and object_key:
-        if s3.can_presign_get():
-            download = {"method": "GET", "url": s3.presign_get(object_key)}
-        else:
-            download = {
-                "method": "GET",
-                "url": f"/evaluations/{row['id']}/archive/download",
-            }
+        # Post-Files-migration downloads always stream through the API; presigned
+        # direct-to-storage URLs are gone (the client has no storage credentials).
+        download = {
+            "method": "GET",
+            "url": f"/evaluations/{row['id']}/archive/download",
+        }
     return EvaluationArchiveResponse(
         evaluation_id=row["id"],
         status=status,
@@ -505,7 +504,7 @@ def preflight_evaluation_request(
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     return result.report
@@ -530,7 +529,7 @@ def create_evaluation(
         db,
         body,
         current,
-        object_exists=s3.object_exists,
+        object_exists=artifacts.object_exists,
         resolve_bundle=accessible_bundle_for_run,
     )
     if isinstance(preflight, BlockedPreflight):
@@ -865,7 +864,7 @@ def delete_evaluation(evaluation_id: str, db: Db) -> DeleteResponse:
 
 # --------------------------------------------------------------------------
 # Per-evaluation artifacts are synced to object storage by the dispatch worker
-# under the stable prefix from scaled_evals.api.s3.evaluation_artifact_prefix.
+# under the stable prefix from scaled_evals.api.artifacts.evaluation_artifact_prefix.
 # Archive endpoints expose status and signed downloads for results.tar.gz bundles.
 # --------------------------------------------------------------------------
 
@@ -1001,10 +1000,10 @@ async def events_stream(evaluation_id: str, request: Request, database_factory: 
 @router.get("/{evaluation_id}/artifacts", response_model=ListEnvelope[EvaluationArtifact])
 def list_artifacts(evaluation_id: str, db: Db, prefix: str = "") -> ListEnvelope[EvaluationArtifact]:
     _ensure_evaluation_exists(db, evaluation_id)
-    base_prefix = s3.evaluation_artifact_prefix(evaluation_id)
+    base_prefix = artifacts.evaluation_artifact_prefix(evaluation_id)
     object_prefix = f"{base_prefix}{prefix.lstrip('/')}"
     data = []
-    for item in s3.list_objects(object_prefix):
+    for item in artifacts.list_objects(object_prefix):
         if not item["key"].startswith(base_prefix):
             continue
         path = item["key"][len(base_prefix) :]
@@ -1024,7 +1023,7 @@ def list_artifacts(evaluation_id: str, db: Db, prefix: str = "") -> ListEnvelope
 @router.get("/{evaluation_id}/artifacts/{path:path}")
 def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabaseFactory) -> StreamingResponse:
     try:
-        object_key = s3.evaluation_artifact_key(evaluation_id, path)
+        object_key = artifacts.evaluation_artifact_key(evaluation_id, path)
     except ValueError:
         raise _http_error(404, "not_found", "not found") from None
     # Short-lived checkout: a request-scoped Db dependency would hold the pooled
@@ -1032,9 +1031,14 @@ def get_artifact(evaluation_id: str, path: str, database_factory: StreamDatabase
     # exhaust the pool and stall unrelated requests.
     with database_factory() as db:
         _ensure_evaluation_exists(db, evaluation_id)
+    # stream_object is a lazy generator, so a missing object would only raise once
+    # the StreamingResponse is already iterating (a broken 200). Probe existence up
+    # front so a missing artifact maps to a clean 404.
+    if not artifacts.object_exists(object_key):
+        raise _http_error(404, "not_found", "not found")
     filename = path.rsplit("/", 1)[-1]
     return StreamingResponse(
-        s3.stream_object(object_key),
+        artifacts.stream_object(object_key),
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -1047,7 +1051,7 @@ def download_archive(evaluation_id: str, database_factory: StreamDatabaseFactory
     if row.get("archive_status") != "ready" or not row.get("archive_object_key"):
         raise _http_error(404, "not_found", "archive not ready")
     return StreamingResponse(
-        s3.stream_object(row["archive_object_key"]),
+        artifacts.stream_object(row["archive_object_key"]),
         media_type="application/x-tar",
         headers={"Content-Disposition": 'attachment; filename="results.tar.gz"'},
     )
@@ -1060,7 +1064,7 @@ def download_harbor_viewer_archive(evaluation_id: str, database_factory: StreamD
     if not harbor_viewer_archive_available_from_result(row.get("result")):
         raise _http_error(404, "not_found", "Harbor Viewer archive not ready")
     return StreamingResponse(
-        s3.stream_object(s3.evaluation_harbor_viewer_archive_key(evaluation_id)),
+        artifacts.stream_object(artifacts.evaluation_harbor_viewer_archive_key(evaluation_id)),
         media_type="application/gzip",
         headers={"Content-Disposition": (f'attachment; filename="{evaluation_id}-harbor-viewer.tar.gz"')},
     )

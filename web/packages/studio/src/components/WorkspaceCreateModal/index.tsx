@@ -18,6 +18,7 @@ import {
   getEntitiesListWorkspacesQueryKey,
   useEntitiesCreateWorkspace,
 } from '@nemo/sdk/generated/platform/entity-store';
+import type { Workspace } from '@nemo/sdk/generated/platform/schema';
 import { FormField, Stack, TextArea, TextInput } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
 import { workspaceCreateSchema } from '@studio/constants/zod';
@@ -32,9 +33,15 @@ interface FormFields {
   description?: string;
 }
 
-export type WorkspaceCreateModalProps = Pick<FormModalProps, 'open' | 'onClose'>;
+export type WorkspaceCreateModalProps = Pick<FormModalProps, 'open' | 'onClose'> & {
+  onCreate?: (workspace: Workspace) => void;
+};
 
-export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({ open, onClose }) => {
+export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
+  open,
+  onClose,
+  onCreate,
+}) => {
   const {
     reset,
     register,
@@ -73,6 +80,7 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({ open, onCl
           description: data.description,
         },
       });
+      onCreate?.(workspace);
       resetAndClose();
       navigate({
         pathname: getWorkspaceDetailsDefaultRoute(workspace.name),

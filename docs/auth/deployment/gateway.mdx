@@ -13,7 +13,7 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 NeMo Helix services trust identity headers only after a bearer token has been validated. In gateway deployments, the recommended path is:
 
-1. The gateway calls `/apis/auth/ext-authz` before forwarding protected API requests.
+1. The gateway calls `/apis/auth/ext-authz/<original-request-path>` before forwarding protected API requests.
 2. The auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
 3. The gateway forwards those trusted headers to NeMo Helix services.
 4. Services run their normal PDP authorization checks using the trusted principal and scopes.

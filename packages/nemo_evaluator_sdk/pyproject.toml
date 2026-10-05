@@ -87,10 +87,10 @@ nemo-helix = [
 #     ephemeral overlay env (`uv run --with ...`) hides them; install into the venv instead.
 #   * claude/codex go through the metapackage extras, which keep the adapters and the Fabric SDK on
 #     compatible versions.
-#   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
+#   * hermes stays direct because Fabric's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     It is Python<3.14-gated upstream, and the lock now reaches 3.14, so the marker below really does
+#     The 0.4 adapter allows Python <3.15, but the lock reaches 3.14, so the marker below really does
 #     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.

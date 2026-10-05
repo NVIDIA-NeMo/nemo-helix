@@ -5,24 +5,46 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 
-from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource, SecretResolver
+from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource, MissingSecretError
 from nemo_evaluator_sdk.values.common import SecretRef
 
 
-def _missing_secret_message(resolver: SecretResolver | EnvSecretSource, secret_ref: SecretRef, env_name: str) -> str:
-    if isinstance(resolver, EnvSecretSource):
-        return resolver.missing_secret_message(secret_ref, env_name)
-    return f"secret {secret_ref.root!r} could not be resolved by {type(resolver).__name__}."
+def env_secret_vars(env_secrets: Mapping[str, SecretRef], source: EnvSecretSource) -> dict[str, str]:
+    """Map each ``env_secrets`` key to the environment variable holding its secret.
 
+    Example:
+        With ``MY_WORKSPACE_PROBE_API_KEY`` set in the process environment::
 
-async def resolve_env_secrets(env_secrets: Mapping[str, SecretRef], resolver: SecretResolver) -> dict[str, str]:
-    """Resolve ``env_secrets`` to values, keyed by the env var each one is handed over as."""
-    resolved: dict[str, str] = {}
+            env_secrets = {"LLM_API_KEY": SecretRef("my-workspace/probe-api-key")}
+            source = LocalSecretResolver()
+            env_secret_vars(env_secrets, source)
+            # Returns: {"LLM_API_KEY": "MY_WORKSPACE_PROBE_API_KEY"}
+
+        Output keys retain the destination names; values name the source variables.
+    """
+    sources: dict[str, str] = {}
     for env_name, secret_ref in env_secrets.items():
-        value = await resolver.resolve_secret(secret_ref)
-        if value is None:
-            raise ValueError(f"env_secrets[{env_name!r}] -> {_missing_secret_message(resolver, secret_ref, env_name)}")
-        resolved[env_name] = value
-    return resolved
+        try:
+            sources[env_name] = source.env_var_for(secret_ref, env_name)
+        except MissingSecretError as error:
+            raise MissingSecretError(f"env_secrets[{env_name!r}] -> {error}") from error
+    return sources
+
+
+def env_secret_values(env_secrets: Mapping[str, SecretRef], source: EnvSecretSource) -> dict[str, str]:
+    """Read each secret from the environment variable named by ``source``.
+
+    Example:
+        With ``MY_WORKSPACE_PROBE_API_KEY="example-secret-value"`` in the process environment::
+
+            env_secrets = {"LLM_API_KEY": SecretRef("my-workspace/probe-api-key")}
+            source = LocalSecretResolver()
+            env_secret_values(env_secrets, source)
+            # Returns: {"LLM_API_KEY": "example-secret-value"}
+
+        Output keys retain the destination names; values contain the resolved secrets.
+    """
+    return {name: os.environ[var] for name, var in env_secret_vars(env_secrets, source).items()}

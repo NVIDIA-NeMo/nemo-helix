@@ -5,7 +5,7 @@
 
 NeMo Helix plugin for analyzing agent telemetry and persisting actionable insights.
 
-Analysis uses [trace-intel](https://github.com/NVIDIA-NeMo/labs-trace-intel).
+Analysis uses [NeMo Compass](https://github.com/NVIDIA-NeMo/labs-nemo-compass).
 NeMo Helix supplies authenticated trace and model access and stores the resulting insights.
 
 ## Prerequisites

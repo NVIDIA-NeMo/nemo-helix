@@ -27,6 +27,7 @@ from nemo_evaluator.api.task_definitions.harbor import ResolvedHarborTaskDefinit
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.publication_spec import PublicationSpec
 from nemo_evaluator.metric_refs import MetricRefOrInline
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import validate_fabric_env
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import validate_harbor_env
 from nemo_evaluator_sdk.agent_eval.runtimes.provenance import require_no_plaintext_credentials
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
@@ -45,7 +46,7 @@ class ModelTarget(BaseModel):
     The prompt template *is* the request sent to the model, so it lives here with the endpoint.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["model"] = "model"
     model: Model = Field(description="The model endpoint to generate trials against.")
@@ -135,7 +136,7 @@ class FabricRunnerTarget(BaseModel):
     is gone — fold any overlay into the config.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["fabric"] = "fabric"
     source: FabricSource = Field(
@@ -188,6 +189,13 @@ class FabricRunnerTarget(BaseModel):
             raise ValueError(
                 "`resolved_config` is the resolution of a registered `agent`; an inline `config` needs none"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _env_vars_are_fabric_safe(self) -> Self:
+        """Reject environment overrides once an inline or registered agent config is available."""
+        if self.config is not None:
+            validate_fabric_env(self.config, self.env_secrets)
         return self
 
     @property
@@ -361,7 +369,7 @@ class GymRunnerTarget(BaseModel):
     to materialize the selected tasks for rollout collection.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     kind: Literal["gym"] = "gym"
     environment: FilesetRef | None = Field(

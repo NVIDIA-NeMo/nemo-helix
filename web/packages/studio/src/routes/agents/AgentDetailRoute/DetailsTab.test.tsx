@@ -4,6 +4,7 @@
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { render, screen } from '@studio/tests/util/render';
+import userEvent from '@testing-library/user-event';
 
 const baseAgent: Agent = {
   name: 'react-agent',
@@ -41,5 +42,22 @@ describe('DetailsTab', () => {
     render(<DetailsTab workspace="default" agentName="react-agent" agent={baseAgent} />);
 
     expect(screen.queryByText('Description')).not.toBeInTheDocument();
+  });
+
+  it('collapses Additional configuration until its header is clicked', async () => {
+    const user = userEvent.setup();
+    render(
+      <DetailsTab
+        workspace="default"
+        agentName="react-agent"
+        agent={{ ...baseAgent, config: { general: { telemetry: 'enabled' } } }}
+      />
+    );
+
+    expect(screen.getByText('enabled')).not.toBeVisible();
+
+    await user.click(screen.getByText('Additional configuration'));
+
+    expect(screen.getByText('enabled')).toBeVisible();
   });
 });

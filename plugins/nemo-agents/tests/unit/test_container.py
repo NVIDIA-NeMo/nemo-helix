@@ -236,6 +236,7 @@ class TestRenderNatDockerfile:
             users=(
                 SandboxUser(name="sandbox", system=True, create_home=True, home="/home/sandbox", shell="/bin/bash"),
             ),
+            workdir_group="sandbox",
         )
 
     def test_sandbox_runtime_off_by_default(self, agent_config: Path) -> None:
@@ -247,6 +248,7 @@ class TestRenderNatDockerfile:
         assert "iproute2" not in result
         assert "nftables" not in result
         assert "sandbox" not in result
+        assert "chmod g+w /workspace" not in result
 
     def test_sandbox_runtime_renders_discovered_profile(self, agent_config: Path) -> None:
         from nemo_agents_plugin.container.template import render_nat_dockerfile
@@ -266,6 +268,10 @@ class TestRenderNatDockerfile:
         # Normal-container hardening + entrypoint are untouched.
         assert "USER agent" in result
         assert "exec nat serve" in result
+        # The workdir grant lands after the agent chown (which would reset the group)
+        # and before dropping to the agent user (which cannot chgrp).
+        grant = result.index("RUN chgrp sandbox /workspace && chmod g+w /workspace")
+        assert result.index("chown -R agent:agent /workspace") < grant < result.index("USER agent")
 
     def test_sandbox_runtime_unknown_raises(self, agent_config: Path) -> None:
         from nemo_agents_plugin.container.template import render_nat_dockerfile
@@ -285,8 +291,9 @@ class TestRenderNatDockerfile:
                 agent_config, None, nat_version="1.4.0", sandbox_runtime="openshell", allow_root=True
             )
 
-        # The sandbox user is required whether or not the agent user is created.
+        # The sandbox user and its workdir grant are required whether or not the agent user is created.
         assert "groupadd --system sandbox" in result
+        assert "RUN chgrp sandbox /workspace && chmod g+w /workspace" in result
         assert "USER agent" not in result
 
     def test_oci_labels_present(self, agent_config: Path) -> None:
@@ -571,7 +578,7 @@ class TestRenderFabricDockerfile:
 
         assert f'"nemo-helix[nemo-agents-plugin]=={get_contract_version()}"' in result
         assert "apt-get install -y --no-install-recommends g++ gcc ca-certificates curl git" in result
-        assert "uv venv --python 3.12 /opt/hermes-venv" in result
+        assert "uv venv --python 3.14 /opt/hermes-venv" in result
         assert 'm.version("nemo-fabric")' in result
         assert '"nemo-fabric[relay]==${FABRIC_VERSION}"' in result
         assert '"nemo-fabric-adapters-hermes==${FABRIC_VERSION}"' in result
@@ -659,6 +666,25 @@ class TestRenderFabricDockerfile:
         assert "groupadd --system sandbox" in result
         assert "USER agent" not in result
         assert "nemo_agents_plugin.fabric.server" in result
+
+    def test_fabric_sandbox_profile_grants_workdir_before_user_switch(self, fabric_agent_config: Path) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+        from nemo_helix_plugin.sandbox import SandboxImageProfile, SandboxUser
+
+        profile = SandboxImageProfile(
+            name="openshell",
+            users=(SandboxUser(name="sandbox", system=True, create_home=True),),
+            workdir_group="sandbox",
+        )
+
+        with patch(
+            "nemo_agents_plugin.container.sandbox.discover_sandbox_profiles",
+            return_value={"openshell": profile},
+        ):
+            result = render_fabric_dockerfile(fabric_agent_config, sandbox_runtime="openshell")
+
+        grant = result.index("RUN chgrp sandbox /workspace && chmod g+w /workspace")
+        assert result.index("chown -R agent:agent /workspace") < grant < result.index("USER agent")
 
     def test_config_outside_project_context_is_rejected(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
