@@ -110,18 +110,16 @@ describe('AgentDetailRoute optimization form', () => {
     const user = userEvent.setup();
     renderDetail('?tab=optimizations&view=new');
 
-    // Accuracy is the default intent.
-    expect(await screen.findByText(/temperature 0\.0–0\.6 · 1 parameter/)).toBeInTheDocument();
+    expect(await screen.findByText(/temperature 0\.0–0\.6/)).toBeInTheDocument();
 
     await user.click(await screen.findByRole('radio', { name: /Creativity/ }));
 
-    expect(await screen.findByText(/temperature 0\.3–1\.5 · 1 parameter/)).toBeInTheDocument();
+    expect(await screen.findByText(/temperature 0\.3–1\.5/)).toBeInTheDocument();
   });
 
   it('holds the run closed while the form is unanswered', async () => {
     renderDetail('?tab=optimizations&view=new');
 
-    // This agent has no published evaluations, so picking one is the first unanswered question.
     expect(
       await screen.findByText('Pick an evaluation to score trials against.')
     ).toBeInTheDocument();

@@ -21,18 +21,13 @@ const Stat: FC<{ value: string; label: string }> = ({ value, label }) => (
   </Stack>
 );
 
-const SAFETY_NOTES = [
-  'Runs against the deployed agent — read-only, no config is written',
-  'Lands in the Optimizations list straight away',
-  'Promotion is a separate, explicit step after the run',
-];
-
 export interface RunSummaryPanelProps {
   intent: OptimizationIntent;
   budget: OptimizationBudget;
   searchSpace: SearchParameter[];
   target?: OptimizationTarget;
   blockingReason?: string;
+  submitError?: string;
   isSubmitting: boolean;
   onRun: () => void;
 }
@@ -46,11 +41,11 @@ export interface RunSummaryPanelProps {
  * will make; it is not a cost figure and does not pretend to be one.
  */
 export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
-  intent,
   budget,
   searchSpace,
   target,
   blockingReason,
+  submitError,
   isSubmitting,
   onRun,
 }) => {
@@ -70,9 +65,6 @@ export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
             </Badge>
           ))}
         </Flex>
-        <Text kind="body/regular/sm" color="secondary">
-          {intent.objective} Derived from the {intent.title} intent.
-        </Text>
 
         <Divider />
 
@@ -90,18 +82,16 @@ export const RunSummaryPanel: FC<RunSummaryPanelProps> = ({
 
         <Divider />
 
-        {blockingReason ? (
+        {blockingReason && (
           <Banner kind="inline" status="warning">
             {blockingReason}
           </Banner>
-        ) : (
-          <Stack gap="density-sm">
-            {SAFETY_NOTES.map((note) => (
-              <Text key={note} kind="body/regular/sm" color="secondary">
-                {note}
-              </Text>
-            ))}
-          </Stack>
+        )}
+
+        {submitError && (
+          <Banner kind="inline" status="error">
+            {submitError}
+          </Banner>
         )}
 
         <LoadingButton
