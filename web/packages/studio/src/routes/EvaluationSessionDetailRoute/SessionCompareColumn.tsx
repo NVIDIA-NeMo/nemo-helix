@@ -58,6 +58,9 @@ const sessionMetrics = (run: EvaluationSessionResponse | undefined) => [
     label: name,
     value: fmtScore(score),
   })),
+  ...(run?.failed_evaluators ?? [])
+    .filter((name) => run?.evaluator_scores?.[name] == null)
+    .map((name) => ({ label: name, value: 'failed' })),
 ];
 
 // ── Column ────────────────────────────────────────────────────────────────────

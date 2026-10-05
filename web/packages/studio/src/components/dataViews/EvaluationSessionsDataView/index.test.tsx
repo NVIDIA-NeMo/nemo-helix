@@ -95,6 +95,22 @@ describe('EvaluationSessionsDataView', () => {
     expect(screen.getByText('Session output')).toBeInTheDocument();
   });
 
+  it('marks an evaluator that ran but produced no score as failed', async () => {
+    server.use(
+      http.get(EVALUATION_URL, () =>
+        HttpResponse.json({ ...mockEvaluation, evaluator_names: ['judge.accuracy'] })
+      ),
+      http.get(SESSIONS_URL, () =>
+        HttpResponse.json({
+          ...mockSessionsPage,
+          data: [{ ...mockSession, evaluator_scores: {}, failed_evaluators: ['judge.accuracy'] }],
+        })
+      )
+    );
+    renderDataView();
+    expect((await screen.findAllByText('Failed')).length).toBeGreaterThan(0);
+  });
+
   it('requests experiment sessions in preview mode', async () => {
     renderDataView();
 

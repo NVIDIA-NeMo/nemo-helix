@@ -80,3 +80,23 @@ describe('EvaluationsTable Job column', () => {
     }
   });
 });
+
+describe('EvaluationsTable Scores column', () => {
+  it('shows how many attempts failed to score beside the mean they are counted in', async () => {
+    renderTable([
+      makeEval({
+        name: 'eval-with-failures',
+        aggregate_scores: {
+          'judge.accuracy': { mean: 0.5, count: 4, failed_count: 2 },
+          'exact.match': { mean: 1, count: 4, failed_count: 0 },
+        },
+      }),
+    ]);
+
+    expect(
+      (await screen.findAllByText('(2 failed)', undefined, { timeout: LG_SELECTOR_TIMEOUT })).length
+    ).toBeGreaterThan(0);
+    // A clean evaluator gets no failure note.
+    expect(screen.queryByText('(0 failed)')).not.toBeInTheDocument();
+  });
+});
