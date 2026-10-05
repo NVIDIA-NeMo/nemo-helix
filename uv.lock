@@ -5592,8 +5592,10 @@ nemo-safe-synthesizer-plugin = [
 ]
 nemo-switchyard = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-agent-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 nemo-unsloth-plugin = [
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6163,6 +6165,7 @@ requires-dist = [
     { name = "nemo-agent-config-example-email-security-triage", marker = "extra == 'services'", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
     { name = "nemo-agent-optimization-plugin", marker = "extra == 'all'", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agent-optimization-plugin", marker = "extra == 'nemo-optimization-plugin'", editable = "plugins/nemo-agent-optimization" },
+    { name = "nemo-agent-optimization-plugin", marker = "extra == 'nemo-switchyard'", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agent-optimization-plugin", marker = "extra == 'plugins'", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agent-optimization-plugin", marker = "extra == 'services'", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agents-plugin", marker = "extra == 'all'", editable = "plugins/nemo-agents" },
@@ -6624,6 +6627,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'nemo-helix-sdk'", specifier = ">=6.0.0" },
     { name = "pyyaml", marker = "extra == 'nemo-insights-plugin'", specifier = ">=6.0.3" },
     { name = "pyyaml", marker = "extra == 'nemo-optimization-plugin'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'nemo-switchyard'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nhx-common'", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'plugins'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'plugins'", specifier = ">=6.0.2" },
@@ -7479,15 +7483,19 @@ version = "0.1.0"
 source = { editable = "plugins/nemo-switchyard" }
 dependencies = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-agent-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-switchyard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0,<1" },
+    { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-switchyard", specifier = "==0.3.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [[package]]
@@ -7685,6 +7693,7 @@ cpu-tasks = [
     { name = "nemo-insights-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-optimization-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-sandboxed-gym", extra = ["opensandbox", "server"], marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-switchyard-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-common", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-hello-world", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nhx-platform", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7947,6 +7956,7 @@ cpu-tasks = [
     { name = "nemo-insights-plugin", editable = "plugins/nemo-insights" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-sandboxed-gym", extras = ["server", "opensandbox"], editable = "packages/sandboxed_gym" },
+    { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-hello-world", editable = "services/hello-world" },
     { name = "nhx-platform", editable = "packages/nhx_platform" },
