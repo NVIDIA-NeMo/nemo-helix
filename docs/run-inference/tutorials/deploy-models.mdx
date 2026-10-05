@@ -9,6 +9,8 @@ description: ""
 
 Deploy models from NGC or HuggingFace. Register external providers like OpenAI or NVIDIA Build.
 
+On-platform model deployments use the deployments plugin (Docker, Kubernetes, or OpenShell executors — no subprocess backend). Default local platform config uses the Docker executor, so local model serving needs a running Docker daemon. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
 <Note>
 
 Resource names for deployments, deployment configs, and providers must contain only letters (a-z, A-Z), digits (0-9), underscores, hyphens, and dots. For example: `llama-3.1-8b`, `my-custom-model`, `qwen-fs-config`.

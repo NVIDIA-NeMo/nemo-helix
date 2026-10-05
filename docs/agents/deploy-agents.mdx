@@ -30,9 +30,15 @@ durable container through the deployments plugin.
 
 | Mode | Runs as | Survives a platform restart | Requires |
 | ------ | --------- | ----------------------------- | ---------- |
-| `subprocess` (default) | A local FastAPI server on the platform host | No | Nothing extra |
+| `subprocess` (default) | A local FastAPI server on the platform host | No | Nothing extra for the agent process |
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
+
+<Note>
+
+Subprocess agent deploy does not mean the **platform** can start without Docker. Default local platform startup still starts the deployments controller with a Docker-backed executor (used for on-platform model deployments and for `--mode docker` / `k8s` agent deploys). See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
+</Note>
 
 In every mode the agent is reached the same way — through the Agents gateway,
 which resolves the agent's active deployment and proxies the request, so

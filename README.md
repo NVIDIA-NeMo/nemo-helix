@@ -16,7 +16,7 @@ NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and 
 
 ## Get started
 
-**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required when starting local services.
+**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for Helix's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
 
 Quick install from PyPI:
 
