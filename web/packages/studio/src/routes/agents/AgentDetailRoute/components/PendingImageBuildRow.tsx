@@ -6,6 +6,7 @@ import { JOBS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
+import { TriangleAlert } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -20,9 +21,18 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
   const { jobName } = build;
   return (
     <Flex align="start" gap="2" className="px-4 py-3" data-testid="pending-image-build">
-      <Spinner size="small" aria-label="Building image" className="mt-0.5 shrink-0" />
+      {build.isStalled ? (
+        <TriangleAlert
+          className="mt-0.5 size-4 shrink-0 text-warning"
+          aria-label="Image build not started"
+        />
+      ) : (
+        <Spinner size="small" aria-label="Building image" className="mt-0.5 shrink-0" />
+      )}
       <Stack gap="0" className="min-w-0 flex-1">
-        <Text kind="body/semibold/sm">Building an image to deploy</Text>
+        <Text kind="body/semibold/sm">
+          {build.isStalled ? 'Waiting for the image build to start' : 'Building an image to deploy'}
+        </Text>
         {build.isStalled ? (
           <Text kind="body/regular/xs" className="text-warning">
             The build was accepted but has not started. Check that the platform is running a jobs

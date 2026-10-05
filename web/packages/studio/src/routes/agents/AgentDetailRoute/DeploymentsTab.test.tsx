@@ -5,7 +5,7 @@ import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDep
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 
 const STAGED = 'a'.repeat(40);
@@ -64,6 +64,7 @@ describe('DeploymentsTab pending image build', () => {
     expect(row).toHaveTextContent('Building an image to deploy');
     expect(row).toHaveTextContent('Docker');
     expect(row).toHaveTextContent(/Deploys when the build finishes/);
+    expect(within(row).getByLabelText('Building image')).toBeInTheDocument();
     expect(screen.queryByText('No deployments for this agent.')).not.toBeInTheDocument();
   });
 
@@ -74,10 +75,14 @@ describe('DeploymentsTab pending image build', () => {
     expect(screen.getByText('calc-dep')).toBeInTheDocument();
   });
 
-  it('warns when the build has not started', () => {
+  it('stops spinning and warns when the build has not started', () => {
     renderTab([], undefined, { mode: 'docker', jobName: 'pkg-1', isStalled: true });
 
-    expect(screen.getByTestId('pending-image-build')).toHaveTextContent(/has not started/);
+    const row = screen.getByTestId('pending-image-build');
+    expect(row).toHaveTextContent('Waiting for the image build to start');
+    expect(row).toHaveTextContent(/has not started/);
+    expect(within(row).getByLabelText('Image build not started')).toBeInTheDocument();
+    expect(within(row).queryByLabelText('Building image')).not.toBeInTheDocument();
   });
 });
 
