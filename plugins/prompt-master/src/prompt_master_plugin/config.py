@@ -4,8 +4,7 @@
 """Configuration for Prompt Master Fabric executions."""
 
 from pathlib import Path
-from typing import Any, Self
-from urllib.parse import urlparse
+from typing import Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -16,30 +15,18 @@ class PromptMasterConfigError(ValueError):
 
 
 class PromptMasterModelConfig(BaseModel):
-    """Model used by the Fabric optimizer agent."""
+    """Model used by the Fabric optimizer agent.
+
+    The model is served through the platform's Inference Gateway: the job binds the gateway
+    URL for its workspace at run time and authenticates with its own identity, so the config
+    names no endpoint and no API key.  ``model`` is a model ID from ``nemo models list``.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
-    api_key_env: str | None = None
-    base_url: str | None = None
     temperature: float | None = None
-    settings: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _validate_deepagents_model(self) -> Self:
-        provider = self.provider.strip().lower()
-        if provider in {"nvidia", "openai-compatible"} and not self.base_url:
-            raise ValueError(f"model.base_url is required for provider {self.provider!r}")
-        if self.base_url and urlparse(self.base_url).hostname == "build.nvidia.com":
-            raise ValueError(
-                "model.base_url must be an OpenAI-compatible API root, such as "
-                "'https://integrate.api.nvidia.com/v1'; 'https://build.nvidia.com/' is the web UI"
-            )
-        if provider != "openai" and not self.api_key_env:
-            raise ValueError(f"model.api_key_env is required for provider {self.provider!r}")
-        return self
 
 
 class PromptMasterConfig(BaseModel):

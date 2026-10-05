@@ -48,9 +48,7 @@ says nothing about the agent being optimized; that comes from `--agent`.
 ```yaml
 model:
   provider: nvidia
-  model: nvidia/nemotron-3.5-lightning-30b-a3b
-  base_url: https://integrate.api.nvidia.com/v1
-  api_key_env: NVIDIA_API_KEY
+  model: nvidia-nemotron-3-5-lightning-30b-a3b
   temperature: 0.0
 prompt_override: |
   You are a one-shot prompt optimizer. Always use the prompt-master skill.
@@ -59,9 +57,13 @@ prompt_override: |
 timeout_seconds: 300
 ```
 
+The model is served through the platform's Inference Gateway: the job binds
+the gateway URL for its workspace at run time and authenticates its inference
+calls with its own identity, so the config carries no provider URL and no API
+key. `model.model` is a model ID from `nemo models list`.
+
 `prompt_override` replaces the optimizer agent's own system instructions. Omit
-it to use the plugin default. When `model.api_key_env` is set, that variable
-must be exported where the job step runs. [examples/prompt-master.yaml](examples/prompt-master.yaml)
+it to use the plugin default. [examples/prompt-master.yaml](examples/prompt-master.yaml)
 is a ready-to-use copy of the above.
 
 ## Run

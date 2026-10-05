@@ -12,8 +12,8 @@ def test_prompt_master_example_is_valid() -> None:
 
     config = load_prompt_master_config(config_path)
 
-    assert config.model.base_url == "https://integrate.api.nvidia.com/v1"
-    assert config.model.api_key_env == "NVIDIA_API_KEY"
+    assert config.model.provider == "nvidia"
+    assert config.model.model == "nvidia-nemotron-3-5-lightning-30b-a3b"
 
 
 def test_loads_yaml_config(tmp_path: Path) -> None:
@@ -22,9 +22,7 @@ def test_loads_yaml_config(tmp_path: Path) -> None:
         """
 model:
   provider: nvidia
-  model: nvidia/nemotron-3-nano-30b-a3b
-  base_url: https://inference-api.nvidia.com/v1
-  api_key_env: NVIDIA_API_KEY
+  model: nvidia-nemotron-3-nano-30b-a3b
   temperature: 0.1
 prompt_override: |
   Help users debug their Python code.
@@ -36,8 +34,8 @@ timeout_seconds: 90
     config = load_prompt_master_config(config_path)
 
     assert config.model.provider == "nvidia"
-    assert config.model.model == "nvidia/nemotron-3-nano-30b-a3b"
-    assert config.model.api_key_env == "NVIDIA_API_KEY"
+    assert config.model.model == "nvidia-nemotron-3-nano-30b-a3b"
+    assert config.model.temperature == 0.1
     assert config.prompt_override == "Help users debug their Python code.\n"
     assert config.timeout_seconds == 90
 
@@ -97,33 +95,22 @@ unexpected: true
         load_prompt_master_config(config_path)
 
 
-def test_rejects_the_nvidia_build_website_as_a_model_api(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "field",
+    ["base_url: https://integrate.api.nvidia.com/v1", "api_key_env: NVIDIA_API_KEY"],
+)
+def test_rejects_a_model_endpoint_or_key(tmp_path: Path, field: str) -> None:
+    """Inference always goes through the platform's Inference Gateway, so neither is configurable."""
     config_path = tmp_path / "prompt-master.yaml"
     config_path.write_text(
-        """
+        f"""
 model:
   provider: nvidia
-  model: nvidia/nemotron-3-nano-30b-a3b
-  base_url: https://build.nvidia.com/
-  api_key_env: NVIDIA_API_KEY
+  model: nvidia-nemotron-3-nano-30b-a3b
+  {field}
 """.lstrip(),
         encoding="utf-8",
     )
 
-    with pytest.raises(PromptMasterConfigError, match="OpenAI-compatible API root"):
-        load_prompt_master_config(config_path)
-
-
-def test_nvidia_model_requires_base_url_and_api_key_env(tmp_path: Path) -> None:
-    config_path = tmp_path / "prompt-master.yaml"
-    config_path.write_text(
-        """
-model:
-  provider: nvidia
-  model: nvidia/nemotron-3-nano-30b-a3b
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PromptMasterConfigError, match="base_url"):
+    with pytest.raises(PromptMasterConfigError, match=field.split(":")[0]):
         load_prompt_master_config(config_path)

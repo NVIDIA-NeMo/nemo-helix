@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
+from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
 from nemo_agents_plugin.fabric.translator import translate_agent_config
+from prompt_master_plugin import runner as runner_module
 from prompt_master_plugin.config import PromptMasterConfig
 from prompt_master_plugin.runner import (
     PromptMasterExecutionError,
@@ -15,39 +19,25 @@ from prompt_master_plugin.runner import (
     build_optimizer_agent,
     extract_optimized_prompt,
     optimize_prompt,
+    run_prompt_master,
+)
+
+PLATFORM_URL = "http://platform:8080"
+GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/team/openai/-/v1"
+GATEWAY_URL = f"{PLATFORM_URL}{GATEWAY_PATH}"
+PROXY_URL = "http://127.0.0.1:4321"
+RESPONSE = "```\nnew prompt\n```\n🎯 Target: Fabric agent."
+
+CONFIG = PromptMasterConfig.model_validate(
+    {
+        "model": {"provider": "nvidia", "model": "nvidia-nemotron-3-5-lightning-30b-a3b", "temperature": 0.0},
+        "prompt_override": "You are a custom one-shot Prompt Master runner.",
+        "timeout_seconds": 45,
+    }
 )
 
 
-def _config() -> PromptMasterConfig:
-    return PromptMasterConfig.model_validate(
-        {
-            "model": {
-                "provider": "openai",
-                "model": "gpt-5.6",
-                "api_key_env": "OPENAI_API_KEY",
-                "temperature": 0.0,
-            },
-            "prompt_override": "You are a custom one-shot Prompt Master runner.",
-            "timeout_seconds": 45,
-        }
-    )
-
-
-def _fabric_agent_config() -> dict[str, Any]:
-    """A translated Fabric package: harness adapter id, flat ``models.default``."""
-    return {
-        "schema_version": "fabric.agent/v1alpha1",
-        "metadata": {"name": "calculator-agent"},
-        "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
-        "models": {"default": {"provider": "nvidia", "model": "calculator-model"}},
-        "instructions": {
-            "system": {"content": "You are a concise calculator agent. Solve arithmetic and return only the answer."}
-        },
-    }
-
-
-def _platform_agent_config() -> dict[str, Any]:
-    """A stored ``nemo-agents-spec-v1`` config, the shape the strategy job hands over."""
+def _agent_config() -> dict[str, Any]:
     return {
         "config_format": "nemo-agents-spec-v1",
         "name": "calculator-agent",
@@ -57,130 +47,165 @@ def _platform_agent_config() -> dict[str, Any]:
     }
 
 
-def test_builds_a_deepagents_fabric_agent_with_the_bundled_skill() -> None:
-    agent = build_optimizer_agent(_config())
+def _fake_invoke(monkeypatch: pytest.MonkeyPatch, result: Any) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    async def fake(request: Any) -> Any:
+        captured["request"] = request
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(runner_module, "invoke_agent_config_request_once", fake)
+    monkeypatch.setenv("NHX_BASE_URL", PLATFORM_URL)
+    return captured
+
+
+def _optimize(tmp_path: Path, agent_config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+    return asyncio.run(
+        optimize_prompt(
+            CONFIG, agent_config=agent_config or _agent_config(), base_dir=tmp_path, workspace="team", **kwargs
+        )
+    )
+
+
+def test_builds_optimizer_agent() -> None:
+    agent = build_optimizer_agent(CONFIG, workspace="team", platform_base_url=PLATFORM_URL)
 
     assert agent.default_harness == "deepagents"
-    assert agent.harnesses["deepagents"].kind == "deepagents"
-    assert agent.models["default"].model == "gpt-5.6"
-    assert agent.models["default"].api_key_env == "OPENAI_API_KEY"
-    assert agent.skills is not None
-    assert len(agent.skills.paths) == 1
-    # The path must be the skills *library*, not the skill: harnesses enumerate the directory's
-    # children and take each one holding a SKILL.md, so naming the skill itself loads nothing --
-    # silently, with no error.  Asserting the library both ways pins the level, not just the name.
-    library_path = Path(agent.skills.paths[0])
-    assert (library_path / "prompt-master" / "SKILL.md").is_file()
-    assert not (library_path / "SKILL.md").exists()
-    assert agent.environment.workspace == "workspace"
-    assert agent.environment.artifacts == "artifacts"
-    assert agent.instructions is not None
-    assert agent.instructions.system is not None
+    assert agent.models["default"].model == "nvidia-nemotron-3-5-lightning-30b-a3b"
+    assert agent.models["default"].base_url == GATEWAY_URL
+    assert agent.models["default"].api_key_env is None
+    assert agent.instructions and agent.instructions.system
     assert agent.instructions.system.content == "You are a custom one-shot Prompt Master runner."
+    # Harnesses load a skills *library* (directory of skill dirs), not the skill dir itself.
+    assert agent.skills and (Path(agent.skills.paths[0]) / "prompt-master" / "SKILL.md").is_file()
 
 
-def test_optimizer_agent_translates_to_a_fabric_config() -> None:
-    fabric_config = translate_agent_config(build_optimizer_agent(_config()))
+def test_reads_platform_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setenv("NHX_BASE_URL", "http://from-env:9000/")
 
-    assert fabric_config.harness is not None
-    assert fabric_config.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
-    assert fabric_config.models["default"].model == "gpt-5.6"
-    assert fabric_config.skills is not None
-    assert len(fabric_config.skills.paths) == 1
+    agent = build_optimizer_agent(CONFIG, workspace="default")
+
+    assert (
+        agent.models["default"].base_url
+        == "http://from-env:9000/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    )
 
 
-def test_describes_a_stored_platform_agent_by_harness_kind_and_model() -> None:
-    task = build_optimization_input(_config(), _platform_agent_config())
+def test_translates_with_gateway_credential() -> None:
+    fabric = translate_agent_config(build_optimizer_agent(CONFIG, workspace="team", platform_base_url=PLATFORM_URL))
+
+    assert fabric.harness and fabric.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
+    assert fabric.models["default"].api_key_env == PLATFORM_IGW_API_KEY_ENV
+    assert fabric.environment and fabric.environment.env[PLATFORM_IGW_API_KEY_ENV] == PLATFORM_IGW_API_KEY_PLACEHOLDER
+
+
+def test_builds_optimization_input() -> None:
+    task = build_optimization_input(_agent_config())
 
     assert "using the hermes harness and harness-model model" in task
     assert "<existing_prompt>You are a concise calculator agent.</existing_prompt>" in task
 
 
-def test_describes_a_fabric_package_by_adapter_id_and_default_model() -> None:
-    task = build_optimization_input(_config(), _fabric_agent_config())
+def test_prefers_default_model() -> None:
+    config = _agent_config() | {"models": {"default": {"provider": "nvidia", "model": "top-model"}}}
 
-    assert "using the nvidia.fabric.langchain.deepagents harness and calculator-model model" in task
+    assert "top-model model" in build_optimization_input(config)
 
 
-def test_executes_the_skill_through_fabric_and_returns_the_prompt(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-    response = (
-        "```\n"
-        "You are a coding assistant. Diagnose the smallest root cause, apply a scoped fix, "
-        "and verify it with focused tests.\n"
-        "```\n"
-        "🎯 Target: Fabric agent, 💡 Added scope and verification criteria."
-    )
+def test_rejects_missing_system_prompt() -> None:
+    config = _agent_config()
+    del config["instructions"]
 
-    async def fake_invoke(request: Any) -> Any:
-        captured["request"] = request
-        return SimpleNamespace(status="succeeded", response=response, error=None)
+    with pytest.raises(PromptMasterExecutionError, match="instructions.system.content"):
+        build_optimization_input(config)
 
-    monkeypatch.setattr("prompt_master_plugin.runner.invoke_agent_config_request_once", fake_invoke)
 
-    outcome = asyncio.run(optimize_prompt(_config(), agent_config=_fabric_agent_config(), base_dir=tmp_path))
+def test_runs_through_fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
+
+    outcome = _optimize(tmp_path)
 
     request = captured["request"]
     assert request.timeout_seconds == 45
     assert request.base_dir == tmp_path
     assert "Use the prompt-master skill" in request.input
-    assert "<existing_prompt>You are a concise calculator agent." in request.input
-    assert "nvidia.fabric.langchain.deepagents" in request.input
-    assert "calculator-model" in request.input
-    assert outcome.optimized_prompt.startswith("You are a coding assistant.")
-    assert outcome.optimized_prompt.endswith("focused tests.")
-    assert outcome.response == response
+    assert request.agent_config.models["default"].base_url == GATEWAY_URL
+    assert outcome.optimized_prompt == "new prompt"
+    assert outcome.response == RESPONSE
 
 
-def test_rejects_a_failed_fabric_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_invoke(_request: Any) -> Any:
-        return SimpleNamespace(status="failed", response=None, error="provider unavailable")
+def test_routes_through_auth_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
 
-    monkeypatch.setattr("prompt_master_plugin.runner.invoke_agent_config_request_once", fake_invoke)
+    _optimize(tmp_path, proxy_origin=PROXY_URL)
 
-    with pytest.raises(PromptMasterExecutionError, match="provider unavailable"):
-        asyncio.run(optimize_prompt(_config(), agent_config=_fabric_agent_config(), base_dir=tmp_path))
+    assert captured["request"].agent_config.models["default"].base_url == f"{PROXY_URL}{GATEWAY_PATH}"
 
 
-def test_wraps_fabric_execution_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
+def test_run_prompt_master_opens_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
+    monkeypatch.setattr(runner_module, "platform_auth_proxy", lambda: contextlib.nullcontext(PROXY_URL))
 
-    async def fake_invoke(_request: Any) -> Any:
-        raise FabricRuntimeExecutionError("adapter could not start")
+    outcome = run_prompt_master(CONFIG, _agent_config(), tmp_path, workspace="team")
 
-    monkeypatch.setattr("prompt_master_plugin.runner.invoke_agent_config_request_once", fake_invoke)
-
-    with pytest.raises(PromptMasterExecutionError, match="adapter could not start"):
-        asyncio.run(optimize_prompt(_config(), agent_config=_fabric_agent_config(), base_dir=tmp_path))
+    assert outcome.optimized_prompt == "new prompt"
+    assert captured["request"].agent_config.models["default"].base_url == f"{PROXY_URL}{GATEWAY_PATH}"
 
 
-def test_rejects_an_agent_without_system_instructions(tmp_path: Path) -> None:
-    agent_config = _fabric_agent_config()
-    agent_config.pop("instructions")
+@pytest.mark.parametrize(
+    ("result", "match"),
+    [
+        (SimpleNamespace(status="failed", response=None, error="provider unavailable"), "provider unavailable"),
+        (SimpleNamespace(status="succeeded", response="", error=None), "no response"),
+        (FabricRuntimeExecutionError("adapter could not start"), "adapter could not start"),
+    ],
+)
+def test_rejects_failed_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, result: Any, match: str) -> None:
+    _fake_invoke(monkeypatch, result)
 
-    with pytest.raises(PromptMasterExecutionError, match="instructions.system.content"):
-        asyncio.run(optimize_prompt(_config(), agent_config=agent_config, base_dir=tmp_path))
-
-
-def test_extracts_the_first_copyable_prompt_block() -> None:
-    response = """Strategy note first.
-
-```markdown
-Role: You are a precise assistant.
-Task: Answer only from supplied context.
-```
-
-🎯 Target: Fabric agent, 💡 Tightened grounding.
-"""
-
-    assert extract_optimized_prompt(response) == (
-        "Role: You are a precise assistant.\nTask: Answer only from supplied context."
-    )
+    with pytest.raises(PromptMasterExecutionError, match=match):
+        _optimize(tmp_path)
 
 
-def test_rejects_a_response_without_a_prompt_block() -> None:
+def test_extracts_first_prompt_block() -> None:
+    response = "Note.\n\n```markdown\nRole: assistant.\nTask: answer.\n```\n\n🎯 Target."
+
+    assert extract_optimized_prompt(response) == "Role: assistant.\nTask: answer."
+
+
+def test_rejects_missing_prompt_block() -> None:
     with pytest.raises(PromptMasterExecutionError, match="copyable prompt block"):
-        extract_optimized_prompt("No fenced block was returned.")
+        extract_optimized_prompt("No fenced block.")
+
+
+def test_missing_prompt_block_error_quotes_the_response() -> None:
+    # The job log only ever sees the exception message, so the model's actual reply must ride
+    # along or the next parse failure is undiagnosable (as the first one was).
+    with pytest.raises(PromptMasterExecutionError, match="Here is an improved prompt without a fence"):
+        extract_optimized_prompt("Here is an improved prompt without a fence.\nRole: assistant.")
+
+
+def test_missing_prompt_block_error_truncates_a_long_response() -> None:
+    response = "word " * 1000
+
+    with pytest.raises(PromptMasterExecutionError) as excinfo:
+        extract_optimized_prompt(response)
+
+    message = str(excinfo.value)
+    assert len(message) < 600
+    assert message.endswith("...")
+
+
+def test_rejects_missing_bundled_skill_before_invoking_fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A skills library without prompt-master/SKILL.md loads nothing, silently, and the optimizer
+    # then answers without Prompt Master's output format.  Fail before paying for that model call.
+    captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
+    monkeypatch.setattr(runner_module, "skills_dir", lambda: tmp_path / "no-skills-here")
+
+    with pytest.raises(PromptMasterExecutionError, match=r"prompt-master/SKILL\.md"):
+        _optimize(tmp_path)
+
+    assert "request" not in captured

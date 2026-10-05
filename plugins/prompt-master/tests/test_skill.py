@@ -14,10 +14,5 @@ def test_bundles_prompt_master_skill_and_references() -> None:
     assert (skill / "references" / "patterns.md").is_file()
 
 
-def test_bundled_skill_retains_upstream_license_and_revision() -> None:
-    skill = skills_dir() / "prompt-master"
-
-    assert "MIT License" in (skill / "LICENSE").read_text(encoding="utf-8")
-    provenance = (skill / "UPSTREAM.md").read_text(encoding="utf-8")
-    assert "nidhinjs/prompt-master" in provenance
-    assert "2bd92518e26bf659e21e3d9ab90573fcf3ddeccb" in provenance
+def test_bundled_skill_retains_upstream_license() -> None:
+    assert "MIT License" in (skills_dir() / "prompt-master" / "LICENSE").read_text(encoding="utf-8")

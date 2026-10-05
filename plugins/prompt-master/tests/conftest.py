@@ -35,7 +35,7 @@ from prompt_master_plugin.runner import PromptMasterOutcome  # noqa: E402
 def optimizer_config() -> dict[str, Any]:
     """A valid optimizer config, as staged in a fileset or passed by absolute path."""
     return {
-        "model": {"provider": "openai", "model": "gpt-5.6", "api_key_env": "OPENAI_API_KEY"},
+        "model": {"provider": "openai", "model": "gpt-5.6"},
         "timeout_seconds": 30,
     }
 
@@ -81,12 +81,12 @@ def config_path(tmp_path: Path, optimizer_config: dict[str, Any]) -> Path:
 
 
 @pytest.fixture
-def fake_prompt_master(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, Any, Path]]:
-    """Replace the Fabric run with a canned outcome; returns the recorded ``(config, agent_config, base_dir)`` calls."""
-    calls: list[tuple[Any, Any, Path]] = []
+def fake_prompt_master(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, Any, Path, str]]:
+    """Replace the Fabric run with a canned outcome; returns the recorded ``(config, agent_config, base_dir, workspace)`` calls."""
+    calls: list[tuple[Any, Any, Path, str]] = []
 
-    def fake(config: Any, agent_config: Any, base_dir: Path) -> PromptMasterOutcome:
-        calls.append((config, agent_config, base_dir))
+    def fake(config: Any, agent_config: Any, base_dir: Path, *, workspace: str) -> PromptMasterOutcome:
+        calls.append((config, agent_config, base_dir, workspace))
         return PromptMasterOutcome(
             optimized_prompt="new prompt",
             response="```\nnew prompt\n```\n🎯 Target: Fabric agent, 💡 Tightened scope.",

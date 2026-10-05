@@ -221,10 +221,12 @@ def test_run_writes_the_optimized_agent_and_registers_the_result(
     assert result["result"]["name"] == RESULT_NAME
     assert "output" not in result
 
-    (config, agent_config, base_dir) = fake_prompt_master[0]
+    (config, agent_config, base_dir, workspace) = fake_prompt_master[0]
     assert config.model.model == "gpt-5.6"
     assert agent_config["instructions"]["system"]["content"] == "old prompt"
     assert base_dir.is_relative_to(ctx.storage.ephemeral)
+    # The optimizer model is bound to the Inference Gateway of the workspace the job runs in.
+    assert workspace == "default"
 
     saved = tmp_path / "job-results" / RESULT_NAME
     optimized = yaml.safe_load((saved / OPTIMIZED_AGENT_FILENAME).read_text(encoding="utf-8"))
@@ -335,6 +337,7 @@ def test_run_stages_the_config_from_the_fileset(
     assert seen["fileset_ref"] == "default/pm-bundle"
     assert seen["workspace"] == "staging"
     assert seen["kind"] == "prompt-master-config"
+    assert fake_prompt_master[0][3] == "staging"
 
 
 def test_run_requires_a_platform_client(ctx: JobContext, config_path: Path) -> None:

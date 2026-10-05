@@ -97,7 +97,7 @@ class PromptMasterOptimizeJob(NemoJob):
     #: subclass, and no strategy-specific entry-point group to join.
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name=STRATEGY_NAME,
-        description="Rewrite the agent's system prompt with the Prompt Master skill in one Fabric run.",
+        description="Rewrite the agent's system prompt using https://github.com/nidhinjs/prompt-master.",
     )
     description: ClassVar[str] = "Optimize a platform agent's system prompt with Prompt Master."
     container: ClassVar[str] = "cpu-tasks"
@@ -176,7 +176,7 @@ class PromptMasterOptimizeJob(NemoJob):
         runtime_dir = ctx.storage.ephemeral / STRATEGY_NAME / "fabric"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Running Prompt Master on agent %s with optimizer model %s", agent_label, optimizer.model.model)
-        outcome = run_prompt_master(optimizer, source, runtime_dir)
+        outcome = run_prompt_master(optimizer, source, runtime_dir, workspace=spec.workspace)
         optimized = with_system_prompt(source, outcome.optimized_prompt)
 
         results_dir = ctx.storage.ephemeral / STRATEGY_NAME / "results"
