@@ -11,7 +11,7 @@ This tutorial walks through running a single audit end-to-end with the NeMo Audi
 
 **What you will learn:**
 
-- Initialize the NeMo Platform SDK and reach the `client.auditor` resource.
+- Initialize NeMo Helix SDK and reach the `client.auditor` resource.
 - Create an `AuditConfig` selecting which garak probes to run.
 - Create an `AuditTarget` pointing at a model through the Inference Gateway.
 - Execute the audit locally with `client.auditor.run(...)`.
@@ -24,7 +24,7 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 </Tip>
 ## Prerequisites
 
-- Install and start NeMo Platform using the [Setup guide](/documentation/get-started).
+- Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 - Install garak in a Python virtual environment so the plugin can shell out to it. By default the plugin invokes `~/.auditor/.venv/bin/python -m garak`. Override the interpreter path with `NEMO_AUDITOR_GARAK_PYTHON` if your install lives elsewhere.
 - Configure at least one Inference Gateway provider — this tutorial uses the `nvidia-inference-api` provider that is included in a default local setup, but any chat-completion-compatible provider works. Step 3 shows how to list the providers registered in your deployment. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nmp_uri_spec` block used below.
 

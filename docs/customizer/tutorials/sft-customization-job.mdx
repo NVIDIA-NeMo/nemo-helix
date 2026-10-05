@@ -50,7 +50,7 @@ Supervised Fine-Tuning (SFT) customizes model behavior, injects new knowledge, a
 
 Before starting this tutorial, ensure you have:
 
-1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Platform locally
+1. **Completed the [Quickstart](/documentation/get-started)** to install and deploy NeMo Helix locally
 2. **Installed the Python SDK** (PyPI wrapper: `pip install "nemo-platform[all]"`; source checkout: run `make bootstrap` from the repository root)
 3. **At least one GPU with CUDA 13+**
 
@@ -58,7 +58,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Platform server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Platform is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
+The SDK needs to know the server URL for your NeMo Helix deployment. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NMP_BASE_URL` environment variable:
 
 ```sh
 export NMP_BASE_URL=<YOUR_NMP_BASE_URL>
@@ -365,9 +365,9 @@ Create a customization job to fine-tune all model weights using the **Automodel*
 
 **GPU Requirements:**
 - 1B models: 1 GPU (24GB+ VRAM)
-- 3B models: 1-2 GPUs  
+- 3B models: 1-2 GPUs
 - 8B models: 2-4 GPUs
-- 70B models: 8+ GPUs 
+- 70B models: 8+ GPUs
 
 Adjust `num_gpus_per_node` based on your model size.
 

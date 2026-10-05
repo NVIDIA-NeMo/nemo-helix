@@ -5,10 +5,10 @@ instances:
 - url: nemo-platform.docs.buildwithfern.com/nemo-platform
   custom-domain: docs.nvidia.com/nemo-platform
   multi-source: true
-title: NVIDIA NeMo Platform
+title: NVIDIA NeMo Helix
 global-theme: nvidia
 logo:
-  right-text: NeMo Platform
+  right-text: NeMo Helix
 css:
 - ./styles/notebook-viewer.css
 - ./styles/button.css

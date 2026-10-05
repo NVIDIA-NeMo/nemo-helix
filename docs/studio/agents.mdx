@@ -5,11 +5,11 @@
 title: "NeMo Studio Agents"
 description: ""
 ---
-Use **Agents** in the NeMo Studio workspace sidebar to review and operate agent workflows managed by NeMo Platform.
+Use **Agents** in the NeMo Studio workspace sidebar to review and operate agent workflows managed by NeMo Helix.
 
 ## Current Agent Experience
 
-New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml` format. NeMo Platform translates this durable configuration into the NVIDIA Agent Intelligence Toolkit Fabric runtime configuration when it deploys the agent. Fabric is the execution layer; `nemo-agents-spec-v1` remains the configuration contract that you author and store.
+New agents use the Platform-managed `nemo-agents-spec-v1` `agent.yaml` format. NeMo Helix translates this durable configuration into the NVIDIA Agent Intelligence Toolkit Fabric runtime configuration when it deploys the agent. Fabric is the execution layer; `nemo-agents-spec-v1` remains the configuration contract that you author and store.
 
 This Fabric-first path is recommended for new agents. Studio can also display legacy `nat-workflow-v1` agents, so the fields shown on the **Details** tab depend on the agent's config format. Create a sample `nemo-agents-spec-v1` agent with **Create Example Agent**, or register your own agent through the `nemo agents` CLI or Agents API. Studio does not currently provide a general-purpose editor for authoring an arbitrary `agent.yaml`.
 

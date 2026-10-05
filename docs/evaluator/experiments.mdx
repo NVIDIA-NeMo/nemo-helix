@@ -28,7 +28,7 @@ decide what to promote.
 
 ### Requirements
 
-- A NeMo Platform environment with the `intake` service running.
+- A NeMo Helix environment with the `intake` service running.
 - The platform entity store (Postgres).
 - A reachable ClickHouse database.
 - A producer that creates Evaluations and sends their telemetry: the NeMo Optimizer, a benchmark or
@@ -122,7 +122,7 @@ Two Experiment-level behaviors are worth knowing:
 
 ### Setup
 
-Experiments are part of the `intake` service, so any running NeMo Platform already serves them. Point
+Experiments are part of the `intake` service, so any running NeMo Helix already serves them. Point
 at whatever you have, whether a deployed platform or a local one from `nemo setup` or
 `nemo quickstart up`:
 

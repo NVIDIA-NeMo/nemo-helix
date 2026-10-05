@@ -5,7 +5,7 @@
 title: "Security Model"
 description: ""
 ---
-This page describes the security architecture of NeMo Platform authentication and authorization — how requests are authenticated, how access decisions are made, and where trust boundaries lie. It is intended for platform operators and security reviewers evaluating NeMo Platform for production deployment.
+This page describes the security architecture of NeMo Helix authentication and authorization — how requests are authenticated, how access decisions are made, and where trust boundaries lie. It is intended for platform operators and security reviewers evaluating NeMo Helix for production deployment.
 
 For hands-on setup, see [Auth Configuration](/documentation/access-control/deployment). For the authorization model, see [Concepts](/documentation/access-control/concepts).
 
@@ -17,7 +17,7 @@ sequenceDiagram
     participant Client
     participant Gateway
     participant Auth as Auth Service
-    participant Service as NeMo Platform Service
+    participant Service as NeMo Helix Service
     participant PDP as PDP (Embedded or OPA)
 
     Note over Gateway,PDP: Trust Boundary
@@ -47,15 +47,15 @@ In quickstart deployments without an OIDC provider, the `X-NMP-Principal-*` head
 </Note>
 ## Authentication Modes
 
-NeMo Platform supports two authentication modes: **service-level** bearer-token validation and **gateway bearer-auth callout**.
+NeMo Helix supports two authentication modes: **service-level** bearer-token validation and **gateway bearer-auth callout**.
 
-In both modes, identity arrives in the `Authorization: Bearer <token>` header. The bearer token is validated exactly once — either by the first NeMo Platform service or by the auth service behind the gateway callout. After validation, the authenticated identity (email, subject, groups) is propagated to downstream services via **trusted `X-NMP-Principal-*` headers**. Downstream services accept these headers without re-validating the token, but they still run authorization checks.
+In both modes, identity arrives in the `Authorization: Bearer <token>` header. The bearer token is validated exactly once — either by the first NeMo Helix service or by the auth service behind the gateway callout. After validation, the authenticated identity (email, subject, groups) is propagated to downstream services via **trusted `X-NMP-Principal-*` headers**. Downstream services accept these headers without re-validating the token, but they still run authorization checks.
 
 This "validate once, propagate via headers" design means that **network perimeter security is critical**: anything inside the trust boundary that receives `X-NMP-Principal-*` headers will trust them unconditionally. The gateway must strip these headers from all incoming external requests to prevent clients from forging an identity. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
 
 ### Service-Level Authentication
 
-The first NeMo Platform service that receives the request validates the bearer token directly:
+The first NeMo Helix service that receives the request validates the bearer token directly:
 
 1. Extracts the `Authorization: Bearer <token>` header
 2. Validates the token using the enabled auth configuration
@@ -137,22 +137,22 @@ The downstream service constructs a principal from this object and evaluates the
 
 #### Job Credential Propagation
 
-Many NeMo Platform operations — customization, evaluation, synthetic data generation — run as asynchronous jobs. When a user submits a job, the platform propagates the submitting user's identity into the job container via the `NMP_PRINCIPAL` environment variable.
+Many NeMo Helix operations — customization, evaluation, synthetic data generation — run as asynchronous jobs. When a user submits a job, the platform propagates the submitting user's identity into the job container via the `NMP_PRINCIPAL` environment variable.
 
 <Note>
 
-Job containers need to run inside the trust boundary — they call NeMo Platform APIs using the propagated identity headers and are subject to the same authorization checks as any other caller. The key distinction is that jobs act as the *user*, not as a privileged service principal, so they can only access resources the submitting user is permitted to reach.
+Job containers need to run inside the trust boundary — they call NeMo Helix APIs using the propagated identity headers and are subject to the same authorization checks as any other caller. The key distinction is that jobs act as the *user*, not as a privileged service principal, so they can only access resources the submitting user is permitted to reach.
 
 </Note>
 ## Authorization: Workspace-Scoped RBAC
 
-NeMo Platform uses **workspace-scoped Role-Based Access Control (RBAC)**. All resources (models, datasets, jobs, evaluations) belong to exactly one workspace, and access is controlled at the workspace level — not per-resource.
+NeMo Helix uses **workspace-scoped Role-Based Access Control (RBAC)**. All resources (models, datasets, jobs, evaluations) belong to exactly one workspace, and access is controlled at the workspace level — not per-resource.
 
 - Users are granted roles (Viewer, Editor, Admin) per workspace via **role bindings**
 - The wildcard principal `*` binds a role for all authenticated users at once
 - Workspaces are private by default; the creator becomes Admin automatically
 
-On top of RBAC, NeMo Platform supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
+On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
 
 1. **Scope check** (token level): The JWT must carry at least one of the scopes required by the endpoint (e.g., `platform:read` or `platform:write`). Scopes limit what the *token* can do.
 2. **Permission check** (role level): The principal must have the necessary permissions via role bindings in the workspace. Roles limit what the *user* can do.
@@ -161,7 +161,7 @@ Both must pass. This enables least-privilege token usage — for example, an Edi
 
 For details, see [Authorization Concepts](/documentation/access-control/concepts), [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions), and [API Scopes](/documentation/access-control/authorization/api-scopes).
 
-## What NeMo Platform Does NOT Do
+## What NeMo Helix Does NOT Do
 
 The following are explicitly out of scope for the current implementation:
 
