@@ -35,7 +35,9 @@ _KNOWN_BINDING_FIELDS = (
 _FIELD_MAPPING_PATH_PATTERN = r"""^[^\[\]]*(?:\[(?:[0-9]*|[^\[\]"'.=\s]+=[^\[\]"'.=\s]+)\](?:\.[^\[\]]*)?)*$"""
 
 #: A predicate group immediately followed by another bracket group. The predicate already binds one
-#: element, so whatever follows can only fail to resolve.
+#: element, so whatever follows can only fail to resolve. Rejecting it keeps the slot free: a bare
+#: predicate means the last match, and this position can later name one explicitly --
+#: ``[role=assistant][0]`` for the first -- without changing what the bare form means.
 _PREDICATE_THEN_BRACKET = re.compile(r"\[[^\[\]]*=[^\[\]]*\]\[")
 
 _FieldMappingPath = Annotated[str, Field(pattern=_FIELD_MAPPING_PATH_PATTERN, min_length=1)]

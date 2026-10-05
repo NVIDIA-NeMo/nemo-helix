@@ -87,7 +87,10 @@ def render_template_or_raise(
         else:
             detail = f"jinja_error={str(exc)!r}.\n"
         raise ValueError(
-            base_message + detail + "Ensure that the dataset provides the fields referenced by the templates."
+            base_message
+            + detail
+            + "If a field_mapping supplies this field, its path did not resolve for this row; check the "
+            "mapping rather than adding a dataset column of this name, which would be scored in its place."
         ) from exc
 
 

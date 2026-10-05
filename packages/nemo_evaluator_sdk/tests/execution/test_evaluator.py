@@ -12,6 +12,7 @@ import pytest
 from nemo_evaluator_sdk.enums import MetricType
 from nemo_evaluator_sdk.execution.config import RunConfig, RunConfigOnlineModel
 from nemo_evaluator_sdk.execution.evaluator import Evaluator
+from nemo_evaluator_sdk.execution.values import EvaluationError
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import FieldMapping, Model
@@ -396,6 +397,30 @@ class TestEvaluator:
         assert result.row_scores[0].item["reference"] == "Paris"
         assert result.row_scores[1].item["reference"] == "Tokyo"
         assert result.aggregate_scores.scores[0].mean == 1.0
+
+    def test_an_unresolved_mapping_fails_rather_than_scoring_a_same_named_column(self):
+        """The scenario a reviewer flagged: a partial miss on a dataset that also has the column.
+
+        Row 1 resolves, row 0 does not, and both carry their own `reference`. Before the mapping
+        owned its field this completed with a plausible aggregate built partly from the dataset's
+        own column; it must fail instead.
+        """
+        evaluator = Evaluator()
+        rows = [
+            {"messages": [{"role": "user", "content": "q"}], "prediction": "Paris", "reference": "Paris"},
+            {
+                "messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "Tokyo"}],
+                "prediction": "Tokyo",
+                "reference": "Tokyo",
+            },
+        ]
+
+        with pytest.raises(EvaluationError, match="could not render its 'reference' template"):
+            evaluator.run_sync(
+                metrics=[ExactMatchMetric(reference="{{reference}}")],
+                dataset=rows,
+                field_mapping=FieldMapping(output="prediction", reference="messages[role=assistant].content"),
+            )
 
     @pytest.mark.asyncio
     async def test_run_uses_sync_backend_adapter_thread_bridge(self, mocker: MockerFixture):

@@ -49,22 +49,21 @@ def _prepare_rows(
     if field_mapping is None:
         return rows
     mapped = [apply_column_mapping_to_row(row, field_mapping) for row in rows]
-    # Tested against the raw rows rather than by asking whether the canonical name is present:
-    # mapping starts from a copy of the row, so a path that resolves nowhere leaves any same-named
-    # raw column in place and that column gets scored. A binding that never resolves on any row is
-    # a mistake worth naming; one that misses on some rows is not.
-    unresolved = sorted(
-        name
-        for name, path in field_mapping.mapping().items()
-        if all(get_value_at_path(row, path) is _MISSING for row in rows)
-    )
-    if rows and unresolved:
+    # Reported per mapping entry so the message carries the path, not just the canonical name: the
+    # two are easy to confuse when a dataset column shares that name. Checked against the raw rows
+    # because a resolved mapping and an unresolved one are indistinguishable after mapping.
+    for name, path in field_mapping.mapping().items():
+        misses = [index for index, row in enumerate(rows) if get_value_at_path(row, path) is _MISSING]
+        if not misses:
+            continue
         log.warning(
-            "field_mapping %s resolved no value in any of %d rows, so those canonical fields were "
-            "not set and any same-named raw column was left in place. Check the path, and for a "
-            "predicate such as messages[role=assistant] that some element matches.",
-            unresolved,
+            "field_mapping %r -> %r resolved nothing on %d of %d rows (first at index %d); those rows leave %r unset.",
+            name,
+            path,
+            len(misses),
             len(rows),
+            misses[0],
+            name,
         )
     return mapped
 

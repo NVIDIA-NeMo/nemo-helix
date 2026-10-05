@@ -230,56 +230,64 @@ class TestLocalBackendEvaluateBenchmark:
 
 
 class TestPrepareRowsUnresolvedMapping:
-    """A binding that resolves nowhere must be reported, not left to fail obscurely later."""
+    """An unresolved mapping must be visible, and must never leave a same-named column in its place."""
 
-    _ROWS = [
-        {"messages": [{"role": "user", "content": "q"}], "reference": "stale raw column"},
-        {"messages": [{"role": "user", "content": "q2"}], "reference": "stale raw column 2"},
-    ]
+    _MAPPING = FieldMapping(reference="messages[role=assistant].content")
 
-    def test_warns_when_a_binding_resolves_on_no_row(
-        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The raw column survives a miss, so presence of the canonical name proves nothing.
+    @staticmethod
+    def _rows(*, with_assistant: tuple[int, ...] = ()) -> list[dict]:
+        """Rows that each carry their own `reference` column, the case that used to hide a miss."""
+        rows = []
+        for index in range(3):
+            messages = [{"role": "user", "content": f"q{index}"}]
+            if index in with_assistant:
+                messages.append({"role": "assistant", "content": f"answer{index}"})
+            rows.append({"messages": messages, "reference": "FROM THE FILE"})
+        return rows
 
-        `apply_column_mapping_to_row` copies the row before mapping. A path that never resolves
-        therefore leaves a same-named raw column in place and that value gets scored -- a wrong
-        answer rather than a missing one. A diagnostic asking `"reference" in mapped` would see the
-        stale column and stay silent, so this test fails under that implementation.
-        """
-        mocker.patch(
-            "nemo_evaluator_sdk.execution.backends.local.backend.prepare_dataset_rows",
-            return_value=[dict(row) for row in self._ROWS],
-        )
-
-        with caplog.at_level("WARNING"):
-            rows = _prepare_rows(
-                dataset=[],
-                params=RunConfig(),
-                field_mapping=FieldMapping(reference="messages[role=assistant].content"),
-            )
-
-        assert rows[0]["reference"] == "stale raw column"
-        assert "reference" in caplog.text
-        assert "resolved no value" in caplog.text
-
-    def test_stays_quiet_when_a_binding_resolves_somewhere(
-        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Resolving on only some rows is legitimate, so only a total miss is worth a warning."""
-        rows = [dict(row) for row in self._ROWS]
-        rows[0]["messages"].append({"role": "assistant", "content": "answer"})
+    def _prepare(self, mocker: MockerFixture, rows: list[dict]) -> list[dict]:
         mocker.patch(
             "nemo_evaluator_sdk.execution.backends.local.backend.prepare_dataset_rows",
             return_value=rows,
         )
+        return _prepare_rows(dataset=[], params=RunConfig(), field_mapping=self._MAPPING)
 
+    def test_an_unresolved_mapping_leaves_the_field_unset(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The mapping owns the field: a miss clears it rather than yielding to the file's column.
+
+        Without this the file's `reference` survives and is scored, which is a wrong answer rather
+        than a missing one. A diagnostic asking `"reference" in mapped` cannot see that, so the
+        warning is checked against the raw rows instead.
+        """
         with caplog.at_level("WARNING"):
-            mapped = _prepare_rows(
-                dataset=[],
-                params=RunConfig(),
-                field_mapping=FieldMapping(reference="messages[role=assistant].content"),
-            )
+            mapped = self._prepare(mocker, self._rows())
 
-        assert mapped[0]["reference"] == "answer"
-        assert "resolved no value" not in caplog.text
+        assert all("reference" not in row for row in mapped)
+        assert "resolved nothing on 3 of 3 rows" in caplog.text
+
+    def test_the_warning_names_the_mapped_path_not_just_the_field(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Naming only `reference` is ambiguous when the dataset also has a column by that name."""
+        with caplog.at_level("WARNING"):
+            self._prepare(mocker, self._rows())
+
+        assert "messages[role=assistant].content" in caplog.text
+
+    def test_a_partial_miss_is_reported(self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture) -> None:
+        """Rows resolving unevenly is the common case for a predicate, and the silent one before."""
+        with caplog.at_level("WARNING"):
+            mapped = self._prepare(mocker, self._rows(with_assistant=(1,)))
+
+        assert mapped[1]["reference"] == "answer1"
+        assert "reference" not in mapped[0]
+        assert "resolved nothing on 2 of 3 rows (first at index 0)" in caplog.text
+
+    def test_no_warning_when_every_row_resolves(self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level("WARNING"):
+            mapped = self._prepare(mocker, self._rows(with_assistant=(0, 1, 2)))
+
+        assert [row["reference"] for row in mapped] == ["answer0", "answer1", "answer2"]
+        assert "resolved nothing" not in caplog.text
