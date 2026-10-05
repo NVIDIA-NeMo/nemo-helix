@@ -30,6 +30,8 @@ Recommended — one command, `nemo` available everywhere, nothing to activate:
 
 ```bash
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
 ```
 
 Use a virtual environment instead when you also import the SDK from your own code. `nemo` then works only while the environment is active:

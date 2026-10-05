@@ -24,6 +24,9 @@ Quick install from PyPI:
 curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
+
 
 nemo setup
 ```
