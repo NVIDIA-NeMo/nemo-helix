@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
-import { CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
+import { Anchor, CodeSnippet, Stack, StatusMessage, Text } from '@nvidia/foundations-react-core';
 import type { HelixHealthStatus } from '@studio/api/helixHealth';
-import { Unplug } from 'lucide-react';
-import type { FC } from 'react';
+import { GlobeX } from 'lucide-react';
+import type { FC, ReactNode } from 'react';
 
 interface HelixUnavailableProps {
   status: Exclude<HelixHealthStatus, 'ready'>;
@@ -15,16 +15,26 @@ interface HelixUnavailableProps {
   isRetrying?: boolean;
 }
 
-const COPY: Record<HelixUnavailableProps['status'], { heading: string; explanation: string }> = {
+const COPY: Record<HelixUnavailableProps['status'], { heading: string; explanation: ReactNode }> = {
   unreachable: {
     heading: "Studio can't connect to NeMo Helix",
-    explanation:
-      'The platform did not respond, so Studio cannot load any data. Make sure the platform is running and that Studio is pointed at it.',
+    explanation: (
+      <>
+        The platform did not respond, so Studio cannot load any data.
+        <br />
+        Make sure the platform is running and that Studio is pointed at it.
+      </>
+    ),
   },
   'not-ready': {
     heading: 'NeMo Helix is still starting',
-    explanation:
-      'The platform is reachable, but not all of its services are ready yet. This usually resolves within a minute of starting it.',
+    explanation: (
+      <>
+        The platform is reachable, but not all of its services are ready yet.
+        <br />
+        This usually resolves within a minute of starting it.
+      </>
+    ),
   },
 };
 
@@ -40,7 +50,7 @@ export const HelixUnavailable: FC<HelixUnavailableProps> = ({
     <Stack gap="density-md" align="center" justify="center" className="h-screen px-density-lg">
       <StatusMessage
         className="max-w-[640px]"
-        slotMedia={<Unplug className="size-16 stroke-2" />}
+        slotMedia={<GlobeX className="size-16 stroke-2" />}
         slotHeading={heading}
         slotSubheading={explanation}
         slotFooter={
@@ -55,18 +65,22 @@ export const HelixUnavailable: FC<HelixUnavailableProps> = ({
         className="w-full max-w-[640px] text-center"
         data-testid="helix-unavailable-help"
       >
-        <Text kind="body/regular/sm" color="secondary">
-          Running locally? Start the platform, then retry:
-        </Text>
         <CodeSnippet
           value="nemo services run"
           language="bash"
           kind="block"
           className="w-full text-left"
+          slotActions={
+            <Text kind="body/regular/sm" color="secondary" className="mr-auto">
+              Running locally? Start the platform, then retry:
+            </Text>
+          }
         />
         <Text kind="body/regular/sm" color="secondary">
-          Studio checked <code className="break-all">{healthUrl}</code>. If the platform runs
-          somewhere else, point Studio at it (<code>VITE_PLATFORM_BASE_URL</code>) and reload.
+          Studio checked{' '}
+          <Anchor href={healthUrl} kind="inline" target="_blank" rel="noopener">
+            {healthUrl}
+          </Anchor>
         </Text>
       </Stack>
     </Stack>
