@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
 import { Loader2 } from 'lucide-react';
 import type { FC } from 'react';
 
@@ -41,6 +42,6 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
       )
     }
   >
-    {canDeploy ? message : `${message} Integrate this agent with NeMo Helix to enable deployment.`}
+    {canDeploy ? message : `${message} ${NO_CONFIG_DEPLOY_MESSAGE}`}
   </Banner>
 );

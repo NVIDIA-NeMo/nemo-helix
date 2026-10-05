@@ -16,6 +16,7 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
@@ -163,7 +164,7 @@ export const AgentDetailRoute: FC = () => {
   };
 
   const modelNames = getAgentModelNames(agent?.config);
-  const canDeploy = !!agent?.config;
+  const canDeploy = hasAgentConfig(agent?.config);
   // Narrower than canDeploy: NAT workflows package from a source checkout.
   const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
   // Survives closing the deploy modal, but not a change of agent: the route is

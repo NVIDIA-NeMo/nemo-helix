@@ -30,6 +30,7 @@ import {
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
+import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -298,6 +299,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
       rowActions: (row: AgentTableRow): DropdownEntry[] => [
         {
           children: 'Deploy',
+          disabled: !hasAgentConfig(row.config),
           onSelect: () => onCreateDeployment?.(row.name),
         },
         ...(canTestModels
