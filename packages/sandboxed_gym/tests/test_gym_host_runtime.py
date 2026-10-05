@@ -379,6 +379,10 @@ def _write_manifest(env_dir, **fields):
         config = env_dir / relative_path
         config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text("test: {}\n", encoding="utf-8")
+        # Gym only discovers a server directory that carries an install marker.
+        server_dir = config.parent.parent
+        if server_dir.parent.name in ("resources_servers", "responses_api_agents"):
+            (server_dir / "requirements.txt").write_text("", encoding="utf-8")
     manifest_path = env_dir / runtime.ENVIRONMENT_MANIFEST_FILENAME
     manifest_path.write_text(yaml.safe_dump(fields), encoding="utf-8")
 
@@ -2003,3 +2007,162 @@ def test_a_secret_straddling_the_retention_bound_is_still_masked(monkeypatch):
 
     assert "nvapi-straddlingsecret" not in buffer[0]
     assert "***" in buffer[0], "the secret crossed the bound and must survive whole to be masked"
+
+
+def _wheels_package_with_servers(
+    tmp_path, monkeypatch, *, servers=("resources_servers/custom",), markers=("requirements.txt",)
+):
+    """A wheels-v1 package whose server directories carry the given install markers, with uv stubbed."""
+    config_paths = [f"{server}/configs/{server.rsplit('/', 1)[1]}.yaml" for server in servers]
+    _write_manifest(tmp_path, format="wheels-v1", config_paths=config_paths)
+    for server in servers:
+        for existing in ("requirements.txt", "pyproject.toml"):
+            (tmp_path / server / existing).unlink(missing_ok=True)
+        for marker in markers:
+            (tmp_path / server / marker).write_text("", encoding="utf-8")
+    wheels_dir = tmp_path / WHEELS_V1_SUBDIR
+    wheels_dir.mkdir(exist_ok=True)
+    (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    return runtime._load_runtime_environment_package(str(tmp_path), required=True)
+
+
+def _fake_container_venv(tmp_path, monkeypatch):
+    venv = tmp_path / "container-venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("", encoding="utf-8")
+    (venv / "bin" / "activate").write_text("", encoding="utf-8")
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    # The caller's opt-in; Evaluator sets it, GRPO does not.
+    monkeypatch.setenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, "true")
+    return venv
+
+
+def test_without_the_callers_opt_in_wheels_v1_servers_build_their_own_venvs(tmp_path, monkeypatch):
+    """GRPO shares this host and documents a vendor-the-full-closure contract; it is not changed unasked."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    monkeypatch.delenv(runtime.REUSE_IMAGE_GYM_INSTALL_ENV_KEY, raising=False)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_wheels_v1_servers_get_the_containers_gym_install_as_their_venv(tmp_path, monkeypatch):
+    """The wheelhouse carries only the servers' extras; Gym itself comes from the image.
+
+    Gym skips a component's venv build when the venv path already holds bin/python and
+    bin/activate, so each package server's venv path is pointed at the container venv.
+    """
+    package = _wheels_package_with_servers(
+        tmp_path, monkeypatch, servers=("resources_servers/custom", "responses_api_agents/custom_agent")
+    )
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(tmp_path / "work"))
+
+    for kind, name in (("resources_servers", "custom"), ("responses_api_agents", "custom_agent")):
+        venv_path = venv_root / kind / name / runtime.COMPONENT_VENV_DIRNAME
+        assert venv_path.is_symlink()
+        assert venv_path.resolve() == container_venv.resolve()
+        # What Gym's skip check looks for.
+        assert (venv_path / "bin" / "python").exists() and (venv_path / "bin" / "activate").exists()
+    # The root was writable, so Gym keeps reading it from the same config key.
+    assert config[runtime.UV_VENV_DIR_KEY] == str(venv_root)
+
+
+def test_an_existing_component_venv_is_kept(tmp_path, monkeypatch):
+    """An image-baked venv for a same-named built-in is not replaced."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+    baked = venv_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    baked.mkdir(parents=True)
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert baked.is_dir() and not baked.is_symlink()
+
+
+def test_a_server_without_an_install_marker_is_not_linked(tmp_path, monkeypatch):
+    """Gym would not discover it, so there is nothing to build and nothing to link."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    (tmp_path / "resources_servers" / "custom" / "requirements.txt").unlink()
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not (venv_root / "resources_servers" / "custom").exists()
+
+
+def test_without_skip_venv_if_present_nothing_is_linked(tmp_path, monkeypatch):
+    """With the skip off, Gym would `uv venv --allow-existing` into the link target: the container venv."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: False, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_native_v1_servers_keep_building_their_own_venvs(tmp_path, monkeypatch):
+    _write_manifest(tmp_path, format="native-v1")
+    package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
+    _fake_container_venv(tmp_path, monkeypatch)
+    venv_root = tmp_path / "gym_venvs"
+
+    runtime._link_wheels_v1_component_venvs(
+        package,
+        {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(venv_root)},
+        str(tmp_path / "work"),
+    )
+
+    assert not venv_root.exists()
+
+
+def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeypatch):
+    """`/opt/gym_venvs` is often read-only for the sandbox uid; the image's baked venvs must stay visible."""
+    package = _wheels_package_with_servers(tmp_path, monkeypatch)
+    container_venv = _fake_container_venv(tmp_path, monkeypatch)
+    image_root = tmp_path / "opt-gym_venvs"
+    baked = image_root / "resources_servers" / "mcqa"
+    (baked / runtime.COMPONENT_VENV_DIRNAME / "bin").mkdir(parents=True)
+    real_access = runtime.os.access
+    monkeypatch.setattr(
+        runtime.os, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
+    )
+    work = tmp_path / "work"
+    config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(image_root)}
+
+    runtime._link_wheels_v1_component_venvs(package, config, str(work))
+
+    mirrored_root = work / runtime.COMPONENT_VENV_ROOT_SUBDIR
+    # Gym is pointed at the writable root...
+    assert config[runtime.UV_VENV_DIR_KEY] == str(mirrored_root)
+    # ...which still exposes the image's baked venv...
+    assert (mirrored_root / "resources_servers" / "mcqa").resolve() == baked.resolve()
+    # ...beside the package server's link to the container venv.
+    linked = mirrored_root / "resources_servers" / "custom" / runtime.COMPONENT_VENV_DIRNAME
+    assert linked.is_symlink() and linked.resolve() == container_venv.resolve()

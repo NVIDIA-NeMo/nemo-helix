@@ -30,11 +30,22 @@ shared PVC storage.
 
 ## 1. Package the environment
 
-The FileSet must contain `nemo-environment.yaml` at its root. Evaluator accepts two formats:
+The FileSet must contain `nemo-environment.yaml` at its root. Evaluator accepts two formats, which
+differ only in where a server's dependencies come from:
 
-- `native-v1` installs component dependencies from each component's `requirements.txt`.
-- `wheels-v1` installs dependencies from a flat, non-empty `wheels/` directory without contacting a
-  package index.
+- `native-v1`: Gym installs each server's `requirements.txt` from a package index at job start.
+- `wheels-v1`: dependencies come from a flat, non-empty `wheels/` directory in the package. No
+  package index is contacted.
+
+The runtime image already provides NeMo Gym and everything Gym itself needs. A `wheels-v1`
+wheelhouse carries only what your servers add on top of that: the packages your `requirements.txt`
+files name, and their dependencies, as wheels built for the image's Python and platform. Do not
+vendor `nemo-gym`, `ray`, or the rest of Gym's own dependencies.
+
+Every agent and resources-server directory needs exactly one of `requirements.txt` or
+`pyproject.toml`, in both formats. Gym recognises a server directory by that file; without it the
+directory is invisible to Gym, and with both Gym refuses to start it. Evaluator checks for the file
+at submit time.
 
 A minimal `native-v1` resource-server package looks like this:
 
@@ -58,24 +69,35 @@ metadata:
   description: Return and score a requested greeting.
 ```
 
-For `wheels-v1`, use the same manifest shape with `format: wheels-v1` and add the wheelhouse:
+For `wheels-v1`, use the same manifest shape with `format: wheels-v1`, keep the server's
+`requirements.txt`, and add the wheelhouse that satisfies it:
 
 ```text
 my-gym-environment/
 ├── nemo-environment.yaml
 ├── wheels/
-│   ├── custom_greeting-0.1.0-py3-none-any.whl
-│   └── dependency-1.0.0-py3-none-any.whl
+│   ├── emoji-2.14.1-py3-none-any.whl
+│   └── some_dependency-1.0.0-py3-none-any.whl
 └── resources_servers/
     └── custom_greeting/
+        ├── app.py
+        ├── requirements.txt
         └── configs/
             └── custom_greeting.yaml
+```
+
+With `requirements.txt` listing `emoji==2.14.1`, this is enough:
+
+```bash
+pip download emoji==2.14.1 --only-binary :all: --python-version 3.13 --platform manylinux2014_x86_64 -d my-gym-environment/wheels
 ```
 
 The package must follow these rules:
 
 - Every `config_paths` entry is relative to the FileSet root and names an uploaded file.
 - `native-v1` config paths stay under `resources_servers/` or `responses_api_agents/`.
+- Each agent and resources-server directory has exactly one of `requirements.txt` or
+  `pyproject.toml`.
 - `wheels/` is flat and contains only `.whl` files.
 - Do not include `responses_api_models/`; model configuration is operator-owned.
 - Do not include dataset `.jsonl` files. Store evaluation rows in a separate taskset.

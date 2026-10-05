@@ -29,6 +29,7 @@ metadata:
 WHEELS_LISTING = [
     "nemo-environment.yaml",
     "resources_servers/custom/configs/custom.yaml",
+    "resources_servers/custom/requirements.txt",
     "wheels/custom_dependency-1.0-py3-none-any.whl",
 ]
 
@@ -68,6 +69,7 @@ def test_native_v1_manifest_is_accepted_against_a_valid_listing() -> None:
         [
             "nemo-environment.yaml",
             "resources_servers/custom/configs/custom.yaml",
+            "resources_servers/custom/requirements.txt",
         ],
     )
 
@@ -89,14 +91,40 @@ def test_invalid_manifests_are_rejected(raw_manifest: str) -> None:
 @pytest.mark.parametrize(
     ("listing", "error"),
     [
-        (["nemo-environment.yaml", "resources_servers/custom/configs/custom.yaml"], "non-empty wheels/ directory"),
         (
             [
                 "nemo-environment.yaml",
                 "resources_servers/custom/configs/custom.yaml",
+                "resources_servers/custom/requirements.txt",
+            ],
+            "non-empty wheels/ directory",
+        ),
+        (
+            [
+                "nemo-environment.yaml",
+                "resources_servers/custom/configs/custom.yaml",
+                "resources_servers/custom/requirements.txt",
                 "wheels/requirements.txt",
             ],
             "non-wheel files",
+        ),
+        (
+            [
+                "nemo-environment.yaml",
+                "resources_servers/custom/configs/custom.yaml",
+                "wheels/custom_dependency-1.0-py3-none-any.whl",
+            ],
+            "exactly one of requirements.txt or pyproject.toml.*resources_servers/custom",
+        ),
+        (
+            [
+                "nemo-environment.yaml",
+                "resources_servers/custom/configs/custom.yaml",
+                "resources_servers/custom/requirements.txt",
+                "resources_servers/custom/pyproject.toml",
+                "wheels/custom_dependency-1.0-py3-none-any.whl",
+            ],
+            "exactly one of requirements.txt or pyproject.toml.*resources_servers/custom",
         ),
         (
             [
@@ -123,3 +151,12 @@ def test_wheels_listing_rejections(listing: list[str], error: str) -> None:
     manifest = parse_environment_manifest(WHEELS_MANIFEST)
     with pytest.raises(GymEnvironmentPackageError, match=error):
         validate_environment_manifest_against_listing(manifest, listing)
+
+
+def test_native_v1_requires_an_install_marker_too() -> None:
+    """Gym discovers servers the same way for both formats."""
+    manifest = parse_environment_manifest(NATIVE_MANIFEST)
+    with pytest.raises(GymEnvironmentPackageError, match="exactly one of requirements.txt or pyproject.toml"):
+        validate_environment_manifest_against_listing(
+            manifest, ["nemo-environment.yaml", "resources_servers/custom/configs/custom.yaml"]
+        )

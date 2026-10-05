@@ -39,6 +39,7 @@ from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_OFFLINE_ENV_KEY,
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
     GYM_GLOBAL_CONFIG_ENV_KEY,
+    REUSE_IMAGE_GYM_INSTALL_ENV_KEY,
 )
 from sandboxed_gym.serve_config import (
     SandboxedGymServeConfig,
@@ -254,6 +255,8 @@ def build_gym_host_spec(
         bootstrap_extra[ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY] = "true"
     if cfg.environment_offline:
         bootstrap_extra[ENVIRONMENT_OFFLINE_ENV_KEY] = "true"
+    if cfg.reuse_image_gym_install:
+        bootstrap_extra[REUSE_IMAGE_GYM_INSTALL_ENV_KEY] = "true"
     bootstrap_env = build_bootstrap_env(
         cfg.job_id,
         cfg.environment_path or sandbox.env_mount_path,
