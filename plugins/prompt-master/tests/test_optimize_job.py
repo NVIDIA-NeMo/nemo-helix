@@ -8,7 +8,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,7 +26,6 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
-from prompt_master_plugin.config import PromptMasterConfigError
 from prompt_master_plugin.jobs import optimize as optimize_module
 from prompt_master_plugin.jobs.optimize import (
     OPTIMIZED_AGENT_FILENAME,
@@ -35,7 +34,7 @@ from prompt_master_plugin.jobs.optimize import (
     TASK_MODULE,
     PromptMasterOptimizeJob,
 )
-from prompt_master_plugin.schemas.optimize import PromptMasterOptimizeSpec, PromptMasterOptimizeSubmitSpec
+from prompt_master_plugin.schemas.optimize import PromptMasterOptimizeSpec
 from pydantic import ValidationError
 
 SUBPROCESS_PROFILE = SubprocessJobExecutionProfile(profile="default")
@@ -78,27 +77,35 @@ async def compile_spec(
     )
 
 
-def run_job(ctx: JobContext, config_path: Path, **overrides: Any) -> dict[str, Any]:
-    spec = {"optimize_config": str(config_path), "agent": "calculator-agent", "workspace": "default", **overrides}
-    return PromptMasterOptimizeJob().run(spec, ctx=ctx, sdk=MagicMock())
+def run_job(ctx: JobContext, **spec: Any) -> dict[str, Any]:
+    return PromptMasterOptimizeJob().run(
+        {"agent": "calculator-agent", "workspace": "default", **spec}, ctx=ctx, sdk=MagicMock()
+    )
+
+
+@pytest.fixture
+def stage_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Fake the fileset download so ``resolve_staged_config`` yields *overrides*; returns the arguments it saw."""
+
+    def _stage(overrides: dict[str, Any]) -> dict[str, Any]:
+        staged = tmp_path / "prompt-master.yaml"
+        staged.write_text(yaml.safe_dump(overrides), encoding="utf-8")
+        seen: dict[str, Any] = {}
+
+        @contextlib.contextmanager
+        def fake_resolve(config_rel_path: str, fileset_ref: str | None, **kwargs: Any) -> Iterator[Path]:
+            seen.update(config_rel_path=config_rel_path, fileset_ref=fileset_ref, **kwargs)
+            yield staged
+
+        monkeypatch.setattr(optimize_module, "resolve_staged_config", fake_resolve)
+        return seen
+
+    return _stage
 
 
 # ---------------------------------------------------------------------------
 # spec
 # ---------------------------------------------------------------------------
-
-
-def test_submit_spec_requires_a_fileset_for_remote_submissions() -> None:
-    with pytest.raises(ValidationError, match="optimize_config_fileset is required"):
-        PromptMasterOptimizeSubmitSpec.model_validate({"optimize_config": "/abs/prompt-master.yaml", "agent": "a"})
-
-
-def test_submit_spec_allows_an_absolute_host_path_for_local_runs() -> None:
-    spec = PromptMasterOptimizeSubmitSpec.model_validate(
-        {"optimize_config": "/abs/prompt-master.yaml", "agent": "a"}, context={"is_local": True}
-    )
-
-    assert spec.optimize_config_fileset is None
 
 
 def test_spec_requires_an_agent() -> None:
@@ -111,29 +118,19 @@ def test_spec_rejects_a_url_as_the_agent() -> None:
         staged_spec(agent="https://example.com/agent")
 
 
-@pytest.mark.parametrize(
-    "config_path", ["/abs/prompt-master.yaml", "../escape.yaml", "~/prompt-master.yaml", "C:\\bundle\\pm.yaml"]
-)
-def test_spec_rejects_config_paths_that_escape_the_fileset(config_path: str) -> None:
-    with pytest.raises(ValidationError, match="relative to the fileset root"):
-        staged_spec(optimize_config=config_path)
+def test_spec_config_is_optional() -> None:
+    assert PromptMasterOptimizeSpec(agent="calculator-agent").optimize_config is None
+
+
+@pytest.mark.parametrize("missing", ["optimize_config", "optimize_config_fileset"])
+def test_spec_requires_config_and_fileset_together(missing: str) -> None:
+    with pytest.raises(ValidationError, match="given together"):
+        PromptMasterOptimizeSpec.model_validate({k: v for k, v in STAGED.items() if k != missing})
 
 
 def test_spec_rejects_a_malformed_fileset_ref() -> None:
-    with pytest.raises(ValidationError, match="'name' or 'workspace/name'"):
+    with pytest.raises(ValidationError, match="optimize_config_fileset"):
         staged_spec(optimize_config_fileset="too/many/parts")
-
-
-async def test_to_spec_stamps_the_workspace() -> None:
-    submitted = PromptMasterOptimizeSubmitSpec.model_validate(STAGED)
-
-    spec = await PromptMasterOptimizeJob.to_spec(
-        submitted, workspace="staging", entity_client=MagicMock(), async_sdk=MagicMock(), is_local=False
-    )
-
-    assert isinstance(spec, PromptMasterOptimizeSpec)
-    assert spec.workspace == "staging"
-    assert spec.agent == "calculator-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -149,13 +146,7 @@ async def test_compile_prefers_the_subprocess_executor_and_stamps_the_spec() -> 
     assert step.name == "prompt-master"
     assert step.executor.provider == "subprocess"
     assert step.executor.command == ["python", "-m", TASK_MODULE]
-    assert step.config == {
-        "optimize_config": "prompt-master.yaml",
-        "optimize_config_fileset": "default/pm-bundle",
-        "agent": "calculator-agent",
-        "output": "default/pm-results",
-        "workspace": "staging",
-    }
+    assert step.config == {**STAGED, "output": "default/pm-results", "workspace": "staging"}
 
 
 async def test_compile_falls_back_to_the_cpu_container() -> None:
@@ -170,13 +161,6 @@ async def test_compile_falls_back_to_the_cpu_container() -> None:
     assert step.executor.container.image == "reg.example/nhx-tasks:test"
     assert step.executor.container.entrypoint == ["python", "-m"]
     assert step.executor.container.command == [TASK_MODULE]
-
-
-async def test_compile_requires_a_staged_fileset() -> None:
-    spec = PromptMasterOptimizeSpec(optimize_config="/abs/prompt-master.yaml", agent="calculator-agent")
-
-    with pytest.raises(HelixJobCompilationError, match="optimize_config_fileset is required"):
-        await compile_spec(spec)
 
 
 async def test_compile_reports_available_profiles_when_none_match() -> None:
@@ -205,14 +189,13 @@ async def test_compile_is_retryable_when_jobs_is_unreachable() -> None:
 
 def test_run_writes_the_optimized_agent_and_registers_the_result(
     ctx: JobContext,
-    config_path: Path,
     tmp_path: Path,
     fake_prompt_master: list[Any],
     stored_agent: Any,
     source_agent: dict[str, Any],
 ) -> None:
     with stored_agent(source_agent):
-        result = run_job(ctx, config_path)
+        result = run_job(ctx)
 
     assert result["status"] == "completed"
     assert result["strategy"] == "prompt-master"
@@ -221,61 +204,49 @@ def test_run_writes_the_optimized_agent_and_registers_the_result(
     assert result["result"]["name"] == RESULT_NAME
     assert "output" not in result
 
-    (config, agent_config, base_dir, workspace) = fake_prompt_master[0]
-    assert config.model.model == "gpt-5.6"
+    optimizer, agent_config, base_dir = fake_prompt_master[0]
+    assert optimizer.models["default"].base_url.endswith("/workspaces/default/openai/-/v1")
     assert agent_config["instructions"]["system"]["content"] == "old prompt"
     assert base_dir.is_relative_to(ctx.storage.ephemeral)
-    # The optimizer model is bound to the Inference Gateway of the workspace the job runs in.
-    assert workspace == "default"
 
     saved = tmp_path / "job-results" / RESULT_NAME
     optimized = yaml.safe_load((saved / OPTIMIZED_AGENT_FILENAME).read_text(encoding="utf-8"))
-    assert optimized["instructions"]["system"]["content"] == "new prompt"
-    # Everything but the prompt is carried over, so the file registers as a complete agent.
-    assert {k: v for k, v in optimized.items() if k != "instructions"} == {
-        k: v for k, v in source_agent.items() if k != "instructions"
-    }
+    assert optimized == {**source_agent, "instructions": {"system": {"content": "new prompt"}}}
     summary = json.loads((saved / SUMMARY_FILENAME).read_text(encoding="utf-8"))
-    assert summary["agent"] == "default/calculator-agent"
     assert summary["original_prompt"] == "old prompt"
     assert summary["optimized_prompt"] == "new prompt"
-    assert summary["optimizer_model"]["model"] == "gpt-5.6"
+    assert summary["optimizer_model"] == optimizer.models["default"].model
     assert "Tightened scope" in summary["response"]
 
 
 def test_run_leaves_the_stored_config_untouched(
-    ctx: JobContext, config_path: Path, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
+    ctx: JobContext, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
 ) -> None:
     before = copy.deepcopy(source_agent)
 
     with stored_agent(source_agent):
-        run_job(ctx, config_path)
+        run_job(ctx)
 
     assert source_agent == before
 
 
 def test_run_resolves_the_agent_workspace_from_the_ref(
-    ctx: JobContext, config_path: Path, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
+    ctx: JobContext, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
 ) -> None:
     with stored_agent(source_agent) as agents:
-        result = run_job(ctx, config_path, agent="team/calculator-agent")
+        result = run_job(ctx, agent="team/calculator-agent")
 
     agents.get_agent.assert_called_once_with(name="calculator-agent", workspace="team")
     assert result["agent"] == "team/calculator-agent"
 
 
 def test_run_publishes_to_a_local_output_dir(
-    ctx: JobContext,
-    config_path: Path,
-    tmp_path: Path,
-    fake_prompt_master: list[Any],
-    stored_agent: Any,
-    source_agent: dict[str, Any],
+    ctx: JobContext, tmp_path: Path, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
 ) -> None:
     out = tmp_path / "out"
 
     with stored_agent(source_agent):
-        result = run_job(ctx, config_path, output=str(out))
+        result = run_job(ctx, output=str(out))
 
     assert result["output"] == {"type": "local_dir", "path": str(out.resolve())}
     assert (out / OPTIMIZED_AGENT_FILENAME).is_file()
@@ -284,7 +255,6 @@ def test_run_publishes_to_a_local_output_dir(
 
 def test_run_publishes_to_a_fileset(
     ctx: JobContext,
-    config_path: Path,
     fake_prompt_master: list[Any],
     stored_agent: Any,
     source_agent: dict[str, Any],
@@ -293,90 +263,65 @@ def test_run_publishes_to_a_fileset(
     uploaded: dict[str, Any] = {}
 
     def fake_upload(local_dir: Path, *, fileset: str, workspace: str, sdk: Any) -> None:
-        uploaded.update(
-            local_dir=local_dir, fileset=fileset, workspace=workspace, files=sorted(p.name for p in local_dir.iterdir())
-        )
+        uploaded.update(fileset=fileset, workspace=workspace, files=sorted(p.name for p in local_dir.iterdir()))
 
     monkeypatch.setattr(optimize_module, "upload_to_fileset", fake_upload)
 
     with stored_agent(source_agent):
-        result = run_job(ctx, config_path, output="team/pm-results")
+        result = run_job(ctx, output="team/pm-results")
 
     assert result["output"] == {"type": "fileset", "fileset": "team/pm-results"}
-    assert uploaded["fileset"] == "pm-results"
-    assert uploaded["workspace"] == "team"
-    assert uploaded["files"] == sorted([OPTIMIZED_AGENT_FILENAME, SUMMARY_FILENAME])
+    assert uploaded == {
+        "fileset": "pm-results",
+        "workspace": "team",
+        "files": sorted([OPTIMIZED_AGENT_FILENAME, SUMMARY_FILENAME]),
+    }
 
 
-def test_run_stages_the_config_from_the_fileset(
+def test_run_merges_the_staged_config_into_the_optimizer(
     ctx: JobContext,
-    tmp_path: Path,
+    stage_config: Callable[[dict[str, Any]], dict[str, Any]],
     fake_prompt_master: list[Any],
     stored_agent: Any,
     source_agent: dict[str, Any],
-    optimizer_config: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    staged = tmp_path / "staged" / "prompt-master.yaml"
-    staged.parent.mkdir()
-    staged.write_text(yaml.safe_dump(optimizer_config), encoding="utf-8")
-    seen: dict[str, Any] = {}
-
-    @contextlib.contextmanager
-    def fake_resolve(config_rel_path: str, fileset_ref: str | None, **kwargs: Any) -> Iterator[Path]:
-        seen.update(config_rel_path=config_rel_path, fileset_ref=fileset_ref, **kwargs)
-        yield staged
-
-    monkeypatch.setattr(optimize_module, "resolve_staged_config", fake_resolve)
+    seen = stage_config({"models": {"default": {"model": "gpt-5.6"}}, "runtime": {"timeout_seconds": 30}})
 
     with stored_agent(source_agent):
-        result = PromptMasterOptimizeJob().run({**STAGED, "workspace": "staging"}, ctx=ctx, sdk=MagicMock())
+        result = run_job(ctx, **STAGED, workspace="staging")
 
     assert result["status"] == "completed"
     assert seen["config_rel_path"] == "prompt-master.yaml"
     assert seen["fileset_ref"] == "default/pm-bundle"
     assert seen["workspace"] == "staging"
-    assert seen["kind"] == "prompt-master-config"
-    assert fake_prompt_master[0][3] == "staging"
-
-
-def test_run_requires_a_platform_client(ctx: JobContext, config_path: Path) -> None:
-    with pytest.raises(LocalRunError, match="platform client"):
-        PromptMasterOptimizeJob().run(
-            {"optimize_config": str(config_path), "agent": "calculator-agent", "workspace": "default"}, ctx=ctx
-        )
+    optimizer = fake_prompt_master[0][0]
+    assert optimizer.models["default"].model == "gpt-5.6"
+    assert optimizer.models["default"].provider == "nvidia"
+    assert optimizer.runtime.timeout_seconds == 30
+    assert optimizer.models["default"].base_url.endswith("/workspaces/staging/openai/-/v1")
 
 
 def test_run_rejects_an_invalid_optimizer_config(
-    ctx: JobContext, tmp_path: Path, stored_agent: Any, source_agent: dict[str, Any]
+    ctx: JobContext, stage_config: Callable[[dict[str, Any]], dict[str, Any]]
 ) -> None:
-    bad = tmp_path / "bad.yaml"
-    bad.write_text("model: {}\n", encoding="utf-8")
+    stage_config({"models": {"default": {"bogus": 1}}})
 
-    with stored_agent(source_agent), pytest.raises(PromptMasterConfigError, match="Invalid Prompt Master config"):
-        run_job(ctx, bad)
+    with pytest.raises(ValidationError, match="bogus"):
+        run_job(ctx, **STAGED)
 
 
-def test_run_reports_a_missing_agent_plainly(
-    ctx: JobContext, config_path: Path, fake_prompt_master: list[Any], stored_agent: Any
-) -> None:
+def test_run_reports_a_missing_agent_plainly(ctx: JobContext, fake_prompt_master: list[Any], stored_agent: Any) -> None:
     missing = NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "http://x")))
 
     with stored_agent(missing), pytest.raises(LocalRunError, match="does not exist"):
-        run_job(ctx, config_path)
+        run_job(ctx)
 
 
-def test_run_refuses_an_agent_in_another_config_format(
-    ctx: JobContext, config_path: Path, fake_prompt_master: list[Any], stored_agent: Any
+@pytest.mark.parametrize(
+    "config", [{}, {"schema_version": "fabric.agent/v1alpha1", "instructions": {"system": {"content": "p"}}}]
+)
+def test_run_refuses_an_agent_that_is_not_spec_v1(
+    ctx: JobContext, fake_prompt_master: list[Any], stored_agent: Any, config: dict[str, Any]
 ) -> None:
-    fabric_package = {"schema_version": "fabric.agent/v1alpha1", "instructions": {"system": {"content": "p"}}}
-
-    with stored_agent(fabric_package), pytest.raises(LocalRunError, match="config_format"):
-        run_job(ctx, config_path)
-
-
-def test_run_refuses_an_agent_with_an_empty_config(
-    ctx: JobContext, config_path: Path, fake_prompt_master: list[Any], stored_agent: Any
-) -> None:
-    with stored_agent({}), pytest.raises(LocalRunError, match="empty or invalid"):
-        run_job(ctx, config_path)
+    with stored_agent(config), pytest.raises(LocalRunError, match="nemo-agents-spec-v1"):
+        run_job(ctx)

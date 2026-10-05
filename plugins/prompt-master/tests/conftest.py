@@ -24,20 +24,10 @@ if importlib.util.find_spec("prompt_master_plugin") is None:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest  # noqa: E402
-import yaml  # noqa: E402
 from nemo_helix_plugin.job_context import JobContext, StoragePaths  # noqa: E402
 from nemo_helix_plugin.job_results import LocalJobResults  # noqa: E402
 from prompt_master_plugin.jobs import optimize as optimize_module  # noqa: E402
 from prompt_master_plugin.runner import PromptMasterOutcome  # noqa: E402
-
-
-@pytest.fixture
-def optimizer_config() -> dict[str, Any]:
-    """A valid optimizer config, as staged in a fileset or passed by absolute path."""
-    return {
-        "model": {"provider": "openai", "model": "gpt-5.6"},
-        "timeout_seconds": 30,
-    }
 
 
 @pytest.fixture
@@ -73,20 +63,12 @@ def ctx(tmp_path: Path) -> JobContext:
 
 
 @pytest.fixture
-def config_path(tmp_path: Path, optimizer_config: dict[str, Any]) -> Path:
-    """An optimizer config on the host, for absolute-path (local) runs."""
-    path = tmp_path / "prompt-master.yaml"
-    path.write_text(yaml.safe_dump(optimizer_config), encoding="utf-8")
-    return path
+def fake_prompt_master(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, Any, Path]]:
+    """Replace the Fabric run with a canned outcome; returns the recorded ``(optimizer, agent_config, base_dir)`` calls."""
+    calls: list[tuple[Any, Any, Path]] = []
 
-
-@pytest.fixture
-def fake_prompt_master(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, Any, Path, str]]:
-    """Replace the Fabric run with a canned outcome; returns the recorded ``(config, agent_config, base_dir, workspace)`` calls."""
-    calls: list[tuple[Any, Any, Path, str]] = []
-
-    def fake(config: Any, agent_config: Any, base_dir: Path, *, workspace: str) -> PromptMasterOutcome:
-        calls.append((config, agent_config, base_dir, workspace))
+    def fake(optimizer: Any, agent_config: Any, base_dir: Path) -> PromptMasterOutcome:
+        calls.append((optimizer, agent_config, base_dir))
         return PromptMasterOutcome(
             optimized_prompt="new prompt",
             response="```\nnew prompt\n```\n🎯 Target: Fabric agent, 💡 Tightened scope.",

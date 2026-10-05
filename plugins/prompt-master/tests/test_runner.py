@@ -9,11 +9,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from prompt_master_plugin import runner as runner_module
-from prompt_master_plugin.config import PromptMasterConfig
 from prompt_master_plugin.runner import (
     WORKSPACE_SKILLS_SOURCE,
     PromptMasterExecutionError,
@@ -31,13 +31,14 @@ GATEWAY_URL = f"{PLATFORM_URL}{GATEWAY_PATH}"
 PROXY_URL = "http://127.0.0.1:4321"
 RESPONSE = "```\nnew prompt\n```\n🎯 Target: Fabric agent."
 
-CONFIG = PromptMasterConfig.model_validate(
-    {
-        "model": {"provider": "nvidia", "model": "nvidia-nemotron-3-5-lightning-30b-a3b", "temperature": 0.0},
-        "prompt_override": "You are a custom one-shot Prompt Master runner.",
-        "timeout_seconds": 45,
-    }
-)
+OVERRIDES: dict[str, Any] = {
+    "models": {"default": {"model": "gpt-5.6", "temperature": 0.0}},
+    "runtime": {"timeout_seconds": 45},
+}
+
+
+def _optimizer(overrides: dict[str, Any] | None = None) -> AgentConfig:
+    return build_optimizer_agent(overrides, workspace="team", platform_base_url=PLATFORM_URL)
 
 
 def _agent_config() -> dict[str, Any]:
@@ -60,27 +61,24 @@ def _fake_invoke(monkeypatch: pytest.MonkeyPatch, result: Any) -> dict[str, Any]
         return result
 
     monkeypatch.setattr(runner_module, "invoke_agent_config_request_once", fake)
-    monkeypatch.setenv("NHX_BASE_URL", PLATFORM_URL)
     return captured
 
 
-def _optimize(tmp_path: Path, agent_config: dict[str, Any] | None = None, **kwargs: Any) -> Any:
+def _optimize(tmp_path: Path, **kwargs: Any) -> Any:
     return asyncio.run(
-        optimize_prompt(
-            CONFIG, agent_config=agent_config or _agent_config(), base_dir=tmp_path, workspace="team", **kwargs
-        )
+        optimize_prompt(_optimizer(OVERRIDES), agent_config=_agent_config(), base_dir=tmp_path, **kwargs)
     )
 
 
-def test_builds_optimizer_agent() -> None:
-    agent = build_optimizer_agent(CONFIG, workspace="team", platform_base_url=PLATFORM_URL)
+def test_builds_bundled_optimizer_agent() -> None:
+    agent = _optimizer()
 
     assert agent.default_harness == "deepagents"
-    assert agent.models["default"].model == "nvidia-nemotron-3-5-lightning-30b-a3b"
+    assert agent.models["default"].provider == "nvidia"
     assert agent.models["default"].base_url == GATEWAY_URL
     assert agent.models["default"].api_key_env is None
     assert agent.instructions and agent.instructions.system
-    assert agent.instructions.system.content == "You are a custom one-shot Prompt Master runner."
+    assert "prompt-master skill" in agent.instructions.system.content
     # The harness sees the skills *library* (directory of skill dirs) at a virtual path under the
     # Fabric workspace, where stage_skills() puts it -- never a host path, which the
     # workspace-rooted Deep Agents filesystem cannot see.
@@ -88,11 +86,21 @@ def test_builds_optimizer_agent() -> None:
     assert agent.environment.workspace == "workspace"
 
 
+def test_merges_overrides_into_bundled_agent() -> None:
+    agent = _optimizer({**OVERRIDES, "instructions": {"system": {"content": "custom"}}})
+
+    assert agent.models["default"].model == "gpt-5.6"
+    assert agent.models["default"].provider == "nvidia"
+    assert agent.runtime.timeout_seconds == 45
+    assert agent.instructions and agent.instructions.system
+    assert agent.instructions.system.content == "custom"
+
+
 def test_reads_platform_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
     monkeypatch.setenv("NHX_BASE_URL", "http://from-env:9000/")
 
-    agent = build_optimizer_agent(CONFIG, workspace="default")
+    agent = build_optimizer_agent(None, workspace="default")
 
     assert (
         agent.models["default"].base_url
@@ -101,7 +109,7 @@ def test_reads_platform_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_translates_with_gateway_credential() -> None:
-    fabric = translate_agent_config(build_optimizer_agent(CONFIG, workspace="team", platform_base_url=PLATFORM_URL))
+    fabric = translate_agent_config(_optimizer())
 
     assert fabric.harness and fabric.harness.adapter_id == "nvidia.fabric.langchain.deepagents"
     assert fabric.models["default"].api_key_env == PLATFORM_IGW_API_KEY_ENV
@@ -155,7 +163,7 @@ def test_run_prompt_master_opens_proxy(tmp_path: Path, monkeypatch: pytest.Monke
     captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
     monkeypatch.setattr(runner_module, "platform_auth_proxy", lambda: contextlib.nullcontext(PROXY_URL))
 
-    outcome = run_prompt_master(CONFIG, _agent_config(), tmp_path, workspace="team")
+    outcome = run_prompt_master(_optimizer(), _agent_config(), tmp_path)
 
     assert outcome.optimized_prompt == "new prompt"
     assert captured["request"].agent_config.models["default"].base_url == f"{PROXY_URL}{GATEWAY_PATH}"

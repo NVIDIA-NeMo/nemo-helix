@@ -27,6 +27,7 @@ from typing import Any, ClassVar
 
 import yaml
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
+from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config, upload_to_fileset
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.client.adapter import client_from_platform
@@ -53,13 +54,8 @@ from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJob
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.refs import FilesetRef, LocalDir, classify_output_target, parse_entity_ref
-from prompt_master_plugin.config import PromptMasterConfig, load_prompt_master_config
-from prompt_master_plugin.runner import PromptMasterOutcome, run_prompt_master
-from prompt_master_plugin.schemas.optimize import (
-    FILESET_REQUIRED,
-    PromptMasterOptimizeSpec,
-    PromptMasterOptimizeSubmitSpec,
-)
+from prompt_master_plugin.runner import PromptMasterOutcome, build_optimizer_agent, run_prompt_master
+from prompt_master_plugin.schemas.optimize import PromptMasterOptimizeSpec
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -104,22 +100,6 @@ class PromptMasterOptimizeJob(NemoJob):
     job_collection_path: ClassVar[str | None] = None
     generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSpec
-    input_spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSubmitSpec
-
-    @classmethod
-    async def to_spec(  # ty: ignore[invalid-method-override]  (narrows the spec types)
-        cls,
-        input_spec: PromptMasterOptimizeSubmitSpec,
-        *,
-        workspace: str,
-        entity_client: object,
-        async_sdk: AsyncNemoClient,
-        is_local: bool,
-    ) -> PromptMasterOptimizeSpec:
-        del entity_client, async_sdk, is_local
-        payload = input_spec.model_dump(mode="json")
-        payload["workspace"] = workspace
-        return PromptMasterOptimizeSpec.model_validate(payload)
 
     @classmethod
     async def compile(  # ty: ignore[invalid-method-override]  (narrows the spec types)
@@ -134,11 +114,6 @@ class PromptMasterOptimizeJob(NemoJob):
         options: dict | None = None,
     ) -> HelixJobSpec:
         del entity_client, job_name, options
-        # ``compile`` is the remote submission path only, so requiring the fileset here keeps
-        # platform execution remote-safe even for a caller that bypassed the submit schema.
-        if spec.optimize_config_fileset is None:
-            raise HelixJobCompilationError(FILESET_REQUIRED)
-
         config = spec.model_dump(mode="json")
         config["workspace"] = workspace
         return HelixJobSpec(
@@ -151,32 +126,30 @@ class PromptMasterOptimizeJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient | None = None) -> dict[str, Any]:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict[str, Any]:
         spec = PromptMasterOptimizeSpec.model_validate(config)
-        if sdk is None:
-            raise LocalRunError(
-                "The prompt-master strategy needs a platform client to read the agent it optimizes. "
-                "Set NHX_BASE_URL, or pass sdk=... to NemoJobScheduler.run_local."
-            )
-
-        with resolve_staged_config(
-            spec.optimize_config,
-            spec.optimize_config_fileset,
-            workspace=spec.workspace,
-            ctx=ctx,
-            sdk=sdk,
-            kind="prompt-master-config",
-        ) as config_path:
-            optimizer = load_prompt_master_config(config_path)
+        overrides = None
+        if spec.optimize_config is not None:
+            with resolve_staged_config(
+                spec.optimize_config,
+                spec.optimize_config_fileset,
+                workspace=spec.workspace,
+                ctx=ctx,
+                sdk=sdk,
+                kind="prompt-master-config",
+            ) as config_path:
+                overrides = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        optimizer = build_optimizer_agent(overrides, workspace=spec.workspace)
 
         agent_ref = parse_entity_ref(spec.agent, default_workspace=spec.workspace)
         agent_label = f"{agent_ref.workspace}/{agent_ref.name}"
         source = fetch_agent_config(sdk, workspace=agent_ref.workspace, name=agent_ref.name)
 
         runtime_dir = ctx.storage.ephemeral / STRATEGY_NAME / "fabric"
-        runtime_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Running Prompt Master on agent %s with optimizer model %s", agent_label, optimizer.model.model)
-        outcome = run_prompt_master(optimizer, source, runtime_dir, workspace=spec.workspace)
+        logger.info(
+            "Running Prompt Master on agent %s with optimizer model %s", agent_label, optimizer.models["default"].model
+        )
+        outcome = run_prompt_master(optimizer, source, runtime_dir)
         optimized = with_system_prompt(source, outcome.optimized_prompt)
 
         results_dir = ctx.storage.ephemeral / STRATEGY_NAME / "results"
@@ -206,17 +179,13 @@ class PromptMasterOptimizeJob(NemoJob):
 def fetch_agent_config(sdk: NemoClient, *, workspace: str, name: str) -> dict[str, Any]:
     """The stored ``nemo-agents-spec-v1`` config of agent *workspace*/*name*."""
     try:
-        agent = client_from_platform(sdk, AgentsClient).get_agent(name=name, workspace=workspace).data()
+        config = client_from_platform(sdk, AgentsClient).get_agent(name=name, workspace=workspace).data().config
     except NotFoundError as exc:
         raise LocalRunError(f"Agent '{workspace}/{name}' does not exist; there is nothing to optimize.") from exc
-    config = agent.config
-    if not isinstance(config, Mapping) or not config:
-        raise LocalRunError(f"Agent '{workspace}/{name}' has an empty or invalid stored config; cannot optimize it.")
-    config_format = config.get("config_format")
-    if config_format != SUPPORTED_CONFIG_FORMAT:
+    if not isinstance(config, Mapping) or config.get("config_format") != SUPPORTED_CONFIG_FORMAT:
         raise LocalRunError(
-            f"Agent '{workspace}/{name}' has config_format {config_format!r}; the prompt-master strategy "
-            f"rewrites instructions.system.content of {SUPPORTED_CONFIG_FORMAT!r} agents only."
+            f"Agent '{workspace}/{name}' is not a {SUPPORTED_CONFIG_FORMAT!r} agent; the prompt-master strategy "
+            "rewrites instructions.system.content of those only."
         )
     logger.info("Resolved agent %s/%s", workspace, name)
     return dict(config)
@@ -233,7 +202,7 @@ def write_artifacts(
     results_dir: Path,
     *,
     agent: str,
-    optimizer: PromptMasterConfig,
+    optimizer: AgentConfig,
     source: Mapping[str, Any],
     optimized: Mapping[str, Any],
     outcome: PromptMasterOutcome,
@@ -254,20 +223,13 @@ def write_artifacts(
     summary = {
         "strategy": STRATEGY_NAME,
         "agent": agent,
-        "optimizer_model": optimizer.model.model_dump(exclude_none=True),
-        "original_prompt": _system_prompt(source),
+        "optimizer_model": optimizer.models["default"].model,
+        "original_prompt": source["instructions"]["system"]["content"],
         "optimized_prompt": outcome.optimized_prompt,
         "optimized_agent_config": OPTIMIZED_AGENT_FILENAME,
         "response": outcome.response,
     }
     (results_dir / SUMMARY_FILENAME).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-
-
-def _system_prompt(agent_config: Mapping[str, Any]) -> str | None:
-    instructions = agent_config.get("instructions")
-    system = instructions.get("system") if isinstance(instructions, Mapping) else None
-    content = system.get("content") if isinstance(system, Mapping) else None
-    return content if isinstance(content, str) else None
 
 
 def publish(results_dir: Path, output: str | None, *, workspace: str, sdk: NemoClient) -> dict[str, str] | None:

@@ -95,15 +95,15 @@ async def _compile_through_router(spec: RunStrategySpec, *, workspace: str = "de
 
 
 async def test_the_router_applies_this_strategys_submit_rules(installed_strategy: None) -> None:
-    """A remote submission without a staged config is refused by *this* strategy's submit schema."""
+    """A config without its fileset is refused by *this* strategy's schema."""
     spec = RunStrategySpec.model_validate(
-        {"strategy": "prompt-master", "optimize_config": "/host/only/pm.yaml", "agent": "calculator-agent"}
+        {"strategy": "prompt-master", "optimize_config": "pm.yaml", "agent": "calculator-agent"}
     )
 
     with pytest.raises(HelixJobCompilationError, match="not valid for optimization strategy 'prompt-master'") as exc:
         await _compile_through_router(spec)
 
-    assert "optimize_config_fileset is required" in str(exc.value)
+    assert "given together" in str(exc.value)
 
 
 async def test_the_router_requires_an_agent_for_this_strategy(installed_strategy: None) -> None:
@@ -153,14 +153,13 @@ async def test_the_router_dispatches_compile_to_this_job(installed_strategy: Non
 def test_the_router_runs_this_job_in_process_with_the_platform_client(
     installed_strategy: None,
     ctx: JobContext,
-    config_path: Path,
     tmp_path: Path,
     fake_prompt_master: list[Any],
     stored_agent: Any,
     source_agent: dict[str, Any],
 ) -> None:
     """The local path: the router's ``run`` forwards ``sdk`` because this job's ``run`` accepts it."""
-    config = {"strategy": "prompt-master", "optimize_config": str(config_path), "agent": "calculator-agent"}
+    config = {"strategy": "prompt-master", "agent": "calculator-agent"}
 
     with stored_agent(source_agent):
         result = RunStrategyJob().run(config, ctx=ctx, sdk=MagicMock())
