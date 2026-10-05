@@ -463,6 +463,17 @@ def _hydrate_by_refs_sql(
                 GROUP BY results.workspace, results.session_id, results.name
             )
             GROUP BY workspace, session_id
+        ),
+        session_failures AS (
+            SELECT
+                workspace,
+                session_id,
+                groupUniqArray(name) AS failed_evaluators
+            FROM {evaluator_results_table} FINAL
+            WHERE workspace = %(workspace)s
+                AND session_id IN %(page_session_ids)s
+                AND status = 'FAILED'
+            GROUP BY workspace, session_id
         )
         SELECT
             sessions.workspace AS workspace,
@@ -481,7 +492,8 @@ def _hydrate_by_refs_sql(
             metrics.output_tokens AS output_tokens,
             metrics.cached_tokens AS cached_tokens,
             metrics.cost_total_usd AS cost_total_usd,
-            scores.evaluator_scores AS evaluator_scores
+            scores.evaluator_scores AS evaluator_scores,
+            failures.failed_evaluators AS failed_evaluators
         FROM page_sessions AS sessions
         LEFT JOIN session_metrics AS metrics
             ON sessions.workspace = metrics.workspace
@@ -489,6 +501,9 @@ def _hydrate_by_refs_sql(
         LEFT JOIN session_scores AS scores
             ON sessions.workspace = scores.workspace
             AND sessions.session_id = scores.session_id
+        LEFT JOIN session_failures AS failures
+            ON sessions.workspace = failures.workspace
+            AND sessions.session_id = failures.session_id
     """
 
 
@@ -536,6 +551,7 @@ def _row(record: dict[str, Any]) -> EvaluationSessionRow:
         cached_tokens=int_or_none(record["cached_tokens"]),
         cost_total_usd=float_or_none(record["cost_total_usd"]),
         evaluator_scores=_score_map(record.get("evaluator_scores")),
+        failed_evaluators=sorted(str(name) for name in (record.get("failed_evaluators") or [])),
     )
 
 

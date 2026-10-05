@@ -58,6 +58,7 @@ class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
                 p90=float_or_none(row["p90"]),
                 p95=float_or_none(row["p95"]),
                 p99=float_or_none(row["p99"]),
+                failed_count=int(row.get("failed_count") or 0),
                 count=int(row["count"]),
             )
 
@@ -178,6 +179,7 @@ def _score_rollups_sql(*, trace_index_table: str, evaluator_results_table: str, 
       test_case_sessions — attempts per test case (the fixed denominator)
       evaluators         — the evaluator axis of the per-test-case grid
       test_case_scores   — stage 2: one value per (test case, evaluator), zero-filled
+      failed_counts      — sessions per evaluator that recorded a FAILED result
     The final SELECT takes the distribution (sum/mean/quantiles/count) across test cases. Sessions with
     no test_case_name can't be attributed to a test case and are dropped.
     """
@@ -197,24 +199,40 @@ def _score_rollups_sql(*, trace_index_table: str, evaluator_results_table: str, 
         ),
         test_case_scores AS (
             {_test_case_scores_cte()}
+        ),
+        failed_counts AS (
+            {_failed_counts_cte(evaluator_results_table)}
         )
         SELECT
-            evaluation_name,
-            evaluator_name,
-            {_stat_columns("value")}
-        FROM test_case_scores
-        GROUP BY evaluation_name, evaluator_name
+            scores.evaluation_name AS evaluation_name,
+            scores.evaluator_name AS evaluator_name,
+            {_stat_columns("scores.value")},
+            max(coalesce(failures.failed_count, 0)) AS failed_count
+        FROM test_case_scores AS scores
+        LEFT JOIN failed_counts AS failures
+            ON failures.evaluation_name = scores.evaluation_name
+            AND failures.evaluator_name = scores.evaluator_name
+        GROUP BY scores.evaluation_name, scores.evaluator_name
         ORDER BY evaluation_name ASC, evaluator_name ASC
     """
 
 
-def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str) -> str:
+_SCORED_RESULT_PREDICATE = "data_type IN ('NUMERIC', 'BOOLEAN') AND value IS NOT NULL"
+_FAILED_RESULT_PREDICATE = "status = 'FAILED'"
+
+
+def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str, include_failed: bool = False) -> str:
     """Join scoped ``sessions`` to their scored evaluator_results (NUMERIC/BOOLEAN, non-null values).
 
     ``columns`` is the projection taken from evaluator_results ("name, value" or "name"). The inner
     subquery pre-filters to scoped sessions so ClickHouse prunes evaluator_results before the join, and
     the trailing WHERE keeps only sessions that carry a test_case_name — the ones the rollup is over.
+    ``include_failed`` also admits FAILED results, which carry no value: the evaluator axis needs them so
+    an evaluator that failed on every session still appears in the grid (as 0, with a failed_count).
     """
+    predicate = (
+        f"(({_SCORED_RESULT_PREDICATE}) OR {_FAILED_RESULT_PREDICATE})" if include_failed else _SCORED_RESULT_PREDICATE
+    )
     return f"""FROM scoped_sessions AS sessions
             INNER JOIN (
                 SELECT workspace, session_id, {columns}
@@ -224,8 +242,7 @@ def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str)
                         SELECT DISTINCT workspace, session_id
                         FROM scoped_sessions
                     )
-                    AND data_type IN ('NUMERIC', 'BOOLEAN')
-                    AND value IS NOT NULL
+                    AND {predicate}
             ) AS results
                 ON sessions.workspace = results.workspace
                 AND sessions.session_id = results.session_id
@@ -275,7 +292,36 @@ def _evaluators_cte(evaluator_results_table: str) -> str:
             SELECT DISTINCT
                 sessions.evaluation_name AS evaluation_name,
                 results.name AS evaluator_name
-            {_sessions_join_scored_results(evaluator_results_table, columns="name")}"""
+            {_sessions_join_scored_results(evaluator_results_table, columns="name", include_failed=True)}"""
+
+
+def _failed_counts_cte(evaluator_results_table: str) -> str:
+    """Sessions per (evaluation, evaluator) that recorded a FAILED result.
+
+    Counted per session, not per row, so an evaluator that failed twice on one attempt counts once —
+    the same unit the score mean is over. A FAILED result has no value, so these sessions already land
+    as zeros in ``test_case_scores``; this CTE only makes the count of them visible.
+    """
+    return f"""
+            SELECT
+                sessions.evaluation_name AS evaluation_name,
+                results.name AS evaluator_name,
+                uniqExact(sessions.session_id) AS failed_count
+            FROM scoped_sessions AS sessions
+            INNER JOIN (
+                SELECT workspace, session_id, name
+                FROM {evaluator_results_table} FINAL
+                WHERE workspace = %(workspace)s
+                    AND (workspace, session_id) IN (
+                        SELECT DISTINCT workspace, session_id
+                        FROM scoped_sessions
+                    )
+                    AND {_FAILED_RESULT_PREDICATE}
+            ) AS results
+                ON sessions.workspace = results.workspace
+                AND sessions.session_id = results.session_id
+            WHERE sessions.test_case_name != ''
+            GROUP BY sessions.evaluation_name, results.name"""
 
 
 def _test_case_scores_cte() -> str:
