@@ -276,7 +276,7 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
 
     async def capture_create(image: str, **kwargs: object) -> object:
         captured.update(kwargs)
-        return SimpleNamespace(sandbox_id="sandbox-1")
+        return SimpleNamespace(id="sandbox-1")
 
     monkeypatch.setattr(Sandbox, "create", staticmethod(capture_create))
 
@@ -288,10 +288,15 @@ async def test_create_passes_the_configured_cap_and_the_episode_requests_separat
 
 
 class _FakeSandbox:
+    """Mirrors the SDK object: the ID is a local attribute, ``get_info`` is a round trip."""
+
     def __init__(self, sandbox_id: str, connection_config: object) -> None:
-        self.sandbox_id = sandbox_id
+        self.id = sandbox_id
         self.connection_config = connection_config
         self.closed = False
+
+    async def get_info(self) -> object:
+        raise AssertionError("the sandbox ID is local; reading it must not call the control plane")
 
     async def close(self) -> None:
         self.closed = True

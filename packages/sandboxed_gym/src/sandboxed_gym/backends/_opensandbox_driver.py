@@ -233,7 +233,7 @@ class OpenSandboxDriver:
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
                 connection_config=create_connection_config,
             )
-            sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
+            sandbox_id = getattr(sandbox, "id", None) or (await sandbox.get_info()).id
             if create_connection_config is not self._connection_config:
                 sandbox = await self._reattach_under_base_connection(sandbox, sandbox_id)
             if spec.workdir:
