@@ -17,6 +17,10 @@ Dockerfile.bake
 **/node_modules
 web/packages/sdk/generated/
 sdk/python/nemo-helix/_dev/nhx
+# Local pi agent state (worktrees, sandbox experiments) — git-ignored, and
+# stale sandbox worktrees can carry other-user-owned dirs that fail docker
+# build context scanning with permission denied.
+.pi
 # nemo-agents optimize-skills artifacts. These ephemeral run outputs can
 # contain root-owned files (the harbor agent runs as root inside the
 # container) that fail docker build context scanning with permission
