@@ -20,6 +20,7 @@ import {
 import { Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { type EvalJobRow, evalDurationMs } from '@studio/api/evaluation/utils';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { evaluationFilesetName } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { evaluatorScores } from '@studio/routes/agents/AgentDetailRoute/evaluations/formatRollups';
@@ -188,7 +189,14 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
           header: 'Status',
           cell: ({ row }) => {
             const { job, evaluation } = row.original;
-            if (job) return <StatusBadge status={job.status} />;
+            if (job) {
+              return (
+                <Flex align="center" gap="density-xs" className="flex-wrap">
+                  <StatusBadge status={job.status} />
+                  <EvalRunOutcomeBadge outcome={job.outcome} />
+                </Flex>
+              );
+            }
             return evaluation ? <StatusBadge status="completed" /> : <Text>—</Text>;
           },
         }),

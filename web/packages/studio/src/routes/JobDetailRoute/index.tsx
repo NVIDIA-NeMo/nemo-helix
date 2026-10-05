@@ -11,6 +11,7 @@ import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import { useJobsGetJob, useJobsListJobResults } from '@nemo/sdk/generated/platform/jobs';
 import { Flex, Grid, PageHeader, Panel, Spinner, Stack } from '@nvidia/foundations-react-core';
+import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -70,6 +71,8 @@ export const JobDetailRoute: FC = () => {
             </Flex>
           }
         />
+
+        <EvalRunOutcomeBanner statusDetails={job?.status_details} />
 
         <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
           <Panel

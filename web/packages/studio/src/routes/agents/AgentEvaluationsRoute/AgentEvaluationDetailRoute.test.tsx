@@ -44,6 +44,73 @@ describe('AgentEvaluationDetailRoute', () => {
     expect(await screen.findByText('Evaluation not found')).toBeInTheDocument();
   });
 
+  describe('run outcome', () => {
+    const failedJob = {
+      ...completedJob,
+      status: 'error',
+      error_details: { message: 'Job exited with code 1' },
+      status_details: {
+        message: 'Job exited with code 1',
+        evaluation: {
+          unit: 'trials',
+          total: 3,
+          errored: 3,
+          scored: 0,
+          failed: true,
+          message: 'No usable scores across 3 trials (3 reported errors).',
+        },
+      },
+    };
+
+    beforeEach(() => {
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+          () => HttpResponse.json(failedJob)
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/evaluator/v2/workspaces/${workspace}/agent-eval-results/${JOB_NAME}`,
+          () =>
+            HttpResponse.json({
+              name: JOB_NAME,
+              workspace,
+              id: 'r1',
+              job_id: JOB_NAME,
+              bundle_ref: `${workspace}/bundle-fs#results/attempt-1`,
+              created_at: '2026-08-01T00:05:00Z',
+              updated_at: '2026-08-01T00:05:00Z',
+              scores: {
+                scores: [
+                  { name: 'output-score.match', score_type: 'range', count: 0, nan_count: 3 },
+                ],
+              },
+              summary: {
+                task_count: 3,
+                trial_count: 3,
+                score_count: 3,
+                error_count: 3,
+                metric_coverage: {
+                  'output-score': { match: { total: 3, scored: 0, failed: 3, missing: 0 } },
+                },
+              },
+            })
+        )
+      );
+    });
+
+    it('explains the failure with the evaluator rollup and shows per-output coverage', async () => {
+      renderDetail();
+      expect(
+        await screen.findByText('No usable scores across 3 trials (3 reported errors).')
+      ).toBeInTheDocument();
+      // The exit code no longer appears as the "Response": the rollup already explains the run.
+      expect(screen.queryByText('Job exited with code 1')).not.toBeInTheDocument();
+      expect(await screen.findByText('0/3 scored')).toBeInTheDocument();
+      expect(screen.getByText('3 failed')).toBeInTheDocument();
+      expect(screen.getByText('3 trials across 3 tasks; 3 reported errors.')).toBeInTheDocument();
+    });
+  });
+
   describe('Gym runner scores', () => {
     beforeEach(() => {
       server.use(

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
+import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
@@ -21,6 +22,8 @@ export interface EvalJobRow {
   /** Intake Evaluation the run publishes to, when it asked to. The join key between a job and its
    *  published results — absent for a run submitted without `publication.intake`. */
   evaluationName: string | null;
+  /** The evaluator's run rollup from the job's status details; null for jobs that predate it. */
+  outcome: EvalRunOutcome | null;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
@@ -97,6 +100,7 @@ export const toEvalJobRow = (job: HelixJobResponse): EvalJobRow => ({
   agentName: targetNameForEvalJob(job),
   configLabel: evalJobConfigLabel(job),
   evaluationName: publishedEvaluationName(job),
+  outcome: evalRunOutcomeOf(job.status_details),
 });
 
 /** Task result shape with metrics and scores for evaluation results. */
