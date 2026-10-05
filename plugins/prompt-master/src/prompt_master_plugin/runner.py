@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import shutil
 from collections.abc import Mapping
@@ -21,9 +20,6 @@ from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
 from nemo_agents_plugin.fabric.translator import FabricTranslationError
 from nemo_agents_plugin.jobs.gateway_proxy import platform_auth_proxy, rewrite_gateway_models
 from nemo_agents_plugin.utils import inject_fabric_gateway_url
-from prompt_master_plugin.skills import skills_dir
-
-logger = logging.getLogger(__name__)
 
 _PROMPT_BLOCK = re.compile(r"```[^\n]*\n(?P<prompt>.*?)\n```", flags=re.DOTALL)
 #: The strategy line that closes Prompt Master's reply ("🎯 Target: <tool>,💡 <why>").  The prompt
@@ -38,18 +34,16 @@ _TRAILING_RULE = re.compile(r"\n[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*\Z")
 #: the exception, so this is the one place the model's actual words survive for diagnosis.
 _RESPONSE_PREVIEW_CHARS = 300
 
-#: The Fabric local workspace, relative to a run's base directory.
-_WORKSPACE = "workspace"
-#: Where the vendored skills library is staged inside that workspace, and the same place as the
-#: harness names it.  The Deep Agents adapter roots its filesystem at the workspace in virtual
-#: mode, so a host path outside it resolves to nothing -- and the harness only warns, then runs
-#: on with no skills.  ``.agents/skills`` is the convention the evaluator SDK and the packaging
-#: validator already use for workspace-rooted harnesses.
-WORKSPACE_SKILLS_DIR = Path(".agents/skills")
-WORKSPACE_SKILLS_SOURCE = "/.agents/skills"
+#: Where the vendored skills library is staged, relative to a run's base directory: the Fabric
+#: workspace plus the path agent.yaml's ``skills.paths`` names from the workspace root.  The Deep
+#: Agents adapter roots its filesystem at the workspace in virtual mode, so a host path outside
+#: it resolves to nothing -- and the harness only warns, then runs on with no skills.
+WORKSPACE_SKILLS_DIR = Path("workspace/.agents/skills")
 #: The optimizer agent.  A run's ``optimize_config`` is a partial file in the same format,
-#: deep-merged over it.  Its ``skills.paths`` names :data:`WORKSPACE_SKILLS_SOURCE`.
+#: deep-merged over it.
 OPTIMIZER_AGENT_YAML = Path(__file__).with_name("agent.yaml")
+#: The vendored skills library: a directory of skill directories, each holding a SKILL.md.
+SKILLS_DIR = Path(__file__).with_name("vendor")
 
 
 class PromptMasterExecutionError(RuntimeError):
@@ -92,32 +86,19 @@ def _merge(base: dict[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]
     return base
 
 
-def _bundled_skill_library() -> Path:
-    """The resolved skills library holding the vendored Prompt Master skill.
-
-    The Deep Agents harness treats a missing skills source as a warning and runs on with no
-    skills at all, so a broken path would only surface after a wasted model call as a reply
-    without the copyable prompt block.  Refuse up front instead.
-    """
-    library = skills_dir().resolve()
-    manifest = library / "prompt-master" / "SKILL.md"
-    if not manifest.is_file():
-        raise PromptMasterExecutionError(
-            f"The bundled Prompt Master skill is missing: expected {manifest} (prompt-master/SKILL.md under the "
-            f"skills library {library}). Reinstall the prompt-master plugin."
-        )
-    return library
-
-
 def stage_skills(base_dir: Path) -> Path:
-    """Copy the vendored skills library into the Fabric workspace under *base_dir*.
+    """Copy the vendored skills library into the Fabric workspace under *base_dir*, replacing any earlier copy.
 
-    Returns the staged library, which the harness reaches as :data:`WORKSPACE_SKILLS_SOURCE`.
-    A previous staging is replaced wholesale so no run sees stale files.
+    A library without the Prompt Master manifest is refused first: the harness treats a missing
+    skill as a warning, and the model would then answer without Prompt Master's output format.
     """
-    destination = base_dir / _WORKSPACE / WORKSPACE_SKILLS_DIR
+    if not (SKILLS_DIR / "prompt-master" / "SKILL.md").is_file():
+        raise PromptMasterExecutionError(
+            f"The bundled Prompt Master skill is missing: no prompt-master/SKILL.md under {SKILLS_DIR}."
+        )
+    destination = base_dir / WORKSPACE_SKILLS_DIR
     shutil.rmtree(destination, ignore_errors=True)
-    shutil.copytree(_bundled_skill_library(), destination)
+    shutil.copytree(SKILLS_DIR, destination)
     return destination
 
 
@@ -166,7 +147,6 @@ async def optimize_prompt(
     if result.status != "succeeded" or not result.response:
         detail = result.error or result.response or "no response"
         raise PromptMasterExecutionError(f"Prompt Master Fabric run failed: {detail}")
-    _log_run(result, result.response)
     return PromptMasterOutcome(optimized_prompt=extract_optimized_prompt(result.response), response=result.response)
 
 
@@ -189,55 +169,13 @@ def extract_optimized_prompt(response: str) -> str:
         if block is None:
             raise PromptMasterExecutionError(
                 "Prompt Master response did not contain a copyable prompt block or a 🎯 Target line. "
-                f"Response began: {_preview(response)}"
+                f"Response began: {response[:_RESPONSE_PREVIEW_CHARS]!r}"
             )
         prompt = block.group("prompt")
     prompt = prompt.strip()
     if not prompt:
         raise PromptMasterExecutionError("Prompt Master response contained an empty prompt.")
     return prompt
-
-
-def _log_run(result: Any, response: str) -> None:
-    """Record what the optimizer did, so a bad reply can be diagnosed from the job log alone.
-
-    Deep Agents discloses a skill progressively: the model sees its name and description, and
-    only learns Prompt Master's output format by reading SKILL.md through a tool call.  Whether
-    that read happened is the first question after a reply the parser rejects, and the reply
-    itself is the second.  Both are logged before parsing so a failure still leaves them behind.
-    """
-    reads = _skill_reads(result)
-    if reads:
-        logger.info("Optimizer read the skill manifest through a tool call: %s", ", ".join(reads))
-    else:
-        logger.warning(
-            "Optimizer never read a SKILL.md through a tool call; Prompt Master's output format may not have "
-            "reached the model."
-        )
-    logger.info("Prompt Master response (%d chars):\n%s", len(response), response)
-
-
-def _skill_reads(result: Any) -> list[str]:
-    """Every SKILL.md path the optimizer named in a tool call, in order, from the run's transcript."""
-    output = getattr(result, "output", None)
-    messages = output.get("messages") if isinstance(output, Mapping) else None
-    reads: list[str] = []
-    for message in messages if isinstance(messages, list) else []:
-        calls = message.get("tool_calls") if isinstance(message, Mapping) else None
-        for call in calls if isinstance(calls, list) else []:
-            args = call.get("args") if isinstance(call, Mapping) else None
-            for value in args.values() if isinstance(args, Mapping) else []:
-                if isinstance(value, str) and value.endswith("SKILL.md"):
-                    reads.append(f"{call.get('name', 'tool')}({value})")
-    return reads
-
-
-def _preview(response: str) -> str:
-    """The first :data:`_RESPONSE_PREVIEW_CHARS` of *response* on one line, for an error message."""
-    flattened = " ".join(response.split())
-    if len(flattened) <= _RESPONSE_PREVIEW_CHARS:
-        return flattened
-    return flattened[:_RESPONSE_PREVIEW_CHARS].rstrip() + "..."
 
 
 def run_prompt_master(optimizer: AgentConfig, agent_config: Mapping[str, Any], base_dir: Path) -> PromptMasterOutcome:

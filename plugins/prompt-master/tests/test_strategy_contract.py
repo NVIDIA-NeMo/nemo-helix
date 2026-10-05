@@ -74,15 +74,6 @@ def test_the_job_name_matches_the_entry_point_key_suffix() -> None:
     assert STRATEGY_JOB_KEY.split(".", 1)[1] == PromptMasterOptimizeJob.name
 
 
-def test_the_skills_entry_point_resolves_to_the_bundled_library() -> None:
-    skills = _pyproject()["project"]["entry-points"]["nemo.skills"]
-    module_name, _, attr = skills["prompt-master"].partition(":")
-
-    library = getattr(importlib.import_module(module_name), attr)()
-
-    assert (library / "prompt-master" / "SKILL.md").is_file()
-
-
 # ---------------------------------------------------------------------------
 # through the router
 # ---------------------------------------------------------------------------

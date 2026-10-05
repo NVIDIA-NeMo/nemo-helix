@@ -3,7 +3,6 @@
 
 import asyncio
 import contextlib
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +14,6 @@ from nemo_agents_plugin.fabric.runtime import FabricRuntimeExecutionError
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from prompt_master_plugin import runner as runner_module
 from prompt_master_plugin.runner import (
-    WORKSPACE_SKILLS_SOURCE,
     PromptMasterExecutionError,
     build_optimization_input,
     build_optimizer_agent,
@@ -30,6 +28,8 @@ GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/team/openai/-/v1"
 GATEWAY_URL = f"{PLATFORM_URL}{GATEWAY_PATH}"
 PROXY_URL = "http://127.0.0.1:4321"
 RESPONSE = "```\nnew prompt\n```\n🎯 Target: Fabric agent."
+#: The skills library as agent.yaml names it, seen from the Fabric workspace root.
+SKILLS_SOURCE = "/.agents/skills"
 
 OVERRIDES: dict[str, Any] = {
     "models": {"default": {"model": "gpt-5.6", "temperature": 0.0}},
@@ -82,7 +82,7 @@ def test_builds_bundled_optimizer_agent() -> None:
     # The harness sees the skills *library* (directory of skill dirs) at a virtual path under the
     # Fabric workspace, where stage_skills() puts it -- never a host path, which the
     # workspace-rooted Deep Agents filesystem cannot see.
-    assert agent.skills and agent.skills.paths == [WORKSPACE_SKILLS_SOURCE]
+    assert agent.skills and agent.skills.paths == [SKILLS_SOURCE]
     assert agent.environment.workspace == "workspace"
 
 
@@ -208,73 +208,19 @@ def test_missing_prompt_block_error_truncates_a_long_response() -> None:
     with pytest.raises(PromptMasterExecutionError) as excinfo:
         extract_optimized_prompt(response)
 
-    message = str(excinfo.value)
-    assert len(message) < 600
-    assert message.endswith("...")
+    assert len(str(excinfo.value)) < 600
 
 
 def test_rejects_missing_bundled_skill_before_invoking_fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A skills library without prompt-master/SKILL.md loads nothing, silently, and the optimizer
     # then answers without Prompt Master's output format.  Fail before paying for that model call.
     captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
-    monkeypatch.setattr(runner_module, "skills_dir", lambda: tmp_path / "no-skills-here")
+    monkeypatch.setattr(runner_module, "SKILLS_DIR", tmp_path / "no-skills-here")
 
     with pytest.raises(PromptMasterExecutionError, match=r"prompt-master/SKILL\.md"):
         _optimize(tmp_path)
 
     assert "request" not in captured
-
-
-def _result_with_messages(response: str, messages: list[dict[str, Any]]) -> SimpleNamespace:
-    """A Fabric result whose ``output`` carries the adapter's message transcript."""
-    return SimpleNamespace(status="succeeded", response=response, error=None, output={"messages": messages})
-
-
-def test_logs_the_response_and_the_skill_read(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.INFO, logger="prompt_master_plugin.runner")
-    manifest = "/skills/prompt-master/SKILL.md"
-    _fake_invoke(
-        monkeypatch,
-        _result_with_messages(
-            RESPONSE,
-            [
-                {"role": "human", "content": "Use the prompt-master skill..."},
-                {
-                    "role": "ai",
-                    "content": "",
-                    "tool_calls": [{"name": "read_file", "args": {"file_path": manifest, "limit": 1000}, "id": "c1"}],
-                },
-                {"role": "tool", "content": "## PRIMACY ZONE ...", "name": "read_file"},
-                {"role": "ai", "content": RESPONSE},
-            ],
-        ),
-    )
-
-    _optimize(tmp_path)
-
-    infos = [record.getMessage() for record in caplog.records if record.levelno == logging.INFO]
-    assert any(manifest in message for message in infos)
-    assert any(RESPONSE in message for message in infos)
-    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
-
-
-def test_warns_when_the_skill_was_never_read_and_still_logs_the_reply(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    # The exact shape of the failure in the field: a bare rewritten prompt, no fence, no
-    # read_file call.  The log must show both facts even though the run then fails to parse.
-    caplog.set_level(logging.INFO, logger="prompt_master_plugin.runner")
-    bare = "You are a concise calculator agent. Output only the final answer."
-    _fake_invoke(monkeypatch, _result_with_messages(bare, [{"role": "ai", "content": bare}]))
-
-    with pytest.raises(PromptMasterExecutionError, match="copyable prompt block"):
-        _optimize(tmp_path)
-
-    warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
-    assert any("never read" in message and "SKILL.md" in message for message in warnings)
-    assert any(bare in record.getMessage() for record in caplog.records if record.levelno == logging.INFO)
 
 
 def test_stages_the_skill_library_into_the_workspace(tmp_path: Path) -> None:
@@ -302,7 +248,7 @@ def test_stages_skills_before_invoking_fabric(tmp_path: Path, monkeypatch: pytes
     _optimize(tmp_path)
 
     assert (tmp_path / "workspace" / ".agents" / "skills" / "prompt-master" / "SKILL.md").is_file()
-    assert captured["request"].agent_config.skills.paths == [WORKSPACE_SKILLS_SOURCE]
+    assert captured["request"].agent_config.skills.paths == [SKILLS_SOURCE]
 
 
 def test_deep_agents_discovers_the_staged_skill(tmp_path: Path) -> None:
@@ -314,11 +260,11 @@ def test_deep_agents_discovers_the_staged_skill(tmp_path: Path) -> None:
     stage_skills(tmp_path)
     backend = backends.FilesystemBackend(root_dir=str(tmp_path / "workspace"), virtual_mode=True)
 
-    skills, error = skills_middleware._list_skills_with_errors(backend, WORKSPACE_SKILLS_SOURCE)
+    skills, error = skills_middleware._list_skills_with_errors(backend, SKILLS_SOURCE)
 
     assert error is None
     assert [skill["name"] for skill in skills] == ["prompt-master"]
-    assert skills[0]["path"] == f"{WORKSPACE_SKILLS_SOURCE}/prompt-master/SKILL.md"
+    assert skills[0]["path"] == f"{SKILLS_SOURCE}/prompt-master/SKILL.md"
 
 
 def test_splits_the_prompt_from_the_target_line() -> None:

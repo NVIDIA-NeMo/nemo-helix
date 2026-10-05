@@ -29,10 +29,6 @@ dependencies = [
 [project.entry-points."nemo.jobs"]
 "agent-optimization.prompt-master" = "prompt_master_plugin.jobs.optimize:PromptMasterOptimizeJob"
 
-# The vendored Prompt Master skill library, for platforms that enumerate plugin-owned skills.
-[project.entry-points."nemo.skills"]
-prompt-master = "prompt_master_plugin.skills:skills_dir"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
