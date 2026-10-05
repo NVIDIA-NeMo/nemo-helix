@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import stat
 import subprocess
@@ -18,7 +19,7 @@ pytest.importorskip("scaled_evals")
 
 from scaled_evals import harbor_opensandbox_cleanup as cleanup
 from scaled_evals.api.framework_versions import resolve_framework_runner
-from scaled_evals.api.settings import settings
+from scaled_evals.api.settings import Settings, settings
 from scaled_evals.dispatch import harbor_opensandbox as backend
 from scaled_evals.models.runtime import LaunchHandle, LaunchSpec
 
@@ -109,6 +110,15 @@ def test_staged_preflight_accepts_task_narrowing(tmp_path: Path) -> None:
 
 def test_trusted_hosts_put_model_endpoint_first_without_duplicates() -> None:
     assert backend.trusted_allowed_hosts() == ["igw.example.internal", "pypi.org"]
+
+
+def test_sandbox_lifetime_default_matches_harbor() -> None:
+    harbor_opensandbox = pytest.importorskip("harbor.environments.opensandbox")
+    harbor_default = (
+        inspect.signature(harbor_opensandbox.OpenSandboxEnvironment.__init__).parameters["sandbox_timeout_sec"].default
+    )
+
+    assert Settings.model_fields["harbor_opensandbox_sandbox_timeout_seconds"].default == harbor_default
 
 
 def test_render_owns_environment_block(tmp_path: Path) -> None:

@@ -530,7 +530,9 @@ class Settings(BaseSettings):
     # matches another deployment's sandboxes on a shared control plane.
     harbor_opensandbox_deployment_id: str = "scaled-evals"
     # Longest a sandbox may live before OpenSandbox stops it, as a backstop if cleanup never runs.
-    harbor_opensandbox_sandbox_timeout_seconds: int = 3600
+    # It must outlast the longest trial (agent setup, agent and verifier), or OpenSandbox kills the
+    # sandbox mid-trial. The default matches Harbor's OpenSandbox adapter.
+    harbor_opensandbox_sandbox_timeout_seconds: int = 86400
     # How long cleanup waits for an evaluation's sandboxes to die before reporting them as remaining.
     harbor_opensandbox_cleanup_timeout_seconds: int = 120
 
