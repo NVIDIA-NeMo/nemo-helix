@@ -133,6 +133,11 @@ def test_spec_rejects_a_malformed_fileset_ref() -> None:
         staged_spec(optimize_config_fileset="too/many/parts")
 
 
+def test_spec_refuses_the_routers_output_field() -> None:
+    with pytest.raises(ValidationError, match="output"):
+        staged_spec(output="default/pm-results")
+
+
 # ---------------------------------------------------------------------------
 # compile
 # ---------------------------------------------------------------------------
@@ -140,13 +145,13 @@ def test_spec_rejects_a_malformed_fileset_ref() -> None:
 
 async def test_compile_prefers_the_subprocess_executor_and_stamps_the_spec() -> None:
     with profiles(SUBPROCESS_PROFILE, CPU_PROFILE):
-        job_spec = await compile_spec(staged_spec(output="default/pm-results"), workspace="staging")
+        job_spec = await compile_spec(staged_spec(), workspace="staging")
 
     (step,) = job_spec.steps
     assert step.name == "prompt-master"
     assert step.executor.provider == "subprocess"
     assert step.executor.command == ["python", "-m", TASK_MODULE]
-    assert step.config == {**STAGED, "output": "default/pm-results", "workspace": "staging"}
+    assert step.config == {**STAGED, "workspace": "staging"}
 
 
 async def test_compile_falls_back_to_the_cpu_container() -> None:
@@ -202,7 +207,6 @@ def test_run_writes_the_optimized_agent_and_registers_the_result(
     assert result["agent"] == "default/calculator-agent"
     assert result["optimized_prompt"] == "new prompt"
     assert result["result"]["name"] == RESULT_NAME
-    assert "output" not in result
 
     optimizer, agent_config, base_dir = fake_prompt_master[0]
     assert optimizer.models["default"].base_url.endswith("/workspaces/default/openai/-/v1")
@@ -238,44 +242,6 @@ def test_run_resolves_the_agent_workspace_from_the_ref(
 
     agents.get_agent.assert_called_once_with(name="calculator-agent", workspace="team")
     assert result["agent"] == "team/calculator-agent"
-
-
-def test_run_publishes_to_a_local_output_dir(
-    ctx: JobContext, tmp_path: Path, fake_prompt_master: list[Any], stored_agent: Any, source_agent: dict[str, Any]
-) -> None:
-    out = tmp_path / "out"
-
-    with stored_agent(source_agent):
-        result = run_job(ctx, output=str(out))
-
-    assert result["output"] == {"type": "local_dir", "path": str(out.resolve())}
-    assert (out / OPTIMIZED_AGENT_FILENAME).is_file()
-    assert (out / SUMMARY_FILENAME).is_file()
-
-
-def test_run_publishes_to_a_fileset(
-    ctx: JobContext,
-    fake_prompt_master: list[Any],
-    stored_agent: Any,
-    source_agent: dict[str, Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    uploaded: dict[str, Any] = {}
-
-    def fake_upload(local_dir: Path, *, fileset: str, workspace: str, sdk: Any) -> None:
-        uploaded.update(fileset=fileset, workspace=workspace, files=sorted(p.name for p in local_dir.iterdir()))
-
-    monkeypatch.setattr(optimize_module, "upload_to_fileset", fake_upload)
-
-    with stored_agent(source_agent):
-        result = run_job(ctx, output="team/pm-results")
-
-    assert result["output"] == {"type": "fileset", "fileset": "team/pm-results"}
-    assert uploaded == {
-        "fileset": "pm-results",
-        "workspace": "team",
-        "files": sorted([OPTIMIZED_AGENT_FILENAME, SUMMARY_FILENAME]),
-    }
 
 
 def test_run_merges_the_staged_config_into_the_optimizer(

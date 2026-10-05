@@ -86,18 +86,18 @@ uv run nemo files filesets create prompt-master-bundle
 uv run nemo files upload plugins/prompt-master/examples/prompt-master.yaml prompt-master-bundle
 
 # 3. Submit. --optimize-config is relative to the fileset root and is omitted, together
-#    with --optimize-config-fileset, to run the bundled optimizer unchanged; --output names
-#    where the artifacts are published once the run succeeds.
+#    with --optimize-config-fileset, to run the bundled optimizer unchanged.
 uv run nemo agents optimize run-strategy \
   --strategy prompt-master \
   --agent calculator-agent \
   --optimize-config-fileset default/prompt-master-bundle \
   --optimize-config prompt-master.yaml \
-  --output default/prompt-master-results \
   --workspace default
 
-# 4. Fetch the optimized agent config and register it as a new agent.
-uv run nemo files download prompt-master-results -o ./prompt-master-results
+# 4. Fetch the optimized agent config from the job's results and register it as a new agent.
+#    A directory result downloads as a tarball holding agent.yaml and prompt-master-result.json.
+uv run nemo jobs results download prompt_master --job <job-name> -o prompt_master.tar.gz
+mkdir -p prompt-master-results && tar -xzf prompt_master.tar.gz -C prompt-master-results --strip-components=1
 uv run nemo agents create \
   --name calculator-agent-optimized \
   --agent-config ./prompt-master-results/agent.yaml
@@ -109,9 +109,8 @@ hyperparameter bundle, and rejects a config with no `optimizer:` section.
 
 ## What the run produces
 
-The artifacts are registered as the job's `prompt_master` result (the job's own
-fileset on the platform) and, when `--output` is given, copied to that fileset
-or local directory as well:
+The artifacts are registered as the job's `prompt_master` result, in the job's
+own fileset on the platform:
 
 | File | Contents |
 | --- | --- |
@@ -124,14 +123,15 @@ be read without downloading anything.
 ## Spec
 
 The router forwards every submitted field but `strategy` to this strategy's
-own schema, which is what decides what is required:
+own schema, which is what decides what is required. Fields it does not declare,
+including the router's `--output`, are refused: the artifacts only ever land in
+the job's results.
 
 | Field | Flag | Required | Meaning |
 | --- | --- | --- | --- |
 | `agent` | `--agent` | yes | Platform agent to optimize, `name` or `workspace/name`. |
 | `optimize_config` | `--optimize-config` | no | Optimizer overrides (a partial `agent.yaml`), relative to the fileset root. |
 | `optimize_config_fileset` | `--optimize-config-fileset` | with `optimize_config` | Fileset holding the overrides. |
-| `output` | `--output` | no | Extra publish target: a fileset ref or a local directory. |
 
 ## Layout
 

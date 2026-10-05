@@ -11,8 +11,8 @@ nemo-agent-optimization-plugin finds this class through the
 The run is one Fabric invocation.  A Deep Agents optimizer carrying the vendored Prompt
 Master skill is handed the target agent's current system prompt as inert data and asked for
 one improved prompt.  The result is written back as a complete ``nemo-agents-spec-v1`` config
-(``agent.yaml``) next to a run summary, registered as the job's result and -- when ``output``
-names one -- published to a fileset or local directory.  The stored agent is never modified.
+(``agent.yaml``) next to a run summary and registered as the job's result.  The stored agent
+is never modified.
 """
 
 from __future__ import annotations
@@ -21,14 +21,13 @@ import copy
 import json
 import logging
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
 import yaml
 from nemo_agent_optimization_plugin.schemas.strategies import OptimizationStrategy
 from nemo_agents_plugin.agent_config import AgentConfig
-from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config, upload_to_fileset
+from nemo_agents_plugin.jobs.fileset_io import resolve_staged_config
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -53,7 +52,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.image import get_qualified_image
-from nemo_helix_plugin.refs import FilesetRef, LocalDir, classify_output_target, parse_entity_ref
+from nemo_helix_plugin.refs import parse_entity_ref
 from prompt_master_plugin.runner import PromptMasterOutcome, build_optimizer_agent, run_prompt_master
 from prompt_master_plugin.schemas.optimize import PromptMasterOptimizeSpec
 from pydantic import BaseModel
@@ -87,17 +86,11 @@ class PromptMasterOptimizeJob(NemoJob):
     """Optimize a platform agent's system prompt with the bundled Prompt Master skill."""
 
     name: ClassVar[str] = STRATEGY_NAME
-    #: Marks this job as an agent optimization strategy, names it for
-    #: ``nemo agents optimize run-strategy --strategy``, and says what it optimizes for
-    #: ``list-strategies``.  Declaring the variable is the whole contract -- nothing to
-    #: subclass, and no strategy-specific entry-point group to join.
     nemo_agent_optimization_strategy: ClassVar[OptimizationStrategy] = OptimizationStrategy(
         name=STRATEGY_NAME,
         description="Rewrite the agent's system prompt using https://github.com/nidhinjs/prompt-master.",
     )
     description: ClassVar[str] = "Optimize a platform agent's system prompt with Prompt Master."
-    container: ClassVar[str] = "cpu-tasks"
-    job_collection_path: ClassVar[str | None] = None
     generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel]] = PromptMasterOptimizeSpec
 
@@ -162,18 +155,13 @@ class PromptMasterOptimizeJob(NemoJob):
             outcome=outcome,
         )
         result_ref = ctx.results.save(RESULT_NAME, results_dir)
-        published = publish(results_dir, spec.output, workspace=spec.workspace, sdk=sdk)
-
-        result: dict[str, Any] = {
+        return {
             "status": "completed",
             "strategy": STRATEGY_NAME,
             "agent": agent_label,
             "optimized_prompt": outcome.optimized_prompt,
             "result": result_ref.model_dump(mode="json"),
         }
-        if published is not None:
-            result["output"] = published
-        return result
 
 
 def fetch_agent_config(sdk: NemoClient, *, workspace: str, name: str) -> dict[str, Any]:
@@ -182,19 +170,19 @@ def fetch_agent_config(sdk: NemoClient, *, workspace: str, name: str) -> dict[st
         config = client_from_platform(sdk, AgentsClient).get_agent(name=name, workspace=workspace).data().config
     except NotFoundError as exc:
         raise LocalRunError(f"Agent '{workspace}/{name}' does not exist; there is nothing to optimize.") from exc
-    if not isinstance(config, Mapping) or config.get("config_format") != SUPPORTED_CONFIG_FORMAT:
+    if config.get("config_format") != SUPPORTED_CONFIG_FORMAT:
         raise LocalRunError(
             f"Agent '{workspace}/{name}' is not a {SUPPORTED_CONFIG_FORMAT!r} agent; the prompt-master strategy "
             "rewrites instructions.system.content of those only."
         )
     logger.info("Resolved agent %s/%s", workspace, name)
-    return dict(config)
+    return config
 
 
-def with_system_prompt(agent_config: Mapping[str, Any], prompt: str) -> dict[str, Any]:
+def with_system_prompt(agent_config: dict[str, Any], prompt: str) -> dict[str, Any]:
     """A deep copy of *agent_config* whose ``instructions.system.content`` is *prompt*."""
-    optimized = copy.deepcopy(dict(agent_config))
-    optimized.setdefault("instructions", {}).setdefault("system", {})["content"] = prompt
+    optimized = copy.deepcopy(agent_config)
+    optimized["instructions"]["system"]["content"] = prompt
     return optimized
 
 
@@ -203,8 +191,8 @@ def write_artifacts(
     *,
     agent: str,
     optimizer: AgentConfig,
-    source: Mapping[str, Any],
-    optimized: Mapping[str, Any],
+    source: dict[str, Any],
+    optimized: dict[str, Any],
     outcome: PromptMasterOutcome,
 ) -> None:
     """Write the optimized agent config and a run summary into a fresh *results_dir*.
@@ -216,10 +204,7 @@ def write_artifacts(
     if results_dir.exists():
         shutil.rmtree(results_dir)
     results_dir.mkdir(parents=True)
-    (results_dir / OPTIMIZED_AGENT_FILENAME).write_text(
-        yaml.safe_dump(dict(optimized), sort_keys=False),
-        encoding="utf-8",
-    )
+    (results_dir / OPTIMIZED_AGENT_FILENAME).write_text(yaml.safe_dump(optimized, sort_keys=False), encoding="utf-8")
     summary = {
         "strategy": STRATEGY_NAME,
         "agent": agent,
@@ -230,37 +215,6 @@ def write_artifacts(
         "response": outcome.response,
     }
     (results_dir / SUMMARY_FILENAME).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-
-
-def publish(results_dir: Path, output: str | None, *, workspace: str, sdk: NemoClient) -> dict[str, str] | None:
-    """Copy the artifacts to *output* and return a pointer for the job result.
-
-    The job's own results (``ctx.results.save``) already land in the job's fileset on the
-    platform; *output* is the stable, caller-named location a remote client can read back
-    or hand to a follow-up command.  Returns ``None`` when no target was requested.
-    """
-    if output is None:
-        return None
-
-    if classify_output_target(output) is LocalDir:
-        local = Path(output).expanduser().resolve()
-        local.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(results_dir, local, dirs_exist_ok=True)
-        logger.info("Published Prompt Master results to local dir %s", local)
-        return {"type": "local_dir", "path": str(local)}
-
-    ref = parse_entity_ref(FilesetRef(output), default_workspace=workspace)
-    upload_to_fileset(results_dir, fileset=ref.name, workspace=ref.workspace, sdk=sdk)
-    logger.info("Published Prompt Master results to fileset %s/%s", ref.workspace, ref.name)
-    return {"type": "fileset", "fileset": f"{ref.workspace}/{ref.name}"}
-
-
-def _profiles_unavailable(profile: str) -> HelixJobDependencyUnavailableError:
-    """A retryable failure while resolving the backend for *profile*."""
-    return HelixJobDependencyUnavailableError(
-        f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
-        "unavailable.  Retry the submission."
-    )
 
 
 async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
@@ -274,7 +228,10 @@ async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> Exec
     try:
         profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
     except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
-        raise _profiles_unavailable(profile) from exc
+        raise HelixJobDependencyUnavailableError(
+            f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
+            "unavailable.  Retry the submission."
+        ) from exc
 
     if any(
         isinstance(candidate, SubprocessJobExecutionProfile) and candidate.profile == profile for candidate in profiles

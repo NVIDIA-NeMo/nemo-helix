@@ -7,12 +7,7 @@ version = "0.1.0"
 description = "The `prompt-master` strategy for `nemo agents optimize`: rewrites an agent's system prompt with the vendored Prompt Master skill in one Fabric run."
 requires-python = ">=3.12,<3.15"
 dependencies = [
-  # The router plugin owns the strategy contract: `OptimizationStrategy`, the type of the
-  # class variable PromptMasterOptimizeJob declares itself with.  Depending on the dispatcher
-  # is the allowed direction; the router never names a strategy, and neither does this plugin
-  # name a sibling strategy.
   "nemo-agent-optimization-plugin",
-  # Fabric one-shot invocation, the Platform agent config model, and fileset staging helpers.
   "nemo-agents-plugin",
   "nemo-helix",
   "nemo-helix-plugin",
@@ -20,12 +15,6 @@ dependencies = [
   "pyyaml>=6.0.3",
 ]
 
-# Discovered by `nemo agents optimize` as the `prompt-master` strategy through the
-# `nemo_agent_optimization_strategy` class variable on PromptMasterOptimizeJob.  The key sits
-# under the dispatcher's `agent-optimization` namespace, like the `legacy` strategy's: plugin
-# allowlists and `nemo plugins list` group `nemo.jobs` entries by that prefix, so a deployment
-# that allows the router also gets its strategies.  Nothing mounts the key on its own -- the job
-# runs as the step of a `run-strategy` record, not as a separately submittable job.
 [project.entry-points."nemo.jobs"]
 "agent-optimization.prompt-master" = "prompt_master_plugin.jobs.optimize:PromptMasterOptimizeJob"
 

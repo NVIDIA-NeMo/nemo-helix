@@ -116,7 +116,6 @@ async def test_the_router_dispatches_compile_to_this_job(installed_strategy: Non
             "optimize_config": "pm.yaml",
             "optimize_config_fileset": "default/pm-bundle",
             "agent": "calculator-agent",
-            "output": "default/pm-results",
         }
     )
 
@@ -136,7 +135,6 @@ async def test_the_router_dispatches_compile_to_this_job(installed_strategy: Non
         "optimize_config": "pm.yaml",
         "optimize_config_fileset": "default/pm-bundle",
         "agent": "calculator-agent",
-        "output": "default/pm-results",
         "workspace": "staging",
     }
 
