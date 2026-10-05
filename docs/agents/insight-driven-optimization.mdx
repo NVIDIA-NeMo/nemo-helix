@@ -42,7 +42,7 @@ want to automate portions of the agent improvement loop.
 
 ### Requirements
 
-- A NeMo Platform deployment (local or remote) with Intake enabled, so the
+- A NeMo Helix deployment (local or remote) with Intake enabled, so the
   Analyst has traces to read.
 - The optimization plugins installed in the same Python environment as the NeMo command-line
   interface (CLI). From a source checkout, `uv sync` installs all three through the default
@@ -68,7 +68,7 @@ uv sync --only-group experimentalist  # Experimenter and Eval Author
 
 ### Dependencies
 
-The optimization agents build on the following NeMo Platform service
+The optimization agents build on the following NeMo Helix service
 dependencies:
 
 - **NeMo Intake** is the first-party trace store that fuels the loop. The

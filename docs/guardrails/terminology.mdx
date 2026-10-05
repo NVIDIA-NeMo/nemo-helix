@@ -64,4 +64,4 @@ MiddlewareCall
 : An entry in a VirtualModel's middleware pipeline that specifies which plugin to invoke and how to resolve its configuration. For guardrails, the `name` is `"nemo-guardrails"`, the `config_type` is `"guardrail_config"`, and the configuration is specified via `config_id` (entity reference) or `config` (inline payload).
 
 Inference Gateway (IGW)
-: The NeMo Platform service that routes inference requests. NeMo Guardrails runs as an in-process middleware plugin on IGW, intercepting requests and responses in the VirtualModel pipeline.
+: The NeMo Helix service that routes inference requests. NeMo Guardrails runs as an in-process middleware plugin on IGW, intercepting requests and responses in the VirtualModel pipeline.

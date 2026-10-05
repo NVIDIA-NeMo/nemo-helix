@@ -7,7 +7,7 @@ description: "Install Kata Containers and an OpenSandbox server that pins sandbo
 ---
 <a id="install-opensandbox-kata"></a>
 
-Use this path when **sandboxed GRPO / NeMo Gym** sandbox pods must be isolated from the host kernel. We document **Kata QEMU** (`RuntimeClass/kata-qemu`) because it runs each sandbox in a QEMU VM with its own guest kernel. Other kernel-isolated runtimes (for example Kata Firecracker, or a different hardware-isolated RuntimeClass) may work the same way, but they have **not been tested** with NeMo Platform. **Kata is optional**; most installs only need the [shared-kernel OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) path. This does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
+Use this path when **sandboxed GRPO / NeMo Gym** sandbox pods must be isolated from the host kernel. We document **Kata QEMU** (`RuntimeClass/kata-qemu`) because it runs each sandbox in a QEMU VM with its own guest kernel. Other kernel-isolated runtimes (for example Kata Firecracker, or a different hardware-isolated RuntimeClass) may work the same way, but they have **not been tested** with NeMo Helix. **Kata is optional**; most installs only need the [shared-kernel OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) path. This does **not** sandbox the rest of the platform (API, DPO, SFT, inference).
 
 Complete the OpenSandbox namespace, Secret, and platform-values steps first; this page only adds virtualization prerequisites and the Kata server overlay.
 

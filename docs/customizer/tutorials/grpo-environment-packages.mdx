@@ -23,7 +23,7 @@ Do not put `.jsonl` in the environment package. If a Gym config lists `datasets[
 
 Before packaging an environment, ensure you have:
 
-1. **A NeMo Platform configured with `platform.runtime: kubernetes`** — GRPO provisions a Ray cluster and has no local Docker fallback
+1. **A NeMo Helix configured with `platform.runtime: kubernetes`** — GRPO provisions a Ray cluster and has no local Docker fallback
 2. **Sandboxed Gym enabled on the cluster** by your platform operator (`sandbox_cluster_capable` and a job-storage PVC claim). Refer to [Cluster prerequisites](/documentation/customizer-reference/grpo-and-reward-environments#cluster-prerequisites); installing OpenSandbox is covered in [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox)
 3. **The `nemo` CLI on your `PATH`**, or a source checkout where `uv run --package nmp-rl` resolves
 4. **The training image tag** your cluster runs — vendoring a wheel closure requires the `nemo-gym`, `ray`, and `openai` versions it reports
