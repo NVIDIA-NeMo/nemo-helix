@@ -70,12 +70,23 @@ function detectColabRef() {
   return "main";
 }
 
+function slashRelative(from, to) {
+  return relative(from, to).split(sep).join("/");
+}
+
 function repoRelative(path) {
-  return relative(REPO_ROOT, path).split(sep).join("/");
+  return slashRelative(REPO_ROOT, path);
+}
+
+function notebookSourcePath(notebookPath) {
+  if (TARGET_DOCS_ROOT === DOCS_ROOT) {
+    return repoRelative(notebookPath);
+  }
+  return `docs/${slashRelative(TARGET_DOCS_ROOT, notebookPath)}`;
 }
 
 function colabUrlFor(notebookPath) {
-  return `${COLAB_PREFIX}/${COLAB_REF}/${repoRelative(notebookPath)}`;
+  return `${COLAB_PREFIX}/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
 }
 
 function splitFrontmatter(source) {
@@ -115,7 +126,7 @@ function syncNotebookViewerColabUrl(source, notebookPath) {
     const indentMatch = withoutColab.match(/\n(\s*)name=/);
     const indent = indentMatch?.[1] ?? "  ";
     return withoutColab.replace(
-      /\n\s*\/>$/,
+      /\s*\/>$/,
       `\n${indent}colabUrl="${colabUrlFor(notebookPath)}"\n/>`,
     );
   });
