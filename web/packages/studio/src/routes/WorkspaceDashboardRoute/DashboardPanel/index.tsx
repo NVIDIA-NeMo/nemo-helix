@@ -62,7 +62,7 @@ export const DashboardPanel: FC<DashboardPanelProps> = ({ icon, title, descripti
         )
       }
     >
-      <Text kind="body/regular/md" className="text-secondary">
+      <Text className="text-secondary" kind="body/regular/md">
         {description}
       </Text>
     </Panel>

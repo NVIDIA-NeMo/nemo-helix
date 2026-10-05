@@ -48,7 +48,7 @@ input description in that workflow.
 | Type | IDs |
 | --- | --- |
 | Wheels | `nemo-helix`, `nemo-helix-plugin` |
-| Containers | `nhx-api`, `nhx-cpu-tasks`, `nhx-gym-tasks`, `nhx-gym-host`, `nhx-customizer-tasks`, `nhx-automodel-training`, `nhx-unsloth-training`, `nhx-rl-training`, `nhx-auditor-tasks`, `nhx-safe-synthesizer-tasks` |
+| Containers | `nhx-api`, `nhx-tasks`, `nhx-gym-tasks`, `nhx-gym-host`, `nhx-customizer-tasks`, `nhx-automodel-training`, `nhx-unsloth-training`, `nhx-rl-training`, `nhx-auditor-tasks`, `nhx-safe-synthesizer-tasks` |
 | Helm chart | `nemo-helix` |
 
 For every selected wheel, the workflow checks that its package configuration

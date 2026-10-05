@@ -171,6 +171,7 @@ class AgentHardenerRunJob(NemoJob):
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
     description = "Run the Agent Hardener war-game against a deployed NAT agent."
     container = "cpu-tasks"
+    generate_legacy_verbs: ClassVar[bool] = False
     spec_schema: ClassVar[type[BaseModel] | None] = WarGameSpec
 
     @classmethod

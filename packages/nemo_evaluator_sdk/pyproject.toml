@@ -39,12 +39,12 @@ dependencies = [
   "ragas==0.4.3",
   "langchain-openai>=1.3.5",
   "langchain-nvidia-ai-endpoints>=1.4.3,<2.0.0",
-  "nemo-relay>=0.7.3,<0.8",
+  "nemo-relay>=0.9.3,<0.10",
   # Fabric's typed config surface (FabricConfig/RuntimeConfig/ModelConfig/the relay models) — what the
   # agent-eval runtimes compose against. The metapackage includes nemo-fabric-runtime; the harness
   # adapters are the weight (codex ~299 MB, claude ~231 MB) and stay in the `fabric` extra below, so
   # only *resolving and running* a harness pulls them.
-  "nemo-fabric>=0.3.0,<0.4.0",
+  "nemo-fabric>=0.4.0,<0.5.0",
   "opentelemetry-proto>=1.27.0",
   "pytrec-eval-terrier==0.5.10",
 ]
@@ -87,16 +87,16 @@ nemo-helix = [
 #     ephemeral overlay env (`uv run --with ...`) hides them; install into the venv instead.
 #   * claude/codex go through the metapackage extras, which keep the adapters and the Fabric SDK on
 #     compatible versions.
-#   * hermes stays direct because Fabric 0.3's adapter does not install Hermes Agent; the adapter
+#   * hermes stays direct because Fabric's adapter does not install Hermes Agent; the adapter
 #     alone is what the runtime needs. It cannot drift from the others regardless: every adapter pins
 #     `nemo-fabric-adapters-common==<its own version>`, so one shared common forces compatible versions.
-#     It is Python<3.14-gated upstream, and the lock now reaches 3.14, so the marker below really does
+#     The 0.4 adapter allows Python <3.15, but the lock reaches 3.14, so the marker below really does
 #     drop hermes on a 3.14 install — `fabric-wheel-smoke` runs a 3.14 leg to cover that closure.
 #   * deepagents is omitted to match plugins/nemo-agents (AIRCORE-952: its adapter does not support
 #     the Relay observability v2 config Fabric streaming generates). Nothing here exercises it.
 fabric = [
-  "nemo-fabric[claude,codex]>=0.3.0,<0.4.0",
-  "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+  "nemo-fabric[claude,codex]>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 
 [build-system]
@@ -106,12 +106,3 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
-
-[tool.vendor-package]
-package = "nemo_evaluator_sdk"
-package_root = "packages/nemo_evaluator_sdk"
-sdk_include_mode = "source-package"
-source_module = "nemo_evaluator_sdk"
-target_sdk_module = "beta.evaluator"
-sdk_optional_dependencies_name = "nemo-evaluator-sdk"
-included_paths = ["**/*.py", "**/*.Dockerfile"]

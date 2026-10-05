@@ -13,13 +13,12 @@ So this walks the doc top to bottom, in order, doing what it says and asserting 
 claims. It deliberately mirrors the doc's own code rather than being written as an idiomatic test —
 when it fails, the fix is usually the doc.
 
-Pure CRUD (no online target or IGW), so it only needs the host subprocess backend. Shares the evaluator-plugin
-integration opt-in (``RUN_AGENT_EVAL_INTEGRATION``) and the session-scoped ``subprocess_platform``.
+Pure CRUD (no online target or IGW), so it only needs the host subprocess backend, through conftest's
+session-scoped ``subprocess_platform``.
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 
 import pytest
@@ -33,31 +32,27 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     TasksetRef,
 )
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator_sdk import ExactMatchMetric
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 
 
 @pytest.fixture
-def doc_client(subprocess_platform: str) -> NeMoHelix:
+def doc_client(subprocess_platform: str) -> NemoClient:
     """The doc's own ``Initialize the SDK`` snippet, with the base URL the fixture provides.
 
     ``workspace=`` on the constructor is part of what is being checked: every later snippet omits a
     per-call workspace and relies on this default.
     """
-    client = NeMoHelix(base_url=subprocess_platform, workspace=WORKSPACE, max_retries=2)
+    client = NemoClient(base_url=subprocess_platform, workspace=WORKSPACE, retry=RetryPolicy(max_retries=2))
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -70,14 +65,15 @@ def _unique(prefix: str) -> str:
 
 
 @pytest.mark.timeout(300)
-def test_the_manage_tasks_walkthrough(doc_client: NeMoHelix) -> None:
+def test_the_manage_tasks_walkthrough(doc_client: NemoClient) -> None:
     """``Manage Tasks`` through ``Tag a revision`` — create, read, publish, pin, tag."""
     client = doc_client
-    tasks = client.evaluator.tasks
+    evaluator = Evaluator.from_client(client)
+    tasks = evaluator.tasks
     task_name = _unique("capital-of-france")
     metric_name = _unique("answer-exact-match")
 
-    client.evaluator.metrics.create(
+    evaluator.metrics.create(
         metric_name,
         metric=ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.output}}"),
     )
@@ -96,7 +92,9 @@ def test_the_manage_tasks_walkthrough(doc_client: NeMoHelix) -> None:
     # The doc prints `stored.id, stored.spec.metrics` and states that a stored task holds metric
     # *references* only.
     assert stored.id
-    assert [ref.root for ref in stored.spec.metrics] == [f"{WORKSPACE}/{metric_name}"]
+    assert [ref.root if isinstance(ref, MetricRef) else ref for ref in stored.spec.metrics] == [
+        f"{WORKSPACE}/{metric_name}"
+    ]
 
     # "Retrieve, list, and delete" — the doc's comment claims `evaluator 1 {'latest': 1}`.
     retrieved = tasks.retrieve(task_name)
@@ -128,6 +126,8 @@ def test_the_manage_tasks_walkthrough(doc_client: NeMoHelix) -> None:
     original = tasks.retrieve(task_name, revision=digest)
     current = tasks.retrieve(task_name)
     assert original.revision == 1 and current.revision == 2
+    assert isinstance(original.spec, EvaluatorTaskDefinition)
+    assert isinstance(current.spec, EvaluatorTaskDefinition)
     assert original.spec.inputs.instruction != current.spec.inputs.instruction
 
     # "Tag a revision", including the documented `ValueError` when both selectors are passed.
@@ -141,11 +141,12 @@ def test_the_manage_tasks_walkthrough(doc_client: NeMoHelix) -> None:
 
 
 @pytest.mark.timeout(300)
-def test_the_manage_tasksets_walkthrough(doc_client: NeMoHelix) -> None:
+def test_the_manage_tasksets_walkthrough(doc_client: NemoClient) -> None:
     """``Manage Tasksets`` and ``Pin the taskset itself`` — membership pinning is the claim."""
     client = doc_client
-    tasks = client.evaluator.tasks
-    tasksets = client.evaluator.tasksets
+    evaluator = Evaluator.from_client(client)
+    tasks = evaluator.tasks
+    tasksets = evaluator.tasksets
     france, japan = _unique("capital-of-france"), _unique("capital-of-japan")
     suite = _unique("geography-suite")
 

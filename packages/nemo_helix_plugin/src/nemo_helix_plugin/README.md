@@ -17,7 +17,7 @@ Build NeMo Helix plugins in Python.
 |---|---|---|---|
 | HTTP service | `NemoService` | `nemo.services` | Contributes FastAPI routers mounted at `/apis/<name>/...` |
 | CLI | `NemoCLI` | `nemo.cli` | Contributes `nemo <name> <cmd>` subcommands |
-| Job | `NemoJob` | `nemo.jobs` | Contributes schedulable, container-executable jobs. Auto-generates `run` / `submit` / `explain` CLI verbs. |
+| Job | `NemoJob` | `nemo.jobs` | Contributes schedulable, container-executable jobs. Generates submission and `explain` commands; jobs can opt into a flat submit callback with `generate_legacy_verbs = False`. |
 | Controller | `NemoController` | `nemo.controllers` | Contributes background reconcile-loop controllers |
 | Configuration | `NemoConfig` | — | Typed plugin configuration with env var / YAML loading |
 | Entity | `NemoEntity` | — | Entity definitions stored in the NeMo Helix entity store |
@@ -28,7 +28,7 @@ Build NeMo Helix plugins in Python.
 pip install nemo-helix-plugin
 ```
 
-To run a local NeMo Helix that loads and serves your plugin while you develop, use Python 3.12–3.14 and install [`nemo-helix`](https://pypi.org/project/nemo-helix/) too — it ships the platform services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
+To run a local NeMo Helix that loads and serves your plugin while you develop, use Python 3.12–3.14 and install [`nemo-helix`](https://pypi.org/project/nemo-helix/) too — it ships the Helix services, the `nemo` CLI, and the runtime that wires entity-client injection into your plugin's FastAPI app:
 
 ```bash
 pip install "nemo-helix[all]"

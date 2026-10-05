@@ -7,7 +7,7 @@ Platform-centric seeding for NeMo Helix: auth role bindings (platform admin, wil
 
 **Layout** (aligned with hello-world): one package `nhx.platform_seed` with `config.py` and `tasks/seed/` for the task (run.py, __main__.py). The task can be run as `python -m nhx.platform_seed` or `python -m nhx.platform_seed.tasks.seed`.
 
-The task uses the same platform config as the rest of the platform (e.g. `NHX_CONFIG_FILE_PATH` and `get_platform_config()`) to resolve service URLs. It uses `get_async_platform_sdk()` from the SDK factory for API calls. When run as a K8s Job or after boot, the task waits for dependencies using the same pattern as services: `async_wait_for_dependencies()` polls each dependency’s `/status` using `platform_config.get_service_url(service_name)`, so service APIs may live at different URLs. Dependency list: entities, auth, files.
+The task uses the same platform config as the rest of the platform (e.g. `NHX_CONFIG_FILE_PATH` and `get_platform_config()`) to resolve service URLs. It uses `get_async_nemo_client()` from the client factory for API calls. When run as a K8s Job or after boot, the task waits for dependencies using the same pattern as services: `async_wait_for_dependencies()` polls each dependency’s `/status` using `platform_config.get_service_url(service_name)`, so service APIs may live at different URLs. Dependency list: entities, auth, files.
 
 ## Usage
 

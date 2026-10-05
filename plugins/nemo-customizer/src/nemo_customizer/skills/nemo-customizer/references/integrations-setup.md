@@ -69,7 +69,7 @@ jobs:
       launcher_tool_path: /path/to/nemo-helix/services/core/jobs/jobs-launcher/jobs-launcher
 ```
 
-Restart platform services after changing launcher path:
+Restart Helix services after changing launcher path:
 
 ```bash
 uv run nemo services restart

@@ -12,12 +12,12 @@ All endpoints assume model repo type (the default in huggingface_hub).
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import (
     get_entity_client,
-    get_sdk_client,
+    get_nemo_client,
     get_service_config_factory,
 )
 from nhx.core.files.api.endpoint_helpers import (
@@ -77,12 +77,12 @@ async def head_file(
     path: str,
     entity_store: EntityClient = Depends(get_entity_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> Response:
     """Get file metadata without downloading content."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     cache_ctx: CacheContext | None = None
@@ -121,12 +121,12 @@ async def download_file(
     background_tasks: BackgroundTasks,
     entity_store: EntityClient = Depends(get_entity_client),
     config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> Response:
     """Download file content with Range support."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     # Set up caching for external storage backends (HuggingFace, NGC, etc.)
@@ -163,12 +163,12 @@ async def get_repo_info(
     workspace: str,
     name: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> HfRepoInfo:
     """Get repository metadata including file list."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     files = await list_storage_files(storage)
@@ -194,12 +194,12 @@ async def get_repo_info_at_revision(
     name: str,
     revision: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> HfRepoInfo:
     """Get repository metadata including file list (revision is ignored)."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     files = await list_storage_files(storage)
@@ -225,12 +225,12 @@ async def get_tree(
     name: str,
     revision: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> list[HfTreeEntry]:
     """List files in repository."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
     files = await list_storage_files(storage)
 
@@ -256,12 +256,12 @@ async def get_paths_info(
     revision: str,
     request_body: PathsInfoRequest,
     entity_store: EntityClient = Depends(get_entity_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
 ) -> list[PathInfo]:
     """Get info for specific file paths."""
     fileset = await get_fileset(workspace, name, entity_store)
-    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, sdk, auth_client)
+    secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
     result = []

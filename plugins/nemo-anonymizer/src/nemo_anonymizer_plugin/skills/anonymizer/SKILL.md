@@ -97,7 +97,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 # selected_models:
 #   detection:
 #     entity_detector: gliner-pii-detector
@@ -128,7 +128,7 @@ model_configs:
     model: openai/gpt-oss-120b
   - alias: nemotron-30b-thinking
     provider: nvidia-build
-    model: nvidia/nemotron-3-nano-30b-a3b
+    model: nvidia/nemotron-3.5-lightning-30b-a3b
 ```
 
 Include only the bits the task requires — keep `model_configs` in every plugin preview and run request, omit `selected_models` unless overrides are needed, and use `Substitute` / `rewrite` only when the user wants LLM-generated replacements or holistic rewriting. Exceptions for omitted `model_configs` apply only to standalone Anonymizer library workflows outside this plugin skill.

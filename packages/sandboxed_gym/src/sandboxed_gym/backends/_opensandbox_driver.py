@@ -142,6 +142,11 @@ def _joined_output(messages: Any) -> str | None:
     return joined or None
 
 
+#: Added to ``ready_timeout_s`` for the create request. The server answers only once the pod is
+#: Running, so a pod that makes it just inside the ready wait still needs the response to arrive.
+CREATE_REQUEST_HEADROOM_S = 30.0
+
+
 def connection_config(connection: Mapping[str, Any] | None) -> Any:
     """Build an SDK ``ConnectionConfig`` from this package's own connection mapping.
 
@@ -194,14 +199,23 @@ class OpenSandboxDriver:
         # Kept off `SandboxHandle`, which mirrors NeMo-Gym's type field for field.
         self._workdirs: dict[str, str] = {}
 
+    def _create_connection_config(self, spec: SandboxSpec) -> Any:
+        """The create POST stays open until the pod is Running, so its timeout must cover the ready wait."""
+        if self._connection.get("request_timeout_s") is not None or spec.ready_timeout_s is None:
+            return self._connection_config
+        request_timeout_s = spec.ready_timeout_s + CREATE_REQUEST_HEADROOM_S
+        return connection_config({**self._connection, "request_timeout_s": request_timeout_s})
+
     async def create(self, spec: SandboxSpec) -> SandboxHandle:
         from opensandbox import Sandbox
+        from opensandbox.exceptions import SandboxTimeoutException
 
         if spec.image is None:
             raise EpisodeBackendError("an episode image is required")
 
         create_attempt_id = uuid4().hex
         metadata = {**spec.metadata, _SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
+        create_connection_config = self._create_connection_config(spec)
         try:
             sandbox = await Sandbox.create(
                 spec.image,
@@ -217,13 +231,15 @@ class OpenSandboxDriver:
                 # Large runtime images flake on the SDK's create-time probe, and the job host polls
                 # `/health` itself once routes resolve. The caller decides; the SDK default stands.
                 skip_health_check=bool(self._create_options.get("skip_health_check", False)),
-                connection_config=self._connection_config,
+                connection_config=create_connection_config,
             )
-            sandbox_id = getattr(sandbox, "sandbox_id", None) or (await sandbox.get_info()).id
+            sandbox_id = getattr(sandbox, "id", None) or (await sandbox.get_info()).id
+            if create_connection_config is not self._connection_config:
+                sandbox = await self._reattach_under_base_connection(sandbox, sandbox_id)
             if spec.workdir:
                 self._workdirs[sandbox_id] = spec.workdir
             return SandboxHandle(sandbox_id=sandbox_id, provider_name=self.name, raw=sandbox)
-        except BaseException:
+        except BaseException as exc:
             try:
                 removed = await self.destroy_sandboxes_matching(
                     {_SANDBOX_CREATE_ATTEMPT_ID_METADATA_KEY: create_attempt_id}
@@ -237,7 +253,32 @@ class OpenSandboxDriver:
             except BaseException:
                 # Preserve the create failure: it is the actionable cause.
                 LOGGER.exception("failed to reconcile sandbox create attempt %s", create_attempt_id)
+            if isinstance(exc, SandboxTimeoutException):
+                request_timeout_s = create_connection_config.request_timeout.total_seconds()
+                raise EpisodeBackendError(
+                    f"OpenSandbox did not answer the create request within the SDK request timeout of "
+                    f"{request_timeout_s:g}s; the server may still have been creating the sandbox (image pull, VM "
+                    f"boot). Set connection.request_timeout_s to at least the server's sandbox_create_timeout_seconds."
+                ) from exc
             raise
+
+    async def _reattach_under_base_connection(self, created: Sandbox, sandbox_id: str) -> Sandbox:
+        """Swap the create-time connection for the configured one once the sandbox exists."""
+        from opensandbox import Sandbox
+
+        try:
+            reattached = await Sandbox.connect(
+                sandbox_id, connection_config=self._connection_config, skip_health_check=True
+            )
+        except Exception:
+            LOGGER.warning(
+                "sandbox %s keeps its create-time request timeout: reattaching under the configured connection failed",
+                sandbox_id,
+                exc_info=True,
+            )
+            return created
+        await created.close()
+        return reattached
 
     def _sandbox(self, handle: SandboxHandle) -> Sandbox:
         return handle.raw  # ty: ignore[invalid-return-type] - provider-owned opaque state
@@ -332,10 +373,17 @@ class OpenSandboxDriver:
                     break
                 page += 1
 
+            killed: list[str] = []
             for sandbox_id in sandbox_ids:
-                await manager.kill_sandbox(sandbox_id)
+                try:
+                    await manager.kill_sandbox(sandbox_id)
+                except Exception:
+                    # One sandbox the control plane already dropped must not spare the rest.
+                    LOGGER.exception("failed to destroy sandbox %s", sandbox_id)
+                    continue
+                killed.append(sandbox_id)
 
-            return tuple(sandbox_ids)
+            return tuple(killed)
         finally:
             await manager.close()
 

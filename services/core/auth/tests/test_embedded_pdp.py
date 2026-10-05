@@ -597,6 +597,31 @@ class TestWithStaticAuthzData:
         assert editor_result["allowed"] is False
         assert job_runner_result["allowed"] is True
 
+    def test_job_runner_otlp_logs_allow_identity_only_workload_scopes(self, static_authz_data):
+        static_authz_data["authz"]["principals"] = {
+            "nemo-workloads": {"workspaces": {"my-ws": ["Viewer", "JobRunner"]}},
+        }
+        set_policy_data(static_authz_data)
+
+        result = evaluate(
+            "allow",
+            {
+                "principal_id": "nemo-workloads",
+                "method": "POST",
+                "path": "/apis/files/v2/workspaces/my-ws/filesets/job-fileset-test/otlp/v1/logs",
+                "scopes": ["openid", "email", "groups"],
+            },
+        )
+
+        assert result["allowed"] is True
+
+    def test_job_runner_otlp_logs_endpoint_is_not_file_scope_gated(self, static_authz_data):
+        post_config = static_authz_data["authz"]["endpoints"][
+            "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
+        ]["post"]
+
+        assert post_config == {"permissions": ["jobs.logs.create"], "scopes": []}
+
 
 class TestIntakeAuthorization:
     """Verify active Intake endpoints are workspace-scoped in static authz data."""
@@ -1002,3 +1027,45 @@ class TestWasmNativeBuiltins:
         for path, expect in cases:
             result = evaluate("allow", {"principal_id": "service:probe", "method": "GET", "path": path})
             assert result["allowed"] is expect, f"GET {path} as service:probe: expected allowed={expect}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["evaluator:read", "evaluator:write"])
+@pytest.mark.parametrize("workspace", ["source", "inaccessible"])
+async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz_data, monkeypatch, scope, workspace):
+    """Exercise the injected authorizer against real policy, not a canned 403 response."""
+    from fastapi import HTTPException
+    from nhx.common.auth.client import AuthClient, AuthorizationResult
+    from nhx.common.auth.dependencies import auth_client_context, get_request_authorizer
+    from nhx.common.auth.models import Principal
+    from nhx.common.config import AuthConfig
+    from starlette.requests import Request
+
+    data = static_authz_data["authz"]
+    data["principals"] = {"member@test.com": {"workspaces": {"source": ["TaskReader"]}}}
+    data["roles"]["TaskReader"] = {"permissions": ["evaluator.tasks.read"]}
+    data["endpoints"]["/apis/evaluator/v2/workspaces/{workspace}/tasks/{name}"] = {
+        "get": {"permissions": ["evaluator.tasks.read"], "scopes": ["evaluator:read", "platform:read"]}
+    }
+    set_policy_data(static_authz_data)
+
+    async def authorize(self, method, path, scopes=None, http_client=None):
+        result = evaluate(
+            "allow", {"principal_id": self.principal.id, "method": method, "path": path, "scopes": scopes}
+        )
+        return AuthorizationResult(allowed=result["allowed"])
+
+    monkeypatch.setattr(AuthClient, "authorize_request", authorize)
+    client = AuthClient(principal=Principal(id="member@test.com"), config=AuthConfig())
+    token = auth_client_context.set(client)
+    try:
+        request = Request({"type": "http", "headers": [(b"x-nhx-scopes", scope.encode())]})
+        check = get_request_authorizer(request)
+        if scope == "evaluator:read" and workspace == "source":
+            await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+        else:
+            with pytest.raises(HTTPException) as denied:
+                await check("GET", f"/apis/evaluator/v2/workspaces/{workspace}/tasks/task")
+            assert denied.value.status_code == 403
+    finally:
+        auth_client_context.reset(token)

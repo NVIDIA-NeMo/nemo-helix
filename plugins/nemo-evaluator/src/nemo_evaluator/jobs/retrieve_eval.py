@@ -30,7 +30,7 @@ from nemo_evaluator.jobs.evaluate import (
 )
 from nemo_evaluator.jobs.metric_resolution import HelixMetricModelResolver
 from nemo_evaluator.jobs.secret_env import build_task_environment
-from nemo_evaluator.jobs.utils import run_with_isolated_async_client
+from nemo_evaluator.jobs.utils import job_evaluator, run_with_isolated_async_client
 from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.metric_execution import run_sync as run_coro_sync
 from nemo_evaluator_sdk.metrics.protocol import Metric
@@ -205,7 +205,7 @@ class _RetrieveEvalJobBase(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nhx-cpu-tasks"),
+                            image=get_qualified_image("nhx-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_evaluator.tasks.retrieve_eval"],
                         ),
@@ -225,7 +225,7 @@ class _RetrieveEvalJobBase(NemoJob):
             RetrievalPrecisionMetric(k=cutoffs),
             RetrievalMAPMetric(k=cutoffs),
         ]
-        evaluator = Evaluator()
+        evaluator = job_evaluator()
         started_at = datetime.now(UTC)
         result, baseline_result = _run_pipelines(evaluator, dataset, spec, metrics)
         result_files = EvaluateJob._write_result_files(
@@ -336,21 +336,21 @@ class AsyncRetrieveEvalJob(_RetrieveEvalJobBase):
 
 async def _resolve_retrieval(
     value: RetrievalInputSpec | Model | ModelRef,
-    async_sdk: AsyncHelixClient | None,
+    async_client: AsyncHelixClient | None,
 ) -> Retrieval:
     if isinstance(value, ModelRef):
-        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        models_client = client_from_platform(async_client, AsyncModelsClient)
         return Retrieval(embeddings=await HelixMetricModelResolver(models_client).resolve_model(value))
     if isinstance(value, Model):
         return Retrieval(embeddings=value)
     embeddings = value.embeddings
     reranker = value.reranker
     if isinstance(embeddings, ModelRef):
-        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        models_client = client_from_platform(async_client, AsyncModelsClient)
         embeddings = await HelixMetricModelResolver(models_client).resolve_model(embeddings)
     if isinstance(reranker, ModelRef):
         reranker_ref = reranker.root
-        models_client = client_from_platform(async_sdk, AsyncModelsClient)
+        models_client = client_from_platform(async_client, AsyncModelsClient)
         reranker = await HelixMetricModelResolver(models_client).resolve_model(reranker)
         try:
             async with asyncio.timeout(15.0):

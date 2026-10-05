@@ -11,8 +11,6 @@ from urllib.parse import urlparse
 
 import httpx
 from fsspec.spec import AbstractBufferedFile, AbstractFileSystem
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetOutput
 
@@ -107,7 +105,7 @@ def test_fileset_name() -> str:
 
 @contextmanager
 def create_fileset(
-    sdk: NeMoHelix,
+    files: FilesClient,
     name: str | None = None,
     workspace: str = DEFAULT_WORKSPACE_ID,
     **kwargs,
@@ -115,7 +113,6 @@ def create_fileset(
     if name is None:
         name = test_fileset_name()
 
-    files = client_from_platform(sdk, FilesClient)
     fileset = files.create_fileset(
         workspace=workspace,
         body=CreateFilesetRequest(name=name, description="Test fileset", **kwargs),

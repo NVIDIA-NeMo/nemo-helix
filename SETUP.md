@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: nemo-setup
-description: Set up a local NeMo Helix (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional demo agent. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Helix.
+description: Set up a local NeMo Helix (`make bootstrap` + `nemo setup`) — services, providers, plugins, default/fast models, and an optional sample workspace. Use when the user asks to install, bootstrap, set up, run, or start a local NeMo Helix.
 version: "0.1"
 ---
 
@@ -21,6 +21,14 @@ Before starting `nemo services run`, check for an existing instance:
 lsof -iTCP:8080 -sTCP:LISTEN
 ps -ef | grep "nemo services run" | grep -v grep
 ```
+
+If nothing is running, confirm this shell may host a server before you start one. Coding-agent sandboxes often deny listening sockets:
+
+```bash
+python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(1); print('LISTEN_OK')" 2>&1 | tail -1
+```
+
+`LISTEN_OK` means this shell can host the platform. `PermissionError: [Errno 1] Operation not permitted` means `nemo services run` will fail with `Not permitted to listen on ...` on every port. Any other output (for example, `python3` not found) is inconclusive; resolve it before deciding. On a confirmed denial, stop and ask the user how to host the platform (their own terminal, an approved run outside the sandbox, a `systemd --user` unit or launchd agent, a container, or an existing platform via `NHX_BASE_URL`). The `nemo-skill-selection` skill's "Starting the platform from a sandboxed agent" section has the full guidance.
 
 Alternatively, probe the API with `nemo workspaces list` — a workspaces table back means the platform is up. **Don't `curl /v1/workspaces`** to check; that path returns 404 even when the platform is healthy.
 
@@ -91,23 +99,23 @@ is unavailable, start Docker and retry—do not proceed to `rm -rf`.
 
 This section is the **source checkout** path: use it to work on NeMo Helix itself, on a local plugin, or on Studio assets. To only *use* the platform, install the published wheel instead — `uv tool install "nemo-helix[all]"` needs no checkout and no toolchain, then continue at `nemo setup`.
 
-The steps below cover prerequisites install, service startup, provider registration, default/fast model selection, and demo agent deployment in one shot. Prefer them over the manual sections further down whenever the task fits:
+The steps below cover prerequisites install, service startup, provider registration, default/fast model selection, and optional sample workspace creation. Prefer them over the manual sections further down whenever the task fits:
 
 Before running `make bootstrap`, install Flox from the [Flox installation guide](https://flox.dev/docs/install-flox/install). Flox is the recommended source-development toolchain and does not need to be activated first. Contributors using a preinstalled host toolchain instead need the versions printed by `make toolchain-versions` and a C compiler; they must use `make TOOLCHAIN=system bootstrap`.
 
 === "Interactive"
 
 ```bash
-make bootstrap           # installs Python deps, Studio assets, and plugins (including demo calculator agent)
+make bootstrap           # installs Python deps, Studio assets, and plugins
 flox -q activate         # enter the managed development environment
-nemo setup               # interactive: prompts for provider, picks default/fast models, optionally deploys calculator-agent
+nemo setup               # interactive: configures models, then offers a sample workspace
 ```
 
 === "Non-interactive (CI)"
 
 ```bash
 export NVIDIA_API_KEY=nvapi...
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 `make bootstrap` is the umbrella for three finer-grained targets — use these if you only need a subset:
@@ -171,7 +179,7 @@ uv run nemo services run \
 
 ### Starting the platform with Switchyard middleware
 
-`make bootstrap-python` and bare `uv sync` install `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The Switchyard library is vendored in-tree at `plugins/nemo-switchyard/vendor/switchyard/` (a snapshot pinned in `tool.uv.sources`) — no separate Switchyard checkout, `SWITCHYARD_PATH` env var, or PyPI workaround is needed. Start with debug logging to see routing decisions:
+`make bootstrap-python` and bare `uv sync` install the `nemo-switchyard-plugin` distribution from `plugins/nemo-switchyard` through the root workspace's `enabled-plugins` group. The plugin pins `nemo-switchyard==0.3.0`, which provides the native `switchyard_rust` bindings. Start with debug logging to see routing decisions:
 
 ```bash
 # Start with LOG_LEVEL=DEBUG to see routing decisions.
@@ -198,14 +206,11 @@ Desktop on macOS/Windows or the Docker service on Linux, then rerun `nemo setup`
 `nemo services run`. To use an external ClickHouse and bypass local Docker provisioning, export
 `NHX_INTAKE_CLICKHOUSE_URL` before starting the platform.
 
-### Demo agent
+### Sample workspace
 
-`make bootstrap` installs the NeMo agents plugin and the calculator-agent example through the root workspace, so no separate `uv pip install` is needed. After services start, `nemo setup` (or `nemo setup --auto --deploy-agent`) will deploy a demo `calculator-agent` in the default workspace. Verify with:
-
-```bash
-nemo agents list
-nemo agents invoke --agent calculator-agent --input "What is 12 * 8?"
-```
+Interactive `nemo setup` can create a `sample` workspace with the Fabric email
+security agent and evaluation artifacts. Follow the Studio link printed after
+setup to explore them.
 
 ### Local platform environment summary
 
@@ -227,13 +232,13 @@ The platform is running. Don't leave the user with "you're good to go" — offer
 | "Can my agent use multiple models?", "split traffic across N backends" | Multi-backend routing via Switchyard | (inline; see `inference` skill) |
 | "Evaluate my model / agent on \<benchmark\>" | Eval against a dataset / harness | `nemo-evaluator`, `evaluator-plugin` |
 | "Generate synthetic data", "I have sensitive data and need…" | Data generation / anonymization / safe synthesis | `data-designer`, `nemo-anonymizer`, `nemo-safe-synthesizer` |
-| "Just deploy / invoke an agent" | Deploy the demo calculator agent or your own | `nemo-agents-optimize` (later, if needed) |
+| "Just deploy / invoke an agent" | Deploy the sample email security agent or your own | `nemo-agents-optimize` (later, if needed) |
 | "Chat with a model", "call \<model\> via inference" | Plain inference through IGW | `inference` skill |
 | "Register an inference provider" (no further use case) | Provider registration only | `inference` skill |
 
 If the user's prompt doesn't already pin one down, ask: *"The platform is up. What would you like to do next — optimize an agent, deploy one, run inference, evaluate, generate data, or something else?"*
 
-If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. For one-off commands, pass the entity ID positionally: `nemo chat <entity-id>`.
+If the user wants to **pick or swap the default/fast model pair**, don't guess — hand off to the `inference` skill. Step 2 there enumerates `served_models[].model_entity_id` and shows jq filters for picking by vendor / family. To pin the choices for subsequent runs, export `NEMO_DEFAULT_MODEL=<workspace>/<entity-id>` and `NEMO_FAST_MODEL=<workspace>/<entity-id>` before the next `nemo setup --auto`; fast falls back to default when omitted. `nemo chat` uses the default model (`--fast` for the fast one); for one-off commands with another model, pass `nemo chat --model <entity-id>`.
 
 ### Available skills
 

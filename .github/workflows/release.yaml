@@ -52,7 +52,7 @@ on:
       container-ids:
         description: >-
           Custom only. Comma-separated container IDs.
-          Allowed: nhx-api, nhx-cpu-tasks, nhx-gym-tasks, nhx-gym-host,
+          Allowed: nhx-api, nhx-tasks, nhx-gym-tasks, nhx-gym-host,
           nhx-customizer-tasks, nhx-automodel-training, nhx-unsloth-training,
           nhx-rl-training, nhx-auditor-tasks, nhx-safe-synthesizer-tasks.
         required: false
@@ -125,7 +125,7 @@ env:
   RELEASE_CONTAINERS_JSON: >-
     [
       {"id":"nhx-api","target":"nhx-api-docker"},
-      {"id":"nhx-cpu-tasks","target":"nhx-cpu-tasks-docker"},
+      {"id":"nhx-tasks","target":"nhx-tasks-docker"},
       {"id":"nhx-gym-tasks","target":"nhx-gym-tasks-docker"},
       {"id":"nhx-gym-host","target":"nhx-gym-host-docker"},
       {"id":"nhx-customizer-tasks","target":"nhx-customizer-tasks"},
@@ -1099,6 +1099,38 @@ jobs:
             "${prerelease_flag[@]}" \
             "${notes_range[@]}"
 
+      - name: Dispatch post-release cleanup
+        if: >-
+          needs.plan-release.outputs.is_prerelease == 'false' &&
+          (needs.plan-release.outputs.release_scope == 'all' ||
+           needs.plan-release.outputs.release_scope == 'containers')
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DISPATCH_REPO: ${{ secrets.CI_DISPATCH_REPO }}
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+          SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}
+        with:
+          github-token: ${{ secrets.CI_DISPATCH_TOKEN }}
+          script: |
+            const [owner, repo] = process.env.DISPATCH_REPO.split("/");
+            const request = {
+              owner,
+              repo,
+              event_type: "cleanup-release-containers",
+              client_payload: {
+                version: process.env.RELEASE_VERSION,
+                source_sha: process.env.SOURCE_SHA,
+              },
+            };
+            if (process.env.ACT === "true") {
+              core.info(`ACT=true; skipped cleanup dispatch: ${JSON.stringify(request.client_payload)}`);
+              return;
+            }
+            await github.rest.repos.createDispatchEvent(request);
+            core.info("Dispatched post-release cleanup.");
+
   notify-end:
     name: Notify release result
     needs:
@@ -1124,6 +1156,7 @@ jobs:
         env:
           SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          NIGHTLY_INSTANCE_URL: ${{ secrets.NIGHTLY_INSTANCE_URL }}
           RELEASE_TYPE: ${{ needs.plan-release.outputs.release_type }}
           RELEASE_LABEL: ${{ needs.plan-release.outputs.release_label }}
           SOURCE_SHA: ${{ needs.plan-release.outputs.source_sha }}

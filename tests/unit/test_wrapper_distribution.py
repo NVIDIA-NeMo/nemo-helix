@@ -38,9 +38,9 @@ def test_harness_extras_include_agents_plugin_dependencies() -> None:
 
     extras = project["optional-dependencies"]
     expected = {
-        "nemo-agents-plugin-claude": "nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0",
-        "nemo-agents-plugin-codex": "nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0",
-        "nemo-agents-plugin-deepagents": "nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0",
+        "nemo-agents-plugin-claude": "nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0",
+        "nemo-agents-plugin-codex": "nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0",
+        "nemo-agents-plugin-deepagents": "nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0",
     }
     for extra, dependency in expected.items():
         assert extras[extra] == ["nemo-helix[nemo-agents-plugin]", dependency]

@@ -84,6 +84,19 @@ def configured_model_refs() -> ConfiguredModelRefs:
     return ConfiguredModelRefs(default=default, fast=fast)
 
 
+def configured_fast_model() -> str | None:
+    """The configured fast model (falling back to the configured default), or None if neither is set.
+
+    Unlike :func:`configured_model_refs`, a missing default model is not an error here.
+    """
+    context = get_context()
+    fast = context.fast_model or context.default_model
+    if not fast:
+        return None
+    _validate_configured_ref(fast, "NEMO_FAST_MODEL" if context.fast_model else "NEMO_DEFAULT_MODEL")
+    return fast
+
+
 def _validate_configured_ref(model_ref: str, env_var: str) -> None:
     """Reject an unqualified model ref where the operator can still act on it.
 
@@ -193,6 +206,23 @@ def _platform_completion_client(
     return _AuthenticatedCompletionClient(model, platform_auth=platform_auth, **config)
 
 
+def supported_backend_format(model_entity: ModelEntity) -> str:
+    """Return the wire format a Nooa client would use for ``model_entity``.
+
+    An unset backend format means OPENAI_CHAT, matching Inference Gateway
+    routing and the ModelEntity field contract. Raises ``ValueError`` for a
+    format Nooa clients cannot speak, so callers can reject such a model before
+    starting work that would need one.
+    """
+    backend_format = model_entity.backend_format or _OPENAI_FORMAT
+    if backend_format not in (_OPENAI_FORMAT, _ANTHROPIC_FORMAT):
+        raise ValueError(
+            f"Model '{model_entity.workspace}/{model_entity.name}' has unsupported backend format "
+            f"{backend_format!r}; expected {_OPENAI_FORMAT} or {_ANTHROPIC_FORMAT}"
+        )
+    return backend_format
+
+
 def _completion_client(
     models_client: AsyncModelsClient,
     model_entity: ModelEntity,
@@ -208,7 +238,8 @@ def _completion_client(
     # Backend format is the Platform-facing wire contract, not the upstream
     # provider identity. The LiteLLM prefix selects the adapter for that shape.
     platform_auth = models_client._auth
-    if model_entity.backend_format == _OPENAI_FORMAT:
+    backend_format = supported_backend_format(model_entity)
+    if backend_format == _OPENAI_FORMAT:
         litellm_model = f"openai/{served_model_name}"
         return _platform_completion_client(
             litellm_model,
@@ -226,15 +257,9 @@ def _completion_client(
             # reasoning_effort value (including "none") to /responses.
             _skip_responses_api_bridge=True,
         )
-    elif model_entity.backend_format == _ANTHROPIC_FORMAT:
-        api_base = api_base.removesuffix("/v1")
-    else:
-        raise ValueError(
-            f"Model '{model_entity.workspace}/{model_entity.name}' has unsupported backend format "
-            f"{model_entity.backend_format!r}; expected {_OPENAI_FORMAT} or {_ANTHROPIC_FORMAT}"
-        )
 
     litellm_model = f"anthropic/{served_model_name}"
+    api_base = api_base.removesuffix("/v1")
     return _platform_completion_client(
         litellm_model,
         platform_auth=platform_auth,

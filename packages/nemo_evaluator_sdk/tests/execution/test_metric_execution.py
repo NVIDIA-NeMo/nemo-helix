@@ -4,6 +4,7 @@
 """Unit tests for nemo_evaluator_sdk.execution.metric_execution."""
 
 import asyncio
+import contextvars
 import json
 import logging
 import math
@@ -344,6 +345,18 @@ class TestRunSync:
 
         result = asyncio.run(outer())
         assert result == "from-thread"
+
+    def test_running_loop_thread_preserves_contextvars(self):
+        value_var = contextvars.ContextVar("value_var", default="missing")
+
+        async def outer():
+            value_var.set("captured")
+            return run_sync(lambda: inner())
+
+        async def inner():
+            return value_var.get()
+
+        assert asyncio.run(outer()) == "captured"
 
     def test_propagates_exception_from_thread(self):
         async def outer():

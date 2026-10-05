@@ -5,7 +5,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.entities import EntityClient
 from nhx.hello_world.api.v2.jobs.endpoints import compile_hello_world_job
 from nhx.hello_world.api.v2.jobs.schemas import HelloWorldJobConfig
@@ -57,7 +57,7 @@ class TestCompileHelloWorldJob:
         job_config = HelloWorldJobConfig(message="Test message")
         entity_client = MagicMock(spec=EntityClient)
         job_name = "test-job"
-        sdk = AsyncMock(spec=AsyncNeMoHelix)
+        sdk = AsyncMock(spec=AsyncNemoClient)
 
         # This test verifies the function signature is correct
         # If any parameter is missing, this will raise TypeError
@@ -90,7 +90,7 @@ class TestCompileHelloWorldJob:
         workspace = "test-workspace"
         job_config = HelloWorldJobConfig(message="Test message")
         entity_client = MagicMock(spec=EntityClient)
-        sdk = AsyncMock(spec=AsyncNeMoHelix)
+        sdk = AsyncMock(spec=AsyncNemoClient)
 
         # Test with None job_name
         result = compile_hello_world_job(
@@ -111,7 +111,7 @@ class TestCompileHelloWorldJob:
         workspace = "test-workspace"
         job_config = HelloWorldJobConfig(message="Custom message")
         entity_client = MagicMock(spec=EntityClient)
-        sdk = AsyncMock(spec=AsyncNeMoHelix)
+        sdk = AsyncMock(spec=AsyncNemoClient)
 
         result = compile_hello_world_job(
             workspace=workspace,

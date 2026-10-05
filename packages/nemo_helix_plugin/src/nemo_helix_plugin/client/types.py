@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable, Iterable
 from dataclasses import dataclass, replace
-from typing import Any, ClassVar, Generic, ParamSpec, Protocol, TypeVar
+from types import MappingProxyType
+from typing import Any, ClassVar, Final, Generic, ParamSpec, Protocol, TypeVar
 
 from pydantic import BaseModel, TypeAdapter
 from typing_extensions import TypedDict
@@ -83,6 +84,12 @@ class OffsetPaginationMetadata(TypedDict):
     total_pages: int
     total_results: int
 
+
+# Pydantic validation context the typed clients pass when parsing a response
+# body. Entities use it to restore store-managed metadata (id, created_at, ...)
+# that request validation must never accept from a caller.
+RESPONSE_VALIDATION_CONTEXT_KEY: Final = "nemo_helix_response"
+RESPONSE_VALIDATION_CONTEXT: Final = MappingProxyType({RESPONSE_VALIDATION_CONTEXT_KEY: True})
 
 _OFFSET_PAGINATION_METADATA_ADAPTER = TypeAdapter(OffsetPaginationMetadata)
 
@@ -314,6 +321,18 @@ class RetryPolicy:
     retry_all_server_errors: bool = False
     respect_retry_decision_headers: bool = False
     respect_retry_after_headers: bool = False
+
+
+# The retry contract the generated ``NeMoHelix`` SDK applied by default. Clients
+# that replace a ``NeMoHelix`` use it to keep the same resilience against
+# transient gateway errors.
+PLATFORM_DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    retryable_status_codes=(408, 409, 429),
+    retry_all_server_errors=True,
+    respect_retry_decision_headers=True,
+    respect_retry_after_headers=True,
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,8 +12,7 @@ from data_designer_nemo.errors import raise_if_errors
 from data_designer_nemo.runnable import resolve_runnable_config
 from nemo_data_designer_plugin.jobs.run import run_step_config_result
 from nemo_data_designer_plugin.jobs.spec import DataDesignerJobConfig, DataDesignerStepConfig
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -43,7 +42,7 @@ class CreateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:  # DataDesignerStepConfig
         del entity_client, is_local
@@ -67,7 +66,7 @@ class CreateJob(NemoJob):
         spec: BaseModel,  # DataDesignerStepConfig
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> HelixJobSpec:
@@ -81,7 +80,7 @@ class CreateJob(NemoJob):
                         profile=profile or "default",
                         provider="cpu",
                         container=ContainerSpec(
-                            image=get_qualified_image("nhx-cpu-tasks"),
+                            image=get_qualified_image("nhx-tasks"),
                             entrypoint=["python", "-m"],
                             command=["nemo_data_designer_plugin.jobs.bridge"],
                         ),
@@ -92,6 +91,6 @@ class CreateJob(NemoJob):
             ],
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         step_config = DataDesignerStepConfig.model_validate(config)
         return run_step_config_result(step_config, ctx, sdk)

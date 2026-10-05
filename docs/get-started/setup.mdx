@@ -15,6 +15,7 @@ Install NeMo Helix and start working with AI agents.
 - Python 3.12-3.14
 - An API key from one of: [NVIDIA Build](https://build.nvidia.com), [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/settings/keys), [Google Gemini](https://aistudio.google.com/apikey), or a local [Ollama](https://ollama.com) instance (no key needed)
 - 16 GB available disk space and 8 GB RAM
+- [Docker](https://docs.docker.com/get-docker/) for Helix's default local operating mode (`nemo setup --start-services` or `nemo services run`); remote-deployment, CLI-only, and non-Docker configurations do not require it
 - For the PyPI install: [uv](https://docs.astral.sh/uv/) `>=0.10.10`, or `pip` in a Python environment
 - For the source checkout install: [Git](https://git-scm.com/), GNU Make, a C compiler, and [Flox](https://flox.dev/docs/install-flox/install) (recommended). A system-toolchain alternative is documented below.
 
@@ -24,7 +25,7 @@ Choose the install path that matches what you want to do.
 
 ### Install from PyPI
 
-Use the [PyPI package](https://pypi.org/project/nemo-helix/) for the quickest local install. The `all` extra includes the SDK, CLI, platform services, and default first-party plugins; drop it for the SDK and CLI alone.
+Use the [PyPI package](https://pypi.org/project/nemo-helix/) for the quickest local install. The `all` extra includes the SDK, CLI, Helix services, and default first-party plugins; drop it for the SDK and CLI alone.
 
 <Tabs>
 
@@ -97,7 +98,7 @@ The wizard walks through each stage:
 4. **Discover models** — finds available models from your provider
 5. **Select agent models** — pick a default model for quality-critical work and a fast model for latency-sensitive work; reuse the default if one model is enough
 6. **Install skills** — adds NeMo skills to detected coding agents (Cursor, Claude Code, Codex)
-7. **Deploy agent** — optionally deploys a demo calculator agent on the platform
+7. **Choose a path** — optionally creates a sample workspace with a Fabric email security agent and evaluation artifacts
 
 Each stage is idempotent — you can re-run `nemo setup` at any time to add more providers or update your configuration.
 
@@ -112,7 +113,7 @@ Platform not reachable at http://localhost:8080. Start local services?
   3. No, I'll start them myself
 ```
 
-Choose the remote option and enter the deployment's base URL. Setup verifies the URL, saves it to the active CLI context, and starts the existing OIDC login flow when the deployment has authentication enabled. It then continues with provider, model, skills, and demo-agent setup.
+Choose the remote option and enter the deployment's base URL. Setup verifies the URL, saves it to the active CLI context, and starts the existing OIDC login flow when the deployment has authentication enabled. It then continues with provider, model, skills, and the optional sample workspace.
 
 This connects the local CLI to an existing deployment; it does not install the platform on a remote host.
 
@@ -139,19 +140,19 @@ uv run python -m nhx.platform_seed
 
 `uv run nemo-helix run task --task nhx.platform_seed` is equivalent. The seed task is idempotent. It creates the **HelixAdmin** binding in the `system` workspace for `auth.admin_email`, the wildcard **Editor** binding for the default workspace, the wildcard **Viewer** binding for the `system` workspace, and the wildcard **WorkspaceCreator** binding for the `system` workspace. Without this step, OIDC login can succeed but admin operations may still return `403 Forbidden` because the RBAC bindings are missing.
 
-When setup completes, try chatting with the model you selected. Use the model name shown at the end of setup (or find it with `nemo models list`):
+When setup completes, try chatting with the default model you selected:
 
 ```bash
-nemo chat <model-name>
+nemo chat
 ```
 
-### Demo agent
+Use `--fast` for the fast model, or `--model <model-name>` for any other model from `nemo models list`.
 
-If you accepted **Deploy agent** during setup, a demo calculator agent is running on the platform. Try it out:
+### Sample workspace
 
-```bash
-nemo agents invoke --agent calculator-agent --input "What is 12 * 8?"
-```
+If you chose **Create a sample workspace and demo agent**, setup creates the
+`sample` workspace and deploys the Fabric email security agent. Use the Studio
+link printed at the end of setup to explore its dataset and evaluation config.
 
 ### Coding agent skills
 
@@ -194,9 +195,8 @@ nemo setup --auto --start-services
 |------|---------|-------------|
 | `--auto` | off | Non-interactive mode: register provider from environment variables |
 | `--workspace`, `-w` | `default` | Target workspace |
-| `--start-services` / `--no-start-services` | prompt (interactive) or skip (auto) | Start local platform services |
+| `--start-services` / `--no-start-services` | prompt (interactive) or skip (auto) | Start local Helix services |
 | `--install-skills` / `--no-install-skills` | prompt (interactive) or skip (auto) | Install NeMo skills for detected coding agents |
-| `--deploy-agent` / `--no-deploy-agent` | prompt (interactive) or skip (auto) | Deploy the demo calculator agent |
 
 Override the default and fast models with `NEMO_DEFAULT_MODEL` and
 `NEMO_FAST_MODEL`. If the fast override is omitted, it reuses the default.
@@ -211,9 +211,9 @@ nemo setup --auto --start-services
 ### Examples
 
 ```bash
-# Full automation: services, skills, and agent
+# Full automation: services and skills
 export NVIDIA_API_KEY=nvapi-...
-nemo setup --auto --start-services --install-skills --deploy-agent
+nemo setup --auto --start-services --install-skills
 
 # Provider only (platform already running)
 export OPENAI_API_KEY=sk-...
@@ -225,17 +225,18 @@ export NHX_ACCESS_TOKEN=...
 export OPENAI_API_KEY=sk-...
 nemo setup --auto --no-start-services
 
-# Skip skills and agent
-nemo setup --no-install-skills --no-deploy-agent
+# Skip skills
+nemo setup --no-install-skills
 ```
 
 ## What to explore next
 
 | Goal | Command or link |
 |------|-----------------|
-| Chat with a model | `nemo chat <model-name>` |
+| Chat with the default model | `nemo chat` |
+| Chat with another model | `nemo chat --model <model-name>` |
 | List available models | `nemo models list` |
-| Open the Studio UI | [http://localhost:8080](http://localhost:8080) |
+| Open the Studio UI | [http://localhost:8080/studio/](http://localhost:8080/studio/) |
 | Browse docs from the CLI | `nemo docs --list` |
 | Evaluate a model | [Run LLM-as-a-Judge Evaluation](/documentation/evaluate-models/tutorials/run-llm-as-a-judge-evaluation) |
 | Generate synthetic data | [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) |

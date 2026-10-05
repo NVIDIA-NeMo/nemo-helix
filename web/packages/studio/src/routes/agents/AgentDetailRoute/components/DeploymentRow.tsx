@@ -61,7 +61,7 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
       <Stack gap="0" className="min-w-0 flex-1">
         <Text kind="body/semibold/sm">{deployment.name}</Text>
         {deployment.endpoint && (
-          <Text kind="body/regular/xs" color="secondary" className="truncate">
+          <Text kind="body/regular/xs" className="truncate text-secondary">
             {deployment.endpoint}
           </Text>
         )}
@@ -70,8 +70,7 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
         {deployment.image && (
           <Text
             kind="body/regular/xs"
-            color="secondary"
-            className="truncate font-mono"
+            className="truncate font-mono text-secondary"
             title={deployment.image}
           >
             {deployment.image}
@@ -81,8 +80,11 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
           <Stack gap="density-xs" className="mt-density-xs items-start">
             <Text
               kind="body/regular/xs"
-              color="danger"
-              className={isErrorExpanded ? 'whitespace-pre-wrap break-words' : 'line-clamp-2'}
+              className={
+                isErrorExpanded
+                  ? 'whitespace-pre-wrap break-words text-feedback-danger'
+                  : 'line-clamp-2 text-feedback-danger'
+              }
             >
               {deployment.error}
             </Text>
@@ -97,7 +99,7 @@ export const DeploymentRow: FC<DeploymentRowProps> = ({
           </Stack>
         )}
         {deployment.spec_revision ? (
-          <Text kind="body/regular/xs" color="secondary" className="truncate">
+          <Text kind="body/regular/xs" className="truncate text-secondary">
             Staged from commit{' '}
             <CommitLink source={specSource} revision={deployment.spec_revision} />
             {specSource && deployment.spec_revision !== specSource.revision ? (

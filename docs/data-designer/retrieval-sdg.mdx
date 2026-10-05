@@ -30,7 +30,7 @@ generation, and quality judging. That choice is first-order for retrieval
 accuracy, because those queries and answers become the embedding training set.
 The published NVDocs dump was generated with that pipeline.
 
-The examples below use `nvidia/nemotron-3-nano-30b-a3b` so they can run on a
+The examples below use `nvidia/nemotron-3.5-lightning-30b-a3b` so they can run on a
 typical already-deployed IGW model. Outside of examples, always use a larger
 model — for example [`nvidia/nemotron-3-ultra-550b-a55b`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16) when the provider serves it. Copying the examples
 as-is produces shallower queries and lower judge scores than the recipe, and a
@@ -43,13 +43,7 @@ nemo data-designer retrieval-generate --workspace default --spec '{
   "artifact_extraction_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "qa_generation_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
   "quality_judge_model": "nvidia/nemotron-3.5-lightning-30b-a3b",
-  "embed_model": "nvidia/nemotron-3-embed-1b",
-  "file_extensions": [".txt", ".md", ".text", ""],
-  "sentences_per_chunk": 5,
-  "max_artifacts_per_type": 2,
-  "num_pairs": 7,
-  "multi_doc": false,
-  "max_parallel_requests_for_gen": null
+  "embed_model": "nvidia/nemotron-3-embed-1b"
 }'
 ```
 
@@ -148,12 +142,14 @@ nemo data-designer retrieval-prepare --spec '{
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalPrepareJobConfig
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+data_designer = DataDesignerResource(client)
 
-client.data_designer.retrieval_prepare(
+data_designer.retrieval_prepare(
     RetrievalPrepareJobConfig(
         sdg_input="hf://nvidia/Retrieval-Synthetic-NVDocs-v1@1c0d1856f3fb595b2dda98d4b61061fa6d782d51/nv_pp_dd_sdg.json",
         enable_mining=True,
@@ -252,12 +248,14 @@ against the same `eval_beir` split.
 ## SDK
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+data_designer = DataDesignerResource(client)
 
-client.data_designer.retrieval_generate(
+data_designer.retrieval_generate(
     RetrievalGenerateJobConfig(
         corpus="default/my-docs",
         provider="default/nvidia-build",

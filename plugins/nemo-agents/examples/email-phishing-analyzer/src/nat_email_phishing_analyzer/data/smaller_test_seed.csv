@@ -1,6 +1,0 @@
-source,intents,sender
-gift,"{'money': {'label': 'Money', 'id': 0, 'score': 0.9998}, 'banking': {'label': 'Personal', 'id': 1, 'score': 0.9997}, 'crypto': {'label': 'NonCrypto', 'id': 1, 'score': 0.9996}}",prize@example.com
-password,"{'money': {'label': 'Money', 'id': 0, 'score': 0.9999}, 'banking': {'label': 'Personal', 'id': 1, 'score': 0.9999}, 'crypto': {'label': 'NonCrypto', 'id': 1, 'score': 0.9995}}",security-alerts@bank.com
-money,"{'money': {'label': 'Money', 'id': 0, 'score': 0.9997}, 'banking': {'label': 'Personal', 'id': 1, 'score': 0.9998}, 'crypto': {'label': 'NonCrypto', 'id': 1, 'score': 0.9994}}",accounts@shop-example.com
-meeting,"{'money': {'label': 'NonMoney', 'id': 1, 'score': 0.9995}, 'banking': {'label': 'NonPersonal', 'id': 1, 'score': 0.9995}, 'crypto': {'label': 'NonCrypto', 'id': 1, 'score': 0.9994}}",bob@example.com
-finance,"{'money': {'label': 'Money', 'id': 0, 'score': 0.9996}, 'banking': {'label': 'Personal', 'id': 1, 'score': 0.9996}, 'crypto': {'label': 'NonCrypto', 'id': 1, 'score': 0.9993}}",alice@company.com

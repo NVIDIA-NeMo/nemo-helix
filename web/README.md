@@ -88,7 +88,7 @@ pnpm test -- --coverage  # coverage report
 
 Studio is configured using environment variables. How they make their way into the React app depends on the environment Studio is running in. For the full list of environment variables Studio accepts, look at `packages/studio/env/.env.fastapi`.
 
-When the bundle is built for the **Studio FastAPI** app (`pnpm build --mode fastapi`), `STUDIO_UI_*` placeholders come from `packages/studio/env/.env.fastapi` and are resolved at runtime using **`services/studio/src/nhx/studio/env_mappings.py`** at the Platform repository root (alongside `web/`). Keep `.env.fastapi` and `env_mappings.py` in sync (see the parity comment in `.env.fastapi`).
+When the bundle is built for the **Studio FastAPI** app (`pnpm build --mode fastapi`), `STUDIO_UI_*` placeholders come from `packages/studio/env/.env.fastapi` and are resolved at runtime using **`services/studio/src/nhx/studio/env_mappings.py`** at the NeMo Helix repository root (alongside `web/`). Keep `.env.fastapi` and `env_mappings.py` in sync (see the parity comment in `.env.fastapi`).
 
 #### Local Development
 

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import ServicePrincipalTokenProvider
 from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError
 from nemo_helix_plugin.entities import (
     EntityBase,
@@ -202,6 +203,23 @@ class _EntityWithAuthContext(EntityBase):
         return self._auth_context
 
 
+class _ServiceTokenProvider(ServicePrincipalTokenProvider):
+    def __init__(self, *, service_principal_id: str = "service:jobs", delegates_principal: bool = False) -> None:
+        self._service_principal_id = service_principal_id
+        self.delegates_principal = delegates_principal
+
+    @property
+    def service_principal_id(self) -> str:
+        return self._service_principal_id
+
+    @property
+    def delegates_principal_identity(self) -> bool:
+        return self.delegates_principal
+
+    def get_access_token(self) -> str:
+        return "service-token"
+
+
 def _stored_entity_with_auth_context() -> Entity:
     return Entity(
         entity_type="test",
@@ -241,11 +259,128 @@ def test_sync_entity_client_auth_context_uses_typed_default_headers() -> None:
     }
 
 
+def test_sync_entity_client_auth_context_strips_delegated_trusted_service_headers() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        default_headers={
+            "X-NHX-Principal-Id": "service:jobs",
+            "X-NHX-Principal-On-Behalf-Of": "creator@example.com",
+        },
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context is None
+
+
+def test_sync_entity_client_auth_context_strips_malformed_service_header() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        default_headers={"X-NHX-Principal-Id": "service:"},
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context is None
+
+
+def test_sync_entity_client_auth_context_uses_service_workload_token_provider() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        auth=_ServiceTokenProvider(),
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context == {
+        "principal_id": "creator@example.com",
+        "principal_email": "creator@example.com",
+        "principal_groups": ["team-alpha"],
+    }
+
+
+def test_sync_entity_client_auth_context_strips_malformed_service_workload_token_provider() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        auth=_ServiceTokenProvider(service_principal_id="service:"),
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context is None
+
+
+def test_sync_entity_client_auth_context_strips_user_bearer_token() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        auth="user-token",
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context is None
+
+
+def test_sync_entity_client_auth_context_strips_delegated_service_workload_token_provider() -> None:
+    entities_client = EntitiesClient(
+        base_url="http://testserver",
+        auth=_ServiceTokenProvider(delegates_principal=True),
+    )
+    client = SyncEntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        client.close()
+
+    assert result.auth_context is None
+
+
 @pytest.mark.asyncio
 async def test_async_entity_client_auth_context_uses_typed_default_headers() -> None:
     entities_client = AsyncEntitiesClient(
         base_url="http://testserver",
         default_headers={"X-NHX-Principal-Id": "service:jobs"},
+    )
+    client = EntityClient(entities_client)
+
+    try:
+        result = client._convert_api_entity_to_model(_stored_entity_with_auth_context(), _EntityWithAuthContext)
+    finally:
+        await client.close()
+
+    assert result.auth_context == {
+        "principal_id": "creator@example.com",
+        "principal_email": "creator@example.com",
+        "principal_groups": ["team-alpha"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_entity_client_auth_context_uses_service_workload_token_provider() -> None:
+    entities_client = AsyncEntitiesClient(
+        base_url="http://testserver",
+        auth=_ServiceTokenProvider(),
     )
     client = EntityClient(entities_client)
 

@@ -5,8 +5,7 @@ import json
 
 import pytest
 from httpx import AsyncClient
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, ListJobsQueryParams
@@ -30,8 +29,8 @@ TEST_PLATFORM_SPEC = HelixJobSpec.model_validate(
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_by_name(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_by_name(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -67,8 +66,8 @@ async def test_search_jobs_by_name(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_by_project(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_by_project(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -106,8 +105,8 @@ async def test_search_jobs_by_project(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_multiple_values_or_logic(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_multiple_values_or_logic(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     for name in ["training-job", "evaluation-job", "inference-job"]:
         (
             await jobs.create_job(
@@ -137,8 +136,8 @@ async def test_search_jobs_multiple_values_or_logic(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_multiple_fields_and_logic(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_multiple_fields_and_logic(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     for name, project in [
         ("training-job-nlp", "nlp-project"),
         ("training-job-vision", "vision-project"),
@@ -173,8 +172,8 @@ async def test_search_jobs_multiple_fields_and_logic(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_case_insensitive(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_case_insensitive(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -199,8 +198,8 @@ async def test_search_jobs_case_insensitive(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_jobs_partial_match(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_jobs_partial_match(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -225,8 +224,8 @@ async def test_search_jobs_partial_match(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_combined_with_filter(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_combined_with_filter(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     job1 = (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -264,8 +263,8 @@ async def test_search_combined_with_filter(test_sdk: AsyncNeMoHelix):
 
 @pytest.mark.asyncio
 @SUBSTRING_SEARCH_SKIP
-async def test_search_no_results(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_no_results(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -289,8 +288,8 @@ async def test_search_no_results(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_empty_string(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_empty_string(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     for name in ["job1", "job2"]:
         (
             await jobs.create_job(
@@ -334,8 +333,8 @@ async def test_search_via_http_client(test_client: AsyncClient):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_pagination(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_pagination(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     for i in range(15):
         (
             await jobs.create_job(
@@ -377,9 +376,9 @@ async def test_search_pagination(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_underscore_behavior(test_sdk: AsyncNeMoHelix):
+async def test_search_underscore_behavior(async_client: AsyncNemoClient):
     """Test that underscore is treated as a literal character in search (substring matching)."""
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     for name in ["test_job_with_underscore", "test-job-with-dash"]:
         (
             await jobs.create_job(
@@ -428,10 +427,10 @@ async def test_search_underscore_behavior(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_long_string(test_sdk: AsyncNeMoHelix):
+async def test_search_long_string(async_client: AsyncNemoClient):
     # Use a name within the 255 character limit
     long_name = "job-" + "a" * 200  # Total 204 chars, within 255 limit
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,
@@ -457,8 +456,8 @@ async def test_search_long_string(test_sdk: AsyncNeMoHelix):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_result_limit(test_sdk: AsyncNeMoHelix):
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def test_search_result_limit(async_client: AsyncNemoClient):
+    jobs = AsyncJobsClient.from_client(async_client)
     for i in range(150):
         (
             await jobs.create_job(
@@ -503,9 +502,9 @@ async def test_search_invalid_field(test_client: AsyncClient):
 
 @SUBSTRING_SEARCH_SKIP
 @pytest.mark.asyncio
-async def test_search_special_characters(test_sdk: AsyncNeMoHelix):
+async def test_search_special_characters(async_client: AsyncNemoClient):
     # Use only valid special characters per the pattern ^[\w\-\+.@:]*$
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+    jobs = AsyncJobsClient.from_client(async_client)
     (
         await jobs.create_job(
             workspace=DEFAULT_WORKSPACE,

@@ -7,8 +7,6 @@ import logging
 import weakref
 from typing import Any, Dict, List, Optional, Tuple, TypeVar
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -270,29 +268,27 @@ class JobDispatcher:
     def __init__(
         self,
         store: EntityClient,
-        sdk: AsyncNeMoHelix,
+        files: AsyncFilesClient,
+        secrets: AsyncSecretsClient,
     ):
         self.store = store
-        self.sdk = sdk
+        self.files = files
+        self.secrets = secrets
 
     # =========================================================================
     # Job Operations
     # =========================================================================
 
-    async def validate_job_secrets(
-        self, job_spec: HelixJobSpec, job_workspace: str, sdk: Optional[AsyncNeMoHelix] = None
-    ) -> None:
-        # Ensure that any referenced secrets in steps exist and the user has access (user-scoped sdk).
-        sdk_to_use = sdk if sdk is not None else self.sdk
+    async def validate_job_secrets(self, job_spec: HelixJobSpec, job_workspace: str) -> None:
+        # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
             if not step.environment:
                 continue
             for env_var in step.environment:
                 if env_var.from_secret:
                     workspace, secret_name = get_entity_parts(env_var.from_secret.name, default_workspace=job_workspace)
-                    secrets = client_from_platform(sdk_to_use, AsyncSecretsClient)
                     try:
-                        await secrets.get_secret(name=secret_name, workspace=workspace)
+                        await self.secrets.get_secret(name=secret_name, workspace=workspace)
                     except ClientNotFoundError as exc:
                         raise JobSecretValidationError(f"Secret '{workspace}/{secret_name}' not found.") from exc
                     except ClientPermissionDeniedError as exc:
@@ -312,21 +308,19 @@ class JobDispatcher:
         job_req: CreateHelixJobRequest,
         workspace: str,
         auth_context: Optional[AuthContext] = None,
-        sdk: Optional[AsyncNeMoHelix] = None,
     ) -> HelixJobResponse:
         """Create a new job and its first step."""
         if job_req.name is None:
-            return await self._create_job(job_req, workspace, auth_context=auth_context, sdk=sdk)
+            return await self._create_job(job_req, workspace, auth_context=auth_context)
 
         async with _get_job_mutation_lock(job_req.name, workspace):
-            return await self._create_job(job_req, workspace, auth_context=auth_context, sdk=sdk)
+            return await self._create_job(job_req, workspace, auth_context=auth_context)
 
     async def _create_job(
         self,
         job_req: CreateHelixJobRequest,
         workspace: str,
         auth_context: Optional[AuthContext] = None,
-        sdk: Optional[AsyncNeMoHelix] = None,
     ) -> HelixJobResponse:
         """Create a new job after the caller has acquired any needed name lock."""
         job_name = job_req.name
@@ -344,7 +338,7 @@ class JobDispatcher:
         try:
             platform_spec = job_req.platform_spec
 
-            await self.validate_job_secrets(platform_spec, workspace, sdk=sdk)
+            await self.validate_job_secrets(platform_spec, workspace)
 
             # Generate a reference ID for naming (job entity ID is assigned by store)
             # Generate auto-name if not provided, ensuring it fits 32 char limit
@@ -356,17 +350,16 @@ class JobDispatcher:
                 job_name = f"{source_prefix}-{short_id}"
 
             # Resolve the fileset for job artifacts (caller-supplied output_location or auto-created).
-            files = client_from_platform(self.sdk, AsyncFilesClient)
             if job_req.output_location is not None:
                 try:
-                    await files.get_fileset(name=job_req.output_location, workspace=workspace)
+                    await self.files.get_fileset(name=job_req.output_location, workspace=workspace)
                 except (ClientNotFoundError, ClientPermissionDeniedError) as exc:
                     raise JobOutputLocationError(
                         f"fileset '{job_req.output_location}' not found or not accessible in workspace '{workspace}'"
                     ) from exc
                 fileset_name = job_req.output_location
             else:
-                fileset_resp = await files.create_fileset(
+                fileset_resp = await self.files.create_fileset(
                     body=CreateFilesetRequest(name=f"job-fileset-{job_name}"),
                     workspace=workspace,
                 )
@@ -422,17 +415,34 @@ class JobDispatcher:
         except Exception as e:
             raise e
 
-    async def get_job(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Get a platform job by ID with its current attempt."""
-        try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
-        except EntityNotFoundError:
+    async def get_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+        """Get a platform job by name or ID, with its current attempt.
+
+        ``nemo jobs list`` leads with the job ``id`` (the ``platform-job-...``
+        value), while jobs are stored keyed by ``name``. To avoid rejecting the
+        identifier the list surfaces, resolve by name first and fall back to an
+        ID lookup on a miss. The ID lookup is workspace-agnostic, so the result
+        is discarded unless it lives in the requested workspace.
+        """
+        job_entity = await self._resolve_job(identifier, workspace)
+        if job_entity is None or job_entity.current_attempt_id is None:
             return None
         try:
             attempt = await self.store.get_by_id(HelixJobAttempt, job_entity.current_attempt_id)
         except EntityNotFoundError:
             return None
         return create_platform_job_response(job_entity, attempt)
+
+    async def _resolve_job(self, identifier: str, workspace: str) -> Optional[HelixJob]:
+        """Resolve a job by name, falling back to its ID within the workspace."""
+        try:
+            return await self.store.get(HelixJob, identifier, workspace=workspace)
+        except EntityNotFoundError:
+            pass
+        job_entity = await self._get_job_by_id_optional(identifier)
+        if job_entity is not None and job_entity.workspace == workspace:
+            return job_entity
+        return None
 
     async def list_jobs(
         self,
@@ -496,20 +506,32 @@ class JobDispatcher:
 
         return job_outputs, response.pagination.total_results
 
-    async def delete_job(self, job_name: str, workspace: str) -> bool:
-        """Delete a job and all of its associated data (steps, tasks, results, logs).
+    async def delete_job(self, identifier: str, workspace: str) -> bool:
+        """Delete a job (by name or ID) and all of its associated data (steps, tasks, results, logs).
 
         Returns:
             True if job was deleted, False if job was not found.
         """
-        async with _get_job_mutation_lock(job_name, workspace):
-            return await self._delete_job_locked(job_name, workspace)
+        job_entity = await self._resolve_job(identifier, workspace)
+        if job_entity is None:
+            return False
+        async with _get_job_mutation_lock(job_entity.name, workspace):
+            return await self._delete_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
 
-    async def _delete_job_locked(self, job_name: str, workspace: str) -> bool:
-        """Delete a terminal job while holding the per-job mutation lock."""
+    async def _delete_job_locked(self, job_name: str, workspace: str, expected_id: str | None = None) -> bool:
+        """Delete a terminal job while holding the per-job mutation lock.
+
+        ``expected_id`` guards against a same-name replacement: the identifier was
+        resolved before the lock was taken, so re-verify the re-fetched job is
+        still the one we resolved before deleting anything.
+        """
         try:
             job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
         except EntityNotFoundError:
+            return False
+        if expected_id is not None and job_entity.id != expected_id:
+            # A same-name job was recreated between resolve and lock acquisition;
+            # the originally-resolved job is gone. Do not touch the replacement.
             return False
 
         extras = {"job": job_entity.name, "workspace": job_entity.workspace}
@@ -582,8 +604,7 @@ class JobDispatcher:
             # owned fileset already being gone.
             if job_entity.output_location is None:
                 try:
-                    files = client_from_platform(self.sdk, AsyncFilesClient)
-                    await files.delete_fileset(name=job_entity.fileset, workspace=workspace)
+                    await self.files.delete_fileset(name=job_entity.fileset, workspace=workspace)
                 except ClientNotFoundError:
                     logger.warning(
                         "Job fileset not found during deletion, may have been cleaned up already", extra=extras
@@ -1185,11 +1206,10 @@ class JobDispatcher:
     # Job Control Operations
     # =========================================================================
 
-    async def cancel_job(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Cancel a job."""
-        try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
-        except EntityNotFoundError:
+    async def cancel_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+        """Cancel a job (by name or ID)."""
+        job_entity = await self._resolve_job(identifier, workspace)
+        if job_entity is None:
             return None
 
         # Check if the job has any created steps, and if so, check if all of them are in created state.
@@ -1223,16 +1243,28 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "cancel_job"})
         return create_platform_job_response(job_entity, attempt)
 
-    async def rerun_job(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Re-run a job."""
-        async with _get_job_mutation_lock(job_name, workspace):
-            return await self._rerun_job_locked(job_name, workspace)
+    async def rerun_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+        """Re-run a job (by name or ID)."""
+        job_entity = await self._resolve_job(identifier, workspace)
+        if job_entity is None:
+            return None
+        async with _get_job_mutation_lock(job_entity.name, workspace):
+            return await self._rerun_job_locked(job_entity.name, workspace, expected_id=job_entity.id)
 
-    async def _rerun_job_locked(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Re-run a terminal job while holding the per-job mutation lock."""
+    async def _rerun_job_locked(
+        self, job_name: str, workspace: str, expected_id: str | None = None
+    ) -> HelixJobResponse | None:
+        """Re-run a terminal job while holding the per-job mutation lock.
+
+        ``expected_id`` guards against a same-name replacement created between the
+        pre-lock resolve and lock acquisition (see ``_delete_job_locked``).
+        """
         try:
             job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
         except EntityNotFoundError:
+            return None
+        if expected_id is not None and job_entity.id != expected_id:
+            # The originally-resolved job was replaced by a same-name job; don't rerun it.
             return None
 
         attempt = await self.get_current_attempt(job_entity.name, workspace=job_entity.workspace)
@@ -1274,11 +1306,10 @@ class JobDispatcher:
             operations_counter.add(1, attributes={"operation": "rerun_job"})
             return create_platform_job_response(job_entity, attempt)
 
-    async def pause_job(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Pause a job."""
-        try:
-            job_entity = await self.store.get(HelixJob, job_name, workspace=workspace)
-        except EntityNotFoundError:
+    async def pause_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+        """Pause a job (by name or ID)."""
+        job_entity = await self._resolve_job(identifier, workspace)
+        if job_entity is None:
             return None
 
         active_or_pending_step = await self._get_step_by_status(
@@ -1296,11 +1327,10 @@ class JobDispatcher:
         operations_counter.add(1, attributes={"operation": "pause_job"})
         return create_platform_job_response(job_entity, attempt)
 
-    async def resume_job(self, job_name: str, workspace: str) -> HelixJobResponse | None:
-        """Resume a job."""
-        try:
-            job = await self.store.get(HelixJob, job_name, workspace=workspace)
-        except EntityNotFoundError:
+    async def resume_job(self, identifier: str, workspace: str) -> HelixJobResponse | None:
+        """Resume a job (by name or ID)."""
+        job = await self._resolve_job(identifier, workspace)
+        if job is None:
             return None
 
         # Only allow resume if the job is in a paused state

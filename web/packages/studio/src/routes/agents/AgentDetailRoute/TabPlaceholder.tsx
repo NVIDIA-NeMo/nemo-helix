@@ -26,7 +26,7 @@ export const TabPlaceholder: FC<TabPlaceholderProps> = ({ icon: Icon, title, des
         <Icon className="size-12" aria-hidden />
       </Flex>
       <Text kind="body/bold/md">{title}</Text>
-      <Text kind="body/regular/sm" color="secondary">
+      <Text className="text-secondary" kind="body/regular/sm">
         {description}
       </Text>
     </Stack>

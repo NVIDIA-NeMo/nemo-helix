@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import datetime
 import json
 import logging
 import os
@@ -264,7 +265,7 @@ def build_metadata(labels: dict[str, str] | None, metadata: KubernetesObjectMeta
 FATAL_WAITING_REASONS = frozenset({"InvalidImageName", "CreateContainerConfigError"})
 
 # Kubelet retries these, so the pod has not started rather than failed. A pull
-# that never succeeds is caught by ttl_seconds_before_active.
+# that never succeeds is caught by ttl_seconds_image_pull.
 RECOVERABLE_WAITING_REASONS = frozenset({"ImagePullBackOff", "ErrImagePull"})
 
 
@@ -308,6 +309,103 @@ def map_pod_to_pod_status(pod: V1Pod) -> PodStatus:
     logger.debug("active %s", [name for name in status.errors.keys()])
     logger.debug("waiting %s", [name for name in status.errors.keys()])
     return status
+
+
+_PULL_FAILURE_PREFIX = "Failed to pull image"
+_PULL_FAILURE_REASONS = frozenset({"Failed", "InspectFailed"})
+
+
+def _parse_event_timestamp(raw: object) -> datetime.datetime | None:
+    """Parse a timestamp in the form ``get_pod_events`` stringifies it to."""
+    if isinstance(raw, datetime.datetime):
+        parsed = raw
+    else:
+        text = str(raw or "").strip()
+        if not text or text == "None":
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=datetime.timezone.utc)
+
+
+def image_pull_backoff_age_seconds(events: list[dict[str, Any]], now: datetime.datetime | None = None) -> float | None:
+    """Seconds since the kubelet first failed to pull, or ``None`` if it never did.
+
+    The step's own pending age is the wrong clock to bound a pull by: a pod that
+    spent minutes unschedulable would have spent the whole budget before its
+    first pull attempt, so the very first ``ImagePullBackOff`` would fail it with
+    no grace at all. Only the pull's own history answers "how long has this been
+    failing", which is the question the budget is asking.
+    """
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    started = [
+        stamp
+        for event in events
+        if event.get("type") == "Warning" and event.get("reason") in _PULL_FAILURE_REASONS
+        for stamp in [
+            _parse_event_timestamp(event.get("first_timestamp")) or _parse_event_timestamp(event.get("last_timestamp"))
+        ]
+        if stamp is not None
+    ]
+    if not started:
+        return None
+    return (now - min(started)).total_seconds()
+
+
+def image_pull_failure_message(events: list[dict[str, Any]]) -> str:
+    """The most specific pull failure among a pod's events, or ``""``.
+
+    The kubelet emits several ``Warning``/``Failed`` events per attempt and only
+    one of them carries the image ref and the resolver error; the others are the
+    bare ``Error: ErrImagePull`` and ``Error: ImagePullBackOff``. They arrive in
+    that order, so ``get_pod_details`` -- which keeps the last one it sees --
+    reports the least useful of the three.
+    """
+    warnings = [
+        str(event.get("message") or "")
+        for event in events
+        if event.get("type") == "Warning" and event.get("reason") in _PULL_FAILURE_REASONS
+    ]
+    for message in warnings:
+        if message.startswith(_PULL_FAILURE_PREFIX):
+            return message
+    return warnings[-1] if warnings else ""
+
+
+def image_pull_backoff_failure(
+    core_v1: client.CoreV1Api,
+    namespace: str,
+    step: HelixJobStepWithContext,
+    ttl_seconds: int,
+) -> str | None:
+    """Describe a pull the kubelet has been retrying past *ttl_seconds*, else ``None``.
+
+    Shared by the Kubernetes and Volcano backends: deciding that a pull is never
+    going to succeed is identical for both, and only the teardown that follows
+    differs.
+    """
+    if ttl_seconds <= 0:
+        return None
+
+    stuck = [
+        pod for pod in list_pod_status(core_v1, namespace, common_labels_for_step(step)) if is_retrying_image_pull(pod)
+    ]
+    if not stuck:
+        return None
+
+    pod_info, error_details, _ = get_pod_details(core_v1, namespace, stuck[0].name)
+    events = pod_info.get("events") or []
+    backoff_age = image_pull_backoff_age_seconds(events)
+    if backoff_age is None or backoff_age < ttl_seconds:
+        return None
+
+    # Only the pull reasons; a sibling container waiting on init is noise here.
+    reasons = sorted({r for pod in stuck for r in pod.waiting.values() if r in RECOVERABLE_WAITING_REASONS})
+    detail = image_pull_failure_message(events) or error_details.get("failed", "")
+    message = f"Image pull did not succeed within {ttl_seconds}s ({', '.join(reasons)})"
+    return f"{message}: {detail}" if detail else message
 
 
 def is_retrying_image_pull(pod_status: PodStatus) -> bool:

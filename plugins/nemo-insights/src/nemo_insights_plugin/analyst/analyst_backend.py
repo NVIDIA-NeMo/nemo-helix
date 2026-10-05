@@ -42,8 +42,7 @@ from pathlib import Path
 
 import httpx
 import yaml
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.intake.types import SpanMode
@@ -169,9 +168,9 @@ class AnalystBackend(ABC):
     primitives. Reads always hit the live platform, even in local insights mode.
     """
 
-    def __init__(self, client: AsyncNeMoHelix) -> None:
+    def __init__(self, client: AsyncNemoClient) -> None:
         self.client = client
-        self.intake = client_from_platform(client, AsyncIntakeClient)
+        self.intake = AsyncIntakeClient.from_client(client)
 
     # -- reads: always against the live platform -------------------------- #
 
@@ -436,7 +435,7 @@ class RemoteAnalystBackend(AnalystBackend):
     semantics.
     """
 
-    def __init__(self, client: AsyncNeMoHelix, mirror: InsightsFileStore | None = None) -> None:
+    def __init__(self, client: AsyncNemoClient, mirror: InsightsFileStore | None = None) -> None:
         super().__init__(client)
         self.mirror = mirror
 
@@ -596,7 +595,7 @@ class LocalAnalystBackend(AnalystBackend):
     stored entity.
     """
 
-    def __init__(self, *, client: AsyncNeMoHelix, path: Path) -> None:
+    def __init__(self, *, client: AsyncNemoClient, path: Path) -> None:
         super().__init__(client)
         self.store = InsightsFileStore(path)
 
@@ -678,7 +677,7 @@ class LocalAnalystBackend(AnalystBackend):
 
 def make_analyst_backend(
     *,
-    client: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     insights_output: str | None,
     local_only: bool = False,
 ) -> AnalystBackend:

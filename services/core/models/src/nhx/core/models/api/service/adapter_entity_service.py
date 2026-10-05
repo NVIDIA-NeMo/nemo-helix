@@ -6,12 +6,11 @@
 import json
 import logging
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter
 from nhx.common.entities import ALL_WORKSPACES, ListResponse
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.core.models.api.service.model_entity_service import _adapter_to_adapter_schema, get_fileset_and_files_list
 from nhx.core.models.constants import parse_model_ref
 from nhx.core.models.entities import Adapter, Model
@@ -24,9 +23,9 @@ logger = logging.getLogger(__name__)
 class AdapterEntityService:
     """Service for adapter CRUD, scoped to a workspace, with model reference from path or body."""
 
-    def __init__(self, entity_client: EntityClient, sdk: AsyncNeMoHelix | None = None) -> None:
+    def __init__(self, entity_client: EntityClient, files: AsyncFilesClient) -> None:
         self.entity_client = entity_client
-        self.sdk = sdk or get_async_platform_sdk()
+        self.files = files
 
     async def _fetch_all_entities(
         self,
@@ -97,7 +96,7 @@ class AdapterEntityService:
 
         await self._assert_adapter_name_free(adapter_workspace, request.name)
 
-        await get_fileset_and_files_list(self.sdk, adapter_workspace, request.fileset)
+        await get_fileset_and_files_list(self.files, adapter_workspace, request.fileset)
 
         adapter = Adapter(
             workspace=adapter_workspace,
@@ -131,7 +130,7 @@ class AdapterEntityService:
         if request.enabled is not None:
             adapter.enabled = request.enabled
         if request.fileset is not None:
-            await get_fileset_and_files_list(self.sdk, adapter_workspace, request.fileset)
+            await get_fileset_and_files_list(self.files, adapter_workspace, request.fileset)
             adapter.fileset = request.fileset
         updated = await self.entity_client.update(adapter)
 

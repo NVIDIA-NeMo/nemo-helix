@@ -3,13 +3,16 @@
 
 """Intake service implementation."""
 
+import asyncio
 import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, List
 
+from nhx.common.entities.client import EntityClient
 from nhx.common.service import RouterConfig, Service
 from nhx.intake.api.v2.experiments import endpoints as experiments
+from nhx.intake.background_worker import BackgroundWorker
 from nhx.intake.config import IntakeConfig, should_provision_local_clickhouse
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
 from nhx.intake.local_clickhouse import (
@@ -19,7 +22,7 @@ from nhx.intake.local_clickhouse import (
     reconcile_local_clickhouse,
     stop_local_clickhouse,
 )
-from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE
+from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE, LOCAL_CLICKHOUSE_PROVISIONING_MESSAGE
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
@@ -29,6 +32,92 @@ from nhx.intake.spans.ingest import atif, chat_completions, otlp
 from nhx.intake.spans.ingest import spans as span_ingest
 
 logger = logging.getLogger(__name__)
+
+# Interruptible pause between failed local ClickHouse reconciles. Tests set this to 0.
+LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS = 5.0
+
+
+class _LocalClickHouseProvisioner(BackgroundWorker):
+    """Retry local ClickHouse reconciliation until it succeeds or Intake shuts down."""
+
+    def __init__(
+        self,
+        service: "IntakeService",
+        settings: ClickHouseSettings,
+        *,
+        image: str,
+        data_dir: Path | None,
+    ) -> None:
+        super().__init__()
+        self._service = service
+        self._settings = settings
+        self._image = image
+        self._data_dir = data_dir
+        self._logged_failures: set[str] = set()
+
+    async def _run(self) -> None:
+        while not self._stopping.is_set():
+            try:
+                url = await reconcile_local_clickhouse(
+                    self._settings,
+                    image=self._image,
+                    data_dir=self._data_dir,
+                )
+            except LocalClickHouseProvisioningError as exc:
+                self._record_failure(exc)
+                if await self._wait_for_retry():
+                    return
+                continue
+            except Exception as exc:
+                logger.exception("Local ClickHouse reconcile failed")
+                self._service._readiness_message = str(exc) or CLICKHOUSE_UNAVAILABLE_MESSAGE
+                if await self._wait_for_retry():
+                    return
+                continue
+            if self._stopping.is_set():
+                await self._stop_unadopted_container()
+                return
+            try:
+                self._service._adopt_reconciled_clickhouse(url, self._settings, self._data_dir)
+            except Exception:
+                logger.exception("Failed to adopt reconciled local ClickHouse")
+                await self._stop_unadopted_container()
+                raise
+            return
+
+    def _record_failure(self, exc: LocalClickHouseProvisioningError) -> None:
+        message = str(exc)
+        self._service._readiness_message = message
+        if message in self._logged_failures:
+            return
+        self._logged_failures.add(message)
+        log = logger.warning if isinstance(exc, DockerUnavailableError) else logger.error
+        log(
+            "Local ClickHouse reconciliation failed: %s Retrying until Intake shuts down.",
+            exc,
+            extra={"service": self._service.name},
+        )
+
+    async def _wait_for_retry(self) -> bool:
+        """Return True when shutdown was requested during the backoff."""
+        try:
+            await asyncio.wait_for(
+                self._stopping.wait(),
+                timeout=LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS,
+            )
+        except TimeoutError:
+            return False
+        return True
+
+    async def _stop_unadopted_container(self) -> None:
+        try:
+            await stop_local_clickhouse(data_dir=self._data_dir)
+        except LocalClickHouseProvisioningError:
+            logger.warning(
+                "Failed to stop local ClickHouse after shutdown interrupted reconciliation",
+                exc_info=True,
+                extra={"service": self._service.name},
+            )
 
 
 class IntakeService(Service[IntakeConfig]):
@@ -47,6 +136,8 @@ class IntakeService(Service[IntakeConfig]):
         self._owns_local_clickhouse = False
         self._ready = False
         self._readiness_message = ""
+        self._reconciler: _LocalClickHouseProvisioner | None = None
+        self._denormalizer_entity_client: EntityClient | None = None
 
     @property
     def title(self) -> str:
@@ -99,57 +190,64 @@ class IntakeService(Service[IntakeConfig]):
         ]
 
     async def on_startup(self) -> None:
-        """Create the trace storage client without requiring ClickHouse to be online."""
+        """Start Intake without blocking the platform lifespan on local ClickHouse."""
 
         self._local_clickhouse_data_dir = None
         self._owns_local_clickhouse = False
+        self._reconciler = None
         cfg = self.service_config or IntakeConfig()
         settings = ClickHouseSettings.from_config(cfg)
-        if should_provision_local_clickhouse(cfg.clickhouse_config):
-            try:
-                local_url = await reconcile_local_clickhouse(
-                    settings,
-                    image=cfg.clickhouse_config.image,
-                    data_dir=cfg.clickhouse_config.data_dir,
-                )
-                settings = replace(settings, url=local_url)
-                self._local_clickhouse_data_dir = cfg.clickhouse_config.data_dir
-                self._owns_local_clickhouse = True
-            except DockerUnavailableError as exc:
-                logger.warning(
-                    "Skipping local ClickHouse reconciliation: %s ClickHouse-backed endpoints will return 503 until "
-                    "ClickHouse is reachable.",
-                    exc,
-                    extra={"service": self.name, "clickhouse_url": settings.url},
-                )
-            except LocalClickHouseProvisioningError as exc:
-                logger.error(
-                    "Local ClickHouse reconciliation failed: %s Intake will continue starting; ClickHouse-backed "
-                    "endpoints will return 503 until ClickHouse is reachable.",
-                    exc,
-                    extra={"service": self.name, "clickhouse_url": settings.url},
-                )
-
-        self.clickhouse_client = ClickHouseSpanClient(settings)
-        # Start the background denormalizer. It needs a service-principal entity client (no request
-        # context) to write onto Evaluation entities; skip it if the entity client can't be built.
-        entity_client = self.dependency_provider.get_entity_client(as_service=self.name)
-        if entity_client is not None:
-            self.denormalizer = EvaluationDenormalizer(
-                rollup_repository=ClickHouseEvaluationRollupRepository(ClickHouseExecutor(self.clickhouse_client)),
-                entity_client=entity_client,
-                interval_seconds=cfg.denormalization_interval_seconds,
-            )
-            self.denormalizer.start()
-        else:
+        # The denormalizer needs a service-principal entity client (no request context).
+        self._denormalizer_entity_client = self.dependency_provider.get_service_entity_client(self.name)
+        if self._denormalizer_entity_client is None:
             logger.warning("Entity client unavailable; evaluation denormalizer not started")
+        if should_provision_local_clickhouse(cfg.clickhouse_config):
+            self._readiness_message = LOCAL_CLICKHOUSE_PROVISIONING_MESSAGE
+            self._reconciler = _LocalClickHouseProvisioner(
+                self,
+                settings,
+                image=cfg.clickhouse_config.image,
+                data_dir=cfg.clickhouse_config.data_dir,
+            )
+            self._reconciler.start()
+        else:
+            self.clickhouse_client = ClickHouseSpanClient(settings)
+            self._start_denormalizer(self.clickhouse_client)
         self._ready = True
+
+    def _adopt_reconciled_clickhouse(self, url: str, settings: ClickHouseSettings, data_dir: Path | None) -> None:
+        """Install the reconciled client. No await, so shutdown cannot interleave mid-assign."""
+
+        client = ClickHouseSpanClient(replace(settings, url=url))
+        self._local_clickhouse_data_dir = data_dir
+        self._owns_local_clickhouse = True
+        self.clickhouse_client = client
+        self._start_denormalizer(client)
+
+    def _start_denormalizer(self, client: ClickHouseSpanClient) -> None:
+        entity_client = self._denormalizer_entity_client
+        if entity_client is None or self.denormalizer is not None:
+            return
+        cfg = self.service_config or IntakeConfig()
+        self.denormalizer = EvaluationDenormalizer(
+            rollup_repository=ClickHouseEvaluationRollupRepository(ClickHouseExecutor(client)),
+            entity_client=entity_client,
+            interval_seconds=cfg.denormalization_interval_seconds,
+        )
+        self.denormalizer.start()
 
     async def on_shutdown(self) -> None:
         """Close the client and stop the managed local ClickHouse container."""
 
         self._ready = False
         self._readiness_message = ""
+        reconciler = self._reconciler
+        self._reconciler = None
+        if reconciler is not None:
+            try:
+                await reconciler.stop()
+            except Exception:
+                logger.exception("Local ClickHouse reconciler failed during shutdown")
         # Stop the denormalizer first: its final flush still needs the ClickHouse client below.
         if self.denormalizer is not None:
             await self.denormalizer.stop()

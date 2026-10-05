@@ -98,5 +98,5 @@ uv run nemo evaluator evaluate --spec \
 ```
 
 Each `metrics` entry may be an inline metric bundle, a stored `MetricRef`, or
-a mix of both. The high-level `client.evaluator.submit` helper still accepts
+a mix of both. The high-level `evaluator.submit` helper still accepts
 only one runtime metric per call.

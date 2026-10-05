@@ -254,6 +254,14 @@ class CLIContext:
         # no_truncate is not in SDK preferences, default to False
         return False
 
+    def get_agent_hints(self, command_path: str) -> list[str]:
+        """Return the hints printed after *command_path* runs in agent mode, else none."""
+        if not self.agent_mode:
+            return []
+        from nemo_helix_ext.cli.core.agent_helpers import get_agent_helpers
+
+        return get_agent_helpers(command_path)
+
     def get_base_url(self, default: str | None = None) -> str | None:
         """Get effective base URL."""
         try:

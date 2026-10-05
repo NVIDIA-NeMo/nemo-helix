@@ -15,9 +15,10 @@ from datetime import datetime, timezone
 from typing import ClassVar, TypeVar
 from zoneinfo import ZoneInfo
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.agents.client import AsyncAgentsClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -29,7 +30,7 @@ from nemo_helix_plugin.entity_client import (
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_insights_plugin.analysis_runs import mint_analysis_run_name, submit_analysis_run
 from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
 from nemo_insights_plugin.config import InsightsConfig
@@ -71,14 +72,14 @@ class InsightsAnalysisController(NemoController):
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
 
     def __init__(self) -> None:
-        self._sdk: AsyncNeMoHelix | None = None
+        self._client: AsyncNemoClient | None = None
         self._entities: NemoEntitiesClient | None = None
         self._jobs: AsyncJobsClient | None = None
         self._config: InsightsConfig | None = None
 
     @property
-    def sdk(self) -> AsyncNeMoHelix:
-        return _require(self._sdk, "sdk")
+    def client(self) -> AsyncNemoClient:
+        return _require(self._client, "client")
 
     @property
     def entities(self) -> NemoEntitiesClient:
@@ -99,11 +100,11 @@ class InsightsAnalysisController(NemoController):
         return 60.0
 
     async def on_startup(self) -> None:
-        """Initialise service-principal SDK and typed clients."""
+        """Initialise the service-principal client and typed clients."""
         self._config = get_nemo_config(InsightsConfig)
-        self._sdk = get_async_platform_sdk(as_service="insights", internal=True)
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
-        self._jobs = client_from_platform(self._sdk, AsyncJobsClient)
+        self._client = get_async_nemo_client(as_service="insights", internal=True)
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._client))
+        self._jobs = AsyncJobsClient.from_client(self._client)
         logger.info("InsightsAnalysisController started.")
 
     async def on_shutdown(self) -> None:
@@ -217,7 +218,7 @@ class InsightsAnalysisController(NemoController):
         if since is None:
             return True
         try:
-            backend = make_analyst_backend(client=self.sdk, insights_output=None)
+            backend = make_analyst_backend(client=self.client, insights_output=None)
             trace_count = await backend.count_agent_sessions(
                 agent=config.agent, workspace=config.workspace, since=since
             )
@@ -320,7 +321,8 @@ class InsightsAnalysisController(NemoController):
         await submit_analysis_run(
             workspace=config.workspace,
             request=request,
-            sdk=self.sdk,
+            agents_client=AsyncAgentsClient.from_client(self.client),
+            models_client=AsyncModelsClient.from_client(self.client),
             entity_client=self.entities,
             name=job_name,
             profile=self.insights_config.analyst.job_profile,

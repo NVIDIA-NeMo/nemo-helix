@@ -394,6 +394,83 @@ class EvaluatorJobResource:
         )
 
 
+class AsyncAgentEvaluatorJobResource:
+    """Async high-level SDK handle for a submitted agent-evaluation job.
+
+    The async counterpart of :class:`AgentEvaluatorJobResource`, with the same surface: status and
+    polling only. An agent evaluation publishes ``agent-eval-results`` and ``summary`` rather than
+    the row job's ``aggregate-scores`` and ``artifacts``, so ``get_result`` and
+    ``download_artifacts`` are omitted — on this job they would 404. Read the persisted record
+    instead::
+
+        await evaluator.agent_eval_results.list(job_id=job.name)
+    """
+
+    def __init__(
+        self,
+        *,
+        job: AgentEvaluatorJob,
+        client: AsyncEvaluatorClient,
+        workspace: str,
+    ) -> None:
+        """Store the job identity and typed async client used for status calls."""
+        self._job = job
+        self._client = client
+        self._workspace = workspace
+
+    @property
+    def name(self) -> str:
+        """Return the agent-evaluation job name."""
+        return self._job.name
+
+    @property
+    def job(self) -> AgentEvaluatorJob:
+        """Return the raw job payload captured at resource creation."""
+        return self._job
+
+    async def get_job_status(self) -> HelixJobStatusResponse:
+        """Fetch the current job status from the evaluator plugin API."""
+        response = await self._client.get_agent_eval_job_status(workspace=self._workspace, name=self.name)
+        return response.data()
+
+    async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
+        """Return whether the job has completed.
+
+        Args:
+            raise_if_not_complete: When true, raise ``RuntimeError`` for any status other than
+                ``completed``.
+
+        Returns:
+            ``True`` only when the current status is ``completed``.
+        """
+        return _status_is_complete(await self.get_job_status(), raise_if_not_complete)
+
+    async def wait_until_done(
+        self,
+        *,
+        poll_interval_seconds: float = _DEFAULT_POLL_INTERVAL_SECONDS,
+        job_timeout_seconds: float = _DEFAULT_JOB_TIMEOUT_SECONDS,
+        pending_timeout_seconds: float = _DEFAULT_PENDING_TIMEOUT_SECONDS,
+    ) -> None:
+        """Wait until the job reaches a terminal platform status.
+
+        Raises:
+            RuntimeError: If the job reaches a terminal failure status.
+            TimeoutError: If polling exceeds configured timeouts.
+        """
+        status = await async_poll_until_terminal(
+            self.get_job_status,
+            status_value=metric_job_status_value,
+            details_value=metric_job_status_details_value,
+            job_name=self.name,
+            terminal=_TERMINAL_STATUSES,
+            timeout=job_timeout_seconds,
+            pending_timeout=pending_timeout_seconds,
+            poll_interval=poll_interval_seconds,
+        )
+        _raise_for_terminal_status(status)
+
+
 class AsyncEvaluatorJobResource:
     """Async high-level SDK handle for a submitted evaluator plugin job."""
 

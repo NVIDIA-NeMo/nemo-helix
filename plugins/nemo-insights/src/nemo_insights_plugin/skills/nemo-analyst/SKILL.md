@@ -25,7 +25,7 @@ not-for:
 compatibility: >-
   nemo-helix >= 0.1.0; requires the Insights plugin, a reachable platform
   with Intake telemetry for the target agent, and a model the platform can call
-  on the Analyst's behalf. No Docker or datasets needed.
+  on the Analyst's behalf. Requires Jobs and a configured agents.execute runtime.
 maturity: beta
 license: Apache-2.0
 user-invocable: true
@@ -36,10 +36,24 @@ metadata:
 
 # NeMo Analyst
 
-Analyze an agent's behavior from its own telemetry and record what recurs as
-Insights.
+## Before running
+
+The Analyst reads telemetry; it cannot create it. Confirm all three:
+
+- The target agent already has traces in Intake. No traces means no Insights.
+- The platform is reachable at `NHX_BASE_URL`.
+- The CLI has default and fast Platform models configured through `nemo setup`,
+  or the submission supplies explicit model references. The Platform must have
+  Jobs and an `agents.execute` runtime available to execute the analysis.
+
+An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
+constraints, and success criteria. Code and traces don't contain that context.
+Without it, the Analyst can only judge an agent against itself.
 
 ## What it produces
+
+Analyze an agent's behavior from its own telemetry and record what recurs as
+Insights.
 
 An Insight is a persistent, named description of one recurring problem, and it
 is the unit of work the rest of the optimization loop runs on. Each carries:
@@ -57,87 +71,51 @@ behavior rather than status or scores, so it finds failures in sessions that
 reported success and passed their evaluations. Two well-evidenced Insights are
 worth more than ten vague ones, so a run that files nothing is a valid outcome.
 
-## Before running
-
-The Analyst reads telemetry; it cannot create it. Confirm all three:
-
-- The target agent already has traces in Intake. No traces means no Insights.
-- The platform is reachable at `NHX_BASE_URL`.
-- The Analyst has a model to run on. It is an LLM agent itself, and how that is
-  configured is changing, so let pre-flight tell you whether it is satisfied —
-  it names what is missing and how to set it.
-
-An `ETHOS.md` file is optional. It gives the Analyst the agent's intent,
-constraints, and success criteria. Code and traces don't contain that context.
-Without it, the Analyst can only judge an agent against itself.
-
-## Pre-flight
-
-```bash
-nemo agents analyst doctor
-```
-
-Only two results block a run: no usable model configured, and an
-`optimizer.yaml` that is missing or unparseable — the second only if you intend
-to run without `--agent`. Doctor takes no `--agent` flag, so it always checks
-for a profile and always reports a red line when there is none; when you pass
-`--agent`, that line is noise. Platform reachability and the workspace probe
-only ever warn.
-
 ## Run it
 
-```bash
-nemo agents analyst run --agent <agent-name> --workspace <workspace>
-```
-
-Add `--ethos ETHOS.md` to tell it what the agent is supposed to do,
-and `--verbose` to stream its tool calls and reasoning to stderr. Expect several
-minutes; it surveys many sessions before drilling into any of them.
-
-From an agent directory, an `optimizer.yaml` profile supplies `agent`,
-`workspace`, and `ethos`, so the flags above become optional:
+Replace the quoted placeholders below with the target agent and workspace.
 
 ```bash
-nemo agents analyst run
+nemo insights analysis-runs create --agent "<agent-name>" --workspace "<workspace>" --wait
 ```
 
-The profile is discovered by walking up from the current directory. Only those
-three fields are read from it; other keys are ignored.
+Add `--ethos ETHOS.md` to supply the agent's intended behavior, `--since` for
+an ISO-8601 lower time bound, or `--evaluation-id` to select an evaluation.
+The command submits an AnalysisRun backed by an `agents.execute` job. Expect
+several minutes. `--wait` exits non-zero unless the job completes successfully.
+
+The CLI supplies the configured default and fast models. Run `nemo setup` if
+they are missing, or pass `--default-model` and `--fast-model` explicitly.
 
 ## Where Insights are stored
 
-Insights always go to the platform. `--insights-file-output` additionally
-mirrors what the platform stored, platform IDs included, merging into that file
-on each run; a mirror that cannot be written warns rather than failing the run.
-
-```bash
-nemo agents analyst run --agent <agent-name> --insights-file-output .nemo-optimizer/insights.yaml
-```
-
-The local mirror can be used to review or export findings.
+The Insights plugin creates and updates insights in NeMo Helix after analysis.
+Stored insights appear in Studio's optimizer view for the workspace.
 
 ## Verify
 
-Do not report success on an exit code. The run prints a line per operation —
-`- created: <title> [<insight-id>] (<n> trace refs)`, `- updated: <insight-id>
-(<n> trace refs)`, or `- no insights created or updated`, which is a successful
-run too. Read back by id whatever it says it wrote, and check each carries a
-clear title, an actionable description, and non-empty `trace_refs`. Listing by
-`?agent=` also returns earlier runs, so it attests the store, not this run:
+Replace the quoted placeholders with the submitted run name and workspace:
+
+```bash
+nemo insights analysis-runs get "<run-name>" --workspace "<workspace>"
+```
+
+Confirm the job completed and inspect its analysis report. A completed run may
+produce no new insights. When it records insights, read them back and check
+for a clear title, an actionable description, and non-empty `trace_refs`.
+Listing all insights for the agent can include earlier runs.
 
 ```bash
 curl --fail-with-body \
   "$NHX_BASE_URL/apis/insights/v2/workspaces/<workspace>/insights/<insight-id>"
 ```
 
-On an authenticated platform pass the token through curl's config, not argv
-where any process on the host can read it:
+On an authenticated platform pass the token through curl's config, not argv.
+Replace `<url>` with the insight URL above:
 
 ```bash
-printf 'header = "Authorization: Bearer %s"' "$(nemo auth token)" | curl -K - <url>
+printf 'header = "Authorization: Bearer %s"' "$(nemo auth token)" | curl --fail-with-body -K - "<url>"
 ```
-
-Stored Insights also appear in Studio's optimizer view for the workspace.
 
 ## When it finds nothing
 

@@ -21,10 +21,13 @@ credentials, when required, to send a supported format to that endpoint.
 
 ## Requirements
 
-Set the target to the local or remote NeMo Helix origin:
+Set the target to the local or remote NeMo Helix origin. Only default to the
+local platform when `NHX_BASE_URL` is unset — never overwrite a remote the user
+has already configured:
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+: "${NHX_BASE_URL:=http://127.0.0.1:8080}"
+export NHX_BASE_URL
 export WORKSPACE=default
 
 nhx_authority=${NHX_BASE_URL#*://}

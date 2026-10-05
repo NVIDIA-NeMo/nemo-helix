@@ -9,7 +9,6 @@ requires-python = ">=3.11,<3.15"
 authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
 dependencies = [
     "nemo-helix-plugin",
-    "nemo-helix",
     "nhx-customization-common",
     "data-designer==0.9.3",
     "data-designer-nemo",
@@ -92,7 +91,6 @@ packages = ["src/nemo_data_designer_plugin"]
 
 
 [tool.uv.sources]
-nemo-helix = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 nhx-build-tools = { workspace = true }

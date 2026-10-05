@@ -17,13 +17,12 @@ def platform_config(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_qualified_image_uses_platform_config(platform_config: None) -> None:
-    assert get_qualified_image("nhx-cpu-tasks") == "registry.example.com/nemo/nhx-cpu-tasks:test-tag"
+    assert get_qualified_image("nhx-tasks") == "registry.example.com/nemo/nhx-tasks:test-tag"
 
 
 def test_get_qualified_image_accepts_overrides(platform_config: None) -> None:
     assert (
-        get_qualified_image("nhx-cpu-tasks", registry="nvcr.io/example", tag="25.10")
-        == "nvcr.io/example/nhx-cpu-tasks:25.10"
+        get_qualified_image("nhx-tasks", registry="nvcr.io/example", tag="25.10") == "nvcr.io/example/nhx-tasks:25.10"
     )
 
 

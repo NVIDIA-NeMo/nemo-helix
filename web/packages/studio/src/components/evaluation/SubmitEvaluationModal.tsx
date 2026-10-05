@@ -50,7 +50,7 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import '@studio/components/evaluation/SubmitEvaluationModal.css';
+import '@studio/components/evaluation/evalWizard.css';
 import {
   entityNameField,
   nameCheckStatus,
@@ -70,6 +70,7 @@ import {
   bareName,
   buildAgentEvalRequestBody,
   buildDatasetEvalRequestBody,
+  DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
   type EvalSpec,
@@ -117,7 +118,7 @@ const startItems = (rerunDisabled: boolean) => [
             </Tooltip>
           )}
         </Flex>
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Reuses the eval config saved on a previous run. The new run joins that run&apos;s
           experiment, so the two sit side by side on its leaderboard.
         </Text>
@@ -129,7 +130,7 @@ const startItems = (rerunDisabled: boolean) => [
     children: (
       <Stack gap="density-xs">
         <Text kind="label/bold/md">Create a new experiment</Text>
-        <Text kind="body/regular/sm" color="secondary">
+        <Text className="text-secondary" kind="body/regular/sm">
           Sets up a fresh experiment to group runs under, then takes a dataset and an eval config to
           measure them with.
         </Text>
@@ -140,6 +141,8 @@ const startItems = (rerunDisabled: boolean) => [
 
 /** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
 const DATASET_BASENAME = 'dataset';
+
+const MAX_PARALLELISM = 16;
 
 const NO_EVALUATIONS_MESSAGE =
   'No evaluations with a reusable eval config yet. Go back and create an experiment instead — its run is re-runnable from here afterwards.';
@@ -157,6 +160,11 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
+  parallelism: z.coerce
+    .number()
+    .int('Use a whole number')
+    .min(1, 'At least 1')
+    .max(MAX_PARALLELISM, `At most ${MAX_PARALLELISM}`),
   ...experimentSettingsSchemaShape,
 });
 
@@ -211,6 +219,7 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
+  parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
 
@@ -739,6 +748,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
           filesetName,
           experimentName: nameStem,
           evaluationId,
+          parallelism: formData.parallelism,
         };
         const created = isDatasetEvalSpec(spec)
           ? await evaluatorCreateEvaluateJob(
@@ -989,7 +999,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                   the name is derived from the pick, so the two belong on the same screen. */}
               {mode === MODE_EXPERIMENT &&
                 (hasNoEvaluations ? (
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     {NO_EVALUATIONS_MESSAGE}
                   </Text>
                 ) : (
@@ -1018,10 +1028,10 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
               {isCreateMode && (
                 <>
-                  <Text kind="label/bold/sm" color="secondary">
+                  <Text className="text-secondary" kind="label/bold/sm">
                     Select evaluation set
                   </Text>
-                  <Text kind="body/regular/md" color="secondary">
+                  <Text className="text-secondary" kind="body/regular/md">
                     Learn more about evaluation set requirements in the{' '}
                     <Anchor
                       kind="inline"
@@ -1084,11 +1094,23 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                   )}
                 </>
               )}
+
+              <ControlledTextInput
+                useControllerProps={{ control, name: 'parallelism' }}
+                name="parallelism"
+                label="Parallel requests"
+                type="number"
+                formFieldProps={{
+                  slotInfo:
+                    'Rows sent to the agent at once. Lower it for a slow agent: a deployment that answers one request at a time fails rows that wait too long in its queue.',
+                  slotError: errors.parallelism?.message,
+                }}
+              />
             </>
           )}
 
           {blocker && step !== 'start' && (
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               {blocker}
             </Text>
           )}

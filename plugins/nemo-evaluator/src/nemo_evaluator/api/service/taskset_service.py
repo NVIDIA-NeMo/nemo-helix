@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 
 from nemo_evaluator.api.schemas import (
@@ -28,7 +29,7 @@ from nemo_evaluator.api.schemas import (
     TasksetInput,
     parse_subentity_ref,
 )
-from nemo_evaluator.entities import TasksetEntity, TasksetRevisionEntity
+from nemo_evaluator.entities import TaskEntity, TasksetEntity, TasksetRevisionEntity
 from nemo_evaluator.revisions import (
     RevisionNotFoundError,
     apply_tag,
@@ -56,8 +57,14 @@ logger = logging.getLogger(__name__)
 #: dataset does not publish at one round trip per member.
 _MEMBER_RESOLUTION_CONCURRENCY = 10
 
+type TaskReadAuthorizer = Callable[[str, str], Awaitable[None]]
+
 
 class _TaskService(Protocol):
+    async def head_by_id(self, task_id: str) -> TaskEntity: ...
+
+    async def resolve_head_revision(self, head: TaskEntity) -> str: ...
+
     async def get_task(self, workspace: str, name: str) -> object | None: ...
 
     async def resolve_revision(self, workspace: str, name: str, fragment: str = "latest") -> str: ...
@@ -167,9 +174,21 @@ class TasksetEntityStoreProtocol(
 
 
 class TasksetService:
-    """Create/get/list/delete for persisted taskset entities, exposed as the ``Taskset`` DTO."""
+    """Manage persisted tasksets and authorize reads of every referenced task.
 
-    def __init__(self, entity_client: TasksetEntityStoreProtocol, task_service: _TaskService):
+    The entity client may use service credentials, so it cannot establish whether the caller may
+    read a task. ``authorize_task_read`` supplies that request-scoped check and is invoked before a
+    task reference or task ID is resolved into pinned taskset membership.
+    """
+
+    def __init__(
+        self,
+        entity_client: TasksetEntityStoreProtocol,
+        task_service: _TaskService,
+        *,
+        authorize_task_read: TaskReadAuthorizer,
+    ):
+        self.authorize_task_read: TaskReadAuthorizer = authorize_task_read
         self.entity_client = entity_client
         #: The same client, viewed at the revision type. Python has no intersection types, so a
         #: single annotation cannot say "serves TasksetEntity *and* TasksetRevisionEntity" — but the
@@ -206,6 +225,7 @@ class TasksetService:
         the task, so a separate existence check would just re-read the same record.
         """
         ref_workspace, name, fragment = parse_subentity_ref(ref.root, workspace)
+        await self.authorize_task_read(ref_workspace, name)
         try:
             digest = await self.task_service.resolve_revision(ref_workspace, name, fragment)
         except NemoEntityNotFoundError as exc:
@@ -234,6 +254,18 @@ class TasksetService:
         nothing. Sorting the stored content rather than only the hash input keeps the digest a hash
         of exactly what is stored, which is what verification on read re-checks.
         """
+        if "task_ids" in taskset_input.model_fields_set:
+            pinned = []
+            for task_id in taskset_input.task_ids:
+                try:
+                    head = await self.task_service.head_by_id(task_id)
+                    await self.authorize_task_read(head.workspace, head.name)
+                    digest = await self.task_service.resolve_head_revision(head)
+                except (NemoEntityNotFoundError, RevisionNotFoundError, ValueError) as exc:
+                    raise TaskRefNotFoundError("Task ID does not identify an available published task") from exc
+                pinned.append(TaskRef(f"{head.workspace}/{head.name}#{digest}"))
+            self._reject_duplicate_members(pinned, workspace=workspace)
+            return sorted(pinned, key=lambda ref: ref.root)
         self._reject_duplicate_members(taskset_input.tasks, workspace=workspace)
         limit = asyncio.Semaphore(_MEMBER_RESOLUTION_CONCURRENCY)
 
@@ -257,6 +289,11 @@ class TasksetService:
     ) -> tuple[Taskset, bool]:
         """Store a new taskset and publish it as revision 1.
 
+        Algorithm:
+            - Resolve every member to an immutable task revision and create the taskset head.
+            - Publish revision 1 and its requested tags.
+            - Delete the orphaned head if publication fails, then re-raise the original error.
+
         Strict create: raises :class:`TasksetExistsError` if the name is taken, and
         :class:`TaskRefNotFoundError` if a member does not exist or has no such revision. Returns
         ``(taskset, published)``; ``published`` is always ``True`` here.
@@ -275,7 +312,7 @@ class TasksetService:
         except NemoEntityConflictError as exc:
             raise TasksetExistsError(f"Taskset '{workspace}/{name}' already exists") from exc
         try:
-            head, published = await self._publish(created, tags=set(taskset_input.tags))
+            revision, head, published = await self._publish(created, tags=set(taskset_input.tags))
         except Exception:
             # A head with no revision would break the invariant consumers rely on — `#latest`
             # always resolves and `revision` is never 0. No cross-entity transaction exists, so
@@ -292,12 +329,17 @@ class TasksetService:
             "Taskset created",
             extra={"workspace": sanitize_for_log(workspace), "taskset_name": sanitize_for_log(name)},
         )
-        return _entity_to_taskset(head), published
+        return _revision_to_taskset(head, revision), published
 
     async def replace_taskset(
         self, name: str, taskset_input: TasksetInput, *, workspace: str, project: str | None = None
     ) -> tuple[Taskset, bool]:
         """Replace a taskset's content and publish the result, creating it if absent.
+
+        Algorithm:
+            - Delegate to strict creation when no head exists.
+            - Re-resolve membership and publish the head and revision together.
+            - Persist non-versioned project changes when content publication is a no-op.
 
         Note that re-submitting *identical* membership can still publish a new revision: members are
         re-resolved on every write, so if a member task published since last time, ``#latest`` now
@@ -320,7 +362,7 @@ class TasksetService:
         # Publish the staged content *without* committing the head first — see the matching comment
         # in ``TaskService.replace_task``. Publishing writes the head itself, so a pre-write would
         # only open a window where a failed publish leaves the head serving uncovered content.
-        published_head, published = await self._publish(head, tags=set(taskset_input.tags))
+        revision, published_head, published = await self._publish(head, tags=set(taskset_input.tags))
         if not published:
             # Publishing wrote nothing (content already published and tagged as requested), so
             # persist what sits outside the digest — ``project``.
@@ -333,14 +375,16 @@ class TasksetService:
                 "published": published,
             },
         )
-        return _entity_to_taskset(published_head), published
+        return _revision_to_taskset(published_head, revision), published
 
-    async def _publish(self, head: TasksetEntity, *, tags: set[str]) -> tuple[TasksetEntity, bool]:
+    async def _publish(
+        self, head: TasksetEntity, *, tags: set[str]
+    ) -> tuple[TasksetRevisionEntity, TasksetEntity, bool]:
         """Freeze the head as a revision. The returned head already carries the new pointers."""
-        _, published_head, created = await publish_revision(
+        revision, published_head, created = await publish_revision(
             self.entity_client, self.revision_client, head, TasksetRevisionEntity, tags=tags
         )
-        return published_head, created
+        return revision, published_head, created
 
     async def list_revisions(
         self, workspace: str, name: str, *, page: int = 1, page_size: int = 100

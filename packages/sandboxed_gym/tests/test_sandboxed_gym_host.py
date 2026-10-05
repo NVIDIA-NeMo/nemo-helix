@@ -27,9 +27,50 @@ def _mount(claim: str, path: str, read_only: bool) -> GymHostVolumeMount:
     )
 
 
-def test_bootstrap_env_rejects_opensandbox_credentials():
-    with pytest.raises(ValueError, match="OPENSANDBOX_API_KEY"):
-        validate_bootstrap_env({"OPENSANDBOX_API_KEY": "secret"})
+@pytest.mark.parametrize(
+    "key",
+    [
+        # The OpenSandbox SDK and the platform's job-pod injection use this spelling.
+        "OPEN_SANDBOX_API_KEY",
+        "OPEN_SANDBOX_DOMAIN",
+        # Gym's sample configs use this one.
+        "OPENSANDBOX_API_KEY",
+        "OPENSANDBOX_DOMAIN",
+    ],
+)
+def test_bootstrap_env_rejects_opensandbox_credentials(key):
+    with pytest.raises(ValueError, match=key):
+        validate_bootstrap_env({key: "secret"})
+
+
+def test_sandbox_bootstrap_env_never_inherits_the_process_environment(monkeypatch):
+    """The sandbox env is a constructed allowlist, never a copy of the trusted process's env.
+
+    The episode broker inherits its Ray actor's runtime env, which carries the episode-backend
+    credential. That credential must reach the broker and never the job sandbox; this is the half
+    of the boundary the package owns.
+    """
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+
+    monkeypatch.setenv("NHX_TEST_AMBIENT_SENTINEL", "ambient-sentinel")
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+
+    env = build_gym_host_spec(_serve_cfg(), broker).bootstrap_env
+
+    assert "NHX_TEST_AMBIENT_SENTINEL" not in env
+    assert not any("ambient-sentinel" in value for value in env.values())
+
+
+def test_caller_host_env_cannot_forward_the_opensandbox_credential():
+    """Job ``env_secrets`` reach the sandbox through ``host_env``, and naming the credential there must fail."""
+    from sandboxed_gym.config import BrokerEndpoint
+    from sandboxed_gym.orchestrator import build_gym_host_spec
+
+    broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
+
+    with pytest.raises(ValueError, match="OPEN_SANDBOX_API_KEY"):
+        build_gym_host_spec(_serve_cfg(host_env={"OPEN_SANDBOX_API_KEY": "secret"}), broker)
 
 
 def test_build_bootstrap_env_sets_required_keys():
@@ -306,6 +347,23 @@ def test_sandbox_runtime_defaults_respect_an_explicit_uv_pip_set_python():
     from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
 
     assert apply_sandbox_runtime_defaults({"uv_pip_set_python": False})["uv_pip_set_python"] is False
+
+
+def test_sandbox_runtime_defaults_reuse_the_image_prebuilt_venvs():
+    """Reinstalling into a prebuilt venv reaches for the package index, which sandbox egress denies.
+
+    The failure is every Gym server dying with "Process `mcqa` finished unexpectedly!" and no reason.
+    The key is ``nemo_gym.global_config.SKIP_VENV_IF_PRESENT_KEY_NAME``; Gym is not importable here.
+    """
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({})["skip_venv_if_present"] is True
+
+
+def test_sandbox_runtime_defaults_respect_an_explicit_skip_venv_if_present():
+    from sandboxed_gym.orchestrator import apply_sandbox_runtime_defaults
+
+    assert apply_sandbox_runtime_defaults({"skip_venv_if_present": False})["skip_venv_if_present"] is False
 
 
 def test_gym_host_spec_defers_to_the_image_entrypoint_when_omitted():

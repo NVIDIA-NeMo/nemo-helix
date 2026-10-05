@@ -33,10 +33,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -498,26 +498,27 @@ class HelixJobResultRoute(BaseModel):
 
 
 # Compiler types: compiler receives both input spec (user-provided) and output spec (with auto-generated fields)
-# Signature: (workspace, original_spec, transformed_spec, entity_client, job_name, sdk) -> HelixJobSpec
+# Signature: (workspace, original_spec, transformed_spec, entity_client, job_name, async_client) -> HelixJobSpec
 # job_name is the resolved name (user-provided or auto-generated), None when no name is available
-# sdk is always provided for accessing secrets, files, and models with user context
+# async_client is the request-scoped AsyncNemoClient, carrying the caller's auth; derive typed
+# service clients from it with ``<Client>.from_client``.
 # A compiler may be implemented synchronously or asynchronously. Model that in
 # the callable's return type instead of narrowing the callable itself with
 # runtime-only typing helpers.
 HelixJobSpecCompiler = Callable[
-    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncHelixClient],
+    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncNemoClient],
     HelixJobSpecLike | Awaitable[HelixJobSpecLike],
 ]
 HelixJobSpecCompilerAsync = Callable[
-    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncHelixClient], Awaitable[HelixJobSpecLike]
+    [str, JobInputT, JobOutputT, EntityClient, str | None, AsyncNemoClient], Awaitable[HelixJobSpecLike]
 ]
 
 
 # Input-to-output transformer types: receives job_name to use for related fields (e.g., output)
-# Signature: (original_spec, workspace, entity_client, job_name, sdk) -> transformed_spec
-InputToOutputTransformer = Callable[[JobInputT, str, EntityClient, str | None, AsyncHelixClient], JobOutputT]
+# Signature: (original_spec, workspace, entity_client, job_name, async_client) -> transformed_spec
+InputToOutputTransformer = Callable[[JobInputT, str, EntityClient, str | None, AsyncNemoClient], JobOutputT]
 InputToOutputTransformerAsync = Callable[
-    [JobInputT, str, EntityClient, str | None, AsyncHelixClient], Awaitable[JobOutputT]
+    [JobInputT, str, EntityClient, str | None, AsyncNemoClient], Awaitable[JobOutputT]
 ]
 
 # Job name generator: called when user doesn't provide a name
@@ -653,7 +654,7 @@ async def _transform_input_to_output(
     entity_client: EntityClient,
     job_name: str | None,
     service_name: str,
-    sdk: AsyncHelixClient,
+    async_client: AsyncNemoClient,
 ) -> JobSchemaLike:
     """Transform a job input spec into an output spec using the provided transformer.
 
@@ -668,9 +669,11 @@ async def _transform_input_to_output(
         return spec
     try:
         if inspect.iscoroutinefunction(input_to_output):
-            return await input_to_output(spec, workspace, entity_client, job_name, sdk)
+            return await input_to_output(spec, workspace, entity_client, job_name, async_client)
         # Run sync transformers in a thread pool to avoid blocking the event loop.
-        return await to_thread.run_sync(partial(input_to_output, spec, workspace, entity_client, job_name, sdk))
+        return await to_thread.run_sync(
+            partial(input_to_output, spec, workspace, entity_client, job_name, async_client)
+        )
     except PermissionError as e:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -691,7 +694,7 @@ async def _compile_platform_spec(
     entity_client: EntityClient,
     job_name: str | None,
     service_name: str,
-    sdk: AsyncHelixClient,
+    async_client: AsyncNemoClient,
     profile: str | None,
     options: dict[str, Any] | None,
 ) -> HelixJobSpec:
@@ -714,7 +717,13 @@ async def _compile_platform_spec(
         compile_result: HelixJobSpecLike | Awaitable[HelixJobSpecLike]
         if inspect.iscoroutinefunction(compiler):
             compile_result = compiler(
-                workspace, original_spec, transformed_spec, entity_client, job_name, sdk, **submit_control_kwargs
+                workspace,
+                original_spec,
+                transformed_spec,
+                entity_client,
+                job_name,
+                async_client,
+                **submit_control_kwargs,
             )
         else:
             # Run sync compilers in a thread pool to avoid blocking the event loop.
@@ -726,7 +735,7 @@ async def _compile_platform_spec(
                     transformed_spec,
                     entity_client,
                     job_name,
-                    sdk,
+                    async_client,
                     **submit_control_kwargs,
                 )
             )
@@ -802,15 +811,17 @@ def job_route_factory(
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
-    The SDK is injected per-request via FastAPI dependency injection, which ensures
-    that user auth headers are properly propagated to the jobs service.
+    The typed client is injected per-request via FastAPI dependency injection
+    (:func:`~nemo_helix_plugin.dependencies.get_nemo_client`), which ensures that
+    user auth headers are properly propagated to the jobs service.
 
     Args:
         service_name: Name of the microservice (e.g., "customization").
         job_type: Type prefix for generated schema names (e.g., "Customization").
         job_input: The job input schema (what users provide in POST requests body.spec field).
         platform_job_config_compiler: Compiles job specs to HelixJobSpec for execution.
-            Signature: (workspace, original_spec, transformed_spec, entity_client, job_name, sdk) -> HelixJobSpec.
+            Signature: (workspace, original_spec, transformed_spec, entity_client, job_name, async_client)
+            -> HelixJobSpec.
             Receives transformed_spec (which contains all input fields plus auto-generated fields)
             and the resolved job_name for configuring outputs.
             job_name is None when no name was provided and no generator exists.
@@ -819,7 +830,7 @@ def job_route_factory(
         job_output: The job output schema (what gets stored and returned).
             If not provided, defaults to job_input (same type for input/output).
         input_to_output: Transforms job input to job output.
-            Signature: (original_spec, workspace, entity_client, job_name, sdk) -> transformed_spec.
+            Signature: (original_spec, workspace, entity_client, job_name, async_client) -> transformed_spec.
             Called on create to add auto-generated fields. Receives job_name so it can
             use the same name for related fields (e.g., output).
         generate_job_name: Called when user doesn't provide a job name. Returns the
@@ -837,7 +848,7 @@ def job_route_factory(
             workspace: str,
             entity_client: EntityClient,
             job_name: str,
-            sdk: AsyncHelixClient,
+            async_client: AsyncNemoClient,
         ) -> CustomizationJobOutput:
             return CustomizationJobOutput(
                 ...
@@ -849,7 +860,7 @@ def job_route_factory(
             transformed_spec: CustomizationJobOutput,
             entity_client: EntityClient,
             job_name: str,
-            sdk: AsyncHelixClient,
+            async_client: AsyncNemoClient,
         ) -> HelixJobSpec:
             ...
 
@@ -953,7 +964,7 @@ def job_route_factory(
         async def create_job(
             workspace: str,
             request: TypedJobRequest,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
         ) -> TypedJobResponse:
             f"""Create a new job for the {service_name} microservice."""
@@ -966,7 +977,7 @@ def job_route_factory(
                 entity_client,
                 job_name,
                 service_name,
-                sdk,
+                async_client,
             )
             platform_spec = await _compile_platform_spec(
                 platform_job_config_compiler,
@@ -976,19 +987,18 @@ def job_route_factory(
                 entity_client,
                 job_name,
                 service_name,
-                sdk,
+                async_client,
                 request.profile,
                 request.options,
             )
 
-            # Create the job using the SDK pointed to the platform jobs microservice.
-            # Build SDK call kwargs, only including optional fields when they have values
+            # Create the job through the typed Jobs client.
+            # Build call kwargs, only including optional fields when they have values
             # (passing None explicitly causes different serialization than omitting)
             # Note: We store transformed_spec (not input), which includes auto-generated fields.
             # ``job_spec`` may be a Pydantic model (the transformed job output);
-            # the request body's ``spec`` is a plain dict on the wire. The
-            # Stainless SDK serialized models implicitly — the typed client
-            # validates the body first, so coerce to a dict here.
+            # the request body's ``spec`` is a plain dict on the wire. The typed
+            # client validates the body before sending, so coerce to a dict here.
             #
             # Dump ``mode="json"`` (not python): the spec is bound for JSON transport and JSON storage,
             # and the request body's ``spec`` is an opaque ``dict`` that has lost the nested models'
@@ -1020,13 +1030,13 @@ def job_route_factory(
             if request.output_location is not None:
                 create_fields["output_location"] = request.output_location
 
-            jobs = client_from_platform(sdk, AsyncJobsClient)
+            jobs = AsyncJobsClient.from_client(async_client)
             job_resp = (await jobs.create_job(workspace=workspace, body=CreateHelixJobRequest(**create_fields))).data()
             return from_response(job_resp)
 
         async def list_jobs(
             workspace: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
             page: int = Query(default=1, description="Page number.", gt=0),
             page_size: int = Query(default=10, description="Page size.", gt=0),
             sort: BaseJobsSortField = Query(
@@ -1059,8 +1069,8 @@ def job_route_factory(
             # when the user filter has a logical root ($or/$and/$not), since the
             # downstream parser short-circuits on the first logical operator.
             parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="source", value=service_name))
-            # Serialize as JSON and forward via extra_query. The SDK's typed
-            # ``filter`` param flows through a deep-object querystring serializer
+            # Serialize as JSON and forward as a single query param. A typed
+            # ``filter`` param would flow through a deep-object querystring serializer
             # whose ``comma`` array_format mangles list-of-dict values that
             # logical operators ($and/$or/$not) produce — joining them as
             # comma-separated Python reprs. core jobs' make_filter_dep already
@@ -1073,7 +1083,7 @@ def job_route_factory(
                 "sort": str(sort),
                 "filter": json.dumps(parsed.to_response()),
             }
-            jobs = client_from_platform(sdk, AsyncJobsClient)
+            jobs = AsyncJobsClient.from_client(async_client)
             list_page = (await jobs.list_jobs(workspace=workspace, query_params=list_query)).page()
             return Page(
                 data=[from_response(job) for job in list_page.items],
@@ -1101,11 +1111,11 @@ def job_route_factory(
         async def get_job(
             workspace: str,
             name: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobResponse:
             f"""Get a job by name for the {service_name} microservice."""
 
-            job_resp = (await client_from_platform(sdk, AsyncJobsClient).get_job(name=name, workspace=workspace)).data()
+            job_resp = (await AsyncJobsClient.from_client(async_client).get_job(name=name, workspace=workspace)).data()
             return from_response(job_resp)
 
         # Status
@@ -1115,11 +1125,11 @@ def job_route_factory(
         async def get_job_status(
             workspace: str,
             name: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobStatusResponse:
             f"""Get the status of a job by name for the {service_name} microservice."""
             job_resp = (
-                await client_from_platform(sdk, AsyncJobsClient).get_job_status(name=name, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).get_job_status(name=name, workspace=workspace)
             ).data()
             return HelixJobStatusResponse(**job_resp.model_dump())
 
@@ -1134,11 +1144,11 @@ def job_route_factory(
         async def delete_job(
             workspace: str,
             name: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> None:
             f"""Delete a job by name for the {service_name} microservice."""
             try:
-                jobs_client = client_from_platform(sdk, AsyncJobsClient).with_retry(RetryPolicy(max_retries=0))
+                jobs_client = AsyncJobsClient.from_client(async_client).with_retry(RetryPolicy(max_retries=0))
                 await jobs_client.delete_job(name=name, workspace=workspace)
             except NemoHTTPError as exc:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -1150,12 +1160,12 @@ def job_route_factory(
         async def cancel_job(
             workspace: str,
             name: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobResponse:
             f"""Cancel a job by name for the {service_name} microservice."""
 
             job_resp = (
-                await client_from_platform(sdk, AsyncJobsClient).cancel_job(name=name, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).cancel_job(name=name, workspace=workspace)
             ).data()
             return from_response(job_resp)
 
@@ -1166,7 +1176,7 @@ def job_route_factory(
         async def get_job_logs(
             workspace: str,
             name: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
             limit: int | None = Query(default=None),
             page_cursor: str | None = Query(default=None),
             tail: int | None = Query(default=None, gt=0, le=10_000),
@@ -1181,7 +1191,7 @@ def job_route_factory(
             if tail is not None:
                 logs_query["tail"] = tail
             logs_page = (
-                await client_from_platform(sdk, AsyncJobsClient).list_job_logs(
+                await AsyncJobsClient.from_client(async_client).list_job_logs(
                     workspace=workspace, name=name, query_params=logs_query
                 )
             ).page()
@@ -1195,12 +1205,12 @@ def job_route_factory(
             workspace: str,
             name: str,
             request: Request,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobListResultResponse:
             f"""Get the results of a job by name for the {service_name} microservice."""
 
             results = (
-                await client_from_platform(sdk, AsyncJobsClient).list_job_results(name=name, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).list_job_results(name=name, workspace=workspace)
             ).data()
             result_dicts = [result.model_dump() for result in results.data]
             list_results = []
@@ -1219,12 +1229,12 @@ def job_route_factory(
             job: str,
             name: str,
             request: Request,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> HelixJobResultResponse:
             f"""Get the result of a job by name for the {service_name} microservice."""
 
             result_obj = (
-                await client_from_platform(sdk, AsyncJobsClient).get_job_result(name=name, job=job, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
             ).data()
 
             # Construct the URL for downloading this result
@@ -1258,7 +1268,7 @@ def job_route_factory(
             job: str,
             background_tasks: BackgroundTasks,
             result_serializer: ResultSerializer,
-            sdk: AsyncHelixClient,
+            async_client: AsyncNemoClient,
             **kwargs,
         ) -> Response:
             """
@@ -1270,14 +1280,14 @@ def job_route_factory(
             """
 
             result_info = (
-                await client_from_platform(sdk, AsyncJobsClient).get_job_result(name=name, job=job, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).get_job_result(name=name, job=job, workspace=workspace)
             ).data()
             _, tmp_dir_path = await download_from_result_info(
                 result_name=name,
                 job_name=job,
                 workspace=workspace,
                 artifact_url=result_info.artifact_url,
-                files_client=client_from_platform(sdk, AsyncFilesClient),
+                files_client=AsyncFilesClient.from_client(async_client),
             )
             background_tasks.add_task(lambda: tmp_dir_path.cleanup_tmp_dir())
             return result_serializer.serialize(tmp_dir_path.path)
@@ -1295,7 +1305,7 @@ def job_route_factory(
                     workspace: str,
                     job: str,
                     background_tasks: BackgroundTasks,
-                    sdk: AsyncHelixClient = Depends(get_sdk_client),
+                    async_client: AsyncNemoClient = Depends(get_nemo_client),
                     limit: int | None = None,
                 ) -> Response:
                     return await _download_route_helper(
@@ -1304,7 +1314,7 @@ def job_route_factory(
                         job=job,
                         background_tasks=background_tasks,
                         result_serializer=job_result_route.serializer,
-                        sdk=sdk,
+                        async_client=async_client,
                         limit=limit,
                     )
 
@@ -1314,7 +1324,7 @@ def job_route_factory(
                 workspace: str,
                 job: str,
                 background_tasks: BackgroundTasks,
-                sdk: AsyncHelixClient = Depends(get_sdk_client),
+                async_client: AsyncNemoClient = Depends(get_nemo_client),
             ) -> Response:
                 return await _download_route_helper(
                     workspace=workspace,
@@ -1322,7 +1332,7 @@ def job_route_factory(
                     job=job,
                     background_tasks=background_tasks,
                     result_serializer=job_result_route.serializer,
-                    sdk=sdk,
+                    async_client=async_client,
                 )
 
             return route
@@ -1339,7 +1349,7 @@ def job_route_factory(
                 job: str,
                 name: str,
                 background_tasks: BackgroundTasks,
-                sdk: AsyncHelixClient = Depends(get_sdk_client),
+                async_client: AsyncNemoClient = Depends(get_nemo_client),
             ) -> Response:
                 return await _download_route_helper(
                     workspace=workspace,
@@ -1347,7 +1357,7 @@ def job_route_factory(
                     job=job,
                     background_tasks=background_tasks,
                     result_serializer=result_serializer,
-                    sdk=sdk,
+                    async_client=async_client,
                 )
 
             return route
@@ -1379,12 +1389,12 @@ def job_route_factory(
         async def pause_job(
             name: str,
             workspace: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobResponse:
             f"""Pause a job by name for the {service_name} microservice."""
 
             job_resp = (
-                await client_from_platform(sdk, AsyncJobsClient).pause_job(name=name, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).pause_job(name=name, workspace=workspace)
             ).data()
             return from_response(job_resp)
 
@@ -1394,12 +1404,12 @@ def job_route_factory(
         async def resume_job(
             name: str,
             workspace: str,
-            sdk: AsyncHelixClient = Depends(get_sdk_client),
+            async_client: AsyncNemoClient = Depends(get_nemo_client),
         ) -> TypedJobResponse:
             f"""Resume a job by name for the {service_name} microservice."""
 
             job_resp = (
-                await client_from_platform(sdk, AsyncJobsClient).resume_job(name=name, workspace=workspace)
+                await AsyncJobsClient.from_client(async_client).resume_job(name=name, workspace=workspace)
             ).data()
             return from_response(job_resp)
 

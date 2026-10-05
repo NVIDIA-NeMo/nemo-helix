@@ -42,6 +42,27 @@ _CREDENTIAL_VALUE = re.compile(
 _CREDENTIAL_VALUE_MIN_CHARS = 16
 
 
+_ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+#: Fabric's fields that hold the *name* of an environment variable rather than a value.
+_VARIABLE_NAME_FIELDS = frozenset({"api_key_env", "client_secret_env", "header_env"})
+
+
+def _names_a_variable(path: str, value: Any) -> bool:
+    """Whether ``path`` is one of Fabric's variable-name fields holding something shaped like a name.
+
+    The exemption needs both halves. Matching the field by name rather than by an ``_env`` suffix keeps
+    a user's own ``environment.env.MY_API_KEY_ENV`` entry -- a value under a key they chose -- inside
+    the checks, and a token written where a name belongs takes the ordinary marker route too.
+    """
+    head, _, field = path.rpartition(".")
+    return (
+        field in _VARIABLE_NAME_FIELDS
+        and head.rpartition(".")[2] != "env"
+        and isinstance(value, str)
+        and _ENV_VAR_NAME.fullmatch(value) is not None
+    )
+
+
 def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[str, Any]:
     """Redact credential-looking values from free-form settings before they are recorded as provenance.
 
@@ -57,13 +78,16 @@ def redact_credentials(settings: Mapping[str, Any], _prefix: str = "") -> dict[s
     Lists are walked too, since a mapping inside one — ``{"models": [{"api_key": "sk-..."}]}`` —
     reaches the harness just as a nested mapping does. The index contributes no path segment: what
     marks a value as a credential is the key it sits under, not where in a list it happens to fall.
+
+    A ``*_env`` key names the variable a harness should read rather than holding its value, so the key
+    marker does not apply to it; the value-shape check still does.
     """
     redacted: dict[str, Any] = {}
     for key, value in settings.items():
         path = f"{_prefix}{key}"
         if isinstance(value, Mapping):
             redacted[key] = redact_credentials(value, f"{path}.")
-        elif any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
+        elif not _names_a_variable(path, value) and any(marker in path.casefold() for marker in _SECRET_KEY_MARKERS):
             redacted[key] = _REDACTED
         elif isinstance(value, (list, tuple)):
             redacted[key] = [_redact_list_item(item, path) for item in value]
@@ -100,6 +124,8 @@ def credential_shaped_settings(settings: Mapping[str, Any]) -> list[str]:
       credential, where redaction can afford to match it.
     * ``${NAME}`` templates pass. Naming a credential without carrying its value is the supported
       route, so it is what a rejected caller is redirected to.
+    * A ``*_env`` key passes the marker check: it names the variable to read, as Fabric's
+      ``models.*.api_key_env`` does. Its value is still checked for an issued-token shape.
 
     A value carrying a recognised issued-token shape is reported whatever its key, since an ``env``
     mapping forwarded to a harness names its own variables.
@@ -116,7 +142,7 @@ def _exposed_paths(path: str, value: Any) -> list[str]:
         return [nested for item in value for nested in _exposed_paths(path, item)]
     if not isinstance(value, str) or not value or _ENV_TEMPLATE.fullmatch(value):
         return []
-    if _SECRET_KEY_MARKER_RE.search(path.casefold()):
+    if not _names_a_variable(path, value) and _SECRET_KEY_MARKER_RE.search(path.casefold()):
         return [path]
     return [path] if is_credential_value(value) else []
 

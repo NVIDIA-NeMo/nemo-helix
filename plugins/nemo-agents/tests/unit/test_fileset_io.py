@@ -69,7 +69,7 @@ def test_resolve_staged_config_fileset_without_sdk_raises(ctx: JobContext) -> No
             kind="optimize-config",
         ):
             pass
-    assert "sdk" in str(exc.value).lower()
+    assert "platform client" in str(exc.value)
 
 
 def test_resolve_staged_config_empty_fileset_ref_is_invalid(ctx: JobContext) -> None:

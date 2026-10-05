@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Kubernetes DNS-safe resource naming shared by platform services and plugins.
+"""Kubernetes DNS-safe resource naming shared by Helix services and plugins.
 
 Plugins cannot depend on ``nhx_common``; this module lives in ``nemo_helix_plugin``
 so deployments, models, and other plugins share one hashing/normalization contract.

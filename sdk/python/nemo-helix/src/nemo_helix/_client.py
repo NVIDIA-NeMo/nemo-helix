@@ -25,6 +25,7 @@ from typing_extensions import Self, override
 import httpx
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.jobs.client import JobsClient, AsyncJobsClient
+from nemo_helix_plugin.client.client import NemoClientRuntime, NemoClientRuntimeSource
 from nemo_helix_plugin.secrets.compat import SecretsResource, AsyncSecretsResource
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
@@ -58,21 +59,17 @@ if TYPE_CHECKING:
     from .models import ModelsResource, AsyncModelsResource
     from .resources import (
         files,
-        intake,
         models,
         adapters,
         projects,
-        guardrail,
         inference,
         workspaces,
         evaluations,
         experiments,
     )
     from .filesets.resources import FilesResource, AsyncFilesResource
-    from .resources.intake.intake import IntakeResource, AsyncIntakeResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
-    from .resources.guardrail.guardrail import GuardrailResource, AsyncGuardrailResource
     from .resources.inference.inference import InferenceResource, AsyncInferenceResource
     from .resources.workspaces.workspaces import WorkspacesResource, AsyncWorkspacesResource
     from .resources.evaluations.evaluations import EvaluationsResource, AsyncEvaluationsResource
@@ -127,7 +124,7 @@ def _copy_requires_bootstrap(
     )
 
 
-class NeMoHelix(SyncAPIClient):
+class NeMoHelix(NemoClientRuntimeSource, SyncAPIClient):
     # client options
     workspace: str | None
     def __init__(
@@ -156,6 +153,7 @@ class NeMoHelix(SyncAPIClient):
         # outlining your use-case to help us decide if it should be
         # part of our public interface in the future.
         _strict_response_validation: bool = False,
+        nemo_client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Construct a new synchronous NeMoHelix client instance.
 
@@ -213,6 +211,7 @@ class NeMoHelix(SyncAPIClient):
             http_client: Custom ``httpx.Client`` instance. When provided, the auth
                 bootstrap is skipped entirely regardless of other parameters.
         """
+        self._nemo_client_runtime = nemo_client_runtime if nemo_client_runtime is not None else NemoClientRuntime()
         env_base_url = os.environ.get("NEMO_HELIX_BASE_URL")
         bootstrap_base_url = base_url if base_url is not None else env_base_url
         client_verify = client_verify_from_env()
@@ -279,12 +278,6 @@ class NeMoHelix(SyncAPIClient):
         return FilesResource(self)
 
     @cached_property
-    def guardrail(self) -> GuardrailResource:
-        from .resources.guardrail import GuardrailResource
-
-        return GuardrailResource(self)
-
-    @cached_property
     def inference(self) -> InferenceResource:
         from .resources.inference import InferenceResource
 
@@ -313,12 +306,6 @@ class NeMoHelix(SyncAPIClient):
         from .resources.adapters import AdaptersResource
 
         return AdaptersResource(self)
-
-    @cached_property
-    def intake(self) -> IntakeResource:
-        from .resources.intake import IntakeResource
-
-        return IntakeResource(self)
 
     @cached_property
     def evaluations(self) -> EvaluationsResource:
@@ -370,6 +357,7 @@ class NeMoHelix(SyncAPIClient):
         set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
+        nemo_client_runtime: NemoClientRuntime | NotGiven = not_given,
         _extra_kwargs: Mapping[str, Any] = {},
     ) -> Self:
         """
@@ -411,6 +399,9 @@ class NeMoHelix(SyncAPIClient):
             max_retries=self.max_retries if isinstance(max_retries, NotGiven) else max_retries,
             default_headers=headers,
             default_query=params,
+            nemo_client_runtime=(
+                self.nemo_client_runtime if isinstance(nemo_client_runtime, NotGiven) else nemo_client_runtime
+            ),
             **_extra_kwargs,
         )
 
@@ -486,7 +477,7 @@ class NeMoHelix(SyncAPIClient):
         return SecretsResource(self)
 
 
-class AsyncNeMoHelix(AsyncAPIClient):
+class AsyncNeMoHelix(NemoClientRuntimeSource, AsyncAPIClient):
     # client options
     workspace: str | None
 
@@ -516,6 +507,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
         # outlining your use-case to help us decide if it should be
         # part of our public interface in the future.
         _strict_response_validation: bool = False,
+        nemo_client_runtime: NemoClientRuntime | None = None,
     ) -> None:
         """Construct a new asynchronous AsyncNeMoHelix client instance.
 
@@ -592,6 +584,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
             http_client: Custom ``httpx.AsyncClient`` instance. When provided, the
                 auth bootstrap is skipped entirely regardless of other parameters.
         """
+        self._nemo_client_runtime = nemo_client_runtime if nemo_client_runtime is not None else NemoClientRuntime()
         env_base_url = os.environ.get("NEMO_HELIX_BASE_URL")
         bootstrap_base_url = base_url if base_url is not None else env_base_url
         client_verify = client_verify_from_env()
@@ -661,12 +654,6 @@ class AsyncNeMoHelix(AsyncAPIClient):
         return AsyncFilesResource(self)
 
     @cached_property
-    def guardrail(self) -> AsyncGuardrailResource:
-        from .resources.guardrail import AsyncGuardrailResource
-
-        return AsyncGuardrailResource(self)
-
-    @cached_property
     def inference(self) -> AsyncInferenceResource:
         from .resources.inference import AsyncInferenceResource
 
@@ -695,12 +682,6 @@ class AsyncNeMoHelix(AsyncAPIClient):
         from .resources.adapters import AsyncAdaptersResource
 
         return AsyncAdaptersResource(self)
-
-    @cached_property
-    def intake(self) -> AsyncIntakeResource:
-        from .resources.intake import AsyncIntakeResource
-
-        return AsyncIntakeResource(self)
 
     @cached_property
     def evaluations(self) -> AsyncEvaluationsResource:
@@ -752,6 +733,7 @@ class AsyncNeMoHelix(AsyncAPIClient):
         set_default_headers: Mapping[str, str | Omit] | None = None,
         default_query: Mapping[str, object] | None = None,
         set_default_query: Mapping[str, object] | None = None,
+        nemo_client_runtime: NemoClientRuntime | NotGiven = not_given,
         _extra_kwargs: Mapping[str, Any] = {},
     ) -> Self:
         """
@@ -793,6 +775,9 @@ class AsyncNeMoHelix(AsyncAPIClient):
             max_retries=self.max_retries if isinstance(max_retries, NotGiven) else max_retries,
             default_headers=headers,
             default_query=params,
+            nemo_client_runtime=(
+                self.nemo_client_runtime if isinstance(nemo_client_runtime, NotGiven) else nemo_client_runtime
+            ),
             **_extra_kwargs,
         )
 
@@ -881,12 +866,6 @@ class NeMoHelixWithRawResponse:
         return FilesResourceWithRawResponse(self._client.files)
 
     @cached_property
-    def guardrail(self) -> guardrail.GuardrailResourceWithRawResponse:
-        from .resources.guardrail import GuardrailResourceWithRawResponse
-
-        return GuardrailResourceWithRawResponse(self._client.guardrail)
-
-    @cached_property
     def inference(self) -> inference.InferenceResourceWithRawResponse:
         from .resources.inference import InferenceResourceWithRawResponse
 
@@ -917,12 +896,6 @@ class NeMoHelixWithRawResponse:
         return AdaptersResourceWithRawResponse(self._client.adapters)
 
     @cached_property
-    def intake(self) -> intake.IntakeResourceWithRawResponse:
-        from .resources.intake import IntakeResourceWithRawResponse
-
-        return IntakeResourceWithRawResponse(self._client.intake)
-
-    @cached_property
     def evaluations(self) -> evaluations.EvaluationsResourceWithRawResponse:
         from .resources.evaluations import EvaluationsResourceWithRawResponse
 
@@ -946,12 +919,6 @@ class AsyncNeMoHelixWithRawResponse:
         from .resources.files import AsyncFilesResourceWithRawResponse
 
         return AsyncFilesResourceWithRawResponse(self._client.files)
-
-    @cached_property
-    def guardrail(self) -> guardrail.AsyncGuardrailResourceWithRawResponse:
-        from .resources.guardrail import AsyncGuardrailResourceWithRawResponse
-
-        return AsyncGuardrailResourceWithRawResponse(self._client.guardrail)
 
     @cached_property
     def inference(self) -> inference.AsyncInferenceResourceWithRawResponse:
@@ -984,12 +951,6 @@ class AsyncNeMoHelixWithRawResponse:
         return AsyncAdaptersResourceWithRawResponse(self._client.adapters)
 
     @cached_property
-    def intake(self) -> intake.AsyncIntakeResourceWithRawResponse:
-        from .resources.intake import AsyncIntakeResourceWithRawResponse
-
-        return AsyncIntakeResourceWithRawResponse(self._client.intake)
-
-    @cached_property
     def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithRawResponse:
         from .resources.evaluations import AsyncEvaluationsResourceWithRawResponse
 
@@ -1013,12 +974,6 @@ class NeMoHelixWithStreamedResponse:
         from .resources.files import FilesResourceWithStreamingResponse
 
         return FilesResourceWithStreamingResponse(self._client.files)
-
-    @cached_property
-    def guardrail(self) -> guardrail.GuardrailResourceWithStreamingResponse:
-        from .resources.guardrail import GuardrailResourceWithStreamingResponse
-
-        return GuardrailResourceWithStreamingResponse(self._client.guardrail)
 
     @cached_property
     def inference(self) -> inference.InferenceResourceWithStreamingResponse:
@@ -1051,12 +1006,6 @@ class NeMoHelixWithStreamedResponse:
         return AdaptersResourceWithStreamingResponse(self._client.adapters)
 
     @cached_property
-    def intake(self) -> intake.IntakeResourceWithStreamingResponse:
-        from .resources.intake import IntakeResourceWithStreamingResponse
-
-        return IntakeResourceWithStreamingResponse(self._client.intake)
-
-    @cached_property
     def evaluations(self) -> evaluations.EvaluationsResourceWithStreamingResponse:
         from .resources.evaluations import EvaluationsResourceWithStreamingResponse
 
@@ -1080,12 +1029,6 @@ class AsyncNeMoHelixWithStreamedResponse:
         from .resources.files import AsyncFilesResourceWithStreamingResponse
 
         return AsyncFilesResourceWithStreamingResponse(self._client.files)
-
-    @cached_property
-    def guardrail(self) -> guardrail.AsyncGuardrailResourceWithStreamingResponse:
-        from .resources.guardrail import AsyncGuardrailResourceWithStreamingResponse
-
-        return AsyncGuardrailResourceWithStreamingResponse(self._client.guardrail)
 
     @cached_property
     def inference(self) -> inference.AsyncInferenceResourceWithStreamingResponse:
@@ -1116,12 +1059,6 @@ class AsyncNeMoHelixWithStreamedResponse:
         from .resources.adapters import AsyncAdaptersResourceWithStreamingResponse
 
         return AsyncAdaptersResourceWithStreamingResponse(self._client.adapters)
-
-    @cached_property
-    def intake(self) -> intake.AsyncIntakeResourceWithStreamingResponse:
-        from .resources.intake import AsyncIntakeResourceWithStreamingResponse
-
-        return AsyncIntakeResourceWithStreamingResponse(self._client.intake)
 
     @cached_property
     def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithStreamingResponse:

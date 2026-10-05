@@ -14,6 +14,7 @@ from nhx.guardrails.app.handlers.utils import update_models_in_config
 from nhx.guardrails.app.services.configs.sources import get_config
 from nhx.guardrails.app.services.rails.registry import RailsRegistry
 from nhx.guardrails.app.utils.model_routing import resolve_model_entity_references
+from nhx.guardrails.app.utils.platform_request_headers import apply_platform_auth_headers
 from nhx.guardrails.config import settings
 from nhx.guardrails.entities import GuardrailConfig
 from nhx.guardrails.entities.values._private import Model, RailsConfig, TracingConfig
@@ -158,6 +159,7 @@ def configure_rails_config(rails_config: RailsConfig, model: Model) -> RailsConf
 
     # Resolve Model Entity references to Inference Gateway URLs for all models
     rails_config = resolve_model_entity_references(rails_config)
+    rails_config = apply_platform_auth_headers(rails_config)
 
     # Disable tracing if telemetry is disabled globally
     if otel_settings.otel_sdk_disabled:

@@ -12,17 +12,17 @@ All tests self-skip when Studio static files are not mounted.
 
 import re
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.testing.pytest_outcomes import pytest_skip
 
 
-def _studio_available(sdk: NeMoHelix) -> bool:
+def _studio_available(client: NemoClient) -> bool:
     """Check if the Studio UI is available (static files are mounted)."""
-    response = sdk._client.get("/studio/")
+    response = client._client.get("/studio/")
     return response.status_code == 200
 
 
-def test_studio_index_html(sdk: NeMoHelix):
+def test_studio_index_html(client: NemoClient):
     """Test that /studio/ serves the index.html correctly.
 
     This verifies:
@@ -31,10 +31,10 @@ def test_studio_index_html(sdk: NeMoHelix):
     3. Assets are prefixed with /studio/ (correct Vite base URL)
     4. No unreplaced STUDIO_UI_ markers remain in the HTML
     """
-    if not _studio_available(sdk):
+    if not _studio_available(client):
         pytest_skip("Studio UI not available (static files not mounted)")
 
-    response = sdk._client.get("/studio/")
+    response = client._client.get("/studio/")
 
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     assert "text/html" in response.headers.get("content-type", ""), (
@@ -56,14 +56,14 @@ def test_studio_index_html(sdk: NeMoHelix):
     assert "STUDIO_UI_" not in html, "Found unreplaced STUDIO_UI_ marker in index.html"
 
 
-def test_studio_spa_routing(sdk: NeMoHelix):
+def test_studio_spa_routing(client: NemoClient):
     """Test that SPA routing returns index.html for client-side routes.
 
     This verifies that the static_files_path is correctly configured and
     the SPA fallback mechanism works - non-file paths should return index.html
     to allow client-side routing to handle them.
     """
-    if not _studio_available(sdk):
+    if not _studio_available(client):
         pytest_skip("Studio UI not available (static files not mounted)")
 
     # These paths don't exist as files but should return index.html for SPA routing
@@ -74,7 +74,7 @@ def test_studio_spa_routing(sdk: NeMoHelix):
     ]
 
     for route in spa_routes:
-        response = sdk._client.get(route)
+        response = client._client.get(route)
         assert response.status_code == 200, f"SPA route {route} returned {response.status_code}"
         assert "text/html" in response.headers.get("content-type", ""), (
             f"SPA route {route} didn't return HTML content-type"
@@ -83,7 +83,7 @@ def test_studio_spa_routing(sdk: NeMoHelix):
         assert "<script" in response.text.lower(), f"SPA route {route} didn't return app HTML"
 
 
-def test_studio_js_bundle(sdk: NeMoHelix):
+def test_studio_js_bundle(client: NemoClient):
     """Test that the Studio JS bundle is production-ready.
 
     This verifies:
@@ -91,11 +91,11 @@ def test_studio_js_bundle(sdk: NeMoHelix):
     2. No unreplaced STUDIO_UI_ markers in the bundle
     3. VITE_APP_ENV=production is baked into the build
     """
-    if not _studio_available(sdk):
+    if not _studio_available(client):
         pytest_skip("Studio UI not available (static files not mounted)")
 
     # Get index.html to find all JS asset paths
-    index_response = sdk._client.get("/studio/")
+    index_response = client._client.get("/studio/")
     assert index_response.status_code == 200
 
     # Find all JS asset paths (e.g., src="/studio/assets/index-XXXXX.js")
@@ -104,7 +104,7 @@ def test_studio_js_bundle(sdk: NeMoHelix):
 
     all_js_content = ""
     for js_path in js_paths:
-        js_response = sdk._client.get(js_path)
+        js_response = client._client.get(js_path)
         assert js_response.status_code == 200, f"Failed to load JS asset at {js_path}"
         all_js_content += js_response.text
 
@@ -117,22 +117,22 @@ def test_studio_js_bundle(sdk: NeMoHelix):
     )
 
 
-def test_studio_css_assets(sdk: NeMoHelix):
+def test_studio_css_assets(client: NemoClient):
     """Test that CSS assets are served correctly from static_files_path.
 
     This verifies that the static file serving works for different asset types.
     """
-    if not _studio_available(sdk):
+    if not _studio_available(client):
         pytest_skip("Studio UI not available (static files not mounted)")
 
     # Get index.html to find CSS asset path
-    index_response = sdk._client.get("/studio/")
+    index_response = client._client.get("/studio/")
     assert index_response.status_code == 200
 
     # Find a CSS asset path (e.g., href="/studio/assets/index-XXXXX.css")
     css_match = re.search(r'href="(/studio/assets/[^"]+\.css)"', index_response.text)
     if css_match:
         css_path = css_match.group(1)
-        css_response = sdk._client.get(css_path)
+        css_response = client._client.get(css_path)
         assert css_response.status_code == 200, f"Failed to load CSS asset at {css_path}"
         assert "text/css" in css_response.headers.get("content-type", ""), "CSS asset didn't have correct content-type"

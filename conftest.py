@@ -12,6 +12,7 @@ files for more specific fixtures.
 import logging
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -27,7 +28,6 @@ import pytest  # noqa: E402
 from nhx.testing.pytest_outcomes import pytest_skip as skip_test  # noqa: E402
 
 from tests.auth_idp.xdist import append_xdist_group_suffix  # noqa: E402
-from tests.discovery_exclusions import TEST_DISCOVERY_EXCLUSIONS  # noqa: E402
 
 # Set test environment variables BEFORE any imports
 # This must happen at module level, before pytest even starts processing
@@ -173,19 +173,6 @@ def mock_env_vars(monkeypatch) -> dict:
 # ============================================================================
 
 
-def pytest_ignore_collect(collection_path: Path, config) -> bool:
-    """Skip test trees with explicit temporary root-CI discovery exclusions."""
-    try:
-        relative_path = collection_path.relative_to(Path(__file__).parent)
-    except ValueError:
-        return False
-
-    return any(
-        relative_path == excluded_path or excluded_path in relative_path.parents
-        for excluded_path in TEST_DISCOVERY_EXCLUSIONS
-    )
-
-
 def pytest_load_initial_conftests(early_config, parser, args):
     """
     Called before any conftest files are loaded.
@@ -243,6 +230,13 @@ _SESSION_TIMEOUT_SECONDS = None
 #: How long before the session timeout the stack dump fires, so it lands before os._exit.
 _TIMEOUT_DUMP_LEAD_SECONDS = 5
 
+#: How long before the session timeout the asyncio task dump fires. Earlier than the thread dump so
+#: the two do not interleave in the crash file.
+_ASYNCIO_DUMP_LEAD_SECONDS = 10
+
+#: Pending watchdog that dumps asyncio tasks for the in-flight test, or None.
+_ASYNCIO_DUMP_TIMER: threading.Timer | None = None
+
 #: Start time of each in-flight test, by nodeid. xdist forwards `logstart` to the controller, so a
 #: lost worker's test can still be timed from there.
 _TEST_START_TIMES: dict[str, float] = {}
@@ -264,6 +258,7 @@ def pytest_runtest_logfinish(nodeid, location):
         import faulthandler
 
         faulthandler.cancel_dump_traceback_later()
+    _cancel_asyncio_task_dump()
 
 
 def _effective_timeout_seconds(item) -> float | None:
@@ -286,6 +281,42 @@ def _arm_timeout_stack_dump(timeout_seconds: float | None) -> None:
     import faulthandler
 
     faulthandler.dump_traceback_later(timeout_seconds - _TIMEOUT_DUMP_LEAD_SECONDS, file=_CRASH_DUMP_FILE, exit=False)
+    _arm_asyncio_task_dump(timeout_seconds)
+
+
+def _arm_asyncio_task_dump(timeout_seconds: float) -> None:
+    """Dump every pending asyncio task's await chain into the crash file before the timeout.
+
+    A thread dump of a hung event loop shows only ``select()``; this names the task it waits on.
+    """
+    global _ASYNCIO_DUMP_TIMER
+    _cancel_asyncio_task_dump()
+    if timeout_seconds <= _ASYNCIO_DUMP_LEAD_SECONDS:
+        return
+    timer = threading.Timer(timeout_seconds - _ASYNCIO_DUMP_LEAD_SECONDS, _dump_asyncio_tasks)
+    timer.daemon = True
+    timer.start()
+    _ASYNCIO_DUMP_TIMER = timer
+
+
+def _dump_asyncio_tasks() -> None:
+    from nhx.testing.asyncio_debug import dump_event_loop_tasks
+
+    handle = _CRASH_DUMP_FILE
+    if handle is None:
+        return
+    handle.write("--- asyncio task dump (test still running near its timeout)\n")
+    try:
+        dump_event_loop_tasks(handle)
+    except Exception as exc:  # Diagnostics must never take down the worker.
+        handle.write(f"--- asyncio task dump failed: {exc!r}\n")
+
+
+def _cancel_asyncio_task_dump() -> None:
+    global _ASYNCIO_DUMP_TIMER
+    if _ASYNCIO_DUMP_TIMER is not None:
+        _ASYNCIO_DUMP_TIMER.cancel()
+        _ASYNCIO_DUMP_TIMER = None
 
 
 def pytest_handlecrashitem(crashitem, report, sched):

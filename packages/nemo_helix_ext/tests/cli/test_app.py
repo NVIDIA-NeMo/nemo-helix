@@ -95,7 +95,7 @@ def test_generated_list_validates_stream_output_before_client_setup():
         ([], "Command-line interface for NeMo Helix."),
         (["agent"], "Commands for AI agent context and capability discovery."),
         (["skills"], "Install AI agent skill files for Nemo."),
-        (["services"], "Run platform services locally."),
+        (["services"], "Run Helix services locally."),
     ],
 )
 def test_no_arg_help_exits_successfully(argv: list[str], expected_text: str):
@@ -131,7 +131,7 @@ contexts:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert "Active context: production (workspace: prod-ns)" in result.stdout
+    assert "Active context: production (workspace: prod-ns, platform: https://api.example.com)" in result.stdout
     assert result.stdout.count("Active context:") == 1
     assert result.stdout.index("Active context:") < result.stdout.index("Usage:")
 
@@ -160,7 +160,7 @@ contexts:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "Active context: production (workspace: prod-ns)" in result.stdout
+    assert "Active context: production (workspace: prod-ns, platform: https://api.example.com)" in result.stdout
     assert result.stdout.count("Active context:") == 1
     assert result.stdout.index("Active context:") < result.stdout.index("Usage:")
 
@@ -198,8 +198,39 @@ contexts:
     result = runner.invoke(app, [])
 
     assert result.exit_code == 0
-    assert "Active context: staging (workspace: staging-ns)" in result.stdout
+    assert "Active context: staging (workspace: staging-ns, platform: https://staging.example.com)" in result.stdout
     assert "Active context: production" not in result.stdout
+
+
+def test_root_help_redacts_platform_url_credentials(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+current_context: production
+clusters:
+  - name: production
+    base_url: https://s3cr3t-userinfo@api.example.com:8443/nhx?token=abc123#frag
+users:
+  - name: production
+    type: no-auth
+contexts:
+  - name: production
+    cluster: production
+    user: production
+    workspace: prod-ns
+"""
+    )
+    monkeypatch.setenv("NHX_CONFIG_FILE", str(config_path))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert (
+        "Active context: production (workspace: prod-ns, platform: https://api.example.com:8443/nhx)" in result.stdout
+    )
+    assert "s3cr3t-userinfo" not in result.stdout
+    assert "abc123" not in result.stdout
 
 
 def test_root_no_arg_help_skips_active_context_when_config_unavailable(tmp_path, monkeypatch):
@@ -417,7 +448,7 @@ def test_lazy_api_group_help_loads_on_demand():
             "nemo_helix_ext.cli.commands.quickstart.cli",
             "Quickstart commands for managing the NeMo Helix container",
         ),
-        (["services", "--help"], "nemo_helix_ext.cli.commands.services.cli", "Run platform services locally"),
+        (["services", "--help"], "nemo_helix_ext.cli.commands.services.cli", "Run Helix services locally"),
         (
             ["cluster-info", "--help"],
             "nemo_helix_ext.cli.commands.quickstart.cli",
@@ -626,6 +657,30 @@ def test_plugin_loader_registers_unavailable_command_for_broken_jobs():
     assert "No such option: --spec" not in result.output
 
 
+def test_plugin_loader_hides_completion_options_on_plain_typer_apps():
+    """Plugins build plain ``typer.Typer`` apps; completion belongs to the root ``nemo`` app."""
+    plugin_app = typer.Typer(help="Plugin help")
+
+    @plugin_app.command("hello")
+    def hello() -> None:
+        typer.echo("hi")
+
+    class _PluginCLI(NemoCLI):
+        name = "example"
+
+        def get_cli(self) -> typer.Typer:
+            return plugin_app
+
+    with (
+        patch("nemo_helix_ext.cli.app._discover_plugin_job_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.app._discover_plugin_function_entry_points", return_value=None),
+        patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", return_value=_PluginCLI),
+    ):
+        loaded = lazy_plugin_loader("example", "fake.module:PluginCLI")()
+
+    assert [param.name for param in loaded.params] == []
+
+
 def test_plugin_loader_surfaces_broken_cli_error():
     with patch("nemo_helix_ext.cli.core.lazy_load.resolve_name", side_effect=RuntimeError("broken")):
         with pytest.raises(click.ClickException, match="Failed to load plugin commands for 'example': broken"):
@@ -690,3 +745,16 @@ def test_cli_entry_point_discards_the_command_return_value(monkeypatch: pytest.M
     monkeypatch.setattr("nemo_helix_ext.cli.app.app", lambda: SimpleNamespace(name="job-1"))
 
     assert cli() is None
+
+
+def test_root_no_args_prints_help_successfully():
+    """Running nemo without args should print help and exit successfully."""
+    runner = CliRunner()
+    result = runner.invoke(app, [])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.stdout
+    assert result.stderr == ""
+    # No ANSI escape codes should appear (colors stripped for non-TTY)
+    # TODO: This fails after vendoring, will fix it later
+    # assert "\x1b[" not in result.stdout

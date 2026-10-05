@@ -7,7 +7,6 @@ from typing import List, Optional, Type
 import yaml
 from fastapi import HTTPException, Request, status
 from nemoguardrails import LLMRails
-from nhx.common.service.headers import build_downstream_service_headers
 from nhx.guardrails.app.constants import X_MODEL_AUTHORIZATION_HEADER
 from nhx.guardrails.app.handlers.utils import (
     get_main_model_from_config,
@@ -35,10 +34,10 @@ from nhx.guardrails.app.utils.config_utils import configure_rails_config
 from nhx.guardrails.app.utils.context_utils import (
     set_http_request_uid_into_context,
     set_main_model_into_context,
-    set_request_default_headers_into_context,
     set_x_model_auth_token_into_context,
 )
 from nhx.guardrails.app.utils.hash_utils import compute_token_headers_hash
+from nhx.guardrails.app.utils.platform_request_headers import publish_downstream_request_headers
 from nhx.guardrails.config import settings
 from nhx.guardrails.entities.values._private import RailsConfig
 from nhx.guardrails.entities.values.check import GuardrailCheckRequest, GuardrailCheckResponse
@@ -81,7 +80,7 @@ class CheckRequestHandler:
     async def handle_request(self):
         self.set_api_request_headers()
         self.ensure_request_id()
-        self.set_custom_headers()
+        await self.set_custom_headers()
         token = self.record_auth_token_in_context()
 
         messages = self._get_messages(self.body)
@@ -268,14 +267,10 @@ class CheckRequestHandler:
             log.error("Request ID not set in the request, middleware is not working")
         set_http_request_uid_into_context(request_id)
 
-    def set_custom_headers(self):
-        custom_headers = self._get_custom_headers()
-        # Inject default NeMo Helix headers in addition to user-supplied custom headers.
-        # These are required to ensure the Langchain HTTP client, used for inference
-        # with non-main models, propagates the correct NeMo Helix auth and OTEL headers to IGW.
-        merged = {**custom_headers, **build_downstream_service_headers("guardrails")}
-        if merged:
-            set_request_default_headers_into_context(merged)
+    async def set_custom_headers(self):
+        # Caller and trace headers propagate to every model. Platform auth is stored
+        # separately and attached only when the model URL is the platform endpoint.
+        await publish_downstream_request_headers(self._get_custom_headers())
 
     def _get_custom_headers(self) -> dict:
         """Extract and return all headers that start with 'x' or 'X', excluding 'X-Model-Authorization'."""

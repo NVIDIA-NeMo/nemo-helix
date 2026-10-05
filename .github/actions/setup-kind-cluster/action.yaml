@@ -172,7 +172,7 @@ runs:
       run: |
         e2e/k8s/scripts/prepull_kind_images.sh \
           "${NHX_E2E_REGISTRY}/nhx-api:${NHX_E2E_TAG}" \
-          "${NHX_E2E_REGISTRY}/nhx-cpu-tasks:${NHX_E2E_TAG}" \
+          "${NHX_E2E_REGISTRY}/nhx-tasks:${NHX_E2E_TAG}" \
           "${GENERIC_HTTP_IMAGE}:${GENERIC_HTTP_TAG}"
 
     - name: Install NeMo Helix

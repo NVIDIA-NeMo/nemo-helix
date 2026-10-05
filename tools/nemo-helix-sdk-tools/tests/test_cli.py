@@ -14,7 +14,8 @@ def test_main_help_lists_preserved_command_groups() -> None:
     assert result.exit_code == 0
     assert "generate-cli" not in result.output
     assert "license" in result.output
-    assert "openapi-stainless" in result.output
+    assert "openapi-stainless" not in result.output
+    assert "post-generation" in result.output
     assert "publish" not in result.output
     assert "vendor" in result.output
 
@@ -34,9 +35,9 @@ def test_license_generate_help_includes_output_option() -> None:
     assert "--output" in click.unstyle(result.output)
 
 
-def test_representative_sdk_help_is_registered() -> None:
-    result = runner.invoke(app, ["openapi-stainless", "--help"])
+def test_post_generation_help_lists_license_header_command() -> None:
+    result = runner.invoke(app, ["post-generation", "--help"])
 
     assert result.exit_code == 0
-    assert "sync-methods" in result.output
-    assert "sync-models" in result.output
+    assert "update-license-headers" in result.output
+    assert "update-pyproject" not in result.output

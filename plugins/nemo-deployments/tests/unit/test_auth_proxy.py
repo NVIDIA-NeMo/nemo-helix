@@ -47,6 +47,7 @@ def test_builds_sidecar_when_requested_and_auth_on() -> None:
     env = {e.name: e.value for e in container.env}
     assert env["NHX_AUTH_PROXY_PRINCIPAL"] == "agents"
     assert env["NHX_BASE_URL"] == "http://nemo-helix-api:8080"
+    assert env["XDG_STATE_HOME"] == "/tmp"
     # Loopback exec probe (proxy binds 127.0.0.1, so pod-IP httpGet would be refused).
     assert container.readiness_probe is not None
     assert container.readiness_probe.exec_action is not None

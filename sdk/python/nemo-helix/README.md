@@ -180,37 +180,43 @@ for job in first_page.data:
 
 ## Nested Parameters
 
-Nested parameters are dictionaries, typed using `TypedDict`, for example:
+Some typed clients accept nested dictionaries through request models, for example:
 
 ```python
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
 client = NeMoHelix(
     base_url="http://nemo.test",
 )
+guardrails = client_from_platform(client, GuardrailClient)
 
-guardrail_config = client.guardrail.configs.create(
+guardrail_config = guardrails.create_guardrail_config(
     workspace="my-workspace",
-    name="self-check-input",
-    data={
-        "models": [
-            {
-                "type": "main",
-                "engine": "nim",
-                "model": "default/mock-llm",
-            }
-        ],
-        "rails": {"input": {"flows": ["self check input"]}},
-        "prompts": [
-            {
-                "task": "self_check_input",
-                "content": "Should this user message be blocked? {{ user_input }}",
-            }
-        ],
-    },
-    description="Self-check input rail",
-)
-print(guardrail_config.data)
+    body=CreateGuardrailConfigRequest(
+        name="self-check-input",
+        data={
+            "models": [
+                {
+                    "type": "main",
+                    "engine": "nim",
+                    "model": "default/mock-llm",
+                }
+            ],
+            "rails": {"input": {"flows": ["self check input"]}},
+            "prompts": [
+                {
+                    "task": "self_check_input",
+                    "content": "Should this user message be blocked? {{ user_input }}",
+                }
+            ],
+        },
+        description="Self-check input rail",
+    ),
+).data()
+print(guardrail_config)
 ```
 
 ## Handling Errors

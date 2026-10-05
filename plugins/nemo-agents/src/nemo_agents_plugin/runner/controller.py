@@ -80,6 +80,12 @@ class AgentDeploymentController(NemoController):
         self._entities: NemoEntitiesClient | None = None
         self._controller_config: ControllerConfig | None = None
         self._starting_since: dict[tuple[str, str], float] = {}
+        # Container deployments that were running and went back to starting because the
+        # deployments plugin is recovering them. The plugin owns their recovery deadline
+        # (drift recovery, then its starting timeout, both ending in FAILED), so the
+        # first-start health timeout here must not delete them. In-memory: after a
+        # controller restart a recovering deployment is timed like a first start.
+        self._recovering: set[tuple[str, str]] = set()
         self._runtime_instance_ids: dict[tuple[str, str], str] = {}
         self._pending_restart_reconciliations: dict[str, datetime] = {}
         self._runtime_cleanup_tasks: set[asyncio.Task[None]] = set()
@@ -608,12 +614,13 @@ class AgentDeploymentController(NemoController):
         no agents-side loopback health check.
         """
         # setdefault — without it, missing key returns now() forever, never times out.
-        since = self._starting_since.setdefault((dep.workspace, dep.name), time.monotonic())
+        key = (dep.workspace, dep.name)
+        since = self._starting_since.setdefault(key, time.monotonic())
         timeout = self.controller_config.health_check_timeout_seconds
         elapsed = time.monotonic() - since
         remaining = timeout - elapsed
 
-        if remaining <= 0:
+        if remaining <= 0 and key not in self._recovering:
             dep.status = "failed"
             dep.error = f"Health check timed out after {timeout}s."
             self._starting_since.pop((dep.workspace, dep.name), None)
@@ -632,6 +639,7 @@ class AgentDeploymentController(NemoController):
             dep.status = "failed"
             dep.error = info.error or "Process exited unexpectedly during startup."
             self._starting_since.pop((dep.workspace, dep.name), None)
+            self._recovering.discard(key)
             try:
                 if is_container_deployment_mode(dep.deployment_mode):
                     await backend.delete_deployment(dep.workspace, dep.name)
@@ -656,6 +664,8 @@ class AgentDeploymentController(NemoController):
             if info.status == "running":
                 dep.status = "running"
                 dep.endpoint = ""
+                dep.error = ""
+                self._recovering.discard(key)
                 self._starting_since.pop((dep.workspace, dep.name), None)
                 await self._observe_runtime_instance(dep)
                 await self._save(dep)
@@ -716,6 +726,18 @@ class AgentDeploymentController(NemoController):
             dep.error = info.error or "Process exited unexpectedly."
             await self._save(dep)
             logger.warning("Deployment '%s' failed: %s", dep.name, dep.error)
+        elif info.status == "starting" and is_container_deployment_mode(dep.deployment_mode):
+            # The workload went offline (e.g. its sandbox was stopped) and the deployments
+            # plugin is recovering it; report that instead of claiming it still serves.
+            await self._reconcile_deployment_sessions_after_restart(dep)
+            key = (dep.workspace, dep.name)
+            dep.status = "starting"
+            dep.error = "Runtime went offline; the deployments plugin is recovering it."
+            dep.endpoints = list(info.endpoints)
+            self._recovering.add(key)
+            self._starting_since[key] = time.monotonic()
+            await self._save(dep)
+            logger.warning("Deployment '%s' is being recovered by the deployments plugin.", dep.name)
         else:
             if info.status == "starting":
                 await self._reconcile_deployment_sessions_after_restart(dep)
@@ -748,6 +770,7 @@ class AgentDeploymentController(NemoController):
             return
 
         self._starting_since.pop((dep.workspace, dep.name), None)
+        self._recovering.discard((dep.workspace, dep.name))
         self._runtime_instance_ids.pop((dep.workspace, dep.name), None)
         if dep.id is not None:
             self._pending_restart_reconciliations.pop(dep.id, None)

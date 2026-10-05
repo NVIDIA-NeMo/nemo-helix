@@ -18,6 +18,7 @@ from nemo_helix_plugin.dependencies import get_nemo_client as get_nemo_client
 from nemo_helix_plugin.dependencies import get_platform_config as get_platform_config
 from nemo_helix_plugin.dependencies import get_sdk_client as get_sdk_client
 from nemo_helix_plugin.dependencies import get_service_config as get_service_config
+from nemo_helix_plugin.dependencies import get_sync_nemo_client as get_sync_nemo_client
 from nemo_helix_plugin.dependencies import get_sync_sdk_client as get_sync_sdk_client
 from nhx.common.config import ServiceConfig
 

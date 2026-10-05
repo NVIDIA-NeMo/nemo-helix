@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
@@ -14,18 +15,18 @@ import pytest
 from fastapi import HTTPException
 from nemo_agents_plugin.entities import AgentInline
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJobConfig
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
 from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
 from nemo_helix_plugin.entities.base import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
-from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_insights_plugin.analysis_runs import (
     ANALYSIS_RUN_NAME_PREFIX,
     CreateAnalysisRunRequest,
+    ExecuteJobClient,
+    ModelLookupClient,
     build_execute_agent_job_config,
     create_analysis_run,
     get_analysis_run,
@@ -84,15 +85,20 @@ class _StubExecuteJobs:
 class _StubModels:
     """Model Entity lookups the create path makes before recording a run."""
 
-    def __init__(self, error: Exception | None = None) -> None:
+    def __init__(self, error: Exception | None = None, backend_formats: dict[str, str | None] | None = None) -> None:
         self.retrieved: list[tuple[str, str]] = []
         self._error = error
+        self._backend_formats = backend_formats or {}
 
     async def retrieve(self, name: str, *, workspace: str) -> object:
         self.retrieved.append((workspace, name))
         if self._error is not None:
             raise self._error
-        return object()
+        return SimpleNamespace(
+            workspace=workspace,
+            name=name,
+            backend_format=self._backend_formats.get(f"{workspace}/{name}"),
+        )
 
 
 class _TypedResponse:
@@ -128,8 +134,8 @@ class _TypedModelsClient:
         return _TypedResponse(await self._models.retrieve(name, workspace=workspace))
 
 
-class _StubSdk:
-    """Minimal stand-in for the request-scoped ``AsyncNeMoHelix``."""
+class _StubClient:
+    """Minimal stand-in for the request-scoped ``AsyncNemoClient``."""
 
     def __init__(self, jobs: _StubExecuteJobs, models: _StubModels | None = None) -> None:
         self.jobs = jobs
@@ -139,14 +145,14 @@ class _StubSdk:
 
 @pytest.fixture(autouse=True)
 def _patch_clients(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_client_from_platform(platform: _StubSdk, client_cls: type[object]) -> object:
-        if client_cls is AsyncAgentsClient:
-            return _TypedAgentsClient(platform.jobs)
-        if client_cls is AsyncModelsClient:
-            return _TypedModelsClient(platform.models)
-        raise AssertionError(f"unexpected client type: {client_cls!r}")
-
-    monkeypatch.setattr("nemo_insights_plugin.analysis_runs.client_from_platform", fake_client_from_platform)
+    monkeypatch.setattr(
+        "nemo_insights_plugin.analysis_runs.AsyncAgentsClient",
+        SimpleNamespace(from_client=lambda client: _TypedAgentsClient(client.jobs)),
+    )
+    monkeypatch.setattr(
+        "nemo_insights_plugin.analysis_runs.AsyncModelsClient",
+        SimpleNamespace(from_client=lambda client: _TypedModelsClient(client.models)),
+    )
 
 
 class _StubEntities:
@@ -183,9 +189,9 @@ class _StubEntities:
         )
 
 
-def _sdk(jobs: _StubExecuteJobs, models: _StubModels | None = None) -> AsyncNeMoHelix:
-    """The route touches ``sdk.agents.jobs.execute`` and ``sdk.models``; cast past the concrete type."""
-    return cast(AsyncNeMoHelix, _StubSdk(jobs, models))
+def _client(jobs: _StubExecuteJobs, models: _StubModels | None = None) -> AsyncNemoClient:
+    """The route only derives typed clients from the platform client; cast past the concrete type."""
+    return cast(AsyncNemoClient, _StubClient(jobs, models))
 
 
 def _entities(stub: _StubEntities) -> NemoEntitiesClient:
@@ -371,7 +377,7 @@ async def test_create_records_the_run_before_submitting_the_job() -> None:
     jobs = _StubExecuteJobs()
     entities = _StubEntities()
 
-    response = await create_analysis_run("team-a", _request(), _sdk(jobs), _entities(entities))
+    response = await create_analysis_run("team-a", _request(), _client(jobs), _entities(entities))
 
     assert len(entities.created) == 1
     assert response.run.agent == "demo-agent"
@@ -383,7 +389,7 @@ async def test_the_job_takes_the_run_name_so_the_link_needs_no_write_back() -> N
     jobs = _StubExecuteJobs()
     entities = _StubEntities()
 
-    response = await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
+    response = await create_analysis_run("default", _request(), _client(jobs), _entities(entities))
 
     assert jobs.calls[0]["name"] == response.run.name
     assert jobs.requests[0].custom_fields == {"insights_analysis_agent": "demo-agent"}
@@ -397,7 +403,7 @@ async def test_on_demand_submission_uses_configured_job_profile(profile: str) ->
     set_nemo_config_override(config)
     try:
         jobs = _StubExecuteJobs()
-        response = await create_analysis_run("default", _request(), _sdk(jobs), _entities(_StubEntities()))
+        response = await create_analysis_run("default", _request(), _client(jobs), _entities(_StubEntities()))
         assert response.job is not None
         assert jobs.requests[0].profile == profile
     finally:
@@ -411,7 +417,8 @@ async def test_scheduler_submission_preserves_name_profile_and_platform_url() ->
     response = await submit_analysis_run(
         workspace="default",
         request=_request(),
-        sdk=_sdk(jobs),
+        agents_client=cast(ExecuteJobClient, _TypedAgentsClient(jobs)),
+        models_client=cast(ModelLookupClient, _TypedModelsClient(_StubModels())),
         entity_client=_entities(entities),
         name=name,
         profile="cpu-cluster",
@@ -431,7 +438,7 @@ async def test_the_run_captures_the_request_scope() -> None:
     entities = _StubEntities()
     request = _request(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
 
-    response = await create_analysis_run("default", request, _sdk(_StubExecuteJobs()), _entities(entities))
+    response = await create_analysis_run("default", request, _client(_StubExecuteJobs()), _entities(entities))
 
     assert response.run.since == datetime(2026, 8, 1, tzinfo=timezone.utc)
     assert response.run.evaluation_id == "eval-123"
@@ -445,7 +452,7 @@ async def test_a_bare_model_name_is_looked_up_in_the_run_workspace() -> None:
     await create_analysis_run(
         "team-a",
         _request(default_model="big", fast_model="small"),
-        _sdk(_StubExecuteJobs(), models),
+        _client(_StubExecuteJobs(), models),
         _entities(_StubEntities()),
     )
 
@@ -461,7 +468,7 @@ async def test_a_denied_model_lookup_keeps_the_status_the_store_returned() -> No
         await create_analysis_run(
             "workspace-a",
             _request(default_model="workspace-b/foo"),
-            _sdk(_StubExecuteJobs(), _StubModels(error=denied)),
+            _client(_StubExecuteJobs(), _StubModels(error=denied)),
             _entities(entities),
         )
 
@@ -477,11 +484,43 @@ async def test_an_unreachable_models_service_is_not_reported_as_a_bad_request() 
 
     with pytest.raises(HTTPException) as excinfo:
         await create_analysis_run(
-            "default", _request(), _sdk(_StubExecuteJobs(), _StubModels(error=unreachable)), _entities(entities)
+            "default", _request(), _client(_StubExecuteJobs(), _StubModels(error=unreachable)), _entities(entities)
         )
 
     assert excinfo.value.status_code == 503
     assert entities.created == []
+
+
+@pytest.mark.parametrize("backend_format", [None, "OPENAI_CHAT", "ANTHROPIC_MESSAGES"])
+async def test_a_model_the_analyst_can_call_is_accepted(backend_format: str | None) -> None:
+    """An unset backend format is accepted because the Analyst treats it as OPENAI_CHAT."""
+    jobs = _StubExecuteJobs()
+    models = _StubModels(backend_formats={DEFAULT_MODEL: backend_format, FAST_MODEL: backend_format})
+
+    response = await create_analysis_run("default", _request(), _client(jobs, models), _entities(_StubEntities()))
+
+    assert response.job is not None
+    assert len(jobs.calls) == 1
+
+
+@pytest.mark.parametrize("field", ["default_model", "fast_model"])
+async def test_a_model_the_analyst_cannot_call_is_rejected_before_anything_is_recorded(field: str) -> None:
+    """The job would only fail once the Analyst built its model clients, so reject it at submit time."""
+    jobs = _StubExecuteJobs()
+    entities = _StubEntities()
+    ref = DEFAULT_MODEL if field == "default_model" else FAST_MODEL
+    models = _StubModels(backend_formats={ref: "OPENAI_RESPONSES"})
+
+    with pytest.raises(HTTPException) as excinfo:
+        await create_analysis_run("default", _request(), _client(jobs, models), _entities(entities))
+
+    assert excinfo.value.status_code == 422
+    assert excinfo.value.detail == (
+        f"{field}: Model '{ref}' has unsupported backend format 'OPENAI_RESPONSES'; "
+        "expected OPENAI_CHAT or ANTHROPIC_MESSAGES"
+    )
+    assert entities.created == []
+    assert jobs.calls == []
 
 
 async def test_nothing_is_submitted_when_the_run_cannot_be_recorded() -> None:
@@ -489,7 +528,7 @@ async def test_nothing_is_submitted_when_the_run_cannot_be_recorded() -> None:
     entities = _StubEntities(create_error=RuntimeError("store down"))
 
     with pytest.raises(HTTPException) as excinfo:
-        await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
+        await create_analysis_run("default", _request(), _client(jobs), _entities(entities))
 
     assert excinfo.value.status_code == 500
     assert jobs.calls == []
@@ -501,7 +540,7 @@ async def test_a_failed_submission_leaves_the_run_record_in_place() -> None:
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
-        await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
+        await create_analysis_run("default", _request(), _client(jobs), _entities(entities))
 
     assert excinfo.value.status_code == 422
     assert excinfo.value.detail == {"error": "bad model ref", "run": entities.created[0].name}
@@ -519,7 +558,7 @@ async def test_an_unreachable_jobs_service_leaves_a_findable_run_record() -> Non
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
-        await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
+        await create_analysis_run("default", _request(), _client(jobs), _entities(entities))
 
     assert excinfo.value.status_code == 503
     assert len(entities.created) == 1
@@ -534,7 +573,7 @@ async def test_a_failed_submission_falls_back_to_the_raw_error_body() -> None:
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
-        await create_analysis_run("default", _request(), _sdk(jobs), _entities(entities))
+        await create_analysis_run("default", _request(), _client(jobs), _entities(entities))
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == {"error": {"message": "upstream exploded"}, "run": entities.created[0].name}
@@ -549,7 +588,7 @@ async def test_get_joins_the_run_with_its_backing_job() -> None:
     jobs = _StubExecuteJobs()
     entities = _StubEntities(existing=_run())
 
-    response = await get_analysis_run("default", RUN_NAME, _sdk(jobs), _entities(entities))
+    response = await get_analysis_run("default", RUN_NAME, _client(jobs), _entities(entities))
 
     assert jobs.gets == [RUN_NAME]
     assert response.job is not None
@@ -561,7 +600,7 @@ async def test_a_run_whose_job_is_missing_reads_as_never_submitted() -> None:
     jobs = _StubExecuteJobs(get_error=_nemo_http_error(404, {"detail": "not found"}))
     entities = _StubEntities(existing=_run())
 
-    response = await get_analysis_run("default", RUN_NAME, _sdk(jobs), _entities(entities))
+    response = await get_analysis_run("default", RUN_NAME, _client(jobs), _entities(entities))
 
     assert response.job is None
     assert response.run.name == RUN_NAME
@@ -572,14 +611,14 @@ async def test_a_non_404_job_lookup_failure_is_not_swallowed() -> None:
     entities = _StubEntities(existing=_run())
 
     with pytest.raises(NemoHTTPError):
-        await get_analysis_run("default", RUN_NAME, _sdk(jobs), _entities(entities))
+        await get_analysis_run("default", RUN_NAME, _client(jobs), _entities(entities))
 
 
 async def test_get_returns_404_for_an_unknown_run() -> None:
     entities = _StubEntities()
 
     with pytest.raises(HTTPException) as excinfo:
-        await get_analysis_run("default", RUN_NAME, _sdk(_StubExecuteJobs()), _entities(entities))
+        await get_analysis_run("default", RUN_NAME, _client(_StubExecuteJobs()), _entities(entities))
 
     assert excinfo.value.status_code == 404
 

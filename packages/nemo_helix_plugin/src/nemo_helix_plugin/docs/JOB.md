@@ -3,19 +3,22 @@
 
 # Job Surface (NemoJob)
 
-A `NemoJob` is a unit of work you can execute locally, submit to a cluster, or introspect — the same class drives all three. The platform auto-generates three CLI verbs per job: `run`, `submit`, `explain`.
+A `NemoJob` is a unit of work you can submit to a cluster, run in a task container, or introspect. When a job sets `generate_legacy_verbs = False`, the generated CLI exposes submission as the job command itself:
 
 ```
-nemo <plugin> <job> run      [--spec '{...}' | --spec-file FILE]
-nemo <plugin> <job> submit   [--profile <p>] [--cluster <c>] \
+nemo <plugin> <job>          [--profile <p>] \
                              [--spec '{...}' | --spec-file FILE] \
                              [-o <backend>.<key>=<value> ...] [--options-file FILE]
 nemo <plugin> <job> explain  [--profile <p>]
 ```
 
-- `run` — executes `job.run()` in-process. No platform needed.
-- `submit` — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
+- flat `<job>` command — POSTs the job to the plugin service, which compiles it into a `HelixJobSpec` and hands it off to the Jobs service for cluster execution.
 - `explain` — prints the job's schemas and submit route. Reads locally, no network.
+
+Leaving `NemoJob.generate_legacy_verbs` at its default `True` preserves the generated nested `<job> submit` / `<job> explain` command group for compatibility. This is per-job generated CLI behavior, not a global plugin naming convention.
+
+Submission targets the platform selected by the global `nemo --base-url` / `nemo --context` flags and
+the active CLI context, like every other `nemo` command.
 
 ## Declaring a NemoJob
 
@@ -203,10 +206,10 @@ The platform calls `get_cli()` once at startup and mounts the result as `nemo <n
 ### Organizing commands
 
 ```python
-from nemo_helix_plugin.cli_state import resolve_cli_workspace
+from nemo_helix_plugin.cli import create_typer_app
 
 def get_cli(self) -> typer.Typer:
-    app = typer.Typer(help=self.description, no_args_is_help=True)
+    app = create_typer_app(help=self.description)
 
     @app.command(rich_help_panel="Local (no platform required)")
     def invoke(config_file: str = typer.Argument(...)) -> None:
@@ -222,13 +225,17 @@ def get_cli(self) -> typer.Typer:
 ### Nested command groups
 
 ```python
-def get_cli(self) -> typer.Typer:
-    app = typer.Typer(name="agents", help=self.description, no_args_is_help=True)
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_options import WorkspaceOption
+from nemo_helix_plugin.cli_state import resolve_cli_workspace
 
-    deps_app = typer.Typer(name="deployments", help="Manage deployments.", no_args_is_help=True)
+def get_cli(self) -> typer.Typer:
+    app = create_typer_app(name="agents", help=self.description)
+
+    deps_app = create_typer_app(name="deployments", help="Manage deployments.")
 
     @deps_app.command()
-    def list(typer_ctx: typer.Context, workspace: str | None = typer.Option(None)) -> None:
+    def list(typer_ctx: typer.Context, workspace: WorkspaceOption = None) -> None:
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         ...
 
@@ -243,8 +250,18 @@ flag, so the command silently discards the workspace the user selected with
 ``nemo config use-context`` (or ``$NHX_WORKSPACE``) and writes to the wrong
 workspace. The generated commands already do this for you.
 
-### Environment-based defaults
+### Platform access and output
+
+Do not declare a `--base-url` (or read `NHX_BASE_URL`) in a command. Take the typed client from the
+CLI state, which carries the platform from `nemo --base-url` / `nemo --context` and the active context's
+auth:
 
 ```python
-base_url: str = typer.Option("http://localhost:8080", envvar="NHX_BASE_URL")
+from nemo_helix_plugin.cli_state import cli_state
+
+client = cli_state(typer_ctx).typed_client(MyPluginClient)
 ```
+
+`list` and `get` commands take the shared `ListOutputFormatOption` / `EntityOutputFormatOption` and print
+with `nemo_helix_plugin.cli_output.format_output`; see the `nhx-cli` skill and
+`plugins/example-plugin/src/nemo_example_plugin/cli.py` for the full pattern.

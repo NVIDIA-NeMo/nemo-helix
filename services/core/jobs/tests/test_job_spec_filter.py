@@ -12,8 +12,7 @@ while keeping offline runs that name no target at all.
 import json
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, ListJobsQueryParams
@@ -72,8 +71,8 @@ async def _list(jobs: AsyncJobsClient, condition: dict) -> set[str]:
 
 
 @pytest.fixture
-async def seeded_jobs(test_sdk: AsyncNeMoHelix) -> AsyncJobsClient:
-    jobs = client_from_platform(test_sdk, AsyncJobsClient)
+async def seeded_jobs(async_client: AsyncNemoClient) -> AsyncJobsClient:
+    jobs = AsyncJobsClient.from_client(async_client)
     await _create(jobs, "agent-job", AGENT_SPEC)
     await _create(jobs, "model-job", MODEL_SPEC)
     await _create(jobs, "offline-job", OFFLINE_SPEC)

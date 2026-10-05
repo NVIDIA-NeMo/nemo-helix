@@ -42,13 +42,14 @@ nemo data-designer create product_reviews.py --num-records 30
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-data_designer = client.data_designer
+data_designer = DataDesignerResource(client)
 preview = data_designer.preview(config_builder)
 job = data_designer.create(config_builder, num_records=1000)
 ```

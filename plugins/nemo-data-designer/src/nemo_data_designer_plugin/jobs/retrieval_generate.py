@@ -10,8 +10,7 @@ from nemo_data_designer_plugin.jobs.retrieval_common import retrieval_step, work
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig, RetrievalGenerateStepConfig
 from nemo_data_designer_plugin.retrieval.corpus import hf_token_from_env, materialize_corpus
 from nemo_data_designer_plugin.retrieval.providers import build_retrieval_model_configs, resolve_retrieval_providers
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
@@ -34,7 +33,7 @@ class RetrievalGenerateJob(NemoJob):
         *,
         workspace: str,
         entity_client: object,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         is_local: bool,
     ) -> BaseModel:
         job_config = (
@@ -68,7 +67,7 @@ class RetrievalGenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict[str, Any] | None = None,
     ) -> HelixJobSpec:
@@ -84,13 +83,13 @@ class RetrievalGenerateJob(NemoJob):
                     "nemo_data_designer_plugin.jobs.retrieval_generate",
                     canonical_spec,
                     profile=profile,
-                    async_sdk=async_sdk,
+                    async_client=async_sdk,
                     hf_token_secret=canonical_spec.job_config.hf_token_secret,
                 )
             ]
         )
 
-    def run(self, config: dict, *, ctx: JobContext, sdk: NeMoHelix) -> dict:
+    def run(self, config: dict, *, ctx: JobContext, sdk: NemoClient) -> dict:
         from nemo_data_designer_plugin.retrieval.generation import build_generation_run_config, execute_generation
 
         step = RetrievalGenerateStepConfig.model_validate(config)
@@ -100,7 +99,7 @@ class RetrievalGenerateJob(NemoJob):
         corpus_dir = materialize_corpus(
             job.corpus,
             dest=ctx.storage.ephemeral / "corpus",
-            sdk=sdk,
+            client=sdk,
             workspace=ctx.workspace,
             hf_token=hf_token_from_env(),
         )

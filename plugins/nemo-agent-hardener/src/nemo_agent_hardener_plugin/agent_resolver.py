@@ -37,6 +37,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
 
@@ -471,11 +473,16 @@ def check_relay_artifacts_dir(agent_config: dict[str, Any]) -> str | None:
 # --------------------------------------------------------------------------- #
 # Orchestrator
 # --------------------------------------------------------------------------- #
-def _fetch_agent_config(sdk: Any, workspace: str, name: str) -> dict[str, Any]:
+def _agents_resource(client: NemoClient) -> AgentsResource:
+    """Build the agents plugin resource explicitly; a typed client has no ``.agents`` plugin attribute."""
+    return AgentsResource(client)
+
+
+def _fetch_agent_config(agents: AgentsResource, workspace: str, name: str) -> dict[str, Any]:
     """Fetch the agent's stored NAT workflow config, raising a clean error if unusable."""
     try:
-        agent = sdk.agents.get(name, workspace=workspace)
-    except Exception as exc:  # any SDK/transport failure → one clean, actionable error
+        agent = agents.get(name, workspace=workspace)
+    except Exception as exc:  # any client/transport failure → one clean, actionable error
         raise AgentResolutionError(
             f"agent {workspace}/{name!r} not found. Deploy it first (nemo agents create + nemo agents deploy)."
         ) from exc
@@ -485,10 +492,10 @@ def _fetch_agent_config(sdk: Any, workspace: str, name: str) -> dict[str, Any]:
     return agent_config
 
 
-def _resolve_victim_port(sdk: Any, workspace: str, name: str) -> tuple[int, list[str]]:
+def _resolve_victim_port(agents: AgentsResource, workspace: str, name: str) -> tuple[int, list[str]]:
     """Return the running deployment's port (else agent-hardener's default 8000) plus any warnings."""
     try:
-        resp = sdk.agents.deployments.list(workspace=workspace)
+        resp = agents.deployments.list(workspace=workspace)
     except Exception:  # transport error → fall back to the default port, but surface why (not a silent miss)
         logger.warning(
             "could not list deployments for %s/%s; defaulting victim port to 8000", workspace, name, exc_info=True
@@ -505,7 +512,9 @@ def _resolve_victim_port(sdk: Any, workspace: str, name: str) -> tuple[int, list
     return 8000, [f"no running deployment for {workspace}/{name!r}; defaulting victim port to 8000."]
 
 
-def inspect_agent(ref: str, *, sdk: Any, default_workspace: str) -> tuple[str, int, list[str], list[str], list[str]]:
+def inspect_agent(
+    ref: str, *, client: NemoClient, default_workspace: str
+) -> tuple[str, int, list[str], list[str], list[str]]:
     """Derive the create-form defaults for a deployed agent without materializing anything.
 
     Returns ``(qualified_ref, port, secrets, egress, warnings)``: the victim port from the running
@@ -519,11 +528,12 @@ def inspect_agent(ref: str, *, sdk: Any, default_workspace: str) -> tuple[str, i
     wins over the derived one, so the manifest stops tracking the agent's own config from then on.
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
-    agent_config = _fetch_agent_config(sdk, workspace, name)
+    agents = _agents_resource(client)
+    agent_config = _fetch_agent_config(agents, workspace, name)
     # Reject here too, not only in resolve_agent_to_manifest: this is what the Studio create form
     # calls, so an unguardable agent is refused before an operator fills anything in.
     require_guardable_harness(agent_config, f"{workspace}/{name}")
-    port, warnings = _resolve_victim_port(sdk, workspace, name)
+    port, warnings = _resolve_victim_port(agents, workspace, name)
     secrets = derive_secret_names(agent_config)
     return f"{workspace}/{name}", port, secrets, derive_egress(agent_config), warnings
 
@@ -531,7 +541,7 @@ def inspect_agent(ref: str, *, sdk: Any, default_workspace: str) -> tuple[str, i
 def resolve_agent_to_manifest(
     ref: str,
     *,
-    sdk: Any,
+    client: NemoClient,
     base_url: str,
     default_workspace: str,
     manifest_dir: Path,
@@ -542,7 +552,8 @@ def resolve_agent_to_manifest(
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
-    ``sdk`` is a ``nemo_helix.NeMoHelix`` client. ``manifest_dir`` is where
+    ``client`` is the typed ``NemoClient``; the agents plugin resource is built from it
+    explicitly. ``manifest_dir`` is where
     ``agent-hardener.yaml`` will be written (paths in the manifest are relative to it).
 
     Pipeline: parse ref → fetch ``Agent`` config → resolve the victim port from a running
@@ -555,9 +566,10 @@ def resolve_agent_to_manifest(
     ``secrets`` override the auto-derived victim port / secret names; leave them unset to derive.
     """
     workspace, name = parse_agent_ref(ref, default_workspace)
-    agent_config = _fetch_agent_config(sdk, workspace, name)
+    agents = _agents_resource(client)
+    agent_config = _fetch_agent_config(agents, workspace, name)
     harness = require_guardable_harness(agent_config, f"{workspace}/{name}")
-    resolved_port, warnings = _resolve_victim_port(sdk, workspace, name)
+    resolved_port, warnings = _resolve_victim_port(agents, workspace, name)
     port = port or resolved_port
 
     telemetry_complaint = check_relay_artifacts_dir(agent_config)
@@ -588,8 +600,8 @@ def resolve_agent_to_manifest(
     config_path = materialize_agent_package(
         injected,
         project_path,
-        dockerfile_override=shipped_dockerfile(sdk, name, workspace),
-        bundle=lambda destination: download_agent_bundle(sdk, name, workspace, destination),
+        dockerfile_override=shipped_dockerfile(client, name, workspace),
+        bundle=lambda destination: download_agent_bundle(client, name, workspace, destination),
     )
     secrets = secrets or derive_secret_names(agent_config)
 

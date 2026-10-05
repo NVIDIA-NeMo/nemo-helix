@@ -97,6 +97,39 @@ describe('VariableTextArea', () => {
     expect(root.querySelector('.nv-variable-unknown')?.textContent).toBe('{{xyz}}');
   });
 
+  it('marks a spaced token by trimming it before lookup', () => {
+    render(
+      <VariableTextArea
+        value="Hello {{ input }}"
+        onChange={() => {}}
+        variables={[{ name: 'input' }]}
+        attributes={{ TextAreaElement: { 'data-testid': 'editor' } }}
+      />
+    );
+    // eslint-disable-next-line testing-library/no-node-access -- CodeMirror DOM structure assertion
+    const root = screen.getByTestId('editor').closest('.cm-editor')!;
+    // eslint-disable-next-line testing-library/no-node-access -- CodeMirror DOM structure assertion
+    expect(root.querySelector('.nv-variable-known')?.textContent).toBe('{{ input }}');
+  });
+
+  it('isKnown decides bracketed expressions the name list cannot answer for', () => {
+    render(
+      <VariableTextArea
+        value="{{ messages[0].content }} {{ nope[0] }}"
+        onChange={() => {}}
+        variables={[{ name: 'messages' }]}
+        isKnown={(token) => token.split(/[.[|\s]/)[0] === 'messages'}
+        attributes={{ TextAreaElement: { 'data-testid': 'editor' } }}
+      />
+    );
+    // eslint-disable-next-line testing-library/no-node-access -- CodeMirror DOM structure assertion
+    const root = screen.getByTestId('editor').closest('.cm-editor')!;
+    // eslint-disable-next-line testing-library/no-node-access -- CodeMirror DOM structure assertion
+    expect(root.querySelector('.nv-variable-known')?.textContent).toBe('{{ messages[0].content }}');
+    // eslint-disable-next-line testing-library/no-node-access -- CodeMirror DOM structure assertion
+    expect(root.querySelector('.nv-variable-unknown')?.textContent).toBe('{{ nope[0] }}');
+  });
+
   it('flips token class when the variable list changes', () => {
     const { rerender } = render(
       <VariableTextArea

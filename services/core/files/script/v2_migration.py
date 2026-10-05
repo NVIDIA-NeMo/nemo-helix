@@ -44,8 +44,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from huggingface_hub import HfApi
-from nemo_helix import NeMoHelix, NotFoundError
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_ext.client.bootstrap import build_nemo_client
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.files.client import FilesClient
@@ -152,13 +152,11 @@ def _get_datastore_api(cfg: RuntimeConfig) -> HfApi:
     return HfApi(endpoint=cfg.datastore_url, token=cfg.datastore_token)
 
 
-def _get_files_sdk(cfg: RuntimeConfig) -> NeMoHelix:
-    kwargs: dict[str, Any] = {}
-    if cfg.files_workspace:
-        kwargs["workspace"] = cfg.files_workspace
-    if cfg.files_base_url:
-        kwargs["base_url"] = cfg.files_base_url
-    return NeMoHelix(**kwargs)
+def _get_files_client(cfg: RuntimeConfig) -> NemoClient:
+    return build_nemo_client(
+        base_url=cfg.files_base_url or None,
+        workspace=cfg.files_workspace or None,
+    )
 
 
 def _resolve_target_workspace(repo_id: str, explicit_files_workspace: str | None) -> str:
@@ -251,8 +249,8 @@ def create_plan(
     repo_limit: int | None,
 ) -> dict[str, Any]:
     api = _get_datastore_api(cfg)
-    files_sdk = _get_files_sdk(cfg)
-    resolved_files_endpoint = str(files_sdk.base_url)
+    files_client = _get_files_client(cfg)
+    resolved_files_endpoint = str(files_client.base_url)
     selected_repo_ids = _list_repo_ids(api, repo_ids, repo_prefix, repo_limit)
 
     repo_plans: list[RepoPlan] = []
@@ -334,14 +332,14 @@ def create_plan(
 
 
 def _ensure_fileset(
-    sdk: NeMoHelix, workspace: str, fileset: str, dry_run: bool
+    client: NemoClient, workspace: str, fileset: str, dry_run: bool
 ) -> Literal["dry_run", "exists", "created"]:
     """
     Ensure that the target fileset exists, and create it if it doesn't.
     """
     if dry_run:
         return "dry_run"
-    files = client_from_platform(sdk, FilesClient)
+    files = FilesClient.from_client(client)
     try:
         files.get_fileset(name=fileset, workspace=workspace)
         return "exists"
@@ -350,11 +348,11 @@ def _ensure_fileset(
         return "created"
 
 
-def _ensure_workspace(sdk: NeMoHelix, workspace: str, dry_run: bool) -> Literal["dry_run", "exists", "created"]:
+def _ensure_workspace(client: NemoClient, workspace: str, dry_run: bool) -> Literal["dry_run", "exists", "created"]:
     """
     Ensure that the target workspace exists, and create it if it doesn't.
     """
-    workspaces = client_from_platform(sdk, WorkspacesClient)
+    workspaces = WorkspacesClient.from_client(client)
     if dry_run:
         return "dry_run"
     try:
@@ -369,16 +367,16 @@ def _ensure_workspace(sdk: NeMoHelix, workspace: str, dry_run: bool) -> Literal[
         return "created"
 
 
-def _get_existing_target_paths(sdk: NeMoHelix, workspace: str, fileset: str) -> set[str]:
+def _get_existing_target_paths(client: NemoClient, workspace: str, fileset: str) -> set[str]:
     """
     Return existing file paths in the target fileset.
 
     If the fileset does not exist yet, return an empty set.
     """
     try:
-        files = client_from_platform(sdk, FilesClient).list_files(name=fileset, workspace=workspace).data().data
+        files = FilesClient.from_client(client).list_files(name=fileset, workspace=workspace).data().data
         return {f.path for f in files}
-    except NotFoundError:
+    except ClientNotFoundError:
         return set()
 
 
@@ -390,7 +388,7 @@ def apply_plan(
     max_repos: int | None,
 ) -> dict[str, Any]:
     api = _get_datastore_api(cfg)
-    sdk = _get_files_sdk(cfg)
+    client = _get_files_client(cfg)
 
     repo_entries: list[dict[str, Any]] = list(plan.get("repos", []))
     if max_repos is not None:
@@ -416,7 +414,7 @@ def apply_plan(
         }
 
         try:
-            repo_result["workspace_status"] = _ensure_workspace(sdk, workspace, dry_run=dry_run)
+            repo_result["workspace_status"] = _ensure_workspace(client, workspace, dry_run=dry_run)
         except Exception as exc:
             repo_result["workspace_status"] = f"failed: {exc}"
             failed += len(artifacts)
@@ -433,7 +431,7 @@ def apply_plan(
             continue
 
         try:
-            repo_result["fileset_status"] = _ensure_fileset(sdk, workspace, fileset, dry_run=dry_run)
+            repo_result["fileset_status"] = _ensure_fileset(client, workspace, fileset, dry_run=dry_run)
         except Exception as exc:
             repo_result["fileset_status"] = f"failed: {exc}"
             failed += len(artifacts)
@@ -449,7 +447,7 @@ def apply_plan(
             results.append(repo_result)
             continue
 
-        existing_paths = _get_existing_target_paths(sdk, workspace, fileset)
+        existing_paths = _get_existing_target_paths(client, workspace, fileset)
         repo_result["existing_target_file_count"] = len(existing_paths)
 
         with tempfile.TemporaryDirectory(prefix="v2-migration-") as tmpdir:
@@ -477,7 +475,7 @@ def apply_plan(
                             repo_type="dataset",
                         )
                         with open(local_file, "rb") as fh:
-                            client_from_platform(sdk, FilesClient).upload_file(
+                            FilesClient.from_client(client).upload_file(
                                 content=fh,
                                 name=fileset,
                                 workspace=workspace,
@@ -557,11 +555,11 @@ def run_setup(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        sdk = _get_files_sdk(cfg)
-        files = client_from_platform(sdk, FilesClient)
+        client = _get_files_client(cfg)
+        files = FilesClient.from_client(client)
         # Lightweight Files API connectivity check against default workspace.
         files.list_filesets(workspace="default", query_params=ListFilesetsQueryParams(page_size=1))
-        print(f"  files service: OK (resolved base_url: {sdk.base_url}, check_workspace=default)")
+        print(f"  files service: OK (resolved base_url: {client.base_url}, check_workspace=default)")
     except Exception as exc:
         print(f"  files service: FAIL ({exc})")
         return 1

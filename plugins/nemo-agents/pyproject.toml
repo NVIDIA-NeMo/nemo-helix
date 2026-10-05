@@ -9,10 +9,7 @@ dependencies = [
     "nemo-helix",
     "nemo-helix-plugin",
     "nemo-deployments-plugin",
-    "nemo-optimization-plugin",
-    "nemo-agents-example-calculator",
-    "nemo-agents-example-email-phishing",
-    "nemo-agents-example-email-security",
+    "nemo-agent-config-example-email-security-triage",
     # NAT 1.9 is the first line whose cryptography cap (>=48,<49) overlaps
     # data-designer's, so it is what makes the published nemo-helix[all]
     # wheel resolvable at all; 1.8.0 caps cryptography at <47. That line ships
@@ -39,13 +36,13 @@ dependencies = [
     # improvement/ subpackage — agent-improvement workflow (POC).
     "anthropic>=0.88.0",
     "rich>=13.7.1",
-    "nemo-fabric[relay,streaming]>=0.3.0,<0.4.0",
-    "nemo-fabric-adapters-claude>=0.3.0,<0.4.0",
-    "nemo-fabric-adapters-codex>=0.3.0,<0.4.0",
-    "nemo-fabric-adapters-deepagents>=0.3.0,<0.4.0",
-    # Fabric 0.3's Hermes adapter intentionally excludes the harness. Platform manages
+    "nemo-fabric[relay,streaming]>=0.4.0,<0.5.0",
+    "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
+    "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
+    "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+    # Fabric's Hermes adapter intentionally excludes the harness. Platform manages
     # the compatible Hermes Agent installation separately.
-    "nemo-fabric-adapters-hermes>=0.3.0,<0.4.0; python_version < '3.14'",
+    "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 version = "0.0.0"
 
@@ -67,7 +64,6 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 # POC: agent-improvement workflow
 "agents.evaluate-suite" = "nemo_agents_plugin.jobs.evaluate_suite:EvaluateSuiteJob"
 "agents.analyze" = "nemo_agents_plugin.jobs.analyze_batch:AnalyzeBatchJob"
-"agents.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
 "agents.optimize-skills" = "nemo_agents_plugin.jobs.optimize_skills:OptimizeSkillsJob"
 "agents.package-agent" = "nemo_agents_plugin.jobs.package_agent:PackageAgentJob"
 
@@ -80,9 +76,9 @@ nemo_agents_files_telemetry = "nemo_agents_plugin.telemetry.files_service_export
 
 [project.optional-dependencies]
 all = ["nemo-agents-plugin[claude,codex,deepagents]"]
-claude = ["nemo-fabric-adapters-claude[harness]>=0.3.0,<0.4.0"]
-codex = ["nemo-fabric-adapters-codex[harness]>=0.3.0,<0.4.0"]
-deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.3.0,<0.4.0"]
+claude = ["nemo-fabric-adapters-claude[harness]>=0.4.0,<0.5.0"]
+codex = ["nemo-fabric-adapters-codex[harness]>=0.4.0,<0.5.0"]
+deepagents = ["nemo-fabric-adapters-deepagents[harness]>=0.4.0,<0.5.0"]
 # Moved to [project] dependencies; kept so older install instructions resolve.
 container = []
 test = [
@@ -108,11 +104,8 @@ packages = [
 nemo-deployments-plugin = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-nemo-optimization-plugin = { workspace = true }
-nemo-agents-example-calculator = { workspace = true }
-nemo-agents-example-email-phishing = { workspace = true }
-nemo-agents-example-email-security = { workspace = true }
 nemo-agent-config-example-calculator = {workspace = true}
+nemo-agent-config-example-email-security-triage = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

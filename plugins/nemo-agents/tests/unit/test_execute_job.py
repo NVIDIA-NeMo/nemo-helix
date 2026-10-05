@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -55,12 +56,19 @@ from nemo_agents_plugin.tasks.execute.workdir import (
 )
 from nemo_agents_plugin.telemetry import intake_export
 from nemo_agents_plugin.telemetry.intake_export import supports_intake_atif_export, wants_intake_atif_export
-from nemo_helix_plugin.dependencies import get_entity_client, get_sdk_client
+from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.job_context import JobContext
+from nemo_helix_plugin.job_usage import LocalJobUsageReporter
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.routes import add_job_routes
 from pydantic import ValidationError
+
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
 
 
 class _TypedFilesResponse:
@@ -496,7 +504,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -510,7 +518,7 @@ async def test_compile_produces_single_cpu_step_with_canonical_config() -> None:
     step = steps[0]
     assert step["name"] == "execute-agent"
     assert step["executor"]["provider"] == "cpu"
-    assert step["executor"]["container"]["image"] == "registry.example/nhx-cpu-tasks:test"
+    assert step["executor"]["container"]["image"] == "registry.example/nhx-tasks:test"
     assert step["executor"]["container"]["command"] == ["nemo_agents_plugin.tasks.execute"]
     assert step["config"] == spec.model_dump(mode="json")
     step_config = cast(dict[str, Any], step["config"])
@@ -823,7 +831,7 @@ async def test_compile_injects_secret_env_and_compute_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -851,7 +859,7 @@ async def test_compile_without_compute_omits_executor_resources() -> None:
     )
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         platform_spec = await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -877,7 +885,7 @@ async def test_compile_rejects_unsupported_compute_resource_key() -> None:
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(HelixJobCompilationError, match="Unsupported compute resource key"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -899,7 +907,7 @@ async def test_compile_rejects_secret_env_colliding_with_reserved_name() -> None
         patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config,
         pytest.raises(HelixJobCompilationError, match="reserved job env var name"),
     ):
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         await ExecuteAgentJob.compile(
             workspace="default",
             spec=spec,
@@ -945,6 +953,27 @@ def test_run_without_input_workdir_saves_empty_input_snapshot(ctx: JobContext) -
     payload = json.loads((ctx.storage.persistent / "results" / FABRIC_RUN_RESULT_NAME).read_text())
     assert payload["metadata"] == {"adapter_runner": "python"}
     assert payload["runtime_id"] == "runtime-1"
+
+
+def test_run_reports_terminal_fabric_token_usage(ctx: JobContext) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(agent="calc", input="hello"),
+        agent=_resolved_agent(),
+    )
+
+    async def _invoke(request: Any) -> FabricRuntimeResult:
+        return FabricRuntimeResult(
+            status="succeeded",
+            output={"response": "done", "usage": {"input_tokens": 21, "output_tokens": 8}},
+        )
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+
+    assert isinstance(ctx.usage, LocalJobUsageReporter)
+    assert ctx.usage.latest is not None
+    assert ctx.usage.latest.input_tokens == 21
+    assert ctx.usage.latest.output_tokens == 8
 
 
 def test_run_threads_custom_timeout_to_fabric(ctx: JobContext) -> None:
@@ -1276,7 +1305,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     entity_client.get.return_value = _agent()
     sdk = _sdk_with_files()
     app.dependency_overrides[get_entity_client] = lambda: entity_client
-    app.dependency_overrides[get_sdk_client] = lambda: sdk
+    app.dependency_overrides[get_nemo_client] = lambda: sdk
 
     captured_body: dict[str, Any] = {}
 
@@ -1303,7 +1332,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
 
     fake_jobs = SimpleNamespace(create_job=_create_job)
     with (
-        patch("nemo_helix_plugin.jobs.api_factory.client_from_platform", return_value=fake_jobs),
+        patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs),
         patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
     ):
         response = TestClient(app).post(
@@ -1380,10 +1409,10 @@ def test_execute_job_create_route_maps_reserved_secret_env_to_422() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = _get
     app.dependency_overrides[get_entity_client] = lambda: entity_client
-    app.dependency_overrides[get_sdk_client] = lambda: _sdk_with_files()
+    app.dependency_overrides[get_nemo_client] = lambda: _sdk_with_files()
 
     with patch("nemo_agents_plugin.jobs.execute.AgentsConfig.get") as get_config:
-        get_config.return_value.jobs.default_image = "registry.example/nhx-cpu-tasks:test"
+        get_config.return_value.jobs.default_image = "registry.example/nhx-tasks:test"
         response = TestClient(app, raise_server_exceptions=False).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={"name": "execute-1", "spec": {"agent": "calc", "input": "hello", "environment": "default/prod"}},
@@ -2028,6 +2057,7 @@ def test_an_unrecognized_telemetry_section_is_left_alone(monkeypatch: pytest.Mon
     assert config["telemetry"] == {"enabled": True, "not_a_real_field": 1}
 
 
+@requires_hermes_adapter
 def test_relay_support_is_read_from_the_adapter_descriptor(tmp_path: Path) -> None:
     """The bundled harnesses advertise relay with an ATIF output."""
     assert supports_intake_atif_export(_fabric_agent_config(), base_dir=tmp_path) is True
@@ -2062,6 +2092,7 @@ def test_an_adapter_without_the_atif_output_is_not_wired(
     assert "not its ATIF output" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2097,6 +2128,7 @@ def test_a_job_with_no_gateway_models_still_exports_through_a_proxy(
     assert "header_env" not in storage
 
 
+@requires_hermes_adapter
 def test_an_auth_disabled_platform_exports_straight_to_the_platform(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2182,6 +2214,7 @@ def test_a_telemetry_only_job_runs_untraced_rather_than_failing(
     assert "without credentials" in caplog.text
 
 
+@requires_hermes_adapter
 def test_a_telemetry_only_job_completes_when_the_proxy_cannot_start(
     ctx: JobContext, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

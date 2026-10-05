@@ -110,7 +110,7 @@ nemo --help   # should show "agents" under Plugins
 ### Calculator agent demo — DeepAgents + Relay
 
 [`examples/nemo-agent-config/calculator-agent/agent.yaml`](examples/nemo-agent-config/calculator-agent/agent.yaml)
-uses DeepAgents as its harness and routes `nvidia-nemotron-3-nano-30b-a3b`
+uses DeepAgents as its harness and routes `nvidia-nemotron-3-5-lightning-30b-a3b`
 through the Platform Inference Gateway. The agent answers arithmetic and
 numeric comparison requests and records ATIF and ATOF telemetry with NeMo
 Relay.
@@ -124,12 +124,11 @@ export NVIDIA_API_KEY="<your NVIDIA API key>"
 export NHX_BASE_URL=http://localhost:8080
 ```
 
-Start ClickHouse for Intake, then set up NeMo Helix without deploying the
-default demo agent:
+Start ClickHouse for Intake, then set up NeMo Helix:
 
 ```bash
 services/intake/scripts/spans/run_clickhouse.sh
-nemo setup --auto --start-services --install-skills --no-deploy-agent
+nemo setup --auto --start-services --install-skills
 ```
 
 Confirm that the Platform is ready before continuing:
@@ -547,7 +546,7 @@ The image installs only `default_harness`; other entries under `harnesses` are
 configuration alternatives and are not available in the immutable image.
 Claude, Codex, and DeepAgents use their corresponding `nemo-helix` extras.
 Hermes uses the adapter-only Platform extra and installs the pinned Hermes
-source plus matching Fabric adapter in an isolated Python 3.12 environment.
+source plus matching Fabric adapter in an isolated Python 3.14 environment.
 Every image runs as a non-root `agent` user and serves the packaged agent on
 port `8000`.
 
@@ -623,7 +622,7 @@ to hyphens:
 
 | Provider model name | IGW entity name |
 |---|---|
-| `nvidia/nemotron-3-nano-30b-a3b` | `nvidia-nemotron-3-nano-30b-a3b` |
+| `nvidia/nemotron-3.5-lightning-30b-a3b` | `nvidia-nemotron-3-5-lightning-30b-a3b` |
 
 The calculator config therefore declares:
 
@@ -631,7 +630,7 @@ The calculator config therefore declares:
 models:
   default:
     provider: nvidia
-    model: nvidia-nemotron-3-nano-30b-a3b
+    model: nvidia-nemotron-3-5-lightning-30b-a3b
     api_key_env: NVIDIA_API_KEY
 ```
 
@@ -687,7 +686,7 @@ nat --help    # should show run, eval, optimize, start, …
 ```
 
 > **Working directory:** All example commands that reference `examples/` use
-> paths relative to the plugin directory.  Run them from `plugins/nemo-agents/`:
+> paths relative to the plugin directory. Run them from `plugins/nemo-agents/`:
 >
 > ```bash
 > cd plugins/nemo-agents/
@@ -697,7 +696,8 @@ nat --help    # should show run, eval, optimize, start, …
 
 ### ReAct agent demo — Wikipedia search + datetime tools
 
-`examples/react-agent.yml` uses `meta/llama-3.1-70b-instruct` with:
+`examples/react-agent/react-agent.yml` uses the model selected by
+`NEMO_DEFAULT_MODEL` with:
 
 - `wiki_search` — searches Wikipedia (no API key needed)
 - `current_datetime` — returns current UTC time
@@ -711,7 +711,7 @@ automatically into the agent config — you only need to:
 
 #### NAT Step 1 — Start the platform
 
-Run this in a **dedicated terminal** — it stays in the foreground.  Use a
+Run this in a **dedicated terminal** — it stays in the foreground. Use a
 separate terminal for all subsequent steps.
 
 ```bash
@@ -752,21 +752,20 @@ nemo wait inference provider nvidia-build
 #### NAT Step 3 — Create and deploy the agent
 
 ```bash
-# Register the agent config with the platform
+# The config resolves this model when the agent is created.
+nemo models list
+export NEMO_DEFAULT_MODEL=your-model-entity-name
 nemo agents create \
     --name react-agent \
     --agent-config examples/react-agent/react-agent.yml
 
-# Deploy it.  ``deploy`` waits for the spawned subprocess to reach a
-# terminal state (``running`` or ``failed``) by default and exits 0 only
-# when the agent is actually serving — so the exit code reflects the
-# real outcome instead of just "the API call succeeded".
+# Deploy waits for the agent to reach a running or failed state.
 nemo agents deploy --agent react-agent
 
 # Container mode (docker): requires the nemo-deployments controller plus a
 # configured docker executor (see agents.deployments / deployments.executors).
 # Build an image first, then deploy with that tag:
-#   nemo agents package --agent-config examples/react-agent/react-agent.yml --tag react-agent:local
+#   nemo agents package --agent examples/react-agent/react-agent.yml --tag react-agent:local
 #   nemo agents deploy --agent react-agent --mode docker --image react-agent:local
 #
 # --mode k8s needs a k8s executor and a registry-reachable image; in-cluster
@@ -805,19 +804,8 @@ nemo agents invoke \
     --input "Who invented the telephone? Also, what time is it right now?"
 ```
 
-Expected response:
-```json
-{
-  "choices": [{
-    "message": {
-      "content": "Alexander Graham Bell invented the telephone. The current time is 2026-03-23 23:17:08 +0000.",
-      "role": "assistant"
-    }
-  }]
-}
-```
-
 The gateway URL is:
+
 ```
 http://127.0.0.1:8080/apis/agents/v2/workspaces/default/agents/react-agent/-/v1/chat/completions
 ```
@@ -829,8 +817,8 @@ stopped when the response or response stream completes. To retain runtime
 context across turns, send a stable session ID in that header; the registered
 runtime then follows the Platform session lifecycle.
 
-The agent is still running — continue to the [Evaluation](#evaluation) section
-below, or see [Cleanup](#cleanup-optional) to tear everything down.
+The agent is still running — continue to [Evaluation](#evaluation) below, or
+see [Cleanup](#cleanup-optional) to tear everything down.
 
 ---
 
@@ -840,53 +828,17 @@ Evaluation delegates to `nat eval`, which sends dataset questions to the
 agent's `/generate/full` endpoint and scores responses with a judge LLM.
 
 The agent must be deployed and running (see NAT Step 3 above) before evaluating.
+The supplied config pins separate agent and judge models. Check that both
+are available in your workspace and adjust their `model_name` values if needed.
 
 ```bash
 nemo agents evaluate \
-    --eval-config examples/test-eval.yml \
+    --eval-config examples/react-agent/react-eval.yml \
     --agent react-agent
 ```
 
 The `--agent` flag resolves the running deployment endpoint automatically and
 passes it to `nat eval --endpoint`.
-
-Expected output:
-```
-=== EVALUATION SUMMARY ===
-Workflow Status: COMPLETED (workflow_output.json)
-Total Runtime: ~1.8s
-
-Per evaluator results:
-| Evaluator   |   Avg Score | Output File         |
-|-------------|-------------|---------------------|
-| runtime     |        ~0.9 | runtime_output.json |
-```
-
-A non-zero `Avg Score` and `Total Runtime` confirms requests reached the agent
-successfully.  (The `avg_workflow_runtime` metric reports average seconds per
-request, so the score varies with network latency.)
-
-#### LLM-judge evaluation (requires a judge LLM)
-
-`examples/calculator-agent/calculator-eval.yml` uses `tunable_rag_evaluator`
-with an LLM judge. The judge's `model_name` is `${NEMO_DEFAULT_MODEL}`, which
-resolves to whichever model your platform context has set as the default
-(see `nemo_helix.config.get_context().default_model`); `base_url` and
-`api_key` are auto-injected by the platform to route through the Inference
-Gateway. Set the env var, or edit `llms.judge_llm.model_name` to pin a
-specific VirtualModel registered in your workspace, then run:
-
-```bash
-export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b   # or any registered VirtualModel
-nemo agents evaluate \
-    --eval-config plugins/nemo-agents/examples/calculator-agent/src/calculator_agent/calculator-eval.yml \
-    --agent calculator-agent
-```
-
-The job pre-flights every LLM `model_name` against
-`sdk.inference.virtual_models.retrieve` before invoking `nat eval`, so a
-missing or mistyped model fails fast with a message naming the model and
-suggesting recovery options instead of an opaque subprocess error.
 
 ---
 
@@ -947,7 +899,7 @@ runtime version.
 Agent configs are standard NAT workflow YAML files. The platform stores them
 as `nat-workflow-v1` entities. All NAT component types are supported.
 
-**ReAct agent with tools** (`examples/react-agent.yml`):
+**ReAct agent with tools** (`examples/react-agent/react-agent.yml`):
 
 ```yaml
 functions:
@@ -960,7 +912,7 @@ llms:
   llm:
     _type: openai
     api_key: not-used            # injected by platform at deploy time
-    model_name: nvidia-nemotron-3-nano-30b-a3b  # IGW entity name
+    model_name: ${NEMO_DEFAULT_MODEL}
     temperature: 0.0
 
 workflow:

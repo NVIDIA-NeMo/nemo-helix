@@ -18,8 +18,10 @@ from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import UUID
 
-import httpx
-from nemo_helix_ext.client.factory import create_client
+from nemo_helix_ext.client.bootstrap import build_nemo_client
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.intake.client import IntakeClient
+from nemo_helix_plugin.intake.types import DirectSpansIngestRequest
 
 JsonObject = dict[str, Any]
 SPAN_BATCH_LIMIT = 1000
@@ -416,17 +418,21 @@ class IntakeWriter:
         session: Any | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
-        self._sdk_client: Any | None = None
+        self._client: NemoClient | None = None
+        self._intake_client: IntakeClient | None = None
+        self.session: Any
         if session is None:
-            self._sdk_client = create_client(
+            self._client = build_nemo_client(
                 base_url=base_url,
                 access_token=access_token,
                 timeout=float(timeout_seconds),
-                max_retries=0,
+                retry=None,
             )
-            self.session = _SdkSession(self._sdk_client)
-            self.base_url = _validated_base_url(str(self._sdk_client.base_url))
-            self.workspace = workspace or self._sdk_client.workspace or "default"
+            self._intake_client = IntakeClient.from_client(self._client)
+            # The bootstrap's httpx client already carries the context's auth and headers.
+            self.session = self._client._client
+            self.base_url = _validated_base_url(self._client.base_url)
+            self.workspace = workspace or self._client.workspace or "default"
             self.headers: dict[str, str] = {}
         else:
             if base_url is None:
@@ -445,19 +451,19 @@ class IntakeWriter:
         self.close()
 
     def close(self) -> None:
-        if self._sdk_client is not None:
-            self._sdk_client.close()
-            self._sdk_client = None
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+            self._intake_client = None
 
     def write(self, bundle: ImportBundle, *, batch_size: int) -> JsonObject:
         bundle.validate()
         for start in range(0, len(bundle.spans), batch_size):
             spans = bundle.spans[start : start + batch_size]
-            if self._sdk_client is not None:
-                self._sdk_client.intake.ingest.spans.create(
+            if self._intake_client is not None:
+                self._intake_client.create_spans(
                     workspace=self.workspace,
-                    source=bundle.source,
-                    spans=spans,
+                    body=DirectSpansIngestRequest.model_validate({"source": bundle.source, "spans": spans}),
                 )
             else:
                 self._request(
@@ -616,32 +622,6 @@ def _annotation_signature(annotation: JsonObject) -> str:
     else:
         raise ValueError(f"Unsupported Intake annotation kind: {kind}")
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-class _SdkSession:
-    """Adapt the SDK factory's OAuth-aware HTTP client to the importer's request interface."""
-
-    def __init__(self, client: Any) -> None:
-        self.client = client
-
-    def request(self, method: str, url: str, **kwargs: Any) -> Any:
-        params = kwargs.pop("params", None)
-        options = {
-            # The generated SDK merges query options as mappings, unlike httpx.
-            "params": dict(params) if params is not None else None,
-            "headers": kwargs.pop("headers", None),
-            "timeout": kwargs.pop("timeout", None),
-            "follow_redirects": bool(kwargs.pop("follow_redirects", False)),
-        }
-        options = {key: value for key, value in options.items() if value is not None}
-        json_body = kwargs.pop("json", None)
-        if kwargs:
-            raise TypeError(f"Unsupported SDK request options: {sorted(kwargs)}")
-        if method == "GET":
-            return self.client.get(url, cast_to=httpx.Response, options=options)
-        if method == "POST":
-            return self.client.post(url, cast_to=httpx.Response, body=json_body, options=options)
-        raise ValueError(f"Unsupported Intake request method: {method}")
 
 
 def _validated_base_url(value: str) -> str:

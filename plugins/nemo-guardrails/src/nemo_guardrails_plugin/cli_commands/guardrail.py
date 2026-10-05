@@ -9,19 +9,20 @@ from typing import Annotated
 
 import typer
 from nemo_guardrails_plugin.cli_commands.configs import app as configs_app
-from nemo_helix_ext.cli.core.api import build_kwargs
-from nemo_helix_ext.cli.core.code_generator import handle_code_generation
-from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_ext.cli.core.errors import handle_errors
-from nemo_helix_ext.cli.core.formatters import format_output
-from nemo_helix_ext.cli.core.help_formatter import collect_warnings, create_typer_app
-from nemo_helix_ext.cli.core.stdin_utils import (
+from nemo_helix_plugin.cli import create_typer_app
+from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_error_handling import handle_errors
+from nemo_helix_plugin.cli_input import (
     build_request_body,
     read_data_input_with_flags,
     read_payload,
     validate_required_fields,
 )
-from nemo_helix_ext.cli.core.types import EntityOutputFormatOption
+from nemo_helix_plugin.cli_kwargs import build_kwargs
+from nemo_helix_plugin.cli_options import EntityOutputFormatOption
+from nemo_helix_plugin.cli_output import format_output
+from nemo_helix_plugin.cli_state import cli_state
+from nemo_helix_plugin.cli_warnings import collect_warnings
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import GuardrailCheckRequest
 
@@ -264,7 +265,7 @@ def check_guardrail(
     )
     kwargs = build_kwargs(workspace=input_payload.get("workspace"), body=body)
 
-    state: CLIContext = ctx.obj
+    state = cli_state(ctx)
     resolved_output_format = state.get_output_format(output_format)
 
     if handle_code_generation(GuardrailClient, "check_guardrail", kwargs, resolved_output_format, state):

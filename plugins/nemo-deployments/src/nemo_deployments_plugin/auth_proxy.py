@@ -38,6 +38,7 @@ _AUTH_PROXY_PRINCIPAL_ENVVAR = "NHX_AUTH_PROXY_PRINCIPAL"
 _AUTH_PROXY_ON_BEHALF_OF_ENVVAR = "NHX_AUTH_PROXY_ON_BEHALF_OF"
 _AUTH_PROXY_HOST_ENVVAR = "NHX_AUTH_PROXY_HOST"
 _AUTH_PROXY_PORT_ENVVAR = "NHX_AUTH_PROXY_PORT"
+_AUTH_PROXY_STATE_HOME_ENVVAR = "XDG_STATE_HOME"
 _AUTH_PROXY_COMMAND = ["nemo", "services", "run", "--sidecars", "auth-proxy"]
 
 
@@ -95,6 +96,11 @@ def build_auth_proxy_container(config: DeploymentConfig, *, docker: bool = False
         EnvVar(name=_AUTH_PROXY_PRINCIPAL_ENVVAR, value=identity),
         EnvVar(name=_AUTH_PROXY_HOST_ENVVAR, value="127.0.0.1"),
         EnvVar(name=_AUTH_PROXY_PORT_ENVVAR, value=str(port)),
+        # OpenShift runs workloads with an arbitrary UID that cannot write the
+        # image-owned /home/nvs directory. ``nemo services run`` persists its
+        # process lock and descriptor under XDG_STATE_HOME, so keep that
+        # ephemeral state in the universally writable container /tmp instead.
+        EnvVar(name=_AUTH_PROXY_STATE_HOME_ENVVAR, value="/tmp"),
     ]
     if on_behalf_of:
         env.append(EnvVar(name=_AUTH_PROXY_ON_BEHALF_OF_ENVVAR, value=on_behalf_of))

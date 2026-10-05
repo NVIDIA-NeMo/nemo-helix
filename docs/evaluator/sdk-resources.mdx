@@ -14,18 +14,18 @@ This page explains the NeMo Helix-specific objects used to submit durable platfo
 ## Evaluator
 
 The `Evaluator` resource is the sync SDK object for working with the Evaluator plugin on NeMo Helix.
-It is accessed directly from a `NeMoHelix` instance:
+Build it from a `NemoClient` instance:
 
 ```python
 import os
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 ```
 
 The primary execution method is `submit`, which creates a durable remote platform job whose lifecycle you manage through the returned job resource.
@@ -33,7 +33,7 @@ For local in-process evaluation that returns a completed `EvaluationResult` with
 
 | Method | Description | Returns |
 |--------|-------------|---------|
-| `submit()` | Submits one metric evaluation as a durable platform job. | `EvaluatorJobResource` |
+| `submit()` | Submits a durable platform job: one metric evaluation over a dataset, or a taskset evaluation run by an agent runner. | `EvaluatorJobResource` or `AgentEvaluatorJobResource` |
 | `plugin_status()` | Returns Evaluator plugin health information from the service. | `dict[str, object]` |
 | `get_job_resource(job_name: str, workspace: str \\| None = None)` | Returns a resource for an existing Evaluator plugin job. | `EvaluatorJobResource` |
 
@@ -43,11 +43,14 @@ The `dataset` argument accepts inline rows, local dataset paths, local glob path
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
-| `metric` | `Metric` | Yes | Metric configuration serialized into the durable platform job. |
-| `dataset` | `PluginDatasetInput` | Yes | Inline rows, local dataset paths, local glob paths, or fileset references with optional fragment selectors. |
-| `config` | `RunConfig \\| RunConfigOnline \\| RunConfigOnlineModel \\| None` | No | Runtime settings applied when the submitted job executes. |
-| `target` | `Model \\| ModelRef \\| Agent \\| None` | No | Model, model reference, or agent target used when the submitted job should generate outputs before scoring. |
-| `prompt_template` | `str \\| dict[str, Any] \\| None` | No | Prompt template used with `target` for online model or agent evaluation. |
+| `metric` | `Metric` | Row evaluation | Metric configuration serialized into the durable platform job. |
+| `dataset` | `PluginDatasetInput` | Row evaluation | Inline rows, local dataset paths, local glob paths, or fileset references with optional fragment selectors. |
+| `tasks` | `TasksetRef \\| None` | Taskset evaluation | Stored taskset the agent runner evaluates. Mutually exclusive with `metric` + `dataset`. |
+| `trials` | `list[AgentEvalTrial] \\| None` | Taskset evaluation | Saved trials to rescore offline, instead of generating them with a runner. Mutually exclusive with `target`. |
+| `config` | `RunConfig \\| RunConfigOnline \\| RunConfigOnlineModel \\| None` | No | Runtime settings applied when the submitted job executes. Row evaluation only. |
+| `target` | `Model \\| ModelRef \\| Agent \\| AgentTaskRunner \\| None` | No | Model, model reference, or agent target for a row evaluation; the live agent runner for a taskset evaluation. |
+| `placement` | `GymPlacement \\| None` | No | Where the platform runs a `GymAgentTaskRunner` — a staged environment FileSet and the agent instance a sandboxed host routes to. Taskset evaluation only. |
+| `prompt_template` | `str \\| dict[str, Any] \\| None` | No | Prompt template used with `target` for online model or agent evaluation. Row evaluation only. |
 
 ### Submit a platform job
 
@@ -68,24 +71,24 @@ print(result.aggregate_scores)
 
 ## AsyncEvaluator
 
-The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNeMoHelix`.
+The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `AsyncNemoClient`.
 Async methods must be awaited:
 
 ```python
 import os
 from nemo_evaluator.sdk import AsyncEvaluator
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
-client = AsyncNeMoHelix(
+async_client = AsyncNemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: AsyncEvaluator = client.evaluator
+async_evaluator = AsyncEvaluator.from_client(async_client)
 ```
 
 | Method | Description | Returns |
 |--------|-------------|---------|
-| `submit()` | Submits one metric evaluation as a durable platform job. | `AsyncEvaluatorJobResource` |
+| `submit()` | Submits a durable platform job: one metric evaluation over a dataset, or a taskset evaluation run by an agent runner. | `AsyncEvaluatorJobResource` or `AsyncAgentEvaluatorJobResource` |
 | `plugin_status()` | Returns Evaluator plugin health information from the service. | `dict[str, object]` |
 | `get_job_resource(job_name: str, workspace: str \\| None = None)` | Returns a resource for an existing Evaluator plugin job. | `AsyncEvaluatorJobResource` |
 
@@ -103,7 +106,7 @@ dataset = [
 ]
 
 async def main() -> None:
-    job = await evaluator.submit(metric=metric, dataset=dataset)
+    job = await async_evaluator.submit(metric=metric, dataset=dataset)
     await job.wait_until_done()
     result = await job.get_result()
     print(result.aggregate_scores)

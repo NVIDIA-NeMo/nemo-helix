@@ -25,6 +25,7 @@ from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import (
     SandboxExecResult,
     SandboxHandle,
     SandboxSpec,
+    SandboxStatus,
 )
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
@@ -42,14 +43,11 @@ def _stub_image_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fabric_runtime, "ensure_fabric_image", lambda **_kwargs: "fabric-img:test")
 
 
-class _FakeResolver:
-    """Resolves any SecretRef to a fixed value."""
+class _FakeEnvSource:
+    """Names the variable populated by the test's orchestrator."""
 
-    def __init__(self, value: str = "resolved-secret") -> None:
-        self._value = value
-
-    async def resolve_secret(self, secret_ref: SecretRef) -> str:
-        return self._value
+    def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+        return "RESOLVED_SECRET"
 
 
 class _FakeProvider:
@@ -131,8 +129,8 @@ class _FakeProvider:
     async def download_file(self, handle: SandboxHandle, source_path: str, target_path: Path) -> None:
         return None
 
-    async def status(self, handle: SandboxHandle) -> object:
-        return None
+    async def status(self, handle: SandboxHandle) -> SandboxStatus:
+        return SandboxStatus.RUNNING
 
     async def close(self, handle: SandboxHandle) -> None:
         self.closed += 1
@@ -253,11 +251,14 @@ async def test_agent_input_uses_instruction_not_intent(tmp_path: Path) -> None:
     assert "fib.py" in agent_input  # seed file listed by name
 
 
-async def test_secrets_are_resolved_and_injected_as_env(tmp_path: Path) -> None:
+async def test_secrets_are_resolved_and_injected_as_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _FakeProvider()
-    runtime = _runtime(provider, secrets={"NVIDIA_API_KEY": SecretRef(root="nvidia-build-api-key")})
-    # The orchestrator (AgentEvaluator / backend) owns the resolver and resolves before running.
-    await runtime.resolve_secrets(_FakeResolver("nvapi-xyz"))
+    monkeypatch.setenv("RESOLVED_SECRET", "nvapi-xyz")
+    runtime = _runtime(
+        provider,
+        env_secrets={"NVIDIA_API_KEY": SecretRef(root="nvidia-build-api-key")},
+        secret_resolver=_FakeEnvSource(),
+    )
     await _run(runtime, [_task()], tmp_path)
     assert provider.env == {"NVIDIA_API_KEY": "nvapi-xyz"}  # resolved value, keyed by the harness env var
 

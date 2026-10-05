@@ -15,7 +15,7 @@ dependencies = [
     "httpx>=0.27.2",
     "nemo-helix",
     "nemo-helix-plugin",
-    "nemo-safe-synthesizer==0.1.7",
+    "nemo-safe-synthesizer==0.1.13",
     "pydantic[email]>=2.9.2",
     "pydantic-settings>=2.2.1",
     "python-multipart~=0.0.9",

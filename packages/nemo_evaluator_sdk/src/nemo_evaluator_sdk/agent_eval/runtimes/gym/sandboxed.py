@@ -30,11 +30,12 @@ token off the descriptor, and hand them to this runner.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +55,7 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTas
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, RunnerInfo
 from nemo_evaluator_sdk.values.results import AggregateScore
 from pydantic import BaseModel, ConfigDict, Field
-from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S
+from sandboxed_gym.host.models import MIN_PROXY_CUTOFF_S, render_host_error
 
 logger = logging.getLogger(__name__)
 
@@ -126,10 +127,14 @@ def _unpack_model_call_captures(records: list[dict[str, Any]], work_dir: Path) -
     return capture_dir
 
 
+def _host_error_message(rollout_url: str, error: object) -> str:
+    return f"sandboxed Gym host reported an error from {rollout_url}: {render_host_error(error)}"
+
+
 class SandboxedGymRuntimeConfig(BaseModel):
     """Where to reach a running sandboxed Gym host, and how to read its rollouts."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     rollout_url: str = Field(description="The session's `/rollouts/run` URL, from its descriptor.")
     auth_token: str | None = Field(
@@ -154,14 +159,24 @@ class SandboxedGymRuntimeConfig(BaseModel):
         "instance an agent config's top-level key defines (`rewoo_agent`), not the component it configures "
         "(`simple_agent`).",
     )
+    num_repeats: int = Field(default=1, ge=1, description="Attempts per row; each attempt becomes one trial.")
     reward_key: str = Field(default=DEFAULT_REWARD_KEY, description="Key read from each rollout record.")
 
 
-class SandboxedGymAgentTaskRunner:
-    """An ``AgentTaskRunner`` that collects rollouts from a sandboxed Gym host over HTTP."""
+RolloutCollector = Callable[[list[dict[str, Any]]], Awaitable[list[Any]]]
 
-    def __init__(self, *, config: SandboxedGymRuntimeConfig) -> None:
+
+class SandboxedGymAgentTaskRunner:
+    """An ``AgentTaskRunner`` that collects rollouts from a sandboxed Gym host over HTTP.
+
+    By default every example goes to ``config.rollout_url`` in one POST. ``collect`` replaces that
+    step, e.g. with a session's ``arun_rollouts``, which chunks the batch and retries.
+    """
+
+    def __init__(self, *, config: SandboxedGymRuntimeConfig, collect: RolloutCollector | None = None) -> None:
         self._config = config
+        self._injected_collector = collect is not None
+        self._collect_rollouts: RolloutCollector = collect or self._collect
         self._run_aggregations: dict[str, Any] | None = None
 
     def run_aggregate_scores(self) -> Sequence[AggregateScore]:
@@ -180,17 +195,16 @@ class SandboxedGymAgentTaskRunner:
         exactly one credential here and nothing about it is worth recording.
         """
         cfg = self._config
-        return RunnerInfo(
-            name="gym",
-            kind="runner",
-            config={
-                "mode": "sandboxed",
-                "rollout_url": cfg.rollout_url,
-                "agent_ref_name": cfg.agent_ref_name,
-                "reward_key": cfg.reward_key,
-                "timeout_s": cfg.timeout_s,
-            },
-        )
+        config: dict[str, Any] = {
+            "mode": "sandboxed",
+            "rollout_url": cfg.rollout_url,
+            "agent_ref_name": cfg.agent_ref_name,
+            "num_repeats": cfg.num_repeats,
+            "reward_key": cfg.reward_key,
+        }
+        if not self._injected_collector:
+            config["timeout_s"] = cfg.timeout_s
+        return RunnerInfo(name="gym", kind="runner", config=config)
 
     def _request_headers(self) -> dict[str, str]:
         headers = dict(self._config.headers)
@@ -252,7 +266,7 @@ class SandboxedGymAgentTaskRunner:
                 f"{self._config.rollout_url} ({exc}); first 200 bytes: {text[:200]!r}"
             ) from exc
 
-    async def _collect(self, examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def _collect(self, examples: list[dict[str, Any]]) -> list[Any]:
         """POST the examples and return the host's rollout records."""
         started = time.monotonic()
         async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
@@ -263,11 +277,16 @@ class SandboxedGymAgentTaskRunner:
             )
         elapsed = time.monotonic() - started
         if response.status_code >= 400:
-            # The body is the host's own error envelope; it names which example or server failed,
-            # which the status code alone does not.
+            # A bootstrap failure arrives here as a 503 carrying the same envelope a 200 would, so
+            # render it the same way. Truncating the raw body instead cuts the output tail short.
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            error = payload.get("error") if isinstance(payload, Mapping) else None
+            detail = render_host_error(error) if error is not None else response.text[:2000]
             raise RuntimeError(
-                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: "
-                f"{response.text[:2000]}"
+                f"sandboxed Gym host returned {response.status_code} from {self._config.rollout_url}: {detail}"
             )
         body = self._decode_body(response, elapsed)
         error = body.get("error") if isinstance(body, Mapping) else None
@@ -276,17 +295,14 @@ class SandboxedGymAgentTaskRunner:
             # connection open past the sandbox proxy's first-byte cap. A failure after that point
             # has only the body left to travel in, and carries the code and traceback that say
             # which of Gym's layers raised.
-            raise RuntimeError(
-                f"sandboxed Gym host reported an error from {self._config.rollout_url}: "
-                f"{error if isinstance(error, str) else json.dumps(error)[:2000]}"
-            )
+            raise RuntimeError(_host_error_message(self._config.rollout_url, error))
         results = body.get("results") if isinstance(body, Mapping) else None
         if not isinstance(results, list):
             raise RuntimeError(
                 f"sandboxed Gym host returned no `results` list from {self._config.rollout_url}; "
                 f"got {type(results).__name__}"
             )
-        return [record for record in results if isinstance(record, dict)]
+        return results
 
     async def run_tasks(
         self,
@@ -315,6 +331,7 @@ class SandboxedGymAgentTaskRunner:
             # which is how multi-agent Gym datasets are meant to work.
             for example in examples:
                 example.setdefault("agent_ref", {"name": cfg.agent_ref_name})
+        examples = [copy.deepcopy(example) for example in examples for _ in range(cfg.num_repeats)]
         _stamp_rollout_indices(examples)
         logger.info(
             "Collecting %d example(s) from %s via sandboxed Gym host %s.",
@@ -323,7 +340,7 @@ class SandboxedGymAgentTaskRunner:
             cfg.rollout_url,
         )
 
-        records = await self._collect(examples)
+        records = [record for record in await self._collect_rollouts(examples) if isinstance(record, dict)]
 
         # Before the records are written: unpacking strips the transport key, and `rollouts.jsonl`
         # has to be the shape Gym itself would have written for the shared parser to read it.

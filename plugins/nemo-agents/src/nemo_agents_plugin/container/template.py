@@ -106,7 +106,7 @@ _DEFAULTS: dict[str, str] = {
     # resolves cleanly with ``uv pip install --prerelease=allow
     # 'nvidia-nat[most]==<ver>'`` against public PyPI.  Note: NAT does not
     # define an ``[all]`` extra — ``[most]`` is the comprehensive one
-    # (includes langchain / react-agent / wiki-search).
+    # (includes langchain and wiki-search).
     "nat_version": "1.8.0",
 }
 
@@ -126,7 +126,11 @@ WHEEL_ENV = "NEMO_AGENTS_WHEEL"
 #: Newest wheel in the checkout's ``dist``, so the value survives every rebuild.
 WHEEL_LATEST = "LATEST"
 
-PINNED_HERMES_COMMIT = "29112bef099274229cadff79cdff7bf7b99c4b77"  # Hermes Agent 0.21.0
+#: ``WORKDIR`` of every rendered agent image.
+_IMAGE_WORKDIR = "/workspace"
+
+# Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
+PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
 
 _FABRIC_HARNESS_INSTALLS = {
     "claude": "nemo-agents-plugin-claude",
@@ -231,6 +235,13 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
     if getent group  1000 >/dev/null; then groupdel -f "$(getent group  1000 | cut -d: -f1)" 2>/dev/null || true; fi && \\
     groupadd -g 1000 agent && useradd -u 1000 -g agent -m agent && \\
     chown -R agent:agent /workspace
+{% endif %}
+{% if sandbox_workdir_setup %}
+# The {{ sandbox_runtime }} supervisor requires its workload identity to be able to
+# write the WORKDIR itself; the contents keep their ownership.
+RUN {{ sandbox_workdir_setup }}
+{% endif %}
+{% if not allow_root %}
 USER agent
 {% endif %}
 ENTRYPOINT ["sh", "-c", "exec nat serve --config_file=$NAT_CONFIG_FILE --host 0.0.0.0"]
@@ -286,10 +297,10 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 {% endif %}
 {% if install_hermes %}
 # Hermes Agent cannot share the Platform environment. Install the pinned source
-# and matching Fabric adapter in Python 3.12, then let Fabric launch that adapter
+# and matching Fabric adapter in Python 3.14, then let Fabric launch that adapter
 # through its isolated interpreter.
 RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
-    uv venv --python 3.12 /opt/hermes-venv && \\
+    uv venv --python 3.14 /opt/hermes-venv && \\
     git init --quiet /opt/hermes-agent && \\
     git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
     git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\
@@ -335,6 +346,13 @@ RUN if getent passwd 1000 >/dev/null; then userdel -rf "$(getent passwd 1000 | c
     if getent group  1000 >/dev/null; then groupdel -f "$(getent group  1000 | cut -d: -f1)" 2>/dev/null || true; fi && \\
     groupadd -g 1000 agent && useradd -u 1000 -g agent -m agent && \\
     chown -R agent:agent /workspace
+{% endif %}
+{% if sandbox_workdir_setup %}
+# The {{ sandbox_runtime }} supervisor requires its workload identity to be able to
+# write the WORKDIR itself; the contents keep their ownership.
+RUN {{ sandbox_workdir_setup }}
+{% endif %}
+{% if not allow_root %}
 USER agent
 {% endif %}
 ENV VIRTUAL_ENV=/workspace/.venv
@@ -381,6 +399,7 @@ class SharedRenderParams:
     sandbox_runtime: str = ""
     sandbox_apt_packages: str = ""
     sandbox_user_setup: str = ""
+    sandbox_workdir_setup: str = ""
     agent_id: str = ""
     agent_name: str = ""
     agent_version: str = ""
@@ -526,10 +545,12 @@ def resolve_shared_render_params(
     sandbox_runtime_name = ""
     sandbox_apt_packages = ""
     sandbox_user_setup = ""
+    sandbox_workdir_setup = ""
     if sandbox_runtime:
         from nemo_agents_plugin.container.sandbox import (
             render_apt_packages,
             render_user_setup,
+            render_workdir_setup,
             resolve_sandbox_profile,
         )
 
@@ -537,6 +558,7 @@ def resolve_shared_render_params(
         sandbox_runtime_name = profile.name
         sandbox_apt_packages = render_apt_packages(profile)
         sandbox_user_setup = render_user_setup(profile)
+        sandbox_workdir_setup = render_workdir_setup(profile, _IMAGE_WORKDIR)
 
     if metadata is None:
         metadata = extract_agent_metadata(
@@ -557,6 +579,7 @@ def resolve_shared_render_params(
         sandbox_runtime=sandbox_runtime_name,
         sandbox_apt_packages=sandbox_apt_packages,
         sandbox_user_setup=sandbox_user_setup,
+        sandbox_workdir_setup=sandbox_workdir_setup,
         contract_version=get_contract_version(),
         agent_id=metadata["agent_id"],
         agent_name=metadata["agent_name"],

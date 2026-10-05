@@ -15,8 +15,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 import yaml
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.intake.client import AsyncIntakeClient
@@ -58,8 +57,8 @@ _BASE_URL = "https://example.com"
 _T = TypeVar("_T")
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url=_BASE_URL)
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url=_BASE_URL)
 
 
 def _http_not_found_error() -> httpx.HTTPStatusError:
@@ -470,13 +469,7 @@ class _IntakeWithGroups:
 
 
 def _patch_intake_groups(monkeypatch: pytest.MonkeyPatch, groups: _SpanGroups) -> None:
-    def fake_client_from_platform(platform: AsyncNeMoHelix, client_cls: type[object]) -> object:
-        del platform
-        if client_cls is AsyncIntakeClient:
-            return _IntakeWithGroups(groups)
-        raise AssertionError(f"unexpected client type: {client_cls!r}")
-
-    monkeypatch.setattr("nemo_insights_plugin.analyst.analyst_backend.client_from_platform", fake_client_from_platform)
+    monkeypatch.setattr(AsyncIntakeClient, "from_client", classmethod(lambda cls, client: _IntakeWithGroups(groups)))
 
 
 @pytest.mark.asyncio
@@ -792,13 +785,13 @@ async def _controller(
             job_profile="test-profile",
         )
     )
-    async with _async_platform() as sdk:
-        jobs_client = client_from_platform(sdk, AsyncJobsClient)
+    async with _async_platform() as client:
+        jobs_client = AsyncJobsClient.from_client(client)
         recording_jobs = _RecordingJobs(jobs=jobs)
-        entities = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
+        entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
         monkeypatch.setattr(jobs_client, "list_jobs", recording_jobs.list_jobs)
         monkeypatch.setattr(entities, "get", _RunStatusLookup(run_status).get)
-        controller._sdk = sdk
+        controller._client = client
         controller._jobs = jobs_client
         controller._entities = entities
 

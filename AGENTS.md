@@ -45,6 +45,7 @@ If you are inside a sandboxed coding-agent environment (macOS sandbox, CI contai
 
 - Each skill calls out the sandbox capabilities it needs. Read those first.
 - If a step requires capabilities you do not have, stop and tell the user what is missing. Do not improvise around the sandbox by skipping verification.
+- The macOS sandbox denies listening sockets, so `nemo services run` and `nemo setup --start-services` cannot host the platform from inside it (the CLI reports `Not permitted to listen on ...`). Do not retry on other ports. Ask the user how the platform should be hosted; see the "Starting the platform from a sandboxed agent" section of `nemo-skill-selection`.
 - `uv` is known to crash under the macOS sandbox today (`system_configuration::dynamic_store` panic). Install is CLI-only for this and other reasons.
 
 ## What this repo is
@@ -144,7 +145,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 
 ### SDK
 
-The Python SDK (`sdk/python/nemo-helix`) is checked in to this repository and hand-maintained. The `nemo` CLI is hand-written in `nemo_helix_ext` and bundled into the SDK package at build time.
+The published `nemo-helix` wheel is defined by `packages/nemo_helix/pyproject.toml`, which bundles the `nemo` CLI (`packages/nemo_helix_ext`), the typed clients (`packages/nemo_helix_plugin`), runtime packages, plugins, and services from source at build time (see `packages/nemo_helix/BUNDLING.md`). The generated `nemo_helix` module under `sdk/python/nemo-helix` is legacy and scheduled for deletion; it is bundled only while runtime packages still import it.
 
 The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
@@ -152,7 +153,7 @@ The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platfo
 - `make refresh-openapi` - Regenerate `openapi/openapi.yaml` from API definitions
 
 **Update web SDK / CLI:**
-- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), then vendor `nemo_helix_ext` into the SDK and regenerate the CLI reference docs.
+- `make update-sdk` - Regenerate the OpenAPI spec and TypeScript web SDK (Orval), refresh the `nemo-helix` wheel metadata (`make vendor`), and regenerate the CLI reference docs.
 
 **When to run `make refresh-openapi`:**
 Run it whenever you modify:
@@ -167,7 +168,7 @@ Run it whenever you modify:
 
 #### Changing SDK types
 
-The SDK package is not regenerated. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
+The generated `nemo_helix` package is not regenerated or extended. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 

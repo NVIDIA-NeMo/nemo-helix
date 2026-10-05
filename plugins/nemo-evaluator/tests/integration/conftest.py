@@ -169,7 +169,7 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
     """Write a self-contained subprocess-backend platform config under ``work_root``.
 
     Owned here rather than borrowed from ``e2e/configs`` (legacy, not run in CI). It pins
-    ``platform.runtime: none`` with an explicit subprocess jobs executor and ABSOLUTE storage paths:
+    ``platform.runtime: none`` with explicit subprocess job profiles and ABSOLUTE storage paths:
     the jobs service writes each step config under ``working_directory`` while the task subprocess
     resolves the same path against a different CWD, so a relative dir would make the task miss its
     config. Absolute paths keep the step-config path agreeing across both processes.
@@ -195,7 +195,13 @@ def _materialize_subprocess_config(work_root: Path, *, base_url: str, auth_enabl
                     "profile": "default",
                     "backend": "subprocess",
                     "config": subprocess_executor_config,
-                }
+                },
+                {
+                    "provider": "subprocess",
+                    "profile": "harbor-test",
+                    "backend": "subprocess",
+                    "config": subprocess_executor_config,
+                },
             ],
             "executor_defaults": {"subprocess": subprocess_executor_config},
         },
@@ -218,18 +224,23 @@ DATA_DIR_ENVVAR = "NHX_DATA_DIR"
 
 
 @pytest.fixture(scope="session")
-def subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def subprocess_platform(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest) -> Iterator[str]:
     """Session-scoped platform with the subprocess jobs backend + IGW mock-provider mode.
 
     Subprocess backend: the compiled task runs as a host process, so a runner target sees the host's
     agent toolchain. IGW mock mode (``NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX``) lets
     Model/Agent-target tests register a mock provider returning a canned response — no real model or
-    key.
+    key. Tests may indirectly parameterize this fixture with explicit service/controller arguments
+    to avoid starting unrelated installed plugins.
     """
     work_root = tmp_path_factory.mktemp("platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+        run_args=getattr(
+            request,
+            "param",
+            ["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+        ),
         base_url=AGENT_PLATFORM_BASE_URL,
         env_vars={
             "NHX_CONFIG_FILE_PATH": str(config_path),

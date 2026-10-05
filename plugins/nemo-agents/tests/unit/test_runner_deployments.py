@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,12 +16,14 @@ from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, Endpoi
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.runner.deployments_backend import (
     DeploymentsRunnerBackend,
+    ImageEntrypointUnsupportedError,
     ReservedSecretEnvVarError,
     UnreachableGatewayURLError,
     build_container_resources,
     build_deployment_config,
     executor_for_mode,
     map_status,
+    openshell_platform_egress_url,
     require_executor_matches_mode,
     resolve_agent_gateway_url,
     rewrite_config_base_urls,
@@ -33,6 +36,12 @@ from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
+# The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
+requires_hermes_adapter = pytest.mark.skipif(
+    find_spec("nemo_fabric_adapters") is None or find_spec("nemo_fabric_adapters.hermes") is None,
+    reason="needs the hermes harness adapter, which is not installed on Python 3.14",
+)
+
 
 @pytest.mark.parametrize(
     ("backend", "expected"),
@@ -41,7 +50,7 @@ from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
         ("STARTING", "starting"),
         ("READY", "running"),
         ("FAILED", "failed"),
-        ("LOST", "failed"),
+        ("LOST", "starting"),
         ("DELETING", "deleting"),
         ("SUCCEEDED", "failed"),
         ("UNKNOWN", "starting"),
@@ -78,6 +87,20 @@ def test_resolve_k8s_without_internal_base_url_raises() -> None:
         resolve_agent_gateway_url("http://localhost:8080", mode="k8s")
 
 
+def test_resolve_openshell_uses_platform_egress_url() -> None:
+    assert (
+        resolve_agent_gateway_url(
+            "http://localhost:8080", mode="openshell", platform_egress_url="http://host.docker.internal:8080/"
+        )
+        == "http://host.docker.internal:8080"
+    )
+
+
+def test_resolve_openshell_without_platform_egress_raises() -> None:
+    with pytest.raises(UnreachableGatewayURLError, match="no platform_egress"):
+        resolve_agent_gateway_url("http://localhost:8080", mode="openshell")
+
+
 def test_resolve_rejects_subprocess_mode() -> None:
     with pytest.raises(ValueError, match="container deployment modes"):
         resolve_agent_gateway_url("http://localhost:8080", mode="subprocess")
@@ -92,6 +115,10 @@ def test_resolve_override_wins_verbatim_for_every_mode() -> None:
         resolve_agent_gateway_url(
             "http://localhost:8080", mode="k8s", override="http://igw:8080/", internal_base_url="http://ignored:8080"
         )
+        == "http://igw:8080"
+    )
+    assert (
+        resolve_agent_gateway_url("http://localhost:8080", mode="openshell", override="http://igw:8080/")
         == "http://igw:8080"
     )
 
@@ -215,12 +242,23 @@ def test_executor_for_mode_prefers_mode_specific() -> None:
         default_executor="default-exec",
         docker_executor="docker-exec",
         k8s_executor="k8s-exec",
+        openshell_executor="openshell-exec",
     )
     assert executor_for_mode(cfg, "docker") == "docker-exec"
     assert executor_for_mode(cfg, "k8s") == "k8s-exec"
+    assert executor_for_mode(cfg, "openshell") == "openshell-exec"
 
 
-def _executors(*pairs: tuple[str, str], default: str | None = None) -> Any:
+def test_executor_for_mode_openshell_falls_back_to_default() -> None:
+    cfg = DeploymentsRunnerConfig(default_executor="default-exec", docker_executor="docker-exec")
+    assert executor_for_mode(cfg, "openshell") == "default-exec"
+
+
+def _executors(
+    *pairs: tuple[str, str],
+    default: str | None = None,
+    configs: dict[str, dict[str, Any]] | None = None,
+) -> Any:
     """A standalone DeploymentsConfig.
 
     Not ``DeploymentsConfig.get()``: that is a cached singleton, and assigning to
@@ -228,8 +266,9 @@ def _executors(*pairs: tuple[str, str], default: str | None = None) -> Any:
     """
     from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 
+    configs = configs or {}
     return DeploymentsConfig(
-        executors=[ExecutorConfigEntry(name=n, backend=b) for n, b in pairs],
+        executors=[ExecutorConfigEntry(name=n, backend=b, config=configs.get(n, {})) for n, b in pairs],
         default_executor=default,
     )
 
@@ -244,17 +283,91 @@ def test_k8s_mode_on_a_docker_executor_is_refused(monkeypatch: pytest.MonkeyPatc
         require_executor_matches_mode("default-exec", "k8s")
 
 
-def test_k8s_mode_on_a_non_deployable_backend_omits_the_mode_suggestion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openshell_mode_on_an_openshell_executor_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_deployments_plugin.config import DeploymentsConfig
 
-    # 'openshell' is a deployments-plugin backend but not a DeploymentMode, so
-    # the error must not suggest deploying with a mode that can't validate.
+    cfg = _executors(("openshell-local", "openshell"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    require_executor_matches_mode("openshell-local", "openshell")
+
+
+def test_openshell_mode_on_a_docker_executor_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(("local-docker", "docker"), default="local-docker")
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    with pytest.raises(ValueError, match="runs on 'docker'") as exc_info:
+        require_executor_matches_mode(None, "openshell")
+    assert "deployments.openshell_executor" in str(exc_info.value)
+
+
+def test_k8s_mode_on_an_openshell_executor_suggests_openshell_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
     cfg = _executors(("default-exec", "openshell"))
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
 
     with pytest.raises(ValueError, match="runs on 'openshell'") as exc_info:
         require_executor_matches_mode("default-exec", "k8s")
+    assert "deploy with deployment_mode 'openshell'" in str(exc_info.value)
+
+
+def test_k8s_mode_on_a_non_deployable_backend_omits_the_mode_suggestion(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    # A backend key that is not a DeploymentMode must not be suggested as one.
+    cfg = _executors(("default-exec", "some-future-backend"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    with pytest.raises(ValueError, match="runs on 'some-future-backend'") as exc_info:
+        require_executor_matches_mode("default-exec", "k8s")
     assert "deploy with deployment_mode" not in str(exc_info.value)
+
+
+def test_openshell_platform_egress_url_reads_executor_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-k8s", "openshell"),
+        configs={"openshell-k8s": {"platform_egress": {"host": "nhx-api.nemo.svc", "port": 8080}}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url("openshell-k8s") == "http://nhx-api.nemo.svc:8080"
+
+
+def test_openshell_platform_egress_url_defaults_to_docker_driver_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(("openshell-local", "openshell"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url("openshell-local") == "http://host.docker.internal:8080"
+
+
+@pytest.mark.parametrize(
+    ("pairs", "configs", "executor"),
+    [
+        ((("openshell-local", "openshell"),), {"openshell-local": {"platform_egress": None}}, "openshell-local"),
+        ((("local-docker", "docker"),), {}, "local-docker"),
+        ((("openshell-local", "openshell"),), {}, "not-configured"),
+    ],
+    ids=["egress-null", "not-openshell", "unknown-executor"],
+)
+def test_openshell_platform_egress_url_is_none_without_a_route(
+    monkeypatch: pytest.MonkeyPatch,
+    pairs: tuple[tuple[str, str], ...],
+    configs: dict[str, dict[str, Any]],
+    executor: str,
+) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(*pairs, configs=configs)
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url(executor) is None
 
 
 def test_k8s_mode_accepts_a_k8s_capable_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -639,6 +752,52 @@ def test_build_deployment_config_fabric_can_preserve_image_entrypoint() -> None:
     assert container.readiness_probe.http_get.path == "/health"
 
 
+def test_build_deployment_config_fabric_openshell_uses_absolute_venv_python() -> None:
+    cfg = build_deployment_config(
+        name="fabric-dep",
+        workspace="default",
+        image="fabric-runtime:latest",
+        port=8000,
+        agent_config=_FABRIC_AGENT_CONFIG,
+        platform_base_url="http://host.docker.internal:8080",
+        config_mount_path="/tmp/nemo/config.yaml",
+        mode="openshell",
+    )
+    container = cfg.containers[0]
+    assert container.command == ["/workspace/.venv/bin/python"]
+    assert container.args[:2] == ["-m", "nemo_agents_plugin.fabric.server"]
+    assert "/tmp/nemo/agent.yaml" in container.args
+
+
+def test_build_deployment_config_nat_openshell_uses_absolute_venv_nat() -> None:
+    cfg = build_deployment_config(
+        name="nat-dep",
+        workspace="default",
+        image="nat-runtime:latest",
+        port=8000,
+        agent_config={"workflow": {"_type": "react_agent"}},
+        platform_base_url="http://host.docker.internal:8080",
+        config_mount_path="/tmp/nemo/config.yaml",
+        mode="openshell",
+    )
+    assert cfg.containers[0].command == ["/workspace/.venv/bin/nat", "start", "fastapi"]
+
+
+def test_build_deployment_config_openshell_rejects_image_entrypoint() -> None:
+    with pytest.raises(ImageEntrypointUnsupportedError, match="does not run the image ENTRYPOINT"):
+        build_deployment_config(
+            name="fabric-dep",
+            workspace="default",
+            image="fabric-runtime:latest",
+            port=8000,
+            agent_config=_FABRIC_AGENT_CONFIG,
+            platform_base_url="http://host.docker.internal:8080",
+            config_mount_path="/tmp/nemo/config.yaml",
+            mode="openshell",
+            use_image_entrypoint=True,
+        )
+
+
 def test_build_deployment_config_fabric_k8s_uses_fabric_entrypoint() -> None:
     cfg = build_deployment_config(
         name="fabric-dep",
@@ -880,6 +1039,112 @@ async def test_create_deployment_k8s_without_internal_url_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("local-docker", "docker"),
+        ("openshell-local", "openshell"),
+        default="local-docker",
+        configs={"openshell-local": {"platform_egress": {"host": "host.docker.internal", "port": 8080}}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    config = {
+        "llms": {
+            "llm": {
+                "_type": "openai",
+                "base_url": "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
+            }
+        }
+    }
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config=config, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    created_dep = entities.create.await_args_list[1].args[0]
+    baked = yaml.safe_load(created_config.config_files[0].content)
+    assert baked["llms"]["llm"]["base_url"] == (
+        "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    )
+    assert created_config.labels["nemo.agents/mode"] == "openshell"
+    assert created_config.containers[0].command[0] == "/workspace/.venv/bin/nat"
+    assert created_dep.executor == "openshell-local"
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_without_platform_egress_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-local", "openshell"),
+        configs={"openshell-local": {"platform_egress": None}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "failed"
+    assert "no platform_egress" in info.error
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_override_wins_without_platform_egress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-local", "openshell"),
+        configs={"openshell-local": {"platform_egress": None}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(
+        default_image="fabric:latest",
+        openshell_executor="openshell-local",
+        gateway_url_override="http://igw.example:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    assert next(e.value for e in created_config.containers[0].env if e.name == "NHX_BASE_URL") == (
+        "http://igw.example:8080"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_rejects_image_entrypoint_before_entity_create() -> None:
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    info = await backend.create_deployment(
+        workspace="default",
+        name="hello-dep",
+        config={},
+        port=0,
+        deployment_mode="openshell",
+        use_image_entrypoint=True,
+    )
+    assert info.status == "failed"
+    assert "use_image_entrypoint is not supported" in info.error
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> None:
     # Agents layer only sets the DeploymentConfig flags + points the agent at the
     # proxy port; the deployments plugin compiles the actual sidecar container.
@@ -900,8 +1165,12 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
     }
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
-        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
-        patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
+        patch("nemo_deployments_plugin.deployment_auth.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(
             workspace="default",
@@ -932,7 +1201,7 @@ async def test_create_deployment_k8s_auth_on_requests_auth_proxy_sidecar() -> No
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of() -> None:
+async def test_create_deployment_k8s_trusted_header_auth_without_creator_omits_on_behalf_of() -> None:
     # When auth is on but the deployment has no known creator, the sidecar still
     # stamps the service principal but cannot delegate — access is unscoped.
     backend = _backend(
@@ -944,8 +1213,12 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
     backend._entities = entities
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
-        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
-        patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
+        patch("nemo_deployments_plugin.deployment_auth.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config={}, port=0, deployment_mode="k8s"
@@ -955,6 +1228,80 @@ async def test_create_deployment_k8s_auth_on_without_creator_omits_on_behalf_of(
     assert created_config.auth_proxy_sidecar is True
     assert created_config.auth_proxy_sidecar_identity == "agents"
     assert created_config.auth_proxy_sidecar_on_behalf_of is None
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_k8s_token_exchange_without_auth_context_fails_closed() -> None:
+    backend = _backend(
+        default_image="nhx-api:latest",
+        default_executor="k8s",
+        k8s_internal_base_url="http://nhx-api:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+    ):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="hello-dep",
+            config={},
+            port=0,
+            deployment_mode="k8s",
+            created_by="user:alice",
+        )
+
+    assert info.status == "failed"
+    assert "creator auth context" in info.error
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_k8s_token_exchange_uses_proxy_without_trusted_obo() -> None:
+    backend = _backend(
+        default_image="nhx-api:latest",
+        default_executor="k8s",
+        k8s_internal_base_url="http://nhx-api:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    auth_context = AuthContext(principal_id="user:alice", principal_groups=["research"])
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
+            return_value=True,
+        ),
+        patch(
+            "nemo_agents_plugin.runner.deployments_backend.get_workload_identity_token_audience",
+            return_value="agent-audience",
+        ),
+        patch("nemo_deployments_plugin.deployment_auth.auth_proxy_port", return_value=8090),
+    ):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="hello-dep",
+            config={},
+            port=0,
+            deployment_mode="k8s",
+            created_by="user:alice",
+            auth_context=auth_context,
+        )
+
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    assert created_config.auth_proxy_sidecar is True
+    assert created_config.auth_proxy_sidecar_identity == "agents"
+    assert created_config.auth_proxy_sidecar_on_behalf_of is None
+    assert created_config.workload_identity is not None
+    assert created_config.workload_identity.enabled is True
+    assert created_config.workload_identity.token_audience == "agent-audience"
 
 
 @pytest.mark.asyncio
@@ -976,7 +1323,7 @@ async def test_create_deployment_k8s_auth_off_no_sidecar() -> None:
     }
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
-        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=False),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=False),
     ):
         info = await backend.create_deployment(
             workspace="default", name="hello-dep", config=config, port=0, deployment_mode="k8s"
@@ -1129,8 +1476,12 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
     }
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
-        patch("nemo_agents_plugin.runner.deployments_backend.platform_auth_enabled", return_value=True),
-        patch("nemo_agents_plugin.runner.deployments_backend.auth_proxy_port", return_value=8090),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=True),
+        patch(
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
+            return_value=False,
+        ),
+        patch("nemo_deployments_plugin.deployment_auth.auth_proxy_port", return_value=8090),
     ):
         info = await backend.create_deployment(
             workspace="default", name="fabric-dep", config=config, port=0, deployment_mode="k8s"
@@ -1144,6 +1495,7 @@ async def test_create_deployment_fabric_k8s_auth_on_rewrites_to_auth_proxy() -> 
     )
 
 
+@requires_hermes_adapter
 @pytest.mark.asyncio
 async def test_deploying_one_config_twice_does_not_carry_the_first_workspace_over() -> None:
     """Telemetry wiring must not mutate the caller's config.
@@ -1467,8 +1819,9 @@ async def test_create_deployment_enables_workload_identity_with_auth_context() -
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"),
+        patch("nemo_deployments_plugin.deployment_auth.platform_auth_enabled", return_value=False),
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.is_workload_identity_token_exchange_enabled",
+            "nemo_deployments_plugin.deployment_auth.is_workload_identity_token_exchange_enabled",
             return_value=True,
         ),
         patch(

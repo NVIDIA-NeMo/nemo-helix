@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import importlib.metadata
 from functools import cache
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from nemo_optimization.backends.protocol import OptimizationBackend
+from nemo_optimization.backends.protocol import OptimizationBackend, OptimizationPhase
 
 OPTIMIZATION_BACKENDS_GROUP = "nemo.optimization.backends"
 
@@ -21,8 +19,6 @@ class OptimizationBackendDiscoveryError(RuntimeError):
 
 @cache
 def discover_optimization_backends() -> dict[str, OptimizationBackend]:
-    from nemo_optimization.backends.protocol import OptimizationBackend
-
     backends: dict[str, OptimizationBackend] = {}
     for entry in importlib.metadata.entry_points(group=OPTIMIZATION_BACKENDS_GROUP):
         try:
@@ -39,3 +35,31 @@ def discover_optimization_backends() -> dict[str, OptimizationBackend]:
             )
         backends[entry.name] = backend
     return backends
+
+
+def discover_optimization_backends_for_phase(phase: OptimizationPhase) -> dict[str, OptimizationBackend]:
+    """Return registered backends that advertise support for *phase*."""
+
+    return {
+        name: backend
+        for name, backend in discover_optimization_backends().items()
+        if backend.capabilities.supports(phase)
+    }
+
+
+def require_optimization_backend(name: str, *, phase: OptimizationPhase) -> OptimizationBackend:
+    """Return a registered backend by name and phase, or raise a detailed error."""
+
+    backends = discover_optimization_backends()
+    backend = backends.get(name)
+    if backend is None:
+        raise OptimizationBackendDiscoveryError(
+            f"Optimization backend {name!r} is not registered. Available backends: {sorted(backends)}"
+        )
+    if not backend.capabilities.supports(phase):
+        phase_backends = discover_optimization_backends_for_phase(phase)
+        raise OptimizationBackendDiscoveryError(
+            f"Optimization backend {name!r} does not support the {phase.value!r} phase. "
+            f"Available {phase.value} backends: {sorted(phase_backends)}"
+        )
+    return backend

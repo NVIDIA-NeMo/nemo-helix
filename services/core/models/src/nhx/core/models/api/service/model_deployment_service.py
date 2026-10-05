@@ -8,7 +8,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from nemo_helix import AsyncNeMoHelix
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.filter import FilterOperation
 from nhx.common.auth import AuthContext
@@ -96,9 +95,8 @@ def _entity_to_schema(entity: ModelDeploymentEntity) -> ModelDeployment:
 class ModelDeploymentService:
     """Service layer for ModelDeployment operations."""
 
-    def __init__(self, entity_client: EntityClient, nhx_sdk: AsyncNeMoHelix):
+    def __init__(self, entity_client: EntityClient):
         self.entity_client = entity_client
-        self.nhx_sdk = nhx_sdk
 
     async def _get_latest_version(self, workspace: str, base_name: str) -> int | None:
         """Get the highest version number for a deployment."""

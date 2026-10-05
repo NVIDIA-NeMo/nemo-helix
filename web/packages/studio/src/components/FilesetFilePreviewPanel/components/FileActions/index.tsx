@@ -16,11 +16,11 @@ import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete'
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
 import { Download as DownloadIcon, Pencil, Trash, Split, EllipsisVertical } from 'lucide-react';
 import { FC, useState } from 'react';
-import { useAuth } from 'react-oidc-context';
 
 type ModalType = 'createSplit' | 'rename' | 'delete';
 
@@ -47,7 +47,7 @@ export const FileActions: FC<Props> = ({
   const [modalFile, setModalFile] = useState<FileSystemNode | undefined>();
   const [openModal, setOpenModal] = useState<ModalType | undefined>();
   const toast = useToast();
-  const auth = useAuth();
+  const bearerToken = useOidcBearerToken();
   const { createWorker } = useWorkers();
 
   const { mutateAsync: deleteFile, error: deleteError } = useDatasetFileDelete();
@@ -73,7 +73,7 @@ export const FileActions: FC<Props> = ({
       workspace,
       dataset: filesetName,
       path: file.path,
-      accessToken: auth.user?.access_token,
+      accessToken: bearerToken,
     });
   };
 

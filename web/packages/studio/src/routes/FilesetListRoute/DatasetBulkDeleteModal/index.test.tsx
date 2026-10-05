@@ -21,6 +21,7 @@ vi.mock('@studio/hooks/useWorkspaceFromPath', () => ({
 
 describe('DatasetBulkDeleteModal', () => {
   const mockOnConfirmSuccess = vi.fn();
+  const mockOnSettled = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -32,6 +33,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -44,6 +46,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[bulkDeleteTestDatasets[0]]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -56,6 +59,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -65,7 +69,11 @@ describe('DatasetBulkDeleteModal', () => {
 
     it('renders with empty dataset array', () => {
       render(
-        <DatasetBulkDeleteModal selectedDatasets={[]} onConfirmSuccess={mockOnConfirmSuccess} />
+        <DatasetBulkDeleteModal
+          selectedDatasets={[]}
+          onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
+        />
       );
 
       const triggerButton = screen.getByTestId('bulk-delete-modal-trigger-button');
@@ -81,6 +89,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -104,6 +113,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[bulkDeleteTestDatasets[0]]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -120,6 +130,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -163,6 +174,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -205,6 +217,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -224,6 +237,7 @@ describe('DatasetBulkDeleteModal', () => {
       await waitFor(() => {
         expect(mockOnConfirmSuccess).toHaveBeenCalledTimes(1);
       });
+      expect(mockOnSettled).toHaveBeenCalledTimes(1);
 
       // Modal should be closed
       await waitFor(() => {
@@ -246,6 +260,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[bulkDeleteTestDatasets[0]]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -261,10 +276,13 @@ describe('DatasetBulkDeleteModal', () => {
       });
       await user.click(deleteButton);
 
-      // onConfirmSuccess should not be called on error
+      // onConfirmSuccess should not be called on error, but onSettled still should —
+      // some deletes in a larger batch could have landed even when the batch throws,
+      // so the list still needs to refresh.
       await waitFor(() => {
         expect(mockOnConfirmSuccess).not.toHaveBeenCalled();
       });
+      expect(mockOnSettled).toHaveBeenCalledTimes(1);
     });
 
     it('shows why an in-use dataset could not be deleted', async () => {
@@ -282,6 +300,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[bulkDeleteTestDatasets[0]]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -292,6 +311,43 @@ describe('DatasetBulkDeleteModal', () => {
       await user.click(deleteButton);
 
       expect(await screen.findByText((content) => content.includes(detail))).toBeInTheDocument();
+      expect(mockOnConfirmSuccess).not.toHaveBeenCalled();
+      expect(mockOnSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes the list even when only part of the batch fails', async () => {
+      const user = userEvent.setup();
+
+      // dataset-1 succeeds, dataset-2 fails — Promise.allSettled means dataset-1's
+      // delete has already landed on the backend by the time the batch as a whole
+      // throws, so the list still needs a refresh to drop it.
+      server.use(
+        http.delete(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          ({ params }) =>
+            params.name === 'dataset-1'
+              ? new HttpResponse(null, { status: 200 })
+              : new HttpResponse(null, { status: 500 })
+        )
+      );
+
+      render(
+        <DatasetBulkDeleteModal
+          selectedDatasets={[bulkDeleteTestDatasets[0], bulkDeleteTestDatasets[1]]}
+          onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
+        />
+      );
+
+      await user.click(screen.getByTestId('bulk-delete-modal-trigger-button'));
+      const deleteButton = within(await screen.findByRole('dialog')).getByRole('button', {
+        name: 'Delete',
+      });
+      await user.click(deleteButton);
+
+      await waitFor(() => {
+        expect(mockOnSettled).toHaveBeenCalledTimes(1);
+      });
       expect(mockOnConfirmSuccess).not.toHaveBeenCalled();
     });
 
@@ -319,6 +375,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={bulkDeleteTestDatasets}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -373,6 +430,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[datasetWithUndefinedNamespace]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -416,6 +474,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[datasetWithUndefinedName]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 
@@ -459,6 +518,7 @@ describe('DatasetBulkDeleteModal', () => {
         <DatasetBulkDeleteModal
           selectedDatasets={[bulkDeleteTestDatasets[0]]}
           onConfirmSuccess={mockOnConfirmSuccess}
+          onSettled={mockOnSettled}
         />
       );
 

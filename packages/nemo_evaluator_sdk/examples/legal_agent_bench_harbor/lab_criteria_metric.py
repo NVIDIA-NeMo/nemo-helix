@@ -6,7 +6,7 @@
 LAB is a *rubric* benchmark: each task carries several pass/fail criteria, and its
 Harbor verifier judges every one, writing the outcome to
 ``<trial>/verifier/scores.json``. The SDK's built-in
-:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor_runtime.HarborRewardMetric`
+:class:`~nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime.HarborRewardMetric`
 scores only the single scalar reward LAB emits (``full_task`` by default: ``1.0``
 iff every criterion passes).
 

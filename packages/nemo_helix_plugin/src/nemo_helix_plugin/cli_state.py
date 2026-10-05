@@ -12,27 +12,112 @@ and **plugin-authored** Typer commands (i.e. anything a plugin registers via
 auto-generated verbs) should use the same surface so they participate in the
 same protocol.
 
+The state object's contract is :class:`CLIState`. The ``nemo`` CLI's
+``CLIContext`` implements it; plugin commands depend on the protocol, never on
+that concrete class.
+
 Example::
 
     import typer
-    from nemo_helix_plugin.cli_state import resolve_local_cli_sdks
+    from nemo_helix_plugin.cli_options import ListOutputFormatOption, WorkspaceOption
+    from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
 
-    def my_command(typer_ctx: typer.Context) -> None:
-        sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-        if sdk is None and async_sdk is None:
-            typer.echo("No NeMo Helix SDK is available.", err=True)
-            raise typer.Exit(code=1)
+    def list_widgets(
+        typer_ctx: typer.Context,
+        workspace: WorkspaceOption = None,
+        output_format: ListOutputFormatOption = None,
+    ) -> None:
+        state = cli_state(typer_ctx)
+        resolved_output_format = resolve_output_format(typer_ctx, output_format)
+        client = state.typed_client(WidgetsClient)
         ...
 """
 
 import logging
 import os
-from typing import Any, cast
+from typing import Any, Protocol, TypeVar, cast
 
 import typer
+from nemo_helix_plugin.cli_options import ListOutputFormat, TimestampFormat
+from nemo_helix_plugin.cli_output import is_tty
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities import DEFAULT_WORKSPACE
 
 logger = logging.getLogger(__name__)
+
+TypedClientT = TypeVar("TypedClientT", bound=NemoClient)
+AsyncTypedClientT = TypeVar("AsyncTypedClientT", bound=AsyncNemoClient)
+
+
+class CLIState(Protocol):
+    """The per-invocation state the ``nemo`` CLI stores on ``typer.Context.obj``.
+
+    Clients from :meth:`typed_client` share the CLI's auth, transport, and base
+    URL (including the global ``--base-url``), so commands never build clients
+    from their own flags or config.
+    """
+
+    def get_client(self, timeout: float = ...) -> NemoClient: ...
+
+    def get_async_client(self, timeout: float = ...) -> AsyncNemoClient: ...
+
+    def typed_client(self, client_cls: type[TypedClientT], timeout: float = ...) -> TypedClientT: ...
+
+    def async_typed_client(self, client_cls: type[AsyncTypedClientT], timeout: float = ...) -> AsyncTypedClientT: ...
+
+    def get_workspace(self) -> str | None: ...
+
+    def get_base_url(self, default: str | None = None) -> str | None: ...
+
+    def get_output_format(
+        self,
+        override: ListOutputFormat | None = None,
+        *,
+        apply_non_tty_default: bool = True,
+    ) -> ListOutputFormat: ...
+
+    def get_timestamp_format(self, override: TimestampFormat | None = None) -> TimestampFormat: ...
+
+    def get_no_truncate(self, override: bool | None = None) -> bool: ...
+
+    def get_agent_hints(self, command_path: str) -> list[str]:
+        """Hints printed after a command in agent mode; called by :func:`~nemo_helix_plugin.cli_warnings.collect_warnings`."""
+        ...
+
+
+def cli_state(typer_ctx: typer.Context) -> CLIState:
+    """Return the ``nemo`` CLI state for *typer_ctx*.
+
+    Raises :class:`RuntimeError` when no state is set, which means the command
+    is running outside ``nemo`` (a test driving the Typer app directly must set
+    ``obj=`` on the runner).
+    """
+    state = typer_ctx.obj
+    if state is None:
+        raise RuntimeError("No NeMo Helix CLI state on this context; run the command through `nemo`.")
+    return cast(CLIState, state)
+
+
+def resolve_output_format(typer_ctx: typer.Context, explicit: ListOutputFormat | None = None) -> ListOutputFormat:
+    """Resolve the output format a command should render with.
+
+    Resolution order, the same for core and plugin commands:
+
+    1. The command's ``--output-format`` flag.
+    2. Agent mode forces ``markdown``.
+    3. The global ``nemo --output-format`` flag, then the context preference.
+    4. A ``table`` result becomes ``json`` when stdout is not a TTY, so piped
+       output is parseable.
+
+    Steps 2-4 belong to the CLI state. Without one (a plugin app driven outside
+    ``nemo``), the fallback is ``table`` on a TTY and ``json`` otherwise.
+    """
+    if explicit is not None:
+        return explicit
+    state = typer_ctx.obj
+    if state is not None:
+        return cast(CLIState, state).get_output_format()
+    return "table" if is_tty() else "json"
 
 
 def resolve_local_cli_sdks(

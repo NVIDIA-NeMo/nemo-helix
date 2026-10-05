@@ -12,6 +12,7 @@ from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
 from nhx.core.jobs.controllers.backends.kubernetes.common import (
     PodStatus,
     aggregate_pod_statuses_for_job_step,
+    image_pull_failure_message,
     map_pod_status_to_platform_status,
     map_pod_to_pod_status,
     update_all_tasks,
@@ -296,3 +297,65 @@ def test_update_all_tasks_reports_error_for_a_pending_pod_that_is_not_retrying(
     body = jobs_client.update_job_step_task.call_args.kwargs["body"]
     assert body.status == HelixJobStatus.ERROR
     assert body.error_details["inspect_failed"] == "no such image"
+
+
+# ---------------------------------------------------------------------------
+# Image-pull failure messages
+# ---------------------------------------------------------------------------
+
+
+def _warning(reason: str, message: str) -> dict:
+    return {"type": "Warning", "reason": reason, "message": message}
+
+
+# The three Warning/Failed events a real kubelet emits for an unresolvable ref,
+# in the order it emits them. Captured from a kind cluster, not hand-written.
+_REAL_PULL_EVENTS = [
+    {
+        "type": "Normal",
+        "reason": "Pulling",
+        "message": 'Pulling image "registry.invalid/nhx-e2e/no-such-image:missing"',
+    },
+    _warning(
+        "Failed",
+        'Failed to pull image "registry.invalid/nhx-e2e/no-such-image:missing": failed to resolve reference: '
+        "dial tcp: lookup registry.invalid on 172.18.0.1:53: no such host",
+    ),
+    _warning("Failed", "Error: ErrImagePull"),
+    _warning("Failed", "Error: ImagePullBackOff"),
+]
+
+
+def test_image_pull_failure_message_prefers_the_event_naming_the_image():
+    """The informative event is not the last one, so 'keep the last' loses it.
+
+    Regression: reading ``get_pod_details``' collapsed ``error_details["failed"]``
+    yielded the bare "Error: ImagePullBackOff", so the step failed without ever
+    saying which image could not be pulled.
+    """
+    message = image_pull_failure_message(_REAL_PULL_EVENTS)
+
+    assert message.startswith("Failed to pull image")
+    assert "registry.invalid/nhx-e2e/no-such-image:missing" in message
+
+
+def test_image_pull_failure_message_falls_back_to_the_last_warning():
+    """An unrecognised failure shape still reports something."""
+    assert image_pull_failure_message([_warning("Failed", "Error: ImagePullBackOff")]) == "Error: ImagePullBackOff"
+
+
+def test_image_pull_failure_message_handles_inspect_failed():
+    """InvalidImageName arrives as InspectFailed and already names the image."""
+    detail = 'Failed to apply default image tag "__invalid_ubuntu:image": invalid reference format'
+
+    assert image_pull_failure_message([_warning("InspectFailed", detail)]) == detail
+
+
+def test_image_pull_failure_message_ignores_unrelated_events():
+    """Normal events and non-failure warnings are not pull failures."""
+    events = [
+        {"type": "Normal", "reason": "Scheduled", "message": "Successfully assigned pod"},
+        {"type": "Warning", "reason": "Unhealthy", "message": "Readiness probe failed"},
+    ]
+
+    assert image_pull_failure_message(events) == ""

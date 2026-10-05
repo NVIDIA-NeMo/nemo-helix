@@ -3,37 +3,31 @@
 
 """Submit-path integration test for the row ``EvaluateJob``, focused on result persistence.
 
-Shares the evaluator-plugin integration harness (conftest's session-scoped ``subprocess_platform``)
-and the ``RUN_AGENT_EVAL_INTEGRATION`` opt-in. Submits an *offline* metric eval — inline dataset, no
+Shares the evaluator-plugin integration harness (conftest's session-scoped ``subprocess_platform``).
+Submits an *offline* metric eval — inline dataset, no
 model target / IGW / agent runner — so the only requirement is the host subprocess backend. Asserts the run
-persisted a queryable ``EvaluateResult`` retrievable via ``client.evaluator.eval_results``, covering
+persisted a queryable ``EvaluateResult`` retrievable via ``Evaluator.eval_results``, covering
 the row-eval half of result persistence (the agent-eval half lives in ``test_agent_evaluate_job.py``).
 """
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from nemo_evaluator.jobs.evaluate import EvaluateInputSpec, EvaluateJob
+from nemo_evaluator.sdk.resources import Evaluator
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.scheduler import NemoJobScheduler
-from nemo_helix_plugin.sdk import NeMoHelix
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.testing.e2e import wait_for_platform_job
 
 #: Opt-in: shares the evaluator-plugin integration opt-in (spins a real ``nemo services`` platform).
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(
-        not os.environ.get("RUN_AGENT_EVAL_INTEGRATION"),
-        reason="opt-in; set RUN_AGENT_EVAL_INTEGRATION=1 to run (spins real nemo services platforms)",
-    ),
-]
+pytestmark = pytest.mark.integration
 
 WORKSPACE = "default"
 
@@ -64,7 +58,7 @@ def test_submit_offline_row_eval_persists_result(subprocess_platform: str) -> No
     # dim: submit x subprocess backend, row (EvaluateJob) path. The jobs service compiles + runs
     # EvaluateJob.run() as a host subprocess; run() writes an EvaluateResult through the async task
     # SDK + entity store. Offline (no target or IGW): the dataset already carries the outputs.
-    client = NeMoHelix(base_url=subprocess_platform, max_retries=2)
+    client = NemoClient(base_url=subprocess_platform, retry=RetryPolicy(max_retries=2))
     client_from_platform(client, WorkspacesClient).create_workspace(
         exist_ok=True, body=CreateWorkspaceRequest(name=WORKSPACE)
     ).data()
@@ -79,9 +73,10 @@ def test_submit_offline_row_eval_persists_result(subprocess_platform: str) -> No
     assert job.status == "completed", f"job {job_name} ended {job.status!r}: {getattr(job, 'status_details', None)}"
 
     # Persistence: run() wrote a queryable EvaluateResult, retrievable via the typed SDK resource
-    # (client.evaluator.eval_results -> the /eval-results route). Row-eval records the metric types
+    # (Evaluator.eval_results -> the /eval-results route). Row-eval records the metric types
     # applied; an inline dataset has no dataset_ref, and an offline run has no target.
-    result = client.evaluator.eval_results.retrieve(job_name, workspace=WORKSPACE)
+    evaluator = Evaluator.from_client(client)
+    result = evaluator.eval_results.retrieve(job_name, workspace=WORKSPACE)
     assert result.job_id == job_name
     assert result.metric_types == ["exact-match"]
     assert result.dataset_ref is None
@@ -90,11 +85,11 @@ def test_submit_offline_row_eval_persists_result(subprocess_platform: str) -> No
     assert result.created_at is not None
 
     # And it's discoverable in the workspace listing.
-    listing = client.evaluator.eval_results.list(workspace=WORKSPACE)
+    listing = evaluator.eval_results.list(workspace=WORKSPACE)
     assert any(r.job_id == job_name for r in listing.data)
 
     # Server-side trait filtering narrows the listing (proves the SDK's filter[...] params reach the
     # entity store — the in-memory unit fakes can't exercise this).
-    by_job = client.evaluator.eval_results.list(workspace=WORKSPACE, job_id=job_name)
+    by_job = evaluator.eval_results.list(workspace=WORKSPACE, job_id=job_name)
     assert [r.job_id for r in by_job.data] == [job_name]
-    assert client.evaluator.eval_results.list(workspace=WORKSPACE, job_id="no-such-job").data == []
+    assert evaluator.eval_results.list(workspace=WORKSPACE, job_id="no-such-job").data == []

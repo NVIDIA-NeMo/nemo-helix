@@ -25,6 +25,7 @@ So ``import vllm`` from the base venv is *expected* to fail and would prove noth
 run each import in the venv that actually owns the package, using that venv's own interpreter.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from file_removals import assert_file_patterns_absent, read_file_patterns
 from python_package_versions import assert_python_package_min_versions
 
 RAY_VENVS = Path("/opt/ray_venvs")
+DRIVER_BIN = Path("/opt/nemo_rl_venv/bin")
 FINAL_FILE_REMOVALS = Path("/smoke_test/removals/files/final/customizer-codecs.txt")
 SOUNDFILE_FILE_REMOVALS = {
     "/opt/nemo_rl_venv/lib/python3.*/site-packages/_soundfile_data/libsndfile_*.so",
@@ -48,18 +50,11 @@ BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
 
 # Actor FQN -> packages that must import inside that actor's venv.
 #
-# MUST list every venv the build prefetches (the eight filters in docker/rl/Dockerfile.nhx-rl-base
-# resolve to NINE actors, because `vllm.vllm_worker` matches the sync and async workers alike).
-# Listing all nine is what makes a broken prefetch filter fail here instead of silently shipping an
+# MUST list every venv the build prefetches (the six filters in docker/rl/Dockerfile.nhx-rl-base
+# resolve to SEVEN actors, because `vllm.vllm_worker` matches the sync and async workers alike).
+# Listing all seven is what makes a broken prefetch filter fail here instead of silently shipping an
 # image whose workers rebuild their venv on the node at job start.
 WORKER_VENV_IMPORTS = {
-    # DPO policy training, DTensor V1 (--extra fsdp)
-    "nemo_rl.models.policy.workers.dtensor_policy_worker.DTensorPolicyWorker": [
-        "torch",
-        "flash_attn",
-        "mamba_ssm",
-        "causal_conv1d",
-    ],
     # GRPO policy training, DTensor V2 (--extra automodel). nemo_automodel and transformer_engine
     # are checked through distribution metadata instead — see WORKER_VENV_DRIVER_LINKED below.
     "nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2": [
@@ -100,17 +95,16 @@ WORKER_VENV_IMPORTS = {
     ],
     # Sandboxed-Gym mode B: the trusted proxy actor in the training pod. Shares the nemo_gym extra
     # with NemoGym, but venvs are named per ACTOR, so it gets its own and needs its own filter.
+    # The episode broker has no registry entry. nemo-sandboxed-gym cannot read
+    # ACTOR_ENVIRONMENTS, so SandboxEpisodeBrokerActor inherits this venv from the
+    # actor that creates it. Import the broker here rather than expecting a
+    # separate /opt/ray_venvs directory or python-SandboxEpisodeBrokerActor wrapper.
     "nemo_rl.environments.sandbox.nemo_gym_actor.SandboxedGymActor": [
         "nemo_gym",
         "opensandbox",
+        "sandboxed_gym",
+        "sandboxed_gym.ray.broker_actor",
         "nemo_rl.environments.sandbox.nemo_gym_actor",
-    ],
-    # Trusted episode broker: creates per-episode sandboxes so the untrusted job sandbox never
-    # holds the OpenSandbox credential.
-    "nemo_rl.environments.sandbox.broker_actor.SandboxEpisodeBrokerActor": [
-        "nemo_gym",
-        "opensandbox",
-        "nemo_rl.environments.sandbox.broker_actor",
     ],
 }
 
@@ -182,20 +176,37 @@ def test_nhx_rl_training_importable():
 def test_sandboxed_gym_driver_imports():
     """The driver must be able to import the mode-B sandbox modules.
 
-    Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports
-    nemo_rl.environments.sandbox.{nemo_gym_actor,host.models}. Both reach
-    nemo_gym.sandbox.broker at module scope, so the base venv needs nemo_gym even though
-    the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
-    image is exact and prunes the nemo_gym extra, so this is only satisfied by the
-    explicit `uv pip install` of the Gym workspace member — without it, mode B fails at
-    Gym spin-up with `ModuleNotFoundError: No module named 'nemo_gym'`, minutes into a
-    run and only on a sandbox-capable cluster.
+    Sandboxed GRPO calls spinup_nemo_gym_actor() in the DRIVER process, which imports the
+    adapter and sandboxed_gym.host.models at module scope, so the base venv needs both even
+    though the Gym actor itself runs in its own venv. The `uv sync --all-groups` in the base
+    image is exact and prunes the nemo_gym extra, so this is only satisfied by the explicit
+    `uv pip install` of the Gym workspace member — without it, mode B fails at Gym spin-up
+    with a ModuleNotFoundError, minutes into a run and only on a sandbox-capable cluster.
     """
-    from nemo_rl.environments.sandbox.host.models import NemoGymSandboxedConfig  # noqa: F401
     from nemo_rl.environments.sandbox.nemo_gym_actor import SandboxedGymActorConfig  # noqa: F401
+    from sandboxed_gym.host.models import NemoGymSandboxedConfig  # noqa: F401
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_base_wandb_opentelemetry_compat():
+    """SDK 1.44 needs ``_ExtendedAttributes`` from api 1.44; api 1.45 removes it.
+
+    wandb imports the SDK metrics path at load time, so a skewed pin fails here before a job
+    reaches the driver. docker/rl/opentelemetry-overrides.txt keeps the matched release line.
+    """
+    import wandb  # noqa: F401
+    from opentelemetry.util.types import _ExtendedAttributes  # noqa: F401
 
 
 # --- per-worker venvs: where training actually runs ---------------------------------------------
+
+
+@pytest.mark.smoke_nhx_rl_training
+@pytest.mark.parametrize("actor_fqn", sorted(WORKER_VENV_IMPORTS))
+def test_frozen_environment_wrapper(actor_fqn):
+    """prefetch_venvs.py writes python-<Class> into the driver venv bin, which is on PATH."""
+    wrapper = DRIVER_BIN / f"python-{actor_fqn.rsplit('.', 1)[-1]}"
+    assert os.access(wrapper, os.X_OK), f"missing frozen-environment wrapper {wrapper}"
 
 
 @pytest.mark.smoke_nhx_rl_training
@@ -239,6 +250,33 @@ def test_worker_venv_imports(actor_fqn, module):
 
 
 @pytest.mark.smoke_nhx_rl_training
+@pytest.mark.parametrize("actor_fqn", sorted(WORKER_VENV_IMPORTS))
+def test_worker_venv_wandb_opentelemetry_compat(actor_fqn):
+    """Same api/sdk skew check as the driver, in each prefetched Ray venv that has wandb."""
+    venv = RAY_VENVS / actor_fqn
+    python = venv / "bin" / "python"
+    if not python.exists():
+        pytest.skip(f"venv for {actor_fqn} not present; covered by test_worker_venv_prefetched")
+    has_wandb = subprocess.run(
+        [str(python), "-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('wandb') else 1)"],
+        capture_output=True,
+        text=True,
+    )
+    if has_wandb.returncode != 0:
+        pytest.skip(f"wandb not installed in {venv}")
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "from opentelemetry.util.types import _ExtendedAttributes; import wandb",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"wandb/OpenTelemetry import failed in {venv} (api/sdk skew?):\n{result.stderr}"
+
+
+@pytest.mark.smoke_nhx_rl_training
 @pytest.mark.parametrize(("actor_fqn", "dist"), WORKER_DIST_CASES)
 def test_worker_venv_driver_linked_dists_installed(actor_fqn, dist):
     """Verify driver-linked packages are installed without importing them.
@@ -267,9 +305,9 @@ def test_worker_venvs_symlink_into_shared_cache():
     """Worker venvs must symlink into /opt/uv_cache rather than carry their own copies.
 
     Guards the link-mode/cache layout: a silent fallback to copy mode would multiply image size
-    across the ~30 venvs this image ships.
+    across the prefetched venvs this image ships.
     """
-    venv = RAY_VENVS / "nemo_rl.models.policy.workers.dtensor_policy_worker.DTensorPolicyWorker"
+    venv = RAY_VENVS / "nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2"
     if not (venv / "bin" / "python").exists():
         pytest.skip("policy worker venv not present; covered by test_worker_venv_prefetched")
     torch_init = next(venv.glob("lib/python*/site-packages/torch/__init__.py"), None)
@@ -306,6 +344,37 @@ def test_transformers_audio_backend_probe_is_off():
 def test_grpo_driver_module_imports():
     """The exact import the GRPO driver performs first, and the one the codec strip broke."""
     from nemo_rl.algorithms.grpo import MasterConfig  # noqa: F401
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_gym_in_tree_cache_is_metadata_only():
+    """NRL_CONTAINER=1 keeps Gym from writing a package cache into its source tree."""
+    cache = Path("/opt/nemo-rl/3rdparty/Gym-workspace/Gym/cache")
+    if not cache.is_dir():
+        return
+    size = sum(path.stat().st_size for path in cache.rglob("*") if path.is_file())
+    assert size <= 100 * 1024 * 1024, f"{cache} is {size} bytes; Gym should use UV_CACHE_DIR"
+
+
+@pytest.mark.smoke_nhx_rl_training
+def test_runtime_user_can_read_image_trees():
+    """Build steps use umask 022 so the runtime user can load these trees."""
+    roots = (
+        Path("/opt/cpython"),
+        Path("/opt/uv_cache"),
+        Path("/opt/nemo_rl_venv"),
+        Path("/opt/nemo-rl"),
+        Path("/opt/gym_venvs"),
+        Path("/opt/ray_venvs"),
+    )
+    for root in roots:
+        for dirpath, _dirnames, filenames in os.walk(root):
+            assert os.access(dirpath, os.R_OK | os.X_OK), f"{dirpath} is not traversable"
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                assert os.access(path, os.R_OK), f"{path} is not readable"
+                if os.stat(path).st_mode & 0o111:
+                    assert os.access(path, os.X_OK), f"{path} is not executable"
 
 
 @pytest.mark.smoke_nhx_rl_training

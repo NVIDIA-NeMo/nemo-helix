@@ -65,7 +65,7 @@ Interpretation:
   route can be checked.
 
 Use the `nemo` CLI rather than constructing a Platform URL or calling
-`/v1/models` directly. The CLI resolves `NEMO_BASE_URL`, `NHX_BASE_URL`, the
+`/v1/models` directly. The CLI resolves `nemo --base-url`, `NHX_BASE_URL`, the
 active CLI context, authentication, and workspace consistently with subsequent
 agent commands. Do not hardcode `localhost`, `127.0.0.1`, or port `8080`.
 

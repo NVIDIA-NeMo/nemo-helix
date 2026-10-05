@@ -28,6 +28,17 @@ data:
           # image_pull_secrets nor the chart's top-level imagePullSecrets apply.
           imagePullSecrets:
             - name: nvcrimagepullsecret
+          # Create-time default for the sandbox container. Requests must not exceed
+          # limits. These match platformConfig.rl.sandbox_resources (2 CPU, 4Gi).
+          containers:
+            - name: sandbox
+              resources:
+                requests:
+                  cpu: "2"
+                  memory: 4Gi
+                limits:
+                  cpu: "2"
+                  memory: 4Gi
           tolerations:
             - key: nvidia.com/gpu
               operator: Exists

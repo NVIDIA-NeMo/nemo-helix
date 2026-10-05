@@ -21,6 +21,7 @@ import { DatasetEvalRowResultsPanel } from '@studio/components/evaluation/Jobs/d
 import { useDatasetEvalResults } from '@studio/components/evaluation/Jobs/datasetEval/useDatasetEvalResults';
 import { DetailsPanel } from '@studio/components/evaluation/Jobs/DetailsPanel';
 import { StatusLogsContent } from '@studio/components/evaluation/Jobs/StatusLogsContent';
+import { Loading } from '@studio/components/Layouts/Loading';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -36,7 +37,11 @@ export const EvaluationResultDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { id } = useRequiredPathParams([ROUTE_PARAMS.evaluationJobId]);
 
-  const { data: job, error } = useEvaluatorGetEvaluateJob(workspace, id, {
+  const {
+    data: job,
+    error,
+    isPending: isJobPending,
+  } = useEvaluatorGetEvaluateJob(workspace, id, {
     query: {
       refetchOnMount: 'always',
       refetchInterval: (query) => {
@@ -61,7 +66,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
     items: [
       {
         href: getEvaluationResultsRoute(workspace),
-        slotLabel: 'Evaluations',
+        slotLabel: 'Model Evaluations',
       },
       {
         slotLabel: job?.name ?? id,
@@ -69,22 +74,51 @@ export const EvaluationResultDetailsRoute: FC = () => {
     ],
   });
 
+  if (isJobPending) {
+    return (
+      <AccessibleTitle title={`Evaluation ${id}`}>
+        <Loading description="Loading evaluation..." />
+      </AccessibleTitle>
+    );
+  }
+
+  const pageHeader = (
+    <PageHeader
+      className="p-0"
+      slotHeading={
+        <Flex align="center" gap="2">
+          {job?.name ?? id}
+          <Badge kind="outline" color="gray">
+            Dataset-Driven
+          </Badge>
+        </Flex>
+      }
+    />
+  );
+
+  // Without a job there is no status to gate results on, so show only the load error rather
+  // than empty score/row panels.
+  if (!job) {
+    return (
+      <AccessibleTitle title={`Evaluation ${id}`}>
+        <Stack className="overflow-auto" gap="density-2xl" padding="density-2xl">
+          <Flex align="center" justify="center" className="w-full">
+            <Stack className="w-full max-w-[1200px]" gap="density-2xl">
+              {pageHeader}
+              <DetailsPanel error />
+            </Stack>
+          </Flex>
+        </Stack>
+      </AccessibleTitle>
+    );
+  }
+
   return (
-    <AccessibleTitle title={`Evaluation ${job?.name ?? id}`}>
+    <AccessibleTitle title={`Evaluation ${job.name ?? id}`}>
       <Stack className="overflow-auto" gap="density-2xl" padding="density-2xl">
         <Flex align="center" justify="center" className="w-full">
           <Stack className="w-full max-w-[1200px]" gap="density-2xl">
-            <PageHeader
-              className="p-0"
-              slotHeading={
-                <Flex align="center" gap="2">
-                  {job?.name ?? id}
-                  <Badge kind="outline" color="gray">
-                    Dataset-Driven
-                  </Badge>
-                </Flex>
-              }
-            />
+            {pageHeader}
 
             <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
               <DetailsPanel evaluationJob={job} error={!!error} />
@@ -140,7 +174,7 @@ export const EvaluationResultDetailsRoute: FC = () => {
               <StatusLogsContent
                 workspace={workspace}
                 jobName={id}
-                jobStatus={job?.status as HelixJobStatus}
+                jobStatus={job.status as HelixJobStatus}
               />
             </AccordionPanel>
           </Stack>

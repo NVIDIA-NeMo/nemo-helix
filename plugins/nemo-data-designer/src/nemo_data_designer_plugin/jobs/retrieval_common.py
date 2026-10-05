@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_data_designer_plugin.config import get_config
 from nemo_data_designer_plugin.retrieval.corpus import HF_TOKEN_ENVVAR
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.jobs.api_factory import (
     ContainerSpec,
     CPUExecutionProviderSpec,
@@ -56,7 +56,7 @@ def cpu_retrieval_step(
     spec: BaseModel,
     profile: str | None,
     module_args: list[str] | None = None,
-    image: str = "nhx-cpu-tasks",
+    image: str = "nhx-tasks",
     hf_token_secret: str | None = None,
 ) -> HelixJobStep:
     return HelixJobStep(
@@ -107,11 +107,11 @@ async def retrieval_step(
     module: str,
     spec: BaseModel,
     profile: str | None,
-    async_sdk: AsyncHelixClient,
+    async_client: AsyncNemoClient,
     gpu: bool = False,
     hf_token_secret: str | None = None,
 ) -> HelixJobStep:
-    del async_sdk
+    del async_client
     if gpu:
         # The GPU mining step runs with ``HF_HUB_OFFLINE``; it never reaches the Hub.
         return gpu_retrieval_step(name, module, spec, profile)
@@ -121,10 +121,10 @@ async def retrieval_step(
 async def model_download_step(
     fileset: str,
     profile: str | None,
-    async_sdk: AsyncHelixClient,
+    async_client: AsyncNemoClient,
 ) -> HelixJobStep:
     """Download a model fileset into the job's shared ``model`` directory."""
-    del async_sdk
+    del async_client
     config = FileIOTaskConfig(download=[DownloadItem(src=FileSetRef.model_validate(fileset), dest="model")])
     return cpu_retrieval_step(
         "retrieval-model-download",

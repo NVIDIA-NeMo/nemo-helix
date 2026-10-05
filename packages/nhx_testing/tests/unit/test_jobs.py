@@ -15,13 +15,20 @@ poll_until_terminal() so that image-pull time (pending status) is not
 counted against the main job-execution timeout.
 """
 
+import time
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
-from nhx.testing.e2e.jobs import TERMINAL_STATUSES, cleanup_platform_job, wait_for_platform_job
+from nhx.testing.e2e.jobs import (
+    TERMINAL_STATUSES,
+    cleanup_platform_job,
+    poll_until_terminal,
+    wait_budget,
+    wait_for_platform_job,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -298,3 +305,136 @@ class TestCleanupHelixJob:
         with _patch_client(jobs_client):
             with pytest.raises(TimeoutError, match="could not be deleted"):
                 cleanup_platform_job(_make_sdk(), "my-job", "ws", timeout=0.0, poll_interval=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Total wall-clock budget
+# ---------------------------------------------------------------------------
+
+
+class TestTotalWallClockBudget:
+    """A stuck job must fail its own test, never the whole session.
+
+    Neither ``timeout`` nor ``image_pull_timeout`` bounds wall clock alone, so
+    these pin the cap that keeps the helper's diagnostic ahead of pytest's kill.
+    """
+
+    def test_pending_job_stops_at_the_published_budget(self):
+        """A job stuck in 'pending' raises once the harness budget expires."""
+        started = time.monotonic()
+        with wait_budget(0.3), pytest.raises(TimeoutError) as excinfo:
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=600.0,
+                poll_interval=0.01,
+            )
+
+        assert time.monotonic() - started < 10.0, "the wait outran its budget"
+        assert "total wall-clock budget" in str(excinfo.value)
+
+    def test_budget_is_ignored_when_image_pull_timeout_is_tighter(self):
+        """The cap is a backstop; a tighter per-status budget still wins."""
+        with wait_budget(60.0), pytest.raises(TimeoutError) as excinfo:
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=0.05,
+                poll_interval=0.01,
+            )
+
+        assert "stuck in pending" in str(excinfo.value)
+
+    def test_terminal_status_still_returns_under_a_budget(self):
+        """The cap does not disturb a job that finishes."""
+        jobs_client = _make_jobs_client("completed")
+        with _patch_client(jobs_client), wait_budget(30.0):
+            job = wait_for_platform_job(_make_sdk(), "my-job", "ws", timeout=5.0)
+
+        assert job.status == "completed"
+
+    def test_stuck_pending_job_fails_with_full_diagnostics(self):
+        """The exact CI failure: an unpullable image parks the job in 'pending'.
+
+        The run reported no status history at all, because pytest killed the
+        process first. The helper's own error must carry it.
+        """
+        job = MagicMock()
+        job.status = "pending"
+        jobs_client = MagicMock()
+        jobs_client.get_job.return_value = _resp(job)
+        jobs_client.get_job_status.return_value = _resp(
+            MagicMock(model_dump=MagicMock(return_value={"steps": [{"status": "pending"}]}))
+        )
+
+        with _patch_client(jobs_client), wait_budget(0.3), pytest.raises(TimeoutError) as excinfo:
+            wait_for_platform_job(_make_sdk(), "my-job", "ws", timeout=300.0, poll_interval=0.01)
+
+        message = str(excinfo.value)
+        assert "total wall-clock budget" in message
+        assert "Status history: pending" in message
+        assert "Job status details" in message
+
+    def test_wait_budget_nests_and_none_clears_the_cap(self):
+        """``None`` clears the cap for non-pytest callers; the outer cap returns."""
+
+        def poll(image_pull_timeout: float) -> str:
+            with pytest.raises(TimeoutError) as excinfo:
+                poll_until_terminal(
+                    lambda: "pending",
+                    label="stuck-job",
+                    terminal=TERMINAL_STATUSES,
+                    timeout=300.0,
+                    image_pull_timeout=image_pull_timeout,
+                    poll_interval=0.01,
+                )
+            return str(excinfo.value)
+
+        with wait_budget(2.0):
+            # Cleared: only image_pull_timeout bounds the wait.
+            with wait_budget(None):
+                assert "stuck in pending" in poll(0.05)
+            # Restored: the outer cap bounds a wait that image_pull_timeout would not.
+            assert "total wall-clock budget" in poll(600.0)
+
+        # Left behind: no cap leaks out to later tests.
+        assert "stuck in pending" in poll(0.05)
+
+    def test_a_nested_budget_cannot_extend_the_enclosing_one(self):
+        """The outer cap is what keeps the wait inside pytest's timeout."""
+        started = time.monotonic()
+        with wait_budget(0.3), wait_budget(30.0), pytest.raises(TimeoutError) as excinfo:
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=600.0,
+                poll_interval=0.01,
+            )
+
+        assert time.monotonic() - started < 10.0, "the inner budget extended the outer one"
+        assert "total wall-clock budget" in str(excinfo.value)
+
+    def test_the_wait_does_not_sleep_past_its_deadline(self):
+        """A poll interval longer than the remaining budget must not overshoot it.
+
+        Overshooting by a whole interval is exactly the margin that decides
+        whether this raises its own error or pytest kills the process first.
+        """
+        started = time.monotonic()
+        with wait_budget(0.3), pytest.raises(TimeoutError):
+            poll_until_terminal(
+                lambda: "pending",
+                label="stuck-job",
+                terminal=TERMINAL_STATUSES,
+                timeout=300.0,
+                image_pull_timeout=600.0,
+                poll_interval=30.0,
+            )
+
+        assert time.monotonic() - started < 5.0, "slept past the deadline"

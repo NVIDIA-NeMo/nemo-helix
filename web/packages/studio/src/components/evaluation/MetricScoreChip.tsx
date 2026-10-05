@@ -20,7 +20,7 @@ export const MetricScoreChip: FC<MetricScoreChipProps> = ({ label, value }) => {
 
   return (
     <Stack gap="density-xs" className="min-w-0">
-      <Text kind="body/regular/sm" color="secondary" className="truncate">
+      <Text kind="body/regular/sm" className="truncate text-secondary">
         {label}
       </Text>
       {categorical ? (

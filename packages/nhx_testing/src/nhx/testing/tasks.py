@@ -4,7 +4,7 @@
 """Task integration testing utilities for NeMo Helix.
 
 This module provides the test_task_harness async context manager for testing
-task modules in isolation with mocked platform services via ASGI transport.
+task modules in isolation with mocked Helix services via ASGI transport.
 
 Example:
     from nhx.hello_world.service import HelloWorldService
@@ -49,6 +49,7 @@ from typing import Any, AsyncGenerator
 
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix._client import NeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.auth import NHX_PRINCIPAL_ENVVAR, Principal
 from nhx.common.service import Service
 from nhx.testing.access_log import AccessLog
@@ -71,6 +72,8 @@ class TaskContext:
 
     sdk: NeMoHelix
     async_sdk: AsyncNeMoHelix
+    client: NemoClient
+    async_client: AsyncNemoClient
     _module: ModuleType
     access_log: AccessLog | None = None
     auth_enabled: bool = False
@@ -82,7 +85,7 @@ class TaskContext:
         in a separate thread to avoid nested event loop issues when tasks use
         asyncio.run() internally.
 
-        The SDK is injected into the task's run() function if it accepts an 'sdk' parameter.
+        The typed client is injected into the task's run() function if it accepts a 'client' parameter.
 
         Args:
             args: Optional list of CLI arguments to pass to the task's run() function.
@@ -91,23 +94,23 @@ class TaskContext:
         Returns:
             TaskResult with exit_code, stdout, stderr, and any exception
         """
-        # Determine which SDK to inject based on task signature
+        # Determine which client to inject based on task signature
         sig = inspect.signature(self._module.run)
-        sdk_param = sig.parameters.get("sdk")
+        client_param = sig.parameters.get("client")
 
-        # Determine the right SDK type to inject
-        injected_sdk: NeMoHelix | AsyncNeMoHelix | None = None
-        if sdk_param is not None:
-            # Check the type annotation to determine sync vs async SDK
-            if sdk_param.annotation is not inspect.Parameter.empty:
-                annotation_str = str(sdk_param.annotation)
-                if "AsyncNeMoHelix" in annotation_str:
-                    injected_sdk = self.async_sdk
+        # Determine the right client type to inject
+        injected_client: NemoClient | AsyncNemoClient | None = None
+        if client_param is not None:
+            # Check the type annotation to determine sync vs async client
+            if client_param.annotation is not inspect.Parameter.empty:
+                annotation_str = str(client_param.annotation)
+                if "AsyncNemoClient" in annotation_str:
+                    injected_client = self.async_client
                 else:
-                    injected_sdk = self.sdk
+                    injected_client = self.client
             else:
-                # Default to sync SDK if no annotation
-                injected_sdk = self.sdk
+                # Default to the sync client if no annotation
+                injected_client = self.client
 
         def _execute_task():
             stdout_capture = io.StringIO()
@@ -121,8 +124,8 @@ class TaskContext:
                     kwargs = {}
                     if "args" in sig.parameters:
                         kwargs["args"] = args
-                    if sdk_param is not None:
-                        kwargs["sdk"] = injected_sdk
+                    if client_param is not None:
+                        kwargs["client"] = injected_client
 
                     exit_code = self._module.run(**kwargs)
             except SystemExit as e:
@@ -165,7 +168,7 @@ async def task_harness(
     access_log: bool = False,
     workspace: str | None = None,
 ) -> AsyncGenerator[TaskContext, None]:
-    """Async context manager for testing task modules with mocked platform services.
+    """Async context manager for testing task modules with mocked Helix services.
 
     Uses create_test_client internally to set up a FastAPI app with the specified
     services using ASGI in-process transport.
@@ -214,16 +217,22 @@ async def task_harness(
             # This simulates how production tasks get auth context propagated.
             sdk = ctx.sdk
             async_sdk = ctx.async_sdk
+            client = ctx.client
+            async_client = ctx.async_client
             principal_json = os.environ.get(NHX_PRINCIPAL_ENVVAR)
             if principal_json and auth_enabled:
                 principal = Principal.model_validate_json(principal_json)
                 auth_headers = principal.get_headers()
                 sdk = sdk.with_options(set_default_headers=auth_headers)
                 async_sdk = async_sdk.with_options(set_default_headers=auth_headers)
+                client = client.with_options(headers=auth_headers)
+                async_client = async_client.with_options(headers=auth_headers)
 
             yield TaskContext(
                 sdk=sdk,
                 async_sdk=async_sdk,
+                client=client,
+                async_client=async_client,
                 _module=module,
                 access_log=ctx.access_log,
                 auth_enabled=auth_enabled,

@@ -24,12 +24,11 @@ from nemo_evaluator_sdk.values.models import Model, ModelRef, RankingInference
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult, AggregateRangeScore
 from nemo_evaluator_sdk.values.retrieval import Retrieval
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
 from nemo_helix_plugin.jobs.api_factory import CPUExecutionProviderSpec
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
 from pydantic import ValidationError
 from pytest_mock import MockerFixture
 
@@ -59,8 +58,8 @@ def _spec() -> RetrieveEvalSpec:
     )
 
 
-def _async_platform() -> AsyncNeMoHelix:
-    return AsyncNeMoHelix(base_url="http://platform.test", workspace="default")
+def _async_platform() -> AsyncNemoClient:
+    return AsyncNemoClient(base_url="http://platform.test", workspace="default")
 
 
 def _result(*, ndcg: float = 0.75, recall: float = 1.0) -> BenchmarkEvaluationResult:
@@ -237,7 +236,7 @@ def test_run_validates_fileset_and_persists_nemotron_keys(tmp_path: Path, mocker
     load = mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=dataset)
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     sdk = mocker.Mock(spec=NemoClient)
 
     output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=sdk)
@@ -275,7 +274,7 @@ def test_run_reports_relative_baseline_scores(tmp_path: Path, mocker: MockerFixt
             _result(ndcg=0.5, recall=0.75),
         ]
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={"baseline": Retrieval(embeddings=Model(url="https://igw.example.test/v1", name="baseline"))}
     )
@@ -317,7 +316,7 @@ def test_run_scores_baseline_concurrently(tmp_path: Path, mocker: MockerFixture)
 
     evaluator = mocker.Mock()
     evaluator.run = _run
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={"baseline": Retrieval(embeddings=Model(url="https://igw.example.test/v1", name="baseline"))}
     )
@@ -344,7 +343,7 @@ def test_run_includes_cutoff_10_when_baseline_omits_it(tmp_path: Path, mocker: M
             _result(ndcg=0.5, recall=0.75),
         ]
     )
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     spec = _spec().model_copy(
         update={
             "k": [1],
@@ -380,7 +379,7 @@ def test_run_records_started_at_before_evaluation(tmp_path: Path, mocker: Mocker
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.datetime", wraps=datetime).now.return_value = started
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
 
     RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
 
@@ -398,7 +397,7 @@ def test_run_passes_the_declared_typed_client_for_fileset_refs(tmp_path: Path, m
     mocker.patch("nemo_evaluator.jobs.retrieve_eval.load_beir_dataset", return_value=_beir_dataset(mocker))
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
     client = NemoClient(base_url="http://platform.test", workspace="dev", http_client=httpx.Client())
     ctx = _context(tmp_path)
 
@@ -425,7 +424,7 @@ def test_run_includes_dropped_qrel_rows_in_eval_results(tmp_path: Path, mocker: 
     )
     evaluator = mocker.Mock()
     evaluator.run = mocker.AsyncMock(return_value=_result())
-    mocker.patch("nemo_evaluator.jobs.retrieve_eval.Evaluator", return_value=evaluator)
+    mocker.patch("nemo_evaluator.jobs.utils.Evaluator", return_value=evaluator)
 
     output = RetrieveEvalJob().run(_spec().model_dump(mode="json"), ctx=ctx, client=mocker.Mock(spec=NemoClient))
 

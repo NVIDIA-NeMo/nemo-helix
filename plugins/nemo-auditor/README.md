@@ -4,7 +4,7 @@
 # NeMo Auditor Plugin
 
 A NeMo Helix plugin which provides Auditor, an LLM
-vulnerability scanner service powered by [Garak](https://https://github.com/NVIDIA/garak)
+vulnerability scanner service powered by [Garak](https://github.com/NVIDIA/garak)
 
 ## CLI quickstart
 
@@ -32,7 +32,7 @@ NeMo CLI:
 
 ```bash
 # Create a config from a JSON file
-nemo auditor configs create quick-scan -w default -f ./quick-scan.json
+nemo auditor configs create quick-scan -w default --data-file ./quick-scan.json
 
 # Create a target inline
 nemo auditor targets create nemotron-3.5-lightning-30b -w default -d '{

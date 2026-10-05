@@ -8,6 +8,7 @@ import io
 import json
 import tarfile
 
+import pytest
 from fastapi.testclient import TestClient
 from nhx.testing.client import TEST_ADMIN_EMAIL
 
@@ -19,6 +20,10 @@ BUNDLE_ALLOWED_HEADERS = {
 
 SERVICE_PRINCIPAL = "service:integration-test"
 NON_ADMIN_USER = "test-user@example.com"
+
+# test_client is module-scoped (expensive to boot): keep these tests on one xdist worker so
+# they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("auth_opa_bundle")
 
 
 class TestOPABundle:

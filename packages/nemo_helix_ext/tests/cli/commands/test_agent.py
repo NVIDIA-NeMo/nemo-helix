@@ -180,7 +180,7 @@ class TestAgentCommands:
         assert command_rows == [
             "| nemo setup | Setup | Set up NeMo Helix: connect or start services, configure a provider, install skills. |",
             "| nemo auth | Setup | Manage authentication for NeMo Helix. |",
-            "| nemo services | Setup | Run platform services locally. |",
+            "| nemo services | Setup | Run Helix services locally. |",
             "| nemo skills | Setup | Install AI agent skill files for Nemo. |",
             "| nemo chat | CLI functions | Start an interactive chat session with a model. |",
             "| nemo docs | CLI functions | Read NeMo Helix documentation. |",

@@ -19,7 +19,7 @@ version = "0.0.0"
 [project.optional-dependencies]
 docker = ["docker>=7.0"]
 k8s = ["kubernetes>=30.1.0"]
-openshell = ["grpcio>=1.78.0", "openshell>=0.0.92", "protobuf>=6.31.1"]
+openshell = ["grpcio>=1.78.0", "openshell>=0.1.2", "protobuf>=6.31.1"]
 
 [project.entry-points."nemo.services"]
 deployments = "nemo_deployments_plugin.service:DeploymentsService"

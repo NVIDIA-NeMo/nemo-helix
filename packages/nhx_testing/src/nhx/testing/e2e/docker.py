@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.docker.gpu_detection import detect_gpu_device_ids
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.network import Network
@@ -189,7 +189,7 @@ class Docker(E2EBackend):
             self.container.with_env("MODELS_DOCKER_NETWORK", self.network.name)
             self.container.with_env("MODELS_DOCKER_CONTAINER_NAME", NHX_API_NETWORK_ALIAS)
             # Pass registry/tag overrides to the container so services use the correct images
-            # for job execution (e.g., nhx-cpu-tasks). Without these, the YAML config defaults
+            # for job execution (e.g., nhx-tasks). Without these, the YAML config defaults
             # would be used, which may not match the actual CI registry/tag.
             if self.registry:
                 self.container.with_env("NHX_IMAGE_REGISTRY", self.registry)
@@ -205,7 +205,7 @@ class Docker(E2EBackend):
                 logger.info("Passing NGC_API_KEY into API container for NIM model downloads")
 
             # Forward NEMO_JOBS_IMAGE_REGISTRY_* so the jobs controller can authenticate
-            # with a private registry to pull job images (e.g. nhx-cpu-tasks from nvcr.io).
+            # with a private registry to pull job images (e.g. nhx-tasks from nvcr.io).
             # Set when running tests against a private registry:
             #   NEMO_JOBS_IMAGE_REGISTRY=nvcr.io \
             #   NEMO_JOBS_IMAGE_REGISTRY_USER_NAME='$oauthtoken' \
@@ -542,14 +542,14 @@ class Docker(E2EBackend):
 
         self._host_port = None
 
-    def get_sdk(self, principal_id: str | None = None) -> NeMoHelix:
-        """Create an SDK client for the containerized NeMo Helix API.
+    def get_client(self, principal_id: str | None = None) -> NemoClient:
+        """Create a typed platform client for the containerized NeMo Helix API.
 
         Args:
             principal_id: Optional principal ID for authentication (X-NHX-Principal-Id header).
 
         Returns:
-            Configured NeMoHelix SDK client.
+            Configured typed platform client.
 
         Raises:
             RuntimeError: If the container is not running.
@@ -560,7 +560,7 @@ class Docker(E2EBackend):
         container_host = self.container.get_container_host_ip()
         base_url = f"http://{container_host}:{self._host_port}"
         headers = {"X-NHX-Principal-Id": principal_id} if principal_id else None
-        return NeMoHelix(base_url=base_url, default_headers=headers)
+        return NemoClient(base_url=base_url, default_headers=headers)
 
     @property
     def network_name(self) -> str | None:

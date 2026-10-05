@@ -14,9 +14,11 @@ It returns an :class:`APIRouter` carrying a single ``POST`` route that:
   header.
 - Resolves keyword-only DI parameters on
   :meth:`~nemo_helix_plugin.function.NemoFunction.run` by parameter name —
-  ``ctx`` (FunctionContext), ``sdk`` (``NeMoHelix``), ``async_sdk``
-  (``AsyncNeMoHelix``, resolved from
-  :func:`~nemo_helix_plugin.dependencies.get_sdk_client`), and ``is_local=False``.
+  ``ctx`` (FunctionContext), ``sdk``
+  (:class:`~nemo_helix_plugin.client.client.NemoClient`, resolved from
+  :func:`~nemo_helix_plugin.dependencies.get_sync_nemo_client`), ``async_sdk``
+  (:class:`~nemo_helix_plugin.client.client.AsyncNemoClient`, resolved from
+  :func:`~nemo_helix_plugin.dependencies.get_nemo_client`), and ``is_local=False``.
   Functions that need sync-only libraries may request ``sdk`` and run that
   work inside :func:`anyio.to_thread.run_sync` / :func:`asyncio.to_thread`.
 - Awaits ``run(spec, **resolved)``.
@@ -62,9 +64,9 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse, StreamingResponse
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.authz import GENERATED_ROUTE_CALLERS, AuthzScope, path_rule
-from nemo_helix_plugin.dependencies import get_sdk_client, get_sync_sdk_client
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client, get_sync_nemo_client
 from nemo_helix_plugin.function import NemoFunction, returns_async_iterator
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import DEFAULT_FUNCTION_PATH, NDJSON_MEDIA_TYPE, Heartbeat
@@ -157,7 +159,7 @@ def add_function_routes(
     path = _resolve_route_path(function_cls)
 
     # The handler signature is built dynamically so we only declare
-    # ``Depends(get_sdk_client)`` for functions that actually opt in.
+    # ``Depends(get_nemo_client)`` for functions that actually opt in.
     # Otherwise FastAPI would resolve it on every request and the
     # placeholder raises ``RuntimeError`` when no ``dependency_overrides``
     # entry has been registered. We also only declare the request-id
@@ -228,9 +230,9 @@ def _build_route_handler(
 
     FastAPI inspects the handler's signature at registration time;
     every parameter with a ``Depends`` is resolved on every request.
-    Declaring SDK dependencies on a function that doesn't want them
+    Declaring client dependencies on a function that doesn't want them
     would force a runtime error on every request until the platform
-    installs ``app.dependency_overrides`` for the SDKs. Building the
+    installs ``app.dependency_overrides`` for the clients. Building the
     closure body's call-shape from booleans keeps each function's
     surface as narrow as the function declared.
     """
@@ -238,8 +240,8 @@ def _build_route_handler(
     async def _invoke(
         spec_obj: BaseModel,
         ctx: FunctionContext | None,
-        sdk: NeMoHelix | None,
-        async_sdk: AsyncNeMoHelix | None,
+        sdk: NemoClient | None,
+        async_sdk: AsyncNemoClient | None,
     ) -> Any:
         kwargs: dict[str, Any] = {}
         if ctx is not None:
@@ -265,8 +267,8 @@ def _build_route_handler(
             workspace: str,
             request_body,
             x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-            sdk: NeMoHelix = Depends(get_sync_sdk_client),
-            async_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+            sdk: NemoClient = Depends(get_sync_nemo_client),
+            async_sdk: AsyncNemoClient = Depends(get_nemo_client),
         ) -> Any:
             ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
             return await _invoke(request_body, ctx, sdk, async_sdk)
@@ -277,7 +279,7 @@ def _build_route_handler(
             workspace: str,
             request_body,
             x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-            sdk: NeMoHelix = Depends(get_sync_sdk_client),
+            sdk: NemoClient = Depends(get_sync_nemo_client),
         ) -> Any:
             ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
             return await _invoke(request_body, ctx, sdk, None)
@@ -288,7 +290,7 @@ def _build_route_handler(
             workspace: str,
             request_body,
             x_request_id: str | None = Header(default=None, alias="X-Request-ID"),
-            async_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+            async_sdk: AsyncNemoClient = Depends(get_nemo_client),
         ) -> Any:
             ctx = FunctionContext(workspace=workspace, request_id=x_request_id)
             return await _invoke(request_body, ctx, None, async_sdk)
@@ -308,8 +310,8 @@ def _build_route_handler(
         async def handler(
             workspace: str,
             request_body,
-            sdk: NeMoHelix = Depends(get_sync_sdk_client),
-            async_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+            sdk: NemoClient = Depends(get_sync_nemo_client),
+            async_sdk: AsyncNemoClient = Depends(get_nemo_client),
         ) -> Any:
             return await _invoke(request_body, None, sdk, async_sdk)
 
@@ -318,7 +320,7 @@ def _build_route_handler(
         async def handler(
             workspace: str,
             request_body,
-            sdk: NeMoHelix = Depends(get_sync_sdk_client),
+            sdk: NemoClient = Depends(get_sync_nemo_client),
         ) -> Any:
             return await _invoke(request_body, None, sdk, None)
 
@@ -327,7 +329,7 @@ def _build_route_handler(
         async def handler(
             workspace: str,
             request_body,
-            async_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+            async_sdk: AsyncNemoClient = Depends(get_nemo_client),
         ) -> Any:
             return await _invoke(request_body, None, None, async_sdk)
 

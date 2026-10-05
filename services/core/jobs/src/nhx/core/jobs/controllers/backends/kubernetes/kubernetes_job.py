@@ -48,6 +48,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     create_pod_template_spec,
     delete_configmap,
     get_namespace_from_environment,
+    image_pull_backoff_failure,
     list_pod_status,
     load_kubernetes_config,
     name_for_step,
@@ -136,6 +137,26 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             labels=metadata.labels or {},
             service_account_name=service_account_name,
         )
+
+    def _ensure_initial_workload_delegation(self, step: HelixJobStepWithContext, job: V1Job) -> None:
+        if not self._workload_delegations.should_manage_step(step):
+            return
+        target = self._workload_delegation_target_for_job(job)
+        if target is None:
+            return
+        try:
+            registered = self._workload_delegations.ensure_for_target_after_initial_pod_wait(step, target)
+        except Exception:
+            logger.exception(
+                "Failed initial Kubernetes workload delegation reconciliation; will retry on next sync",
+                extra={"job_name": target.name, "namespace": target.namespace},
+            )
+            return
+        if not registered:
+            logger.warning(
+                "Kubernetes workload delegation was not registered during initial pod wait",
+                extra={"job_name": target.name, "namespace": target.namespace},
+            )
 
     def get_job_by_name(self, name: str) -> V1Job | None:
         try:
@@ -244,6 +265,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             logger.info(
                 "Scheduled job step with Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
             )
+            self._ensure_initial_workload_delegation(step, k8s_job)
         except ApiException:
             logger.exception(
                 "Failed to create Kubernetes job", extra={"job_name": job_name, "namespace": self.namespace}
@@ -282,6 +304,8 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 )
             return self.sync_active(step, k8s_job)
         elif step.status == HelixJobStatus.PENDING:
+            if k8s_job is not None and (result := self.enforce_image_pull_ttl(step, k8s_job)):
+                return result
             if k8s_job is not None and (
                 result := self.enforce_sync_ttl(
                     step,
@@ -390,6 +414,36 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                     self._workload_delegations.ensure_for_target(step, target)
         error_details = {"message": error_message} if error_message is not None else {}
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
+
+    def enforce_image_pull_ttl(self, step: HelixJobStepWithContext, k8s_job: V1Job) -> JobUpdate | None:
+        """Fail a step whose image the kubelet has been retrying for too long.
+
+        ``ImagePullBackOff`` is recoverable, so a single failed attempt must not
+        fail the step -- a registry blip resolves on its own. A reference that
+        can never resolve, though, backs off forever, and the only other
+        backstop is ``ttl_seconds_before_active``: far longer, and its message
+        reports a scheduling timeout that never mentions the image.
+
+        The budget runs from the first failed pull, not from when the step went
+        pending, so time the pod spent waiting to be scheduled does not eat into
+        the grace a transient registry fault gets.
+        """
+        message = image_pull_backoff_failure(
+            self._core_v1,
+            self.namespace,
+            step,
+            self._execution_profile_config.ttl_seconds_image_pull,
+        )
+        if message is None:
+            return None
+
+        self.terminate_job(k8s_job)
+        update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        return JobUpdate(
+            status=HelixJobStatus.ERROR,
+            status_details={"message": message, "events": self.get_kube_job_events(k8s_job)},
+            error_details={"message": message},
+        )
 
     def enforce_sync_ttl(
         self,

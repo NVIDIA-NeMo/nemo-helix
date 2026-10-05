@@ -81,7 +81,7 @@ class CallerKind(StrEnum):
 # Caller kinds stamped on every factory-generated route (see ``jobs.api_factory`` and
 # ``functions.routes``).
 #
-# Generated routes admit both kinds. Plugin controllers and other in-platform services call
+# Generated routes admit both kinds. Plugin controllers and other Helix services call
 # these routes as ``service:<name>``, and a principal-only route is an unconditional PDP
 # *deny* for a service principal — it overrides even the ServiceSystem wildcard, so no role
 # grant recovers it. Caller kind is the wrong lever for narrowing service-to-service reach:

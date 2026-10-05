@@ -6,13 +6,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.service.dependencies import get_sdk_client
-from nhx.core.models.api.dependencies import get_adapter_entity_service
+from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import FilesetValidationError
@@ -40,12 +39,12 @@ async def create_adapter(
     workspace: str,
     adapter_create: CreateAdapterRequest,
     service: AdapterEntityService = Depends(get_adapter_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
 ) -> Adapter:
     """Create an adapter under a base model specified by the "model" field in the body."""
     logger.info(f"Creating adapter entity: {workspace} for model {adapter_create.model!r}")
     try:
-        await check_fileset_access(nhx_sdk, adapter_create.fileset, workspace)
+        await check_fileset_access(files, adapter_create.fileset, workspace)
         body = CreateModelAdapterRequest.model_validate(
             adapter_create.model_dump(exclude={"model"}, exclude_unset=True)
         )
@@ -189,11 +188,11 @@ async def update_adapter(
     name: str,
     adapter_update: UpdateAdapterRequest,
     service: AdapterEntityService = Depends(get_adapter_entity_service),
-    nhx_sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    files: AsyncFilesClient = Depends(get_files_client),
 ) -> Adapter:
     try:
         if adapter_update.fileset:
-            await check_fileset_access(nhx_sdk, adapter_update.fileset, workspace)
+            await check_fileset_access(files, adapter_update.fileset, workspace)
         updated = await service.update_adapter_in_workspace(workspace, name, adapter_update)
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during adapter update: {e}")

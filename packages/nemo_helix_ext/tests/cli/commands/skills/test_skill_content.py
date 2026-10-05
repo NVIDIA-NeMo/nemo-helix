@@ -8,6 +8,7 @@ entry-point mechanism that third-party plugins use, so these tests exercise the
 public ``load_skills()`` API rather than any "built-in" branch.
 """
 
+import re
 from pathlib import Path
 
 from nemo_helix_ext.cli.commands.skills.base import Skill
@@ -223,3 +224,44 @@ class TestLoadHelixSkills:
         skills2 = load_skills()
         assert skills1 is not skills2
         assert "inference" in skills2
+
+    def test_platform_skills_do_not_clobber_configured_base_url(self):
+        """Platform skills must not unconditionally overwrite ``NHX_BASE_URL``.
+
+        Regression guard: a skill that runs a bare
+        ``export NHX_BASE_URL=http://localhost:8080`` clobbers a user's already
+        configured *remote* platform. Skills should default to a local URL only
+        when the var is unset (the ``${NHX_BASE_URL:=...}`` / ``${NHX_BASE_URL:-...}``
+        idioms), so an existing remote is respected.
+        """
+        # A literal assignment (``export NHX_BASE_URL=http://...``) clobbers.
+        # The parameter-expansion default forms (``${NHX_BASE_URL:=...}`` and
+        # ``${NHX_BASE_URL:-...}``) are non-destructive and allowed.
+        # A literal assignment to a concrete URL clobbers, whether or not it is
+        # prefixed with ``export`` (``export NHX_BASE_URL=http://...`` or a bare
+        # ``NHX_BASE_URL=http://...``). The parameter-expansion default forms
+        # (``${NHX_BASE_URL:=...}`` and ``${NHX_BASE_URL:-...}``, with or without
+        # a leading ``:`` no-op) are non-destructive and allowed.
+        clobber = re.compile(r"(?:export\s+)?NHX_BASE_URL=(?!\"?\$\{NHX_BASE_URL:)")
+        # A line carrying this inline marker is a deliberate, documented override
+        # (e.g. the explicit "user selects the local Platform" path in
+        # nemo-try-agent) and is intentionally exempt — the guard still catches
+        # any *other* clobbering line in the same skill.
+        allow_marker = "nhx-base-url-allow"
+        offenders: list[str] = []
+        for name, skill in load_skills().items():
+            if skill.source_plugin != "platform":
+                continue
+            for match in clobber.finditer(skill.raw):
+                line_start = skill.raw.rfind("\n", 0, match.start()) + 1
+                line_end = skill.raw.find("\n", match.start())
+                line_text = skill.raw[line_start : line_end if line_end != -1 else None]
+                if allow_marker in line_text:
+                    continue
+                line = skill.raw[: match.start()].count("\n") + 1
+                offenders.append(f"{name}:{line}")
+        assert not offenders, (
+            "Platform skills unconditionally overwrite NHX_BASE_URL, clobbering a "
+            f"configured remote: {offenders}. Use "
+            "': \"${NHX_BASE_URL:=http://localhost:8080}\"' so an existing value is respected."
+        )

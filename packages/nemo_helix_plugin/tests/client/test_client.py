@@ -7,10 +7,18 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, AsyncNemoClient, NemoClient, _type_adapter
+from nemo_helix_plugin.client.client import (
+    DEFAULT_TIMEOUT,
+    AsyncNemoClient,
+    NemoClient,
+    NemoClientRuntime,
+    _type_adapter,
+)
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoResponseValidationError, NotFoundError
 from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_plugin.client.types import RetryPolicy
 from pydantic import BaseModel
 
 BASE = "http://test:8000"
@@ -192,6 +200,24 @@ def test_base_url_trailing_slash_stripped() -> None:
 
     url_called = mock_http.request.call_args[0][1]
     assert not url_called.startswith(BASE + "//")
+
+
+def test_default_runtime_is_allocated_per_client() -> None:
+    sync_a = NemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.Client))
+    sync_b = NemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.Client))
+    async_a = AsyncNemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.AsyncClient))
+    async_b = AsyncNemoClient(base_url=BASE, http_client=MagicMock(spec=httpx.AsyncClient))
+    explicit_runtime = NemoClientRuntime()
+    explicit_client = NemoClient(
+        base_url=BASE,
+        http_client=MagicMock(spec=httpx.Client),
+        client_runtime=explicit_runtime,
+    )
+
+    assert sync_a.nemo_client_runtime is not sync_b.nemo_client_runtime
+    assert async_a.nemo_client_runtime is not async_b.nemo_client_runtime
+    assert sync_a.nemo_client_runtime is not async_a.nemo_client_runtime
+    assert explicit_client.nemo_client_runtime is explicit_runtime
 
 
 def _assert_platform_url_behavior(client: NemoClient | AsyncNemoClient) -> None:
@@ -602,6 +628,38 @@ def test_from_client_carries_the_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_to_async_mirrors_the_config_on_its_own_transport() -> None:
+    upload_timeout = httpx.Timeout(30.0, write=10 * 60)
+    retry = RetryPolicy(max_retries=5)
+    resolver = MagicMock(side_effect=lambda path: path)
+    sync_client = NemoClient(
+        base_url=BASE,
+        workspace="ws",
+        auth="token",
+        default_headers={"X-Test": "1"},
+        timeout=upload_timeout,
+        retry=retry,
+        url_resolver=resolver,
+    )
+
+    async with sync_client.to_async() as async_client:
+        assert isinstance(async_client, AsyncNemoClient)
+        assert async_client.base_url == sync_client.base_url
+        assert async_client.workspace == "ws"
+        assert async_client._auth is sync_client._auth
+        assert async_client.default_headers == {"X-Test": "1"}
+        assert async_client._timeout == upload_timeout
+        assert async_client.retry is retry
+        assert async_client.nemo_client_runtime is sync_client.nemo_client_runtime
+        assert async_client.nemo_client_runtime.url_resolver is resolver
+        transport = async_client._http
+
+    assert transport.is_closed
+    assert not sync_client._http.is_closed
+    sync_client.close()
+
+
+@pytest.mark.asyncio
 async def test_constructor_timeout_is_sent_with_every_request_async() -> None:
     mock_http = AsyncMock(spec=httpx.AsyncClient)
     mock_http.request.return_value = httpx.Response(
@@ -696,3 +754,19 @@ def test_query_param_dicts_are_json_serialized() -> None:
     _, kwargs = mock_http.request.call_args
     filter_value = kwargs["params"]["filter"]
     assert filter_value == '{"name": "test"}', f"Expected JSON string, got: {filter_value}"
+
+
+@pytest.mark.parametrize(
+    ("client_cls", "httpx_cls"),
+    [(NemoClient, "Client"), (AsyncNemoClient, "AsyncClient")],
+)
+def test_owned_transport_verifies_with_the_configured_ca_bundle(
+    monkeypatch: pytest.MonkeyPatch, client_cls: type, httpx_cls: str
+) -> None:
+    monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
+    built = MagicMock()
+    monkeypatch.setattr(httpx, httpx_cls, built)
+
+    client_cls(base_url="https://gateway.example")
+
+    assert built.call_args.kwargs["verify"] == "/tmp/nemo-ca.pem"

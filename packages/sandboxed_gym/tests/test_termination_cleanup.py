@@ -14,7 +14,11 @@ import signal
 from collections.abc import Callable
 
 import pytest
-from sandboxed_gym.orchestrator import TERMINATION_SIGNALS, install_termination_cleanup
+from sandboxed_gym.orchestrator import (
+    _TERMINATION_SHUTDOWNS,
+    TERMINATION_SIGNALS,
+    install_termination_cleanup,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +27,8 @@ def restore_process_state():
     original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
     registered: list[Callable[[], object]] = []
     real_register = atexit.register
+    prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
+    _TERMINATION_SHUTDOWNS.clear()
 
     def _tracking_register(func, *args, **kwargs):
         registered.append(func)
@@ -37,6 +43,8 @@ def restore_process_state():
             atexit.unregister(func)
         for signum, handler in original.items():
             signal.signal(signum, handler)
+        _TERMINATION_SHUTDOWNS.clear()
+        _TERMINATION_SHUTDOWNS.extend(prior_shutdowns)
 
 
 @pytest.mark.parametrize("signum", TERMINATION_SIGNALS)

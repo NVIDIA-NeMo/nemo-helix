@@ -1,16 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests: a Fabric-driven agent eval end-to-end, scored by a metric that consumes the
-captured trajectory evidence.
+"""A Fabric-driven agent eval end-to-end against a fake ``nemo_fabric``, scored by a metric that
+consumes the captured trajectory evidence: the runner -> evaluator -> metric -> evidence chain.
 
-- ``test_fabric_runner_eval_exposes_trajectory_to_metric`` is hermetic (fake ``nemo_fabric``) and runs
-  in CI: it proves the runner -> evaluator -> metric -> evidence chain, i.e. the metric receives and
-  reads the trajectory (ATIF) evidence for the task.
-- ``test_fabric_codex_live_eval_captures_atif_trajectory`` is the real fabric->codex->Relay run, gated
-  behind the required binaries so CI skips it; run it locally after
-  ``uv sync --frozen --package nemo-evaluator-sdk --extra fabric --inexact`` plus
-  ``script/dev-install-fabric.sh`` for the relay gateway.
+The real fabric -> codex -> Relay run lives in ``tests/e2e/test_fabric_codex_live.py``.
 """
 
 from __future__ import annotations
@@ -77,10 +71,18 @@ def _task() -> AgentEvalTask:
 
 
 class _FakeEnvironment:
-    def __init__(self, *, provider: str = "local", workspace: str | None = None, artifacts: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str = "local",
+        workspace: str | None = None,
+        artifacts: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> None:
         self.provider = provider
         self.workspace = workspace
         self.artifacts = artifacts
+        self.env = dict(env or {})
 
 
 class _FakeRuntimeCfg:
@@ -274,6 +276,7 @@ requires_live_fabric = pytest.mark.skipif(
 
 
 @requires_live_fabric
+@pytest.mark.real_codex_home
 @pytest.mark.timeout(300)
 def test_fabric_codex_live_eval_captures_atif_trajectory(tmp_path: Path) -> None:
     codex_config = {
@@ -310,7 +313,7 @@ def test_fabric_codex_live_eval_captures_atif_trajectory(tmp_path: Path) -> None
     )
 
     trial = result.trials[0]
-    assert trial.status == "completed", trial.metadata
+    assert trial.status == "completed", f"{trial.metadata.get('error_type')}: {trial.metadata.get('error')}"
     assert trial.evidence is not None
     # OTLP is primary because Relay exported one and the runner captured it; ATIF stays reachable
     # under its own key, so a metric written against either view still finds it.
@@ -397,7 +400,7 @@ async def test_a_relay_export_is_captured_and_becomes_the_primary_trace(
     )
 
     trial = result.trials[0]
-    assert trial.status == "completed", trial.metadata
+    assert trial.status == "completed", f"{trial.metadata.get('error_type')}: {trial.metadata.get('error')}"
     assert trial.evidence is not None
     trace = trial.evidence.descriptors[EVIDENCE_TRACE]
     assert trace.format == EVIDENCE_FORMAT_OTLP

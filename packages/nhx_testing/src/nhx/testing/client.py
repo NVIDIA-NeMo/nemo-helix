@@ -18,7 +18,7 @@ import httpx
 from fastapi.testclient import TestClient
 from nemo_helix import AsyncNeMoHelix, NeMoHelix, NotGiven, not_given
 from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
@@ -34,9 +34,11 @@ from nhx.core.inference_gateway.service import InferenceGatewayService
 from nhx.platform_runner.loader import order_services_by_dependencies
 from nhx.platform_runner.server import create_app
 from nhx.testing.access_log import AccessLog, AccessLogMiddleware
+from nhx.testing.asyncio_debug import bounded_event_loop_teardown
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
+_IN_PROCESS_PLATFORM_BASE_URL = "http://127.0.0.1"
 
 
 @dataclass
@@ -53,6 +55,9 @@ class ClientContext:
     async_sdk: AsyncNeMoHelix
     """Asynchronous NeMoHelix SDK client."""
 
+    client: NemoClient
+    """Synchronous typed platform client."""
+
     async_client: AsyncNemoClient
     """Asynchronous typed platform client."""
 
@@ -66,7 +71,9 @@ class ClientContext:
     """Captured requests when access_log=True was passed to create_test_client."""
 
 
-ClientT = TypeVar("ClientT", TestClient, AsyncNemoClient, AsyncNeMoHelix, NeMoHelix, EntityClient, ClientContext)
+ClientT = TypeVar(
+    "ClientT", TestClient, NemoClient, AsyncNemoClient, AsyncNeMoHelix, NeMoHelix, EntityClient, ClientContext
+)
 
 
 class SDKTestClientAdapter(httpx.Client):
@@ -144,8 +151,7 @@ def _default_service_configs(tmp_dir: Path) -> dict[type[object], ServiceConfig]
                 },
             },
         ),
-        # HelixConfig with testserver URL so get_service_url() works in tests
-        HelixConfig: HelixConfig(base_url="http://testserver"),
+        HelixConfig: HelixConfig(base_url=_IN_PROCESS_PLATFORM_BASE_URL),
     }
 
 
@@ -254,8 +260,8 @@ def create_test_client(
 
     Args:
         *service_types: One or more Service classes to test
-        client_type: The client type to yield. One of TestClient, AsyncNemoClient,
-                     AsyncNeMoHelix, NeMoHelix, or EntityClient. Defaults to NeMoHelix.
+        client_type: The client type to yield. One of TestClient, NemoClient, AsyncNemoClient,
+                     AsyncNeMoHelix, NeMoHelix, EntityClient, or ClientContext. Defaults to NeMoHelix.
         dependency_overrides: Custom dependency overrides dict. If get_entity_client
                       is not in dependency_overrides, an EntityClient will be created.
         service_configs: Optional map of service class → config. Overrides defaults
@@ -359,6 +365,10 @@ def create_test_client(
         configs = _default_service_configs(tmp_dir)
         if service_configs:
             configs.update(service_configs)
+        platform_config = configs.get(HelixConfig)
+        if not isinstance(platform_config, HelixConfig):
+            raise TypeError("create_test_client requires a HelixConfig platform config")
+        platform_base_url = platform_config.base_url
 
         # If auth is enabled, set up auth configs and add AuthService
         if auth_enabled:
@@ -368,7 +378,7 @@ def create_test_client(
 
             # Only add auth configs if not already provided by user.
             # PDP base is the platform root; get_pdp_url() appends /apis/auth/v2/authz/{entrypoint}.
-            pdp_base = "http://testserver"
+            pdp_base = platform_base_url
             if SharedAuthConfig not in configs:
                 configs[SharedAuthConfig] = SharedAuthConfig(
                     enabled=True,
@@ -450,7 +460,7 @@ def create_test_client(
 
         transport = httpx.ASGITransport(app=_pending_asgi_app)
         pdp_timeout = Configuration.get_service_config(AuthConfig).policy_decision_point_request_timeout_seconds
-        async_http_client = httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=pdp_timeout)
+        async_http_client = httpx.AsyncClient(transport=transport, base_url=platform_base_url, timeout=pdp_timeout)
 
         # Both auth callouts target this in-process ASGI app in tests.
         app = create_app(
@@ -476,10 +486,10 @@ def create_test_client(
         from nhx.common.sdk_factory import get_async_platform_sdk
 
         async_sdk = get_async_platform_sdk(
-            base_url="http://testserver",
+            base_url=platform_base_url,
             http_client=async_http_client,
         ).copy(workspace=workspace)
-        async_client = AsyncNemoClient(base_url="http://testserver", http_client=async_http_client, workspace=workspace)
+        async_client = AsyncNemoClient(base_url=platform_base_url, http_client=async_http_client, workspace=workspace)
 
         # Create the EntityClient (used for DI and optionally yielded)
         entity_client = EntityClient(client_from_platform(async_sdk, AsyncEntitiesClient))
@@ -529,16 +539,17 @@ def create_test_client(
         if all_overrides:
             app.dependency_overrides.update(all_overrides)
 
-        with TestClient(app) as client:
+        with bounded_event_loop_teardown(), TestClient(app, base_url=platform_base_url) as client:
             # Use max_retries=0 to avoid retry delays on 409 Conflict errors
             sdk_http_client = SDKTestClientAdapter(client)
             sdk = NeMoHelix(
                 workspace=workspace,
-                base_url="http://testserver",
+                base_url=platform_base_url,
                 http_client=sdk_http_client,
                 max_retries=0,
             )
             _install_asgi_files_resource(sdk)
+            sync_client = NemoClient(base_url="http://testserver", http_client=sdk_http_client, workspace=workspace)
 
             for svc in services_to_start:
                 svc.dependency_provider._sync_http_client = sdk_http_client
@@ -661,6 +672,8 @@ def create_test_client(
 
             if selected_client_type is TestClient:
                 yield client  # ty: ignore[invalid-yield]
+            elif selected_client_type is NemoClient:
+                yield sync_client  # ty: ignore[invalid-yield]
             elif selected_client_type is AsyncNemoClient:
                 yield async_client  # ty: ignore[invalid-yield]
             elif selected_client_type is AsyncNeMoHelix:
@@ -671,6 +684,7 @@ def create_test_client(
                 yield ClientContext(
                     sdk=sdk,
                     async_sdk=async_sdk,
+                    client=sync_client,
                     async_client=async_client,
                     entity_client=entity_client,
                     test_client=client,

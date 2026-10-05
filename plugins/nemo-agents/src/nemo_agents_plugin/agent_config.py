@@ -17,7 +17,7 @@ from typing import Any, Literal, Self
 
 import yaml
 from nemo_agents_plugin.entities import AGENT_CONFIG_FILENAME
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 class AgentConfigLoadError(ValueError):
@@ -32,7 +32,17 @@ class ModelConfig(BaseModel):
     api_key_env: str | None = None
     base_url: str | None = None
     temperature: float | None = None
+    top_p: float | None = Field(default=None, strict=True, ge=0, le=1)
+    max_tokens: int | None = Field(default=None, strict=True, gt=0, le=(1 << 64) - 1)
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def _normalize_integral_max_tokens(cls, value: Any) -> Any:
+        # Match Fabric's handling of whole-number JSON/YAML floats.
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 class HarnessConfig(BaseModel):

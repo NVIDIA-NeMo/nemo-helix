@@ -10,7 +10,7 @@ to detect and replace/rewrite PII in tabular text data.
 The plugin exposes an `anonymizer` service, CLI commands under
 `nemo anonymizer`, an SDK accessor on `NeMoHelix.anonymizer`, a streaming
 preview API, and an `anonymizer.run` job that executes on the
-`nhx-cpu-tasks` container image.
+`nhx-tasks` container image.
 
 ## What it does
 

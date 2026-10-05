@@ -27,10 +27,10 @@ from nemo_evaluator.jobs.metric_resolution import (
 from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
-from nemo_evaluator.jobs.utils import async_client_from_sync_client, run_with_isolated_async_client
+from nemo_evaluator.jobs.token_usage import report_row_evaluation_usage
+from nemo_evaluator.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
-from nemo_evaluator_sdk import Evaluator
 from nemo_evaluator_sdk.execution.config import resolve_params
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
@@ -298,7 +298,7 @@ class _EvaluateJobBase(NemoJob):
             submit_spec.metrics,
             workspace=workspace,
             entity_client=entity_client,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
         )
         return EvaluateSpec(
             metrics=metrics,
@@ -322,7 +322,7 @@ class _EvaluateJobBase(NemoJob):
         # nowhere to put it. Publication needs a start time that is a function of the run, not of
         # when it was published, or re-ingest duplicates spans instead of replacing them.
         started_at = datetime.now(UTC)
-        evaluator = Evaluator()
+        evaluator = job_evaluator()
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         if isinstance(spec.target, Model):
@@ -360,6 +360,7 @@ class _EvaluateJobBase(NemoJob):
                 field_mapping=spec.field_mapping,
                 prompt_template=None,
             )
+        report_row_evaluation_usage(result, ctx.usage)
         result_files = self._write_result_files(
             result, ctx.storage.persistent, run_id=ctx.job_id, started_at=started_at
         )

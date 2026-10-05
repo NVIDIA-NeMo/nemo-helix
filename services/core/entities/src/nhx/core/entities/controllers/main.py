@@ -6,9 +6,9 @@ import logging
 import signal
 import threading
 
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import get_platform_config, get_service_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.entities.app.repository import (
     SQLAlchemyWorkspaceRepository,
@@ -39,10 +39,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     else:
         local_stop_signal = parent_stop_signal
 
-    nhx_sdk = get_async_platform_sdk(
-        as_service="entities",
-        internal=True,
-    )
+    client = get_async_nemo_client(as_service="entities", internal=True)
 
     # Create a single event loop that will be shared for DB init and the cleanup controller,
     # so SQLAlchemy's async pool is bound to the same loop that later runs queries.
@@ -60,7 +57,7 @@ def run(parent_stop_signal: threading.Event | None = None):
         logger.warning("Server did not become ready in time, starting loops anyway")
 
     cleanup_controller = WorkspaceCleanup(
-        nhx_sdk=nhx_sdk,
+        client=client,
         workspace_repository=workspace_repository,
         stop_signal=local_stop_signal,
         loop=loop,

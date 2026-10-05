@@ -6,8 +6,8 @@
 // every `pnpm gen`.
 //
 // Studio's own fetchers read the OIDC user out of localStorage. A plugin must
-// not: only the access token crosses the plugin boundary, so `Root` installs
-// the host's token getter here at mount and every request reads it fresh
+// not: only the configured platform bearer crosses the plugin boundary, so
+// `Root` installs the host's token getter here at mount and every request reads it fresh
 // (getAccessToken returns the current token after silent renew).
 
 import axios, {
@@ -35,7 +35,7 @@ export const configureClient = (next: ClientConfig): void => {
 /** Absolute URL for a plugin-owned endpoint not covered by the generated client. */
 export const apiUrl = (path: string): string => `${config?.baseUrl ?? ''}${path}`;
 
-/** Current access token, for callers that build their own request. */
+/** Current configured platform bearer, for callers that build their own request. */
 export const authHeader = (): Record<string, string> => {
   const token = config?.getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};

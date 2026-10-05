@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 from evaluation import artifact, export
 from evaluation.registry import Subject
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 # --------------------------------------------------------------------------- #
 # fake SDK client
@@ -41,8 +41,38 @@ def _paginator(items):
     return gen()
 
 
+class _FakePaginated:
+    """Stand-in for the typed client's awaitable paginated response."""
+
+    def __init__(self, items):
+        self._items = items
+
+    def __await__(self):
+        async def ready():
+            return self
+
+        return ready().__await__()
+
+    def items(self):
+        return _paginator(self._items)
+
+
+class _FakeResponse:
+    """Stand-in for the typed client's single-entity response."""
+
+    def __init__(self, item):
+        self._item = item
+
+    def data(self):
+        return self._item
+
+
 class FakeClient:
-    """Captures every list call's kwargs; serves canned docs per (collection, workspace)."""
+    """Captures every list call's kwargs; serves canned docs per (collection, workspace).
+
+    The typed intake fake flattens ``query_params`` into the recorded kwargs so the
+    assertions read the same for intake and non-intake collections.
+    """
 
     def __init__(self, docs: dict):
         self.docs = docs  # {("spans", ws): [Doc, ...], ...}
@@ -50,33 +80,37 @@ class FakeClient:
         self.closed = False
         outer = self
 
-        class _Collection:
-            def __init__(self, name):
-                self.name = name
-
-            def list(self, **kwargs):
-                outer.calls.append((self.name, kwargs))
-                items = outer.docs.get((self.name, kwargs["workspace"]), [])
+        class _Intake:
+            def _list(self, name, *, workspace, query_params=None):
+                kwargs = {"workspace": workspace, **(query_params or {})}
+                outer.calls.append((name, kwargs))
+                items = outer.docs.get((name, workspace), [])
                 filters = kwargs.get("filter") or {}
                 for key in ("evaluation_id", "trace_id", "session_id"):
                     if key in filters:
                         items = [item for item in items if item.payload.get(key) == filters[key]]
-                return _paginator(items)
+                return _FakePaginated(items)
 
-        class _Intake:
-            spans = _Collection("spans")
-            annotations = _Collection("annotations")
-            evaluator_results = _Collection("evaluator_results")
-            traces = _Collection("traces")
+            def list_spans(self, **kwargs):
+                return self._list("spans", **kwargs)
 
-        class _Experiments:
-            async def retrieve(self, name, **kwargs):
-                outer.calls.append(("experiments", {"name": name, **kwargs}))
-                return outer.docs[("experiments", kwargs["workspace"])][0]
+            def list_annotations(self, **kwargs):
+                return self._list("annotations", **kwargs)
+
+            def list_evaluator_results(self, **kwargs):
+                return self._list("evaluator_results", **kwargs)
+
+            def list_traces(self, **kwargs):
+                return self._list("traces", **kwargs)
+
+            def list_evaluations(self, **kwargs):
+                return self._list("evaluations", **kwargs)
+
+            async def get_experiment(self, *, name, workspace):
+                outer.calls.append(("experiments", {"name": name, "workspace": workspace}))
+                return _FakeResponse(outer.docs[("experiments", workspace)][0])
 
         self.intake = _Intake()
-        self.experiments = _Experiments()
-        self.evaluations = _Collection("evaluations")
 
     async def close(self):
         self.closed = True
@@ -88,6 +122,7 @@ class FakeClient:
 def _install_fake_client(monkeypatch, docs) -> FakeClient:
     client = FakeClient(docs)
     monkeypatch.setattr(export, "make_client", lambda base_url: client)
+    monkeypatch.setattr(export, "_intake_client", lambda platform: platform.intake)
     return client
 
 
@@ -193,15 +228,16 @@ def test_export_closes_client(tmp_path, monkeypatch):
     assert client.closed
 
 
-def test_export_closes_injected_client(tmp_path):
+def test_export_closes_injected_client(tmp_path, monkeypatch):
     client = FakeClient({})
+    monkeypatch.setattr(export, "_intake_client", lambda platform: platform.intake)
 
     export.export_workspaces(
         "http://localhost:8080",
         ["ws-a"],
         tmp_path,
         since=None,
-        client=cast(AsyncNeMoHelix, client),
+        client=cast(AsyncNemoClient, client),
     )
 
     assert client.closed

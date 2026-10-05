@@ -258,7 +258,8 @@ def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Pat
 
     def _handler(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json={"data": []})
+        empty_page = {"page": 1, "page_size": 10, "current_page_size": 0, "total_pages": 1, "total_results": 0}
+        return httpx.Response(200, json={"data": [], "pagination": empty_page})
 
     transport = httpx.MockTransport(_handler)
     real_client = httpx.Client

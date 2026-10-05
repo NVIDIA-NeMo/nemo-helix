@@ -91,7 +91,19 @@ class OIDCConfig(BaseSettings):
 
     client_id: str = Field(
         default="",
-        description="OAuth client ID for this NeMo Helix deployment. Used for device flow and token audience validation.",
+        description="OAuth client ID for this NeMo Helix deployment and its default interactive login flows.",
+    )
+
+    cli_client_id: str | None = Field(
+        default=None,
+        description="OAuth client ID for interactive CLI user authentication. Defaults to client_id when unset.",
+    )
+
+    bearer_token_source: Literal["access_token", "id_token"] = Field(
+        default="access_token",
+        description="Token returned by the identity provider that clients send to NeMo Helix APIs. "
+        "Use 'access_token' for standard OAuth resource access, or 'id_token' only when the provider "
+        "documents its signed ID token as the backend bearer.",
     )
 
     # Optional: Override endpoints if not using standard discovery
@@ -108,6 +120,23 @@ class OIDCConfig(BaseSettings):
     device_authorization_endpoint: str | None = Field(
         default=None,
         description="Override device authorization endpoint (defaults to discovery).",
+    )
+
+    device_authorization_requires_device_id: bool = Field(
+        default=False,
+        description="Include a stable, locally generated device_id parameter in CLI device authorization requests. "
+        "Enable only for identity providers that require this extension.",
+    )
+
+    device_authorization_display_name: str | None = Field(
+        default=None,
+        description="Optional display_name sent with CLI device authorization requests.",
+    )
+
+    device_token_request_includes_scope: bool = Field(
+        default=True,
+        description="Include the requested scope in CLI device-flow token polling requests. "
+        "Disable for identity providers whose token endpoint rejects this extension.",
     )
 
     jwks_uri: str | None = Field(
@@ -199,7 +228,9 @@ class OIDCConfig(BaseSettings):
     default_scopes: str = Field(
         default="openid profile email offline_access",
         description="Space-separated OAuth scopes to request during authentication. "
-        "For Azure AD with custom API, use: 'api://{app-id}/.default openid profile email'",
+        "Include short NeMo Helix API scopes such as 'platform:read platform:write' only when the "
+        "IdP application exposes them. If the IdP requires resource-qualified API scope names, set "
+        "scope_prefix instead of putting qualified values here.",
     )
 
     workload_token_exchange_enabled: bool = Field(
@@ -297,9 +328,10 @@ class OIDCConfig(BaseSettings):
 
     scope_prefix: str | None = Field(
         default=None,
-        description="Prefix to strip from token scopes before authorization. "
-        "For example, if IdP returns 'api://my-app/models:read', set prefix to "
-        "'api://my-app/' to normalize to 'models:read'. "
+        description="Optional provider prefix for NeMo Helix API scopes. Clients prepend it to short "
+        "API scopes during login, and NeMo Helix strips it from returned token scopes before authorization. "
+        "For example, if IdP scopes use 'api://my-app/models:read', set prefix to "
+        "'api://my-app/' so NeMo Helix normalizes the value to 'models:read'. "
         "If not set, scopes are used as-is.",
     )
 

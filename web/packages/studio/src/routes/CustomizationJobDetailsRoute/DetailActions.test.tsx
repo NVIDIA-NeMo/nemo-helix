@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getCustomizationListJobTemplatesQueryKey } from '@nemo/sdk/generated/customizer/customization-job-templates';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -11,7 +12,8 @@ import { DetailActions } from '@studio/routes/CustomizationJobDetailsRoute/Detai
 import { mockUseNavigate, mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { CustomizationBackend } from '@studio/util/customizationBackend';
-import { render, screen } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 
@@ -35,7 +37,7 @@ describe('DetailActions', () => {
     );
     expect(screen.getByRole('menuitem', { name: 'Cancel Job' })).toBeEnabled();
   });
-  it('should render evaluate button when status is launchable', () => {
+  it('should not render an evaluate button even when status is launchable', () => {
     render(
       <TestProviders>
         <DetailActions
@@ -45,7 +47,7 @@ describe('DetailActions', () => {
         />
       </TestProviders>
     );
-    expect(screen.getByRole('button', { name: 'Evaluate' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Evaluate' })).not.toBeInTheDocument();
   });
   it('should render loading button when mutation is pending', async () => {
     // Override the default handler with an infinite delay to capture the loading state
@@ -92,5 +94,85 @@ describe('DetailActions', () => {
     );
     expect(screen.queryByRole('button', { name: 'Cancel Job' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Evaluate' })).not.toBeInTheDocument();
+  });
+
+  describe('save as template', () => {
+    const openModal = async () => {
+      const user = userEvent.setup();
+      render(
+        <TestProviders>
+          <DetailActions
+            status={HelixJobStatus.completed}
+            backend={CustomizationBackend.automodel}
+            name={customizationJob1.name}
+            job={customizationJob1}
+          />
+        </TestProviders>
+      );
+      await user.click(screen.getByRole('menuitem', { name: 'Save as template' }));
+      return user;
+    };
+
+    it('sits with Clone, which is the other way to start from this job', async () => {
+      render(
+        <TestProviders>
+          <DetailActions
+            status={HelixJobStatus.completed}
+            backend={CustomizationBackend.automodel}
+            name={customizationJob1.name}
+            job={customizationJob1}
+          />
+        </TestProviders>
+      );
+
+      expect(screen.getByRole('menuitem', { name: 'Clone' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Save as template' })).toBeInTheDocument();
+    });
+
+    it('holds back a name that is not a valid entity name', async () => {
+      const user = await openModal();
+
+      await user.type(await screen.findByRole('textbox', { name: /name/i }), 'Not A Name');
+      await user.tab();
+
+      expect(await screen.findByText(/try "not-a-name"/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    it('opens with empty fields after a previous edit', async () => {
+      const user = await openModal();
+
+      await user.type(await screen.findByRole('textbox', { name: /name/i }), 'first-try');
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Save as template' }));
+
+      // A long-lived instance would reopen carrying the last name typed into it.
+      expect(await screen.findByRole('textbox', { name: /name/i })).toHaveValue('');
+    });
+
+    it('invalidates the template list so a later visit does not show a stale one', async () => {
+      server.use(
+        http.post(
+          `${PLATFORM_BASE_URL}/apis/customization/v2/workspaces/:workspace/job-templates`,
+          () => HttpResponse.json({ id: 'tpl-new', name: 'my-recipe' }, { status: 201 })
+        )
+      );
+      // On the cache, not a refetch: nothing observes the list here, so invalidation
+      // marks it stale — which is what makes the start page refetch when it next mounts.
+      const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+
+      const user = await openModal();
+      await user.type(await screen.findByRole('textbox', { name: /name/i }), 'my-recipe');
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() =>
+        expect(invalidate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            queryKey: getCustomizationListJobTemplatesQueryKey(workspace1.name),
+          })
+        )
+      );
+      invalidate.mockRestore();
+    });
   });
 });

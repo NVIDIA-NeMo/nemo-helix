@@ -20,6 +20,7 @@ from nemo_optimization.backends.optuna.study_driver import (
     resolve_n_trials,
     run_numeric_study,
 )
+from nemo_optimization.optimizer_config import MetricDirection
 from optuna.samplers import GridSampler, NSGAIISampler, TPESampler
 from optuna.study import StudyDirection
 
@@ -61,7 +62,7 @@ def test_parse_numeric_study_config() -> None:
     assert config.n_trials == 4
     assert config.reps_per_param_set == 2
     assert len(config.search_space) == 2
-    assert config.metrics[0].direction == StudyDirection.MAXIMIZE
+    assert config.metrics[0].direction == MetricDirection.MAXIMIZE
     assert config.sampler == "bayesian"
     assert isinstance(create_sampler(config), TPESampler)
 
@@ -119,6 +120,7 @@ def test_run_numeric_study_writes_configs(tmp_path: Path) -> None:
     assert len(list(tmp_path.glob("config_numeric_trial_*.yml"))) == 4
     optimized = yaml.safe_load((tmp_path / "optimized_config.yml").read_text(encoding="utf-8"))
     assert "optimizer" not in optimized
+    assert result.optimized_payload["optimizer"] == payload["optimizer"]
     assert result.best_trial.params
     # Logical Optuna names must be mapped onto Fabric dotted paths in the export.
     for name, value in result.best_trial.params.items():
@@ -204,8 +206,9 @@ def test_run_numeric_study_all_trials_failed(tmp_path: Path) -> None:
 
     payload = _payload()
     payload["optimizer"]["numeric"]["n_trials"] = 2
-    with pytest.raises(StudyDriverError, match="no completed trials"):
+    with pytest.raises(StudyDriverError, match="no completed trials") as exc_info:
         run_numeric_study(payload, tmp_path, AlwaysFailEvaluator(), seed=0)
+    assert exc_info.value.trial_count == 2
 
 
 def test_sanitize_config_for_artifact_redacts_secrets() -> None:

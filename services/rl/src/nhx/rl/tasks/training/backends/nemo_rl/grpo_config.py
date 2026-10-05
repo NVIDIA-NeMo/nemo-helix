@@ -31,6 +31,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _megatron_cfg_disabled,
 )
 from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
+    SANDBOX_CREATE_REQUEST_TIMEOUT_S,
     NemoGymSandboxedConfig,
     SandboxConfig,
     SandboxNetworkPolicy,
@@ -97,7 +98,7 @@ def _build_dtensor_cfg(
         "tensor_parallel_size": parallelism.tensor_parallel_size,
         "context_parallel_size": parallelism.context_parallel_size,
         "custom_parallel_plan": None,
-        "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": ""},
+        "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
     }
     # Optional keys stay absent when unset so NeMo-RL's defaults apply.
     if expert_parallel_size > 1:
@@ -113,6 +114,13 @@ def _build_dtensor_cfg(
             # There is no case where recomputing it is what a caller wants, so this is not
             # a knob: NeMo-RL's own MoE recipes set it wherever AC is on.
             dtensor_cfg["moe_parallelizer"] = {"ignore_router_for_ac": True}
+    if grpo_hp.moe_parallelizer:
+        # Merged rather than replaced so a caller reaching for another parallelizer knob
+        # does not silently drop ignore_router_for_ac and hit the recompute crash.
+        dtensor_cfg["moe_parallelizer"] = {
+            **dtensor_cfg.get("moe_parallelizer", {}),
+            **grpo_hp.moe_parallelizer,
+        }
     if automodel_kwargs:
         dtensor_cfg["automodel_kwargs"] = dict(automodel_kwargs)
     if lora_cfg["enabled"]:
@@ -268,6 +276,17 @@ def _resolve_gym_paths(
     )
 
 
+def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """``create.resource`` must match ``sandbox.resources``."""
+    connection: dict[str, Any] = {"request_timeout_s": SANDBOX_CREATE_REQUEST_TIMEOUT_S}
+    if gym.sandbox_server_protocol:
+        connection["protocol"] = gym.sandbox_server_protocol
+    options: dict[str, Any] = {"connection": connection}
+    if gym.sandbox_resources:
+        options["create"] = {"resource": dict(gym.sandbox_resources)}
+    return options
+
+
 def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
@@ -356,9 +375,8 @@ def _build_nemo_gym_env_config(
             ),
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
-            host_provider_options=(
-                {"connection": {"protocol": gym.sandbox_server_protocol}} if gym.sandbox_server_protocol else {}
-            ),
+            # create.resource must match resources.
+            host_provider_options=_sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,
@@ -534,13 +552,6 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    # Automodel: write a consolidated HF export. V1 forbids model_save_format.
-    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
-        cfg["checkpointing"]["save_consolidated"] = True
-        cfg["checkpointing"]["v4_compatible"] = customizer_config.model.v4_compatible
-        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
-        if customizer_config.training.finetuning_type == FinetuningType.ALL_WEIGHTS:
-            cfg["checkpointing"]["model_save_format"] = "safetensors"
     lora_cfg = _build_lora_cfg(customizer_config)
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(customizer_config, grpo_hp)
     chat_template = resolve_chat_template(
@@ -559,7 +570,7 @@ def compile_grpo_config(
         "logprob_batch_size": micro_batch_size,
         "max_total_sequence_length": customizer_config.model.max_seq_length,
         "precision": precision,
-        "logprob_chunk_size": 2048,
+        "logprob_chunk_size": grpo_hp.logprob_chunk_size or 2048,
         "offload_optimizer_for_logprob": False,
         "max_grad_norm": grpo_hp.max_grad_norm,
         "dtensor_cfg": _build_dtensor_cfg(customizer_config, grpo_hp, lora_cfg),
@@ -580,6 +591,9 @@ def compile_grpo_config(
             # whole distribution.
             "top_p": 1.0,
             "top_k": grpo_hp.top_k,
+            "val_temperature": grpo_hp.temperature,
+            "val_top_p": 1.0,
+            "val_top_k": grpo_hp.top_k,
             "stop_token_ids": None,
             "stop_strings": None,
             "vllm_cfg": {
@@ -600,11 +614,25 @@ def compile_grpo_config(
                 "expose_http_server": True,
             },
             "colocated": {"enabled": True, "resources": {"gpus_per_node": None, "num_nodes": None}},
+            # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
+            # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
+            **({"vllm_kwargs": dict(grpo_hp.vllm_kwargs)} if grpo_hp.vllm_kwargs else {}),
         },
         "sequence_packing": sequence_packing_cfg,
         "dynamic_batching": dynamic_batching_cfg,
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
+
+    # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
+    # checkpointing config rejects them. "every" consolidates each save, which is
+    # what publication needs: the kept checkpoint is the best one, not always the last.
+    # Both policy backends use that worker, so both need the block.
+    cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
+        "model_save_format": "safetensors",
+        "save_consolidated": "every",
+        "v4_compatible": customizer_config.model.v4_compatible,
+    }
+    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than
@@ -632,6 +660,18 @@ def compile_grpo_config(
 
     cfg["env"] = _build_nemo_gym_env_config(customizer_config, job_ctx)
     cfg["logger"] = _build_logger_config(customizer_config, job_ctx, workspace_dir)
+    # GRPO-only, so layered on here rather than in the shared DPO/GRPO helper. With W&B
+    # off, `logger.wandb` is an inert placeholder NeMo-RL never reads.
+    if grpo_hp.log_nemo_gym_full_result_tables:
+        if cfg["logger"]["wandb_enabled"]:
+            cfg["logger"]["wandb"]["log_nemo_gym_full_result_tables"] = True
+        else:
+            # The request schema can only check that integrations.wandb is present; whether
+            # WANDB_API_KEY actually reached the container is known only here.
+            logger.warning(
+                "log_nemo_gym_full_result_tables=true but W&B is disabled for this run "
+                "(no WANDB_API_KEY and no wandb.base_url); the rollout Tables will not be written."
+            )
     cfg["cluster"] = {
         "gpus_per_node": parallelism.num_gpus_per_node,
         "num_nodes": parallelism.num_nodes,

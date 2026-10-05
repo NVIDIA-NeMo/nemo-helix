@@ -10,7 +10,7 @@ This exercises the whole loop against *real* services and *real* LLM APIs:
 3. Clear all spans for the test project.
 4. Run the research agent on three questions (concurrently) so it logs
    traces to Intake.
-5. Run the analyst agent (``nemo agents analyst run``).
+5. Run the analyst agent (``nemo insights analysis-runs create --wait``).
 6. Assert the analyst created at least one Insight.
 
 Required setup (the test is **opt-in** because it costs real tokens and needs
@@ -297,7 +297,6 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
                 WORKSPACE,
                 "--no-start-services",
                 "--no-install-skills",
-                "--no-deploy-agent",
             ),
             cwd=str(EXAMPLE_DIR),
             env=env,
@@ -324,16 +323,18 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
 # SDK helpers (reuse the Insights plugin's own client/preflight code)         #
 # --------------------------------------------------------------------------- #
 def _count_traces() -> int:
+    from nemo_helix_plugin.client.adapter import client_from_platform
+    from nemo_helix_plugin.client.client import AsyncNemoClient
     from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
     from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> int:
-        client = make_client(BASE_URL)
-        backend = make_analyst_backend(client=client, insights_output=None)
+        sdk = make_client(BASE_URL)
+        backend = make_analyst_backend(client=client_from_platform(sdk, AsyncNemoClient), insights_output=None)
         try:
             return await backend.count_agent_sessions(agent=TEST_AGENT, workspace=WORKSPACE)
         finally:
-            await client.close()
+            await sdk.close()
 
     return asyncio.run(_run())
 
@@ -460,9 +461,10 @@ def test_analyst_creates_insight_end_to_end(platform_server: str) -> None:  # no
     result = subprocess.run(
         _cli_cmd(
             "nemo",
-            "agents",
-            "analyst",
-            "run",
+            "insights",
+            "analysis-runs",
+            "create",
+            "--wait",
             "--agent",
             TEST_AGENT,
             "--workspace",

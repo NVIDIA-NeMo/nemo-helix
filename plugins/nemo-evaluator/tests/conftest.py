@@ -6,12 +6,17 @@
 from __future__ import annotations
 
 import math
+import tempfile
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
-from nemo_helix_plugin.entities import EntityBase, ListResponse, PaginationInfo
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import LogicalOperation
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretAccessResponse
 
 
 def matches_filter(entity, operation) -> bool:
@@ -30,7 +35,7 @@ def matches_filter(entity, operation) -> bool:
     return actual == operation.value
 
 
-class FakeEntityStore:
+class FakeEntityStore(EntityClient):
     """In-memory entity store standing in for ``NemoEntitiesClient``.
 
     Two behaviors are reproduced deliberately, because service logic depends on them:
@@ -52,6 +57,8 @@ class FakeEntityStore:
     """
 
     def __init__(self) -> None:
+        # The job transformer now accepts only the concrete typed-client boundary. This fake
+        # implements that boundary directly while keeping all storage in memory.
         self.entities: dict[tuple[str, str, str, str | None], EntityBase] = {}
         #: Monotonic tick for creation timestamps. Wall-clock ``now()`` can repeat within a test,
         #: which would make ``-created_at`` ordering non-deterministic — the real store's inserts
@@ -70,7 +77,7 @@ class FakeEntityStore:
         if key in self.entities:
             raise NemoEntityConflictError(f"{key} exists")
         now = self._now()
-        entity._id = f"{entity.__entity_type__}-{entity.name}"
+        entity._id = f"{entity.__entity_type__}-{self._tick}"
         entity._created_at = now
         entity._updated_at = now
         entity._db_version = 0
@@ -82,6 +89,12 @@ class FakeEntityStore:
         if key not in self.entities:
             raise NemoEntityNotFoundError(f"{workspace}/{name} not found")
         return self.entities[key].model_copy(deep=True)
+
+    async def get_by_id(self, entity_type, entity_id):
+        for entity in self.entities.values():
+            if entity.id == entity_id and isinstance(entity, entity_type):
+                return entity.model_copy(deep=True)
+        raise NemoEntityNotFoundError("Task not found")
 
     async def update(self, entity, *, original_name: str | None = None):
         key = self._key(type(entity), original_name or entity.name, entity.workspace, entity._parent)
@@ -161,3 +174,52 @@ def entity_store() -> FakeEntityStore:
     module wins and the import fails.
     """
     return FakeEntityStore()
+
+
+# ---- judge secret resolution ----------------------------------------------
+
+
+class FakeAccessResponse:
+    """Stands in for the typed client's response wrapper, whose `data()` yields the payload."""
+
+    def __init__(self, payload: HelixSecretAccessResponse) -> None:
+        self._payload = payload
+
+    def data(self) -> HelixSecretAccessResponse:
+        return self._payload
+
+
+class FakeSecretsClient(AsyncSecretsClient):
+    """Answers secret lookups from a dict and records every (workspace, name) it was asked for."""
+
+    def __init__(self, secrets: dict[tuple[str, str], str] | None = None) -> None:
+        super().__init__(base_url="http://secrets.invalid", workspace="default")
+        self._secrets = secrets or {}
+        self.lookups: list[tuple[str, str]] = []
+
+    async def access_secret(self, *, workspace: str | None = None, name: str) -> FakeAccessResponse:
+        key = (workspace or "default", name)
+        self.lookups.append(key)
+        if key not in self._secrets:
+            raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
+        return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
+
+
+@pytest.fixture
+def make_secrets_client():
+    """Return a factory for Secrets clients seeded with ``(workspace, name) -> value``."""
+    return FakeSecretsClient
+
+
+@pytest.fixture(autouse=True)
+def _guard_codex_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``CODEX_HOME`` and the temp root at a pytest temp dir.
+
+    Codex-adapter trials link the base ``auth.json`` into a temp Codex home; without this guard, unit
+    tests would link the developer's real ``~/.codex`` login.
+    """
+    guard = tmp_path_factory.mktemp("codex-home-guard")
+    monkeypatch.setenv("CODEX_HOME", str(guard / "base-codex-home"))
+    temp_root = guard / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))

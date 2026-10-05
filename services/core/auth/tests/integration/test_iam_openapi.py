@@ -3,9 +3,14 @@
 
 """Integration tests for IAM endpoints in OpenAPI spec."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 SERVICE_PRINCIPAL = "service:integration-test"
+
+# test_client is module-scoped (expensive to boot): keep these tests on one xdist worker so
+# they share it instead of each worker re-provisioning it from scratch.
+pytestmark = pytest.mark.xdist_group("auth_iam_openapi")
 
 
 class TestIAMOpenAPI:

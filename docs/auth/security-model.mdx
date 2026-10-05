@@ -25,7 +25,7 @@ sequenceDiagram
     Client->>IdP: Validate credentials
     IdP-->>Client: JWT
     Client->>Gateway: Authorization: Bearer token
-    Gateway->>Auth: /apis/auth/authenticate
+    Gateway->>Auth: /apis/auth/ext-authz
     Auth-->>Gateway: Trusted X-NHX-Principal-* and X-NHX-Scopes headers
     Gateway->>Service: Forward request with trusted headers
     Service->>PDP: Check authorization
@@ -35,7 +35,7 @@ sequenceDiagram
 The request flow:
 
 1. **Client** sends a request with a bearer token in the `Authorization` header.
-2. In gateway deployments, **Gateway** calls the auth service's `/apis/auth/authenticate` endpoint; otherwise, the first service validates the token directly.
+2. In gateway deployments, **Gateway** calls the auth service's `/apis/auth/ext-authz` endpoint; otherwise, the first service validates the token directly.
 3. The validating component derives trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers.
 4. **PDP** (Policy Decision Point) evaluates authorization — checks the principal's role bindings and token scopes against the operation's requirements.
 5. If allowed, the service handles the request.
@@ -69,12 +69,12 @@ No gateway is required. This is the simplest mode and the default.
 
 The gateway (e.g., Envoy with `ext_authz`) authenticates the bearer token before forwarding the request:
 
-1. Gateway calls `/apis/auth/authenticate` with the original `Authorization` header
+1. Gateway calls `/apis/auth/ext-authz` with the original `Authorization` header
 2. Auth service validates the bearer token and returns trusted `X-NHX-Principal-*` and `X-NHX-Scopes` headers
 3. Gateway forwards the request with those trusted headers
 4. Services skip bearer-token re-validation and run their normal PDP authorization checks
 
-This rejects unauthenticated requests before they reach platform services while keeping authorization decisions in the normal service middleware path.
+This rejects unauthenticated requests before they reach Helix services while keeping authorization decisions in the normal service middleware path.
 
 ## Principal Model
 
@@ -141,7 +141,7 @@ Many NeMo Helix operations — customization, evaluation, synthetic data generat
 
 <Note>
 
-Job containers need to run inside the trust boundary — they call NeMo Helix APIs using the propagated identity headers and are subject to the same authorization checks as any other caller. The key distinction is that jobs act as the *user*, not as a privileged service principal, so they can only access resources the submitting user is permitted to reach.
+Job containers need to run inside the trust boundary. In token-exchange mode, managed jobs call NeMo Helix APIs with delegated bearer tokens obtained through workload identity token exchange. In trusted-header mode, callers use the propagated identity headers. In both modes, jobs act as the submitting user and remain subject to the same authorization checks as any other caller.
 
 </Note>
 ## Authorization: Workspace-Scoped RBAC
@@ -152,9 +152,9 @@ NeMo Helix uses **workspace-scoped Role-Based Access Control (RBAC)**. All resou
 - The wildcard principal `*` binds a role for all authenticated users at once
 - Workspaces are private by default; the creator becomes Admin automatically
 
-On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through two independent checks:
+On top of RBAC, NeMo Helix supports **API scopes** as a second authorization layer at the token level. Every authorized request passes through role checks, and scoped tokens also pass through API-scope checks:
 
-1. **Scope check** (token level): The JWT must carry at least one of the scopes required by the endpoint (e.g., `platform:read` or `platform:write`). Scopes limit what the *token* can do.
+1. **Scope check** (token level): When the JWT carries NeMo Helix API scopes, at least one scope must match the endpoint (for example, `platform:read` or `platform:write`). Tokens with no NeMo Helix API scopes skip this optional check for backward compatibility. Scopes limit what the *token* can do.
 2. **Permission check** (role level): The principal must have the necessary permissions via role bindings in the workspace. Roles limit what the *user* can do.
 
 Both must pass. This enables least-privilege token usage — for example, an Editor can create a read-only token (`platform:read` only) for monitoring scripts.

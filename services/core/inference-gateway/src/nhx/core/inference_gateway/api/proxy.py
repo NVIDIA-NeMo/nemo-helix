@@ -16,7 +16,6 @@ from aiohttp import ClientSession
 from fastapi import HTTPException, Request
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from jinja2 import Environment as JinjaEnvironment
 from multidict import CIMultiDict, CIMultiDictProxy
 from nemo_helix import AsyncNeMoHelix
 from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
@@ -32,7 +31,8 @@ from nemo_helix_plugin.inference_middleware import (
 )
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.entities.utils import ADAPTERS_INFIX, parse_adapters_suffix, parse_model_entity_ref
+from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
+from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
@@ -47,6 +47,7 @@ from nhx.core.inference_gateway.api.middleware_registry import (
     execute_response_middleware,
 )
 from nhx.core.inference_gateway.api.mock_provider import handle_mock_request, is_mock_provider
+from nhx.core.inference_gateway.api.provider_request import render_auth_header
 from nhx.core.inference_gateway.api.typed_request import build_inference_request
 from pydantic import BaseModel
 
@@ -166,32 +167,6 @@ class NextRequestInfo:
 
     query_params: dict[str, str]
     """Query parameters to include in the request"""
-
-
-_DEFAULT_AUTH_HEADER_FORMAT = "Authorization: Bearer {{ auth_secret }}"
-# Renders HTTP header values, not HTML. Autoescape would corrupt secrets
-# containing characters like `&`, `<`, `>`, or quotes.
-_JINJA_ENV = JinjaEnvironment(autoescape=False)  # noqa: S701  # nosec B701
-
-
-def render_auth_header(secret_value: str, auth_header_format: str | None) -> tuple[str, str]:
-    """Render an auth header name and value from a Jinja2 format template.
-
-    The template must contain exactly one variable named ``auth_secret``, which is
-    substituted with *secret_value* at render time.  If *auth_header_format* is
-    ``None``, the default ``"Authorization: Bearer {{ auth_secret }}"`` is used.
-
-    Args:
-        secret_value: The raw API key / secret to inject into the template.
-        auth_header_format: Jinja2 template string, e.g. ``"X-Api-Key: {{ auth_secret }}"``.
-
-    Returns:
-        ``(header_name, header_value)`` tuple ready to set on the outgoing request.
-    """
-    template_str = auth_header_format or _DEFAULT_AUTH_HEADER_FORMAT
-    rendered = _JINJA_ENV.from_string(template_str).render(auth_secret=secret_value)
-    header_name, _, header_value = rendered.partition(": ")
-    return header_name, header_value
 
 
 async def build_next_request(
@@ -384,6 +359,29 @@ _DEPENDENCY_FAILURE_STATUS = http_status.HTTP_424_FAILED_DEPENDENCY  # 424 Faile
 # token in services/core/models/.../controllers/provider_reconciler.py in lockstep.
 _UPSTREAM_REJECTED_DETAIL_MARKER = "rejected the request"
 
+# Machine-readable upstream status token embedded in every wrapped-upstream-rejection
+# 424 detail, e.g. ``[nemo_upstream_status=401]``. The human-readable marker above tells
+# a consumer *that* the upstream rejected the request; this token tells them *which*
+# upstream status it was, so a consumer can distinguish a credential/authorization
+# rejection (401/403) from a missing-route (404) WITHOUT parsing the prose. This is the
+# second half of the CROSS-SERVICE contract: the models provider-reconciler parses this
+# token to route 401/403 to an auth-failure (non-READY) path and 404 to the
+# non-compliant (READY) path. Keep the ``PREFIX``/``SUFFIX`` and the regex the reconciler
+# uses (``_GATEWAY_UPSTREAM_STATUS_RE`` in
+# services/core/models/.../controllers/provider_reconciler.py) in lockstep.
+_UPSTREAM_STATUS_TOKEN_PREFIX = "[nemo_upstream_status="
+_UPSTREAM_STATUS_TOKEN_SUFFIX = "]"
+
+
+def _upstream_status_token(status_code: int) -> str:
+    """Return the machine-readable upstream-status token for *status_code*.
+
+    e.g. ``_upstream_status_token(401) == "[nemo_upstream_status=401]"``. Embedded in the
+    424 detail alongside the human-readable marker so a consumer can machine-match the
+    originating upstream status. See :data:`_UPSTREAM_STATUS_TOKEN_PREFIX`.
+    """
+    return f"{_UPSTREAM_STATUS_TOKEN_PREFIX}{status_code}{_UPSTREAM_STATUS_TOKEN_SUFFIX}"
+
 
 @dataclass(frozen=True)
 class UpstreamProviderContext:
@@ -471,9 +469,18 @@ def _dependency_failure_detail(
         "credentials have access to it, and your request parameters. If this provider sits behind a gateway "
         "or proxy, check its logs for the originating upstream status and message."
     )
+    # Machine-readable upstream-status token (cross-service contract; see
+    # _UPSTREAM_STATUS_TOKEN_PREFIX). Placed after the human guidance so it never disrupts
+    # the readable message, but is always present for a programmatic consumer to parse.
+    #
+    # ORDERING IS LOAD-BEARING: the token MUST precede the echoed ``error_body``. The consumer
+    # parses with re.search (first match wins), so keeping our token ahead of the untrusted
+    # upstream body guarantees a body that happens to contain a ``[nemo_upstream_status=...]``
+    # substring can't shadow the genuine status. Do not move the token after error_body.
+    status_token = _upstream_status_token(status_code)
     if error_body:
-        return f"{first} {guidance} Upstream response: {error_body}"
-    return f"{first} {guidance}"
+        return f"{first} {guidance} {status_token} Upstream response: {error_body}"
+    return f"{first} {guidance} {status_token}"
 
 
 async def proxy_request(
@@ -1036,8 +1043,8 @@ async def virtual_model_proxy(
             # Example: body ``myvm&adapters/a-ws/a-name`` + default ``base-ws/base`` ->
             # ``base-ws/base&adapters/a-ws/a-name``.
             _, adapter_workspace, adapter_name = adapter_parts
-            json_body["model"] = (
-                f"{virtual_model.default_model_entity}{ADAPTERS_INFIX}{adapter_workspace}/{adapter_name}"
+            json_body["model"] = format_adapter_composite(
+                virtual_model.default_model_entity, adapter_workspace, adapter_name
             )
         else:
             json_body["model"] = virtual_model.default_model_entity
@@ -1100,6 +1107,8 @@ async def virtual_model_proxy(
                 http_status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Could not resolve model entity from body['model'] after request middleware: {exc}",
             ) from exc
+
+        await enforce_model_ref_access(workspace, modified_model_ref)
 
         resolved_model_entity = model_cache.get_from_model_entity(modified_model_ref.workspace, modified_model_ref.name)
         if resolved_model_entity is None:

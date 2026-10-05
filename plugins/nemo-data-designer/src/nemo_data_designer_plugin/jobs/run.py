@@ -12,7 +12,7 @@ from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_data_designer_plugin._data_designer import create_data_designer
 from nemo_data_designer_plugin.jobs.result_manager import DataDesignerResultManager
 from nemo_data_designer_plugin.jobs.spec import DataDesignerStepConfig
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.job_results import ResultRef
 
@@ -24,9 +24,9 @@ BUFFER_SIZE = 500
 def run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoHelix,
+    client: NemoClient,
 ) -> int:
-    result = run_step_config_result(step_config, ctx, sdk)
+    result = run_step_config_result(step_config, ctx, client)
     exit_code = result.get("exit_code")
     return exit_code if isinstance(exit_code, int) else 1
 
@@ -34,10 +34,10 @@ def run_step_config(
 def run_step_config_result(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoHelix,
+    client: NemoClient,
 ) -> dict[str, object]:
     try:
-        return _run_step_config(step_config, ctx, sdk)
+        return _run_step_config(step_config, ctx, client)
     except Exception as exc:
         logger.exception("Data Designer job failed: %s", exc)
         return {
@@ -51,7 +51,7 @@ def run_step_config_result(
 def _run_step_config(
     step_config: DataDesignerStepConfig,
     ctx: JobContext,
-    sdk: NeMoHelix,
+    client: NemoClient,
 ) -> dict[str, object]:
     # In dispatched-container mode the root logger has no handler;
     # attach our JSON-formatted stderr handler so the container's
@@ -61,7 +61,7 @@ def _run_step_config(
     workspace = ctx.workspace
     workspace_cvar.set(workspace)
 
-    dd_ctx = create_execution_context(sdk, workspace)
+    dd_ctx = create_execution_context(client, workspace)
 
     config_builder = dd.DataDesignerConfigBuilder.from_config(step_config.job_config.config.to_dict())
 

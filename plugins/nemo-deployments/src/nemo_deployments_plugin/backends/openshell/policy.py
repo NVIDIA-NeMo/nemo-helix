@@ -45,23 +45,42 @@ DEFAULT_RUN_AS_USER = "sandbox"
 # docker-driver happy path; harden via OpenShellExecutorConfig.landlock_compatibility.
 DEFAULT_LANDLOCK_COMPATIBILITY: Literal["best_effort", "hard_requirement"] = "best_effort"
 
-# The binary that opens the egress socket for NAT's LLM calls is the venv/uv python,
-# NOT curl. The exact uv-managed interpreter path is image/patch-version specific
-# (e.g. /opt/uv/python/cpython-3.13.7-.../bin/python3.13); an executor can add it via
-# its platform_egress config. OpenShell matches binary paths exactly, with no prefix or
-# glob support, so an egress rule has to pin the interpreter patch version.
-DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/workspace/.venv/bin/python3.13", "/usr/bin/curl")
+# The binary that opens the egress socket for the agent's LLM calls is the python
+# interpreter, NOT curl. OpenShell matches the resolved executable, so the venv symlink
+# (/workspace/.venv/bin/python) never matches; the real path is the uv-managed
+# interpreter the packaged image installs under /opt/uv/python, whose directory name
+# carries the patch version and arch (e.g. cpython-3.13.9-linux-aarch64-gnu). Binary
+# paths are globs where `*` stays within one path component, so this covers any
+# uv-managed interpreter without widening past that directory.
+DEFAULT_EGRESS_BINARIES: tuple[str, ...] = ("/opt/uv/python/*/bin/python3*", "/usr/bin/curl")
 
 # Map key for the mandatory platform egress rule. Reserved: injected into every
 # policy, so a user rule at this key is overwritten rather than merged.
 PLATFORM_EGRESS_KEY = "nemo_helix"
 
 
-# Values the supervisor recognises for the two free-form string fields that fail OPEN when
-# unrecognised: anything but "hard_requirement" becomes best-effort Landlock (no filesystem
-# confinement on a kernel without Landlock), and an unset enforcement takes the proto's
-# "audit" default instead of blocking. The proto cannot type these, so they are checked here.
+# Landlock compatibility is a free-form string the supervisor fails OPEN on: anything but
+# "hard_requirement" becomes best-effort Landlock (no filesystem confinement on a kernel
+# without Landlock). The proto cannot type it, so it is checked here.
 LANDLOCK_COMPATIBILITIES = ("best_effort", "hard_requirement")
+
+# Policy YAML spells these endpoint fields as strings; the proto types them as enums.
+# Mirrors openshell-policy l7_validate.rs, where "" is the unspecified value. The tls
+# modes OpenShell 0.1 removed ("terminate", "passthrough") are rejected, not mapped.
+_ENDPOINT_ENUMS: dict[str, tuple[str, dict[str, str]]] = {
+    "enforcement": (
+        "NETWORK_ENFORCEMENT_MODE",
+        {"": "UNSPECIFIED", "enforce": "ENFORCE", "audit": "AUDIT"},
+    ),
+    "access": (
+        "NETWORK_ACCESS_PRESET",
+        {"": "UNSPECIFIED", "read-only": "READ_ONLY", "read-write": "READ_WRITE", "full": "FULL"},
+    ),
+    "tls": (
+        "NETWORK_TLS_MODE",
+        {"": "UNSPECIFIED", "skip": "SKIP"},
+    ),
+}
 ENFORCEMENTS = ("enforce", "audit")
 DEFAULT_ENFORCEMENT = "enforce"
 
@@ -187,7 +206,7 @@ def generate_sandbox_policy(*, filesystem: SandboxFilesystem, egress: HelixEgres
 
 _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required to build OpenShell sandbox policies. "
-    'Install it with: uv pip install "openshell>=0.0.92" "grpcio>=1.78.0" "protobuf>=6.31.1"'
+    'Install it with: uv pip install "openshell>=0.1.2" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
 
 
@@ -217,12 +236,50 @@ def _with_proto_field_names(data: dict[str, Any]) -> dict[str, Any]:
     return renamed
 
 
+def _with_proto_enum_values(data: dict[str, Any]) -> dict[str, Any]:
+    """Translate endpoint ``enforcement``/``access``/``tls`` YAML strings to proto enum names.
+
+    An unset or empty enforcement becomes ``enforce``: the supervisor treats an
+    unspecified enforcement as audit, which would ship a rule that reads as blocking but
+    only logs. Unknown strings raise rather than falling through to a weaker setting.
+    """
+    policies = data.get("network_policies")
+    if not isinstance(policies, dict):
+        return data
+    translated_policies: dict[str, Any] = {}
+    for key, rule in policies.items():
+        endpoints = rule.get("endpoints") if isinstance(rule, dict) else None
+        if not isinstance(endpoints, list):
+            translated_policies[key] = rule
+            continue
+        translated_endpoints = []
+        for endpoint in endpoints:
+            if not isinstance(endpoint, dict):
+                translated_endpoints.append(endpoint)
+                continue
+            endpoint = dict(endpoint)
+            endpoint["enforcement"] = endpoint.get("enforcement") or DEFAULT_ENFORCEMENT
+            for field, (prefix, values) in _ENDPOINT_ENUMS.items():
+                if field not in endpoint:
+                    continue
+                value = endpoint[field]
+                if value not in values:
+                    raise ValueError(
+                        f"invalid sandbox policy: network_policies.{key} {field} must be one of "
+                        f"{', '.join(repr(v) for v in values)}, got {value!r}"
+                    )
+                endpoint[field] = f"{prefix}_{values[value]}"
+            translated_endpoints.append(endpoint)
+        translated_policies[key] = {**rule, "endpoints": translated_endpoints}
+    return {**data, "network_policies": translated_policies}
+
+
 def _apply_defaults_and_check(policy: Any) -> None:
     """Fill the defaults the proto cannot express, and check the fields it cannot type.
 
-    The supervisor reads ``compatibility`` and ``enforcement`` as free-form strings and
-    treats anything it does not recognise as the weaker setting, so an unrecognised value
-    here would ship a policy that reads as confined but is not.
+    The supervisor reads ``compatibility`` as a free-form string and treats anything it
+    does not recognise as the weaker setting, so an unrecognised value here would ship a
+    policy that reads as confined but is not.
     """
     if not policy.version:
         policy.version = DEFAULT_POLICY_VERSION
@@ -231,15 +288,6 @@ def _apply_defaults_and_check(policy: Any) -> None:
             f"invalid sandbox policy: landlock.compatibility must be one of "
             f"{', '.join(LANDLOCK_COMPATIBILITIES)}, got '{policy.landlock.compatibility}'"
         )
-    for key, rule in policy.network_policies.items():
-        for endpoint in rule.endpoints:
-            if not endpoint.enforcement:
-                endpoint.enforcement = DEFAULT_ENFORCEMENT
-            elif endpoint.enforcement not in ENFORCEMENTS:
-                raise ValueError(
-                    f"invalid sandbox policy: network_policies.{key} enforcement must be one of "
-                    f"{', '.join(ENFORCEMENTS)}, got '{endpoint.enforcement}'"
-                )
 
 
 def build_sandbox_policy(data: dict[str, Any]) -> Any:
@@ -251,7 +299,7 @@ def build_sandbox_policy(data: dict[str, Any]) -> Any:
     """
     _ensure_sb()
     try:
-        policy = json_format.ParseDict(_with_proto_field_names(data), sb.SandboxPolicy())
+        policy = json_format.ParseDict(_with_proto_enum_values(_with_proto_field_names(data)), sb.SandboxPolicy())
     except json_format.ParseError as exc:
         raise ValueError(f"invalid sandbox policy: {exc}") from exc
     _apply_defaults_and_check(policy)

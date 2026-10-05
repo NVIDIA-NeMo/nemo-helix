@@ -5,6 +5,9 @@
 title: "The Basics"
 description: ""
 ---
+{/* @nemo-nb: process */}
+{/* @nemo-nb: skip-test */}
+
 <a id="data-designer-tutorials-basics"></a>
 
 This tutorial demonstrates the fundamentals of Data Designer by generating a product review dataset.
@@ -216,12 +219,13 @@ The `DataDesignerResource` is your SDK interface for Data Designer execution on 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
 base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=base_url, workspace="default")
+client = NemoClient(base_url=base_url, workspace="default")
 
-data_designer = client.data_designer
+data_designer = DataDesignerResource(client)
 ```
 
 ### Previewing the Dataset
@@ -236,10 +240,15 @@ preview.display_sample_record()
 
 # Access the full preview dataset as a pandas DataFrame
 df = preview.dataset
+if df is None:
+    raise RuntimeError("Preview did not return a dataset")
 print(df.head())
 
 # View statistical analysis
-preview.analysis.to_report()
+analysis = preview.analysis
+if analysis is None:
+    raise RuntimeError("Preview did not return analysis")
+analysis.to_report()
 ```
 
 <Markdown src="/snippets/data-designer/_snippets/preview-results.mdx" />

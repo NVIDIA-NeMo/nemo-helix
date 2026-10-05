@@ -40,7 +40,7 @@ from nemo_auditor.jobs.audit import (
     _resolve_garak_python,
     _rewrite_options_uris,
 )
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
@@ -721,7 +721,7 @@ class TestCompileProfileDefault:
                 spec=_make_config(),
                 entity_client=None,
                 job_name=None,
-                async_sdk=cast(AsyncNeMoHelix, None),
+                async_sdk=cast(AsyncNemoClient, None),
                 profile=profile,
             )
         )

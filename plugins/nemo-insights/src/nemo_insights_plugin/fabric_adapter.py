@@ -16,8 +16,12 @@ from typing import Any
 
 from nemo_fabric_adapter_contract import models as contract
 from nemo_fabric_adapters.common import lifecycle
+from nemo_fabric_adapters.common.utils import (
+    reject_ambient_relay_plugin_config,
+    reject_inherited_relay_plugin_config,
+)
+from nemo_helix_plugin.client_provider import get_async_task_nemo_client
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
-from nemo_helix_plugin.sdk_provider import get_async_task_sdk
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
 from nemo_insights_plugin.analyst.run import run_analyst_change_set
 from nemo_relay import plugin as relay_plugin
@@ -94,7 +98,9 @@ class InsightsAnalystRuntime:
         # FABRIC_RELAY_CONFIG_PATH is the ambient-config hazard the bundled
         # adapters have a named guard against.
         with _applied_environment(telemetry.env):
-            async with relay_plugin.plugin(_relay_plugin_config(telemetry)):
+            reject_ambient_relay_plugin_config()
+            async with relay_plugin.activate(_relay_plugin_config(telemetry)) as activation:
+                reject_inherited_relay_plugin_config(activation.report)
                 return await self._run_analysis(request, relay_scope_name=ANALYST_RELAY_SCOPE)
 
     async def _run_analysis(self, request: contract.AgentRunRequest, *, relay_scope_name: str | None = None):
@@ -123,7 +129,7 @@ class InsightsAnalystRuntime:
             default=_default_model_ref(self._settings, self._models),
             fast=_fast_model_ref(self._settings, self._models),
         )
-        async with get_async_task_sdk("insights") as client:
+        async with get_async_task_nemo_client("insights") as client:
             result, _backend = await run_analyst_change_set(
                 agent=target_agent,
                 ethos=ethos,

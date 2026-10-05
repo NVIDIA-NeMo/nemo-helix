@@ -18,6 +18,7 @@ from nemo_helix import AsyncNeMoHelix, DefaultHttpxClient, NeMoHelix, not_given
 from nemo_helix_ext.auth.helpers import NHXOIDCConfig, decode_jwt_claims
 from nemo_helix_ext.client.factory import create_client
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
+from nemo_helix_plugin.client.client import NemoClientRuntime
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 
 
@@ -314,7 +315,7 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
 
     @patch(
         "nemo_helix_ext.client.bootstrap.discover_nhx_config",
-        side_effect=Exception("network error"),
+        side_effect=httpx.ConnectError("network error"),
     )
     def test_discovery_failure_preserves_stored_token(self, _mock_discover, tmp_path):
         # A discovery failure must not strip auth — the stored token may still
@@ -327,6 +328,31 @@ class TestCreateClientOAuthUserAuthDisabledCluster:
         request = client._client.build_request("GET", "http://localhost:8080/test")
         client._client._event_hooks["request"][0](request)
         assert request.headers["Authorization"] == f"Bearer {token}"
+
+    @patch(
+        "nemo_helix_ext.client.bootstrap.discover_nhx_config",
+        side_effect=json.JSONDecodeError("Expecting value", "<html>", 0),
+    )
+    def test_non_json_discovery_preserves_stored_token(self, _mock_discover, tmp_path):
+        token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
+
+        client = create_client(config_path=config_path)
+
+        request = client._client.build_request("GET", "http://localhost:8080/test")
+        client._client._event_hooks["request"][0](request)
+        assert request.headers["Authorization"] == f"Bearer {token}"
+
+    @patch(
+        "nemo_helix_ext.client.bootstrap.discover_nhx_config",
+        side_effect=ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'"),
+    )
+    def test_discovery_validation_failure_is_not_downgraded_to_fallback(self, _mock_discover, tmp_path):
+        token = _make_jwt({"exp": int(time.time()) + 3600, "sub": "user1"})
+        config_path = _write_config(tmp_path, token=token, refresh_token="refresh_abc")
+
+        with pytest.raises(ValueError, match="bearer_token_source"):
+            create_client(config_path=config_path)
 
 
 class TestCreateClientWorkloadIdentity:
@@ -702,6 +728,39 @@ class TestCreateClientBootstrapFailures:
 
 
 class TestClientConstructorBootstrapBypass:
+    def test_sdk_constructors_allocate_fresh_default_runtime(self):
+        sync_client_a = NeMoHelix(base_url="http://override-host:8081")
+        sync_client_b = NeMoHelix(base_url="http://override-host:8081")
+        explicit_runtime = NemoClientRuntime()
+        explicit_client = NeMoHelix(
+            base_url="http://override-host:8081",
+            nemo_client_runtime=explicit_runtime,
+        )
+        try:
+            assert sync_client_a.nemo_client_runtime is not sync_client_b.nemo_client_runtime
+            assert explicit_client.nemo_client_runtime is explicit_runtime
+        finally:
+            sync_client_a.close()
+            sync_client_b.close()
+            explicit_client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_sdk_constructor_allocates_fresh_default_runtime(self):
+        async_client_a = AsyncNeMoHelix(base_url="http://override-host:8081")
+        async_client_b = AsyncNeMoHelix(base_url="http://override-host:8081")
+        explicit_runtime = NemoClientRuntime()
+        explicit_client = AsyncNeMoHelix(
+            base_url="http://override-host:8081",
+            nemo_client_runtime=explicit_runtime,
+        )
+        try:
+            assert async_client_a.nemo_client_runtime is not async_client_b.nemo_client_runtime
+            assert explicit_client.nemo_client_runtime is explicit_runtime
+        finally:
+            await async_client_a.close()
+            await async_client_b.close()
+            await explicit_client.close()
+
     @patch("nemo_helix_ext.client.factory.build_client_init_kwargs")
     def test_sync_constructor_with_base_url_skips_config_bootstrap(self, mock_build_client_kwargs):
         mock_build_client_kwargs.side_effect = AssertionError("bootstrap should not be called")

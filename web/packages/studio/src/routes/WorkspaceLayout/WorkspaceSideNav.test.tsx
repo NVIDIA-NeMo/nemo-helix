@@ -11,9 +11,13 @@ import type { ReactElement } from 'react';
 vi.hoisted(() => {
   vi.stubEnv('VITE_FF_OPTIMIZER_ENABLED', 'false');
   vi.stubEnv('VITE_FF_CUSTOMIZER_ENABLED', 'true');
+  vi.stubEnv('VITE_FF_DEPLOYMENTS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_GUARDRAILS_ENABLED', 'true');
   vi.stubEnv('VITE_FF_MONITOR_ENABLED', 'true');
 });
+
+/** The Models children, in the order a user walks the funnel. Virtual Models trails them. */
+const MODEL_FUNNEL = ['Model Catalog', 'Evaluations', 'Fine-tuning', 'Playground', 'Deployments'];
 
 /** A parent row's label is a link; its chevron is a separate disclosure button. */
 const disclosure = (label: string) => screen.getByRole('button', { name: new RegExp(label, 'i') });
@@ -116,14 +120,27 @@ describe('WorkspaceSideNav', () => {
     expect(screen.getByRole('link', { name: 'Agents' })).toBeInTheDocument();
   });
 
-  it('renders the customization screen as Fine-tune under Models', () => {
-    renderSideNav('/workspaces/test-workspace/customizations');
+  it('renders the customization screen as Fine-tuning under Models', () => {
+    renderSideNav('/workspaces/test-workspace/fine-tune');
 
-    expect(screen.getByRole('link', { name: 'Fine-tune' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Fine-tuning' })).toHaveAttribute(
       'href',
-      '/workspaces/test-workspace/customizations'
+      '/workspaces/test-workspace/fine-tune'
     );
     expect(screen.queryByText('Custom Models')).not.toBeInTheDocument();
+  });
+
+  it('orders the Models children as the model funnel', async () => {
+    const user = userEvent.setup();
+    renderSideNav();
+
+    await user.click(disclosure('Models'));
+    const labels = screen
+      .getAllByRole('link')
+      .map((link) => link.textContent?.trim())
+      .filter((label) => MODEL_FUNNEL.includes(label ?? ''));
+
+    expect(labels).toEqual(MODEL_FUNNEL);
   });
 
   it('expands only the parent owning the current nested route', () => {

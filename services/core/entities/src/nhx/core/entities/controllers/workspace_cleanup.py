@@ -5,8 +5,7 @@ import asyncio
 import logging
 import threading
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
@@ -50,12 +49,12 @@ def _job_status_is_terminal(status: object) -> bool:
 class WorkspaceCleanup(HeartbeatMixin, Controller):
     def __init__(
         self,
-        nhx_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         workspace_repository: WorkspaceRepositoryInterface,
         stop_signal: threading.Event | None = None,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
-        self._nhx_sdk = nhx_sdk
+        self._client = client
         self._workspace_repository = workspace_repository
         self._stop_signal = stop_signal
         self._is_healthy = False
@@ -153,7 +152,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
     async def _cleanup_jobs(self, workspace: Workspace) -> None:
         logger.info(f"Cleaning up jobs for workspace: {workspace.name}")
         try:
-            jobs_client = client_from_platform(self._nhx_sdk, AsyncJobsClient)
+            jobs_client = AsyncJobsClient.from_client(self._client)
             jobs = [job async for job in (await jobs_client.list_jobs(workspace=workspace.name)).items()]
 
             cleanup_errors: list[Exception] = []
@@ -220,7 +219,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
     async def _cleanup_deployments(self, workspace: Workspace) -> None:
         logger.info(f"Cleaning up deployments for workspace: {workspace.name}")
         try:
-            models_client = client_from_platform(self._nhx_sdk, AsyncModelsClient)
+            models_client = AsyncModelsClient.from_client(self._client)
             deployments_response = await models_client.list_deployments(workspace=workspace.name)
             deployments = [deployment async for deployment in deployments_response.items()]
 
@@ -244,7 +243,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
     async def _cleanup_models_and_adapters(self, workspace: Workspace) -> None:
         logger.info(f"Cleaning up models and adapters for workspace: {workspace.name}")
         try:
-            models_client = client_from_platform(self._nhx_sdk, AsyncModelsClient)
+            models_client = AsyncModelsClient.from_client(self._client)
             adapters_response = await models_client.list_adapters(workspace=workspace.name)
             adapters = [adapter async for adapter in adapters_response.items()]
             models_response = await models_client.list_models(workspace=workspace.name)
@@ -282,7 +281,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
     async def _cleanup_filesets(self, workspace: Workspace) -> None:
         logger.info(f"Cleaning up filesets for workspace: {workspace.name}")
         try:
-            files = client_from_platform(self._nhx_sdk, AsyncFilesClient)
+            files = AsyncFilesClient.from_client(self._client)
             filesets_response = await files.list_filesets(workspace=workspace.name)
 
             async for fileset in filesets_response.items():

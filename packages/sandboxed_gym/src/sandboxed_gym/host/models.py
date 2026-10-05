@@ -8,6 +8,7 @@ Defines the create/spec and config shapes used by ``SandboxedGymHostProvider`` a
 :mod:`sandboxed_gym.egress`.
 """
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Generic, Mapping, TypeVar
@@ -35,7 +36,7 @@ DEFAULT_ROLLOUT_MAX_IN_FLIGHT = 8
 DEFAULT_ROLLOUT_MAX_ATTEMPTS = 3
 DEFAULT_ROLLOUT_RETRY_BACKOFF_S = 5.0
 
-FORBIDDEN_BOOTSTRAP_ENV_PREFIXES = ("OPENSANDBOX_",)
+FORBIDDEN_BOOTSTRAP_ENV_PREFIXES = ("OPENSANDBOX_", "OPEN_SANDBOX_")
 FORBIDDEN_BOOTSTRAP_ENV_KEYS = frozenset(
     {
         "OPENSANDBOX_API_KEY",
@@ -206,6 +207,8 @@ class SandboxConfig(BaseModel):
     workspace_sub_path: str = ""
     runtime_http_port: int = Field(default=DEFAULT_RUNTIME_HTTP_PORT, ge=1, le=65535)
     ready_timeout_s: float = Field(default=float(DEFAULT_HOST_READY_TIMEOUT_S), gt=0)
+    # Gym's /health wait once the sandbox runs; unset reuses ready_timeout_s, which also covers the pull.
+    bootstrap_timeout_s: float | None = Field(default=None, gt=0)
     rollout_timeout_s: float = Field(default=float(DEFAULT_ROLLOUT_TIMEOUT_S), gt=0)
     rollout_chunk_size: int = Field(default=DEFAULT_ROLLOUT_CHUNK_SIZE, gt=0)
     rollout_max_in_flight: int = Field(default=DEFAULT_ROLLOUT_MAX_IN_FLIGHT, gt=0)
@@ -316,3 +319,23 @@ def build_bootstrap_env(
         env.update(dict(extra))
     validate_bootstrap_env(env)
     return env
+
+
+class GymHostBootstrapFailed(RuntimeError):
+    """The host started its HTTP server but never finished bootstrapping."""
+
+
+def render_host_error(error: object) -> str:
+    """Render a host error envelope, ending with the host's own output when it sent any."""
+    if not isinstance(error, Mapping):
+        return str(error) if error is not None else "no detail reported"
+
+    tail = error.get("host_output_tail")
+    summary = {key: value for key, value in error.items() if key != "host_output_tail"}
+    rendered = json.dumps(summary)[:2000]
+    if isinstance(tail, list) and tail:
+        # Every line the host sent. It already bounded the tail against its own response budget, and
+        # re-bounding here would drop diagnostics that survived the wire.
+        lines = "\n".join(str(line) for line in tail)
+        rendered = f"{rendered}\n--- gym host output ({len(tail)} lines) ---\n{lines}"
+    return rendered

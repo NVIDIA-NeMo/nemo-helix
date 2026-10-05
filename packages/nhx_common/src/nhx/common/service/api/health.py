@@ -58,6 +58,25 @@ def service_ready_state_from_status(data: object, service_name: str) -> bool | N
     return True
 
 
+def not_ready_message_from_status(data: object, service_name: str) -> str:
+    """Return the not-ready message for ``service_name``, or empty when it has none."""
+
+    if not isinstance(data, Mapping):
+        return ""
+    services = data.get("services") or {}
+    if not isinstance(services, Mapping):
+        return ""
+    not_ready = services.get("not_ready") or []
+    if not isinstance(not_ready, list):
+        return ""
+    for value in not_ready:
+        if not isinstance(value, Mapping) or value.get("name") != service_name:
+            continue
+        message = value.get("message", "")
+        return message if isinstance(message, str) else ""
+    return ""
+
+
 async def async_wait_for_service_ready(
     platform_config: HelixConfig,
     service_name: str,
@@ -65,7 +84,7 @@ async def async_wait_for_service_ready(
     poll_interval: float = 0.5,
     http_client: httpx.AsyncClient | None = None,
 ) -> bool:
-    """Wait for a specific platform service to be ready by polling its /status endpoint.
+    """Wait for a specific Helix service to be ready by polling its /status endpoint.
 
     Uses platform_config.get_service_url(service_name) so each service can have its own URL
     (e.g. from service_discovery). Returns True when the named service appears in
@@ -91,6 +110,7 @@ async def async_wait_for_service_ready(
 
     logger.debug("Waiting for service to be ready", extra={"service": service_name, "url": status_url})
 
+    last_message = ""
     try:
         start = time.monotonic()
         while (time.monotonic() - start) < timeout:
@@ -105,13 +125,20 @@ async def async_wait_for_service_ready(
                     if ready is True:
                         logger.info("Service is ready", extra={"service": service_name})
                         return True
+                    if ready is False:
+                        last_message = not_ready_message_from_status(data, service_name)
             except (httpx.RequestError, ValueError) as e:
                 logger.debug("Status check failed, will retry", extra={"service": service_name, "error": str(e)})
             await asyncio.sleep(poll_interval)
 
         logger.warning(
             "Timeout waiting for service to be ready",
-            extra={"service": service_name, "url": status_url, "timeout": timeout},
+            extra={
+                "service": service_name,
+                "url": status_url,
+                "timeout": timeout,
+                "readiness_message": last_message,
+            },
         )
         return False
     finally:
@@ -126,7 +153,7 @@ async def async_wait_for_dependencies(
     poll_interval: float = 0.5,
     http_client: httpx.AsyncClient | None = None,
 ) -> bool:
-    """Wait for all named platform services to be ready (same pattern as Service._wait_for_dependencies).
+    """Wait for all named Helix services to be ready (same pattern as Service._wait_for_dependencies).
 
     Uses get_service_url(service_name) for each dependency so service APIs may live at different URLs.
     Waits for each dependency in order; returns False if any timeout.
@@ -160,7 +187,7 @@ def wait_for_service_ready(
     timeout: float = 60.0,
     poll_interval: float = 0.5,
 ) -> bool:
-    """Wait for a specific platform service to be ready by polling /status.
+    """Wait for a specific Helix service to be ready by polling /status.
 
     Polls the platform's /status endpoint (which always returns 200 with
     per-service status). Returns True when the named service appears in
@@ -187,6 +214,7 @@ def wait_for_service_ready(
         extra={"service": service_name, "url": status_url},
     )
 
+    last_message = ""
     try:
         while not stop_signal.is_set() and (time.time() - start_time) < timeout:
             try:
@@ -200,6 +228,8 @@ def wait_for_service_ready(
                             extra={"service": service_name, "url": status_url},
                         )
                         return True
+                    if ready is False:
+                        last_message = not_ready_message_from_status(data, service_name)
             except (httpx.RequestError, ValueError) as e:
                 logger.debug(
                     "Status check failed, will retry",
@@ -214,6 +244,11 @@ def wait_for_service_ready(
     else:
         logger.warning(
             "Timeout waiting for service to be ready; check that the platform URL is reachable and the service has started",
-            extra={"service": service_name, "url": status_url, "timeout": timeout},
+            extra={
+                "service": service_name,
+                "url": status_url,
+                "timeout": timeout,
+                "readiness_message": last_message,
+            },
         )
     return False

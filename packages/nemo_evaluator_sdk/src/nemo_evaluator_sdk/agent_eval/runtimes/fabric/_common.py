@@ -267,6 +267,8 @@ class TaskRun:
     workspace_dir: Path
     relay_dir: Path
     skill_provenances: list[SkillProvenance] = field(default_factory=list)
+    #: Workspace-relative skill bundles copied in for a workspace-rooted harness; removed after the run.
+    relocated_skills: list[str] = field(default_factory=list)
     result: ResultView | None = None
     error: Exception | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

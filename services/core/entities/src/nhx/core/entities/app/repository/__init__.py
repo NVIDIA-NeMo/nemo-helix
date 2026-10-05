@@ -18,7 +18,7 @@ from nhx.core.entities.app.repository.sqlalchemy.entity import SQLAlchemyEntityR
 from nhx.core.entities.app.repository.sqlalchemy.workspace import SQLAlchemyWorkspaceRepository
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
 from nhx.core.entities.config import EntitiesConfig
-from sqlalchemy import text
+from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 _async_engine: AsyncEngine | None = None
@@ -36,6 +36,11 @@ async def initialize_async_engine(config: EntitiesConfig) -> None:
     global _async_engine, _async_session_maker
 
     if _async_engine is not None:
+        if _async_engine.url != make_url(config.get_async_sqlalchemy_url()):
+            raise RuntimeError(
+                "The entities engine is already initialized for a different database. One process runs one "
+                "entity store; a test that opens a second service context must close the first one before it."
+            )
         return  # Already initialized
 
     _async_engine = create_async_engine_for_entities(config)

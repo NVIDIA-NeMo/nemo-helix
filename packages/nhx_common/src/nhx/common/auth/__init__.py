@@ -16,10 +16,12 @@ from .dependencies import (
     auth_as_service,
     auth_client_context,
     build_service_principal_headers,
+    build_service_principal_headers_async,
     get_auth_client,
     get_principal_auth_headers,
 )
 from .exceptions import AuthorizationError, InvalidPermissionFormatError, InvalidScopeFormatError
+from .headers import AUTHENTICATION_CONTEXT_HEADERS, AUTHORIZATION_HEADER, TRUSTED_IDENTITY_HEADERS
 from .middleware import AuthorizationMiddleware
 from .models import NHX_PRINCIPAL_ENVVAR, AuthContext, Principal
 from .permissions import ALL_WORKSPACES, compute_accessible_workspaces
@@ -87,6 +89,8 @@ __all__ = [
     "AuthClient",
     "AuthContext",
     "AuthConfig",
+    "AUTHENTICATION_CONTEXT_HEADERS",
+    "AUTHORIZATION_HEADER",
     "AuthorizationError",
     "InvalidPermissionFormatError",
     "InvalidPrincipalIdentifier",
@@ -113,6 +117,7 @@ __all__ = [
     "Principal",
     "PrincipalIdentifier",
     "SyncWorkloadDelegationStore",
+    "TRUSTED_IDENTITY_HEADERS",
     "WorkloadDelegationConflictError",
     "WorkloadDelegationEntity",
     "WorkloadDelegationError",
@@ -125,6 +130,7 @@ __all__ = [
     "auth_as_service",
     "auth_client_context",
     "build_service_principal_headers",
+    "build_service_principal_headers_async",
     "create_opaque_docker_proof_token",
     "workload_identity_env",
     "workload_delegation_expires_at",

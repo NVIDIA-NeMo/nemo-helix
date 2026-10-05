@@ -16,7 +16,6 @@ required-version = ">=0.9.14,<0.10.0"
 members = [
   "packages/nhx_build_tools",
   "packages/filesets",
-  "packages/models",
   "sdk/python/nemo-helix",
   "packages/nemo_helix_plugin",
   "packages/nhx_common",
@@ -27,7 +26,6 @@ members = [
 [tool.uv.sources]
 nhx-build-tools = { workspace = true }
 filesets = { workspace = true }
-models = { workspace = true }
 nemo-helix-sdk = { workspace = true }
 nemo-helix-plugin = { workspace = true }
 nhx-common = { workspace = true }

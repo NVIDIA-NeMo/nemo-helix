@@ -22,7 +22,7 @@ endif
 PYTEST_EXTRA ?=
 # Default development toolchain versions. Keep these aligned with Flox; the
 # version-consistency checks validate them in pre-commit and CI.
-PYTHON_VERSION ?= 3.12
+PYTHON_VERSION ?= 3.13
 UV_VERSION := 0.10.10
 NODE_VERSION := 22.23.2
 PNPM_VERSION := 10.34.5
@@ -80,11 +80,7 @@ update-web-sdk: verify-toolchain ## Regenerate the TypeScript web SDK (web/packa
 	cd web && $(PNPM) gen
 
 .PHONY: update-sdk
-update-sdk: build-policy refresh-openapi update-web-sdk update-cli ## Update the SDK by regenerating the OpenAPI spec
-
-.PHONY: vendor-nemo-helix-ext
-vendor-nemo-helix-ext:
-	$(FLOX_EXEC) $(MAKE) -C packages/nemo_helix_ext vendor
+update-sdk: build-policy refresh-openapi update-web-sdk vendor update-cli ## Regenerate the OpenAPI spec, web SDK, wheel metadata, and CLI docs
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
@@ -119,9 +115,29 @@ docs-watch: ## Start Fern docs dev plus a repo-level watcher for docs/** changes
 docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link check)
 	cd docs/fern && npm run check
 
+DOCS_TYPED_SNIPPET_PATHS := \
+	docs/anonymizer/tutorials/preview.mdx \
+	docs/auth/authorization/plugin-authorization.mdx \
+	docs/auth/authorization/policy-engine.mdx \
+	docs/customizer/tutorials/embedding-customization-job.mdx \
+	docs/customizer/tutorials/grpo-environment-packages.mdx \
+	docs/data-designer/cli.mdx \
+	docs/data-designer/index.mdx \
+	docs/data-designer/retrieval-sdg.mdx \
+	docs/data-designer/tutorials/basics.mdx \
+	docs/data-designer/tutorials/seeding.mdx \
+	docs/evaluator/agent-eval/gym-runner.mdx \
+	docs/evaluator/agent-eval/index.mdx \
+	docs/pysdk/client/index.mdx \
+	docs/safe-synthesizer/about/jobs.mdx \
+	docs/safe-synthesizer/about/reference.mdx \
+	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+
 .PHONY: docs-lint-snippets
-docs-lint-snippets: ## Syntax-check Python fenced snippets across all docs
+docs-lint-snippets: ## Syntax-check all Python fenced snippets and type-check curated executable docs
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
 
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)
@@ -154,7 +170,7 @@ docs-publish: ## Trigger the Publish Fern Docs workflow (normally runs on push t
 	gh workflow run publish-fern-docs.yaml
 
 .PHONY: update-cli
-update-cli: vendor-nemo-helix-ext generate-cli-reference-docs
+update-cli: generate-cli-reference-docs ## Regenerate the CLI reference documentation
 
 .PHONY: clean-python
 clean-python: ## remove python virtual environment
@@ -340,7 +356,7 @@ check-copyright-headers: ## Checks to see if all copyright headers are appropria
 	$(CMD_COPYRIGHT_HEADER_FIXER) --check
 
 .PHONY: lint
-lint: ## Run all linters (licenses, openapi, config docs, python style/types/sdk, vendored SDK, CLI, auth config)
+lint: ## Run all linters (licenses, openapi, config docs, python style/types, wheel metadata, auth config)
 	$(FLOX_EXEC) bash tools/lint/lint-all.sh
 
 LINT_FIX_VERIFY ?= 0
@@ -370,11 +386,8 @@ lint-github-scripts: verify-node-version ## Lint and format-check GitHub JavaScr
 check-github-scripts: test-github-scripts lint-github-scripts ## Test, lint, and format-check GitHub JavaScript scripts
 
 .PHONY: vendor
-vendor: ## Vendor packages into the SDK and generate wrapper metadata
-	$(UV) run --no-sync nemo-helix-sdk-tools vendor all-from-configs \
-		nemo_helix_ext models filesets \
-		nemo_evaluator_sdk
-	$(UV) run --no-sync nemo-helix-sdk-tools post-generation update-license-headers
+vendor: ## Refresh the nemo-helix wheel metadata generated from [tool.bundle-package]
+	$(UV) run --no-sync nemo-helix-sdk-tools vendor bundle-metadata
 
 # ============================================================================
 # Python Testing Targets

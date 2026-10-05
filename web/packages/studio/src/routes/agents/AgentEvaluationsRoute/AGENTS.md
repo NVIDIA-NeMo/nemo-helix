@@ -148,7 +148,7 @@ Submit body is wrapped: `{"spec": { ...AgentEvalInputSpec }}`.
 ```
 
 Use the non-streaming chat-completions endpoint, which both agent config formats serve: a
-`nemo-agents-spec-v1` agent through the Platform-owned Fabric server, a `nat-workflow-v1`
+`nemo-agents-spec-v1` agent through the NeMo Helix-owned Fabric server, a `nat-workflow-v1`
 agent through NAT's FastAPI front end (`workflow.openai_api_v1_path`, on by default). NAT
 also serves the legacy `/generate`, but Fabric does not — it 404s — so the target must not
 branch on the agent's format.

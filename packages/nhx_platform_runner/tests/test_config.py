@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from nhx.common.controller import Loop
+from nhx.common.controller.controller_manager import ControllerManager
 from nhx.platform_runner import registry
 from nhx.platform_runner.config import (
     DEFAULT_PLATFORM_BIND_HOST,
@@ -526,3 +528,48 @@ auth:
         env: dict[str, str] = {}
         apply_run_environment(_make_config(host="0.0.0.0", port=8080, config_path=default_config_path()), env=env)
         assert env["NHX_BASE_URL"] == "http://127.0.0.1:8080"
+
+
+class _SelectorLoop:
+    def __init__(self, *, healthy: bool) -> None:
+        self.is_healthy = healthy
+        self.unhealthy_reason = None
+
+
+def test_status_selector_names_round_trip_through_controllers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nhx.platform_runner.config.get_available_controllers",
+        lambda: {
+            "jobs": "nhx.core.jobs.controllers.main:run",
+            "deployments": "plugin:deployments",
+            "models": "nhx.core.models.controllers.main:run",
+        },
+    )
+    monkeypatch.setattr(
+        "nhx.platform_runner.config.get_available_services",
+        lambda: {"entities": "nhx.core.entities.main:service"},
+    )
+    ControllerManager._instance = None
+    manager = ControllerManager.get_instance()
+    try:
+        with manager.controller_registration_context("jobs"):
+            manager.register("job_scheduler", cast(Loop, _SelectorLoop(healthy=True)))
+            manager.register("job_reconciler", cast(Loop, _SelectorLoop(healthy=True)))
+        with manager.controller_registration_context("models"):
+            manager.register("models_controller", cast(Loop, _SelectorLoop(healthy=True)))
+        with manager.controller_registration_context("deployments"):
+            manager.register("controller-plugin-deployments", cast(Loop, _SelectorLoop(healthy=False)))
+
+        _all_healthy, status = manager.health_by_component()
+        assert status == {"jobs": True, "models": True, "deployments": False}
+
+        healthy_names = sorted(name for name, ok in status.items() if ok)
+        resolved = resolve(controllers=healthy_names)
+        assert resolved.controllers == {"jobs", "models"}
+
+        with pytest.raises(ValueError, match="job_scheduler"):
+            resolve(controllers=["job_scheduler"])
+        with pytest.raises(ValueError, match="controller-plugin-deployments"):
+            resolve(controllers=["controller-plugin-deployments"])
+    finally:
+        ControllerManager._instance = None

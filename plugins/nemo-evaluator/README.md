@@ -9,7 +9,7 @@ provides:
 - **CLI** `nemo evaluator` commands for plugin status, job schema inspection, and
   durable job submissions.
 - **Service** routes for evaluator job management: `plugins/nemo-evaluator/src/nemo_evaluator/service.py`.
-- **SDK accessor** at `client.evaluator` for status checks, job
+- **SDK resource** built with `Evaluator.from_client(client)` for status checks, job
   submission, status polling, result retrieval, and artifact download.
 - **Evaluator job** support for inline SDK metric specs, inline rows, and
   Fileset-backed datasets.
@@ -24,7 +24,7 @@ provides:
 | --- | --- | --- |
 | CLI | `nemo.cli:evaluator` | Plugin status, metric discovery, job schema inspection, and durable submissions |
 | Service | `nemo.services:evaluator` | Health, job, stored-resource, and result routes |
-| SDK | `nemo.sdk:evaluator` | `client.evaluator` execution, job lifecycle, stored resources, and result indexes |
+| SDK | `nemo.sdk:evaluator` | `Evaluator.from_client(client)` execution, job lifecycle, stored resources, and result indexes |
 | Dataset job | `nemo.jobs:evaluator.evaluate` | Scores inline or Fileset-backed datasets |
 | Agent job | `nemo.jobs:evaluator.agent-evaluate` | Runs or rescores task-driven agent trials |
 | Skill | `nemo.skills:evaluator` | Publishes the evaluator agent skill |
@@ -90,9 +90,11 @@ Use the mounted SDK resource to submit durable evaluation jobs:
 
 ```python
 from nemo_evaluator_sdk import ExactMatchMetric, RunConfig
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_evaluator.sdk import Evaluator
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+evaluator = Evaluator.from_client(client)
 metric = ExactMatchMetric(
     reference="{{item.expected}}",
     candidate="{{item.output}}",
@@ -102,7 +104,7 @@ dataset = [
     {"expected": "Paris", "output": "London"},
 ]
 
-job = client.evaluator.submit(
+job = evaluator.submit(
     metric=metric,
     dataset=dataset,
     config=RunConfig(parallelism=2),
@@ -191,11 +193,11 @@ for tasksets, other durable targets, and precomputed trials.
 
 The SDK namespace includes:
 
-- `client.evaluator.metrics`
-- `client.evaluator.tasks`
-- `client.evaluator.tasksets`
-- `client.evaluator.eval_results`
-- `client.evaluator.agent_eval_results`
+- `evaluator.metrics`
+- `evaluator.tasks`
+- `evaluator.tasksets`
+- `evaluator.eval_results`
+- `evaluator.agent_eval_results`
 
 Metrics, tasks, and tasksets support create, retrieve, list, and delete. Result
 resources support retrieve, list, and delete.

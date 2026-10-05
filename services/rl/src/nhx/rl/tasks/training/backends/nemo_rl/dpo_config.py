@@ -211,7 +211,7 @@ def compile_dpo_config(
         # context parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).
         "dtensor_cfg": {
-            "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": ""},
+            "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
             "enabled": True,
             "cpu_offload": False,
             "sequence_parallel": parallelism.sequence_parallel,
@@ -232,6 +232,14 @@ def compile_dpo_config(
                 "dropout_position": "post",
                 "lora_A_init": "xavier",
                 "use_triton": True,
+            },
+            # The DTensor policy worker reads its save options from here and raises
+            # KeyError without them; the top-level checkpointing config rejects them.
+            # "every" consolidates each save, so the best checkpoint is publishable.
+            "checkpoint": {
+                "model_save_format": "safetensors",
+                "save_consolidated": "every",
+                "v4_compatible": customizer_config.model.v4_compatible,
             },
         },
         "dynamic_batching": {"enabled": False},
@@ -478,16 +486,24 @@ def _build_optimizer_config(customizer_config: TrainingStepConfig) -> dict[str, 
         # Default: AdamW for ADAMW_WITH_COSINE_ANNEALING and ADAMW_WITH_FLAT_LR
         optimizer_name = "torch.optim.AdamW"
 
+    kwargs: dict[str, Any] = {
+        "lr": opt.learning_rate,
+        "weight_decay": opt.weight_decay,
+        "betas": [opt.beta1, opt.beta2],
+        "eps": opt.eps,
+    }
+    # foreach/fused are torch.optim-only; NeMo-RL passes kwargs straight to the class, and
+    # TE FusedAdam's __init__ takes neither (no **kwargs), so it would raise TypeError.
+    if not opt.optimizer_name:
+        kwargs["foreach"] = False
+        kwargs["fused"] = False
+    # A caller-supplied class (e.g. TE FusedAdam) takes its own kwargs, so let their
+    # values win over ours rather than merging under them.
+    if opt.optimizer_kwargs:
+        kwargs.update(opt.optimizer_kwargs)
     return {
-        "name": optimizer_name,
-        "kwargs": {
-            "lr": opt.learning_rate,
-            "weight_decay": opt.weight_decay,
-            "betas": [opt.beta1, opt.beta2],
-            "eps": opt.eps,
-            "foreach": False,
-            "fused": False,
-        },
+        "name": opt.optimizer_name or optimizer_name,
+        "kwargs": kwargs,
     }
 
 

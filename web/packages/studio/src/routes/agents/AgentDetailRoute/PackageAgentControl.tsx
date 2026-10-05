@@ -19,13 +19,61 @@ import {
   Text,
   TextInput,
 } from '@nvidia/foundations-react-core';
+import {
+  type DeploymentMode,
+  enabledImageModes,
+  IMAGE_DEPLOYMENT_MODES,
+  useDeploymentModes,
+} from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { CopyButton } from '@studio/components/CopyButton';
 import { JOBS_ENABLED } from '@studio/constants/environment';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
 import { Package } from 'lucide-react';
 import { useEffect, useState, type FC } from 'react';
 import { useNavigate } from 'react-router';
+
+const modeLabels = (modes: readonly DeploymentMode[]) =>
+  modes.map(deploymentModeLabel).join(' or ');
+
+const CommandSnippet: FC<{ command: string }> = ({ command }) => (
+  <CodeSnippetRoot>
+    <CodeSnippetActions>
+      <CopyButton text={command} color="neutral" kind="tertiary" size="tiny" />
+    </CodeSnippetActions>
+    <CodeSnippetCode value={command} language="bash" />
+  </CodeSnippetRoot>
+);
+
+// `mode` is undefined when the platform's modes couldn't be read.
+const LocalBuildSteps: FC<{ workspace: string; agentName: string; mode?: DeploymentMode }> = ({
+  workspace,
+  agentName,
+  mode,
+}) => {
+  const publishes = mode !== 'docker';
+  return (
+    <Stack gap="density-sm">
+      <Text className="text-secondary" kind="body/regular/sm">
+        This platform can&apos;t build images: builds run on the platform host under a subprocess
+        job profile, and this platform doesn&apos;t register one. Build the image yourself, from the
+        agent&apos;s directory{publishes ? ', replacing REGISTRY with your registry' : ''}:
+      </Text>
+      <CommandSnippet
+        command={`nemo agents package --agent agent.yaml${publishes ? ' --publish --registry REGISTRY' : ''}`}
+      />
+      <Text className="text-secondary" kind="body/regular/sm">
+        Then deploy it, replacing IMAGE with the tag the build printed
+        {mode ? '' : ' and MODE with docker or k8s'}:
+      </Text>
+      <CommandSnippet
+        command={`nemo agents deploy --agent ${agentName} --workspace ${workspace} --mode ${mode ?? 'MODE'} --image IMAGE`}
+      />
+    </Stack>
+  );
+};
 
 interface PackageAgentControlProps {
   workspace: string;
@@ -81,6 +129,12 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
     image,
     published,
   } = usePackageAgent({ workspace, agentName });
+  const platformCannotBuild = useImageBuildsUnsupported();
+  const deploymentModes = useDeploymentModes(workspace);
+  const imageModes = enabledImageModes(deploymentModes);
+  const noImageMode = imageModes.length === 0;
+  const knownDeployMode: DeploymentMode | undefined =
+    deploymentModes.status === 'ready' ? imageModes.at(0) : undefined;
 
   useEffect(() => {
     // Only a build watched on this page load. A restored tag can be months old
@@ -90,6 +144,9 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
       onImageAvailable?.(image);
     }
   }, [isComplete, image, isRestored, onImageAvailable]);
+
+  const showLocalBuild =
+    canPackage && platformCannotBuild && !noImageMode && deploymentModes.status !== 'loading';
 
   const isBusy = isQueued || isRunning;
   const hasImage = isComplete && Boolean(image);
@@ -129,11 +186,13 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
       <FormModal
         open={isOpen}
         title="Container image"
-        instruction="Build an image for this agent to deploy it with Docker or Kubernetes."
+        instruction={`Build an image for this agent to deploy it with ${modeLabels(
+          noImageMode ? IMAGE_DEPLOYMENT_MODES : imageModes
+        )}.`}
         submitButtonText={hasImage ? 'Rebuild' : 'Build image'}
         cancelButtonText="Close"
         loading={isSubmitting}
-        submitDisabled={!canPackage || isRunning}
+        submitDisabled={!canPackage || isRunning || platformCannotBuild || noImageMode}
         onClose={() => setIsOpen(false)}
         onSubmit={(e) => {
           e.preventDefault();
@@ -141,20 +200,32 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         }}
       >
         {isAgentLoading ? (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             Checking whether this agent can be packaged…
           </Text>
         ) : null}
 
         {!canPackage && !isAgentLoading ? (
-          <Text kind="body/regular/sm" color="secondary">
+          <Text className="text-secondary" kind="body/regular/sm">
             Packaging is available for Platform-managed agents. Build a NAT workflow image with{' '}
             <code>nemo agents package</code>.
           </Text>
         ) : null}
 
+        {canPackage && noImageMode ? (
+          <Text className="text-secondary" kind="body/regular/sm">
+            This platform has no Docker or Kubernetes deployment mode enabled, so an image built
+            here couldn&apos;t be deployed. Ask your platform admin to configure a Docker or
+            Kubernetes executor.
+          </Text>
+        ) : null}
+
+        {showLocalBuild ? (
+          <LocalBuildSteps workspace={workspace} agentName={agentName} mode={knownDeployMode} />
+        ) : null}
+
         {submitError ? (
-          <Text kind="body/regular/sm" color="danger">
+          <Text kind="body/regular/sm" className="text-feedback-danger">
             {getErrorMessage(submitError, 'Failed to start the packaging job')}
           </Text>
         ) : null}
@@ -174,7 +245,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
               <CodeSnippetCode value={image} />
             </CodeSnippetRoot>
             {restoredAt ? (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Built{' '}
                 <RelativeTime
                   datetime={new Date(restoredAt).toISOString()}
@@ -184,7 +255,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
               </Text>
             ) : null}
             {published ? (
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 Pushed to {published}
               </Text>
             ) : null}
@@ -194,7 +265,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         {isResultPending ? (
           <Flex gap="density-sm" className="items-center">
             <Spinner size="small" aria-label="Reading build result" />
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               Reading the build result…
             </Text>
           </Flex>
@@ -202,7 +273,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {resultError ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               The build finished, but its result could not be read. Open the job for the tag.
             </Text>
             {viewJobButton}
@@ -211,7 +282,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isComplete && !isResultPending && !resultError && !image ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="secondary">
+            <Text className="text-secondary" kind="body/regular/sm">
               The job finished without reporting an image tag. Open the job to see why.
             </Text>
             {viewJobButton}
@@ -220,7 +291,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isUnreachable ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               Lost track of this build — its status could not be read. Open the job, or start
               another build.
             </Text>
@@ -240,7 +311,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {isFailed ? (
           <Flex gap="density-sm" className="items-center justify-between">
-            <Text kind="body/regular/sm" color="danger">
+            <Text kind="body/regular/sm" className="text-feedback-danger">
               Packaging failed. Open the job for the build output.
             </Text>
             {viewJobButton}
@@ -251,7 +322,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
           <Flex gap="density-sm" className="items-center justify-between">
             <Flex gap="density-sm" className="items-center">
               <Spinner size="small" aria-label="Building image" />
-              <Text kind="body/regular/sm" color="secondary">
+              <Text className="text-secondary" kind="body/regular/sm">
                 {isQueued
                   ? 'Waiting for a build to start…'
                   : 'Building — this takes a few minutes.'}
@@ -264,7 +335,7 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
         {/* Stays mounted once an image exists: the registry is remembered and a
             Rebuild pushes there again, so hiding it would push somewhere the
             user cannot see. */}
-        {canPackage && !isBusy ? (
+        {canPackage && !isBusy && !platformCannotBuild && !noImageMode ? (
           <Accordion
             className="[&>div]:border-b-0"
             value={pushOptionsOpen}
@@ -294,17 +365,19 @@ export const PackageAgentControl: FC<PackageAgentControlProps> = ({
 
         {hasImage && image && onImageBuilt ? (
           <Flex gap="density-sm" align="center">
-            <Button
-              kind="primary"
-              size="small"
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                onImageBuilt(image);
-              }}
-            >
-              Deploy
-            </Button>
+            {noImageMode ? null : (
+              <Button
+                kind="primary"
+                size="small"
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onImageBuilt(image);
+                }}
+              >
+                Deploy
+              </Button>
+            )}
             {viewJobButton}
           </Flex>
         ) : null}

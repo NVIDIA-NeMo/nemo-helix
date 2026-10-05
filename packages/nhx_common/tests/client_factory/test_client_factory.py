@@ -16,10 +16,25 @@ import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.types import PreparedRequest
 from nemo_helix_plugin.client_provider import NemoClientProvider
+from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.common import client_factory as cf
-from nhx.common.config import Configuration
+from nhx.common.auth import Principal, auth_client_context
+from nhx.common.auth.client import AuthClient
+from nhx.common.config import AuthConfig, Configuration
+from nhx.common.config.base import OIDCConfig
 from nhx.common.observability.otel import scoped_otel_headers
 from nhx.common.platform_endpoint import _AsyncHelixEndpointRoutingTransport, _SyncHelixEndpointRoutingTransport
+
+
+def _auth_config_with_token_exchange() -> AuthConfig:
+    return AuthConfig(
+        enabled=True,
+        oidc=OIDCConfig(
+            workload_token_exchange_enabled=True,
+            workload_token_private_key_file="/tmp/test-workload-token-private-key.pem",
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +83,35 @@ class TestSyncConstruction:
         assert client._default_headers["X-NHX-Internal"] == "true"
         assert client._default_headers["X-NHX-Actor-Aliases"] == "service:evaluator"
 
+    def test_service_principal_uses_bearer_auth_in_token_exchange_mode(self):
+        try:
+            Configuration.set_override(_auth_config_with_token_exchange())
+
+            with patch(
+                "nhx.common.auth.workload_tokens.ServiceWorkloadAccessTokenProvider.get_access_token",
+                return_value="typed-service-token",
+            ):
+                client = cf.get_nemo_client(as_service="evaluator", internal=True)
+                assert client._auth is not None
+                assert client._auth.get_access_token() == "typed-service-token"
+        finally:
+            Configuration.clear_override(AuthConfig)
+
+        assert client._default_headers["X-NHX-Internal"] == "true"
+        assert "X-NHX-Principal-Id" not in client._default_headers
+
+    def test_service_principal_rejects_bearer_auth_to_remote_cleartext_endpoint(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        try:
+            Configuration.set_override(_auth_config_with_token_exchange())
+
+            client = cf.get_nemo_client(as_service="evaluator")
+            with pytest.raises(ValueError, match="NemoClient cannot send Authorization.*cleartext remote endpoint"):
+                client.send(_get("/apis/entities/v2/foo"))
+        finally:
+            Configuration.clear_override(AuthConfig)
+
     def test_on_behalf_of(self):
         client = cf.get_nemo_client(as_service="svc", on_behalf_of="user@example.com")
         assert client._default_headers["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
@@ -89,6 +133,19 @@ class TestSyncConstruction:
         with httpx.Client() as explicit:
             client = cf.get_nemo_client(http_client=explicit)
             assert client._http is explicit
+
+    def test_base_url_override_skips_endpoint_routing(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(base_url="http://other-platform:7000")
+
+        assert client.base_url == "http://other-platform:7000"
+        assert not isinstance(client._http._transport, _SyncHelixEndpointRoutingTransport)
+
+    def test_async_base_url_override(self):
+        client = cf.get_async_nemo_client(base_url="http://other-platform:7000")
+        assert client.base_url == "http://other-platform:7000"
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +182,22 @@ class TestAsyncConstruction:
 
 
 class TestUrlRouting:
+    def test_base_url_override_is_not_routed_back_to_platform(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NHX_ENTITIES_URL", "http://entities-svc:9999")
+        Configuration.clear_cache()
+
+        captured: list[httpx.Request] = []
+        client = cf.get_nemo_client(
+            as_service="entities",
+            base_url="http://other-platform:7000",
+            http_client=_mock_client(captured),
+        )
+        client.send(_get("/apis/entities/v2/foo"))
+
+        assert str(captured[0].url) == "http://other-platform:7000/apis/entities/v2/foo"
+        assert captured[0].headers["X-NHX-Principal-Id"] == "service:entities"
+
     def test_routes_service_path_to_discovered_origin(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
         monkeypatch.setenv("NHX_ENTITIES_URL", "http://entities-svc:9999")
@@ -185,6 +258,19 @@ class TestUrlRouting:
 
         assert "/workspaces/team-a/models" in str(captured[0].url)
 
+    def test_typed_client_jobs_property_preserves_factory_runtime_routing(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("NHX_BASE_URL", "https://nemo-gateway:8080")
+        monkeypatch.setenv("NHX_JOBS_URL", "http://jobs-svc:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(workspace="default")
+        jobs = client.jobs
+
+        assert isinstance(jobs, JobsClient)
+        assert jobs.nemo_client_runtime is client.nemo_client_runtime
+        request = jobs_endpoints.list_steps(workspace="default", name="job-1")
+        assert jobs._resolve_path(request) == "http://jobs-svc:8080/apis/jobs/v2/workspaces/default/jobs/job-1/steps"
+
 
 # ---------------------------------------------------------------------------
 # Headers / auth
@@ -194,8 +280,8 @@ class TestUrlRouting:
 class TestHeadersAuth:
     def test_propagates_request_principal_when_no_service(self):
         auth_headers = {"X-NHX-Principal-Id": "user@example.com", "X-NHX-Principal-Groups": "g1,g2"}
-        # _get_default_headers reads the request principal via sdk_factory's binding.
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value=auth_headers):
+        # platform_auth_headers reads the request principal via the platform context helper.
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value=auth_headers):
             client = cf.get_nemo_client()
         assert client._default_headers["X-NHX-Principal-Id"] == "user@example.com"
         assert client._default_headers["X-NHX-Principal-Groups"] == "g1,g2"
@@ -226,10 +312,55 @@ class TestHeadersAuth:
 
     def test_no_headers_leaves_default_headers_none(self):
         # No service, no principal context, no OTEL, no internal → no default headers.
-        with patch("nhx.common.sdk_factory.get_principal_auth_headers", return_value={}):
-            with patch("nhx.common.sdk_factory.principal_from_env", return_value=None):
+        with patch("nhx.common.platform_client_context.current_principal_auth_headers", return_value={}):
+            with patch("nhx.common.platform_client_context.principal_from_env", return_value=None):
                 client = cf.get_nemo_client()
         assert client._default_headers == {}
+
+    def test_token_exchange_request_context_forwards_bearer_without_trusted_headers(self):
+        config = _auth_config_with_token_exchange()
+        Configuration.set_override(config)
+        context_token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="incoming-service-token",
+            )
+        )
+        try:
+            client = cf.get_async_nemo_client()
+        finally:
+            auth_client_context.reset(context_token)
+            Configuration.clear_override(AuthConfig)
+
+        assert client._default_headers["Authorization"] == "Bearer incoming-service-token"
+        assert all(name.lower() != "x-nhx-principal-id" for name in client._default_headers)
+        assert all(name.lower() != "x-nhx-actor-aliases" for name in client._default_headers)
+
+    async def test_token_exchange_request_context_rejects_bearer_to_remote_cleartext_endpoint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
+        Configuration.clear_cache()
+        config = _auth_config_with_token_exchange()
+        Configuration.set_override(config)
+        context_token = auth_client_context.set(
+            AuthClient(
+                principal=Principal(id="service:models", authz_aliases=["service:models"]),
+                config=config,
+                bearer_token="incoming-service-token",
+            )
+        )
+        try:
+            client = cf.get_async_nemo_client()
+            with pytest.raises(
+                ValueError, match="AsyncNemoClient cannot send Authorization.*cleartext remote endpoint"
+            ):
+                await client.send(_get("/apis/entities/v2/foo"))
+        finally:
+            auth_client_context.reset(context_token)
+            Configuration.clear_override(AuthConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +490,19 @@ class TestTaskClientWorkloadIdentity:
         # No trusted principal headers in workload-identity mode.
         assert "X-NHX-Principal-Id" not in client._default_headers
         assert client._default_headers.get("X-NHX-Internal") == "true"
+
+    def test_base_url_override_keeps_workload_identity_auth(self, monkeypatch, tmp_path, _stub_exchange):
+        token_file = tmp_path / "token"
+        token_file.write_text("subject-token")
+        monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
+        monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
+        Configuration.clear_cache()
+
+        client = cf.get_nemo_client(base_url="http://other-platform:7000")
+
+        assert isinstance(client._auth, _FakeExchangeProvider)
+        assert _stub_exchange["base_url"] == "http://other-platform:7000"
+        assert client.base_url == "http://other-platform:7000"
 
     def test_uds_does_not_bootstrap_workload_identity(self, monkeypatch, tmp_path, _stub_exchange):
         # Matches get_task_sdk exactly: with the WI token file set the task path

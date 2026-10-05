@@ -404,6 +404,188 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates:
+    post:
+      tags:
+      - Customization Job Templates
+      summary: Create Job Template
+      description: Save a job input for reuse.
+      operationId: create_job_template_apis_customization_v2_workspaces__workspace__job_templates_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomizationJobTemplateRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - Customization Job Templates
+      summary: List Job Templates
+      description: List saved job templates in the workspace.
+      operationId: list_job_templates_apis_customization_v2_workspaces__workspace__job_templates_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Page Size
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          default: -created_at
+          title: Sort
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NemoListResponse_CustomizationJobTemplate_'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/customization/v2/workspaces/{workspace}/job-templates/{name}:
+    get:
+      tags:
+      - Customization Job Templates
+      summary: Get Job Template
+      description: Get a single job template.
+      operationId: get_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    patch:
+      tags:
+      - Customization Job Templates
+      summary: Update Job Template
+      description: Edit a job template's config, target backend or description.
+      operationId: update_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__patch
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCustomizationJobTemplateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomizationJobTemplate'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Customization Job Templates
+      summary: Delete Job Template
+      description: Delete a job template.
+      operationId: delete_job_template_apis_customization_v2_workspaces__workspace__job_templates__name__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/customization/v2/workspaces/{workspace}/rl/jobs:
     post:
       tags:
@@ -1178,6 +1360,96 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
+    AutomodelBackendSpec:
+      properties:
+        attn:
+          title: Attn
+          description: Attention kernel. 'te' uses Transformer Engine (Hopper or newer);
+            'sdpa' is the portable PyTorch implementation.
+          type: string
+          enum:
+          - te
+          - sdpa
+          - flex
+          - eager
+          - tilelang
+        linear:
+          title: Linear
+          description: Linear-layer kernel.
+          type: string
+          enum:
+          - torch
+          - te
+          - quack
+        rms_norm:
+          title: Rms Norm
+          description: RMSNorm kernel. 'torch_fp32' normalises in fp32 for numerical
+            stability.
+          type: string
+          enum:
+          - torch
+          - torch_fp32
+          - te
+          - quack
+        rope:
+          title: Rope
+          description: Rotary position embedding kernel.
+          type: string
+          enum:
+          - torch
+          - quack
+        rope_fusion:
+          title: Rope Fusion
+          description: Fuse the rotary embedding into the attention kernel.
+          type: boolean
+        experts:
+          title: Experts
+          description: MoE expert compute kernel. 'gmm' is the grouped-matmul path
+            used by the large MoE recipes.
+          type: string
+          enum:
+          - torch
+          - te
+          - gmm
+          - torch_mm
+          - torch_mm_mxfp8
+        dispatcher:
+          title: Dispatcher
+          description: How MoE tokens are routed between expert-parallel ranks. 'deepep'
+            is the high-throughput path and requires the DeepEP library on the node.
+          type: string
+          enum:
+          - torch
+          - deepep
+          - hybridep
+          - uccl_ep
+        fake_balanced_gate:
+          title: Fake Balanced Gate
+          description: Route tokens evenly across experts instead of using the trained
+            router. Benchmarking aid.
+          type: boolean
+        enable_hf_state_dict_adapter:
+          title: Enable Hf State Dict Adapter
+          description: Save and load checkpoints in HuggingFace layout. Needed when
+            the trained model is consumed by HuggingFace tooling.
+          type: boolean
+        enable_fsdp_optimizations:
+          title: Enable Fsdp Optimizations
+          description: Enable Automodel's additional FSDP2 sharding optimizations.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: AutomodelBackendSpec
+      description: 'Which implementation Automodel uses for each model component.
+
+
+        Every field defaults to ``None``, meaning "leave it to Automodel". Its own
+        defaults
+
+        depend on what the training node has available (Transformer Engine, DeepEP,
+        CUDA), so
+
+        only explicitly set values are forwarded.'
     AutomodelBatchSpec:
       properties:
         global_batch_size:
@@ -1201,6 +1473,12 @@ components:
           description: Samples analyzed to estimate the optimal pack size when packing
             is enabled.
           default: 1000
+        packed_sequence_size:
+          title: Packed Sequence Size
+          description: Pin the packed sequence length instead of estimating it. Requires
+            sequence_packing.
+          type: integer
+          exclusiveMinimum: 0.0
       additionalProperties: false
       type: object
       title: AutomodelBatchSpec
@@ -1217,6 +1495,12 @@ components:
         prompt_template:
           title: Prompt Template
           type: string
+        shuffle:
+          type: boolean
+          title: Shuffle
+          description: Reshuffle training examples each epoch. Disable only for a
+            deliberate curriculum order.
+          default: true
       additionalProperties: false
       type: object
       required:
@@ -1564,9 +1848,45 @@ components:
           title: Use Triton
           description: Use the optimized Triton LoRA kernel.
           default: true
+        use_memory_efficient_lora:
+          title: Use Memory Efficient Lora
+          description: Use Automodel's lower-memory LoRA path. Recommended for large
+            MoE checkpoints. Omit to use Automodel's default, which is on.
+          type: boolean
       additionalProperties: false
       type: object
       title: AutomodelLoRAParams
+    AutomodelMTPSpec:
+      properties:
+        num_nextn_predict_layers:
+          title: Num Nextn Predict Layers
+          description: How many tokens ahead to predict. Omit to keep the checkpoint's
+            own value.
+          type: integer
+          exclusiveMinimum: 0.0
+        use_repeated_layer:
+          title: Use Repeated Layer
+          description: Share one weight-tied layer across the prediction depths. Only
+            some Automodel models accept it (Nemotron-H in r0.6.0); omit it for others.
+          type: boolean
+        loss_scaling_factor:
+          title: Loss Scaling Factor
+          description: Weight of the MTP loss term relative to the main loss. Omit
+            to keep the model's default (0.1).
+          type: number
+          minimum: 0.0
+      additionalProperties: false
+      type: object
+      title: AutomodelMTPSpec
+      description: 'Multi-Token Prediction overrides for checkpoints trained with
+        MTP heads, e.g. Nemotron 3.5 Lightning.
+
+
+        Automodel builds MTP from the checkpoint''s own config; each field here overrides
+        one
+
+        setting, and only the fields that are set reach the model. Support differs
+        per model.'
     AutomodelOptimizerSpec:
       properties:
         learning_rate:
@@ -1705,9 +2025,51 @@ components:
           title: Sequence Parallel
           description: Enable sequence parallelism.
           default: false
+        pipeline:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelPipelineSpec'
+          description: Pipeline schedule settings. Only read when pipeline_parallel_size
+            is greater than 1.
       additionalProperties: false
       type: object
       title: AutomodelParallelismSpec
+    AutomodelPipelineSpec:
+      properties:
+        pp_schedule:
+          title: Pp Schedule
+          description: Pipeline schedule name, e.g. '1f1b', 'interleaved1f1b', 'gpipe'.
+            Defaults to 'interleaved1f1b'.
+          type: string
+        pp_microbatch_size:
+          title: Pp Microbatch Size
+          description: Micro-batch size flowing through each pipeline stage.
+          type: integer
+          exclusiveMinimum: 0.0
+        round_virtual_stages_to_pp_multiple:
+          title: Round Virtual Stages To Pp Multiple
+          description: Round the number of virtual stages to a multiple of the pipeline
+            size, in the given direction.
+          type: string
+          enum:
+          - up
+          - down
+        scale_grads_in_schedule:
+          title: Scale Grads In Schedule
+          description: Scale gradients inside the schedule rather than afterwards.
+          type: boolean
+        patch_inner_model:
+          title: Patch Inner Model
+          description: Apply Automodel's pipeline patch to the inner transformer module.
+          type: boolean
+        patch_causal_lm_model:
+          title: Patch Causal Lm Model
+          description: Apply Automodel's pipeline patch to the causal-LM wrapper.
+          type: boolean
+      additionalProperties: false
+      type: object
+      title: AutomodelPipelineSpec
+      description: How work is scheduled across pipeline stages. Read only when pipeline_parallel_size
+        > 1.
     AutomodelRetrievalSpec:
       properties:
         train_n_passages:
@@ -1891,6 +2253,23 @@ components:
           - $ref: '#/components/schemas/AutomodelRetrievalSpec'
           description: Retrieval dataset, collator, and export knobs. Used when recipe
             is bi_encoder or cross_encoder.
+        activation_checkpointing:
+          type: boolean
+          title: Activation Checkpointing
+          description: Recompute intermediate activations in the backward pass instead
+            of storing them. Substantially lowers memory use for a modest slowdown,
+            and is commonly enabled when training large MoE models.
+          default: false
+        mtp:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelMTPSpec'
+          description: Multi-Token Prediction settings. Omit for checkpoints trained
+            without MTP heads.
+        backend:
+          allOf:
+          - $ref: '#/components/schemas/AutomodelBackendSpec'
+          description: Low-level kernel selection for the model's components. Omit
+            to let Automodel choose based on the hardware it lands on.
       additionalProperties: false
       type: object
       title: AutomodelTrainingSpec
@@ -1908,6 +2287,131 @@ components:
         in
 
         ``lm_policy`` and ``BatchedDataDict.shard_by_batch_size``.'
+    CreateCustomizationJobTemplateRequest:
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          pattern: ^[a-z](?!.*--)[a-z0-9\-@.+_]{1,62}(?<!-)$
+          title: Name
+          description: The name of the template. Name must start with a lowercase
+            letter, be 2-63 characters, and use lowercase letters, digits, hyphens,
+            and dots (no consecutive hyphens, cannot end with a hyphen).
+        backend:
+          type: string
+          title: Backend
+          description: Customization backend the config targets, e.g. 'automodel'.
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+        description:
+          type: string
+          title: Description
+          description: What this template is for.
+          default: ''
+      type: object
+      required:
+      - name
+      - backend
+      - config
+      title: CreateCustomizationJobTemplateRequest
+      description: Request body for ``POST /v2/workspaces/{workspace}/job-templates``.
+    CustomizationJobTemplate:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: Entity name within the workspace
+          default: ''
+        workspace:
+          type: string
+          pattern: ^[\w\-\+.@:]+$
+          title: Workspace
+          description: Workspace identifier
+        project:
+          title: Project
+          description: The name of the project associated with this entity.
+          type: string
+        backend:
+          type: string
+          title: Backend
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        description:
+          type: string
+          title: Description
+          default: ''
+        id:
+          type: string
+          title: Id
+          readOnly: true
+        created_at:
+          title: Created At
+          readOnly: true
+          type: string
+          format: date-time
+        created_by:
+          title: Created By
+          readOnly: true
+          nullable: true
+          type: string
+        updated_at:
+          title: Updated At
+          readOnly: true
+          type: string
+          format: date-time
+        updated_by:
+          title: Updated By
+          readOnly: true
+          nullable: true
+          type: string
+        entity_id:
+          type: string
+          title: Entity Id
+          description: Alias for id for backwards compatibility.
+          readOnly: true
+        parent:
+          title: Parent
+          description: Parent entity ID for nested entities.
+          readOnly: true
+          type: string
+        db_version:
+          type: integer
+          title: Db Version
+          description: Database version of the entity for optimistic locking.
+          readOnly: true
+      type: object
+      required:
+      - workspace
+      - backend
+      - config
+      - id
+      - created_at
+      - created_by
+      - updated_at
+      - updated_by
+      - entity_id
+      - parent
+      - db_version
+      title: CustomizationJobTemplate
+      description: 'A named, re-runnable customization job input.
+
+
+        ``config`` holds the same job input a submit would take, stored as given:
+        the
+
+        submitter-facing schema belongs to whichever backend plugin is installed,
+        and the
+
+        router does not import them. Submit is what checks it. ``backend`` is lifted
+        out so
+
+        callers know which customization backend/form should replay the saved config.'
     DatetimeFilter:
       additionalProperties: false
       properties:
@@ -2281,6 +2785,29 @@ components:
 
 
         To enable MLflow, provide a non-null ``mlflow`` object on :class:`IntegrationsSpec`.'
+    NemoListResponse_CustomizationJobTemplate_:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/CustomizationJobTemplate'
+          type: array
+          title: Data
+        pagination:
+          allOf:
+          - $ref: '#/components/schemas/PaginationData'
+          description: "Pagination metadata \u2014 page, page_size, total_results,\
+            \ etc."
+        sort:
+          title: Sort
+          description: Sort field applied to this result set (e.g. '-created_at').
+          type: string
+        filter:
+          title: Filter
+          description: Filter criteria echoed back from the request.
+      type: object
+      required:
+      - data
+      title: NemoListResponse_CustomizationJobTemplate_
     OptimizerType:
       type: string
       enum:
@@ -2388,6 +2915,23 @@ components:
           - $ref: '#/components/schemas/OptimizerType'
           description: "Optimizer + LR-scheduler combination (AdamW/Adam \xD7 cosine-annealing/flat-LR).\
             \ Defaults to AdamW with cosine annealing."
+        optimizer_name:
+          title: Optimizer Name
+          description: Import path of the optimizer class, overriding the one implied
+            by optimizer_type (e.g. 'transformer_engine.pytorch.optimizers.fused_adam.FusedAdam').
+            optimizer_type still selects the LR schedule. Unset uses torch.optim.AdamW
+            / Adam.
+          type: string
+        optimizer_kwargs:
+          title: Optimizer Kwargs
+          description: 'Additional keyword arguments for the optimizer, merged over
+            the generated ones. Use it to configure options the job schema does not
+            model directly, for example {''master_weights'': true, ''store_param_remainders'':
+            true, ''exp_avg_dtype'': ''torch.bfloat16''} to keep FusedAdam''s state
+            in half precision. Values given here take precedence over the generated
+            arguments and are forwarded to the optimizer as supplied.'
+          additionalProperties: true
+          type: object
         learning_rate:
           type: number
           exclusiveMinimum: 0.0
@@ -2493,6 +3037,14 @@ components:
           title: Seed
           description: Random seed for reproducibility.
           type: integer
+        env_vars:
+          title: Env Vars
+          description: 'Environment variables for the training workers, merged over
+            the platform''s own (e.g. {''PYTORCH_CUDA_ALLOC_CONF'': ''expandable_segments:True''}
+            to cut memory fragmentation).'
+          additionalProperties:
+            type: string
+          type: object
         parallelism:
           $ref: '#/components/schemas/RlParallelismParams'
         execution_profile:
@@ -2552,6 +3104,23 @@ components:
           - $ref: '#/components/schemas/OptimizerType'
           description: "Optimizer + LR-scheduler combination (AdamW/Adam \xD7 cosine-annealing/flat-LR).\
             \ Defaults to AdamW with cosine annealing."
+        optimizer_name:
+          title: Optimizer Name
+          description: Import path of the optimizer class, overriding the one implied
+            by optimizer_type (e.g. 'transformer_engine.pytorch.optimizers.fused_adam.FusedAdam').
+            optimizer_type still selects the LR schedule. Unset uses torch.optim.AdamW
+            / Adam.
+          type: string
+        optimizer_kwargs:
+          title: Optimizer Kwargs
+          description: 'Additional keyword arguments for the optimizer, merged over
+            the generated ones. Use it to configure options the job schema does not
+            model directly, for example {''master_weights'': true, ''store_param_remainders'':
+            true, ''exp_avg_dtype'': ''torch.bfloat16''} to keep FusedAdam''s state
+            in half precision. Values given here take precedence over the generated
+            arguments and are forwarded to the optimizer as supplied.'
+          additionalProperties: true
+          type: object
         learning_rate:
           type: number
           exclusiveMinimum: 0.0
@@ -2657,6 +3226,14 @@ components:
           title: Seed
           description: Random seed for reproducibility.
           type: integer
+        env_vars:
+          title: Env Vars
+          description: 'Environment variables for the training workers, merged over
+            the platform''s own (e.g. {''PYTORCH_CUDA_ALLOC_CONF'': ''expandable_segments:True''}
+            to cut memory fragmentation).'
+          additionalProperties:
+            type: string
+          type: object
         parallelism:
           $ref: '#/components/schemas/RlParallelismParams'
         execution_profile:
@@ -2957,6 +3534,27 @@ components:
             0.0}}` for Qwen3.5.'
           additionalProperties: true
           type: object
+        logprob_chunk_size:
+          title: Logprob Chunk Size
+          description: Tokens scored at once when the trainer re-reads its own generated
+            text. Lower it to cut memory at long context. Unset uses the platform
+            default (2048).
+          type: integer
+          exclusiveMinimum: 0.0
+        vllm_kwargs:
+          title: Vllm Kwargs
+          description: 'Additional arguments for the vLLM rollout engine, for example
+            {''moe_backend'': ''triton''}. Forwarded to vLLM as supplied.'
+          additionalProperties: true
+          type: object
+        moe_parallelizer:
+          title: Moe Parallelizer
+          description: Merged over policy.dtensor_cfg.moe_parallelizer, which controls
+            how MoE experts are sharded and checkpointed. The platform already sets
+            ignore_router_for_ac when expert parallelism and activation checkpointing
+            are both on; this reaches the rest.
+          additionalProperties: true
+          type: object
         vllm_tensor_parallel_size:
           title: Vllm Tensor Parallel Size
           description: Tensor parallel size for the vLLM rollout engine, independent
@@ -2972,6 +3570,15 @@ components:
             Raise toward 0.7 for large models; the rest is left for the colocated
             policy.
           default: 0.5
+        log_nemo_gym_full_result_tables:
+          type: boolean
+          title: Log Nemo Gym Full Result Tables
+          description: "Log each rollout's full NeMo-Gym payload to your own W&B as\
+            \ a Table (`<agent>/full_result`). The only place generated text is readable\
+            \ \u2014 the per-step JSONL carries token ids and an empty `content`.\
+            \ Each row is one JSON blob, so W&B cannot sort or filter on fields inside\
+            \ it. Payloads are large; enable for short debugging runs. Requires `integrations.wandb`."
+          default: false
       additionalProperties: false
       type: object
       required:
@@ -4216,6 +4823,25 @@ components:
       type: object
       title: UnslothTrainingSpec
       description: Algorithm + adapter shape selectors.
+    UpdateCustomizationJobTemplateRequest:
+      properties:
+        backend:
+          title: Backend
+          description: Customization backend the config targets.
+          type: string
+        config:
+          title: Config
+          description: Job input to replay, in the same shape the backend's submit
+            accepts.
+          additionalProperties: true
+          type: object
+        description:
+          title: Description
+          description: What this template is for.
+          type: string
+      type: object
+      title: UpdateCustomizationJobTemplateRequest
+      description: Request body for ``PATCH /v2/workspaces/{workspace}/job-templates/{name}``.
     ValidationError:
       properties:
         loc:

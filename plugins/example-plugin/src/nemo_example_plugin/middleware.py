@@ -83,7 +83,6 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from nemo_example_plugin.middleware_config import ExampleMiddlewareConfig
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.inference_middleware import (
@@ -144,15 +143,15 @@ class ExampleInferenceMiddleware(NemoInferenceMiddleware):
     async def on_startup(self) -> None:
         """Initialise resources and validate platform state at startup.
 
-        Constructs an entity client from the platform SDK so that
+        Constructs an entity client from the platform client so that
         :meth:`get_middleware_config` can fetch stored config entities.
         Logs a warning if no model entities are visible — this does not
         prevent the plugin from loading.
         """
-        from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+        from nemo_helix_plugin.client_provider import get_async_nemo_client
 
-        sdk = get_async_platform_sdk(as_service="nemo-example-middleware", internal=True)
-        self._entity_client = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
+        client = get_async_nemo_client(as_service="nemo-example-middleware", internal=True)
+        self._entity_client = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
         entities = self.list_model_entities_for_workspace()
         if not entities:

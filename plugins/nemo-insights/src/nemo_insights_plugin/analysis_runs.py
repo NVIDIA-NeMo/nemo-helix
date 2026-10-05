@@ -24,18 +24,18 @@ from collections.abc import Awaitable, Mapping
 from typing import Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.response import NemoResponse
 from nemo_helix_plugin.config import get_nemo_config
-from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.nooa_model_client import supported_backend_format
 from nemo_helix_plugin.schema import PaginationData
 from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
@@ -87,7 +87,7 @@ def mint_analysis_run_name() -> str:
 async def create_analysis_run(
     workspace: str,
     request: CreateAnalysisRunRequest,
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Create an Insights analysis run backed by the generic ``agents.execute`` job."""
@@ -95,7 +95,8 @@ async def create_analysis_run(
     return await submit_analysis_run(
         workspace=workspace,
         request=request,
-        sdk=sdk,
+        agents_client=AsyncAgentsClient.from_client(client),
+        models_client=AsyncModelsClient.from_client(client),
         entity_client=entity_client,
         profile=config.analyst.job_profile,
     )
@@ -105,7 +106,8 @@ async def submit_analysis_run(
     *,
     workspace: str,
     request: CreateAnalysisRunRequest,
-    sdk: AsyncNeMoHelix,
+    agents_client: ExecuteJobClient,
+    models_client: ModelLookupClient,
     entity_client: NemoEntitiesClient,
     name: str | None = None,
     profile: str | None = None,
@@ -118,8 +120,6 @@ async def submit_analysis_run(
     On-demand runs do not advance the scheduled cursor: their evaluation or
     time scope may omit telemetry that the next scheduled run must still cover.
     """
-    agents_client = client_from_platform(sdk, AsyncAgentsClient)
-    models_client = client_from_platform(sdk, AsyncModelsClient)
     # Resolve before recording anything: a bogus ref would otherwise persist a
     # run and submit a job that cannot start, and the request carries the only
     # copy of the operator's intent.
@@ -225,11 +225,11 @@ async def list_analysis_runs(
 async def get_analysis_run(
     workspace: str,
     name: str,
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AnalysisRunResponse:
     """Get one analysis run, joined with the live state of its backing job."""
-    agents_client = client_from_platform(sdk, AsyncAgentsClient)
+    agents_client = AsyncAgentsClient.from_client(client)
     try:
         run = await entity_client.get(AnalysisRun, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
@@ -280,7 +280,7 @@ async def _resolve_model_refs(
 
 
 async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str, workspace: str) -> str:
-    """Return ``<workspace>/<name>`` for an existing Model Entity, or raise 422."""
+    """Return ``<workspace>/<name>`` for an existing Model Entity the Analyst can call, or raise 422."""
     match ref.split("/"):
         case [name]:
             model_workspace = workspace
@@ -293,7 +293,7 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
             )
 
     try:
-        await client.get_model(name=name, workspace=model_workspace)
+        model_entity = (await client.get_model(name=name, workspace=model_workspace)).data()
     except NotFoundError as exc:
         raise HTTPException(
             status_code=422,
@@ -308,6 +308,12 @@ async def _resolve_model_ref(client: ModelLookupClient, ref: str, *, field: str,
         raise HTTPException(
             status_code=503, detail="Could not reach the Models service to validate the model refs."
         ) from exc
+    # The Analyst job would otherwise start and fail when it builds its model
+    # clients, after the run is recorded and a pod has been scheduled.
+    try:
+        supported_backend_format(model_entity)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field}: {exc}") from exc
     return f"{model_workspace}/{name}"
 
 
