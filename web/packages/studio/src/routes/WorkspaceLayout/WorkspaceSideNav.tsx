@@ -41,8 +41,16 @@ import { getAgentsListRoute } from '@studio/routes/utils';
 import { lazy, Suspense, useMemo } from 'react';
 import { useLocation } from 'react-router';
 
+const NoPluginNavIcon = () => null;
+
+// Without the catch, a failed chunk (e.g. after a redeploy) reaches the root errorElement.
 const PluginNavIcon = lazy(() =>
-  import('@studio/plugins/PluginNavIcon').then((m) => ({ default: m.PluginNavIcon }))
+  import('@studio/plugins/PluginNavIcon')
+    .then((m) => ({ default: m.PluginNavIcon }))
+    .catch((err: unknown) => {
+      logger.warn('[plugins] Failed to load plugin nav icons:', err);
+      return { default: NoPluginNavIcon };
+    })
 );
 
 // The parent rows stand for the entity their landing page lists, so they take
