@@ -84,6 +84,8 @@ test("resolves a stable Helm-only release", async () => {
     }),
     listBranches: async () =>
       assert.fail("stable releases do not discover release branches"),
+    compareCommits: async () =>
+      assert.fail("stable releases do not compare release branch commits"),
   });
 
   assert.equal(plan.sourceSha, SHA);
@@ -141,10 +143,13 @@ for (const [label, context] of [
       env: environment(),
       context,
       listBranches: async () => BRANCHES,
+      compareCommits: async () =>
+        assert.fail("unpinned nightlies use the discovered branch head"),
     });
 
     assert.equal(plan.sourceBranch, "release/0.10");
     assert.equal(plan.sourceSha, SHA);
+    assert.equal(plan.sendNotifications, true);
   });
 }
 
@@ -171,22 +176,104 @@ test("compares major versions before minor versions and ignores unrelated branch
 });
 
 for (const dryRun of ["false", "true"]) {
-  test(`explicit nightly SHAs bypass branch discovery (dry-run=${dryRun})`, async () => {
+  test(`pinned nightlies retain the release series (dry-run=${dryRun})`, async () => {
     const plan = await resolveReleasePlan({
       env: environment(),
       context: manualContext({
         "release-type": "nightly",
         "source-sha": ` ${SHA.toUpperCase()} `,
         "dry-run": dryRun,
+        "send-notifications": "false",
       }),
-      listBranches: async () =>
-        assert.fail("an explicit SHA bypasses branch discovery"),
+      listBranches: async () => [
+        { name: "release/0.7", commit: { sha: SHA } },
+        { name: "release/0.6", commit: { sha: "c".repeat(40) } },
+      ],
+      compareCommits: async (base, head) => {
+        assert.equal(base, SHA);
+        assert.equal(head, SHA);
+        return { status: "identical" };
+      },
     });
 
     assert.equal(plan.sourceSha, SHA);
-    assert.equal(plan.sourceBranch, "");
+    assert.equal(plan.sourceBranch, "release/0.7");
+    assert.equal(plan.sendNotifications, false);
+    assert.equal(
+      resolveNightlyBaseVersion(plan.sourceBranch, [{ name: "0.6.0" }]),
+      "0.7.0",
+    );
   });
 }
+
+test("retains an older pinned SHA within the latest release branch", async () => {
+  const olderSha = "d".repeat(40);
+  const plan = await resolveReleasePlan({
+    env: environment(),
+    context: manualContext({
+      "release-type": "nightly",
+      "source-sha": olderSha,
+    }),
+    listBranches: async () => BRANCHES,
+    compareCommits: async (base, head) => {
+      assert.equal(base, olderSha);
+      assert.equal(head, SHA);
+      return { status: "ahead" };
+    },
+  });
+  assert.equal(plan.sourceSha, olderSha);
+  assert.equal(plan.sourceBranch, "release/0.10");
+});
+
+for (const status of ["behind", "diverged", undefined]) {
+  test(`rejects pinned nightlies outside the release branch (${status})`, async () => {
+    await assert.rejects(
+      resolveReleasePlan({
+        env: environment(),
+        context: manualContext({
+          "release-type": "nightly",
+          "source-sha": SHA,
+        }),
+        listBranches: async () => BRANCHES,
+        compareCommits: async () => ({ status }),
+      }),
+      /must be an ancestor of release\/0\.10/,
+    );
+  });
+}
+
+test("pinned nightlies propagate comparison and branch lookup errors", async () => {
+  const error = new Error("GitHub lookup failed");
+  for (const failedLookup of ["listBranches", "compareCommits"]) {
+    await assert.rejects(
+      resolveReleasePlan({
+        env: environment(),
+        context: manualContext({
+          "release-type": "nightly",
+          "source-sha": SHA,
+        }),
+        listBranches: async () => BRANCHES,
+        compareCommits: async () => ({ status: "identical" }),
+        [failedLookup]: async () => {
+          throw error;
+        },
+      }),
+      error,
+    );
+  }
+});
+
+test("pinned nightlies fail when no release branch exists", async () => {
+  await assert.rejects(
+    resolveReleasePlan({
+      env: environment(),
+      context: manualContext({ "release-type": "nightly", "source-sha": SHA }),
+      listBranches: async () => [],
+      compareCommits: async () => assert.fail("no branch to compare"),
+    }),
+    /No release\/X\.X branch found/,
+  );
+});
 
 for (const branches of [[], [BRANCHES[2]]]) {
   test(`fails without release branches (${branches.length} total branches)`, async () => {

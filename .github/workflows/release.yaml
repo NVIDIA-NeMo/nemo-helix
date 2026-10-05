@@ -22,7 +22,7 @@ on:
           - nightly
           - stable
       source-sha:
-        description: "Exact source commit SHA. Required for stable releases; nightlies default to the latest release/X.X branch."
+        description: "Exact source commit SHA. Required for stable releases. Nightlies use the latest release/X.X version series; a pinned SHA must belong to that branch's history."
         required: false
         type: string
         default: ""
@@ -203,6 +203,11 @@ jobs:
                   per_page: 100,
                 },
               ),
+              compareCommits: async (base, head) => (await github.rest.repos.compareCommits({
+                ...context.repo,
+                base,
+                head,
+              })).data,
             });
             let nightlyBaseVersion = "";
             if (plan.releaseType === "nightly" && plan.sourceBranch) {
@@ -250,7 +255,7 @@ jobs:
           persist-credentials: false
 
       - name: Ensure selected source is an ancestor of this workflow revision
-        if: steps.plan.outputs.source_branch == ''
+        if: inputs.source-sha != ''
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
