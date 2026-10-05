@@ -96,6 +96,36 @@ class _Manager:
         pass
 
 
+class _RunCommandOpts:
+    model_fields = {"working_directory": None, "timeout": None, "envs": None, "uid": None}
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.kwargs = kwargs
+
+
+class _Commands:
+    """``sandbox.commands`` whose default user is ``image_uid``; ``None`` makes ``id -u`` fail."""
+
+    def __init__(self, image_uid: int | None) -> None:
+        self.image_uid = image_uid
+        self.runs: list[tuple[str, dict[str, Any]]] = []
+
+    async def run(self, command: str, opts: _RunCommandOpts) -> SimpleNamespace:
+        self.runs.append((command, opts.kwargs))
+        stdout = []
+        if command == "id -u":
+            if self.image_uid is None:
+                raise SandboxApiException("execd unavailable")
+            stdout = [SimpleNamespace(text=f"{self.image_uid}\n")]
+        return SimpleNamespace(logs=SimpleNamespace(stdout=stdout, stderr=[]), exit_code=0, error=None)
+
+    def uids_sent(self, command: str) -> list[int | None]:
+        return [opts.get("uid") for run, opts in self.runs if run == command]
+
+    def probes(self) -> int:
+        return sum(run == "id -u" for run, _ in self.runs)
+
+
 def _fake_sdk(server: _Server) -> dict[str, Any]:
     class Sandbox:
         @staticmethod
@@ -115,6 +145,7 @@ def _fake_sdk(server: _Server) -> dict[str, Any]:
 
     return {
         "Sandbox": Sandbox,
+        "RunCommandOpts": _RunCommandOpts,
         "ConnectionConfig": lambda **kwargs: SimpleNamespace(**kwargs),
         "NetworkPolicy": SimpleNamespace(model_validate=lambda payload: SimpleNamespace(payload=payload)),
         "SandboxManager": SandboxManager,
@@ -170,6 +201,9 @@ def test_harbor_private_hooks_still_exist() -> None:
     assert "self._build_network_policy(sdk)" in inspect.getsource(base._create_sandbox)
     assert hasattr(base, "_safe_kill")
     assert hasattr(base, "_build_connection_config")
+    assert list(inspect.signature(base._resolve_uid).parameters) == ["self", "user"]
+    assert "self._resolve_uid(" in inspect.getsource(base._build_run_command_opts)
+    assert "self._sandbox.commands.run(" in inspect.getsource(base.exec)
 
 
 def _policy_sent(server: _Server) -> dict[str, Any]:
@@ -310,3 +344,58 @@ async def test_strict_verification_rejects_a_dropped_rule(tmp_path: Path, server
         await environment._create_sandbox(sdk)
 
     assert server.live() == set()
+
+
+def _started(tmp_path: Path, image_uid: int | None) -> tuple[NemoOpenSandboxEnvironment, _Commands]:
+    environment = _environment(tmp_path, NetworkMode.NO_NETWORK)
+    commands = _Commands(image_uid)
+    environment._sandbox = SimpleNamespace(commands=commands)
+    return environment, commands
+
+
+async def test_root_commands_run_as_the_image_user_on_a_non_root_image(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+
+    await environment.exec("tmux -V", user="root")
+    await environment.exec("chmod 777 /logs/agent", user=0)
+
+    assert commands.uids_sent("tmux -V") == [None]
+    assert commands.uids_sent("chmod 777 /logs/agent") == [None]
+    assert commands.probes() == 1
+
+
+async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+    environment.default_user = "root"
+
+    await environment.exec("mkdir -p /installed-agent")
+
+    assert commands.uids_sent("mkdir -p /installed-agent") == [None]
+
+
+async def test_root_images_keep_uid_0(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=0)
+
+    await environment.exec("apt-get install -y curl", user="root")
+
+    assert commands.uids_sent("apt-get install -y curl") == [0]
+
+
+async def test_non_root_requests_do_not_probe(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=10001)
+
+    await environment.exec("whoami")
+    await environment.exec("whoami", user=1234)
+
+    assert commands.uids_sent("whoami") == [None, 1234]
+    assert commands.probes() == 0
+
+
+async def test_a_failed_probe_keeps_harbor_behavior(tmp_path: Path, server: _Server) -> None:
+    environment, commands = _started(tmp_path, image_uid=None)
+
+    await environment.exec("tmux -V", user="root")
+    await environment.exec("tmux -V", user="root")
+
+    assert commands.uids_sent("tmux -V") == [0, 0]
+    assert commands.probes() == 1
