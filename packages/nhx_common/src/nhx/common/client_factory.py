@@ -25,6 +25,7 @@ import logging
 import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient, NemoClientRuntime
 from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
+from nemo_helix_plugin.client.types import RetryPolicy
 from nhx.common.auth.models import Principal
 from nhx.common.auth.tasks import principal_from_env
 from nhx.common.client_runtime import build_platform_client_runtime
@@ -32,6 +33,18 @@ from nhx.common.platform_client_context import HelixClientContext, build_platfor
 from nhx.common.platform_endpoint import HelixEndpoint, resolve_platform_endpoint
 
 logger = logging.getLogger(__name__)
+
+#: Default retry behavior for platform clients, matching the generated SDK's
+#: contract: up to 2 retries with exponential backoff on request timeouts
+#: (408), lock conflicts (409), rate limits (429) and server errors (>=500),
+#: honoring the server's ``Retry-After`` and ``x-should-retry`` verdicts.
+DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    retryable_status_codes=(408, 409, 429),
+    retry_all_server_errors=True,
+    respect_retry_after_headers=True,
+    respect_retry_decision_headers=True,
+)
 
 
 def _unrouted_endpoint(context: HelixClientContext) -> HelixEndpoint:
@@ -120,6 +133,7 @@ def get_nemo_client(
         default_headers=context.default_headers_or_none(),
         http_client=_sync_nemo_http_client(context, http_client, base_url),
         client_runtime=_nemo_client_runtime(context, base_url),
+        retry=DEFAULT_RETRY_POLICY,
     )
 
 
@@ -153,6 +167,7 @@ def get_async_nemo_client(
         default_headers=context.default_headers_or_none(),
         http_client=_async_nemo_http_client(context, http_client, base_url),
         client_runtime=_nemo_client_runtime(context, base_url),
+        retry=DEFAULT_RETRY_POLICY,
     )
 
 
