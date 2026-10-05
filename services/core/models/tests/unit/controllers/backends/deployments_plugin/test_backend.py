@@ -12,6 +12,7 @@ from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Volum
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import Endpoint
 from nemo_helix_plugin.auth import AuthContext as DeploymentAuthContext
+from nemo_helix_plugin.deployments.types import DeploymentConfig as DeploymentConfigDTO
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nhx.common.config import Runtime
 from nhx.core.models.app import ModelWeightsType
@@ -665,3 +666,43 @@ async def test_create_propagates_deployment_auth_context_to_plugin_deployments()
     plugin_deployments = [entity for entity in created if isinstance(entity, Deployment)]
     assert len(plugin_deployments) == 2
     assert all(deployment.auth_context == auth_context for deployment in plugin_deployments)
+
+
+def _managed_config(workspace: str, name: str, *, role: str = "server", managed: bool = True) -> DeploymentConfigDTO:
+    """A deployments-plugin DeploymentConfig DTO with models-controller ownership labels."""
+    labels = {
+        "nhx.nvidia.com/deployment-workspace": workspace,
+        "nhx.nvidia.com/deployment-name": name,
+        "nhx.nvidia.com/models-role": role,
+    }
+    if managed:
+        labels["nhx.nvidia.com/managed-by"] = "models-controller"
+    return DeploymentConfigDTO(name=f"{name}-{role}", workspace=workspace, labels=labels)
+
+
+@pytest.mark.asyncio
+async def test_list_managed_deployment_names_filters_and_queries_all_workspaces() -> None:
+    # Server-role managed configs across two workspaces, plus rows that must be
+    # excluded: a puller-role config, and one from another controller.
+    configs = [
+        _managed_config("ws-b", "dep-2"),
+        _managed_config("ws-a", "dep-1"),
+        _managed_config("ws-a", "dep-1", role="puller"),
+        _managed_config("ws-c", "other", managed=False),
+    ]
+
+    async def _items() -> object:
+        for config in configs:
+            yield config
+
+    response = Mock()
+    response.items = Mock(return_value=_items())
+    backend = DeploymentsPluginServiceBackend(AsyncMock(), {}, "puller:latest")
+    backend.init()
+    backend._deployments = AsyncMock()
+    backend._deployments.list_deployment_configs = AsyncMock(return_value=response)
+
+    names = await backend.list_managed_deployment_names()
+
+    assert names == ["ws-a/dep-1", "ws-b/dep-2"]
+    backend._deployments.list_deployment_configs.assert_awaited_once_with(workspace="-")
