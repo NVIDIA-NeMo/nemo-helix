@@ -240,10 +240,15 @@ preview.display_sample_record()
 
 # Access the full preview dataset as a pandas DataFrame
 df = preview.dataset
+if df is None:
+    raise RuntimeError("Preview did not return a dataset")
 print(df.head())
 
 # View statistical analysis
-preview.analysis.to_report()
+analysis = preview.analysis
+if analysis is None:
+    raise RuntimeError("Preview did not return analysis")
+analysis.to_report()
 ```
 
 <Markdown src="/snippets/data-designer/_snippets/preview-results.mdx" />

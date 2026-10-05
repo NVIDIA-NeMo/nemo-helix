@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,10 +19,13 @@ _CATEGORY_MARKERS = {
     "slow": "Slow-running tests.",
     "skip_in_ci": "Tests skipped in CI environments.",
 }
+_OTHER_MARKERS = {
+    "real_codex_home": "Live test that needs the developer's real Codex login (skips the Codex home guard).",
+}
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    for marker_name, description in _CATEGORY_MARKERS.items():
+    for marker_name, description in {**_CATEGORY_MARKERS, **_OTHER_MARKERS}.items():
         config.addinivalue_line("markers", f"{marker_name}: {description}")
 
 
@@ -36,3 +40,21 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         marker_names = {marker.name for marker in item.iter_markers()}
         if not marker_names.intersection(_CATEGORY_MARKERS):
             item.add_marker(pytest.mark.unit)
+
+
+@pytest.fixture(autouse=True)
+def _guard_codex_home(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Point ``CODEX_HOME`` and the temp root at a pytest temp dir.
+
+    Codex-adapter trials link the base ``auth.json`` into a temp Codex home; without this guard, unit
+    tests would link the developer's real ``~/.codex`` login.
+    """
+    if request.node.get_closest_marker("real_codex_home"):
+        return
+    guard = tmp_path_factory.mktemp("codex-home-guard")
+    monkeypatch.setenv("CODEX_HOME", str(guard / "base-codex-home"))
+    temp_root = guard / "tmp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))

@@ -650,7 +650,8 @@ async def test_to_async_mirrors_the_config_on_its_own_transport() -> None:
         assert async_client.default_headers == {"X-Test": "1"}
         assert async_client._timeout == upload_timeout
         assert async_client.retry is retry
-        assert async_client._url_resolver is resolver
+        assert async_client.nemo_client_runtime is sync_client.nemo_client_runtime
+        assert async_client.nemo_client_runtime.url_resolver is resolver
         transport = async_client._http
 
     assert transport.is_closed

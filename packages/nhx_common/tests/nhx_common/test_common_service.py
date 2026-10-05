@@ -4,6 +4,7 @@
 """Tests for nhx.common.service module."""
 
 import asyncio
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -258,6 +259,32 @@ class TestServiceAsync:
 
         assert ready is True
         assert len(requests) == 1
+
+    @pytest.mark.asyncio
+    async def test_wait_for_service_ready_timeout_records_readiness_message(self, caplog: pytest.LogCaptureFixture):
+        """Dependency timeout logs the not-ready service message from /status."""
+        message = "Docker daemon is unavailable"
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"services": {"ready": [], "not_ready": [{"name": "intake", "message": message}]}},
+            )
+
+        provider = DependencyProvider()
+        provider._platform_config = HelixConfig(base_url="http://platform.local")
+        caplog.set_level(logging.WARNING, logger="nhx.common.service.base")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider._http_client = client
+            service = MockService(dependency_provider=provider)
+            ready = await service.wait_for_service_ready("intake", timeout=0.05, poll_interval=0)
+
+        assert ready is False
+        timeout_records = [
+            record for record in caplog.records if record.message == "Timeout waiting for service to be ready"
+        ]
+        assert timeout_records
+        assert timeout_records[-1].readiness_message == message
 
 
 class CloseCountingAsyncClient(httpx.AsyncClient):

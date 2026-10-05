@@ -174,8 +174,8 @@ nemo jobs get-status calc-run-1
 nemo jobs tail calc-run-1 -n 200
 
 # List what the run produced, then download one result
-nemo jobs results list --job calc-run-1
-nemo jobs results download output_workdir --job calc-run-1 -o output_workdir.tar.gz
+nemo jobs results list calc-run-1
+nemo jobs results download output_artifacts --job calc-run-1 -o output_artifacts.tar.gz
 ```
 
 </Tab>

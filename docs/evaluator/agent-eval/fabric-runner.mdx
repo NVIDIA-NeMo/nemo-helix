@@ -21,12 +21,12 @@ score it with a Harbor verifier instead, see
 
 ## Harnesses
 
-| `adapter_id` | Harness | Transport |
+| `adapter_id` | Harness | Execution |
 |---|---|---|
-| `nvidia.fabric.codex` | Codex CLI | `cli` (subprocess) |
-| `nvidia.fabric.claude` | Claude | `cli` |
-| `nvidia.fabric.hermes` | Hermes SDK | `library` (in-process) |
-| `nvidia.fabric.langchain.deepagents` | LangChain deepagents | `library` |
+| `nvidia.fabric.codex` | Codex | Selected by the Fabric adapter |
+| `nvidia.fabric.claude` | Claude | Selected by the Fabric adapter |
+| `nvidia.fabric.hermes` | Hermes SDK | Selected by the Fabric adapter |
+| `nvidia.fabric.langchain.deepagents` | LangChain deepagents | Selected by the Fabric adapter |
 
 <Warning>
 
@@ -45,7 +45,8 @@ This runner is **not** zero-dependency. It needs:
   script/dev-install-fabric.sh
   ```
 
-- **The harness's own CLI**, for `transport: cli` harnesses — `codex` on `PATH` and authenticated.
+- **The harness's own runtime**, when required by the selected adapter — for example, `codex` on
+  `PATH` and authenticated for the Codex adapter.
 
 The `fabric` extra installs the Codex, Claude, and Hermes adapters. The deepagents adapter is
 deliberately excluded from it, because that adapter does not support the Relay observability
@@ -94,7 +95,6 @@ config = {
     "runtime": {
         "input_schema": "text",
         "output_schema": "message",
-        "timeout_seconds": 180,
     },
     "environment": {"provider": "local"},
     "models": {"default": {"provider": "openai", "model": "<provider-model>"}},
