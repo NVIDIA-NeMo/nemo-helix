@@ -423,9 +423,13 @@ describe('CreateDeploymentModal', () => {
       const dialog = await getDeploymentDialog();
       await user.type(within(dialog).getByRole('textbox', { name: /Deployment Name/ }), 'prod');
       await chooseDocker(dialog, user);
-      await user.click(
-        await within(dialog).findByRole('button', { name: 'Build image and deploy' })
-      );
+      const buildAndDeploy = await within(dialog).findByRole('button', {
+        name: 'Build image and deploy',
+      });
+      expect(
+        within(dialog).getByText(/Docker runs a container image, and none is set/)
+      ).toBeInTheDocument();
+      await user.click(buildAndDeploy);
 
       expect(await screen.findByText('Build then deploy docker as prod')).toBeInTheDocument();
       expect(captured.body).toBeUndefined();
@@ -443,6 +447,9 @@ describe('CreateDeploymentModal', () => {
         within(dialog).getByRole('textbox', { name: 'Container Image' }),
         PACKAGED_IMAGE
       );
+      expect(
+        within(dialog).queryByText(/runs a container image, and none is set/)
+      ).not.toBeInTheDocument();
       await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
 
       await waitFor(() =>

@@ -43,6 +43,7 @@ import {
 import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeploymentModeSelect } from '@studio/components/DeploymentModeSelect';
+import { ImageBuildFirstNotice } from '@studio/components/ImageBuildFirstNotice';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   PLATFORM_BASE_URL,
@@ -445,12 +446,10 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
             useControllerProps={{ control, name: 'deploymentMode' }}
             modes={deploymentModes}
             loading={isModesLoading}
-            formFieldProps={{
-              slotInfo: modeNeedsImageBuild(watchedDeploymentMode)
-                ? 'Builds a container image for the agent first, then deploys it. The build takes a few minutes.'
-                : undefined,
-            }}
           />
+        ) : null}
+        {watchedDeploy && modeNeedsImageBuild(watchedDeploymentMode) ? (
+          <ImageBuildFirstNotice mode={watchedDeploymentMode} />
         ) : null}
       </Stack>
     ) : null;

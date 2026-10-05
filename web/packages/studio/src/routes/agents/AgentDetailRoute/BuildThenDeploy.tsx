@@ -11,22 +11,34 @@ import {
   type BuildThenDeployRequest,
   getBuildThenDeployRequest,
 } from '@studio/api/agents/buildThenDeploy';
+import type { DeploymentMode } from '@studio/api/agents/useDeploymentModes';
 import { usePackageAgent } from '@studio/api/agents/usePackageAgent';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
+export interface PendingImageBuild {
+  mode: DeploymentMode;
+  jobName?: string;
+  isStalled: boolean;
+}
+
 interface BuildThenDeployProps {
   workspace: string;
   agentName: string;
+  onPendingChange?: (build: PendingImageBuild | null) => void;
 }
 
 /**
  * Picks up a build-then-deploy request handed over in the route state, builds the agent's image,
- * and deploys the finished tag. Renders nothing: progress shows on the image control.
+ * and deploys the finished tag. Renders nothing; progress is reported through `onPendingChange`.
  */
-export const BuildThenDeploy: FC<BuildThenDeployProps> = ({ workspace, agentName }) => {
+export const BuildThenDeploy: FC<BuildThenDeployProps> = ({
+  workspace,
+  agentName,
+  onPendingChange,
+}) => {
   const toast = useToast();
   const location = useLocation();
   const navigate = useNavigate();
@@ -38,6 +50,7 @@ export const BuildThenDeploy: FC<BuildThenDeployProps> = ({ workspace, agentName
     submitError,
     jobName,
     isRestored,
+    isStalled,
     isComplete,
     isFailed,
     isUnreachable,
@@ -78,6 +91,16 @@ export const BuildThenDeploy: FC<BuildThenDeployProps> = ({ workspace, agentName
 
   // A restored job is an earlier build, never the one this request started.
   const ownJob = Boolean(jobName) && !isRestored;
+
+  const pendingMode = request?.mode;
+  const pendingJobName = ownJob ? jobName : undefined;
+  const pendingStalled = ownJob && isStalled;
+  useEffect(() => {
+    onPendingChange?.(
+      pendingMode ? { mode: pendingMode, jobName: pendingJobName, isStalled: pendingStalled } : null
+    );
+  }, [onPendingChange, pendingMode, pendingJobName, pendingStalled]);
+  useEffect(() => () => onPendingChange?.(null), [onPendingChange]);
 
   useEffect(() => {
     if (!request) return;

@@ -9,11 +9,14 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
-import { BuildThenDeploy } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
+import {
+  BuildThenDeploy,
+  type PendingImageBuild,
+} from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { getAgentDetailRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { http, HttpResponse } from 'msw';
-import { type FC, useEffect } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 const workspace = workspace1.workspace;
@@ -31,12 +34,18 @@ const Launcher: FC<{ request: BuildThenDeployRequest }> = ({ request }) => {
   return null;
 };
 
-const AgentPage = () => (
-  <>
-    <div>{useLocation().state ? 'request pending' : 'request consumed'}</div>
-    <BuildThenDeploy workspace={workspace} agentName={agent} />
-  </>
-);
+const AgentPage = () => {
+  const [pending, setPending] = useState<PendingImageBuild | null>(null);
+  return (
+    <>
+      <div>{useLocation().state ? 'request pending' : 'request consumed'}</div>
+      {pending ? (
+        <div>{`Waiting on ${pending.jobName ?? 'submit'} for ${pending.mode}`}</div>
+      ) : null}
+      <BuildThenDeploy workspace={workspace} agentName={agent} onPendingChange={setPending} />
+    </>
+  );
+};
 
 const renderFrom = (start: string, request: BuildThenDeployRequest) =>
   renderRoute(undefined, {
@@ -101,6 +110,7 @@ describe('BuildThenDeploy', () => {
     );
     expect(submitted).toHaveLength(1);
     expect(screen.getByText('request consumed')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Waiting on/)).not.toBeInTheDocument());
   });
 
   it("never deploys an earlier build's image while its own build runs", async () => {
@@ -112,6 +122,7 @@ describe('BuildThenDeploy', () => {
 
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(await screen.findByText(/Building an image for "my-agent"/)).toBeInTheDocument();
+    expect(await screen.findByText('Waiting on pkg-new for k8s')).toBeInTheDocument();
     expect(deployments).toEqual([]);
   });
 

@@ -3,6 +3,7 @@
 
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
+import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { renderRoute, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
@@ -32,7 +33,11 @@ const source = (revision: string): AgentSpecSource => ({
 const deployment = (overrides: Partial<AgentDeployment> = {}): AgentDeployment =>
   ({ name: 'calc-dep', status: 'running', ...overrides }) as AgentDeployment;
 
-const renderTab = (deployments: AgentDeployment[], specSource?: AgentSpecSource) =>
+const renderTab = (
+  deployments: AgentDeployment[],
+  specSource?: AgentSpecSource,
+  pendingBuild?: PendingImageBuild
+) =>
   renderRoute(
     <DeploymentsTab
       agentName="calculator-agent"
@@ -47,8 +52,34 @@ const renderTab = (deployments: AgentDeployment[], specSource?: AgentSpecSource)
       specSource={specSource}
       workspace="default"
       canPackage
+      pendingBuild={pendingBuild}
     />
   );
+
+describe('DeploymentsTab pending image build', () => {
+  it('shows the build in place of the empty state', () => {
+    renderTab([], undefined, { mode: 'docker', jobName: 'pkg-1', isStalled: false });
+
+    const row = screen.getByTestId('pending-image-build');
+    expect(row).toHaveTextContent('Building an image to deploy');
+    expect(row).toHaveTextContent('Docker');
+    expect(row).toHaveTextContent(/Deploys when the build finishes/);
+    expect(screen.queryByText('No deployments for this agent.')).not.toBeInTheDocument();
+  });
+
+  it('sits above existing deployments', () => {
+    renderTab([deployment()], undefined, { mode: 'k8s', isStalled: false });
+
+    expect(screen.getByTestId('pending-image-build')).toHaveTextContent('Kubernetes');
+    expect(screen.getByText('calc-dep')).toBeInTheDocument();
+  });
+
+  it('warns when the build has not started', () => {
+    renderTab([], undefined, { mode: 'docker', jobName: 'pkg-1', isStalled: true });
+
+    expect(screen.getByTestId('pending-image-build')).toHaveTextContent(/has not started/);
+  });
+});
 
 describe('DeploymentsTab staged commit', () => {
   it('links the staged commit to GitHub, opened away from Studio', () => {

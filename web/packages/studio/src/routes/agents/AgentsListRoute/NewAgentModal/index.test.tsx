@@ -963,7 +963,7 @@ describe('NewAgentModal deploy after create', () => {
     await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
     await user.click(await screen.findByRole('option', { name: 'Kubernetes' }));
     expect(
-      within(dialog).getAllByText(/Builds a container image for the agent first/)
+      within(dialog).getAllByText(/Kubernetes runs a container image, and none is set/)
     ).not.toHaveLength(0);
     await submit(dialog, user);
 

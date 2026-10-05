@@ -24,6 +24,7 @@ import {
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
 import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
+import { ImageBuildFirstNotice } from '@studio/components/ImageBuildFirstNotice';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useQueryClient } from '@tanstack/react-query';
@@ -297,11 +298,12 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                         formFieldProps={{
                           slotError: errors.image?.message,
                           slotInfo: buildImageFirst
-                            ? 'No default image is configured. Leave empty to build an image for this agent first; it deploys when the build finishes.'
+                            ? 'The backend pulls this image using its configured registry credentials. Leave empty to build one for this agent.'
                             : 'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
                         }}
                       />
                     )}
+                    {buildImageFirst ? <ImageBuildFirstNotice mode={deploymentMode} /> : null}
                   </Stack>
                 ),
               },
