@@ -69,8 +69,8 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
     },
     {
       id: 'deploy',
-      label: isDeploying ? 'Deploying...' : 'Deploy',
-      disabled: !agentName || !canDeploy || isDeploying,
+      label: canDeploy ? (isDeploying ? 'Deploying...' : 'Deploy') : 'Upload',
+      disabled: !agentName || isDeploying,
       onClick: onDeploy,
       ref: deployButtonRef,
     },

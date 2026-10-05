@@ -11,4 +11,4 @@ export const hasAgentConfig = (config: object | null | undefined): boolean =>
 
 /** Shown wherever deploying is unavailable because the agent has no config. */
 export const NO_CONFIG_DEPLOY_MESSAGE =
-  'This agent was registered from traces and runs outside Platform. Upload the agent to deploy it here.';
+  "This agent was registered from traces and runs outside Platform, so it can't be deployed here. To deploy it, upload an agent under a new name.";

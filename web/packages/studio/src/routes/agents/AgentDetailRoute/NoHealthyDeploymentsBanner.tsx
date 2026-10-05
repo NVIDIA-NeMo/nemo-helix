@@ -31,13 +31,8 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
           <Text kind="label/regular/sm">Deploying…</Text>
         </Flex>
       ) : (
-        <Button
-          kind="secondary"
-          size="small"
-          disabled={!agentName || !canDeploy}
-          onClick={onDeploy}
-        >
-          Deploy this Agent
+        <Button kind="secondary" size="small" disabled={!agentName} onClick={onDeploy}>
+          {canDeploy ? 'Deploy this Agent' : 'Upload'}
         </Button>
       )
     }

@@ -131,7 +131,7 @@ describe('AgentDetailRoute', () => {
     expect(screen.queryByRole('button', { name: 'Open traces' })).not.toBeInTheDocument();
   });
 
-  it('disables Deploy and says why for an agent registered from traces (empty config)', async () => {
+  it('offers Upload instead of Deploy for an agent registered from traces (empty config)', async () => {
     const user = userEvent.setup();
     server.use(
       http.get(`${agentsUrl}/:name`, () =>
@@ -154,8 +154,12 @@ describe('AgentDetailRoute', () => {
     await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
 
     expect(await screen.findByText(/runs outside Platform/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Deploy' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Deploy this Agent' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy this Agent' })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Upload' })[0]!);
+
+    expect(await screen.findByDisplayValue(`${agentName}-v2`)).toBeInTheDocument();
   });
 
   it('switches to the chat tab', async () => {

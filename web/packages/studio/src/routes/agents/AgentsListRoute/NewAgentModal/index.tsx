@@ -100,7 +100,12 @@ const OFFERED_ON_CREATE: readonly DeploymentMode[] = AGENT_CONTAINER_DEPLOYMENTS
   ? ['subprocess', ...IMAGE_DEPLOYMENT_MODES]
   : ['subprocess'];
 
-export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace }) => {
+export const NewAgentModal: FC<NewAgentModalProps> = ({
+  open,
+  onClose,
+  workspace,
+  initialName,
+}) => {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -183,7 +188,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     formState: { errors },
   } = useForm({
     resolver: zodResolver(uploadAgentFormSchema),
-    defaultValues: UPLOAD_AGENT_FORM_DEFAULTS,
+    defaultValues: { ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' },
     disabled: isPending,
     mode: 'onChange',
   });
@@ -256,7 +261,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     resetMutation();
     resetRepoMutation();
     resetTracedMutation();
-    resetForm(UPLOAD_AGENT_FORM_DEFAULTS);
+    resetForm({ ...UPLOAD_AGENT_FORM_DEFAULTS, name: initialName ?? '' });
     deployAfterCreate.current = null;
     setEntries([]);
     setSourceLabel('');
@@ -310,7 +315,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
     try {
       const config = parseAgentConfig((await configEntry?.file.text()) ?? '');
       if (superseded()) return;
-      setValue('name', agentNameFromConfig(config) ?? '', { shouldValidate: true });
+      setValue('name', initialName ?? agentNameFromConfig(config) ?? '', {
+        shouldValidate: true,
+      });
     } catch (error) {
       if (superseded()) return;
       setEntries([]);
