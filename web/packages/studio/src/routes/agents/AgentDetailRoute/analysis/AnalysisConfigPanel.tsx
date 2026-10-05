@@ -204,7 +204,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
           <code>nemo insights analysis enable --agent {agent}</code>.
         </Text>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Grid cols={{ base: 1, md: 2 }} gap="4">
           <KVPair
             orientation="vertical"
             label="Periodic analysis"
@@ -221,7 +221,7 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
           />
           <KVPair orientation="vertical" label="Default model" value={config?.default_model} />
           <KVPair orientation="vertical" label="Fast model" value={config?.fast_model} />
-        </div>
+        </Grid>
       )}
     </DetailPanel>
   );
