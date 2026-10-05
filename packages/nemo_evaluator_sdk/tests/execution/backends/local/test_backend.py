@@ -8,8 +8,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend
-from nemo_evaluator_sdk.values import Model, RunConfig, RunConfigOnline, RunConfigOnlineModel
+from nemo_evaluator_sdk.execution.backends.local.backend import LocalBackend, _prepare_rows
+from nemo_evaluator_sdk.values import FieldMapping, Model, RunConfig, RunConfigOnline, RunConfigOnlineModel
 from nemo_evaluator_sdk.values.multi_metric_results import BenchmarkEvaluationResult
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
 from pytest_mock import MockerFixture
@@ -227,3 +227,59 @@ class TestLocalBackendEvaluateBenchmark:
         sdk_kwargs = mock_sdk.await_args.kwargs
         assert sdk_kwargs["preprocess_hooks"] == (explicit_preprocess,)
         assert sdk_kwargs["postprocess_hooks"] == (explicit_postprocess,)
+
+
+class TestPrepareRowsUnresolvedMapping:
+    """A binding that resolves nowhere must be reported, not left to fail obscurely later."""
+
+    _ROWS = [
+        {"messages": [{"role": "user", "content": "q"}], "reference": "stale raw column"},
+        {"messages": [{"role": "user", "content": "q2"}], "reference": "stale raw column 2"},
+    ]
+
+    def test_warns_when_a_binding_resolves_on_no_row(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The raw column survives a miss, so presence of the canonical name proves nothing.
+
+        `apply_column_mapping_to_row` copies the row before mapping. A path that never resolves
+        therefore leaves a same-named raw column in place and that value gets scored -- a wrong
+        answer rather than a missing one. A diagnostic asking `"reference" in mapped` would see the
+        stale column and stay silent, so this test fails under that implementation.
+        """
+        mocker.patch(
+            "nemo_evaluator_sdk.execution.backends.local.backend.prepare_dataset_rows",
+            return_value=[dict(row) for row in self._ROWS],
+        )
+
+        with caplog.at_level("WARNING"):
+            rows = _prepare_rows(
+                dataset=[],
+                params=RunConfig(),
+                field_mapping=FieldMapping(reference="messages[role=assistant].content"),
+            )
+
+        assert rows[0]["reference"] == "stale raw column"
+        assert "reference" in caplog.text
+        assert "resolved no value" in caplog.text
+
+    def test_stays_quiet_when_a_binding_resolves_somewhere(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Resolving on only some rows is legitimate, so only a total miss is worth a warning."""
+        rows = [dict(row) for row in self._ROWS]
+        rows[0]["messages"].append({"role": "assistant", "content": "answer"})
+        mocker.patch(
+            "nemo_evaluator_sdk.execution.backends.local.backend.prepare_dataset_rows",
+            return_value=rows,
+        )
+
+        with caplog.at_level("WARNING"):
+            mapped = _prepare_rows(
+                dataset=[],
+                params=RunConfig(),
+                field_mapping=FieldMapping(reference="messages[role=assistant].content"),
+            )
+
+        assert mapped[0]["reference"] == "answer"
+        assert "resolved no value" not in caplog.text

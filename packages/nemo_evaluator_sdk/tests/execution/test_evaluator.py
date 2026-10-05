@@ -360,6 +360,43 @@ class TestEvaluator:
         assert result.row_scores[0].item["reference"] == "Paris"
         assert result.aggregate_scores.scores[0].mean == 1.0
 
+    def test_run_sync_field_mapping_binds_a_turn_by_role_across_differing_shapes(self):
+        """One mapping scores conversations whose turns sit at different positions.
+
+        The first row has a leading system turn and two exchanges, the second has neither. No single
+        positional index binds the final answer in both, which is what the predicate form is for.
+        """
+        evaluator = Evaluator()
+        conversations = [
+            {
+                "messages": [
+                    {"role": "system", "content": "be terse"},
+                    {"role": "user", "content": "capital of France?"},
+                    {"role": "assistant", "content": "Lyon"},
+                    {"role": "user", "content": "are you sure?"},
+                    {"role": "assistant", "content": "Paris"},
+                ],
+                "prediction": "Paris",
+            },
+            {
+                "messages": [
+                    {"role": "user", "content": "capital of Japan?"},
+                    {"role": "assistant", "content": "Tokyo"},
+                ],
+                "prediction": "Tokyo",
+            },
+        ]
+
+        result = evaluator.run_sync(
+            metrics=[ExactMatchMetric(reference="{{reference}}")],
+            dataset=conversations,
+            field_mapping=FieldMapping(output="prediction", reference="messages[role=assistant].content"),
+        )
+
+        assert result.row_scores[0].item["reference"] == "Paris"
+        assert result.row_scores[1].item["reference"] == "Tokyo"
+        assert result.aggregate_scores.scores[0].mean == 1.0
+
     @pytest.mark.asyncio
     async def test_run_uses_sync_backend_adapter_thread_bridge(self, mocker: MockerFixture):
         expected = _empty_benchmark_result()

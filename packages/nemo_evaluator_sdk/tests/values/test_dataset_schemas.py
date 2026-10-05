@@ -69,3 +69,9 @@ def test_column_mapping_explains_why_the_wildcard_is_rejected() -> None:
     """The wildcard parses but names no single element, so the validator -- not the pattern -- owns it."""
     with pytest.raises(ValueError, match=r"wildcard array segments"):
         FieldMapping(input="messages[].content")
+
+
+def test_column_mapping_explains_why_a_predicate_cannot_be_chained() -> None:
+    """`messages[role=assistant][1]` parses but reads like "the second assistant turn"; it is not."""
+    with pytest.raises(ValueError, match=r"cannot be followed by another array segment"):
+        FieldMapping(input="messages[role=assistant][1].text")

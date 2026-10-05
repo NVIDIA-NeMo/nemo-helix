@@ -10,6 +10,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any
 
+from nemo_evaluator_sdk.dataset_schemas.common import _MISSING, get_value_at_path
 from nemo_evaluator_sdk.dataset_schemas.compatibility import apply_column_mapping_to_row
 from nemo_evaluator_sdk.datasets.loader import prepare_dataset_rows
 from nemo_evaluator_sdk.execution import benchmark_execution
@@ -47,7 +48,25 @@ def _prepare_rows(
     )
     if field_mapping is None:
         return rows
-    return [apply_column_mapping_to_row(row, field_mapping) for row in rows]
+    mapped = [apply_column_mapping_to_row(row, field_mapping) for row in rows]
+    # Tested against the raw rows rather than by asking whether the canonical name is present:
+    # mapping starts from a copy of the row, so a path that resolves nowhere leaves any same-named
+    # raw column in place and that column gets scored. A binding that never resolves on any row is
+    # a mistake worth naming; one that misses on some rows is not.
+    unresolved = sorted(
+        name
+        for name, path in field_mapping.mapping().items()
+        if all(get_value_at_path(row, path) is _MISSING for row in rows)
+    )
+    if rows and unresolved:
+        log.warning(
+            "field_mapping %s resolved no value in any of %d rows, so those canonical fields were "
+            "not set and any same-named raw column was left in place. Check the path, and for a "
+            "predicate such as messages[role=assistant] that some element matches.",
+            unresolved,
+            len(rows),
+        )
+    return mapped
 
 
 class LocalBackend:
