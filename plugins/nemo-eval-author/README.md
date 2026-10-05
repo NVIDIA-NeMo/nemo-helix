@@ -59,7 +59,7 @@ Stage it with `nemo files upload author.yaml my-bundle` and pass
 
 ## Limitations
 
-- Only the `eval-author-first-eval` skill is exposed; the other vendored skills ship because it links to them.
+- Only the `eval-author-first-eval` skill is exposed; the other vendored skills ship because it links into them. Upstream skills it never references are not vendored (see `vendor/UPSTREAM.md`).
 - There is no evaluation runtime (Harbor, Gym, Docker) inside the job: the deliverable is the Ethos,
   the evaluation plan, and task drafts, not an executed suite.
 
