@@ -36,7 +36,7 @@ durable container through the deployments plugin.
 
 <Note>
 
-Subprocess agent deploy does not mean the **platform** can start without Docker. Default local platform startup still starts the deployments controller with a Docker-backed executor (used for on-platform model deployments and for `--mode docker` / `k8s` agent deploys). See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+Subprocess agent deploy does not mean the **platform** can start without Docker. Default local platform startup still starts the deployments controller with a Docker-backed executor for on-platform model deployments. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
 
 </Note>
 
