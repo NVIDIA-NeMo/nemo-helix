@@ -23,7 +23,7 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
     <Flex align="start" gap="2" className="px-4 py-3" data-testid="pending-image-build">
       {build.isStalled ? (
         <TriangleAlert
-          className="mt-0.5 size-4 shrink-0 text-warning"
+          className="mt-0.5 size-4 shrink-0 text-feedback-warning"
           aria-label="Image build not started"
         />
       ) : (
@@ -34,7 +34,7 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
           {build.isStalled ? 'Waiting for the image build to start' : 'Building an image to deploy'}
         </Text>
         {build.isStalled ? (
-          <Text kind="body/regular/xs" className="text-warning">
+          <Text kind="body/regular/xs" className="text-feedback-warning">
             The build was accepted but has not started. Check that the platform is running a jobs
             controller.
           </Text>
