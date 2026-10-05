@@ -610,7 +610,7 @@ jobs:
           uv run --frozen pytest \
             e2e \
             -v \
-            -m "not gym_e2e and not platform_deploy" \
+            -m "not gym_e2e and not full_e2e" \
             --run-e2e \
             --no-cov \
             --junitxml=report-kubernetes-e2e.xml
@@ -1779,7 +1779,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
       - name: Run e2e tests
-        run: make test-e2e PYTEST_EXTRA='-m "not platform_deploy"'
+        run: make test-e2e PYTEST_EXTRA='-m "not full_e2e"'
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
           E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs

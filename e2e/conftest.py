@@ -100,13 +100,13 @@ from e2e.services_pool_fixtures import (  # noqa: F401
 DEFAULT_DOCKER_INTERNAL_HOST = "nhx-quickstart:8080"
 DEFAULT_KUBERNETES_INTERNAL_HOST = "nemo-helix-api:8080"
 DEFAULT_PRINCIPAL_ID = "e2e-test-user@example.com"
-PLATFORM_DEPLOY_E2E_PREFIXES = (
+FULL_E2E_PREFIXES = (
     "e2e/auditor/",
     "e2e/cli/",
     "e2e/customizer/",
     "e2e/notebooks/",
 )
-PLATFORM_DEPLOY_E2E_FILES = {
+FULL_E2E_FILES = {
     "e2e/test_files.py",
     "e2e/test_hello_world.py",
     "e2e/test_jobs_kai_scheduler.py",
@@ -264,7 +264,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "feature(*names): optional e2e feature requirement.")
     config.addinivalue_line("markers", "external_network: test requires outbound network access.")
     config.addinivalue_line("markers", "skip_on_astra: skip this test when NHX_E2E_ON_ASTRA=1.")
-    config.addinivalue_line("markers", "platform_deploy: tests owned by Platform-Deploy orchestration jobs.")
+    config.addinivalue_line("markers", "full_e2e: tests excluded from the default CI smoke e2e subset.")
 
     configure_services_pool(config)
 
@@ -297,8 +297,8 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
 
     for item in items:
         relpath = item.path.relative_to(config.rootpath).as_posix()
-        if relpath in PLATFORM_DEPLOY_E2E_FILES or relpath.startswith(PLATFORM_DEPLOY_E2E_PREFIXES):
-            item.add_marker(pytest.mark.platform_deploy)
+        if relpath in FULL_E2E_FILES or relpath.startswith(FULL_E2E_PREFIXES):
+            item.add_marker(pytest.mark.full_e2e)
 
         if on_astra and item.get_closest_marker("skip_on_astra"):
             item.add_marker(pytest.mark.skip(reason="Test is known to fail on Astra (skip_on_astra)."))
