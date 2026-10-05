@@ -3,6 +3,7 @@
 
 import asyncio
 import contextlib
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,12 +15,14 @@ from nemo_agents_plugin.fabric.translator import translate_agent_config
 from prompt_master_plugin import runner as runner_module
 from prompt_master_plugin.config import PromptMasterConfig
 from prompt_master_plugin.runner import (
+    WORKSPACE_SKILLS_SOURCE,
     PromptMasterExecutionError,
     build_optimization_input,
     build_optimizer_agent,
     extract_optimized_prompt,
     optimize_prompt,
     run_prompt_master,
+    stage_skills,
 )
 
 PLATFORM_URL = "http://platform:8080"
@@ -78,8 +81,11 @@ def test_builds_optimizer_agent() -> None:
     assert agent.models["default"].api_key_env is None
     assert agent.instructions and agent.instructions.system
     assert agent.instructions.system.content == "You are a custom one-shot Prompt Master runner."
-    # Harnesses load a skills *library* (directory of skill dirs), not the skill dir itself.
-    assert agent.skills and (Path(agent.skills.paths[0]) / "prompt-master" / "SKILL.md").is_file()
+    # The harness sees the skills *library* (directory of skill dirs) at a virtual path under the
+    # Fabric workspace, where stage_skills() puts it -- never a host path, which the
+    # workspace-rooted Deep Agents filesystem cannot see.
+    assert agent.skills and agent.skills.paths == [WORKSPACE_SKILLS_SOURCE]
+    assert agent.environment.workspace == "workspace"
 
 
 def test_reads_platform_url_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,8 +176,8 @@ def test_rejects_failed_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, res
         _optimize(tmp_path)
 
 
-def test_extracts_first_prompt_block() -> None:
-    response = "Note.\n\n```markdown\nRole: assistant.\nTask: answer.\n```\n\n🎯 Target."
+def test_falls_back_to_the_first_fenced_block_without_a_target_line() -> None:
+    response = "Note.\n\n```markdown\nRole: assistant.\nTask: answer.\n```\n\nDone."
 
     assert extract_optimized_prompt(response) == "Role: assistant.\nTask: answer."
 
@@ -209,3 +215,144 @@ def test_rejects_missing_bundled_skill_before_invoking_fabric(tmp_path: Path, mo
         _optimize(tmp_path)
 
     assert "request" not in captured
+
+
+def _result_with_messages(response: str, messages: list[dict[str, Any]]) -> SimpleNamespace:
+    """A Fabric result whose ``output`` carries the adapter's message transcript."""
+    return SimpleNamespace(status="succeeded", response=response, error=None, output={"messages": messages})
+
+
+def test_logs_the_response_and_the_skill_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="prompt_master_plugin.runner")
+    manifest = "/skills/prompt-master/SKILL.md"
+    _fake_invoke(
+        monkeypatch,
+        _result_with_messages(
+            RESPONSE,
+            [
+                {"role": "human", "content": "Use the prompt-master skill..."},
+                {
+                    "role": "ai",
+                    "content": "",
+                    "tool_calls": [{"name": "read_file", "args": {"file_path": manifest, "limit": 1000}, "id": "c1"}],
+                },
+                {"role": "tool", "content": "## PRIMACY ZONE ...", "name": "read_file"},
+                {"role": "ai", "content": RESPONSE},
+            ],
+        ),
+    )
+
+    _optimize(tmp_path)
+
+    infos = [record.getMessage() for record in caplog.records if record.levelno == logging.INFO]
+    assert any(manifest in message for message in infos)
+    assert any(RESPONSE in message for message in infos)
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+
+
+def test_warns_when_the_skill_was_never_read_and_still_logs_the_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The exact shape of the failure in the field: a bare rewritten prompt, no fence, no
+    # read_file call.  The log must show both facts even though the run then fails to parse.
+    caplog.set_level(logging.INFO, logger="prompt_master_plugin.runner")
+    bare = "You are a concise calculator agent. Output only the final answer."
+    _fake_invoke(monkeypatch, _result_with_messages(bare, [{"role": "ai", "content": bare}]))
+
+    with pytest.raises(PromptMasterExecutionError, match="copyable prompt block"):
+        _optimize(tmp_path)
+
+    warnings = [record.getMessage() for record in caplog.records if record.levelno == logging.WARNING]
+    assert any("never read" in message and "SKILL.md" in message for message in warnings)
+    assert any(bare in record.getMessage() for record in caplog.records if record.levelno == logging.INFO)
+
+
+def test_stages_the_skill_library_into_the_workspace(tmp_path: Path) -> None:
+    staged = stage_skills(tmp_path)
+
+    assert staged == tmp_path / "workspace" / ".agents" / "skills"
+    assert (staged / "prompt-master" / "SKILL.md").is_file()
+    assert (staged / "prompt-master" / "references" / "templates.md").is_file()
+
+
+def test_restaging_replaces_a_previous_staging(tmp_path: Path) -> None:
+    stale = stage_skills(tmp_path) / "stale-skill" / "SKILL.md"
+    stale.parent.mkdir()
+    stale.write_text("---\nname: stale-skill\ndescription: left over\n---\n", encoding="utf-8")
+
+    staged = stage_skills(tmp_path)
+
+    assert not stale.exists()
+    assert (staged / "prompt-master" / "SKILL.md").is_file()
+
+
+def test_stages_skills_before_invoking_fabric(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = _fake_invoke(monkeypatch, SimpleNamespace(status="succeeded", response=RESPONSE, error=None))
+
+    _optimize(tmp_path)
+
+    assert (tmp_path / "workspace" / ".agents" / "skills" / "prompt-master" / "SKILL.md").is_file()
+    assert captured["request"].agent_config.skills.paths == [WORKSPACE_SKILLS_SOURCE]
+
+
+def test_deep_agents_discovers_the_staged_skill(tmp_path: Path) -> None:
+    # Pin the contract against the harness itself: the Deep Agents adapter roots its filesystem
+    # at the workspace in virtual mode, and its skills middleware must find prompt-master there.
+    # (A host path, which the runner used to pass, resolves to nothing under that root.)
+    backends = pytest.importorskip("deepagents.backends")
+    skills_middleware = pytest.importorskip("deepagents.middleware.skills")
+    stage_skills(tmp_path)
+    backend = backends.FilesystemBackend(root_dir=str(tmp_path / "workspace"), virtual_mode=True)
+
+    skills, error = skills_middleware._list_skills_with_errors(backend, WORKSPACE_SKILLS_SOURCE)
+
+    assert error is None
+    assert [skill["name"] for skill in skills] == ["prompt-master"]
+    assert skills[0]["path"] == f"{WORKSPACE_SKILLS_SOURCE}/prompt-master/SKILL.md"
+
+
+def test_splits_the_prompt_from_the_target_line() -> None:
+    # Prompt Master's documented shape, exactly as the 120B optimizer returned it: no fence.
+    response = (
+        "You are a calculator agent. Solve arithmetic and numeric comparison requests. "
+        "Return only the numerical answer. 🎯 Target: NeMo Fabric agent with deepagents harness "
+        "and nvidia-nemotron-3-5-lightning-30b-a3b model,💡 Removed redundancy."
+    )
+
+    assert extract_optimized_prompt(response) == (
+        "You are a calculator agent. Solve arithmetic and numeric comparison requests. "
+        "Return only the numerical answer."
+    )
+
+
+def test_unwraps_a_fenced_prompt_before_the_target_line() -> None:
+    response = "```markdown\nRole: assistant.\nTask: answer.\n```\n\n🎯 Target: Cursor,💡 Tightened."
+
+    assert extract_optimized_prompt(response) == "Role: assistant.\nTask: answer."
+
+
+def test_keeps_fences_inside_an_unwrapped_prompt() -> None:
+    # A fence inside the prompt is the prompt's own example, not the delimiter.
+    prompt = 'Reply in JSON, for example:\n```json\n{"answer": 4}\n```\nNo prose.'
+
+    assert extract_optimized_prompt(prompt + "\n\n🎯 Target: GPT,💡 Locked the format.") == prompt
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        "\n\n🎯 **Target:** Cursor,💡 note",
+        "\n🎯Target: Cursor",
+        "\n\n---\n🎯 Target: Cursor",
+        " 🎯\ufe0f Target: Cursor",
+    ],
+)
+def test_tolerates_target_line_variants(tail: str) -> None:
+    assert extract_optimized_prompt("The prompt." + tail) == "The prompt."
+
+
+def test_rejects_a_reply_that_is_only_a_target_line() -> None:
+    with pytest.raises(PromptMasterExecutionError, match="empty prompt"):
+        extract_optimized_prompt("🎯 Target: Cursor,💡 Nothing to show.")

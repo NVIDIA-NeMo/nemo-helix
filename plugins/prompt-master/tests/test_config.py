@@ -13,7 +13,7 @@ def test_prompt_master_example_is_valid() -> None:
     config = load_prompt_master_config(config_path)
 
     assert config.model.provider == "nvidia"
-    assert config.model.model == "nvidia-nemotron-3-5-lightning-30b-a3b"
+    assert config.model.model == "nvidia-nemotron-3-super-120b-a12b"
 
 
 def test_loads_yaml_config(tmp_path: Path) -> None:
