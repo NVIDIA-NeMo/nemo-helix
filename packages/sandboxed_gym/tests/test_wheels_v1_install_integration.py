@@ -16,6 +16,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import pytest
 from sandboxed_gym.environment_package import WHEELS_V1_SUBDIR
 from sandboxed_gym.runtime import gym_host_runtime as runtime
 
@@ -110,3 +111,28 @@ def test_real_wheel_is_importable_by_host_and_child(tmp_path: Path, isolated_gym
     finally:
         # Avoid leaking the temporary package through Python's process-global module cache.
         sys.modules.pop(_PACKAGE_NAME, None)
+
+
+def test_install_ignores_the_uv_config_of_the_directory_it_runs_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_gym_host_process_state: None
+) -> None:
+    # gym_host.sh starts the host in the image's git root (/opt/nemo-rl), whose pyproject.toml
+    # overrides versions for the training stack. Those pins must not apply to the wheelhouse:
+    # here the override asks for a version the wheelhouse does not have.
+    image_root = tmp_path / "image-root"
+    image_root.mkdir()
+    (image_root / "pyproject.toml").write_text(
+        f'[project]\nname = "image-root"\nversion = "0"\n\n[tool.uv]\noverride-dependencies = ["{_PACKAGE_NAME}==2.0"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(image_root)
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir()
+    _write_wheels_v1_bundle(environment_dir)
+
+    runtime._install_wheels_v1_dependencies(
+        runtime._load_runtime_environment_package(str(environment_dir), required=True),
+        str(tmp_path / "work"),
+    )
+
+    assert (tmp_path / "work" / runtime.WHEELS_V1_INSTALL_SUBDIR / _PACKAGE_NAME / "__init__.py").is_file()

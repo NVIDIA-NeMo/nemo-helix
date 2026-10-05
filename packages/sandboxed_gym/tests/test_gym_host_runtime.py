@@ -582,10 +582,11 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
     assert len(calls) == 1
     (args,), kwargs = calls[0]
     install_dir = work_dir / runtime.WHEELS_V1_INSTALL_SUBDIR
-    assert args[:10] == [
+    assert args[:11] == [
         "uv",
         "pip",
         "install",
+        "--no-config",
         "--target",
         str(install_dir),
         "--no-index",
@@ -595,7 +596,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         str(wheels_dir),
     ]
     # Every .whl is installed explicitly.
-    assert args[10:] == [
+    assert args[11:] == [
         str(wheels_dir / "a_dep-1.0-py3-none-any.whl"),
         str(wheels_dir / "b_dep-2.0-py3-none-any.whl"),
     ]
