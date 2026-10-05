@@ -363,7 +363,11 @@ RUN git config --global http.version HTTP/1.1 && \
     git -C /src/magi-attention remote add origin https://github.com/SandAI-org/MagiAttention.git && \
     git -C /src/magi-attention fetch --depth 1 origin ${MAGI_ATTENTION_COMMIT} && \
     git -C /src/magi-attention checkout --detach FETCH_HEAD && \
-    git -C /src/magi-attention submodule update --init --recursive --depth 1 && \
+    cutlass_sha=$(git -C /src/magi-attention rev-parse 'HEAD:magi_attention/csrc/cutlass') && \
+    git clone --filter=blob:none --sparse --no-checkout https://github.com/NVIDIA/cutlass.git /src/magi-attention/magi_attention/csrc/cutlass && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass sparse-checkout set include tools/util/include && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass fetch --depth 1 origin "$cutlass_sha" && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass checkout --detach FETCH_HEAD && \
     mkdir -p /wheels && \
     pip install --no-cache-dir versioningit && \
     cd /src/magi-attention && \
