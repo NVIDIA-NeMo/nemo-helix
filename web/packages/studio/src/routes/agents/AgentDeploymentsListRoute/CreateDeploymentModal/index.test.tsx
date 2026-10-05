@@ -6,7 +6,10 @@ vi.hoisted(() => {
 });
 
 import { getAgentsListDeploymentsQueryKey } from '@nemo/sdk/generated/agents/agent-deployments';
+import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
   DEPLOYMENT_MODES_URL,
@@ -14,12 +17,17 @@ import {
 } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
-import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
+import { getAgentsListRoute } from '@studio/routes/utils';
+import {
+  mockEnabledModes,
+  mockExecutionProfiles,
+} from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { useState, type FC } from 'react';
+import { useLocation } from 'react-router';
 
 const workspace = workspace1.workspace;
 const agent = 'nemo-studio-assistant';
@@ -364,5 +372,95 @@ describe('CreateDeploymentModal', () => {
       await within(dialog).findByText(/no deployment mode enabled for agents/)
     ).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
+  });
+
+  describe('for an agent the platform can build an image for', () => {
+    const agentUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents/:name`;
+
+    const AgentDetailStub = () => {
+      const request = getBuildThenDeployRequest(useLocation().state);
+      return (
+        <div>{request ? `Build then deploy ${request.mode} as ${request.deploymentName}` : ''}</div>
+      );
+    };
+
+    const renderOnRoutes = () =>
+      renderRoute(undefined, {
+        history: getAgentsListRoute(workspace),
+        routes: [
+          {
+            path: ROUTES.workspace.agentsList,
+            element: (
+              <CreateDeploymentModal open onClose={vi.fn()} workspace={workspace} agent={agent} />
+            ),
+          },
+          { path: ROUTES.workspace.agentDetail, element: <AgentDetailStub /> },
+        ],
+      });
+
+    const chooseDocker = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(within(dialog).getByRole('combobox', { name: 'Runtime' }));
+      await user.click(await screen.findByRole('option', { name: 'Docker' }));
+    };
+
+    beforeEach(() => {
+      server.use(
+        http.get(agentUrl, ({ params }) =>
+          HttpResponse.json({
+            name: params['name'],
+            workspace,
+            config_format: FABRIC_CONFIG_FORMAT,
+          })
+        )
+      );
+    });
+
+    it('builds an image first when the runtime has no default image', async () => {
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderOnRoutes();
+
+      const dialog = await getDeploymentDialog();
+      await user.type(within(dialog).getByRole('textbox', { name: /Deployment Name/ }), 'prod');
+      await chooseDocker(dialog, user);
+      await user.click(
+        await within(dialog).findByRole('button', { name: 'Build image and deploy' })
+      );
+
+      expect(await screen.findByText('Build then deploy docker as prod')).toBeInTheDocument();
+      expect(captured.body).toBeUndefined();
+    });
+
+    it('deploys a typed image directly', async () => {
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderOnRoutes();
+
+      const dialog = await getDeploymentDialog();
+      await chooseDocker(dialog, user);
+      await within(dialog).findByRole('button', { name: 'Build image and deploy' });
+      await user.type(
+        within(dialog).getByRole('textbox', { name: 'Container Image' }),
+        PACKAGED_IMAGE
+      );
+      await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+      await waitFor(() =>
+        expect(captured.body).toEqual({ agent, deployment_mode: 'docker', image: PACKAGED_IMAGE })
+      );
+    });
+
+    it('deploys without building when the platform cannot build images', async () => {
+      mockExecutionProfiles([{ profile: 'default', backend: 'docker' }]);
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderOnRoutes();
+
+      const dialog = await getDeploymentDialog();
+      await chooseDocker(dialog, user);
+      await user.click(within(dialog).getByRole('button', { name: 'Deploy' }));
+
+      await waitFor(() => expect(captured.body?.deployment_mode).toBe('docker'));
+    });
   });
 });

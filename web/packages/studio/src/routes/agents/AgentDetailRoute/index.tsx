@@ -22,6 +22,7 @@ import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import {
+  AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
   AGENT_OVERVIEW_ENABLED,
@@ -31,6 +32,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
+import { BuildThenDeploy } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
@@ -389,6 +391,9 @@ export const AgentDetailRoute: FC = () => {
           agentName={agentName}
         />
       )}
+      {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+        <BuildThenDeploy key={agentName} workspace={workspace} agentName={agentName} />
+      ) : null}
       {createDeploymentOpen && (
         <CreateDeploymentModal
           open

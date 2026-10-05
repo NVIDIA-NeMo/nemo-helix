@@ -12,8 +12,10 @@ import {
   getAgentsListDeploymentsQueryKey,
   useAgentsCreateDeployment,
 } from '@nemo/sdk/generated/agents/agent-deployments';
-import { useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
+import { useAgentsGetAgent, useAgentsListAgents } from '@nemo/sdk/generated/agents/agents';
 import { Accordion, Stack, Text } from '@nvidia/foundations-react-core';
+import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
+import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import {
   type DeploymentMode,
   DeploymentModeAvailabilityMode,
@@ -21,11 +23,13 @@ import {
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
+import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
 // Whether a container deployment needs an image depends on the server's configured
@@ -82,7 +86,9 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   initialImage,
 }) => {
   const toast = useToast();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const imageBuildsUnsupported = useImageBuildsUnsupported();
   const deploymentModes = useDeploymentModes(workspace, { enabled: open });
   // An image's runtime depends on the modes, so deploying it waits for them; a failed read falls back to all modes.
   const awaitingModesForImage =
@@ -148,6 +154,20 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
     mode: 'onChange',
   });
   const deploymentMode = watch('deploymentMode');
+  const selectedAgent = watch('agent');
+  const enteredImage = watch('image')?.trim();
+
+  const { data: selectedAgentDetails } = useAgentsGetAgent(workspace, selectedAgent, {
+    query: { enabled: open && Boolean(selectedAgent) },
+  });
+  // Without an image or a configured default, the platform can only deploy what it builds first.
+  const buildImageFirst =
+    !enteredImage &&
+    deploymentMode !== 'subprocess' &&
+    deploymentModes.status === 'ready' &&
+    !deploymentModes.withoutImage.includes(deploymentMode) &&
+    !imageBuildsUnsupported &&
+    selectedAgentDetails?.config_format === FABRIC_CONFIG_FORMAT;
 
   // The modes can arrive after the dialog opens; a default they rule out would be rejected on submit.
   useEffect(() => {
@@ -192,6 +212,16 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   };
 
   const onSubmit: SubmitHandler<DeploymentFormData> = async (formData) => {
+    if (buildImageFirst) {
+      resetAndClose();
+      navigate(
+        ...buildThenDeployNavigation(workspace, formData.agent, {
+          mode: formData.deploymentMode,
+          deploymentName: formData.name || undefined,
+        })
+      );
+      return;
+    }
     try {
       await createDeployment(formData);
     } catch {
@@ -207,7 +237,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       open={open}
       onClose={resetAndClose}
       title="Deploy Agent"
-      submitButtonText="Deploy"
+      submitButtonText={buildImageFirst ? 'Build image and deploy' : 'Deploy'}
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
@@ -266,8 +296,9 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
                         placeholder="nvcr.io/org/team/agent:tag"
                         formFieldProps={{
                           slotError: errors.image?.message,
-                          slotInfo:
-                            'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
+                          slotInfo: buildImageFirst
+                            ? 'No default image is configured. Leave empty to build an image for this agent first; it deploys when the build finishes.'
+                            : 'The backend pulls this image using its configured registry credentials. Leave empty to use the deployment default, if one is configured.',
                         }}
                       />
                     )}

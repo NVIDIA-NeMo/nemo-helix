@@ -32,6 +32,7 @@ import {
   UploadTrigger,
 } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
+import { buildThenDeployNavigation } from '@studio/api/agents/buildThenDeploy';
 import { useCreateAgentFromGitHub } from '@studio/api/agents/useCreateAgentFromGitHub';
 import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
 import {
@@ -39,6 +40,7 @@ import {
   IMAGE_DEPLOYMENT_MODES,
   useDeploymentModes,
 } from '@studio/api/agents/useDeploymentModes';
+import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeploymentModeSelect } from '@studio/components/DeploymentModeSelect';
 import {
@@ -116,7 +118,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
   // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
-  const deployAfterCreate = useRef<DeploymentMode | null>(null);
+  const deployAfterCreate = useRef<{ mode: DeploymentMode; buildImage: boolean } | null>(null);
 
   // Toasts live on the hook, not on mutate(): navigating to the new agent unmounts this modal.
   const { mutate: deployAgent } = useAgentsCreateDeployment({
@@ -138,12 +140,18 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const onAgentCreated = (agent: Agent) => {
     toast.success(`Agent "${agent.name}" created`);
     void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
-    const deploymentMode = deployAfterCreate.current;
-    if (agent.name && deploymentMode) {
-      deployAgent({ workspace, data: { agent: agent.name, deployment_mode: deploymentMode } });
-    }
+    const deployment = deployAfterCreate.current;
     resetAndClose();
-    if (agent.name) navigate(getAgentDetailRoute(workspace, agent.name));
+    if (!agent.name) return;
+    if (deployment?.buildImage) {
+      // The build outlives this modal, so the agent's page runs it and deploys the tag.
+      navigate(...buildThenDeployNavigation(workspace, agent.name, { mode: deployment.mode }));
+      return;
+    }
+    if (deployment) {
+      deployAgent({ workspace, data: { agent: agent.name, deployment_mode: deployment.mode } });
+    }
+    navigate(getAgentDetailRoute(workspace, agent.name));
   };
 
   const {
@@ -181,15 +189,22 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
 
   const tracedAgents = useTraceAgentNames(workspace, open && tab === 'imported-traces');
 
-  // A new agent has no image yet, so only modes that need none can deploy it.
+  // A new agent has no image yet, so a mode that needs one is offered only if the platform can build it.
   const deploymentModeState = useDeploymentModes(workspace, { enabled: open });
+  const imageBuildsUnsupported = useImageBuildsUnsupported();
   const deploymentModes = useMemo<readonly DeploymentMode[]>(
     () =>
       deploymentModeState.status === 'ready'
-        ? OFFERED_ON_CREATE.filter((mode) => deploymentModeState.withoutImage.includes(mode))
+        ? OFFERED_ON_CREATE.filter(
+            (mode) =>
+              deploymentModeState.withoutImage.includes(mode) ||
+              (deploymentModeState.enabled.includes(mode) && !imageBuildsUnsupported)
+          )
         : [],
-    [deploymentModeState]
+    [deploymentModeState, imageBuildsUnsupported]
   );
+  const modeNeedsImageBuild = (mode: DeploymentMode) =>
+    deploymentModeState.status === 'ready' && !deploymentModeState.withoutImage.includes(mode);
   const isModesLoading = deploymentModeState.status === 'loading';
   const canDeployOnCreate = deploymentModes.length > 0;
 
@@ -366,7 +381,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
   const onSubmit: SubmitHandler<UploadAgentFormData> = async (formData) => {
     const name = formData.name.trim();
     deployAfterCreate.current =
-      formData.deploy && canDeployOnCreate ? formData.deploymentMode : null;
+      formData.deploy && canDeployOnCreate
+        ? {
+            mode: formData.deploymentMode,
+            buildImage: modeNeedsImageBuild(formData.deploymentMode),
+          }
+        : null;
     try {
       if (onGitHubTab) {
         if (!repoSource) return;
@@ -425,6 +445,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({ open, onClose, workspace
             useControllerProps={{ control, name: 'deploymentMode' }}
             modes={deploymentModes}
             loading={isModesLoading}
+            formFieldProps={{
+              slotInfo: modeNeedsImageBuild(watchedDeploymentMode)
+                ? 'Builds a container image for the agent first, then deploys it. The build takes a few minutes.'
+                : undefined,
+            }}
           />
         ) : null}
       </Stack>
