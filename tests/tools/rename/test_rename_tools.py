@@ -64,6 +64,24 @@ def test_codeowners_team_slugs_are_preserved(tmp_path: Path) -> None:
     assert "No legacy product" in verify.stdout
 
 
+def test_release_test_scope_reference_snapshots_are_ignored(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+    install_rename_tools(repo)
+
+    references = repo / ".agents/skills/release-test-scope/references"
+    references.mkdir(parents=True)
+    (references / "example.md").write_text(LEGACY_SENTENCE)
+    run(["git", "add", "."], repo)
+    run(["git", "commit", "-m", "initial"], repo)
+
+    verify = run([str(repo / "tools/rename/verify-nemo-helix-rename.sh"), "--repo-dir", str(repo)], tmp_path)
+
+    assert "No legacy product" in verify.stdout
+    assert (references / "example.md").read_text() == LEGACY_SENTENCE
+
+
 def test_rename_scans_tracked_ignored_files_without_rewriting_itself(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
