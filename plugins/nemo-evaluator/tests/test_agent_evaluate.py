@@ -997,6 +997,23 @@ async def test_to_spec_resolves_inline_task_metrics_without_metric_refs() -> Non
     assert isinstance(_to_runtime_task(spec.tasks[0]).metrics[0], ExactMatchMetric)
 
 
+@pytest.mark.parametrize("task_id", ["", "   ", "\t\n"])
+async def test_to_spec_rejects_a_blank_inline_task_id(task_id: str) -> None:
+    """A blank id must fail at submit, before a job exists, rather than run as an unnamed task."""
+    input_spec = AgentEvalInputSpec(
+        tasks=[
+            AgentEvalTaskInput(
+                id=task_id, intent="Answer.", inputs=_task_inputs(instruction="Reply DONE."), metrics=[_inline_metric()]
+            )
+        ],
+        target=_runner_target("openai/gpt-5.4"),
+    )
+    with pytest.raises(ValueError, match="task id must not be empty"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
+
+
 async def test_to_spec_requires_entity_store_to_resolve_a_metric_reference() -> None:
     # A stored MetricRef can only be loaded with an entity store and Files service; without one,
     # to_spec must fail loudly rather than silently drop the metric.
