@@ -200,10 +200,12 @@ FROM  mamba-wheel-base-py312-cu13.4 AS causal-conv1d-wheel-builder-py312-cu13.4
 
 ARG CAUSAL_CONV1D_VERSION=v1.5.3
 
+# NGC 26.09 torch requires C++20; upstream still passes -std=c++17.
 RUN mkdir -p /wheels && \
     git clone --depth 1 --branch ${CAUSAL_CONV1D_VERSION} \
     https://github.com/Dao-AILab/causal-conv1d.git /src/causal-conv1d && \
     cd /src/causal-conv1d && \
+    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
     CAUSAL_CONV1D_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
     rm -rf /src/causal-conv1d
 
@@ -312,13 +314,15 @@ ARG MAMBA_23_COMMIT=v2.3.0
 
 # MAMBA_FORCE_BUILD skips the GitHub release wheel lookup. That URL 404s for this
 # NGC torch build; setup.py then compiles, and the 404 shows up in the traceback
-# above the real nvcc/ninja error.
+# above the real nvcc/ninja error. NGC 26.09 torch requires C++20; upstream still
+# passes -std=c++17.
 RUN mkdir -p /wheels && \
     git clone https://github.com/state-spaces/mamba.git /src/mamba && \
     cd /src/mamba && \
     git checkout ${MAMBA_23_COMMIT} && \
     sed -i "/triton/d" setup.py && \
     sed -i "/triton/d" pyproject.toml && \
+    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
     MAMBA_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
     rm -rf /src/mamba
 
