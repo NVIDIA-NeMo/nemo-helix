@@ -445,34 +445,27 @@ def _hydrate_by_refs_sql(
             SELECT
                 workspace,
                 session_id,
-                mapFromArrays(groupArray(evaluator_name), groupArray(mean_score)) AS evaluator_scores
+                mapFromArrays(
+                    groupArrayIf(evaluator_name, isNotNull(mean_score)),
+                    groupArrayIf(assumeNotNull(mean_score), isNotNull(mean_score))
+                ) AS evaluator_scores,
+                groupArrayIf(evaluator_name, failed = 1) AS failed_evaluators
             FROM (
                 SELECT
                     results.workspace AS workspace,
                     results.session_id AS session_id,
                     results.name AS evaluator_name,
-                    avg(results.value) AS mean_score
+                    avg(results.value) AS mean_score,
+                    max(results.status = 'FAILED') AS failed
                 FROM (
-                    SELECT workspace, session_id, name, value
+                    SELECT workspace, session_id, name, value, status
                     FROM {evaluator_results_table} FINAL
                     WHERE workspace = %(workspace)s
                         AND session_id IN %(page_session_ids)s
-                        AND data_type IN ('NUMERIC', 'BOOLEAN')
-                        AND value IS NOT NULL
+                        AND ((data_type IN ('NUMERIC', 'BOOLEAN') AND value IS NOT NULL) OR status = 'FAILED')
                 ) AS results
                 GROUP BY results.workspace, results.session_id, results.name
             )
-            GROUP BY workspace, session_id
-        ),
-        session_failures AS (
-            SELECT
-                workspace,
-                session_id,
-                groupUniqArray(name) AS failed_evaluators
-            FROM {evaluator_results_table} FINAL
-            WHERE workspace = %(workspace)s
-                AND session_id IN %(page_session_ids)s
-                AND status = 'FAILED'
             GROUP BY workspace, session_id
         )
         SELECT
@@ -493,7 +486,7 @@ def _hydrate_by_refs_sql(
             metrics.cached_tokens AS cached_tokens,
             metrics.cost_total_usd AS cost_total_usd,
             scores.evaluator_scores AS evaluator_scores,
-            failures.failed_evaluators AS failed_evaluators
+            scores.failed_evaluators AS failed_evaluators
         FROM page_sessions AS sessions
         LEFT JOIN session_metrics AS metrics
             ON sessions.workspace = metrics.workspace
@@ -501,9 +494,6 @@ def _hydrate_by_refs_sql(
         LEFT JOIN session_scores AS scores
             ON sessions.workspace = scores.workspace
             AND sessions.session_id = scores.session_id
-        LEFT JOIN session_failures AS failures
-            ON sessions.workspace = failures.workspace
-            AND sessions.session_id = failures.session_id
     """
 
 
