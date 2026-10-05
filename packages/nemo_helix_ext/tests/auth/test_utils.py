@@ -3,7 +3,6 @@
 
 import base64
 import json
-from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -14,12 +13,12 @@ from nemo_helix_ext.auth.helpers import (
     decode_jwt_claims,
     decode_jwt_header,
     discover_nhx_config,
+    discover_nhx_config_async,
     generate_unsigned_jwt,
     is_unsigned_jwt,
     normalize_scope_prefix,
     validate_requested_scopes_granted,
 )
-from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from pytest_httpserver import HTTPServer
 
 
@@ -35,6 +34,11 @@ def _make_jwt_with_alg(payload: dict, alg: str) -> str:
     body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
     signature = base64.urlsafe_b64encode(b"fake-signature").rstrip(b"=").decode()
     return f"{header}.{body}.{signature}"
+
+
+def _discover_with_client(base_url: str) -> NHXOIDCConfig:
+    with httpx.Client() as http_client:
+        return discover_nhx_config(base_url, http_client=http_client)
 
 
 class TestDecodeJwtClaims:
@@ -132,7 +136,7 @@ class TestDiscoverNhxConfig:
             },
         }
         httpserver.expect_request("/apis/auth/discovery").respond_with_json(config_response)
-        result = discover_nhx_config(httpserver.url_for(""))
+        result = _discover_with_client(httpserver.url_for(""))
         assert result == NHXOIDCConfig(
             auth_enabled=True,
             issuer="https://idp.example.com",
@@ -150,10 +154,27 @@ class TestDiscoverNhxConfig:
 
     def test_handles_auth_disabled(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_json({"auth_enabled": False})
-        result = discover_nhx_config(httpserver.url_for(""))
+        result = _discover_with_client(httpserver.url_for(""))
         assert result.auth_enabled is False
         assert result.client_id is None
         assert result.token_endpoint is None
+
+    def test_rejects_wrong_scalar_types_as_malformed_discovery(self, httpserver: HTTPServer):
+        httpserver.expect_request("/apis/auth/discovery").respond_with_json(
+            {
+                "auth_enabled": "true",
+                "oidc": {
+                    "issuer": 123,
+                    "client_id": ["nhx-app"],
+                    "device_authorization_requires_device_id": "true",
+                    "device_token_request_includes_scope": "false",
+                    "default_scopes": 42,
+                },
+            }
+        )
+
+        with pytest.raises(AttributeError, match="expected shape"):
+            _discover_with_client(httpserver.url_for(""))
 
     def test_rejects_unknown_bearer_token_source(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_json(
@@ -161,11 +182,11 @@ class TestDiscoverNhxConfig:
         )
 
         with pytest.raises(ValueError, match="bearer_token_source"):
-            discover_nhx_config(httpserver.url_for(""))
+            _discover_with_client(httpserver.url_for(""))
 
     def test_handles_missing_oidc_key(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_json({"auth_enabled": True})
-        result = discover_nhx_config(httpserver.url_for(""))
+        result = _discover_with_client(httpserver.url_for(""))
         assert result.auth_enabled is True
         assert result.issuer is None
         assert result.default_scopes == "openid profile email offline_access"
@@ -173,45 +194,39 @@ class TestDiscoverNhxConfig:
     def test_raises_on_http_error(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_data("Not Found", status=404)
         with pytest.raises(httpx.HTTPStatusError):
-            discover_nhx_config(httpserver.url_for(""))
+            _discover_with_client(httpserver.url_for(""))
 
     def test_strips_trailing_slash(self, httpserver: HTTPServer):
         httpserver.expect_request("/apis/auth/discovery").respond_with_json({"auth_enabled": False})
-        result = discover_nhx_config(httpserver.url_for("") + "/")
+        result = _discover_with_client(httpserver.url_for("") + "/")
         assert result.auth_enabled is False
 
-    @patch("nemo_helix_ext.auth.helpers.httpx.get")
-    def test_uses_nemo_scoped_ca_bundle(self, mock_get, monkeypatch):
-        response = MagicMock()
-        response.json.return_value = {"auth_enabled": False}
-        mock_get.return_value = response
-        monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
+    def test_uses_injected_http_client(self):
+        requests: list[httpx.Request] = []
 
-        result = discover_nhx_config("https://nemo.example.com")
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"auth_enabled": False})
 
-        assert result.auth_enabled is False
-        mock_get.assert_called_once_with(
-            "https://nemo.example.com/apis/auth/discovery",
-            timeout=10.0,
-            verify="/tmp/nemo-ca.pem",
-        )
-
-    @patch("nemo_helix_ext.auth.helpers.httpx.get")
-    def test_uses_context_certificate_authority(self, mock_get, tmp_path, monkeypatch):
-        response = MagicMock()
-        response.json.return_value = {"auth_enabled": False}
-        mock_get.return_value = response
-        context_ca = str(tmp_path / "context-ca.pem")
-        monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
-
-        result = discover_nhx_config("https://nemo.example.com", certificate_authority=context_ca)
+        with httpx.Client(transport=httpx.MockTransport(handler)) as http_client:
+            result = discover_nhx_config("https://nemo.example.com", http_client=http_client)
 
         assert result.auth_enabled is False
-        mock_get.assert_called_once_with(
-            "https://nemo.example.com/apis/auth/discovery",
-            timeout=10.0,
-            verify=context_ca,
-        )
+        assert [request.url.path for request in requests] == ["/apis/auth/discovery"]
+
+    @pytest.mark.asyncio
+    async def test_async_uses_injected_http_client(self):
+        requests: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"auth_enabled": False})
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            result = await discover_nhx_config_async("https://nemo.example.com", http_client=http_client)
+
+        assert result.auth_enabled is False
+        assert [request.url.path for request in requests] == ["/apis/auth/discovery"]
 
 
 class TestBuildEffectiveScope:

@@ -17,7 +17,6 @@ Pin the user-visible contracts:
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -25,19 +24,6 @@ from unittest.mock import patch
 import httpx
 from nemo_agents_plugin.cli import _DEFAULT_WORKSPACE, AgentsCLI
 from typer.testing import CliRunner
-
-
-def _install_mock_transport(handler) -> AbstractContextManager[Any]:
-    """Patch ``httpx.Client`` in the CLI module to use a ``MockTransport``."""
-    transport = httpx.MockTransport(handler)
-    real_client = httpx.Client
-
-    class _Client(real_client):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            kwargs["transport"] = transport
-            super().__init__(*args, **kwargs)
-
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
 
 
 def _page(
@@ -65,7 +51,7 @@ def _page(
 # ---------------------------------------------------------------------------
 
 
-def test_deploy_default_waits_and_returns_success_on_running() -> None:
+def test_deploy_default_waits_and_returns_success_on_running(make_cli_state) -> None:
     """``deploy`` polls until status=running and exits 0."""
     statuses = iter(["pending", "starting", "running"])
 
@@ -88,17 +74,18 @@ def test_deploy_default_waits_and_returns_success_on_running() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "10"],
+            obj=make_cli_state(handler),
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert "is running" in result.stdout
 
 
-def test_deploy_default_exits_failure_when_subprocess_dies() -> None:
+def test_deploy_default_exits_failure_when_subprocess_dies(make_cli_state) -> None:
     """Deploy exits 1 when the deployment reaches ``failed``.
 
     Before this fix the CLI would print the pending entity JSON and exit 0
@@ -125,10 +112,11 @@ def test_deploy_default_exits_failure_when_subprocess_dies() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "10"],
+            obj=make_cli_state(handler),
         )
 
     assert result.exit_code == 1, result.stdout
@@ -137,7 +125,7 @@ def test_deploy_default_exits_failure_when_subprocess_dies() -> None:
     assert "failed" in result.stdout
 
 
-def test_deploy_polls_through_multiple_pending_responses() -> None:
+def test_deploy_polls_through_multiple_pending_responses(make_cli_state) -> None:
     """Deploy keeps polling while status is non-terminal — even if the API
     initially returns ``pending`` repeatedly before the controller runs.
 
@@ -162,17 +150,18 @@ def test_deploy_polls_through_multiple_pending_responses() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
             ["deploy", "--agent", "calc", "--timeout", "60"],
+            obj=make_cli_state(handler),
         )
 
     assert result.exit_code == 0, result.stdout
     assert "is running" in result.stdout
 
 
-def test_deploy_no_wait_returns_immediately_with_pending_json() -> None:
+def test_deploy_no_wait_returns_immediately_with_pending_json(make_cli_state) -> None:
     """``--no-wait`` preserves the legacy behaviour: print JSON and exit 0."""
     posts: list[httpx.Request] = []
     gets: list[httpx.Request] = []
@@ -185,11 +174,11 @@ def test_deploy_no_wait_returns_immediately_with_pending_json() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler):
-        result = CliRunner().invoke(
-            app,
-            ["deploy", "--agent", "calc", "--no-wait"],
-        )
+    result = CliRunner().invoke(
+        app,
+        ["deploy", "--agent", "calc", "--no-wait"],
+        obj=make_cli_state(handler),
+    )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
     assert "calc-abcd" in result.stdout
@@ -198,7 +187,7 @@ def test_deploy_no_wait_returns_immediately_with_pending_json() -> None:
     assert gets == []
 
 
-def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages() -> None:
+def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages(make_cli_state) -> None:
     """``deployments wait --agent`` fetches all pages and selects newest active deployment."""
     requests: list[httpx.Request] = []
     pages = [
@@ -247,10 +236,11 @@ def test_deployments_wait_agent_resolves_latest_active_deployment_across_pages()
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler), patch("nemo_agents_plugin.cli.time.sleep"):
+    with patch("nemo_agents_plugin.cli.time.sleep"):
         result = CliRunner().invoke(
             app,
             ["deployments", "wait", "--agent", "calc", "--timeout", "10"],
+            obj=make_cli_state(handler),
         )
 
     assert result.exit_code == 0, result.stdout + (result.stderr or "")
@@ -274,7 +264,7 @@ def _make_log_for(workspace: str, name: str) -> Path:
     return path
 
 
-def test_logs_prints_file_contents_from_deterministic_path() -> None:
+def test_logs_prints_file_contents_from_deterministic_path(make_cli_state) -> None:
     """``nemo agents logs <name>`` reads the file at the conventional path."""
     log_file = _make_log_for(_DEFAULT_WORKSPACE, "calc-1")
     log_file.write_text("agent boot ok\nready on port 49200\n")
@@ -285,29 +275,31 @@ def test_logs_prints_file_contents_from_deterministic_path() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "calc-1"])
+    result = CliRunner().invoke(app, ["logs", "calc-1"], obj=make_cli_state(handler))
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "agent boot ok" in result.stdout
     assert "ready on port 49200" in result.stdout
 
 
-def test_logs_path_only_prints_path_without_reading_file() -> None:
+def test_logs_path_only_prints_path_without_reading_file(make_cli_state) -> None:
     """``--path`` prints the absolute path even if the file doesn't exist locally."""
     from nemo_agents_plugin.runner.in_memory import log_path_for_deployment
 
     expected_path = str(log_path_for_deployment(_DEFAULT_WORKSPACE, "calc-1"))
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "calc-1", "--path"])
+    result = CliRunner().invoke(
+        app,
+        ["logs", "calc-1", "--path"],
+        obj=make_cli_state(lambda r: httpx.Response(404)),
+    )
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert expected_path in result.stdout
 
 
-def test_logs_uses_workspace_to_separate_same_named_deployments() -> None:
+def test_logs_uses_workspace_to_separate_same_named_deployments(make_cli_state) -> None:
     """The CLI's ``--workspace`` flag must drive the resolved log path.
 
     Two workspaces with deployment ``shared`` produce distinct log files
@@ -320,9 +312,12 @@ def test_logs_uses_workspace_to_separate_same_named_deployments() -> None:
     other_log.write_text("from other workspace\n")
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(lambda r: httpx.Response(404)):
-        default_result = CliRunner().invoke(app, ["logs", "shared"])
-        other_result = CliRunner().invoke(app, ["logs", "shared", "--workspace", "other-ws"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    default_result = CliRunner().invoke(app, ["logs", "shared"], obj=make_cli_state(handler))
+    other_result = CliRunner().invoke(app, ["logs", "shared", "--workspace", "other-ws"], obj=make_cli_state(handler))
 
     assert default_result.exit_code == 0
     assert "from default workspace" in default_result.stdout
@@ -333,25 +328,27 @@ def test_logs_uses_workspace_to_separate_same_named_deployments() -> None:
     assert "from default workspace" not in other_result.stdout
 
 
-def test_logs_reports_helpful_error_when_file_missing() -> None:
+def test_logs_reports_helpful_error_when_file_missing(make_cli_state) -> None:
     """If the log file isn't on disk yet, exit 1 with a useful hint."""
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "never-spawned"])
+    result = CliRunner().invoke(app, ["logs", "never-spawned"], obj=make_cli_state(lambda r: httpx.Response(404)))
 
     assert result.exit_code == 1
     assert "log file does not exist" in result.stderr
     assert "different host" in result.stderr  # part of the diagnostic hint
 
 
-def test_logs_tail_prints_only_last_n_lines() -> None:
+def test_logs_tail_prints_only_last_n_lines(make_cli_state) -> None:
     """``--tail N`` prints only the last N lines."""
     log_file = _make_log_for(_DEFAULT_WORKSPACE, "calc-1")
     log_file.write_text("\n".join(f"line-{i}" for i in range(20)) + "\n")
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(lambda r: httpx.Response(404)):
-        result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", "3"])
+    result = CliRunner().invoke(
+        app,
+        ["logs", "calc-1", "--tail", "3"],
+        obj=make_cli_state(lambda r: httpx.Response(404)),
+    )
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "line-19" in result.stdout
@@ -360,19 +357,22 @@ def test_logs_tail_prints_only_last_n_lines() -> None:
     assert "line-0" not in result.stdout
 
 
-def test_logs_tail_rejects_non_positive_values() -> None:
+def test_logs_tail_rejects_non_positive_values(make_cli_state) -> None:
     """Zero or negative ``--tail`` is a usage error — fail fast instead of
     silently printing the full log."""
     app = AgentsCLI().get_cli()
     for value in ("0", "-1"):
-        with _install_mock_transport(lambda r: httpx.Response(404)):
-            result = CliRunner().invoke(app, ["logs", "calc-1", "--tail", value])
+        result = CliRunner().invoke(
+            app,
+            ["logs", "calc-1", "--tail", value],
+            obj=make_cli_state(lambda r: httpx.Response(404)),
+        )
 
         assert result.exit_code == 1, f"--tail {value} should reject"
         assert "positive" in result.stderr
 
 
-def test_logs_resolves_most_recent_deployment_for_agent() -> None:
+def test_logs_resolves_most_recent_deployment_for_agent(make_cli_state) -> None:
     """``--agent`` picks the deployment with the latest ``created_at``,
     not just the last list element.
 
@@ -413,14 +413,13 @@ def test_logs_resolves_most_recent_deployment_for_agent() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "--agent", "calc"])
+    result = CliRunner().invoke(app, ["logs", "--agent", "calc"], obj=make_cli_state(handler))
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "calc-2 ok" in result.stdout
 
 
-def test_logs_agent_resolution_fetches_all_deployment_pages() -> None:
+def test_logs_agent_resolution_fetches_all_deployment_pages(make_cli_state) -> None:
     """``logs --agent`` considers matching deployments beyond the first page."""
     log_file = _make_log_for(_DEFAULT_WORKSPACE, "calc-2")
     log_file.write_text("calc-2 from page 2\n")
@@ -461,8 +460,7 @@ def test_logs_agent_resolution_fetches_all_deployment_pages() -> None:
         return httpx.Response(404)
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler):
-        result = CliRunner().invoke(app, ["logs", "--agent", "calc"])
+    result = CliRunner().invoke(app, ["logs", "--agent", "calc"], obj=make_cli_state(handler))
 
     assert result.exit_code == 0, result.stderr or result.stdout
     assert "calc-2 from page 2" in result.stdout

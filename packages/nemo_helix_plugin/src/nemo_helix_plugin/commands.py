@@ -99,7 +99,7 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_options import workspace_help, workspace_option
 from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
-from nemo_helix_plugin.cli_state import resolve_cli_workspace, resolve_local_cli_sdks
+from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_local_cli_sdks
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.function import NemoFunction, returns_async_iterator
 from nemo_helix_plugin.function_context import FunctionContext
@@ -1047,7 +1047,7 @@ def _add_function_submit_command(
             raise typer.Exit(code=1) from exc
 
         url = _build_function_submit_url(typer_ctx, fn_cls, workspace=workspace)
-        headers = resolve_submit_auth_headers(typer_ctx)
+        headers: dict[str, str] = {}
         if request_id is not None:
             headers["X-Request-ID"] = request_id
 
@@ -1056,10 +1056,12 @@ def _add_function_submit_command(
             renderer_cls = cli.get_function_renderer(fn_cls, verb="submit")
 
         try:
+            sdk = cli_state(typer_ctx).get_client()
             _post_function_submit(
                 url,
                 spec_data,
-                headers=headers,
+                headers=sdk.request_headers(headers, url=url) or {},
+                http_client=sdk.http_client,
                 renderer_cls=renderer_cls,
                 cli_kwargs=original_kwargs,
             )
@@ -1138,6 +1140,7 @@ def _post_function_submit(
     body: dict,
     *,
     headers: dict[str, str],
+    http_client: httpx.Client,
     timeout: float = 30.0,
     renderer_cls: type[CLIRenderer] | None = None,
     cli_kwargs: Mapping[str, Any] | None = None,
@@ -1154,37 +1157,33 @@ def _post_function_submit(
     :meth:`CLIRenderer.on_frame`. The non-NDJSON fallback path is unchanged.
     """
     logger.debug("submit %s", url)
-    with httpx.Client(timeout=timeout) as client:
-        with client.stream("POST", url, json=body, headers=headers) as response:
-            if response.status_code >= 400:
-                # Buffer the body so the caller's error formatter
-                # can read ``exc.response.text`` without raising
-                # ``ResponseNotRead`` — ``client.stream`` opens the
-                # response unbuffered, and the ``with`` block closes
-                # the stream before the caller sees the exception.
-                response.read()
-                response.raise_for_status()
-            content_type = response.headers.get("content-type", "")
-            if NDJSON_MEDIA_TYPE in content_type:
-                if renderer_cls is not None:
-                    rctx = _make_renderer_context(
-                        cli_kwargs=cli_kwargs or {},
-                        verb="submit",
-                        is_local=False,
-                    )
-                    renderer = _drive_sync_renderer(response.iter_lines(), renderer_cls, rctx=rctx)
-                    renderer.on_complete(ctx=rctx)
-                    return
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    typer.echo(_pretty_print_jsonl_line(line))
-                return
+    with http_client.stream("POST", url, json=body, headers=headers, timeout=timeout) as response:
+        if response.status_code >= 400:
+            # Buffer the body so the caller's error formatter can read
+            # ``exc.response.text`` without raising ``ResponseNotRead``.
             response.read()
-            try:
-                typer.echo(json.dumps(response.json(), indent=2))
-            except ValueError:
-                typer.echo(response.text)
+            response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if NDJSON_MEDIA_TYPE in content_type:
+            if renderer_cls is not None:
+                rctx = _make_renderer_context(
+                    cli_kwargs=cli_kwargs or {},
+                    verb="submit",
+                    is_local=False,
+                )
+                renderer = _drive_sync_renderer(response.iter_lines(), renderer_cls, rctx=rctx)
+                renderer.on_complete(ctx=rctx)
+                return
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                typer.echo(_pretty_print_jsonl_line(line))
+            return
+        response.read()
+        try:
+            typer.echo(json.dumps(response.json(), indent=2))
+        except ValueError:
+            typer.echo(response.text)
 
 
 # ---- helpers ----------------------------------------------------- #

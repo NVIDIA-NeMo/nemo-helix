@@ -9,9 +9,10 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypeVar
 from unittest.mock import patch
 
+import click
 import httpx
 import pytest
 from nemo_agents_plugin.cli import (
@@ -24,7 +25,10 @@ from nemo_agents_plugin.cli import (
     _upload_ethos_fileset,
 )
 from nemo_agents_plugin.entities import AGENT_SPEC_FILENAME
+from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
+
+ClientT = TypeVar("ClientT", bound=NemoClient)
 
 
 class _ValidatedAgentConfig:
@@ -64,7 +68,6 @@ class _FakeEthosFiles:
 
 def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = ()) -> tuple[set[str], list[str]]:
     files = _FakeEthosFiles(existing_paths)
-    sdk = SimpleNamespace(files=files)
     uploaded: set[str] = set()
 
     def _capture_upload(local_dir: Path, *, fileset: str, workspace: str, sdk: Any) -> None:
@@ -73,7 +76,7 @@ def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = 
         uploaded.update(path.relative_to(local_dir).as_posix() for path in local_dir.rglob("*") if path.is_file())
 
     with (
-        patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
+        _shared_cli_context(),
         patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
@@ -81,7 +84,6 @@ def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = 
             agent_name="fabric-agent",
             workspace="default",
             agent_root=agent_root,
-            base_url="http://test",
         )
 
     return uploaded, files.deleted
@@ -100,7 +102,61 @@ def _install_mock_transport(
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.httpx.Client", _Client)
+
+
+class _CLIState:
+    def __init__(
+        self,
+        *,
+        base_url: str = "http://localhost:8080",
+        workspace: str | None = "default",
+        default_headers: dict[str, str] | None = None,
+    ) -> None:
+        self.base_url = base_url
+        self.workspace = workspace
+        self.default_headers = default_headers
+        self.timeout: float | httpx.Timeout | None = None
+
+    def typed_client(self, client_cls: type[ClientT], timeout: float | httpx.Timeout | None = None) -> ClientT:
+        self.timeout = timeout
+        return client_cls(
+            base_url=self.base_url,
+            workspace=self.workspace,
+            default_headers=self.default_headers,
+            timeout=timeout,
+        )
+
+    def get_base_url(self, default: str | None = None) -> str | None:
+        return self.base_url
+
+    def get_workspace(self) -> str | None:
+        return self.workspace
+
+    def get_output_format(self, override: str | None = None, *, apply_non_tty_default: bool = True) -> str:
+        return override or "json"
+
+    def get_no_truncate(self, override: bool | None = None) -> bool:
+        return bool(override)
+
+    def get_timestamp_format(self, override: str | None = None) -> str:
+        return override or "iso8601"
+
+
+def _shared_cli_context(base_url: str = "http://test") -> click.Context:
+    return click.Context(click.Command("nemo"), obj=_CLIState(base_url=base_url))
+
+
+@pytest.fixture(autouse=True)
+def _default_cli_state_for_direct_invocations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direct Typer invocations in these tests still run through a CLI state."""
+    original_invoke = CliRunner.invoke
+
+    def invoke(self: CliRunner, app: Any, args: Any | None = None, *pargs: Any, **kwargs: Any) -> Any:
+        kwargs.setdefault("obj", _CLIState())
+        return original_invoke(self, app, args, *pargs, **kwargs)
+
+    monkeypatch.setattr(CliRunner, "invoke", invoke)
 
 
 def test_no_args_prints_help_successfully() -> None:
@@ -112,21 +168,15 @@ def test_no_args_prints_help_successfully() -> None:
     assert "Agent lifecycle management" in result.stdout
 
 
-def test_agents_client_preserves_legacy_cli_timeout() -> None:
-    captured_timeout: list[float | None] = []
-
-    with (
-        patch("nemo_agents_plugin.cli._resolve_context_headers", return_value={}),
-        _install_mock_transport(
-            lambda _request: httpx.Response(200, json={}),
-            on_create=lambda kwargs: captured_timeout.append(kwargs.get("timeout")),
-        ),
-    ):
+def test_agents_client_uses_sdk_constructor_timeout_defaults() -> None:
+    state = _CLIState()
+    ctx = click.Context(click.Command("nemo"), obj=state)
+    with ctx:
         client = _agents_client("http://test", "default")
 
-    assert captured_timeout == [30]
-    assert client._timeout == 30
-    assert client._client.timeout == httpx.Timeout(30)
+    assert state.timeout is None
+    assert client._timeout is None
+    assert client._client.timeout == httpx.Timeout(60)
 
 
 def test_run_starts_nat_server_for_nat_config(tmp_path: Path) -> None:
@@ -210,7 +260,7 @@ def test_list_404_prints_request_context_and_hint() -> None:
 
     assert result.exit_code == 1
     assert "Error: GET agent API failed: HTTP 404 Not Found" in result.stderr
-    # Without a CLI state the localhost default applies; long URLs are elided mid-way.
+    # The test CLI state uses localhost; long URLs are elided mid-way.
     assert "Request: GET http://localhost:8080/" in result.stderr
     assert "Target: agents API route /apis/agents/v2/workspaces/default/agents" in result.stderr
     assert "route may not be deployed" in result.stderr
@@ -350,7 +400,6 @@ def test_create_validates_platform_agent_config_before_post(tmp_path) -> None:
         agent_name="fabric-agent",
         workspace="default",
         agent_root=tmp_path,
-        base_url="http://localhost:8080",
     )
 
 
@@ -405,12 +454,11 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
         patch("nemo_agents_plugin.fabric.validation.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", fake_upload),
         patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
-        patch("nemo_agents_plugin.cli._platform_sdk") as mock_sdk,
     ):
-        mock_sdk.return_value = SimpleNamespace(base_url="http://test", files=files)
         result = CliRunner().invoke(
             app,
             ["create", "--name", "fabric-agent", "--agent-config", str(config)],
+            obj=_CLIState(base_url="http://test"),
         )
 
     assert result.exit_code == 0, result.stderr
@@ -501,7 +549,6 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
     (agent_root / "ETHOS.md").write_text("# Local Ethos\n", encoding="utf-8")
     remote = {"ETHOS.md": b"# Remote Ethos\n"}
     files = _FakeEthosFiles(list(remote))
-    sdk = SimpleNamespace(files=files)
 
     def _capture_upload(local_dir: Path, **_: Any) -> None:
         remote.update(
@@ -511,7 +558,7 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
         )
 
     with (
-        patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
+        _shared_cli_context(),
         patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
@@ -519,7 +566,6 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
             agent_name="fabric-agent",
             workspace="default",
             agent_root=agent_root,
-            base_url="http://test",
         )
 
     assert remote == {"ETHOS.md": b"# Remote Ethos\n", "agent.yaml": b"name: fabric-agent\n"}
@@ -610,7 +656,6 @@ def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> N
             "nemo_agents_plugin.cli._upload_ethos_fileset",
             side_effect=RuntimeError("upload boom"),
         ),
-        patch("nemo_agents_plugin.cli._platform_sdk") as mock_sdk,
     ):
         result = CliRunner().invoke(
             app,
@@ -622,7 +667,6 @@ def test_create_fabric_rolls_back_agent_when_fileset_upload_fails(tmp_path) -> N
     # Rollback removes the agent entity only; the Ethos fileset is durable and may
     # already hold an ETHOS.md written before this agent existed.
     assert methods == ["POST", "DELETE"]
-    mock_sdk.assert_not_called()
 
 
 def test_create_fabric_reports_rollback_failure(tmp_path) -> None:
@@ -737,21 +781,22 @@ def test_create_aborts_when_default_model_missing(tmp_path, placeholder: str) ->
 
 
 def test_invoke_with_custom_timeout() -> None:
-    """--timeout is threaded through to the httpx client."""
-    captured_timeout: list[float | None] = []
+    """--timeout is threaded through to the HTTP request."""
+    captured_read_timeout: list[float] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
+        captured_read_timeout.append(req.extensions["timeout"]["read"])
         return httpx.Response(200, json={"model": "test", "choices": []})
 
     app = AgentsCLI().get_cli()
-    with _install_mock_transport(handler, on_create=lambda kw: captured_timeout.append(kw.get("timeout"))):
+    with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
             ["invoke", "--agent", "calc", "--input", "hi", "--timeout", "42"],
         )
 
     assert result.exit_code == 0, result.stderr
-    assert captured_timeout[0] == 42.0
+    assert captured_read_timeout == [42.0]
 
 
 def test_invoke_timeout_error_message() -> None:
@@ -922,7 +967,7 @@ def test_list_connection_error_prints_request_context_and_hint() -> None:
 
     assert result.exit_code == 1
     assert "Error: GET agent API failed: connection refused" in result.stderr
-    # Without a CLI state the localhost default applies; long URLs are elided mid-way.
+    # The test CLI state uses localhost; long URLs are elided mid-way.
     assert "Request: GET http://localhost:8080/" in result.stderr
     assert "Target: agents API route /apis/agents/v2/workspaces/default/agents" in result.stderr
     assert "nemo config view" in result.stderr
@@ -1316,13 +1361,7 @@ def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
         return httpx.Response(201, json={"name": "ben"})
 
     app = AgentsCLI().get_cli()
-    with (
-        _install_mock_transport(handler),
-        patch(
-            "nemo_agents_plugin.cli._resolve_context_headers",
-            return_value={"Authorization": "Bearer tok-xyz"},
-        ),
-    ):
+    with _install_mock_transport(handler):
         result = CliRunner().invoke(
             app,
             [
@@ -1332,6 +1371,7 @@ def test_environment_spec_create_via_typed_client_sends_auth_header() -> None:
                 "--spec",
                 '{"provider": "local"}',
             ],
+            obj=_CLIState(default_headers={"Authorization": "Bearer tok-xyz"}),
         )
 
     assert result.exit_code == 0, result.stderr

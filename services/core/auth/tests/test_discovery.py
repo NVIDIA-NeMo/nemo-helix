@@ -7,11 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from nhx.common.auth.discovery import AuthDiscoveryResponse, OIDCDiscoveryResponse
 from nhx.common.config import AuthConfig, Configuration
 from nhx.common.config.base import OIDCConfig, TokenSigningConfig
 from nhx.core.auth.api.v2.discovery.endpoints import (
-    AuthDiscoveryResponse,
-    OIDCDiscoveryResponse,
     _clear_idp_discovery_cache,
     _fetch_idp_discovery,
     get_auth_discovery,

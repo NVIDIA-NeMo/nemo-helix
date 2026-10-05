@@ -18,7 +18,7 @@ from typing import Protocol
 
 import httpx
 from httpx._types import TimeoutTypes
-from nemo_helix_plugin.client.auth import TokenProvider
+from nemo_helix_plugin.client.auth import AsyncClientTokenProvider, AsyncFromSyncTokenProvider, TokenProvider
 from nemo_helix_plugin.client.client import NemoClientRuntime
 from nemo_helix_plugin.client.constants import (
     WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR,
@@ -115,6 +115,8 @@ class HelixAuthPlan(Protocol):
 
     def nemo_client_auth(self) -> TokenProvider | None: ...
 
+    def async_nemo_client_auth(self) -> AsyncClientTokenProvider | None: ...
+
     def sync_sdk_request_hooks(self) -> tuple[SyncRequestHook, ...]: ...
 
     def async_sdk_request_hooks(self) -> tuple[AsyncRequestHook, ...]: ...
@@ -129,6 +131,9 @@ class TrustedHeaderAuthPlan:
         return False
 
     def nemo_client_auth(self) -> TokenProvider | None:
+        return None
+
+    def async_nemo_client_auth(self) -> AsyncClientTokenProvider | None:
         return None
 
     def sync_sdk_request_hooks(self) -> tuple[SyncRequestHook, ...]:
@@ -148,6 +153,9 @@ class ServiceWorkloadTokenAuthPlan:
         return False
 
     def nemo_client_auth(self) -> ServiceWorkloadAccessTokenProvider:
+        return self.provider
+
+    def async_nemo_client_auth(self) -> ServiceWorkloadAccessTokenProvider:
         return self.provider
 
     def sync_sdk_request_hooks(self) -> tuple[SyncRequestHook, ...]:
@@ -171,6 +179,9 @@ class WorkloadIdentityBootstrapAuthPlan:
         from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 
         return resolve_workload_exchange_provider(base_url=self.base_url, subject_token_file=self.subject_token_file)
+
+    def async_nemo_client_auth(self) -> AsyncClientTokenProvider:
+        return AsyncFromSyncTokenProvider(self.nemo_client_auth())
 
     def sync_sdk_request_hooks(self) -> tuple[SyncRequestHook, ...]:
         return ()
@@ -202,6 +213,9 @@ class HelixClientContext:
 
     def nemo_client_auth(self) -> TokenProvider | None:
         return self.auth_plan.nemo_client_auth()
+
+    def async_nemo_client_auth(self) -> AsyncClientTokenProvider | None:
+        return self.auth_plan.async_nemo_client_auth()
 
     def sync_sdk_request_hooks(self) -> tuple[SyncRequestHook, ...]:
         return self.auth_plan.sync_sdk_request_hooks()

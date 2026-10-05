@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from nemo_helix_ext.auth.helpers import NHXOIDCConfig
 from nemo_insights_plugin.client import AsyncInsightsClient
 from nemo_insights_plugin.platform_client import make_client
 from nemo_insights_plugin.schema import CreateAnalysisRunRequest
@@ -41,38 +40,12 @@ async def test_async_client_submits_analysis_run() -> None:
     assert response.job_status == "created"
 
 
-def test_remote_no_auth_ignores_unrelated_local_oauth_context() -> None:
+def test_remote_uses_local_oauth_context() -> None:
     config_path = MagicMock()
     config_path.exists.return_value = True
 
     with (
         patch("nemo_insights_plugin.platform_client.Config.get_default_config_path", return_value=config_path),
-        patch(
-            "nemo_insights_plugin.platform_client.discover_nhx_config",
-            return_value=NHXOIDCConfig(auth_enabled=False),
-        ),
-        patch("nemo_insights_plugin.platform_client.build_direct_async_nemo_client") as build_direct,
-    ):
-        client = make_client(REMOTE_URL)
-
-    build_direct.assert_called_once_with(base_url=REMOTE_URL)
-    assert client is build_direct.return_value
-
-
-def test_remote_auth_uses_local_oauth_context() -> None:
-    config_path = MagicMock()
-    config_path.exists.return_value = True
-
-    with (
-        patch("nemo_insights_plugin.platform_client.Config.get_default_config_path", return_value=config_path),
-        patch(
-            "nemo_insights_plugin.platform_client.discover_nhx_config",
-            return_value=NHXOIDCConfig(
-                auth_enabled=True,
-                client_id="nemo-cli",
-                token_endpoint="https://auth.example.com/token",
-            ),
-        ),
         patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
     ):
         client = make_client(REMOTE_URL)
@@ -81,21 +54,13 @@ def test_remote_auth_uses_local_oauth_context() -> None:
     assert client is build.return_value
 
 
-def test_remote_auth_rejects_http_before_credential_bootstrap() -> None:
+def test_remote_rejects_http_before_credential_bootstrap() -> None:
     config_path = MagicMock()
     config_path.exists.return_value = True
     base_url = "http://nemo-helix.example.com"
 
     with (
         patch("nemo_insights_plugin.platform_client.Config.get_default_config_path", return_value=config_path),
-        patch(
-            "nemo_insights_plugin.platform_client.discover_nhx_config",
-            return_value=NHXOIDCConfig(
-                auth_enabled=True,
-                client_id="nemo-cli",
-                token_endpoint="https://auth.example.com/token",
-            ),
-        ),
         patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
         pytest.raises(ValueError, match="non-HTTPS remote URL"),
     ):
@@ -104,35 +69,13 @@ def test_remote_auth_rejects_http_before_credential_bootstrap() -> None:
     build.assert_not_called()
 
 
-def test_remote_discovery_failure_raises_controlled_error() -> None:
+def test_remote_http_without_config_uses_direct_client() -> None:
     config_path = MagicMock()
-    config_path.exists.return_value = True
-
-    with (
-        patch("nemo_insights_plugin.platform_client.Config.get_default_config_path", return_value=config_path),
-        patch(
-            "nemo_insights_plugin.platform_client.discover_nhx_config",
-            side_effect=httpx.ConnectError("connection refused"),
-        ),
-        patch("nemo_insights_plugin.platform_client.build_async_nemo_client") as build,
-        pytest.raises(RuntimeError, match="could not discover NeMo Helix auth configuration"),
-    ):
-        make_client(REMOTE_URL)
-
-    build.assert_not_called()
-
-
-def test_remote_no_auth_allows_http_without_credentials() -> None:
-    config_path = MagicMock()
-    config_path.exists.return_value = True
+    config_path.exists.return_value = False
     base_url = "http://nemo-helix.example.com"
 
     with (
         patch("nemo_insights_plugin.platform_client.Config.get_default_config_path", return_value=config_path),
-        patch(
-            "nemo_insights_plugin.platform_client.discover_nhx_config",
-            return_value=NHXOIDCConfig(auth_enabled=False),
-        ),
         patch("nemo_insights_plugin.platform_client.build_direct_async_nemo_client") as build_direct,
     ):
         client = make_client(base_url)

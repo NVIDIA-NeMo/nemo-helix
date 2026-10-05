@@ -24,7 +24,7 @@ from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_codegen import handle_code_generation
 from nemo_helix_plugin.cli_options import ListOutputFormatOption, NoTruncateOption, OutputColumnsOption
 from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output
-from nemo_helix_plugin.cli_state import cli_state, resolve_output_format
+from nemo_helix_plugin.cli_state import cli_state, resolve_base_url, resolve_output_format, shared_cli_client
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.commands import add_job_commands
 from nemo_helix_plugin.discovery import discover
@@ -143,26 +143,11 @@ def _register_contributed_subcommands(group: typer.Typer) -> None:
 def _remote_strategies() -> tuple[list[OptimizationStrategy], str]:
     """Ask the platform for its installed strategies. Raises if it cannot answer.
 
-    The platform comes from the global ``nemo --base-url`` / ``nemo --context``, and
-    under ``nemo`` the request uses the CLI's shared client, the way the rest of
-    ``nemo agents`` does.
-    ``nemo_agents_plugin.cli_context`` is imported lazily and is not a declared
-    dependency: this group is only ever reached through the ``nemo.cli.agents``
-    entry point, so the agents plugin is installed whenever this code runs, and
-    declaring it would drag the whole agents stack into service-only installs.
+    The platform comes from the global ``nemo --base-url`` / ``nemo --context``,
+    and the request uses the CLI's shared client, the way the rest of the CLI
+    does.
     """
-    from nemo_agents_plugin.cli_context import resolve_base_url, resolve_context_headers, shared_cli_client
-
     target = resolve_base_url()
-    # The CLI owns the shared client's connection pool, so it is not closed here.
     shared = shared_cli_client(AgentOptimizationClient, timeout=STRATEGIES_TIMEOUT_SECONDS)
-    if shared is not None:
-        listing = shared.list_strategies().data()
-    else:
-        with AgentOptimizationClient(
-            base_url=target,
-            default_headers=resolve_context_headers(),
-            timeout=STRATEGIES_TIMEOUT_SECONDS,
-        ) as client:
-            listing = client.list_strategies().data()
+    listing = shared.list_strategies().data()
     return listing.data, target

@@ -8,14 +8,17 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TypeVar
 from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_agents_plugin.cli import AgentsCLI
 from nemo_helix_plugin.client.client import NemoClient
 from typer.testing import CliRunner
 
 runner = CliRunner()
+ClientT = TypeVar("ClientT", bound=NemoClient)
 
 
 class _FakeSDKUser:
@@ -28,23 +31,62 @@ class _FakeSDKUser:
         return {"default_headers": {"Authorization": f"Bearer {self._token}"}}
 
 
+class _FakeCluster:
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url
+
+
 class _FakeSDKContext:
-    def __init__(self, base_url: str, token: str | None) -> None:
+    def __init__(self, base_url: str, token: str | None, workspace: str | None) -> None:
         self.user = _FakeSDKUser(token)
-        self.cluster = type("_Cluster", (), {"base_url": base_url})()
+        self.cluster = _FakeCluster(base_url)
+        self.workspace = workspace
 
 
 class _FakeCLIContext:
     """Minimal stand-in for ``CLIContext`` (typer.Context.obj)."""
 
-    def __init__(self, base_url: str = "http://config-host:9999", token: str | None = "cfg-token") -> None:
-        self._sdk = _FakeSDKContext(base_url, token)
+    def __init__(
+        self,
+        base_url: str = "http://config-host:9999",
+        token: str | None = "cfg-token",
+        workspace: str | None = "default",
+    ) -> None:
+        self._sdk = _FakeSDKContext(base_url, token, workspace)
+        self._client: NemoClient | None = None
 
     def get_sdk_context(self) -> _FakeSDKContext:
         return self._sdk
 
     def get_base_url(self, default: str | None = None) -> str | None:
         return str(self._sdk.cluster.base_url)
+
+    def get_workspace(self) -> str | None:
+        return self._sdk.workspace
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        if self._client is None:
+            auth_config = self._sdk.user.get_client_config()
+            default_headers = auth_config.get("default_headers")
+            headers = (
+                {str(key): str(value) for key, value in default_headers.items()}
+                if isinstance(default_headers, dict)
+                else None
+            )
+            self._client = NemoClient(
+                base_url=str(self._sdk.cluster.base_url),
+                workspace=self._sdk.workspace,
+                default_headers=headers,
+                timeout=timeout,
+            )
+        return self._client
+
+    def typed_client(
+        self,
+        client_cls: type[ClientT],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> ClientT:
+        return client_cls.from_client(self.get_client(timeout=timeout))
 
 
 @pytest.fixture
@@ -116,11 +158,11 @@ def test_usage_show_with_fileset_ref_uses_sdk(app, tmp_natjobs_dir: Path, fake_s
     """A bare-name ref classifies as FilesetRef and routes through the SDK."""
     fake = fake_sdk_factory(tmp_natjobs_dir)
 
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(
-            app,
-            ["usage", "show", "my-fileset", "--workspace", "ws-test"],
-        )
+    result = runner.invoke(
+        app,
+        ["usage", "show", "my-fileset", "--workspace", "ws-test"],
+        obj=_FakeCLIContext(),
+    )
 
     assert result.exit_code == 0, result.output
     # The resolved-target banner goes to stderr; stdout stays clean JSON.
@@ -199,13 +241,11 @@ def test_usage_show_sdk_download_failure_exits_cleanly(app, monkeypatch) -> None
         def download_file(self, *, workspace=None, name, path):
             raise RuntimeError("simulated SDK failure: fileset not found")
 
-    sdk = type("_BoomSDK", (), {"build_files_client": lambda self: BoomFiles()})()
     monkeypatch.setattr(
         "nemo_agents_plugin.usage.sources.fileset.FilesClient.from_client",
         lambda _platform: BoomFiles(),
     )
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=sdk):
-        result = runner.invoke(app, ["usage", "show", "missing-fileset"])
+    result = runner.invoke(app, ["usage", "show", "missing-fileset"], obj=_FakeCLIContext())
 
     assert result.exit_code == 1
     assert "Traceback" not in result.output
@@ -252,12 +292,13 @@ def test_usage_show_batch_all_runs_tokened_sums_compute_units(app, tmp_path: Pat
     assert payload["null_token_runs"] == 0
 
 
-def test_usage_show_rejects_empty_workspace(app, tmp_path: Path, fake_sdk_factory) -> None:
+def test_usage_show_rejects_empty_workspace(app) -> None:
     """``--workspace ''`` is rejected at the FilesetRef layer (symmetric with empty name)."""
-    fake = fake_sdk_factory(tmp_path)
-
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(app, ["usage", "show", "my-fileset", "--workspace", ""])
+    result = runner.invoke(
+        app,
+        ["usage", "show", "my-fileset", "--workspace", ""],
+        obj=_FakeCLIContext(),
+    )
 
     assert result.exit_code == 1
     assert "workspace must be non-empty" in result.output
@@ -295,13 +336,13 @@ def test_usage_show_path_shaped_missing_does_not_try_fileset(app, tmp_path: Path
 
 def test_usage_show_fileset_rewrites_source_dirs(app, tmp_natjobs_dir: Path, fake_sdk_factory) -> None:
     """Fileset-resolved reports replace tempdir source_dirs with synthetic ``<ref>/<rel>``."""
-    fake = fake_sdk_factory(tmp_natjobs_dir)
+    fake_sdk_factory(tmp_natjobs_dir)
 
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(
-            app,
-            ["usage", "show", "my-fileset"],
-        )
+    result = runner.invoke(
+        app,
+        ["usage", "show", "my-fileset"],
+        obj=_FakeCLIContext(),
+    )
 
     assert result.exit_code == 0, result.output
     # The resolved-target banner goes to stderr; stdout stays clean JSON.
@@ -319,10 +360,9 @@ def test_usage_show_fileset_single_run_rel_dot(app, tmp_path: Path, fake_sdk_fac
     staged = tmp_path / "staged"
     staged.mkdir()
     (staged / "result.json").write_text((fixtures_dir / "result-ok-with-tokens.json").read_text())
-    fake = fake_sdk_factory(staged)
+    fake_sdk_factory(staged)
 
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(app, ["usage", "show", "single-fileset"])
+    result = runner.invoke(app, ["usage", "show", "single-fileset"], obj=_FakeCLIContext())
 
     assert result.exit_code == 0, result.output
     # The resolved-target banner goes to stderr; stdout stays clean JSON.
@@ -354,24 +394,18 @@ def test_fileset_path_stages_nested_paths_preserving_relative(app, tmp_path: Pat
     assert {c["path"] for c in fake.files.calls} == {"top.txt", "configs/v1/config.json"}
 
 
-def test_usage_show_rejects_multi_segment_fileset_ref(app, tmp_path: Path, fake_sdk_factory) -> None:
+def test_usage_show_rejects_multi_segment_fileset_ref(app) -> None:
     """A multi-segment fileset ref (``ws/sub/path``) errors cleanly, not as a tempdir crash."""
-    fake = fake_sdk_factory(tmp_path)
-
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(app, ["usage", "show", "ws/sub/path"])
+    result = runner.invoke(app, ["usage", "show", "ws/sub/path"], obj=_FakeCLIContext())
 
     assert result.exit_code == 1
     assert "must not contain '/'" in result.output
 
 
-def test_usage_show_rejects_empty_or_dot_relative_fileset_name(app, tmp_path: Path, fake_sdk_factory) -> None:
+def test_usage_show_rejects_empty_or_dot_relative_fileset_name(app) -> None:
     """Trailing slash, ``.``, and ``..`` produce names rejected at the FilesetRef layer."""
-    fake = fake_sdk_factory(tmp_path)
-
     for ref in ("my-fileset/", "ws/.", "ws/.."):
-        with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-            result = runner.invoke(app, ["usage", "show", ref])
+        result = runner.invoke(app, ["usage", "show", ref], obj=_FakeCLIContext())
         assert result.exit_code == 1, (ref, result.output)
         assert "must be a real fileset name" in result.output, (ref, result.output)
 
@@ -409,11 +443,11 @@ def test_usage_show_with_workspace_qualified_fileset_ref(app, tmp_natjobs_dir: P
     """A ``ws/name`` ref overrides the default workspace."""
     fake = fake_sdk_factory(tmp_natjobs_dir)
 
-    with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=fake):
-        result = runner.invoke(
-            app,
-            ["usage", "show", "other-ws/eval-results"],
-        )
+    result = runner.invoke(
+        app,
+        ["usage", "show", "other-ws/eval-results"],
+        obj=_FakeCLIContext(),
+    )
 
     assert result.exit_code == 0, result.output
     assert fake.files.list_calls == [{"name": "eval-results", "workspace": "other-ws"}]

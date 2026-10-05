@@ -150,7 +150,8 @@ async def test_async_task_client_uses_workload_identity(monkeypatch, tmp_path, _
     monkeypatch.setenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", str(token_file))
 
     client = get_async_task_nemo_client("evaluator")
-    assert isinstance(client._auth, _FakeExchangeProvider)
+    assert client._auth is not None
+    assert await client._auth.get_access_token_or_none_async() == "exchanged-token"
     assert "X-NHX-Principal-Id" not in client._default_headers
 
 

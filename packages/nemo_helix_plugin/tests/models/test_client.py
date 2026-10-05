@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from nemo_helix_plugin.models.types import (
@@ -456,7 +457,7 @@ def test_get_openai_client_without_auth_sends_placeholder_key() -> None:
 
 @pytest.mark.asyncio
 async def test_get_async_openai_client_sends_token_provider_bearer() -> None:
-    client = AsyncModelsClient(base_url=BASE, workspace="default", auth="tok-2")
+    client = AsyncModelsClient(base_url=BASE, workspace="default", auth=StaticToken("tok-2"))
     seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
