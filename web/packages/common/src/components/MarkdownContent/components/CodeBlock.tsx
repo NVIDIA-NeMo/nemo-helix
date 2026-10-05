@@ -9,9 +9,7 @@ import { type ExtraProps } from 'react-markdown';
 
 type CodeBlockProps = ComponentProps<'code'> & ExtraProps;
 
-// `!` (important) beats CodeSnippet's own surface styles; `[&&]:` was used
-// before but composes with `dark:` into a descendant selector that never
-// matches, so the dark background silently fell back to the light one.
+// `!` surfaces beat CodeSnippet's own code background.
 const CODE_BLOCK_SURFACE_CLASS = '!bg-gray-050 dark:!bg-gray-900';
 const INLINE_CODE_SURFACE_CLASS =
   '!rounded !bg-gray-050 !px-1 !py-0.5 !font-sans dark:!bg-gray-900';

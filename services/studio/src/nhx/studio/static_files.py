@@ -257,12 +257,7 @@ class SPAStaticFiles(StaticFiles):
 
     @staticmethod
     def _accepts_html(scope: Scope) -> bool:
-        """True when the request is a browser navigation (Accept includes text/html).
-
-        Asset fetches (script/link/import) send Accept: */* or a concrete type,
-        so they must keep 404ing for genuinely missing files instead of silently
-        receiving index.html.
-        """
+        """True for browser navigations (Accept includes text/html); asset fetches send */*."""
         headers = dict(scope.get("headers") or [])
         accept = headers.get(b"accept", b"").decode("latin-1", errors="ignore")
         return "text/html" in accept
@@ -318,12 +313,8 @@ class SPAStaticFiles(StaticFiles):
         except Exception:
             pass
 
-        # If the original path failed, try SPA fallbacks. Client-side routes may
-        # carry a file extension: the fileset file preview URL ends in the file
-        # name (e.g. .../file/failure-classes/2026-10-04/report.md), so an
-        # extension alone must not block the index.html fallback. Browser
-        # navigations (Accept: text/html) fall through to the SPA; asset fetches
-        # (Accept: */*) keep 404ing for genuinely missing files.
+        # Client routes may end in a file extension (e.g. a file-preview URL);
+        # fall back to index.html for navigations even then. Asset fetches 404.
         if not self._has_file_extension(path) or self._accepts_html(scope):
             # Try adding .html extension
             html_path = rel_path.rstrip("/") + ".html"
