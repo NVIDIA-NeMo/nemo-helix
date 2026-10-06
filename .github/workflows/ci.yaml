@@ -2348,9 +2348,6 @@ jobs:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   jobs-openshell-tests:
-    # Same reason as deployments-openshell-tests: the openshell extra is a
-    # platform-restricted wheel the shared unit-test job does not install, so the
-    # OpenShell job backend tests skip there.
     name: Jobs OpenShell backend tests
     needs: [changes]
     if: >

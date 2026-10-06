@@ -4,6 +4,7 @@
 package nhxclient
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,7 +19,7 @@ const stepSpecNameConfigKey = "_step_spec_name"
 type JobStepClient interface {
 	// GetJobStepConfig returns the step spec config for a job step as JSON,
 	// in the shape the workload reads from NEMO_JOB_STEP_CONFIG_FILE_PATH.
-	GetJobStepConfig(workspace, job, step string) ([]byte, error)
+	GetJobStepConfig(ctx context.Context, workspace, job, step string) ([]byte, error)
 }
 
 type jobStepClient struct {
@@ -45,8 +46,8 @@ func getJobStepURL(baseURL, workspace, job, step string) string {
 	)
 }
 
-func (c *jobStepClient) GetJobStepConfig(workspace, job, step string) ([]byte, error) {
-	req, err := http.NewRequest("GET", getJobStepURL(c.apiBaseURL, workspace, job, step), nil)
+func (c *jobStepClient) GetJobStepConfig(ctx context.Context, workspace, job, step string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", getJobStepURL(c.apiBaseURL, workspace, job, step), nil)
 	if err != nil {
 		return nil, err
 	}

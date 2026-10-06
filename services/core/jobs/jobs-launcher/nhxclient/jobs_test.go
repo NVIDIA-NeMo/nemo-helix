@@ -4,7 +4,9 @@
 package nhxclient
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -71,7 +73,7 @@ func TestJobStepClient_GetJobStepConfig(t *testing.T) {
 			defer server.Close()
 
 			client := NewJobStepClientWithHTTPClient(server.URL, tc.principal, server.Client())
-			data, err := client.GetJobStepConfig("ws", "job-1", "step-a")
+			data, err := client.GetJobStepConfig(context.Background(), "ws", "job-1", "step-a")
 
 			if tc.expectError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.expectError) {
@@ -90,6 +92,21 @@ func TestJobStepClient_GetJobStepConfig(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestJobStepClient_GetJobStepConfigCancelled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	client := NewJobStepClientWithHTTPClient(server.URL, nil, server.Client())
+	if _, err := client.GetJobStepConfig(ctx, "ws", "job-1", "step-a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
 
