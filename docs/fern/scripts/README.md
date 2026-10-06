@@ -45,7 +45,7 @@ adjacent `.ipynb` files during Fern preparation.
 Keeps notebook actions consistent across Fern docs:
 
 - Inline MDX pages with an adjacent `.ipynb` get top-of-page buttons for
-  running in Colab and downloading the source notebook.
+  running in Colab and downloading the source notebook from generated Fern assets.
 - `NotebookViewer` wrapper pages with an adjacent `.ipynb` get generated
   `colabUrl` and `downloadUrl` props so the viewer renders the same actions.
 - Pages without an adjacent `.ipynb` do not get generated notebook actions.
