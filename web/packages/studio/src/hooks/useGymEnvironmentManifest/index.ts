@@ -44,6 +44,8 @@ const CONFIG_PATH_PREFIXES: Record<string, readonly string[]> = {
 export interface GymEnvironmentManifest {
   /** Value of the `format` field in nemo-environment.yaml (e.g. "adapter-wheels-v1"). */
   format: string;
+  /** `adapter.agent`, the NeMo Gym agent an adapter-wheels-v1 package runs. */
+  agent?: string;
   envName: string;
   description?: string;
   hubId?: string;
@@ -213,6 +215,7 @@ export const useGymEnvironmentManifest = ({
     return {
       manifest: {
         format: yaml.format ?? 'unknown',
+        agent: yaml.adapter?.agent?.trim() || undefined,
         envName: meta.name ?? 'unknown',
         description: meta.description || undefined,
         hubId: meta.hub_id || undefined,

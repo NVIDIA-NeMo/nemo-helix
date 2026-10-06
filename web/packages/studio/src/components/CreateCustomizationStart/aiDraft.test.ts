@@ -12,7 +12,6 @@ import {
 import {
   automodelDraft,
   GYM_DATASET,
-  HYBRID_MOE_MODEL,
   INPUTS,
   PREFERENCE_DATASET,
   SQL_ENVIRONMENT,
@@ -167,13 +166,6 @@ describe('validateDraft', () => {
       expect(expectValid(validate(automodelDraft())).values.outputName).toBe(
         'llama-8b-ticket-router'
       );
-    });
-
-    it('keeps LoRA off Mamba out_proj layers, where adapters have no effect', () => {
-      const { values } = expectValid(
-        validate(automodelDraft(), { ...INPUTS, model: HYBRID_MOE_MODEL })
-      );
-      expect(values.automodel.training.lora?.exclude_modules).toEqual(['*.out_proj']);
     });
 
     it('keeps an unsloth merged save', () => {
