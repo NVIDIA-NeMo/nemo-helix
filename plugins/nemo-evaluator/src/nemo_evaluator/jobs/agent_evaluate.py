@@ -521,7 +521,6 @@ class _AgentEvalJobBase(NemoJob):
                 model=target.model,
                 timeout_s=target.timeout_s,
                 capture_trajectory=target.capture_trajectory,
-                work_root=ctx.storage.persistent / "fabric",
             )
             return fabric_runtime, None, None
         if isinstance(target, GymRunnerTarget):
@@ -583,7 +582,7 @@ class _AgentEvalJobBase(NemoJob):
         if isinstance(target, HarborRunnerTarget):
             harbor_runtime = HarborAgentTaskRunner(
                 config=HarborRuntimeConfig(
-                    jobs_dir=ctx.storage.persistent / "harbor",
+                    jobs_dir=ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor",
                     agent_name=target.agent_name,
                     agent_import_path=target.agent_import_path,
                     agent_model_name=target.agent_model_name,

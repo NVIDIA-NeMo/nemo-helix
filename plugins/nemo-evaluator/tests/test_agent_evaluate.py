@@ -75,6 +75,7 @@ from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.commands import add_job_commands
@@ -350,6 +351,66 @@ def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bun
     assert json.loads(capture)["model_call_id"] == "c0"
 
 
+def _fabric_evidence_path(runtime: FabricAgentRuntime, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
+    return runtime._evidence_dir(0, task, config) / "fabric_result.json"
+
+
+def _harbor_evidence_path(runtime: HarborAgentTaskRunner, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
+    assert runtime._config is not None and runtime._config.jobs_dir is not None
+    return runtime._config.jobs_dir / "job" / task.id / "result.json"
+
+
+@pytest.mark.parametrize(
+    ("runtime_cls", "target", "evidence_path"),
+    [
+        (FabricAgentRuntime, _runner_target("openai/gpt-5.4"), _fabric_evidence_path),
+        (HarborAgentTaskRunner, HarborRunnerTarget(agent_name="oracle"), _harbor_evidence_path),
+    ],
+    ids=["fabric", "harbor"],
+)
+def test_agent_eval_job_keeps_runner_evidence_inside_the_downloadable_bundle(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    runtime_cls: type,
+    target: FabricRunnerTarget | HarborRunnerTarget,
+    evidence_path: Callable[[Any, AgentEvalTask, AgentEvalRunConfig], Path],
+) -> None:
+    """Each runner writes evidence where the job tells it to; that place must be inside the bundle.
+
+    Anywhere else, the evidence dies with the Job's container and the trial references a path nobody can open.
+    """
+
+    async def run_tasks(
+        runtime: Any, tasks: Sequence[AgentEvalTask], config: AgentEvalRunConfig | None = None
+    ) -> list[AgentEvalTrial]:
+        assert config is not None
+        [task] = tasks
+        path = evidence_path(runtime, task, config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return [
+            AgentEvalTrial(
+                id=f"{task.id}-trial",
+                task_id=task.id,
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="4"),
+                evidence=CandidateEvidence(descriptors={"result": EvidenceDescriptor(kind="log", ref=str(path))}),
+            )
+        ]
+
+    mocker.patch.object(runtime_cls, "run_tasks", autospec=True, side_effect=run_tasks)
+    ctx = _job_context(tmp_path)
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    downloaded = ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+    [trial] = [json.loads(line) for line in (downloaded / "trials.jsonl").read_text(encoding="utf-8").splitlines()]
+    ref = trial["evidence"]["descriptors"]["result"]["ref"]
+    assert not Path(ref).is_absolute()
+    assert (downloaded / ref).is_file()
+
+
 def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
     """A retried job (Volcano ``maxRetry``) reuses the failed attempt's persistent storage; leftover Gym output
     must not block or leak.
@@ -439,7 +500,6 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     target, prompt_template, params = AgentEvalJob._resolve_target(fabric_target, ctx)
     assert isinstance(target, FabricAgentRuntime)
     assert target._model == "openai/gpt-5.4"
-    assert target._work_root == ctx.storage.persistent / "fabric"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
@@ -462,9 +522,8 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(harbor_target, ctx)
     assert isinstance(target, HarborAgentTaskRunner)
-    # The runtime-only jobs directory is injected from the job's persistent storage.
     assert target._config is not None
-    assert target._config.jobs_dir == ctx.storage.persistent / "harbor"
+    assert target._config.jobs_dir == ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor"
     # Spec knobs are forwarded onto the Harbor runtime config.
     assert target._config.agent_model_name == "openai/gpt-5.4"
     assert target._config.agent_kwargs == {
