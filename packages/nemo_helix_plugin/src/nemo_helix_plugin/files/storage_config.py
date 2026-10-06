@@ -329,7 +329,8 @@ def parse_ssh_remote(url: str) -> SshRemote:
     return SshRemote(
         user=parts["user"],
         host=parts["host"].lower().removesuffix("."),
-        port=int(port) if port else None,
+        # ssh's default port, dropped so one repository has one URL, as the allowlist already assumes.
+        port=int(port) if port and int(port) != 22 else None,
         path=parts["path"],
         scp=scp,
     )
