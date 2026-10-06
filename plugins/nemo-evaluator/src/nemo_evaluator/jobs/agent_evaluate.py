@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -67,12 +68,14 @@ from nemo_evaluator.jobs.gym_sandbox import (
 )
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
+from nemo_evaluator.jobs.metric_resolution import resolve_deferred_metric_models
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
 from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.jobs.token_usage import capture_agent_evaluation_usage, capture_evaluator_request_logs
 from nemo_evaluator.jobs.utils import async_client_from_sync_client
+from nemo_evaluator.shared.metric_bundles.cloudpickle import allow_cloudpickle_loading
 from nemo_evaluator.task_refs import (
     groupby_kind,
     load_tasks,
@@ -309,6 +312,14 @@ def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: Jo
     return staged
 
 
+def _with_deferred_metric_models(
+    task: ResolvedTask, *, workspace: str, async_client: AsyncNemoClient | None
+) -> ResolvedTask:
+    """Return the task with cloudpickle metric model references resolved in the worker."""
+    metrics = resolve_deferred_metric_models(task.spec.metrics, workspace=workspace, async_client=async_client)
+    return task.model_copy(update={"spec": task.spec.model_copy(update={"metrics": metrics})})
+
+
 class _AgentEvalJobBase(NemoJob):
     """Run agent evaluation (``AgentEvaluator``) over tasks against a Model/Agent endpoint or runner."""
 
@@ -332,7 +343,20 @@ class _AgentEvalJobBase(NemoJob):
         is_local: bool,
     ) -> BaseModel:
         """Resolve each task's metric references into inline metrics for the canonical spec."""
-        del is_local
+        with allow_cloudpickle_loading() if is_local else nullcontext():
+            return await cls._resolve_spec(
+                input_spec, workspace=workspace, entity_client=entity_client, async_sdk=async_sdk
+            )
+
+    @classmethod
+    async def _resolve_spec(
+        cls,
+        input_spec: BaseModel,
+        *,
+        workspace: str,
+        entity_client: object,
+        async_sdk: AsyncHelixClient | None,
+    ) -> BaseModel:
         submit_spec = (
             input_spec.model_copy(deep=True)
             if isinstance(input_spec, AgentEvalInputSpec)
@@ -678,6 +702,14 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
+        spec = spec.model_copy(
+            update={
+                "tasks": [
+                    _with_deferred_metric_models(task, workspace=ctx.workspace, async_client=async_client)
+                    for task in spec.tasks
+                ]
+            }
+        )
         prepare_ctx = PrepareContext(
             storage_root=ctx.storage.persistent,
             client=platform_client if isinstance(platform_client, NemoClient) else None,
@@ -776,7 +808,8 @@ class AgentEvalJob(_AgentEvalJobBase):
         client: NemoClient,
     ) -> dict:
         """Run the agent evaluation locally and persist its result bundle as artifacts."""
-        return self._run_sync(config, ctx=ctx, client=client)
+        with allow_cloudpickle_loading():
+            return self._run_sync(config, ctx=ctx, client=client)
 
 
 class AsyncAgentEvalJob(_AgentEvalJobBase):
@@ -790,4 +823,5 @@ class AsyncAgentEvalJob(_AgentEvalJobBase):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Run the agent evaluation in a task container and persist async side effects."""
-        return self._run_with_client(config, ctx=ctx, platform_client=async_client, async_client=async_client)
+        with allow_cloudpickle_loading():
+            return self._run_with_client(config, ctx=ctx, platform_client=async_client, async_client=async_client)

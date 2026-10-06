@@ -21,6 +21,8 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 
+pytestmark = pytest.mark.usefixtures("cloudpickle_loading")
+
 
 class _OptionalMetric:
     type = "optional-score"

@@ -57,7 +57,7 @@ from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, Publicat
 from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.metric_refs import MetricRef
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
-from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator.tasks.agent_evaluate import main as agent_eval_task_main
 from nemo_evaluator.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary
@@ -113,7 +113,7 @@ from typer.testing import CliRunner
 def _inline_metric() -> MetricInline:
     bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{item.model_output}}"),
-        CloudpickleMetricBundlePackager(),
+        InlineMetricBundlePackager(),
     )
     return MetricInline.model_validate(bundle.model_dump(mode="json"))
 

@@ -18,6 +18,7 @@ from nemo_evaluator.jobs.agent_spec import (
 )
 from nemo_evaluator.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext, TaskKindAdapter
 from nemo_evaluator.jobs.metric_resolution import (
+    loadable_here,
     require_resolved_model_refs,
     resolve_metrics_to_inline,
     to_runtime_metrics,
@@ -100,6 +101,8 @@ class EvaluatorTaskAdapter(TaskKindAdapter):
     ) -> None:
         """Reject unresolved metric model references during API and worker validation."""
         for task in tasks:
+            if not all(loadable_here(metric) for metric in task.spec.metrics):
+                continue
             runtime = _to_runtime_task(task)
             require_resolved_model_refs(runtime.metrics, subject=f"AgentEvalSpec task {task.id!r}")
 

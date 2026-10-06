@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import pickle
 from pathlib import Path
 from typing import Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -35,7 +37,12 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
     register_metric_bundle_kind,
     unbundle_metric,
 )
-from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evaluator.shared.metric_bundles.cloudpickle import (
+    CloudpickleMetricBundlePackager,
+    CloudpickleMetricPayload,
+    allow_cloudpickle_loading,
+)
+from nemo_evaluator.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evaluator.tasks.evaluate import main as evaluate_task_main
 from nemo_evaluator.tasks.runner import SDK_INITIALIZATION_EXIT_CODE
 from nemo_evaluator_sdk.enums import AgentFormat
@@ -92,7 +99,7 @@ def _exact_match_spec() -> dict:
 
 
 def _bundle_payload(metric) -> dict[str, Any]:
-    return bundle_metric(metric, CloudpickleMetricBundlePackager()).model_dump(mode="json")
+    return bundle_metric(metric, HybridMetricBundlePackager()).model_dump(mode="json")
 
 
 def _repo_root() -> Path:
@@ -523,7 +530,8 @@ def test_unbundle_metric_dispatches_mixed_bundle_kinds_by_payload_kind() -> None
     )
     static_bundle = bundle_metric(_StaticMetric("test-static"), _StaticMetricBundlePackager())
 
-    metrics = [unbundle_metric(bundle) for bundle in [cloudpickle_bundle, static_bundle]]
+    with allow_cloudpickle_loading():
+        metrics = [unbundle_metric(bundle) for bundle in [cloudpickle_bundle, static_bundle]]
 
     assert [metric.type for metric in metrics] == ["exact-match", "test-static"]
 
@@ -684,6 +692,89 @@ async def test_evaluate_job_to_spec_preserves_metric_without_model_refs() -> Non
     metric = unbundle_metric(to_runtime_bundle(canonical.metrics[0]))
     assert isinstance(metric, LLMJudgeMetric)
     assert metric.prompt_template is None
+
+
+class _Detonator:
+    def __reduce__(self):
+        return (pytest.fail, ("to_spec deserialized a cloudpickle payload",))
+
+
+async def test_evaluate_job_to_spec_never_deserializes_cloudpickle_on_the_api_server() -> None:
+    bundle = bundle_metric(ExactMatchMetric(reference="a", candidate="a"), CloudpickleMetricBundlePackager())
+    hostile = bundle.model_copy(update={"payload": CloudpickleMetricPayload.from_blob(pickle.dumps(_Detonator()))})
+
+    canonical = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {"metrics": [hostile.model_dump(mode="json")], "dataset": [{"output_text": "hello"}]}
+        ),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=_async_sdk(),
+        is_local=False,
+    )
+
+    assert isinstance(canonical, EvaluateSpec)
+    assert to_runtime_bundle(canonical.metrics[0]).payload.digest == hostile.payload.digest
+
+
+async def test_evaluate_job_local_to_spec_resolves_cloudpickle_metric_model_refs(mocker: MockerFixture) -> None:
+    _patch_async_model_reference_resolution(mocker)
+    bundle = bundle_metric(_llm_judge_ref_metric(), CloudpickleMetricBundlePackager())
+
+    canonical = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {"metrics": [bundle.model_dump(mode="json")], "dataset": [{"output_text": "hello"}]}
+        ),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=_async_sdk(),
+        is_local=True,
+    )
+
+    assert isinstance(canonical, EvaluateSpec)
+    with allow_cloudpickle_loading():
+        metric = unbundle_metric(to_runtime_bundle(canonical.metrics[0]))
+    assert isinstance(metric, LLMJudgeMetric)
+    assert isinstance(metric.model, Model)
+
+
+class _StopBeforeScoring(Exception):
+    pass
+
+
+async def test_evaluate_job_worker_resolves_cloudpickle_metric_model_refs_deferred_by_api(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    _patch_async_model_reference_resolution(mocker)
+    bundle = bundle_metric(_llm_judge_ref_metric(), CloudpickleMetricBundlePackager())
+    canonical = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {"metrics": [bundle.model_dump(mode="json")], "dataset": [{"output_text": "hello"}]}
+        ),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=_async_sdk(),
+        is_local=False,
+    )
+    compiled = await EvaluateJob.compile(
+        workspace="default", spec=canonical, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    config = cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)
+    scored_specs: list[EvaluateSpec] = []
+
+    def stop_before_scoring(self: EvaluateJob, spec: EvaluateSpec, **kwargs: Any) -> None:
+        scored_specs.append(spec)
+        raise _StopBeforeScoring
+
+    mocker.patch.object(EvaluateJob, "_run_evaluator", stop_before_scoring)
+    with pytest.raises(_StopBeforeScoring):
+        await asyncio.to_thread(_run_evaluate_job, config, tmp_path)
+
+    with allow_cloudpickle_loading():
+        metric = unbundle_metric(to_runtime_bundle(scored_specs[0].metrics[0]))
+    assert isinstance(metric, LLMJudgeMetric)
+    assert isinstance(metric.model, Model)
+    assert metric.model.url == "https://igw.example.test/v1/chat/completions"
 
 
 async def test_evaluate_job_compile_produces_online_model_job() -> None:

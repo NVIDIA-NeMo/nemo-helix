@@ -9,6 +9,9 @@ import hashlib
 import pickle
 import platform
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Annotated, Literal
 
 import cloudpickle
@@ -21,8 +24,26 @@ from nemo_evaluator.shared.metric_bundles.bundles import (
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from pydantic import ConfigDict, Field, computed_field, field_validator
 
+CLOUDPICKLE_KIND = "cloudpickle"
 MAX_CLOUDPICKLE_PAYLOAD_BYTES = 10 * 1024 * 1024
 CloudpickleBlob = Annotated[bytes, Field(min_length=1, max_length=MAX_CLOUDPICKLE_PAYLOAD_BYTES)]
+
+_loading_allowed: ContextVar[bool] = ContextVar("cloudpickle_metric_loading_allowed", default=False)
+
+
+def cloudpickle_loading_allowed() -> bool:
+    """Whether the current context may execute code from a cloudpickle metric payload."""
+    return _loading_allowed.get()
+
+
+@contextmanager
+def allow_cloudpickle_loading() -> Iterator[None]:
+    """Permit cloudpickle hydration; only for job workers and the submitter's own process, never an API handler."""
+    token = _loading_allowed.set(True)
+    try:
+        yield
+    finally:
+        _loading_allowed.reset(token)
 
 
 def _format_bytes(value: int) -> str:
@@ -75,7 +96,7 @@ class CloudpickleMetricPayload(MetricBundlePayload):
     @property
     def kind(self) -> Literal["cloudpickle"]:
         """Payload discriminator used by the metric bundle registry."""
-        return "cloudpickle"
+        return CLOUDPICKLE_KIND
 
     @computed_field
     @property
@@ -112,6 +133,10 @@ class CloudpickleMetricBundlePackager(MetricBundlePackager):
 
     def load(self, payload: MetricBundlePayload) -> Metric:
         """Hydrate a metric from a cloudpickle payload."""
+        if not cloudpickle_loading_allowed():
+            raise MetricBundlingError(
+                "cloudpickle metric payloads run arbitrary code and are only loaded inside an evaluation job"
+            )
         cloudpickle_payload = CloudpickleMetricPayload.model_validate(payload.model_dump(mode="python"))
         _validate_python_version(cloudpickle_payload)
         hydrated_metric = cloudpickle.loads(cloudpickle_payload.blob)
@@ -121,7 +146,7 @@ class CloudpickleMetricBundlePackager(MetricBundlePackager):
 
 
 register_metric_bundle_kind(
-    "cloudpickle",
+    CLOUDPICKLE_KIND,
     payload_type=CloudpickleMetricPayload,
     packager_factory=CloudpickleMetricBundlePackager,
 )

@@ -12,7 +12,7 @@ from nemo_evaluator.harbor.resolution import harbor_member
 from nemo_evaluator.jobs.agent_spec import HarborRunnerTarget, ResolvedTask, Target
 from nemo_evaluator.jobs.harbor_scoring import harbor_scoring_task
 from nemo_evaluator.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext, TaskKindAdapter
-from nemo_evaluator.jobs.metric_resolution import resolve_metrics_to_inline
+from nemo_evaluator.jobs.metric_resolution import loadable_here, resolve_metrics_to_inline
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.scoring import saved_harbor_reward_key
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial
@@ -60,6 +60,8 @@ class HarborTaskAdapter(TaskKindAdapter):
         for task in tasks:
             if not isinstance(task.spec, ResolvedHarborTaskDefinition):
                 raise ValueError("Expected a Harbor task")
+            if not all(loadable_here(metric) for metric in task.spec.metrics):
+                continue
             harbor_scoring_task(definition=task.spec, reward_key=reward_key)
 
     def prepare(self, tasks: Sequence[ResolvedTask], ctx: PrepareContext) -> list[AgentEvalTask]:

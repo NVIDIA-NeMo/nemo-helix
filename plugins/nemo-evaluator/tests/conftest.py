@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
+from nemo_evaluator.shared.metric_bundles.cloudpickle import allow_cloudpickle_loading
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityBase, EntityClient, ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -203,6 +204,13 @@ class FakeSecretsClient(AsyncSecretsClient):
         if key not in self._secrets:
             raise NotFoundError(httpx.Response(404, json={"detail": "not found"}, request=httpx.Request("GET", "/")))
         return FakeAccessResponse(HelixSecretAccessResponse(name=name, workspace=key[0], value=self._secrets[key]))
+
+
+@pytest.fixture
+def cloudpickle_loading():
+    """Run the test as a job worker would, with cloudpickle metric hydration permitted."""
+    with allow_cloudpickle_loading():
+        yield
 
 
 @pytest.fixture

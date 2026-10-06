@@ -5,10 +5,13 @@ from __future__ import annotations
 
 from typing import cast
 
+import pytest
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric, unbundle_metric
 from nemo_evaluator.shared.metric_bundles.hybrid import HybridMetricBundlePackager
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+
+pytestmark = pytest.mark.usefixtures("cloudpickle_loading")
 
 
 class _CustomMetric:
