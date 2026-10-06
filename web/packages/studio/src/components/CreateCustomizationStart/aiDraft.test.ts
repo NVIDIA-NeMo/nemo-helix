@@ -227,6 +227,13 @@ describe('estimateTrainingRows', () => {
     });
   });
 
+  it('never presents the count as exact when the files are not valid UTF-8', () => {
+    expect(estimateTrainingRows([file(100, 1_000, 1_000)], false)).toEqual({
+      trainingRowCount: 100,
+      rowCountIsEstimate: true,
+    });
+  });
+
   it('scales a capped preview by the bytes actually read', () => {
     expect(estimateTrainingRows([file(1_000, 5_000_000, 500_000)])).toEqual({
       trainingRowCount: 10_000,

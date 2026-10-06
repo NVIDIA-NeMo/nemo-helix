@@ -44,13 +44,16 @@ export interface DraftDataset {
  * Rows across the training files. A count taken from a capped preview — fewer bytes read
  * than the file holds — is scaled up by the file's size, assuming the rows read are typical
  * of the rest. A count from the whole file is used as is.
+ *
+ * Bytes read are measured on decoded text, which only matches the file for valid UTF-8, so
+ * the total is never presented as exact when the encoding check failed.
  */
 interface RowCount {
   trainingRowCount: number;
   rowCountIsEstimate: boolean;
 }
 
-export const estimateTrainingRows = (files: AnnotatedFilesetFile[]): RowCount =>
+export const estimateTrainingRows = (files: AnnotatedFilesetFile[], validUtf8 = true): RowCount =>
   files.reduce<RowCount>(
     (total, file) => {
       const rows = file.rowCount ?? 0;
@@ -62,7 +65,7 @@ export const estimateTrainingRows = (files: AnnotatedFilesetFile[]): RowCount =>
         rowCountIsEstimate: total.rowCountIsEstimate || capped,
       };
     },
-    { trainingRowCount: 0, rowCountIsEstimate: false }
+    { trainingRowCount: 0, rowCountIsEstimate: !validUtf8 }
   );
 
 /** The picked reward environment, with what its `nemo-environment.yaml` says about itself. */
