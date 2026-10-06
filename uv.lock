@@ -6738,6 +6738,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+filesets = [
+    { name = "anyio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "fsspec", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
 nemo-evaluator-sdk = [
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -6757,13 +6761,30 @@ nemo-evaluator-sdk = [
     { name = "rouge-score", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "sacrebleu", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
+nemo-helix-ext = [
+    { name = "docker", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "ngcsdk", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nvidia-ml-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "prompt-toolkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "psutil", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "pyyaml", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "requests", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "rich", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.88.0" },
+    { name = "anyio", marker = "extra == 'filesets'", specifier = ">=4.0.0" },
+    { name = "docker", marker = "extra == 'nemo-helix-ext'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.4" },
     { name = "filesets", editable = "packages/filesets" },
+    { name = "fsspec", marker = "extra == 'filesets'", specifier = ">=2023.1.0" },
     { name = "httpx", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.27.0,<1" },
+    { name = "httpx", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.23.0,<1" },
     { name = "jinja2", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=3.1.6" },
     { name = "jsonpath-ng", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.7.0" },
     { name = "jsonschema", specifier = ">=4.0.0" },
@@ -6773,22 +6794,31 @@ requires-dist = [
     { name = "lark", specifier = ">=1.1.0" },
     { name = "nemo-fabric", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.4.0,<0.5.0" },
     { name = "nemo-relay", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=0.9.3,<0.10" },
+    { name = "ngcsdk", marker = "extra == 'nemo-helix-ext'", specifier = ">=4.8.2" },
+    { name = "nvidia-ml-py", marker = "extra == 'nemo-helix-ext'", specifier = ">=13.0.0" },
     { name = "openai", specifier = ">=1.109.1" },
     { name = "openai", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.61.0" },
     { name = "opentelemetry-proto", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.27.0" },
     { name = "pandas", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=1.5.3" },
+    { name = "prompt-toolkit", marker = "extra == 'nemo-helix-ext'", specifier = ">=3.0.0" },
+    { name = "psutil", marker = "extra == 'nemo-helix-ext'", specifier = ">=5.9.0" },
     { name = "pyarrow", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydantic", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
     { name = "pytrec-eval-terrier", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "pyyaml", marker = "extra == 'nemo-helix-ext'", specifier = ">=6.0.0" },
     { name = "ragas", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.4.3" },
+    { name = "requests", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.31.0" },
+    { name = "rich", marker = "extra == 'nemo-helix-ext'", specifier = ">=13.7.1" },
     { name = "rouge-score", marker = "extra == 'nemo-evaluator-sdk'", specifier = "==0.1.2" },
     { name = "sacrebleu", marker = "extra == 'nemo-evaluator-sdk'", specifier = ">=2.5.1" },
     { name = "typer", specifier = ">=0.20.0,<0.26" },
+    { name = "typer", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.20.0" },
 ]
-provides-extras = ["nemo-evaluator-sdk"]
+provides-extras = ["filesets", "nemo-evaluator-sdk", "nemo-helix-ext"]
 
 [[package]]
 name = "nemo-helix-sdk-tools"

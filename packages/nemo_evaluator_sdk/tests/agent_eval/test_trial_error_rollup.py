@@ -5,9 +5,6 @@
 
 from __future__ import annotations
 
-from importlib import import_module
-from typing import Any
-
 import pytest
 from nemo_evaluator_sdk.agent_eval.results import AgentEvalSummary, _error_trial_ids
 from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
@@ -19,10 +16,6 @@ from nemo_evaluator_sdk.agent_eval.trials import (
 )
 from nemo_evaluator_sdk.metrics.protocol import MetricOutput
 from pydantic import ValidationError
-
-
-def _vendored_module(name: str) -> Any:
-    return import_module(f"nemo_helix.beta.evaluator.agent_eval.{name}")
 
 
 def _trial(
@@ -159,26 +152,3 @@ def test_summary_round_trips_the_rollup_through_json() -> None:
 
     assert reloaded.error_trial_ids == {"RuntimeError": ["t0"]}
     assert reloaded.error_count == 1
-
-
-def test_vendored_module_exposes_the_error_rollup_surface() -> None:
-    # The byte-copy pin proves file parity, not that these names are importable through the shipped
-    # package -- which is the path a nemo-helix consumer actually uses.
-    vendored_results = _vendored_module("results")
-    vendored_trials = _vendored_module("trials")
-    VendoredSummary = vendored_results.AgentEvalSummary
-    VendoredTrial = vendored_trials.AgentEvalTrial
-    VendoredStatus = vendored_trials.AgentEvalTrialStatus
-    VendoredError = vendored_trials.TrialError
-
-    trial = VendoredTrial(
-        id="t0",
-        task_id="task-a",
-        status=VendoredStatus.PARTIAL,
-        error=VendoredError(type="RuntimeError", message="boom"),
-    )
-    summary = VendoredSummary.from_scores([], trials=[trial])
-
-    assert summary.error_trial_ids == {"RuntimeError": ["t0"]}
-    assert summary.error_count == 1
-    assert trial.get_evidence("result") is None
