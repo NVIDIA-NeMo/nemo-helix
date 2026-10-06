@@ -122,6 +122,9 @@ RUN --mount=type=bind,from=builder,source=/usr/bin/tar,target=/usr/bin/tar \
 COPY --chmod=0755 --from=nhx-jobs-launcher /artifacts/jobs-launcher /tools/jobs-launcher
 ENV USERNAME=sandbox \
     HOME=/home/sandbox
+# The docker driver validates the image WORKDIR is writable by the sandbox
+# identity before starting the supervisor; /app is the root-owned venv.
+WORKDIR /home/sandbox
 
 FROM openshell AS openshell-smoke-test
 # Mimic the OpenShell launch contract: non-root `sandbox` user, PATH reset to the

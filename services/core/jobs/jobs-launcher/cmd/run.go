@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,13 @@ import (
 )
 
 const secretFetchTimeout = 30 * time.Second
+
+const stepConfigFetchTimeout = 30 * time.Second
+
+// fetchStepConfig makes the launcher download the step config from the jobs API
+// before starting the workload. Runtimes with no way to place a file in the
+// container before it starts (OpenShell) set it instead of pre-writing the file.
+var fetchStepConfig bool
 
 var runCmd = &cobra.Command{
 	Use:   "run <command> [args...]",
@@ -47,7 +55,52 @@ var runCmd = &cobra.Command{
 var launcherExitCode int
 
 func init() {
+	runCmd.Flags().BoolVar(
+		&fetchStepConfig,
+		"fetch-step-config",
+		false,
+		"Fetch the step config from the jobs API and write it to NEMO_JOB_STEP_CONFIG_FILE_PATH before starting the command",
+	)
 	rootCmd.AddCommand(runCmd)
+}
+
+// writeStepConfigFromAPI fetches this job step's config and writes it where the
+// workload expects it. The step is identified by the NEMO_JOB_* env vars the
+// jobs controller sets on every job.
+func writeStepConfigFromAPI() error {
+	required := map[string]string{}
+	for _, name := range []string{"NEMO_JOB_WORKSPACE", "NEMO_JOB_ID", "NEMO_JOB_STEP", "NEMO_JOB_STEP_CONFIG_FILE_PATH"} {
+		value := os.Getenv(name)
+		if value == "" {
+			return fmt.Errorf("%s is required with --fetch-step-config", name)
+		}
+		required[name] = value
+	}
+
+	endpoint, err := nhxclient.ResolveServiceEndpointFromEnv("jobs")
+	if err != nil {
+		return fmt.Errorf("jobs endpoint is not configured (NHX_JOBS_URL or NHX_BASE_URL): %w", err)
+	}
+	httpClient := *endpoint.HTTPClient()
+	httpClient.Timeout = stepConfigFetchTimeout
+	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), &httpClient)
+
+	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
+	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
+	config, err := client.GetJobStepConfig(workspace, job, step)
+	if err != nil {
+		return fmt.Errorf("failed to fetch step config for %s/%s/%s: %w", workspace, job, step, err)
+	}
+
+	path := required["NEMO_JOB_STEP_CONFIG_FILE_PATH"]
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create step config directory: %w", err)
+	}
+	if err := os.WriteFile(path, config, 0o600); err != nil {
+		return fmt.Errorf("failed to write step config: %w", err)
+	}
+	logger.Printf("Wrote step config to %s\n", path)
+	return nil
 }
 
 // secretReference represents a mapping from an environment variable to a secret
@@ -195,6 +248,13 @@ func runExec(args []string, stdinReader io.Reader) (int, error) {
 
 	// Inherit parent environment, excluding launcher-private control variables.
 	cmd.Env = workloadEnvFromParent()
+
+	if fetchStepConfig {
+		if err := writeStepConfigFromAPI(); err != nil {
+			logger.Printf("Error: %v\n", err)
+			return 1, err
+		}
+	}
 
 	// Parse and fetch secrets if NEMO_JOB_SECRETS is set
 	secretsEnv := os.Getenv("NEMO_JOB_SECRETS")

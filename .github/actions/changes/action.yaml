@@ -73,6 +73,9 @@ outputs:
   deployments-openshell:
     description: "'true' if the nemo-deployments plugin changed (OpenShell backend coverage)"
     value: ${{ steps.filter.outputs.deployments-openshell }}
+  jobs-openshell:
+    description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
+    value: ${{ steps.filter.outputs.jobs-openshell }}
   ngc-metadata:
     description: "'true' if NGC metadata scripts, tests, or assets changed"
     value: ${{ steps.filter.outputs.ngc-metadata }}
@@ -255,6 +258,9 @@ runs:
             - 'packages/nemo_helix_plugin/**'
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
+            - 'packages/nemo_helix_plugin/**'
+          jobs-openshell:
+            - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
