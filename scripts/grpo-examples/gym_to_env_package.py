@@ -9,15 +9,21 @@ platform calls it: the supported contract is the environment FileSet layout itse
 `nhx.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
 get a working package quickly, or as a starting point for your own build.
 
-    uv run scripts/grpo-examples/gym_to_env_package.py \\
+Run it with a dedicated interpreter, not ``uv run`` (that is the project ``.venv``).
+``wheels-v1`` calls ``sys.executable -m pip``, and installing into the project
+environment makes it diverge from ``uv.lock``. ``flox activate`` then fails trying
+to recreate ``.venv``, which blocks commits and uploads.
+
+    UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl
+    .venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \\
         --gym-root ~/workspace/Gym \\
         --nemo-rl-root ~/workspace/RL \\
         --server resources_servers/math_with_judge \\
         --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
-Then validate and upload:
+Then validate and upload, still with that interpreter:
 
-    uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+    .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
     nemo files filesets create my-env -w default --purpose environment --exist-ok
     nemo files upload /tmp/mwj-env/ my-env -w default
 
@@ -673,7 +679,7 @@ def main() -> int:
                 "ray_version": ray_version,
                 "openai_version": openai_version,
                 "wheel_count": len(list(wheels.glob("*.whl"))) if wheels else 0,
-                "next": [f"uv run --package nhx-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
+                "next": [f"{Path(sys.executable).parent / 'pi-to-gym-conversion'} --validate-only {args.out_dir}"],
             },
             indent=2,
         )

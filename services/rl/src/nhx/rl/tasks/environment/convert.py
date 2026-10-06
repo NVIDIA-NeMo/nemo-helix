@@ -643,8 +643,10 @@ def _load_verifiers_environment(vf_env_id: str, vf_env_args: dict[str, Any]) -> 
             "verifiers is required for pi-to-gym-conversion dataset generation; it lives in "
             "the optional `conversion` extra. Sync it into a dedicated environment, not the "
             "repo .venv, which every `flox activate` prunes back to uv.lock: "
-            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl "
-            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`"
+            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl "
+            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`. "
+            "Do not use the project .venv: this installs into sys.executable, and a mutated "
+            "project environment makes the next flox activate fail"
         ) from exc
 
     return vf.load_environment(vf_env_id, **vf_env_args)

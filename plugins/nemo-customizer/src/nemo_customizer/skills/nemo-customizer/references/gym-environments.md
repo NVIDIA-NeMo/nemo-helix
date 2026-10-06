@@ -200,14 +200,22 @@ Before hand-building anything, check whether an example already covers the case.
 `scripts/grpo-examples/` ships two, and they are **examples** — nothing in the platform calls
 them, and the supported contract is the FileSet layout itself.
 
+Do not `uv run` these from the project `.venv`. `wheels-v1` downloads wheels with
+`sys.executable -m pip`, so that interpreter must be a dedicated environment. A mutated
+project environment no longer matches `uv.lock`, and `flox activate` then fails recreating
+`.venv`, which blocks commits and uploads. `.venv*` is gitignored.
+
 ```bash
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
+
 # Any Gym server -> an environment package
-uv run scripts/grpo-examples/gym_to_env_package.py \
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
   --gym-root ~/workspace/Gym --server resources_servers/math_with_judge \
   --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
-# math_with_judge rollout rows (adds agent_ref and expected_answer)
-uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
+# math_with_judge rollout rows (adds agent_ref and expected_answer).
+# --no-project so this does not sync the project .venv.
+uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
   --out-dir /tmp/mwj-data --train-size 512
 ```
 
@@ -361,10 +369,10 @@ That snapshot is two artifacts: `hub_environment.parquet`, with `vf_env_args.dat
 
 **Run it on a host with internet.** Training clusters have no hub egress and consume uploaded FileSets only.
 
-`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out.
+`pi-to-gym-conversion` is a console script that ships with `nemo-rl-plugin`, so on an installed platform run it bare. From a repo checkout, generating a dataset needs the `conversion` extra (verifiers), and it belongs in its own environment: the converter installs the untrusted hub wheel into whatever interpreter runs it, and a `uv sync` of the repo `.venv` prunes both that wheel and `verifiers` back out. The same environment is what `gym_to_env_package.py` must use — its `pip download` runs as `sys.executable`.
 
 ```bash
-UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra conversion
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
 .venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
@@ -373,7 +381,7 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra convers
   --validation-fraction 0.1
 ```
 
-`--validate-only` needs neither, so the plain `uv run --package nhx-rl pi-to-gym-conversion` used below for validation is fine from the repo `.venv`.
+`--validate-only` needs neither extra nor hub access. Run it with the same interpreter (`uv run --package nhx-rl` would sync the project `.venv`).
 
 | Flag | Use it for |
 |---|---|
@@ -575,7 +583,7 @@ Validate the tree with `--validate-only`.
 Cheapest possible failure. Run it on every package, whichever path built it:
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion --validate-only ./my-env-pkg
+.venv-conversion/bin/pi-to-gym-conversion --validate-only ./my-env-pkg
 # {"valid": true, "format": "adapter-wheels-v1", "name": "ascii-tree"}
 ```
 
