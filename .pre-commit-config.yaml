@@ -11,10 +11,9 @@ repos:
       # Run the linter.
       - id: ruff
         args: [--fix]
-        exclude: "sdk/python|.*\\.ipynb$"
+        exclude: ".*\\.ipynb$"
       # Run the formatter.
       - id: ruff-format
-        exclude: "sdk/python"
   - repo: local
     hooks:
       - id: ty
