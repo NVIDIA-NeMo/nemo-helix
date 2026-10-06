@@ -202,7 +202,7 @@ class ScoreParserRegex(ScoreParser):
             return MetricScore(name=self.score.name, value=float("nan"))
 
         groups = match.groups()
-        if len(groups) == 0:
+        if len(groups) == 0 or groups[0] is None:
             return MetricScore(name=self.score.name, value=float("nan"))
 
         try:
