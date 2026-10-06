@@ -156,7 +156,7 @@ Gym reads it two different ways depending on where the server sits:
 | Inside a Gym checkout (`../../pyproject.toml` exists) | `uv pip install -r requirements.txt <head deps>` |
 | Staged FileSet (the normal case) | `(echo 'nemo-gym==<image version>' && grep -v -F '../..' requirements.txt) \| uv pip install -r /dev/stdin <head deps>` |
 
-The second form is why a Gym server copies cleanly: its `-e nemo-gym[dev] @ ../../` line, meaningless outside a checkout, is stripped and replaced with a version pin. It is also why vendoring **the image's exact `nemo-gym` version** matters — a mismatch means uv ignores your wheel and resolves upstream from PyPI.
+The second form is why a Gym server copies cleanly: its `-e nemo-gym[dev] @ ../../` line, meaningless outside a checkout, is stripped and replaced with `nemo-gym==<image version>`. The training image already provides that package. Do not vendor a wheel of the Gym checkout: it contains every built-in server and would shadow the image.
 
 **Do not ship a literally empty `requirements.txt`.** The file's *existence* is what makes Gym treat the directory as a server, and an empty one does currently install (`grep` finds nothing, `nemo-gym` and the head deps still reach uv). But the resulting venv contains only `nemo-gym`, `ray` and `openai` — so any other import in `app.py` fails at the first rollout — and it leaves the install command's `grep` exiting non-zero, which is harmless only because nothing enables `pipefail` on this path today. List the server's real imports; if it genuinely has none beyond `nemo-gym`, write a comment line rather than leaving the file empty.
 
@@ -505,15 +505,15 @@ EOF
 
 mkdir -p my-env/wheels
 
-# Build nemo-gym from the checkout, never from an index: the image's version is not published,
-# and a same-versioned upstream wheel would be different code.
-uv build --wheel --out-dir my-env/wheels "$RL/3rdparty/Gym-workspace/Gym"
-GYM_WHEEL=$(ls my-env/wheels/nemo_gym-"$GYM_VERSION"-*.whl)
+# A platform package is not a Gym checkout. Gym rewrites
+# `-e nemo-gym[dev] @ ../../` to `nemo-gym==<image version>` and imports the
+# image's Gym. Do not `uv build` the Gym tree: that wheel contains every
+# built-in server and is not what the sandbox installs.
+grep -v -e '../..' -e 'nemo-gym' -e '^#' resources_servers/my_env/requirements.txt > server.in
 
 # Resolve and download are separate steps: `--platform` requires `--no-deps`, and resolving
 # on the build host would evaluate environment markers for the wrong OS.
 cat > closure.in <<EOF
-nemo-gym[dev] @ file://$GYM_WHEEL
 ray[default]==$RAY_VERSION
 openai==$OPENAI_VERSION
 pip
@@ -521,7 +521,7 @@ setuptools>=61,<81
 setuptools-scm
 hydra-core>=1.3,<1.4
 omegaconf>=2.2,<2.4
--r resources_servers/my_env/requirements.txt
+-r server.in
 EOF
 uv pip compile closure.in --output-file closure.txt --no-header --no-config \
   --python-platform "$ARCH-unknown-linux-gnu" --python-version 3.13
@@ -546,10 +546,7 @@ done
 uv run --package nhx-rl pi-to-gym-conversion --validate-only ./my-env
 ```
 
-The `[dev]` extra, not the bare wheel: servers that resolve into the Gym tree install
-`nemo-gym[dev]`, so the closure has to cover that extra too. `setuptools` is capped below 81 —
-the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time — and
-`setuptools-scm` is there because building Gym from source needs its `build-system.requires`.
+`setuptools` is capped below 81 — the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time.
 
 The sub-venv is created with `uv venv --seed`, so nothing carries over from the image — omit `ray[default]` / `openai` and the venv build reaches for an index even when the environment's own closure is complete. A `nemo-gym` version mismatch is worse than an omission: uv ignores your wheel and silently resolves upstream from PyPI.
 
@@ -574,7 +571,7 @@ Keep the Gym directory structure, drop `data/` and `tests/` so no `.jsonl` survi
 
 Do **not** convert the server into a setuptools package installed as `resources_servers.<impl>`, and do not add a root `pyproject.toml`: Gym runs `{server_type}/{implementation}/` directly and treats a root `pyproject.toml` as "this is a Gym checkout" — see § **How Gym finds the implementation directory**.
 
-**Vendor `nemo-gym` at the image's exact version.** Gym builds each server's venv from its `requirements.txt`, which in the source tree starts `-e nemo-gym[dev] @ ../../`. Outside a Gym checkout that relative path does not exist, so `setup_env_command` rewrites the line to `nemo-gym==<image version>`. If the environment must run our Gym fork, `pip download nemo-gym==X` fetches *upstream* at that version string — build the wheel from the fork checkout instead (`uv build --wheel <gym-root>`) and confirm the built version matches.
+**Do not vendor a `nemo-gym` wheel.** Gym builds each server's venv from its `requirements.txt`, which in the source tree starts `-e nemo-gym[dev] @ ../../`. Outside a Gym checkout that relative path does not exist, so `setup_env_command` rewrites the line to `nemo-gym==<image version>` and the sandbox imports the Gym already in the training image. A wheel built from the checkout contains every built-in server and would shadow that install.
 
 Validate the tree with `--validate-only`.
 
