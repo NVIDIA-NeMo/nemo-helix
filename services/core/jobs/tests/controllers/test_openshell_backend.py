@@ -395,6 +395,19 @@ class TestSync:
         assert update.status == HelixJobStatus.CANCELLED
         assert backend._client.delete.called
 
+    def test_cancel_delete_failure_stays_cancelling(
+        self, mock_nhx_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        backend._client.delete.side_effect = _rpc_error(grpc.StatusCode.UNAVAILABLE, "gateway down")
+        step = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLING})
+
+        update = backend.sync(step)
+
+        assert update.status == HelixJobStatus.CANCELLING
+        assert "gateway down" in update.status_details["message"]
+
 
 class TestCleanup:
     def test_deletes_completed_sandbox_when_configured(

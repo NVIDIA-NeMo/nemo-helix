@@ -67,7 +67,7 @@ func init() {
 // writeStepConfigFromAPI fetches this job step's config and writes it where the
 // workload expects it. The step is identified by the NEMO_JOB_* env vars the
 // jobs controller sets on every job.
-func writeStepConfigFromAPI() error {
+func writeStepConfigFromAPI(ctx context.Context) error {
 	required := map[string]string{}
 	for _, name := range []string{"NEMO_JOB_WORKSPACE", "NEMO_JOB_ID", "NEMO_JOB_STEP", "NEMO_JOB_STEP_CONFIG_FILE_PATH"} {
 		value := os.Getenv(name)
@@ -87,7 +87,7 @@ func writeStepConfigFromAPI() error {
 
 	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
 	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
-	config, err := client.GetJobStepConfig(workspace, job, step)
+	config, err := client.GetJobStepConfig(ctx, workspace, job, step)
 	if err != nil {
 		return fmt.Errorf("failed to fetch step config for %s/%s/%s: %w", workspace, job, step, err)
 	}
@@ -96,11 +96,34 @@ func writeStepConfigFromAPI() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("failed to create step config directory: %w", err)
 	}
-	if err := os.WriteFile(path, config, 0o600); err != nil {
+	if err := writeFileReplacing(path, config, 0o600); err != nil {
 		return fmt.Errorf("failed to write step config: %w", err)
 	}
 	logger.Printf("Wrote step config to %s\n", path)
 	return nil
+}
+
+// writeFileReplacing writes data to a new file with mode perm and renames it over
+// path, so an existing destination never keeps its previous permissions.
+func writeFileReplacing(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // nolint:errcheck
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close() // nolint:errcheck
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close() // nolint:errcheck
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // secretReference represents a mapping from an environment variable to a secret
@@ -231,11 +254,11 @@ func runExecWithStdin(args []string) (exitCode int, err error) {
 		err = errors.Join(err, otelShutdown(context.Background()))
 	}()
 
-	return runExec(args, os.Stdin)
+	return runExec(ctx, args, os.Stdin)
 }
 
 // runExec runs the specified command with arguments, injecting secrets as environment variables if specified
-func runExec(args []string, stdinReader io.Reader) (int, error) {
+func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, error) {
 	// Command and arguments
 	cmdName := args[0]
 	cmdArgs := []string{}
@@ -250,7 +273,7 @@ func runExec(args []string, stdinReader io.Reader) (int, error) {
 	cmd.Env = workloadEnvFromParent()
 
 	if fetchStepConfig {
-		if err := writeStepConfigFromAPI(); err != nil {
+		if err := writeStepConfigFromAPI(ctx); err != nil {
 			logger.Printf("Error: %v\n", err)
 			return 1, err
 		}
@@ -312,6 +335,10 @@ func runExec(args []string, stdinReader io.Reader) (int, error) {
 	}
 
 	// Start the command
+	if ctx.Err() != nil {
+		logger.Printf("Terminated before starting main process: %v\n", ctx.Err())
+		return 1, ctx.Err()
+	}
 	if err := cmd.Start(); err != nil {
 		logger.Printf("Error starting command: %v\n", err)
 		return 1, err

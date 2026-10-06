@@ -440,11 +440,15 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         ):
             try:
                 self._client.delete(sandbox_name, workspace=self._workspace, allow_missing=True)
-            except grpc.RpcError:
+            except grpc.RpcError as exc:
                 logger.warning(
                     "Failed to delete sandbox %s during cancel",
                     sandbox_name,
                     extra={"job": step.job, "step": step.name},
+                )
+                return JobUpdate(
+                    status=HelixJobStatus.CANCELLING,
+                    status_details={"message": f"Sandbox delete failed, retrying: {_rpc_detail(exc)}"},
                 )
             return JobUpdate(status=HelixJobStatus.CANCELLED, status_details={"message": "Sandbox deleted"})
 

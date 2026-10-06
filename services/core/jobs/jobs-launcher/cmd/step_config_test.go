@@ -4,6 +4,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -59,7 +61,7 @@ func TestRunExecFetchStepConfigWritesFileBeforeWorkload(t *testing.T) {
 	enableFetchStepConfig(t)
 
 	// The workload exits 0 only if the config file exists when it starts.
-	exitCode, err := runExec([]string{"sh", "-c", `test -f "$NEMO_JOB_STEP_CONFIG_FILE_PATH"`}, nil)
+	exitCode, err := runExec(context.Background(), []string{"sh", "-c", `test -f "$NEMO_JOB_STEP_CONFIG_FILE_PATH"`}, nil)
 	if err != nil || exitCode != 0 {
 		t.Fatalf("expected workload to see the config file, got exit %d err %v", exitCode, err)
 	}
@@ -125,7 +127,7 @@ func TestRunExecFetchStepConfigFailsBeforeWorkload(t *testing.T) {
 			enableFetchStepConfig(t)
 
 			marker := filepath.Join(t.TempDir(), "ran")
-			exitCode, err := runExec([]string{"touch", marker}, nil)
+			exitCode, err := runExec(context.Background(), []string{"touch", marker}, nil)
 			if exitCode != 1 {
 				t.Fatalf("expected exit 1, got %d", exitCode)
 			}
@@ -142,11 +144,59 @@ func TestRunExecFetchStepConfigFailsBeforeWorkload(t *testing.T) {
 	}
 }
 
+func TestRunExecFetchStepConfigReplacesPermissiveExistingFile(t *testing.T) {
+	server, _ := stepConfigServer(t, http.StatusOK, `{"config":{"epochs":3}}`)
+	path := setStepConfigEnv(t, server.URL)
+	enableFetchStepConfig(t)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	exitCode, err := runExec(context.Background(), []string{"true"}, nil)
+	if err != nil || exitCode != 0 {
+		t.Fatalf("expected success, got exit %d err %v", exitCode, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("expected mode 0600, got %o", mode)
+	}
+	if data, _ := os.ReadFile(path); string(data) != `{"epochs":3}` {
+		t.Fatalf("unexpected config content %s", data)
+	}
+}
+
+func TestRunExecCancelledBeforeStartSkipsWorkload(t *testing.T) {
+	server, _ := stepConfigServer(t, http.StatusOK, `{"config":{}}`)
+	setStepConfigEnv(t, server.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	marker := filepath.Join(t.TempDir(), "ran")
+	exitCode, err := runExec(ctx, []string{"touch", marker}, nil)
+	if exitCode != 1 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected exit 1 with context.Canceled, got exit %d err %v", exitCode, err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("workload started after termination")
+	}
+}
+
 func TestRunExecWithoutFetchStepConfigSkipsJobsAPI(t *testing.T) {
 	server, hits := stepConfigServer(t, http.StatusOK, `{"config":{}}`)
 	path := setStepConfigEnv(t, server.URL)
 
-	exitCode, err := runExec([]string{"true"}, nil)
+	exitCode, err := runExec(context.Background(), []string{"true"}, nil)
 	if err != nil || exitCode != 0 {
 		t.Fatalf("expected success, got exit %d err %v", exitCode, err)
 	}
