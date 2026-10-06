@@ -577,11 +577,6 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 
 .PHONY: test-jobs-openshell
 test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
-	# Same reason as test-deployments-openshell: the shared unit-test job does not
-	# install the openshell extra, so these tests skip there. The integration test
-	# needs a live gateway (OPENSHELL_GATEWAY_ENDPOINT) and skips when none is up.
-	# For an mTLS gateway set OPENSHELL_TEST_TLS_CA/_CLIENT_CERT/_CLIENT_KEY; for the
-	# docker driver set OPENSHELL_TEST_EGRESS_PROXY (the supervisor proxy, :3128).
 	$(UV) run --frozen --package nhx-jobs --extra openshell \
 		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
 		services/core/jobs/tests/integration/test_openshell_job_integration.py
