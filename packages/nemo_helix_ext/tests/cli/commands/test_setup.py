@@ -785,6 +785,32 @@ class TestAutoSetup:
         assert body.name == "my-custom-llm-example-com"
         assert body.host_url == "https://my-custom-llm.example.com/v1"
 
+    def test_inference_base_url_override_works_with_nvidia_key(self):
+        client = _make_mock_client()
+        with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-test"}, clear=True):
+            result = _auto_setup(
+                client,
+                "default",
+                inference_base_url="https://inference-api.nvidia.com/v1",
+            )
+        assert result == "inference-api-nvidia-com"
+        body = _create_body(client)
+        assert body.name == "inference-api-nvidia-com"
+        assert body.host_url == "https://inference-api.nvidia.com/v1"
+
+    def test_inference_base_url_override_preserves_env_provider_auth_metadata(self):
+        client = _make_mock_client()
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+            result = _auto_setup(
+                client,
+                "default",
+                inference_base_url="https://anthropic-proxy.example.com",
+            )
+        assert result == "anthropic-proxy-example-com"
+        body = _create_body(client)
+        assert body.host_url == "https://anthropic-proxy.example.com"
+        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+
     def test_existing_provider_updated_not_recreated(self):
         client = _make_mock_client(provider_exists=True, secret_exists=True)
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test123"}, clear=True):
