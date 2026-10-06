@@ -10,7 +10,7 @@ authors = [{ name = "NVIDIA", email = "nemo@nvidia.com" }]
 dependencies = [
     "nemo-helix-plugin",
     "nhx-customization-common",
-    "data-designer==0.9.3",
+    "data-designer==0.9.4",
     "data-designer-nemo",
     "httpx>=0.27",
     "fastapi",
@@ -60,7 +60,7 @@ test = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 data-designer-nemo = [
   "nemo-helix-plugin",
-  "data-designer==0.9.3",
+  "data-designer==0.9.4",
   "anyio>=4.0",
   "duckdb",
   "pydantic>=2",
