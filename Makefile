@@ -577,7 +577,7 @@ test-deployments-openshell: ## Run OpenShell deployment backend unit tests with 
 
 .PHONY: test-jobs-openshell
 test-jobs-openshell: ## Run OpenShell job backend unit + integration tests with the platform-restricted [openshell] extra installed
-	$(UV) run --frozen --package nhx-jobs --extra openshell \
+	$(UV) run --frozen --all-packages --extra openshell \
 		pytest -v services/core/jobs/tests/controllers/test_openshell_backend.py \
 		services/core/jobs/tests/integration/test_openshell_job_integration.py
 
