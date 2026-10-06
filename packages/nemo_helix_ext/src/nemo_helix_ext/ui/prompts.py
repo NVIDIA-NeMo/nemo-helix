@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from html import escape as html_escape
 from typing import Literal, TypeVar, overload
 
 from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
@@ -370,10 +371,11 @@ def prompt_search_select(
     default_label = next((label for value, label in normalized if value == default), None)
     prompt_suffix = "search"
     if default_idx is not None:
-        prompt_suffix += f", Enter for default ({default_label or default})"
+        escaped_default = html_escape(str(default_label or default), quote=False)
+        prompt_suffix += f", Enter for default ({escaped_default})"
     bottom_hint = hint or "Type to fuzzy-search; use Tab/↑↓ to choose a completion."
     session: PromptSession[str] = PromptSession(
-        completer=FuzzyCompleter(_ChoiceCompleter(normalized)),
+        completer=FuzzyCompleter(_ChoiceCompleter(normalized), pattern=r"^.*"),
         complete_while_typing=True,
         style=PROMPT_STYLE,
     )
@@ -388,7 +390,7 @@ def prompt_search_select(
         except (KeyboardInterrupt, EOFError):
             raise UserCancelled from None
 
-        if not response and default is not None:
+        if not response and default_idx is not None and default is not None:
             if confirmation is not None:
                 _print_confirmation(confirmation, default, indent)
             return default

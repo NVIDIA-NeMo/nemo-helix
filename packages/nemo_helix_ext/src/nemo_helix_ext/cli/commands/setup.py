@@ -2418,11 +2418,17 @@ def _select_model_pair(
         if suggested
         else "Type to search models you can access.",
     )
+    fast_default = suggested.fast if suggested else default_model
+    fast_hint = (
+        "Press Enter to reuse the default model, or type to search."
+        if fast_default == default_model
+        else "Press Enter to accept the suggested fast model, or type to search."
+    )
     fast = prompt_search_select(
         "Choose your fast model (used for latency-sensitive agent work):",
         choices=display_models,
-        default=suggested.fast if suggested else default_model,
-        hint="Press Enter to reuse the default model, or type to search.",
+        default=fast_default,
+        hint=fast_hint,
     )
     return ModelPair(default=default_model, fast=fast)
 

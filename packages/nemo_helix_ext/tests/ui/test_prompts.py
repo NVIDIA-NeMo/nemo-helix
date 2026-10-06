@@ -5,10 +5,18 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_helix_ext.ui.prompts import ProviderNameValidator, _normalize_choices, _resolve_select_response
+from nemo_helix_ext.ui.prompts import (
+    ProviderNameValidator,
+    _normalize_choices,
+    _resolve_select_response,
+    prompt_search_select,
+)
+from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import to_formatted_text
 from prompt_toolkit.validation import ValidationError
 
 
@@ -68,3 +76,52 @@ def test_select_response_resolves_number_value_and_label() -> None:
     assert _resolve_select_response("default/model-a", choices) == "default/model-a"
     assert _resolve_select_response("model b", choices) == "default/model-b"
     assert _resolve_select_response("missing", choices) is None
+
+
+def test_search_select_empty_response_requires_default_in_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = ["", "2"]
+
+    class FakePromptSession:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        def prompt(self, message, **kwargs) -> str:  # type: ignore[no-untyped-def]
+            to_formatted_text(message)
+            return responses.pop(0)
+
+    monkeypatch.setattr("nemo_helix_ext.ui.prompts.PromptSession", FakePromptSession)
+
+    result = prompt_search_select(
+        "Choose:",
+        [("default/model-a", "Model A"), ("default/model-b", "Model B")],
+        default="default/missing",
+    )
+
+    assert result == "default/model-b"
+
+
+def test_search_select_escapes_default_label_and_replaces_full_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    sessions: list[Any] = []
+
+    class FakePromptSession:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            self.kwargs = kwargs
+            sessions.append(self)
+
+        def prompt(self, message, **kwargs) -> str:  # type: ignore[no-untyped-def]
+            to_formatted_text(message)
+            return ""
+
+    monkeypatch.setattr("nemo_helix_ext.ui.prompts.PromptSession", FakePromptSession)
+
+    result = prompt_search_select(
+        "Choose:",
+        [("default/model-a", "Model <A&>")],
+        default="default/model-a",
+    )
+
+    assert result == "default/model-a"
+    completer = sessions[0].kwargs["completer"]
+    completions = list(completer.get_completions(Document("Model A"), MagicMock()))
+    assert completions
+    assert completions[0].start_position == -len("Model A")

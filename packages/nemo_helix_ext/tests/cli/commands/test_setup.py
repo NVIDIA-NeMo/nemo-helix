@@ -2653,6 +2653,31 @@ class TestInteractiveModelPairSelection:
         assert default_call.kwargs["hint"] == "Type to search models you can access."
         assert fast_call.kwargs["default"] == "default/nvidia/nemotron-nano-9b-v2"
 
+    def test_fast_prompt_hint_describes_suggested_fast_default(self):
+        client = _make_mock_client()
+        choices = [
+            ("default/quality-model", "Quality"),
+            ("default/fast-model", "Fast"),
+        ]
+
+        with (
+            patch(f"{self._MOD}._get_all_model_choices", return_value=choices),
+            patch(
+                f"{self._MOD}._select_usable_model_pair",
+                return_value=ModelPair(default="default/quality-model", fast="default/fast-model"),
+            ),
+            patch(
+                f"{self._MOD}.prompt_search_select",
+                side_effect=["default/quality-model", "default/fast-model"],
+            ) as mock_prompt_search_select,
+        ):
+            result = _select_model_pair(client, "default", provider_name="nvidia-build")
+
+        assert result == ModelPair(default="default/quality-model", fast="default/fast-model")
+        _default_call, fast_call = mock_prompt_search_select.call_args_list
+        assert fast_call.kwargs["default"] == "default/fast-model"
+        assert fast_call.kwargs["hint"] == "Press Enter to accept the suggested fast model, or type to search."
+
     def test_returns_none_when_only_specialist_models_are_available(self):
         client = _make_mock_client()
         provider = MagicMock()
