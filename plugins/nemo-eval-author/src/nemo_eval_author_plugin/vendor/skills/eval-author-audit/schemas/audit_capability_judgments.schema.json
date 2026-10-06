@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit_capability_judgments.schema.json",
+  "title": "NeMo Eval Author capability judgments",
+  "description": "Structured skill-authored judgments for non-tool capability evidence in one trace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "trace_sha256",
+    "judgments"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for capability judgment sidecars.",
+      "const": "nemo.eval_author.audit_capability_judgments.v1"
+    },
+    "trace_sha256": {
+      "description": "SHA-256 digest of the exact ATIF trajectory bytes inspected for these judgments.",
+      "$ref": "#/$defs/sha256Digest"
+    },
+    "judged_by": {
+      "description": "Human-readable identifier for the skill, model, or reviewer that authored these judgments.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "instructions": {
+      "description": "Optional note about the judging rubric or prompt used to produce these judgments.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "judgments": {
+      "description": "Judgments keyed back to capability evidence requirements by capability name and evidence index.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/judgment"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "itemName": {
+      "description": "Stable machine-readable audit item or tool name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "judgment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "evidence_index",
+        "kind",
+        "description",
+        "status",
+        "confidence",
+        "rationale"
+      ],
+      "properties": {
+        "capability": {
+          "description": "Capability item name containing the judged evidence requirement.",
+          "$ref": "#/$defs/itemName"
+        },
+        "evidence_index": {
+          "description": "Zero-based index into the capability's evidence_required list.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "description": "Non-tool evidence kind being judged. tool_call evidence is intentionally excluded.",
+          "enum": [
+            "environment_state",
+            "outcome",
+            "output",
+            "policy_boundary",
+            "state_change",
+            "trace_span",
+            "user_intent",
+            "verifier"
+          ]
+        },
+        "description": {
+          "description": "Exact description from the audit evidence requirement, used to reject stale judgments.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "description": "Whether the trace satisfies this non-tool evidence requirement.",
+          "enum": [
+            "satisfied",
+            "missing",
+            "unclear"
+          ]
+        },
+        "confidence": {
+          "description": "Confidence in the subjective judgment.",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "rationale": {
+          "description": "Brief explanation grounded in the inspected trace.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "supporting_trace_refs": {
+          "description": "Optional trace locations, message ids, or step references that support the judgment.",
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

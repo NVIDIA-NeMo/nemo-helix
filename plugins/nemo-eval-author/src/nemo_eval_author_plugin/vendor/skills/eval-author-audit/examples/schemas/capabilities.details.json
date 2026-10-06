@@ -1,0 +1,132 @@
+{
+  "schema": "nemo.eval_author.audit_capabilities_details.v1",
+  "audit": {
+    "path": ".eval-author/audit.md",
+    "schema": "nemo.eval_author.audit.v1",
+    "agent": "support-agent",
+    "status": "draft",
+    "item_count": 5
+  },
+  "subject": {
+    "trace": ".harbor/runs/account-recovery/trials/trial-001/agent/trajectory.json",
+    "trace_format": "atif",
+    "task_id": "account-recovery",
+    "run_id": "trial-001"
+  },
+  "method": {
+    "name": "capabilities"
+  },
+  "covered": [
+    "account_recovery"
+  ],
+  "missing": [],
+  "judgment_input": {
+    "provided": true,
+    "schema": "nemo.eval_author.audit_capability_judgments.v1",
+    "trace_sha256": "sha256:6f0419aa86229c2895d7d8bc22e4f7e55258979a1168dee8cd60608b6cda5a33",
+    "judged_by": "eval-author-audit skill",
+    "judgment_count": 1
+  },
+  "observed_tool_calls": [
+    {
+      "tool": "customer.lookup",
+      "step_id": 2,
+      "tool_call_id": "call-001",
+      "trajectory_id": "root-trajectory",
+      "trajectory_path": "$"
+    },
+    {
+      "tool": "password.reset",
+      "step_id": 4,
+      "tool_call_id": "call-002",
+      "trajectory_id": "root-trajectory",
+      "trajectory_path": "$"
+    }
+  ],
+  "tool_call_counts": {
+    "customer.lookup": 1,
+    "password.reset": 1
+  },
+  "capability_results": {
+    "account_recovery": {
+      "covered": true,
+      "required_tool_results": [
+        {
+          "tool": "customer.lookup",
+          "status": "satisfied",
+          "matches": [
+            {
+              "tool": "customer.lookup",
+              "step_id": 2,
+              "tool_call_id": "call-001",
+              "trajectory_id": "root-trajectory",
+              "trajectory_path": "$"
+            }
+          ]
+        },
+        {
+          "tool": "password.reset",
+          "status": "satisfied",
+          "matches": [
+            {
+              "tool": "password.reset",
+              "step_id": 4,
+              "tool_call_id": "call-002",
+              "trajectory_id": "root-trajectory",
+              "trajectory_path": "$"
+            }
+          ]
+        }
+      ],
+      "evidence_results": [
+        {
+          "kind": "user_intent",
+          "evidence_index": 0,
+          "description": "User is trying to recover account access.",
+          "measurement": "judged",
+          "status": "satisfied",
+          "confidence": "high",
+          "rationale": "The user request asks for help recovering account access.",
+          "supporting_trace_refs": [
+            "$.steps[0].message"
+          ]
+        },
+        {
+          "kind": "tool_call",
+          "evidence_index": 1,
+          "description": "Trace shows a customer lookup call.",
+          "measurement": "deterministic",
+          "status": "satisfied",
+          "tool": "customer.lookup",
+          "matches": [
+            {
+              "tool": "customer.lookup",
+              "step_id": 2,
+              "tool_call_id": "call-001",
+              "trajectory_id": "root-trajectory",
+              "trajectory_path": "$"
+            }
+          ]
+        },
+        {
+          "kind": "tool_call",
+          "evidence_index": 2,
+          "description": "Trace shows a password reset call.",
+          "measurement": "deterministic",
+          "status": "satisfied",
+          "tool": "password.reset",
+          "matches": [
+            {
+              "tool": "password.reset",
+              "step_id": 4,
+              "tool_call_id": "call-002",
+              "trajectory_id": "root-trajectory",
+              "trajectory_path": "$"
+            }
+          ]
+        }
+      ],
+      "missing_reasons": []
+    }
+  }
+}

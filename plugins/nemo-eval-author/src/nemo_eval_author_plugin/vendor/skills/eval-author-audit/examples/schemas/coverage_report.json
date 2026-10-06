@@ -1,0 +1,239 @@
+{
+  "schema": "nemo.eval_author.audit_coverage_report.v1",
+  "audit": {
+    "path": ".eval-author/audit.md",
+    "schema": "nemo.eval_author.audit.v1",
+    "agent": "support-agent",
+    "status": "draft",
+    "item_count": 5,
+    "item_counts": {
+      "capability": 1,
+      "failure_case": 1,
+      "tool": 3
+    }
+  },
+  "measured_kinds": [
+    "tool"
+  ],
+  "warnings": [],
+  "input_reports": [
+    {
+      "path": ".eval-author/audit-measurements/task=account-recovery/run=trial-001/tool_calls/coverage.json",
+      "method": "tool_calls",
+      "item_kind": "tool",
+      "item_kind_count": 3,
+      "subject": {
+        "trace": ".harbor/runs/account-recovery/trials/trial-001/agent/trajectory.json",
+        "trace_format": "atif",
+        "task_id": "account-recovery",
+        "run_id": "trial-001"
+      },
+      "covered": [
+        "customer.lookup"
+      ],
+      "covered_count": 1
+    },
+    {
+      "path": ".eval-author/audit-measurements/task=escalation/run=trial-002/tool_calls/coverage.json",
+      "method": "tool_calls",
+      "item_kind": "tool",
+      "item_kind_count": 3,
+      "subject": {
+        "trace": ".harbor/runs/escalation/trials/trial-002/agent/trajectory.json",
+        "trace_format": "atif",
+        "task_id": "escalation",
+        "run_id": "trial-002"
+      },
+      "covered": [
+        "ticket.create"
+      ],
+      "covered_count": 1
+    }
+  ],
+  "coverage": {
+    "overall": {
+      "item_count": 5,
+      "covered_count": 2,
+      "uncovered_count": 3
+    },
+    "by_kind": {
+      "capability": {
+        "item_count": 1,
+        "covered_count": 0,
+        "uncovered_count": 1
+      },
+      "failure_case": {
+        "item_count": 1,
+        "covered_count": 0,
+        "uncovered_count": 1
+      },
+      "tool": {
+        "item_count": 3,
+        "covered_count": 2,
+        "uncovered_count": 1
+      }
+    }
+  },
+  "covered": [
+    "customer.lookup",
+    "ticket.create"
+  ],
+  "uncovered": [
+    "password.reset",
+    "account_recovery",
+    "account_recovery_unverified_identity"
+  ],
+  "uncovered_items": [
+    {
+      "name": "password.reset",
+      "kind": "tool",
+      "reason": "not_covered_by_any_input_report",
+      "description": "Resets a verified customer's password.",
+      "source_refs": [
+        "ethos:Tools"
+      ],
+      "generation": {
+        "focus": "Exercise a scenario where the agent should call password.reset: Used after identity is verified and the user requests password recovery.",
+        "needed_tools": [
+          "password.reset"
+        ],
+        "evidence_required": [
+          {
+            "kind": "tool_call",
+            "tool": "password.reset",
+            "description": "Trace shows a password.reset call after verification."
+          }
+        ]
+      },
+      "audit_item": {
+        "kind": "tool",
+        "name": "password.reset",
+        "source_refs": [
+          "ethos:Tools"
+        ],
+        "description": "Resets a verified customer's password.",
+        "expected_use": "Used after identity is verified and the user requests password recovery.",
+        "expected_failure_behavior": "If reset fails, explain the issue and avoid repeated reset attempts.",
+        "evidence_required": [
+          {
+            "kind": "tool_call",
+            "tool": "password.reset",
+            "description": "Trace shows a password.reset call after verification."
+          }
+        ]
+      }
+    },
+    {
+      "name": "account_recovery",
+      "kind": "capability",
+      "reason": "not_measured_by_any_method",
+      "description": "Helps a verified user regain account access.",
+      "source_refs": [
+        "ethos:Behavior"
+      ],
+      "generation": {
+        "focus": "Exercise capability account_recovery: Verify identity, inspect the account, reset access, and summarize the outcome.",
+        "needed_tools": [
+          "customer.lookup",
+          "password.reset"
+        ],
+        "evidence_required": [
+          {
+            "kind": "tool_call",
+            "tool": "customer.lookup",
+            "description": "Trace shows a lookup before account recovery."
+          },
+          {
+            "kind": "tool_call",
+            "tool": "password.reset",
+            "description": "Trace shows a reset after verification."
+          },
+          {
+            "kind": "outcome",
+            "description": "Final response explains the account recovery result."
+          }
+        ]
+      },
+      "audit_item": {
+        "kind": "capability",
+        "name": "account_recovery",
+        "source_refs": [
+          "ethos:Behavior"
+        ],
+        "description": "Helps a verified user regain account access.",
+        "required_tools": [
+          "customer.lookup",
+          "password.reset"
+        ],
+        "expected_behavior": "Verify identity, inspect the account, reset access, and summarize the outcome.",
+        "evidence_required": [
+          {
+            "kind": "tool_call",
+            "tool": "customer.lookup",
+            "description": "Trace shows a lookup before account recovery."
+          },
+          {
+            "kind": "tool_call",
+            "tool": "password.reset",
+            "description": "Trace shows a reset after verification."
+          },
+          {
+            "kind": "outcome",
+            "description": "Final response explains the account recovery result."
+          }
+        ]
+      }
+    },
+    {
+      "name": "account_recovery_unverified_identity",
+      "kind": "failure_case",
+      "reason": "not_measured_by_any_method",
+      "description": "Refuses to reset access when identity verification is missing.",
+      "source_refs": [
+        "ethos:Success Criteria"
+      ],
+      "generation": {
+        "focus": "Exercise failure case account_recovery_unverified_identity by triggering User cannot provide required verification details: Refuse account reset, explain what verification is required, and avoid password.reset.",
+        "needed_tools": [
+          "customer.lookup"
+        ],
+        "evidence_required": [
+          {
+            "kind": "policy_boundary",
+            "description": "Agent refuses reset without verification."
+          },
+          {
+            "kind": "output",
+            "description": "Final response asks for verification details."
+          }
+        ]
+      },
+      "audit_item": {
+        "kind": "failure_case",
+        "name": "account_recovery_unverified_identity",
+        "applies_to": [
+          "account_recovery"
+        ],
+        "source_refs": [
+          "ethos:Success Criteria"
+        ],
+        "description": "Refuses to reset access when identity verification is missing.",
+        "trigger": "User cannot provide required verification details.",
+        "expected_behavior": "Refuse account reset, explain what verification is required, and avoid password.reset.",
+        "prohibited_tools": [
+          "password.reset"
+        ],
+        "evidence_required": [
+          {
+            "kind": "policy_boundary",
+            "description": "Agent refuses reset without verification."
+          },
+          {
+            "kind": "output",
+            "description": "Final response asks for verification details."
+          }
+        ]
+      }
+    }
+  ]
+}

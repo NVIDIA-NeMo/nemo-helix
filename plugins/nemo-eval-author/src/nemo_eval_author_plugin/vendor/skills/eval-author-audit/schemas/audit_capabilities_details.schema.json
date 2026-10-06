@@ -1,0 +1,484 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit_capabilities_details.schema.json",
+  "title": "NeMo Eval Author capability measurement details",
+  "description": "Method-specific details for composite capability coverage measurement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "audit",
+    "subject",
+    "method",
+    "covered",
+    "missing",
+    "judgment_input",
+    "observed_tool_calls",
+    "tool_call_counts",
+    "capability_results"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for capability measurement details.",
+      "const": "nemo.eval_author.audit_capabilities_details.v1"
+    },
+    "audit": {
+      "description": "Audit spec metadata for the denominator used by this measurement.",
+      "$ref": "#/$defs/audit"
+    },
+    "subject": {
+      "description": "Provider-neutral identity of the measured task/run artifact.",
+      "$ref": "#/$defs/subject"
+    },
+    "method": {
+      "description": "Measurement method that produced this details file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "const": "capabilities"
+        }
+      }
+    },
+    "covered": {
+      "description": "Capability names covered by deterministic evidence and any required skill-authored judgments.",
+      "$ref": "#/$defs/nameList"
+    },
+    "missing": {
+      "description": "Capability names not covered by deterministic evidence or required skill-authored judgments.",
+      "$ref": "#/$defs/nameList"
+    },
+    "judgment_input": {
+      "description": "Summary of the optional judgment sidecar consumed by this measurement.",
+      "$ref": "#/$defs/judgmentInput"
+    },
+    "observed_tool_calls": {
+      "description": "All tool calls found in the ATIF trace.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/toolCall"
+      }
+    },
+    "tool_call_counts": {
+      "description": "Observed tool call counts keyed by tool name.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "capability_results": {
+      "description": "Per-capability evidence results keyed by capability name.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/itemName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/capabilityResult"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "itemName": {
+      "description": "Stable machine-readable audit item or tool name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "pathString": {
+      "description": "Local file or directory path recorded as a string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "nameList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "audit": {
+      "description": "Identity and status of the audit denominator used for this measurement. Details readers use this to connect method-specific evidence back to the same denominator as coverage.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "schema",
+        "agent",
+        "status",
+        "item_count"
+      ],
+      "properties": {
+        "path": {
+          "description": "Path to the audit.md file measured against.",
+          "$ref": "#/$defs/pathString"
+        },
+        "schema": {
+          "description": "Schema version of the audit denominator.",
+          "const": "nemo.eval_author.audit.v1"
+        },
+        "agent": {
+          "description": "Agent name declared by the audit denominator.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "description": "Review state of the audit denominator when this measurement was produced.",
+          "enum": [
+            "draft",
+            "approved"
+          ]
+        },
+        "item_count": {
+          "description": "Number of audit items in the denominator when this measurement was produced.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "subject": {
+      "description": "The measured task or run. Keep this provider-neutral so coverage and details files can be read without understanding the runner that produced the trace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace",
+        "trace_format",
+        "task_id",
+        "run_id"
+      ],
+      "properties": {
+        "trace": {
+          "description": "Path to the interaction trace that was measured.",
+          "$ref": "#/$defs/pathString"
+        },
+        "trace_format": {
+          "description": "Trace serialization format understood by the measurement method.",
+          "const": "atif"
+        },
+        "task_id": {
+          "description": "Stable task, scenario, or case identifier for grouping measurements.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "description": "Identifier for the specific run, trial, attempt, or repetition measured.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "judgmentInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provided",
+        "judgment_count"
+      ],
+      "properties": {
+        "provided": {
+          "type": "boolean"
+        },
+        "schema": {
+          "const": "nemo.eval_author.audit_capability_judgments.v1"
+        },
+        "trace_sha256": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "judged_by": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "judgment_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provided": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "schema",
+              "trace_sha256"
+            ]
+          }
+        }
+      ]
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "trajectory_path"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trajectory_path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "step_id": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "tool_call_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trajectory_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "toolResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "status",
+        "matches"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/itemName"
+        },
+        "status": {
+          "enum": [
+            "satisfied",
+            "missing"
+          ]
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolCall"
+          }
+        }
+      }
+    },
+    "evidenceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "evidence_index",
+        "description",
+        "measurement",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "evidence_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "measurement": {
+          "enum": [
+            "deterministic",
+            "judged",
+            "judgment_required",
+            "unsupported"
+          ]
+        },
+        "status": {
+          "enum": [
+            "satisfied",
+            "missing",
+            "unclear",
+            "unjudged",
+            "unsupported"
+          ]
+        },
+        "tool": {
+          "$ref": "#/$defs/itemName"
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolCall"
+          }
+        },
+        "confidence": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "rationale": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "supporting_trace_refs": {
+          "$ref": "#/$defs/stringList"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "measurement": {
+                "const": "deterministic"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "satisfied",
+                  "missing"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement": {
+                "const": "judged"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "satisfied",
+                  "missing",
+                  "unclear"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement": {
+                "const": "judgment_required"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "unjudged"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement": {
+                "const": "unsupported"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "unsupported"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "capabilityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "covered": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "missing_reasons": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "covered": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "missing_reasons": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "required": [
+        "covered",
+        "required_tool_results",
+        "evidence_results",
+        "missing_reasons"
+      ],
+      "properties": {
+        "covered": {
+          "type": "boolean"
+        },
+        "required_tool_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolResult"
+          }
+        },
+        "evidence_results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceResult"
+          }
+        },
+        "missing_reasons": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    }
+  }
+}

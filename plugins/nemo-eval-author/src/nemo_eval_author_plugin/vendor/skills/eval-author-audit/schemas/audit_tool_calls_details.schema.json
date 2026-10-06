@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit_tool_calls_details.schema.json",
+  "title": "NeMo Eval Author tool-call measurement details",
+  "description": "Method-specific details for deterministic tool-call coverage measurement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "audit",
+    "subject",
+    "method",
+    "item_kind",
+    "audit_tools",
+    "covered",
+    "missing",
+    "observed_tool_calls",
+    "tool_call_counts",
+    "matches"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for tool-call measurement details.",
+      "const": "nemo.eval_author.audit_tool_calls_details.v1"
+    },
+    "audit": {
+      "description": "Audit spec metadata for the denominator used by this measurement.",
+      "$ref": "#/$defs/audit"
+    },
+    "subject": {
+      "description": "Provider-neutral identity of the measured task/run artifact.",
+      "$ref": "#/$defs/subject"
+    },
+    "method": {
+      "description": "Measurement method that produced this details file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "const": "tool_calls"
+        }
+      }
+    },
+    "item_kind": {
+      "description": "Audit item kind measured by tool-call coverage.",
+      "const": "tool"
+    },
+    "audit_tools": {
+      "description": "Tool item names declared by the audit denominator.",
+      "$ref": "#/$defs/nameList"
+    },
+    "covered": {
+      "description": "Audit tool names observed in the trace.",
+      "$ref": "#/$defs/nameList"
+    },
+    "missing": {
+      "description": "Audit tool names not observed in the trace.",
+      "$ref": "#/$defs/nameList"
+    },
+    "observed_tool_calls": {
+      "description": "All tool calls found in the ATIF trace.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/toolCall"
+      }
+    },
+    "tool_call_counts": {
+      "description": "Observed tool call counts keyed by tool name.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "matches": {
+      "description": "Observed tool calls grouped by matching audit tool name.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/itemName"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/toolCall"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "itemName": {
+      "description": "Stable machine-readable audit item or tool name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "pathString": {
+      "description": "Local file or directory path recorded as a string.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "nameList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "audit": {
+      "description": "Identity and status of the audit denominator used for this measurement. Details readers use this to connect method-specific evidence back to the same denominator as coverage.json.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "schema",
+        "agent",
+        "status",
+        "item_count"
+      ],
+      "properties": {
+        "path": {
+          "description": "Path to the audit.md file measured against.",
+          "$ref": "#/$defs/pathString"
+        },
+        "schema": {
+          "description": "Schema version of the audit denominator.",
+          "const": "nemo.eval_author.audit.v1"
+        },
+        "agent": {
+          "description": "Agent name declared by the audit denominator.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "description": "Review state of the audit denominator when this measurement was produced.",
+          "enum": [
+            "draft",
+            "approved"
+          ]
+        },
+        "item_count": {
+          "description": "Number of audit items in the denominator when this measurement was produced.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "subject": {
+      "description": "The measured task or run. Keep this provider-neutral so coverage and details files can be read without understanding the runner that produced the trace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace",
+        "trace_format",
+        "task_id",
+        "run_id"
+      ],
+      "properties": {
+        "trace": {
+          "description": "Path to the interaction trace that was measured.",
+          "$ref": "#/$defs/pathString"
+        },
+        "trace_format": {
+          "description": "Trace serialization format understood by the measurement method.",
+          "const": "atif"
+        },
+        "task_id": {
+          "description": "Stable task, scenario, or case identifier for grouping measurements.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "run_id": {
+          "description": "Identifier for the specific run, trial, attempt, or repetition measured.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "trajectory_path"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trajectory_path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "step_id": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        },
+        "tool_call_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trajectory_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    }
+  }
+}

@@ -367,6 +367,16 @@ nemo-deployments-plugin = [
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
+nemo-eval-author-plugin = [
+  "fastapi>=0.115",
+  "nemo-agents-plugin",
+  "nemo-helix-plugin",
+  "pydantic>=2.12.0",
+  "pyyaml>=6.0.2",
+  "typer>=0.20.0",
+]
+
+# Generated from [tool.bundle-package]; do not edit by hand.
 nemo-evaluator-plugin = [
   "cloudpickle>=3.1.1",
   "filesets",
@@ -601,6 +611,7 @@ plugins = [
     "nemo-helix[nemo-customizer-plugin]",
     "nemo-helix[nemo-data-designer-plugin]",
     "nemo-helix[nemo-deployments-plugin]",
+    "nemo-helix[nemo-eval-author-plugin]",
     "nemo-helix[nemo-evaluator-plugin]",
     "nemo-helix[nemo-guardrails-plugin]",
     "nemo-helix[nemo-insights-plugin]",
@@ -709,6 +720,10 @@ optimize = "nemo_agent_optimization_plugin.cli:AgentOptimizeCLI"
 prepare-fileset = "nemo_optimization.optimize_cli:register_prepare_fileset_command"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
+[project.entry-points."nemo.cli.evaluator"]
+author = "nemo_eval_author_plugin.cli:EvalAuthorCLI"
+
+# Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.client_provider"]
 platform = "nhx.common.client_factory:HelixNemoClientProvider"
 
@@ -762,6 +777,7 @@ nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
 "agent-optimization.run-strategy" = "nemo_agent_optimization_plugin.jobs.run_strategy:RunStrategyJob"
 "evaluator.retrieve-eval" = "nemo_evaluator.jobs.retrieve_eval:RetrieveEvalJob"
 "agent-optimization.optimize" = "nemo_optimization.jobs.optimize:OptimizeJob"
+"eval-author.first-eval" = "nemo_eval_author_plugin.jobs.first_eval:FirstEvalJob"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.logging_provider"]
@@ -803,6 +819,7 @@ evaluator = "nemo_evaluator.service:EvaluatorPluginService"
 insights = "nemo_insights_plugin.service:InsightsService"
 deployments = "nemo_deployments_plugin.service:DeploymentsService"
 customization = "nemo_customizer.router:CustomizationRouterService"
+eval-author = "nemo_eval_author_plugin.service:EvalAuthorService"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.skills"]
@@ -884,6 +901,7 @@ nemo-customizer-plugin = { source = "../../plugins/nemo-customizer/src/nemo_cust
 nemo-data-designer-plugin = { source = "../../plugins/nemo-data-designer/src/nemo_data_designer_plugin", module = "nemo_data_designer_plugin", inherit = { "entry-points" = ["nemo.*", "data_designer.plugins"] } }
 nemo-deployments-plugin = { source = "../../plugins/nemo-deployments/src/nemo_deployments_plugin", module = "nemo_deployments_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator", inherit = { "entry-points" = ["nemo.*"] } }
+nemo-eval-author-plugin = { source = "../../plugins/nemo-eval-author/src/nemo_eval_author_plugin", module = "nemo_eval_author_plugin", inherit = { "entry-points" = ["nemo.*"] } }
 # shared_data mirrors the standalone plugin's wheel shared-data: Fabric resolves
 # adapter descriptors from <sys.prefix>/share/nemo-fabric/adapters at runtime.
 nemo-insights-plugin = { source = "../../plugins/nemo-insights/src/nemo_insights_plugin", module = "nemo_insights_plugin", inherit = { "entry-points" = ["nemo.*"] }, shared_data = { "../../insights-analyst.fabric-adapter.json" = "share/nemo-fabric/adapters/insights-analyst/insights-analyst.fabric-adapter.json" } }

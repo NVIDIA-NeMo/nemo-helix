@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://developer.nvidia.com/nemo/eval-author/audit.schema.json",
+  "title": "NeMo Eval Author audit spec",
+  "description": "A finite coverage denominator for Eval Author audit measurement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "agent",
+    "status",
+    "items"
+  ],
+  "properties": {
+    "schema": {
+      "description": "Version marker for the audit spec format. This must match the validator's supported schema.",
+      "const": "nemo.eval_author.audit.v1"
+    },
+    "agent": {
+      "description": "Human-readable name of the agent, workflow, or system this audit denominator covers.",
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "sources": {
+      "description": "Optional provenance records for source-of-truth material used to author this audit spec, such as ETHOS.md, policy docs, product requirements, or generated agent specs.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "status": {
+      "description": "Review state for this audit spec. Draft specs can still change; approved specs are intended to act as the coverage denominator.",
+      "enum": [
+        "draft",
+        "approved"
+      ]
+    },
+    "items": {
+      "description": "Finite set of discrete coverage items that future eval traces can be measured against.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/toolItem"
+          },
+          {
+            "$ref": "#/$defs/capabilityItem"
+          },
+          {
+            "$ref": "#/$defs/failureCaseItem"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "description": "String value that must contain at least one non-whitespace character.",
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "itemName": {
+      "description": "Stable machine-readable name used for source, tool, capability, and failure-case references.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:/-]*$"
+    },
+    "source": {
+      "description": "Optional source-of-truth record. If sha256 is provided, validation compares it to the file at path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "dependentRequired": {
+        "sha256": [
+          "path"
+        ]
+      },
+      "properties": {
+        "name": {
+          "description": "Stable source key for this provenance record, for example ethos or product_requirements.",
+          "$ref": "#/$defs/itemName"
+        },
+        "path": {
+          "description": "Optional local path to the source document, resolved relative to audit.md when validation runs.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sha256": {
+          "description": "Optional sha256 digest for the source document at path, formatted as sha256:<64 lowercase hex characters>.",
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "description": {
+          "description": "Optional human-readable note describing the source and why it matters to this audit spec.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "toolList": {
+      "description": "List of tool item names. Validation requires every value to match a declared tool item.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "optionalToolList": {
+      "description": "Optional list of tool-like names. Some fields require declared tool item names; prohibited_tools intentionally does not.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "optionalStringList": {
+      "description": "Optional list of non-empty human-readable string values.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "capabilityRefList": {
+      "description": "List of capability item names this failure case applies to.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/itemName"
+      }
+    },
+    "sourceRefs": {
+      "description": "Optional free-form provenance notes for item authors and reviewers, for example ethos:Tools or policy.md#refunds. The v1 validator preserves these strings but does not resolve them against sources.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      }
+    },
+    "evidenceRequired": {
+      "description": "Evidence predicates that a measurement method must satisfy before marking an item covered.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/toolCallEvidence"
+          },
+          {
+            "$ref": "#/$defs/nonToolEvidence"
+          }
+        ]
+      }
+    },
+    "toolCallEvidence": {
+      "description": "Machine-checkable evidence that a specific declared tool was called in the trace.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "description",
+        "tool"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Evidence discriminator. tool_call evidence requires a tool field.",
+          "const": "tool_call"
+        },
+        "description": {
+          "description": "Human-readable explanation of the tool-call evidence expected in the trace.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "tool": {
+          "description": "Declared tool item name expected to appear as a call in the trace.",
+          "$ref": "#/$defs/itemName"
+        }
+      }
+    },
+    "nonToolEvidence": {
+      "description": "Typed non-tool evidence that may require trace inspection, output inspection, verifier results, or later LLM/manual judgment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "description"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Evidence discriminator for non-tool evidence.",
+          "enum": [
+            "environment_state",
+            "outcome",
+            "output",
+            "policy_boundary",
+            "state_change",
+            "trace_span",
+            "user_intent",
+            "verifier"
+          ]
+        },
+        "description": {
+          "description": "Human-readable explanation of the evidence expected for this predicate.",
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "toolItem": {
+      "description": "Coverage item for a canonical tool the agent may call.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "description",
+        "expected_use",
+        "expected_failure_behavior",
+        "evidence_required"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Item discriminator for tool coverage items.",
+          "const": "tool"
+        },
+        "name": {
+          "description": "Stable tool name used by tool references and coverage reports.",
+          "$ref": "#/$defs/itemName"
+        },
+        "source_refs": {
+          "description": "Optional provenance notes showing where this tool expectation came from.",
+          "$ref": "#/$defs/sourceRefs"
+        },
+        "description": {
+          "description": "What this tool provides from the agent's point of view.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "expected_use": {
+          "description": "When the agent is expected to use this tool.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "expected_failure_behavior": {
+          "description": "What the agent should do when the tool is unavailable, fails, returns no useful result, or should not be called.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "evidence_required": {
+          "description": "Evidence needed to mark this tool item covered.",
+          "$ref": "#/$defs/evidenceRequired"
+        }
+      }
+    },
+    "capabilityItem": {
+      "description": "Coverage item for a high-level behavior or capability the agent should exercise.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "description",
+        "required_tools",
+        "expected_behavior",
+        "evidence_required"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Item discriminator for capability coverage items.",
+          "const": "capability"
+        },
+        "name": {
+          "description": "Stable capability name used by failure cases, generated tasks, and coverage reports.",
+          "$ref": "#/$defs/itemName"
+        },
+        "source_refs": {
+          "description": "Optional provenance notes showing where this capability expectation came from.",
+          "$ref": "#/$defs/sourceRefs"
+        },
+        "description": {
+          "description": "What user-facing or system-facing behavior this capability covers.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "required_tools": {
+          "description": "Declared tool item names needed for this capability. Use an empty list when no tools are required.",
+          "$ref": "#/$defs/toolList"
+        },
+        "expected_behavior": {
+          "description": "What successful execution of this capability should look like at a high level.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "evidence_required": {
+          "description": "Evidence needed to mark this capability item covered.",
+          "$ref": "#/$defs/evidenceRequired"
+        }
+      }
+    },
+    "failureCaseItem": {
+      "description": "Coverage item for expected safe behavior when a capability cannot proceed normally.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "name",
+        "applies_to",
+        "description",
+        "trigger",
+        "expected_behavior",
+        "evidence_required"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Item discriminator for failure-case coverage items.",
+          "const": "failure_case"
+        },
+        "name": {
+          "description": "Stable failure-case name used by generated tasks and coverage reports.",
+          "$ref": "#/$defs/itemName"
+        },
+        "applies_to": {
+          "description": "Capability item names this failure case exercises.",
+          "$ref": "#/$defs/capabilityRefList"
+        },
+        "source_refs": {
+          "description": "Optional provenance notes showing where this failure expectation came from.",
+          "$ref": "#/$defs/sourceRefs"
+        },
+        "description": {
+          "description": "What failure condition or boundary this item covers.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "trigger": {
+          "description": "Condition in a user request, environment, dependency, or policy boundary that should activate this failure case.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "expected_behavior": {
+          "description": "Safe behavior expected when this failure case is triggered.",
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "expected_tools": {
+          "description": "Declared tool item names that may be appropriate to call while handling this failure case.",
+          "$ref": "#/$defs/optionalToolList"
+        },
+        "prohibited_tools": {
+          "description": "Tool names that must not be called in this failure case. These do not need to be declared tool items.",
+          "$ref": "#/$defs/optionalToolList"
+        },
+        "prohibited_outputs": {
+          "description": "Output content or data classes that must not appear when handling this failure case.",
+          "$ref": "#/$defs/optionalStringList"
+        },
+        "evidence_required": {
+          "description": "Evidence needed to mark this failure-case item covered.",
+          "$ref": "#/$defs/evidenceRequired"
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from enum import Enum
 from types import UnionType
 from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
@@ -15,7 +16,14 @@ import typer
 from nemo_evaluator_sdk.metrics.types import MetricVariants
 from nemo_evaluator_sdk.values.metrics import _RAGASBase
 from nemo_helix_plugin.cli import NemoCLI
+from nemo_helix_plugin.discovery import discover
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+#: Entry-point group a plugin joins to mount a command group under ``nemo evaluator``.
+#: Each value is a :class:`NemoCLI` subclass; its ``name`` is the subcommand.
+EVALUATOR_CLI_GROUP = "nemo.cli.evaluator"
 
 
 def _unwrap_metric_model_classes(type_hint: object) -> list[type[BaseModel]]:
@@ -130,4 +138,19 @@ class EvaluatorPluginCLI(NemoCLI):
                 raise typer.Exit(code=1)
             _echo_json(model_cls.model_json_schema())
 
+        _register_contributed_subcommands(app)
         return app
+
+
+def _register_contributed_subcommands(group: typer.Typer) -> None:
+    """Mount every :data:`EVALUATOR_CLI_GROUP` contribution; one broken contributor must not take the CLI down."""
+    try:
+        contributors = discover(EVALUATOR_CLI_GROUP)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not discover %r contributions", EVALUATOR_CLI_GROUP, exc_info=True)
+        return
+    for name, cli_cls in contributors.items():
+        try:
+            group.add_typer(cli_cls().get_cli(), name=name, rich_help_panel="Contributed")
+        except Exception:  # noqa: BLE001
+            logger.warning("Evaluator CLI contribution %r failed to register", name, exc_info=True)

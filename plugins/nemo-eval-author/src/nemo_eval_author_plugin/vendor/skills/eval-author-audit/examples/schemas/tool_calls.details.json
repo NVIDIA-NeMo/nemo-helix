@@ -1,0 +1,81 @@
+{
+  "schema": "nemo.eval_author.audit_tool_calls_details.v1",
+  "audit": {
+    "path": ".eval-author/audit.md",
+    "schema": "nemo.eval_author.audit.v1",
+    "agent": "support-agent",
+    "status": "draft",
+    "item_count": 5
+  },
+  "subject": {
+    "trace": ".harbor/runs/account-recovery/trials/trial-001/agent/trajectory.json",
+    "trace_format": "atif",
+    "task_id": "account-recovery",
+    "run_id": "trial-001"
+  },
+  "method": {
+    "name": "tool_calls"
+  },
+  "item_kind": "tool",
+  "audit_tools": [
+    "customer.lookup",
+    "ticket.create",
+    "password.reset"
+  ],
+  "covered": [
+    "customer.lookup",
+    "ticket.create"
+  ],
+  "missing": [
+    "password.reset"
+  ],
+  "observed_tool_calls": [
+    {
+      "tool": "customer.lookup",
+      "step_id": 2,
+      "tool_call_id": "call-001",
+      "trajectory_id": "root-trajectory",
+      "trajectory_path": "$"
+    },
+    {
+      "tool": "ticket.create",
+      "step_id": 4,
+      "tool_call_id": "call-002",
+      "trajectory_id": "root-trajectory",
+      "trajectory_path": "$"
+    },
+    {
+      "tool": "notes.search",
+      "step_id": 1,
+      "tool_call_id": "sub-call-001",
+      "trajectory_id": "helper-trajectory",
+      "trajectory_path": "$.subagent_trajectories[0]"
+    }
+  ],
+  "tool_call_counts": {
+    "customer.lookup": 1,
+    "ticket.create": 1,
+    "notes.search": 1
+  },
+  "matches": {
+    "customer.lookup": [
+      {
+        "tool": "customer.lookup",
+        "step_id": 2,
+        "tool_call_id": "call-001",
+        "trajectory_id": "root-trajectory",
+        "trajectory_path": "$"
+      }
+    ],
+    "ticket.create": [
+      {
+        "tool": "ticket.create",
+        "step_id": 4,
+        "tool_call_id": "call-002",
+        "trajectory_id": "root-trajectory",
+        "trajectory_path": "$"
+      }
+    ],
+    "password.reset": []
+  }
+}

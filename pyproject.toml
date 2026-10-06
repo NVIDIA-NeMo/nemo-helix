@@ -184,6 +184,7 @@ enabled-plugins = [
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-evaluator-plugin",
+  "nemo-eval-author-plugin",
   "nemo-insights-plugin",
   "nemo-guardrails-plugin",
   "nemo-auditor-plugin",
@@ -253,6 +254,7 @@ cpu-tasks = [
   # Insights Analyst Fabric adapter and insights.analysis execute extension.
   "nemo-insights-plugin",
   "nemo-evaluator-plugin",
+  "nemo-eval-author-plugin",
   "nemo-sandboxed-gym[server,opensandbox]",
   "nemo-anonymizer-plugin",
   "nemo-data-designer-plugin[retrieval-sdg]",
@@ -426,6 +428,7 @@ nemo-helix-plugin = { workspace = true }
 nemo-insights-plugin = { workspace = true }
 
 nemo-evaluator-plugin = { workspace = true }
+nemo-eval-author-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-auditor-plugin = { workspace = true }
@@ -487,6 +490,7 @@ members = [
   "packages/filesets",
   "plugins/nemo-guardrails",
   "plugins/nemo-evaluator",
+  "plugins/nemo-eval-author",
   "plugins/nemo-auditor",
   "plugins/nemo-safe-synthesizer",
   "plugins/nemo-switchyard",
@@ -706,6 +710,10 @@ exclude = [
   # replaces modules of the sandbox library it imports. Nothing imports it from
   # the control plane, so that library is absent from the workspace env.
   "plugins/_temporary-scaled-evals/harbor-patches/",
+
+  # Upstream labs-eval-author skills, vendored byte-identical; their helper scripts are
+  # not typed against this workspace and are never imported by the plugin.
+  "plugins/nemo-eval-author/src/nemo_eval_author_plugin/vendor/",
 
   "docs/",
 
