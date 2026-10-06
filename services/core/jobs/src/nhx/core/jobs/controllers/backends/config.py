@@ -13,7 +13,6 @@ from nhx.core.jobs.controllers.backends.kubernetes import (
     VolcanoJobExecutionProfile,
     VolcanoJobExecutionProfileConfig,
 )
-from nhx.core.jobs.controllers.backends.openshell import OpenShellJobExecutionProfileConfig
 from nhx.core.jobs.controllers.backends.subprocess import (
     SubprocessJobExecutionProfile,
     SubprocessJobExecutionProfileConfig,
@@ -42,10 +41,6 @@ class DefaultExecutionProfileConfig(BaseModel):
     subprocess: SubprocessJobExecutionProfileConfig = Field(
         default_factory=SubprocessJobExecutionProfileConfig,
         description="Default subprocess execution profile configuration",
-    )
-    openshell: OpenShellJobExecutionProfileConfig = Field(
-        default_factory=OpenShellJobExecutionProfileConfig,
-        description="Default OpenShell execution profile configuration",
     )
 
 
