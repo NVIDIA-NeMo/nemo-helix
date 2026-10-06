@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getBaseModelsQueryKeyPrefix } from '@nemo/common/src/api/entity-store/useBaseModels';
+import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
 import { InferenceProvidersDataView } from '@studio/components/dataViews/InferenceProvidersDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { renderRoute, screen } from '@studio/tests/util/render';
+import { QueryClient } from '@tanstack/react-query';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -70,6 +73,7 @@ const renderDataView = (initialEntry: string) =>
 describe('InferenceProvidersDataView', () => {
   afterEach(() => {
     server.resetHandlers();
+    vi.restoreAllMocks();
   });
 
   it('sends no filter[ or search params on initial render', async () => {
@@ -125,5 +129,29 @@ describe('InferenceProvidersDataView', () => {
         'Deleting this inference provider will also delete its auto-discovered model entities unless another provider serves them. Are you sure you want to proceed?'
       )
     ).toBeInTheDocument();
+  });
+
+  it('invalidates model catalog queries after deleting a provider', async () => {
+    const user = userEvent.setup();
+    const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+    server.use(
+      http.get(PROVIDERS_URL, () => HttpResponse.json(providersPage)),
+      http.delete(`${PROVIDERS_URL}/:name`, () => new HttpResponse(null, { status: 204 }))
+    );
+    renderDataView('/workspaces/default/inference-providers');
+
+    await screen.findByText(provider.name);
+    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: getModelsListModelsQueryKey('default'),
+      });
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: getBaseModelsQueryKeyPrefix('default'),
+    });
   });
 });

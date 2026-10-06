@@ -11,6 +11,7 @@
  */
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { getBaseModelsQueryKeyPrefix } from '@nemo/common/src/api/entity-store/useBaseModels';
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
@@ -29,6 +30,7 @@ import {
   useModelsDeleteProvider,
   useModelsListProviders,
 } from '@nemo/sdk/generated/platform/model-providers';
+import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
 import {
   ModelProvider,
   ModelProviderFilter,
@@ -113,6 +115,12 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
         toast.success('Inference provider deleted successfully.');
         queryClient.invalidateQueries({
           queryKey: getModelsListProvidersQueryKey(workspace),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getModelsListModelsQueryKey(workspace),
+        });
+        queryClient.invalidateQueries({
+          queryKey: getBaseModelsQueryKeyPrefix(workspace),
         });
       },
     },
