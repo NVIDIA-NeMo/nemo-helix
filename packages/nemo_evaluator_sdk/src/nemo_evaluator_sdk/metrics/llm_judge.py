@@ -472,7 +472,7 @@ def generate_structured_output(params: _LLMJudgeHookParams) -> dict | None:
             }
         elif isinstance(score, RangeScore):
             schema = {
-                "type": "integer" if isinstance(score.minimum, int) else "number",
+                "type": "integer" if score.integer else "number",
                 "minimum": score.minimum,
                 "maximum": score.maximum,
             }

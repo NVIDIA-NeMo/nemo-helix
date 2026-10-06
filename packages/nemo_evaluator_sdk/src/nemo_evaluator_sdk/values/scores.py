@@ -93,6 +93,10 @@ class RangeScore(_Score):
     model_config = ConfigDict(extra="forbid")
     minimum: float | int = Field(description="Minimum value for the score range. Must be less than maximum.")
     maximum: float | int = Field(description="Maximum value for the score range. Must be greater than minimum.")
+    integer: bool = Field(
+        default=False,
+        description="Restrict the score to whole numbers. When false, any number within the range is allowed.",
+    )
 
     @model_validator(mode="after")
     def valid_range(self) -> Self:
