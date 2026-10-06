@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import time
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
@@ -23,12 +24,15 @@ from nhx.core.files.app.backends.git import (
     GitBackendError,
     GitConfigError,
     GitRepositoryDamaged,
+    GitRepositoryLocked,
     GitServerFault,
     GitStorageConfig,
     GitStorageImpl,
     GitUnavailableError,
     _access_checks,
     _classify_failure,
+    _fetched_commits,
+    _last_touched,
     _listings,
     _pick_ref,
     _prune_fetch_repositories,
@@ -126,6 +130,8 @@ def _forget_listings_and_access_checks():
     yield
     _listings.clear()
     _access_checks.clear()
+    _fetched_commits.clear()
+    _last_touched.clear()
 
 
 def _durable_files(tmp_path: Path) -> list[Path]:
@@ -264,6 +270,7 @@ class TestSshCredentials:
             assert "ServerAliveInterval=15" in command
             assert env["GIT_ALLOW_PROTOCOL"] == "ssh"
             assert env["GIT_LITERAL_PATHSPECS"] == "1"
+            assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("gc.auto", "0")
         assert not key_path.exists()
 
     def test_repr_leaves_out_the_private_key(self, tmp_path):
@@ -302,7 +309,9 @@ class TestClassifyFailure:
                 "to view it.\nfatal: Could not read from remote repository.",
                 GitConfigError,
             ),
-            ("fatal: Unable to create '/cache/r/shallow.lock': File exists.", GitRepositoryDamaged),
+            ("fatal: Unable to create '/cache/r/shallow.lock': File exists.", GitRepositoryLocked),
+            ("git@host: Permission denied (password,keyboard-interactive).", GitAccessError),
+            ("git@host: Permission denied (gssapi-with-mic).", GitAccessError),
             ("warning: unrelated\nerror: inflate: data stream error (incorrect header check)", GitRepositoryDamaged),
             ("fatal: cannot change to '/cache/r': No such file or directory", GitRepositoryDamaged),
             ("fatal: something new", GitBackendError),
@@ -629,19 +638,107 @@ class TestDownloads:
         assert await _read(_impl(config, tmp_path / "cache"), "README.md") == b"readme\n"
 
 
+class TestColdRepositories:
+    async def test_looking_a_file_up_fetches_its_commit_before_the_download_starts(self, remote, tmp_path, monkeypatch):
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        shutil.rmtree(tmp_path / "cache")
+        _fetched_commits.clear()
+
+        impl = _impl(config, tmp_path / "cache")
+        await impl.get_file("README.md")
+
+        async def no_fetch(*_args, **_kwargs):
+            raise AssertionError("the download fetched")
+
+        monkeypatch.setattr(GitStorageImpl, "_fetch", no_fetch)
+        assert await _read(impl, "README.md") == b"changed\n"
+
+    async def test_reads_keep_a_repository_from_looking_idle(self, remote, tmp_path):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        await impl.list_files()
+        repository = _fetch_repository(tmp_path / "cache")
+        week_ago = time.time() - 8 * 24 * 60 * 60
+        os.utime(repository, (week_ago, week_ago))
+        _last_touched.clear()
+
+        await _read(impl, "README.md")
+        assert repository.stat().st_mtime > week_ago + 24 * 60 * 60
+
+    async def test_fetching_again_prunes_other_repositories(self, remote, tmp_path):
+        cache = tmp_path / "cache"
+        impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
+        await impl.list_files()
+        shutil.rmtree(_fetch_repository(cache))
+        _fetched_commits.clear()
+        idle = cache / "idle"
+        idle.mkdir()
+        week_ago = time.time() - 8 * 24 * 60 * 60
+        os.utime(idle, (week_ago, week_ago))
+
+        await impl.get_file("README.md")
+        assert not idle.exists()
+
+
+class TestStreamSlots:
+    async def test_a_slot_is_held_while_a_file_streams_and_freed_when_it_closes(self, remote, tmp_path):
+        impl = _impl(_config(remote["url"], path="agents/support"), tmp_path / "cache")
+        await impl.get_file("prompt.md")
+        free = git_backend._STREAM_SLOTS._value
+
+        stream = await impl.download("prompt.md", None)
+        assert isinstance(stream, AsyncGenerator)
+        assert await anext(stream) == b"0123"
+        assert git_backend._STREAM_SLOTS._value == free - 1
+
+        await stream.aclose()
+        await _until_background_work_is_done()
+        assert git_backend._STREAM_SLOTS._value == free
+
+
 class TestRepair:
-    @pytest.mark.parametrize("damage", ["stale_lock", "missing_objects"])
-    async def test_a_damaged_fetch_repository_is_started_over(self, remote, tmp_path, damage):
+    async def test_a_damaged_fetch_repository_is_started_over(self, remote, tmp_path):
         cache = tmp_path / "cache"
         await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
-        repository = _fetch_repository(cache)
-        if damage == "stale_lock":
-            (repository / "shallow.lock").touch()
-        else:
-            shutil.rmtree(repository / "objects")
+        shutil.rmtree(_fetch_repository(cache) / "objects")
 
         files = await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
         assert len(files) == 3
+
+    async def test_a_stale_lock_is_removed_and_the_repository_kept(self, remote, tmp_path):
+        cache = tmp_path / "cache"
+        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
+        repository = _fetch_repository(cache)
+        identity = repository.stat().st_ino
+        lock = repository / "shallow.lock"
+        lock.touch()
+        hour_ago = time.time() - 60 * 60
+        os.utime(lock, (hour_ago, hour_ago))
+
+        assert len(await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()) == 3
+        assert repository.stat().st_ino == identity
+        assert not lock.exists()
+
+    async def test_a_lock_in_use_is_reported_busy_and_left_alone(self, remote, tmp_path):
+        cache = tmp_path / "cache"
+        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
+        repository = _fetch_repository(cache)
+        identity = repository.stat().st_ino
+        lock = repository / "shallow.lock"
+        lock.touch()
+
+        with pytest.raises(GitUnavailableError, match="busy"):
+            await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
+        assert lock.exists()
+        assert repository.stat().st_ino == identity
+
+    def test_a_lock_outside_the_repository_is_never_removed(self, tmp_path):
+        outside = tmp_path / "elsewhere.lock"
+        outside.touch()
+        os.utime(outside, (0, 0))
+        (tmp_path / "repo").mkdir()
+        assert not git_backend._remove_stale_lock(tmp_path / "repo", outside)
+        assert outside.exists()
 
     @pytest.mark.parametrize(
         "failure",
@@ -728,6 +825,11 @@ class TestAccess:
 
 
 class TestRegistration:
+    async def test_resolving_a_pinned_config_keeps_the_branch_it_came_from(self, remote, tmp_path):
+        config = _config(remote["url"], revision=remote["main"], original_revision="main")
+        resolved = await _impl(config, tmp_path / "cache").resolve_config()
+        assert (resolved.revision, resolved.original_revision) == (remote["main"], "main")
+
     async def test_validate_storage_refuses_a_pinned_commit_the_remote_lacks(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
         monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
