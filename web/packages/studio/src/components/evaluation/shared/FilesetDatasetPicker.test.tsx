@@ -6,22 +6,18 @@ import {
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
-import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
 import { FilesetDatasetPicker } from '@studio/components/evaluation/shared/FilesetDatasetPicker';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { render, screen, waitFor } from '@studio/tests/util/render';
+import { render, screen } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { type FC } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 
-vi.mock('@studio/api/datasets/useDatasetFileContent', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@studio/api/datasets/useDatasetFileContent')>()),
-  datasetFileContentQueryOptions: vi.fn(),
-}));
-
-const JSONL_ROWS = '{"prompt":"hi"}\n{"prompt":"yo"}\n';
+interface PickerFormValues {
+  fileset: string;
+  file: string;
+}
 
 const fileEntry = (path: string) => ({
   file_ref: `${DEFAULT_WORKSPACE}/generated#${path}`,
@@ -34,8 +30,11 @@ const mockFilesets = (paths: string[]) => {
   server.use(
     http.get(mockApiUrl(getFilesListFilesetsQueryKey, ':workspace'), () =>
       HttpResponse.json({
-        data: [{ name: 'generated', workspace: DEFAULT_WORKSPACE }],
-        pagination: { total: 1, page: 1, page_size: 20 },
+        data: [
+          { name: 'generated', workspace: DEFAULT_WORKSPACE },
+          { name: 'other', workspace: DEFAULT_WORKSPACE },
+        ],
+        pagination: { total: 2, page: 1, page_size: 20 },
       })
     ),
     http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
@@ -44,38 +43,21 @@ const mockFilesets = (paths: string[]) => {
   );
 };
 
-const mockFileContent = (read: () => Promise<string>) => {
-  vi.mocked(datasetFileContentQueryOptions).mockImplementation(
-    ({ path }) =>
-      ({
-        queryKey: ['test-file-content', path],
-        queryFn: read,
-      }) as never
-  );
-};
-
-interface PickerFormValues {
-  fileset: string;
-}
-
-const PickerHarness: FC<
-  Pick<React.ComponentProps<typeof FilesetDatasetPicker>, 'onPick' | 'onClear'>
-> = (props) => {
-  const { control } = useForm<PickerFormValues>({ defaultValues: { fileset: '' } });
+const PickerHarness = ({ error }: { error?: string }) => {
+  const { control } = useForm<PickerFormValues>({ defaultValues: { fileset: '', file: '' } });
+  const file = useWatch({ control, name: 'file' });
   return (
-    <FilesetDatasetPicker<PickerFormValues>
-      workspace={DEFAULT_WORKSPACE}
-      filesetControllerProps={{ control, name: 'fileset' }}
-      {...props}
-    />
+    <>
+      <FilesetDatasetPicker<PickerFormValues>
+        workspace={DEFAULT_WORKSPACE}
+        control={control}
+        filesetName="fileset"
+        fileName="file"
+        error={error}
+      />
+      <output data-testid="form-file">{file}</output>
+    </>
   );
-};
-
-const renderPicker = () => {
-  const onPick = vi.fn();
-  const onClear = vi.fn();
-  render(<PickerHarness onPick={onPick} onClear={onClear} />);
-  return { onPick, onClear };
 };
 
 const chooseFileset = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
@@ -88,43 +70,34 @@ const chooseFile = async (user: ReturnType<typeof userEvent.setup>, name: string
   await user.click(await screen.findByRole('option', { name }));
 };
 
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
 describe('FilesetDatasetPicker', () => {
-  it('hands the picked file over under its own name', async () => {
-    mockFilesets(['rows.jsonl']);
-    mockFileContent(async () => JSONL_ROWS);
-    const user = userEvent.setup();
-    const { onPick } = renderPicker();
-
-    await chooseFileset(user, 'generated');
-    await chooseFile(user, 'rows.jsonl');
-
-    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
-    const file: File = onPick.mock.calls[0][0];
-    expect(file.name).toBe('rows.jsonl');
-    expect(await file.text()).toBe(JSONL_ROWS);
-  });
-
-  it('renames a parquet file to the JSONL it was decoded into', async () => {
+  it('writes the picked file path to the form', async () => {
     mockFilesets(['output/part-0.parquet']);
-    mockFileContent(async () => JSONL_ROWS);
     const user = userEvent.setup();
-    const { onPick } = renderPicker();
+    render(<PickerHarness />);
 
     await chooseFileset(user, 'generated');
     await chooseFile(user, 'output/part-0.parquet');
 
-    await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
-    expect(onPick.mock.calls[0][0].name).toBe('part-0.jsonl');
+    expect(screen.getByTestId('form-file')).toHaveTextContent('output/part-0.parquet');
+  });
+
+  it('clears the picked file when the fileset changes', async () => {
+    mockFilesets(['rows.jsonl']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'rows.jsonl');
+    await chooseFileset(user, 'other');
+
+    expect(screen.getByTestId('form-file')).toBeEmptyDOMElement();
   });
 
   it('lists only dataset formats', async () => {
     mockFilesets(['rows.jsonl', 'README.md', 'notes.txt']);
     const user = userEvent.setup();
-    renderPicker();
+    render(<PickerHarness />);
 
     await chooseFileset(user, 'generated');
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
@@ -134,18 +107,22 @@ describe('FilesetDatasetPicker', () => {
     expect(screen.queryByRole('option', { name: 'notes.txt' })).not.toBeInTheDocument();
   });
 
-  it('shows why a file could not be read and hands nothing over', async () => {
-    mockFilesets(['rows.jsonl']);
-    mockFileContent(async () => {
-      throw new Error('File is too large to edit in the browser.');
-    });
+  it('says when a fileset has no dataset files', async () => {
+    mockFilesets(['README.md']);
     const user = userEvent.setup();
-    const { onPick } = renderPicker();
+    render(<PickerHarness />);
 
     await chooseFileset(user, 'generated');
-    await chooseFile(user, 'rows.jsonl');
+
+    expect(
+      await screen.findByText('This fileset has no JSONL, JSON, or Parquet files.')
+    ).toBeVisible();
+  });
+
+  it('shows the error it is given on the file field', async () => {
+    mockFilesets(['rows.jsonl']);
+    render(<PickerHarness error="File is too large to edit in the browser." />);
 
     expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
-    expect(onPick).not.toHaveBeenCalled();
   });
 });

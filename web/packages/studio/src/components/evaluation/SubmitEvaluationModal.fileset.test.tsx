@@ -13,13 +13,13 @@ import {
   getFilesListFilesetFilesQueryKey,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
-import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
+import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -44,7 +44,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
 
 vi.mock('@studio/api/datasets/useDatasetFileContent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/api/datasets/useDatasetFileContent')>()),
-  datasetFileContentQueryOptions: vi.fn(),
+  useDatasetFileContent: vi.fn(),
 }));
 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
@@ -104,6 +104,33 @@ const mockListApis = () => {
   );
 };
 
+const mockFileContent = (result: { data?: string; error?: Error }) => {
+  vi.mocked(useDatasetFileContent).mockImplementation(
+    ({ enabled }) =>
+      ({
+        data: enabled ? result.data : undefined,
+        error: enabled ? (result.error ?? null) : null,
+        isFetching: false,
+      }) as never
+  );
+};
+
+const openDatasetStep = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+  await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+  await user.click(screen.getByRole('button', { name: 'Next' }));
+};
+
+const pickFilesetFile = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+  await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
+  await user.click(await screen.findByRole('option', { name: 'generated' }));
+  await user.click(await screen.findByRole('combobox', { name: 'File' }));
+  await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
+};
+
 const renderModal = () =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
@@ -125,9 +152,7 @@ const renderModal = () =>
 
 beforeEach(() => {
   mockListApis();
-  vi.mocked(datasetFileContentQueryOptions).mockImplementation(
-    ({ path }) => ({ queryKey: ['test-file-content', path], queryFn: async () => ROWS }) as never
-  );
+  mockFileContent({ data: ROWS });
   vi.mocked(evaluatorCreateEvaluateJob).mockResolvedValue({ name: 'job-1' } as never);
   vi.mocked(createExperiment).mockResolvedValue({
     id: 'grp_new',
@@ -145,18 +170,9 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
+    await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
-    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
-    await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
-    await user.click(await screen.findByRole('option', { name: 'generated' }));
-    await user.click(await screen.findByRole('combobox', { name: 'File' }));
-    await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
+    await pickFilesetFile(user);
     await user.upload(
       screen.getByLabelText('Select Evaluator Config'),
       new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
@@ -174,48 +190,56 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     expect(await (datasetUpload?.[3] as File).text()).toBe(ROWS);
   });
 
-  it('drops a fileset read that finishes after switching back to upload', async () => {
-    let finishRead: (text: string) => void = () => {};
-    vi.mocked(datasetFileContentQueryOptions).mockImplementation(
-      ({ path }) =>
-        ({
-          queryKey: ['test-file-content', path],
-          queryFn: () => new Promise<string>((resolve) => (finishRead = resolve)),
-        }) as never
-    );
+  it('forgets the fileset file after switching back to upload', async () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await pickFilesetFile(user);
+    await user.click(screen.getByRole('radio', { name: 'Upload a file' }));
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
+    expect(await screen.findByText('Add a dataset')).toBeVisible();
+    expect(evaluatorCreateEvaluateJob).not.toHaveBeenCalled();
+  });
+
+  it('still shows the picked file after stepping back and forward', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await pickFilesetFile(user);
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
-    await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
-    await user.click(await screen.findByRole('option', { name: 'generated' }));
-    await user.click(await screen.findByRole('combobox', { name: 'File' }));
-    await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
-    await user.click(screen.getByRole('radio', { name: 'Upload a file' }));
-    await act(async () => {
-      finishRead(ROWS);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
+    expect(await screen.findByRole('combobox', { name: 'File' })).toHaveTextContent(
+      'output/part-0.parquet'
+    );
+  });
 
-    expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
+  it('shows why a fileset file could not be read', async () => {
+    mockFileContent({ error: new Error('File is too large to edit in the browser.') });
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await pickFilesetFile(user);
+
+    expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
   });
 
   it('keeps Submit from sending a fileset dataset that was never picked', async () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Next' }));
-
+    await openDatasetStep(user);
     await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
     await user.upload(

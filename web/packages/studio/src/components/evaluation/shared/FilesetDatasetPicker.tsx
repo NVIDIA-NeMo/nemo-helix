@@ -4,21 +4,17 @@
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
-import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
-import { useQueryClient } from '@tanstack/react-query';
-import { type ReactElement, useEffect, useRef, useState } from 'react';
-import { type FieldValues, type UseControllerProps, useWatch } from 'react-hook-form';
+import { type ReactElement } from 'react';
+import {
+  type Control,
+  type FieldValues,
+  type Path,
+  useController,
+  useWatch,
+} from 'react-hook-form';
 
 const DATASET_FORMATS = ['json', 'jsonl', 'parquet'];
-
-/** Parquet is decoded to JSONL text on read, so the picked file is named for what it now holds. */
-const pickedFileName = (path: string): string => {
-  const baseName = path.split('/').pop() ?? path;
-  return formatFromFileName(baseName) === 'parquet'
-    ? baseName.replace(/\.(parquet|pq)$/i, '.jsonl')
-    : baseName;
-};
 
 const filesetOption = (fileset: { name: string }) => ({
   value: fileset.name,
@@ -27,100 +23,66 @@ const filesetOption = (fileset: { name: string }) => ({
 
 interface FilesetDatasetPickerProps<T extends FieldValues> {
   workspace: string;
+  control: Control<T>;
   /** Form field holding the chosen fileset name. */
-  filesetControllerProps: UseControllerProps<T>;
+  filesetName: Path<T>;
+  /** Form field holding the chosen file's path within that fileset. */
+  fileName: Path<T>;
   disabled?: boolean;
+  /** The chosen file's content is still being read. */
+  loading?: boolean;
   error?: string;
-  onPick: (file: File) => void;
-  onClear: () => void;
 }
 
 export function FilesetDatasetPicker<T extends FieldValues>({
   workspace,
-  filesetControllerProps,
+  control,
+  filesetName,
+  fileName,
   disabled,
+  loading,
   error,
-  onPick,
-  onClear,
 }: FilesetDatasetPickerProps<T>): ReactElement {
-  const queryClient = useQueryClient();
-  const filesetName: string = useWatch({
-    control: filesetControllerProps.control,
-    name: filesetControllerProps.name,
-  });
-  const [path, setPath] = useState('');
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const requestId = useRef(0);
+  const fileset: string = useWatch({ control, name: filesetName });
+  const { field: fileField } = useController({ control, name: fileName });
 
-  useEffect(
-    () => () => {
-      requestId.current += 1;
-    },
-    []
-  );
-
-  const filesQuery = useFilesListFilesetFiles(workspace, filesetName, undefined, {
-    query: { enabled: !!filesetName },
+  const filesQuery = useFilesListFilesetFiles(workspace, fileset, undefined, {
+    query: { enabled: !!fileset },
   });
 
   const fileItems = (filesQuery.data?.data ?? [])
     .filter((file) => DATASET_FORMATS.includes(formatFromFileName(file.path)))
     .map((file) => ({ value: file.path, children: file.path }));
 
-  const handleFilesetChange = () => {
-    requestId.current += 1;
-    setPath('');
-    setLoadError(null);
-    onClear();
-  };
-
-  const handleFileChange = async (value: string) => {
-    requestId.current += 1;
-    const current = requestId.current;
-    setPath(value);
-    setLoadError(null);
-    onClear();
-    try {
-      const text = await queryClient.fetchQuery(
-        datasetFileContentQueryOptions({
-          workspace,
-          name: filesetName,
-          path: value,
-          fullContent: true,
-        })
-      );
-      if (current !== requestId.current) return;
-      onPick(new File([text], pickedFileName(value)));
-    } catch (err) {
-      if (current !== requestId.current) return;
-      setLoadError(err instanceof Error ? err.message : 'Could not read the file');
-    }
-  };
-
-  const noDatasetFiles = !!filesetName && !filesQuery.isLoading && fileItems.length === 0;
+  const noDatasetFiles = !!fileset && !filesQuery.isLoading && fileItems.length === 0;
+  const placeholder = filesQuery.isLoading || loading ? 'Loading files...' : 'Select a file';
 
   return (
     <Stack gap="density-sm">
       <FilesetSearchableSelect<T>
         workspace={workspace}
-        useControllerProps={filesetControllerProps}
+        useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Fileset' }}
         renderOption={filesetOption}
-        onChange={handleFilesetChange}
+        onChange={() => fileField.onChange('')}
         disabled={disabled}
       />
       <FormField
         slotLabel="File"
-        slotHelp={noDatasetFiles ? 'This fileset has no JSONL, JSON, or Parquet files.' : undefined}
-        slotError={loadError ?? error}
-        status={(loadError ?? error) ? 'error' : undefined}
+        slotHelp={
+          noDatasetFiles
+            ? 'This fileset has no JSONL, JSON, or Parquet files.'
+            : 'JSONL, JSON, or Parquet. Parquet is converted to JSONL.'
+        }
+        slotError={error}
+        status={error ? 'error' : undefined}
       >
         <Select
-          disabled={disabled || !filesetName}
+          disabled={disabled || !fileset}
           items={fileItems}
-          value={path}
-          onValueChange={(value) => void handleFileChange(value)}
-          placeholder={filesQuery.isLoading ? 'Loading files...' : 'Select a file'}
+          value={fileField.value}
+          onValueChange={fileField.onChange}
+          placeholder={placeholder}
         />
       </FormField>
     </Stack>

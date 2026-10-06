@@ -34,12 +34,14 @@ import {
   Flex,
   FormField,
   RadioGroup,
+  SegmentedControl,
   Stack,
   Stepper,
   Text,
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
+import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
 import {
@@ -99,7 +101,7 @@ import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { useDebounce } from 'use-debounce';
@@ -172,6 +174,7 @@ const submitEvaluationBaseSchema = z.object({
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
   datasetFileset: z.string(),
+  datasetFile: z.string(),
   parallelism: z.coerce
     .number()
     .int('Use a whole number')
@@ -232,6 +235,7 @@ const makeDefaultValues = (
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
   datasetFileset: '',
+  datasetFile: '',
   parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
@@ -270,8 +274,8 @@ const isRecord = (value: unknown): boolean =>
  *  fields, and a file of scalars only fails once the job is running. Parsed here rather than
  *  through ``validateFileFormat``, which does not check record shape and would mean reading a
  *  large dataset into memory twice. */
-const inspectDatasetFile = async (file: File): Promise<Omit<DatasetPick, 'file'>> => {
-  const text = (await file.text()).trim();
+const inspectDatasetText = (rawText: string): Omit<DatasetPick, 'file'> => {
+  const text = rawText.trim();
   if (!text) return { error: 'File is empty' };
 
   let records: unknown[];
@@ -295,6 +299,11 @@ const inspectDatasetFile = async (file: File): Promise<Omit<DatasetPick, 'file'>
   }
   return { storedName: `${DATASET_BASENAME}.${format}` };
 };
+
+const inspectDatasetFile = async (file: File): Promise<Omit<DatasetPick, 'file'>> =>
+  inspectDatasetText(await file.text());
+
+const fileNameOf = (path: string): string => path.split('/').pop() ?? path;
 
 interface SubmitEvaluationModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
@@ -514,11 +523,33 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
   const evaluationFieldError = errors.evaluationName?.message ?? evaluationConfigIssue ?? undefined;
 
+  const datasetFileset = useWatch({ control, name: 'datasetFileset' });
+  const datasetFilePath = useWatch({ control, name: 'datasetFile' });
+  const isFilesetSource = datasetSource === DATASET_SOURCE_FILESET;
+  const filesetFile = useDatasetFileContent({
+    workspace,
+    name: datasetFileset,
+    path: datasetFilePath,
+    fullContent: true,
+    enabled: open && isFilesetSource && !!datasetFileset && !!datasetFilePath,
+  });
+  const filesetPick = useMemo<DatasetPick | null>(() => {
+    if (!isFilesetSource || filesetFile.data === undefined) return null;
+    return {
+      file: new File([filesetFile.data], fileNameOf(datasetFilePath)),
+      ...inspectDatasetText(filesetFile.data),
+    };
+  }, [isFilesetSource, filesetFile.data, datasetFilePath]);
+  const activeDatasetPick = isFilesetSource ? filesetPick : datasetPick;
+
   const uploads: UploadedEvalInputs | null =
-    datasetPick?.storedName && !datasetPick.error && configPick?.spec && !configPick.error
+    activeDatasetPick?.storedName &&
+    !activeDatasetPick.error &&
+    configPick?.spec &&
+    !configPick.error
       ? {
-          dataset: datasetPick.file,
-          datasetName: datasetPick.storedName,
+          dataset: activeDatasetPick.file,
+          datasetName: activeDatasetPick.storedName,
           spec: configPick.spec,
           configFormat: configPick.format ?? 'json',
         }
@@ -570,7 +601,11 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   );
 
   const datasetError =
-    datasetPick?.error ?? (submitAttempted && !datasetPick ? 'Add a dataset' : undefined);
+    activeDatasetPick?.error ??
+    (isFilesetSource ? filesetFile.error?.message : undefined) ??
+    (submitAttempted && !activeDatasetPick && !filesetFile.isFetching
+      ? 'Add a dataset'
+      : undefined);
   const configError =
     configPick?.error ??
     (submitAttempted && !configPick ? 'Select an evaluator config' : undefined);
@@ -1061,34 +1096,30 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                     .
                   </Text>
 
-                  <RadioGroup
+                  <SegmentedControl
                     aria-label="Dataset source"
-                    orientation="horizontal"
-                    name="datasetSource"
+                    size="tiny"
+                    className="w-full"
                     value={datasetSource}
                     onValueChange={(value) => {
                       clearDatasetPick();
                       setValue('datasetFileset', '');
+                      setValue('datasetFile', '');
                       setDatasetSource(value as DatasetSource);
                     }}
                     items={DATASET_SOURCE_ITEMS}
                   />
 
                   {datasetSource === DATASET_SOURCE_FILESET ? (
-                    <Stack gap="density-xs">
-                      <Text kind="label/bold/sm">Add Dataset</Text>
-                      <Text className="text-secondary" kind="body/regular/sm">
-                        A JSONL, JSON, or Parquet file in a fileset. Parquet is converted to JSONL.
-                      </Text>
-                      <FilesetDatasetPicker<SubmitEvaluationFormData>
-                        workspace={workspace}
-                        filesetControllerProps={{ control, name: 'datasetFileset' }}
-                        disabled={isPending}
-                        error={datasetError}
-                        onPick={(file) => void handleDatasetPicked({ file })}
-                        onClear={clearDatasetPick}
-                      />
-                    </Stack>
+                    <FilesetDatasetPicker<SubmitEvaluationFormData>
+                      workspace={workspace}
+                      control={control}
+                      filesetName="datasetFileset"
+                      fileName="datasetFile"
+                      disabled={isPending}
+                      loading={filesetFile.isFetching}
+                      error={datasetError}
+                    />
                   ) : (
                     <Upload
                       accept=".jsonl,.json"
