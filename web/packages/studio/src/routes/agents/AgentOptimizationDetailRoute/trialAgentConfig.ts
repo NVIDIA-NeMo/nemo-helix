@@ -116,7 +116,9 @@ const defaultHarnessModelPath = (config: ConfigMapping): string | undefined => {
   const harnesses = config.harnesses;
   const harness =
     typeof harnessName === 'string' && isMapping(harnesses) ? harnesses[harnessName] : undefined;
-  return isMapping(harness) && isMapping(harness.model) ? `harnesses.${harnessName}.model` : undefined;
+  return isMapping(harness) && isMapping(harness.model)
+    ? `harnesses.${harnessName}.model`
+    : undefined;
 };
 
 /**

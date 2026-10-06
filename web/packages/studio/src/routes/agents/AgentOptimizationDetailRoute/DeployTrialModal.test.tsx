@@ -53,7 +53,7 @@ interface CapturedAgent {
   config?: { name?: string; models?: { default?: { temperature?: number } } };
 }
 
-const mockPlatform = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => {
+const mockHelix = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => {
   const captured: { body: CapturedAgent } = { body: {} };
   server.use(
     http.get(`${AGENTS_URL}/:name`, ({ params }) =>
@@ -93,7 +93,7 @@ const renderModal = (trial: Trial = TRIAL) =>
 describe('DeployTrialModal', () => {
   it('creates an agent with the trial configuration and opens it', async () => {
     const user = userEvent.setup();
-    const captured = mockPlatform();
+    const captured = mockHelix();
     renderModal();
 
     const dialog = await screen.findByRole('dialog');
@@ -113,7 +113,7 @@ describe('DeployTrialModal', () => {
 
   it('deploys the rest of a trial when some params tune a study-only model', async () => {
     const user = userEvent.setup();
-    const captured = mockPlatform(`
+    const captured = mockHelix(`
 optimizer:
   search_space:
     temperature: {type: fabric, path: models.default.temperature, values: [0.0, 0.2]}
@@ -139,14 +139,16 @@ models:
 
   it('deploys a trial whose optimize config restates the agent model under another id', async () => {
     const user = userEvent.setup();
-    const captured = mockPlatform(`${OPTIMIZE_YAML}
+    const captured = mockHelix(`${OPTIMIZE_YAML}
 models:
   default: {provider: nvidia, model: nvidia/llama}
 `);
     renderModal();
 
     const dialog = await screen.findByRole('dialog');
-    expect(await within(dialog).findByText(/The study ran the "default" model as/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/The study ran the "default" model as/)
+    ).toBeInTheDocument();
     const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
     await waitFor(() => expect(deploy).toBeEnabled());
     await user.click(deploy);
@@ -156,7 +158,7 @@ models:
   });
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
-    mockPlatform();
+    mockHelix();
     renderRoute(undefined, {
       history: getAgentOptimizationDetailRoute(workspace, 'study'),
       routes: [
