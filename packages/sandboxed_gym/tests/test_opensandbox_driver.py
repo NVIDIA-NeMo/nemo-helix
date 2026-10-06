@@ -28,7 +28,7 @@ from sandboxed_gym.backends._opensandbox_driver import (
     _resource_requests,
 )
 from sandboxed_gym.backends.base import EpisodeBackendError, UnsupportedEpisodeOperationError
-from sandboxed_gym.sandbox_types import SandboxResources, SandboxSpec, SandboxStatus
+from sandboxed_gym.sandbox_types import SandboxHandle, SandboxResources, SandboxSpec, SandboxStatus
 
 requires_opensandbox = pytest.mark.skipif(
     importlib.util.find_spec("opensandbox") is None,
@@ -88,20 +88,93 @@ def test_a_named_user_is_refused_rather_than_guessed() -> None:
         _exec_identity("root")
 
 
-class _Message:
-    def __init__(self, content: str) -> None:
-        self.content = content
+def _sdk_messages(*texts: str) -> list[object]:
+    OutputMessage = getattr(importlib.import_module("opensandbox.models.execd"), "OutputMessage")
+    return [OutputMessage(text=text, timestamp=0) for text in texts]
 
 
-def test_output_messages_are_joined_into_one_stream() -> None:
-    assert _joined_output([_Message("line one\n"), _Message("line two\n")]) == "line one\nline two\n"
+def _driver_with_sandbox(sandbox: object) -> tuple[OpenSandboxDriver, SandboxHandle]:
+    return OpenSandboxDriver(), SandboxHandle(sandbox_id="sandbox-1", provider_name="opensandbox", raw=sandbox)
 
 
-@pytest.mark.parametrize("empty", [None, [], [_Message("")]])
-def test_absent_output_is_none_not_an_empty_string(empty: object) -> None:
+@requires_opensandbox
+@pytest.mark.parametrize(
+    ("texts", "expected"),
+    [
+        (("b23e3df7bafd4529a159b7429c8a220e",), "b23e3df7bafd4529a159b7429c8a220e"),
+        (("a", "b"), "a\nb"),
+        (("a", "\n", "b"), "a\n\nb"),
+        (("\n",), ""),
+    ],
+    ids=["single-line", "multiple-lines", "blank-line", "only-a-blank-line"],
+)
+def test_output_is_the_message_text_rejoined_into_lines(texts: tuple[str, ...], expected: str) -> None:
+    """execd sends one message per line with its terminator stripped, and a blank line as ``"\\n"``.
+
+    These are the shapes a live OpenSandbox 0.1.16 server returned for ``echo <nonce>``,
+    ``printf 'a\\nb\\n'``, ``printf 'a\\n\\nb\\n'`` and a bare ``echo``. Reading any field but
+    ``text`` leaks the message model's repr, timestamp included, into the stdout callers compare
+    against. A bare ``echo`` did write output, so it is ``""``, not ``None``.
+    """
+    assert _joined_output(_sdk_messages(*texts)) == expected  # ty: ignore[invalid-argument-type]
+
+
+@requires_opensandbox
+@pytest.mark.parametrize("empty", [None, [], [""]], ids=["absent", "no-messages", "empty-message"])
+def test_absent_output_is_none_not_an_empty_string(empty: list[str] | None) -> None:
     # The contract's `stdout`/`stderr` are optional, and callers distinguish "no output" from
     # "empty output" when deciding whether a command said anything.
-    assert _joined_output(empty) is None
+    messages = None if empty is None else _sdk_messages(*empty)
+    assert _joined_output(messages) is None
+
+
+@requires_opensandbox
+async def test_exec_returns_stdout_and_stderr_text_from_the_sdk_execution() -> None:
+    from types import SimpleNamespace
+
+    execd = importlib.import_module("opensandbox.models.execd")
+    execution = execd.Execution(
+        logs=execd.ExecutionLogs(stdout=_sdk_messages("out-1", "out-2"), stderr=_sdk_messages("err")),
+        exit_code=0,
+    )
+
+    async def run(command: str, opts: object) -> object:
+        return execution
+
+    driver, handle = _driver_with_sandbox(SimpleNamespace(commands=SimpleNamespace(run=run)))
+
+    result = await driver.exec(handle, "anything")
+
+    assert (result.stdout, result.stderr, result.return_code) == ("out-1\nout-2", "err", 0)
+
+
+@requires_opensandbox
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("Pending", SandboxStatus.STARTING),
+        ("Running", SandboxStatus.RUNNING),
+        ("Terminated", SandboxStatus.STOPPED),
+        ("Failed", SandboxStatus.ERROR),
+        ("Paused", SandboxStatus.UNKNOWN),
+    ],
+)
+async def test_status_maps_the_sdk_lifecycle_state(state: str, expected: SandboxStatus) -> None:
+    """The SDK reports lifecycle as ``SandboxInfo.status.state``, capitalised (``"Running"``).
+
+    ``status`` itself is a model; matching its repr, or its free-form ``reason``, reads a live
+    sandbox as ``unknown``.
+    """
+    from types import SimpleNamespace
+
+    SdkSandboxStatus = getattr(importlib.import_module("opensandbox.models.sandboxes"), "SandboxStatus")
+
+    async def get_info() -> object:
+        return SimpleNamespace(status=SdkSandboxStatus(state=state, reason="SOME_REASON"))
+
+    driver, handle = _driver_with_sandbox(SimpleNamespace(get_info=get_info))
+
+    assert await driver.status(handle) == expected
 
 
 def test_every_status_alias_maps_onto_a_real_contract_status() -> None:

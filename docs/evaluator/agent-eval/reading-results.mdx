@@ -202,8 +202,9 @@ An `agent-evaluate` platform job persists the same JSON and JSONL data without `
 publishes two named job results:
 
 - `agent-eval-results` — the complete bundle, including tasks, trials, scores, metadata, and summary.
-  For a Gym runner it also holds Gym's output under `gym_run/`, which `trials.jsonl` references by
-  bundle-relative path.
+  It also holds each runner's evidence, which `trials.jsonl` references by bundle-relative path:
+  Gym's output under `gym_run/`, Fabric's per-trial evidence under `evidence/fabric/`, and Harbor's
+  job output under `evidence/harbor/`.
 - `summary` — `summary.json` by itself for lightweight retrieval.
 
 Wait for the platform job to reach a terminal state before reading either result:

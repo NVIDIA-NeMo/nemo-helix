@@ -54,6 +54,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
+from nemo_evaluator.jobs.run_outcome import STATUS_DETAILS_KEY
 from nemo_evaluator.jobs.secret_env import JobEnvSecretSource
 from nemo_evaluator.metric_refs import MetricRef
 from nemo_evaluator.shared.metric_bundles.bundles import MetricBundle, bundle_metric
@@ -71,18 +72,22 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym.sandboxed import (
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.env import harbor_env_templates
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner
+from nemo_evaluator_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTarget,
     AgentEvalTrial,
     AgentEvalTrialStatus,
     AgentOutput,
+    TrialError,
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.enums import AgentFormat
 from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nemo_evaluator_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from nemo_evaluator_sdk.values.protocol import MetricOutput
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import InternalServerError, NemoResponseValidationError, NemoTransportError
 from nemo_helix_plugin.commands import add_job_commands
@@ -177,9 +182,14 @@ def test_cli_agent_evaluate_uses_flat_submit_without_local_run() -> None:
 
 
 class _FakeEvaluator:
-    """Stand-in for AgentEvaluator: records the tasks it was handed and returns canned trials."""
+    """Stand-in for AgentEvaluator: records the tasks it was handed and returns canned trials.
 
-    def __init__(self) -> None:
+    With ``failed=True`` every trial fails to generate and every score fails with it, the shape a dead
+    agent endpoint produces under ``ignore_request_failure``.
+    """
+
+    def __init__(self, *, failed: bool = False) -> None:
+        self.failed = failed
         self.received_tasks: list[AgentEvalTask] = []
         self.received_trials: list[AgentEvalTrial] | None = None
         self.received_target: AgentEvalTarget | None = None
@@ -201,13 +211,26 @@ class _FakeEvaluator:
             AgentEvalTrial(
                 id=f"{task.id}:trial",
                 task_id=task.id,
-                status=AgentEvalTrialStatus.COMPLETED,
-                output=AgentOutput(output_text="4"),
+                status=AgentEvalTrialStatus.FAILED if self.failed else AgentEvalTrialStatus.COMPLETED,
+                output=None if self.failed else AgentOutput(output_text="4"),
+                error=TrialError(type="ConnectError", message="SSL: WRONG_VERSION_NUMBER") if self.failed else None,
             )
             for task in tasks
         ]
+        scores = [
+            AgentEvalTaskScore(
+                id=f"{trial.id}:exact_match",
+                run_id="run-1",
+                task_id=trial.task_id,
+                trial_id=trial.id,
+                metric_type="exact_match",
+                status=AgentEvalScoreStatus.FAILED if self.failed else AgentEvalScoreStatus.COMPLETED,
+                outputs=[] if self.failed else [MetricOutput(name="score", value=1.0)],
+            )
+            for trial in generated_trials
+        ]
         return AgentEvalResult(
-            run_id="run-1", tasks=list(tasks), trials=generated_trials, scores=[], summary=AgentEvalSummary()
+            run_id="run-1", tasks=list(tasks), trials=generated_trials, scores=scores, summary=AgentEvalSummary()
         )
 
 
@@ -360,6 +383,66 @@ def test_agent_eval_job_keeps_sandboxed_gym_evidence_inside_the_downloadable_bun
     assert json.loads(capture)["model_call_id"] == "c0"
 
 
+def _fabric_evidence_path(runtime: FabricAgentRuntime, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
+    return runtime._evidence_dir(0, task, config) / "fabric_result.json"
+
+
+def _harbor_evidence_path(runtime: HarborAgentTaskRunner, task: AgentEvalTask, config: AgentEvalRunConfig) -> Path:
+    assert runtime._config is not None and runtime._config.jobs_dir is not None
+    return runtime._config.jobs_dir / "job" / task.id / "result.json"
+
+
+@pytest.mark.parametrize(
+    ("runtime_cls", "target", "evidence_path"),
+    [
+        (FabricAgentRuntime, _runner_target("openai/gpt-5.4"), _fabric_evidence_path),
+        (HarborAgentTaskRunner, HarborRunnerTarget(agent_name="oracle"), _harbor_evidence_path),
+    ],
+    ids=["fabric", "harbor"],
+)
+def test_agent_eval_job_keeps_runner_evidence_inside_the_downloadable_bundle(
+    tmp_path: Path,
+    mocker: MockerFixture,
+    runtime_cls: type,
+    target: FabricRunnerTarget | HarborRunnerTarget,
+    evidence_path: Callable[[Any, AgentEvalTask, AgentEvalRunConfig], Path],
+) -> None:
+    """Each runner writes evidence where the job tells it to; that place must be inside the bundle.
+
+    Anywhere else, the evidence dies with the Job's container and the trial references a path nobody can open.
+    """
+
+    async def run_tasks(
+        runtime: Any, tasks: Sequence[AgentEvalTask], config: AgentEvalRunConfig | None = None
+    ) -> list[AgentEvalTrial]:
+        assert config is not None
+        [task] = tasks
+        path = evidence_path(runtime, task, config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+        return [
+            AgentEvalTrial(
+                id=f"{task.id}-trial",
+                task_id=task.id,
+                status=AgentEvalTrialStatus.COMPLETED,
+                output=AgentOutput(output_text="4"),
+                evidence=CandidateEvidence(descriptors={"result": EvidenceDescriptor(kind="log", ref=str(path))}),
+            )
+        ]
+
+    mocker.patch.object(runtime_cls, "run_tasks", autospec=True, side_effect=run_tasks)
+    ctx = _job_context(tmp_path)
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    downloaded = ctx.storage.persistent / "results" / DEFAULT_RESULT_NAME
+    [trial] = [json.loads(line) for line in (downloaded / "trials.jsonl").read_text(encoding="utf-8").splitlines()]
+    ref = trial["evidence"]["descriptors"]["result"]["ref"]
+    assert not Path(ref).is_absolute()
+    assert (downloaded / ref).is_file()
+
+
 def test_agent_eval_job_retry_replaces_a_failed_attempts_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
     """A retried job (Volcano ``maxRetry``) reuses the failed attempt's persistent storage; leftover Gym output
     must not block or leak.
@@ -425,6 +508,57 @@ def test_agent_eval_job_passes_async_client_to_publication(tmp_path: Path, mocke
     assert intake.default_headers == _SDK_IDENTITY_HEADERS
 
 
+def test_agent_eval_job_reports_the_run_outcome_on_success(tmp_path: Path, mocker: MockerFixture) -> None:
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    report = mocker.patch("nemo_evaluator.jobs.agent_evaluate.report_run_outcome")
+
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=_runner_target("openai/gpt-5.4"))
+    result = AgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity())
+
+    assert result["status"] == "completed"
+    assert result[STATUS_DETAILS_KEY] == {
+        "unit": "trials",
+        "total": 1,
+        "errored": 0,
+        "scored": 1,
+        "failed": False,
+        "message": "1 of 1 trials scored; 0 reported errors.",
+    }
+    assert report.call_args.args[0].scored == 1
+
+
+def test_agent_eval_job_fails_when_no_trial_scored(tmp_path: Path, mocker: MockerFixture) -> None:
+    """A run whose every agent call died must not end as a completed job with zero scores.
+
+    Everything else still happens — artifacts (they hold the per-trial errors), the queryable record
+    (Studio reaches the bundle through it), publication (Intake gets the failed traces) — and the job
+    reports ``failed`` with the reason.
+    """
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator(failed=True))
+    persist = mocker.patch("nemo_evaluator.jobs.agent_evaluate.persist_agent_eval_result")
+    publish = mocker.patch(
+        "nemo_evaluator.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    report = mocker.patch("nemo_evaluator.jobs.agent_evaluate.report_run_outcome")
+    ctx = _job_context(tmp_path)
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+
+    result = AgentEvalJob().run(spec.model_dump(), ctx=ctx, client=_sync_sdk_with_identity())
+
+    assert result["status"] == "failed"
+    assert result["reason"].startswith("No usable scores across 1 trials (1 reported errors)")
+    assert result[STATUS_DETAILS_KEY]["failed"] is True
+    assert (ctx.storage.persistent / "results" / SUMMARY_RESULT_NAME).exists()
+    persist.assert_called_once()
+    publish.assert_called_once()
+    assert report.call_args.args[0].failed
+
+
 def test_agent_eval_spec_requires_at_least_one_task() -> None:
     with pytest.raises(ValueError, match="at least 1 item|too_short|min_length"):
         AgentEvalSpec(tasks=[])
@@ -451,7 +585,6 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     target, prompt_template, params = AgentEvalJob._resolve_target(fabric_target, ctx)
     assert isinstance(target, FabricAgentRuntime)
     assert target._model == "openai/gpt-5.4"
-    assert target._work_root == ctx.storage.persistent / "fabric"
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
@@ -474,9 +607,8 @@ def test_resolve_target_builds_harbor_runtime_from_runner_target(
     )
     target, prompt_template, params = AgentEvalJob._resolve_target(harbor_target, ctx)
     assert isinstance(target, HarborAgentTaskRunner)
-    # The runtime-only jobs directory is injected from the job's persistent storage.
     assert target._config is not None
-    assert target._config.jobs_dir == ctx.storage.persistent / "harbor"
+    assert target._config.jobs_dir == ctx.storage.persistent / AGENT_BUNDLE_DIR / "evidence" / "harbor"
     # Spec knobs are forwarded onto the Harbor runtime config.
     assert target._config.agent_model_name == "openai/gpt-5.4"
     assert target._config.agent_kwargs == {
