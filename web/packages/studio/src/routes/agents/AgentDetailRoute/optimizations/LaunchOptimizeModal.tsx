@@ -151,10 +151,11 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
   }, [source, bundle, filesetFiles.data]);
 
   const problems = useMemo(() => {
-    const config = bundle?.configs[configPath];
-    if (strategy !== PREFLIGHT_STRATEGY || source !== UPLOAD_BUNDLE || !bundle || !config) {
+    if (strategy !== PREFLIGHT_STRATEGY || source !== UPLOAD_BUNDLE || !bundle || !configPath) {
       return [];
     }
+    const config = bundle.configs[configPath];
+    if (!config) return [`${configPath} is not valid YAML with a mapping at the top level.`];
     return optimizeBundleProblems({
       config,
       bundlePaths: new Set(bundle.entries.map((entry) => entry.path)),
@@ -375,9 +376,11 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
             onValueChange={setConfigPath}
             disabled={isPending || filesetFiles.isFetching}
             placeholder={
-              !filesetFiles.isFetching && configPaths.length === 0
-                ? 'No YAML files in this fileset'
-                : 'Select the config YAML'
+              filesetFiles.isError
+                ? 'Could not load the files in this fileset'
+                : !filesetFiles.isFetching && configPaths.length === 0
+                  ? 'No YAML files in this fileset'
+                  : 'Select the config YAML'
             }
             items={configPaths.map((path) => ({ value: path, children: path }))}
           />

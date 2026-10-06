@@ -205,6 +205,20 @@ describe('LaunchOptimizeModal', () => {
     expect(startButton(dialog)).toBeDisabled();
   });
 
+  it('blocks a legacy upload whose config is not valid YAML', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    renderModal();
+
+    const dialog = await pickStrategy('LEGACY');
+    await pickSource(user, 'Upload files');
+    await pickBundle(dialog, [makeFile('bundle/optimize.yaml', 'key: [unclosed')]);
+
+    const problems = await within(dialog).findByTestId('optimize-bundle-problems');
+    expect(problems).toHaveTextContent('optimize.yaml is not valid YAML');
+    expect(startButton(dialog)).toBeDisabled();
+  });
+
   it('asks which config to run when the bundle holds several YAML files', async () => {
     const user = userEvent.setup();
     const { submitted } = mockHelix();
