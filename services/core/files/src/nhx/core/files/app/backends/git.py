@@ -60,11 +60,8 @@ _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueD
 # git's own "infinite" depth, which deepens a shallow repository to the full history of a ref.
 _FULL_HISTORY = 2147483647
 
-# Bounds the git and ssh processes one files service starts at once, across every request.
+# Bounds the git and ssh commands one files service runs at once, across every request; file streams are not counted.
 _GIT_SLOTS = asyncio.Semaphore(16)
-
-# Separate from the slots above, so slow clients streaming files cannot starve fetches and listings.
-_STREAM_SLOTS = asyncio.Semaphore(32)
 
 
 class GitBackendError(StorageBackendError):
@@ -408,13 +405,6 @@ def _remove_stale_lock(repo: Path, lock_path: Path) -> bool:
     except OSError:
         return False
     return True
-
-
-async def _release_when_done(proc: asyncio.subprocess.Process, slots: asyncio.Semaphore) -> None:
-    try:
-        await proc.wait()
-    finally:
-        slots.release()
 
 
 def _identity(repo: Path) -> int | None:
@@ -801,7 +791,6 @@ class GitStorageImpl(StorageImpl):
         return (await self._snapshot()).get(wanted)
 
     async def _open_blob(self, repo: Path, blob: str, size: int) -> AsyncGenerator[bytes]:
-        await _STREAM_SLOTS.acquire()
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
@@ -816,15 +805,8 @@ class GitStorageImpl(StorageImpl):
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
             )
-        except BaseException as exc:
-            _STREAM_SLOTS.release()
-            if isinstance(exc, FileNotFoundError):
-                raise GitServerFault("git is not installed in the files service") from exc
-            raise
-        # Released when the process exits, even if the stream is dropped without being read or closed.
-        releasing = asyncio.ensure_future(_release_when_done(proc, _STREAM_SLOTS))
-        _background_work.add(releasing)
-        releasing.add_done_callback(_background_work.discard)
+        except FileNotFoundError as exc:
+            raise GitServerFault("git is not installed in the files service") from exc
         assert proc.stdout is not None and proc.stderr is not None
         chunk_size = self.config.read_chunk_size
         try:
