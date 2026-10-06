@@ -62,6 +62,7 @@ import uuid
 from IPython.display import clear_output
 from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_customizer.sdk import Customization
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
@@ -94,7 +95,8 @@ nemo models get nemotron-3-embed-1b --workspace default
 The entity is ready once `nemo models get` reports a non-null `fileset` and a populated `spec`. For a gated repo, create the token first with `nemo secrets create hf-token --value "$HF_TOKEN"` and add `"token_secret":"hf-token"` to `--storage`.
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
+from nemo_helix_plugin.schema import SecretRef
 
 NGC_API_KEY = os.environ.get("NGC_API_KEY")
 if not NGC_API_KEY:
@@ -116,28 +118,28 @@ if HF_TOKEN:
         sdk.secrets.create(name="hf-token", workspace="default", value=HF_TOKEN)
     except ConflictError:
         pass
-    storage = HuggingfaceStorageConfigParam(
-        type="huggingface",
+    storage = HuggingfaceStorageConfig(
+        type=StorageConfigType.HUGGINGFACE,
         repo_id=HF_REPO_ID,
         repo_type="model",
-        token_secret="hf-token",
+        token_secret=SecretRef("hf-token"),
     )
 else:
-    storage = HuggingfaceStorageConfigParam(
-        type="huggingface",
+    storage = HuggingfaceStorageConfig(
+        type=StorageConfigType.HUGGINGFACE,
         repo_id=HF_REPO_ID,
         repo_type="model",
     )
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=MODEL_NAME,
-        purpose="model",
+        purpose=FilesetPurpose.MODEL,
         description="Nemotron 3 Embed 1B BF16 checkpoint",
         storage=storage,
-    )
-except ConflictError:
-    print("Base model fileset already exists")
+    ),
+    exist_ok=True,
+)
 
 try:
     base_model = sdk.models.create(
@@ -300,15 +302,15 @@ with qrels_path.open("w", encoding="utf-8", newline="") as stream:
     writer.writerows(kept)
 print(f"qrels judgments: {len(kept)}")
 
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=TRAINING_FILESET,
-        purpose="dataset",
+        purpose=FilesetPurpose.DATASET,
         description="NVDocs mined retrieval artifacts",
-    )
-except ConflictError:
-    pass
+    ),
+    exist_ok=True,
+)
 sdk.files.upload(
     local_path=f"{local_dir}/",
     remote_path="",

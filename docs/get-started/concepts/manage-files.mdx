@@ -70,7 +70,7 @@ The Files service supports multiple storage backends and can be used to store da
 
 ## Managing Filesets
 
-Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK (`client.files.filesets`).
+Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK's typed files client (`client.files.client`).
 
 <Tip>
 
@@ -137,6 +137,7 @@ nemo files filesets create my-files \
 import os
 
 from nemo_helix import NeMoHelix
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 client = NeMoHelix(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
@@ -144,10 +145,13 @@ client = NeMoHelix(
 )
 
 # Create a fileset
-fileset = client.files.filesets.create(
-    name="my-files",
-    description="Training data for model fine-tuning",
-)
+fileset = client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-files",
+        description="Training data for model fine-tuning",
+    ),
+    exist_ok=True,
+).data()
 
 print(fileset.model_dump_json(indent=2))
 ```
@@ -202,9 +206,8 @@ nemo files filesets list
 <Tab title="Python SDK">
 
 ```python
-filesets = client.files.filesets.list()
-
-for fileset in filesets:
+# items() fetches subsequent pages lazily
+for fileset in client.files.client.list_filesets().items():
     print(f"{fileset.name}: {fileset.description}")
 ```
 
@@ -230,10 +233,10 @@ nemo files filesets list --filter.storage-type local
 
 ```python
 # List only dataset filesets
-datasets = client.files.filesets.list(filter={"purpose": "dataset"})
+datasets = client.files.client.list_filesets(query_params={"filter": 'purpose:"dataset"'}).page().items
 
 # List filesets using local storage
-local_filesets = client.files.filesets.list(filter={"storage_type": "local"})
+local_filesets = client.files.client.list_filesets(query_params={"filter": 'storage_type:"local"'}).page().items
 ```
 
 </Tab>
@@ -254,11 +257,14 @@ nemo files filesets list --page 1 --page-size 10 --sort "-created_at"
 <Tab title="Python SDK">
 
 ```python
-filesets = client.files.filesets.list(
-    page=1,
-    page_size=10,
-    sort="-created_at",  # The "-" prefix sorts descending (newest first)
-)
+page = client.files.client.list_filesets(
+    query_params={
+        "page": 1,
+        "page_size": 10,
+        "sort": "-created_at",  # The "-" prefix sorts descending (newest first)
+    },
+).page()
+filesets = page.items
 ```
 
 </Tab>
@@ -284,7 +290,7 @@ nemo files filesets delete my-files
 <Tab title="Python SDK">
 
 ```python
-deleted_fileset = client.files.filesets.delete(name="my-files")
+deleted_fileset = client.files.client.delete_fileset(name="my-files").data()
 
 print(f"Deleted fileset: {deleted_fileset.name}")
 ```
@@ -562,7 +568,7 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 "type": "ngc",
 "org": "nvidia",
 "team": "nemotron-personas",
-"resource": "nemotron-personas-dataset-en_us",
+"target": "nemotron-personas-dataset-en_us",
 "version": "0.0.2",
 "api_key_secret": "my-ngc-api-key"
 }'
@@ -574,22 +580,27 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 ```python
 import os
 
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a secret to store your NGC API key
 secret = client.secrets.create(name="my-ngc-api-key", value="<your-ngc-api-key>")
 
 # Create a fileset pointing to NGC storage
-ngc_fileset = client.files.filesets.create(
-    name="my-nemotron-personas-dataset-en_us",
-    description="Nemotron Personas USA",
-    storage={
-        "type": "ngc",
-        "org": "nvidia",
-        "team": "nemotron-personas",
-        "resource": "nemotron-personas-dataset-en_us",
-        "version": "0.0.2",
-        "api_key_secret": secret.name,
-    },
-)
+ngc_fileset = client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-nemotron-personas-dataset-en_us",
+        description="Nemotron Personas USA",
+        storage={
+            "type": "ngc",
+            "org": "nvidia",
+            "team": "nemotron-personas",
+            "target": "nemotron-personas-dataset-en_us",
+            "version": "0.0.2",
+            "api_key_secret": secret.name,
+        },
+    ),
+    exist_ok=True,
+).data()
 ```
 
 </Tab>
@@ -622,20 +633,25 @@ nemo files filesets create hf-dataset \
 ```python
 import os
 
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a secret to store your HuggingFace token (needed for gated and private repos)
 secret = client.secrets.create(name="hf_token", value=os.getenv("HF_TOKEN"))
 
 # Create a fileset pointing to a HuggingFace repo
-hf_fileset = client.files.filesets.create(
-    name="hf-dataset",
-    description="Dataset from HuggingFace",
-    storage={
-        "type": "huggingface",
-        "repo_id": "nvidia/Nemotron-Personas-Japan",
-        "repo_type": "dataset",
-        "token_secret": secret.name,  # Optional, needed for gated and private repos
-    },
-)
+hf_fileset = client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="hf-dataset",
+        description="Dataset from HuggingFace",
+        storage={
+            "type": "huggingface",
+            "repo_id": "nvidia/Nemotron-Personas-Japan",
+            "repo_type": "dataset",
+            "token_secret": secret.name,  # Optional, needed for gated and private repos
+        },
+    ),
+    exist_ok=True,
+).data()
 ```
 
 </Tab>
@@ -672,19 +688,24 @@ nemo files download s3-training-data -o ./downloaded_data/
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a fileset backed by S3 storage using SDK credential chain
 # (uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, IRSA, instance profiles, etc.)
-s3_fileset = client.files.filesets.create(
-    name="s3-training-data",
-    description="Training data stored in S3",
-    storage={
-        "type": "s3",
-        "bucket": "my-ml-bucket",
-        "prefix": "datasets/training",  # Optional: scope to a folder within the bucket
-        "region": "us-east-1",
-        "use_sdk_auth": True,  # Use AWS SDK credential chain (default)
-    },
-)
+s3_fileset = client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="s3-training-data",
+        description="Training data stored in S3",
+        storage={
+            "type": "s3",
+            "bucket": "my-ml-bucket",
+            "prefix": "datasets/training",  # Optional: scope to a folder within the bucket
+            "region": "us-east-1",
+            "use_sdk_auth": True,  # Use AWS SDK credential chain (default)
+        },
+    ),
+    exist_ok=True,
+).data()
 
 # Upload data to S3
 client.files.upload(
@@ -734,6 +755,8 @@ nemo files filesets create minio-fileset \
 ```python
 import os
 
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create secrets to store your S3 credentials
 access_key = client.secrets.create(
     name="s3_access_key", value=os.getenv("S3_ACCESS_KEY")
@@ -742,19 +765,22 @@ secret_key = client.secrets.create(
     name="s3_secret_key", value=os.getenv("S3_SECRET_KEY")
 )
 
-s3_fileset = client.files.filesets.create(
-    name="minio-fileset",
-    description="Data stored in MinIO",
-    storage={
-        "type": "s3",
-        "bucket": "my-bucket",
-        "endpoint_url": "http://minio.example.com:9000",  # Custom S3 endpoint
-        "region": "us-east-1",
-        "use_sdk_auth": False,  # Use explicit credentials instead of SDK auth
-        "access_key_id_secret": access_key.name,
-        "secret_access_key_secret": secret_key.name,
-    },
-)
+s3_fileset = client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="minio-fileset",
+        description="Data stored in MinIO",
+        storage={
+            "type": "s3",
+            "bucket": "my-bucket",
+            "endpoint_url": "http://minio.example.com:9000",  # Custom S3 endpoint
+            "region": "us-east-1",
+            "use_sdk_auth": False,  # Use explicit credentials instead of SDK auth
+            "access_key_id_secret": access_key.name,
+            "secret_access_key_secret": secret_key.name,
+        },
+    ),
+    exist_ok=True,
+).data()
 ```
 
 </Tab>

@@ -185,6 +185,13 @@ class TestModelUpload:
 
         assert files.created[0]["storage"].token_secret.root == "hf-token"
 
+    def test_huggingface_storage_type_is_sent(self) -> None:
+        files, models = _FakeFiles(), _FakeModels()
+        _run(files=files, models=models, model_source="Qwen/Qwen3-1.7B")
+
+        # The typed client serializes request bodies with exclude_unset, so a defaulted type would be dropped.
+        assert files.created[0]["storage"].model_dump(mode="json", exclude_unset=True)["type"] == "huggingface"
+
     def test_local_model_directory_is_uploaded(self, tmp_path: Path) -> None:
         source = tmp_path / "my-model"
         source.mkdir()
