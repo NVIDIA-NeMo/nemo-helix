@@ -6,11 +6,13 @@ import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customi
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import type { DatasetFormat } from '@studio/hooks/useDatasetFormat';
+import { FILE_PREVIEW_MAX_BYTES } from '@studio/api/datasets/useDatasetFileContent';
+import type { AnnotatedFilesetFile } from '@studio/hooks/useCustomizationDatasetValidation';
 import type { CustomizationBackend, CustomizationJob } from '@studio/util/customizationBackend';
 import { getFinetuningType } from '@studio/util/customizations';
 import {
   CUSTOMIZER_SCHEMA_LABELS,
+  type CustomizerSchemaDetection,
   type CustomizerSchemaVariant,
   type TrainingType,
 } from '@studio/util/customizerSchema';
@@ -28,9 +30,41 @@ import { AUTOMODEL_SEED, rlSeed, UNSLOTH_SEED } from '@studio/util/forms/specDef
 import { isPlainObject } from '@studio/util/functions';
 import { z } from 'zod';
 
-export interface DraftDataset extends DatasetFormat {
+export interface DraftDataset {
   ref: string;
+  /** Null when the first training row matches no format customizer accepts. */
+  schema: CustomizerSchemaDetection | null;
+  trainingRowCount: number;
+  rowCountIsEstimate: boolean;
+  hasValidation: boolean;
+  /** Field names and types of the first training row — no values. */
+  shape: string;
 }
+
+/**
+ * Rows across the training files. Each file's count comes from a preview capped at
+ * {@link FILE_PREVIEW_MAX_BYTES}, so a larger file is scaled up by its size — assuming the
+ * rows read are typical of the rest.
+ */
+interface RowCount {
+  trainingRowCount: number;
+  rowCountIsEstimate: boolean;
+}
+
+export const estimateTrainingRows = (files: AnnotatedFilesetFile[]): RowCount =>
+  files.reduce<RowCount>(
+    (total, file) => {
+      const rows = file.rowCount ?? 0;
+      const capped = file.size > FILE_PREVIEW_MAX_BYTES;
+      return {
+        trainingRowCount:
+          total.trainingRowCount +
+          (capped ? Math.round((rows * file.size) / FILE_PREVIEW_MAX_BYTES) : rows),
+        rowCountIsEstimate: total.rowCountIsEstimate || capped,
+      };
+    },
+    { trainingRowCount: 0, rowCountIsEstimate: false }
+  );
 
 /** The picked reward environment, with what its `nemo-environment.yaml` says about itself. */
 export interface DraftEnvironment {

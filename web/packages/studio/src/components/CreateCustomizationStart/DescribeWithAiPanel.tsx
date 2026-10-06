@@ -11,14 +11,17 @@ import { getEntityReference, getPartsFromReference } from '@nemo/common/src/name
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Flex, FormField, Grid, Select, Stack, Text } from '@nvidia/foundations-react-core';
-import type { DraftInputs } from '@studio/components/CreateCustomizationStart/aiDraft';
+import {
+  type DraftInputs,
+  estimateTrainingRows,
+} from '@studio/components/CreateCustomizationStart/aiDraft';
 import { DraftResult } from '@studio/components/CreateCustomizationStart/DraftResult';
 import type { DescribeWithAiPanelProps } from '@studio/components/CreateCustomizationStart/types';
 import {
   MAX_RETRIES,
   useDescribeWithAi,
 } from '@studio/components/CreateCustomizationStart/useDescribeWithAi';
-import { useDatasetFormat } from '@studio/hooks/useDatasetFormat';
+import { useCustomizationDatasetValidation } from '@studio/hooks/useCustomizationDatasetValidation';
 import { useGymEnvironmentManifest } from '@studio/hooks/useGymEnvironmentManifest';
 import { pickDefaultModelName } from '@studio/util/buildSuggestedModelOptions';
 import { CUSTOMIZER_SCHEMA_LABELS } from '@studio/util/customizerSchema';
@@ -53,8 +56,10 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   const [datasetRef, setDatasetRef] = useState<string | null>(null);
   const [environmentRef, setEnvironmentRef] = useState<string | null>(null);
 
-  const dataset = useDatasetFormat(datasetRef);
-  const isGymDataset = dataset.format?.schema?.variant === 'grpo-gym';
+  // The full form's dataset check, without a training type so it detects any format.
+  const dataset = useCustomizationDatasetValidation({ fileset: datasetRef ?? undefined });
+  const isGymDataset = dataset.schema?.variant === 'grpo-gym';
+  const { trainingRowCount, rowCountIsEstimate } = estimateTrainingRows(dataset.training);
 
   // Same requests as the form's dataset and environment pickers.
   const datasets = useFilesListFilesets(workspace, {
@@ -76,10 +81,18 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   const isEnvironmentLoading = !!pickedEnvironment && environment.isPending;
 
   const inputs = useMemo<DraftInputs | null>(() => {
-    if (!baseModel || !datasetRef || !dataset.format || isEnvironmentLoading) return null;
+    if (!baseModel || !datasetRef || dataset.isPending || dataset.discoveryError) return null;
+    if (isEnvironmentLoading) return null;
     return {
       model: baseModel,
-      dataset: { ref: datasetRef, ...dataset.format },
+      dataset: {
+        ref: datasetRef,
+        schema: dataset.schema,
+        hasValidation: dataset.hasValidation,
+        shape: dataset.schemaShape,
+        trainingRowCount,
+        rowCountIsEstimate,
+      },
       environment: pickedEnvironment
         ? {
             ref: pickedEnvironment,
@@ -91,7 +104,13 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   }, [
     baseModel,
     datasetRef,
-    dataset.format,
+    dataset.isPending,
+    dataset.discoveryError,
+    dataset.schema,
+    dataset.hasValidation,
+    dataset.schemaShape,
+    trainingRowCount,
+    rowCountIsEstimate,
     isEnvironmentLoading,
     pickedEnvironment,
     environment.manifest,
@@ -162,9 +181,9 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     }
   };
 
-  const schema = dataset.format?.schema;
+  const { schema } = dataset;
   const datasetSummary = schema
-    ? `${CUSTOMIZER_SCHEMA_LABELS[schema.variant]} · ${dataset.format?.rowCountIsEstimate ? '~' : ''}${dataset.format?.trainingRowCount.toLocaleString()} examples`
+    ? `${CUSTOMIZER_SCHEMA_LABELS[schema.variant]} · ${rowCountIsEstimate ? '~' : ''}${trainingRowCount.toLocaleString()} examples`
     : undefined;
 
   if (showResult && validation?.status === 'valid') {
@@ -229,9 +248,9 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
               attributes={DROPDOWN_SIZE}
               aria-label="Training dataset"
             />
-            {dataset.error ? (
+            {dataset.discoveryError ? (
               <Banner kind="inline" status="error">
-                {`Couldn't read the dataset: ${getErrorMessage(dataset.error)}`}
+                {`Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`}
               </Banner>
             ) : null}
           </Stack>
@@ -318,7 +337,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
             type="submit"
             kind="secondary"
             loading={isGenerating || isPreparing}
-            disabled={isGenerating || isPreparing || !!dataset.error}
+            disabled={isGenerating || isPreparing || !!dataset.discoveryError}
           >
             {validation || requestError ? 'Draft again' : 'Draft settings'}
           </LoadingButton>

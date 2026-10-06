@@ -8,7 +8,7 @@ import {
   MAX_RETRIES,
   useDescribeWithAi,
 } from '@studio/components/CreateCustomizationStart/useDescribeWithAi';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 
 const mutateAsync = vi.fn();
 
@@ -141,5 +141,32 @@ describe('useDescribeWithAi', () => {
       errors: ['training.lora_rank: not a field of the automodel job schema'],
     });
     expect(onDraft).toHaveBeenLastCalledWith(null);
+  });
+
+  it('drops a reply that lands after the panel unmounts', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    mutateAsync.mockReturnValue(new Promise((r) => (resolve = r)));
+    const onDraft = vi.fn();
+    const { result, unmount } = renderHook(() => useDescribeWithAi('default', INPUTS, onDraft));
+    act(() => {
+      result.current.form.setValue('model', 'default/drafter');
+      result.current.form.setValue('baseModel', 'default/llama-8b');
+      result.current.form.setValue('dataset', 'default/tickets');
+      result.current.form.setValue('prompt', 'route support tickets');
+    });
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = result.current.generate();
+    });
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
+    const { signal } = mutateAsync.mock.calls[0][0];
+
+    unmount();
+    expect(signal.aborted).toBe(true);
+    resolve(toolCallResponse(automodelDraft()));
+    await pending;
+
+    expect(onDraft).not.toHaveBeenCalledWith(expect.objectContaining({ backend: 'automodel' }));
   });
 });
