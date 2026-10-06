@@ -272,13 +272,9 @@ nemo agent-hardener status [--limit <n>]
 Agent Hardener resources are available on the platform client as `client.agent_hardener`:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 manifest = client.agent_hardener.get_manifest(name="react-agent").data()
 

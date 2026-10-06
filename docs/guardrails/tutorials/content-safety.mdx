@@ -19,7 +19,7 @@ For the main model, this tutorial uses the [Nemotron 3.5 Lightning 30B-A3B](http
 Before you begin:
 
 - You have access to a running NeMo Helix deployment.
-- `NHX_BASE_URL` is set to NeMo Helix base URL.
+- Your current CLI context points at your NeMo Helix deployment. For details, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 - A `ModelProvider` is configured with an LLM provider. Follow [Setup](/documentation/get-started) if you haven't done this yet.
 
 This tutorial uses the following NIMs, available on `build.nvidia.com`:
@@ -44,16 +44,12 @@ You will:
 Instantiate the platform client.
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
 
 ---

@@ -64,7 +64,7 @@ active context. Otherwise, choose a model from `nemo models list` and set
 In another terminal:
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+export NHX_BASE_URL=http://127.0.0.1:8080  # nhx-base-url-allow: targets the platform started above
 cd plugins/nemo-agents
 
 printf '%s' "$NVIDIA_API_KEY" | nemo secrets create ngc-api-key --from-file -
@@ -160,17 +160,12 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 client.inference.virtual_models.create_virtual_model(
     body=CreateVirtualModelRequest(
@@ -249,19 +244,20 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
-import os
 import yaml
 from pathlib import Path
 
 from nemo_agents_plugin.jobs.optimize_skills import OptimizeSkillsJob
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
+client = NemoClient.from_config()
 spec = yaml.safe_load(Path(".agent-improver.yml").read_text())
 result = NemoJobScheduler().submit_remote(
     OptimizeSkillsJob,
     spec,
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
+    base_url=client.base_url,
+    workspace=client.resolve_workspace(),
 )
 print(result)
 ```
@@ -367,12 +363,12 @@ What it does under the hood:
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
-WORKSPACE = "default"
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
 
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
@@ -382,7 +378,7 @@ result = NemoJobScheduler().submit_remote(
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-chatonly",
         "workspace": WORKSPACE,
     },
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    base_url=client.base_url,
     workspace=WORKSPACE,
 )
 print(result)
@@ -426,12 +422,12 @@ nemo agents optimize run-strategy \
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_agent_optimization_plugin.jobs.run_strategy import RunStrategyJob
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 
-WORKSPACE = "default"
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
 
 result = NemoJobScheduler().submit_remote(
     RunStrategyJob,
@@ -441,7 +437,7 @@ result = NemoJobScheduler().submit_remote(
         "optimize_config_fileset": f"{WORKSPACE}/hermes-optimize-mcp",
         "workspace": WORKSPACE,
     },
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    base_url=client.base_url,
     workspace=WORKSPACE,
 )
 print(result)

@@ -16,6 +16,7 @@ Platform-managed agents are the canonical consumer: pointing an agent's `llms` b
 
 - A guardrail configuration exists in your workspace. See [Manage Configurations](/documentation/guardrail-models/core-concepts/configurations/manage-configurations) to create one.
 - A VirtualModel is configured with `nemo-guardrails` middleware. See [Architecture](/documentation/guardrail-models/core-concepts/architecture) for wiring details.
+- The `curl` examples default to a local platform at `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` first, and for an authenticated deployment add `-H "Authorization: Bearer $(nemo auth token)"`. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 <Tip>
 
@@ -25,17 +26,12 @@ If you do not have access to GPUs, you can use NIMs hosted on `build.nvidia.com`
 For the examples below, create a guardrail configuration and VirtualModel:
 
 ```python
-
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 CONTENT_SAFETY_PROMPT = """\
 Task: Check if there is unsafe content in the user or agent messages in the below conversation in accordance with our safety policy with the below categories. Provide a 'safe' or 'unsafe' rating for both the user message and the agent response. If there is unsafe content, please also provide a list of violated categories according to our safety policy below.
@@ -172,7 +168,7 @@ nemo chat -m default/guarded-nemotron "What is the capital of France?"
 <Tab title="curl">
 
 ```bash
-curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -312,7 +308,7 @@ If the request sets `stream: true` but the guardrail config has output flows wit
 <Tab title="curl">
 
 ```bash
-curl -N -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -N -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -376,7 +372,7 @@ and disabling it or, if needed, redacting captured data before storing or using
 logs in production environments.
 
 ```bash
-curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
@@ -397,7 +393,7 @@ curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/c
 For clients that do not handle extra response fields, configure the request to return guardrail data as a choice in the `choices` list with the role `guardrails_data`:
 
 ```bash
-curl -s $NHX_BASE_URL/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'content-type: application/json' \
   -d '{
     "model": "default/guarded-nemotron",
