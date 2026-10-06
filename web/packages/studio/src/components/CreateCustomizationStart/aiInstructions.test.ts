@@ -79,7 +79,7 @@ describe('messages', () => {
   it('describes a picked environment from its manifest', () => {
     const [system] = buildDraftMessages('write sql', { ...INPUTS, environment: SQL_ENVIRONMENT });
     expect(system.content).toContain(
-      '## Reward environment (grpo only)\ndefault/sql-env — text2sql: Executes generated SQL and rewards matching result sets.'
+      '## Reward environment (grpo only)\ndefault/sql-env — text2sql: Executes generated SQL and rewards matching result sets.\n- Format: adapter-wheels-v1\n- Agent: verifiers_agent'
     );
   });
 

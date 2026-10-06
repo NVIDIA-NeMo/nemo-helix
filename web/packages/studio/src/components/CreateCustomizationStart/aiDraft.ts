@@ -7,6 +7,7 @@ import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import type { AnnotatedFilesetFile } from '@studio/hooks/useCustomizationDatasetValidation';
+import type { GymEnvironmentManifest } from '@studio/hooks/useGymEnvironmentManifest';
 import type { CustomizationBackend, CustomizationJob } from '@studio/util/customizationBackend';
 import { getFinetuningType } from '@studio/util/customizations';
 import {
@@ -30,7 +31,8 @@ import { isPlainObject } from '@studio/util/functions';
 import { z } from 'zod';
 
 export interface DraftDataset {
-  ref: string;
+  /** The picked fileset, as `workspace/name`. */
+  fileset: string;
   /** Null when the first training row matches no format customizer accepts. */
   schema: CustomizerSchemaDetection | null;
   trainingRowCount: number;
@@ -38,6 +40,11 @@ export interface DraftDataset {
   hasValidation: boolean;
   /** Field names and types of the first training row — no values. */
   shape: string;
+}
+
+interface RowCount {
+  trainingRowCount: number;
+  rowCountIsEstimate: boolean;
 }
 
 /**
@@ -48,11 +55,6 @@ export interface DraftDataset {
  * Bytes read are measured on decoded text, which only matches the file for valid UTF-8, so
  * the total is never presented as exact when the encoding check failed.
  */
-interface RowCount {
-  trainingRowCount: number;
-  rowCountIsEstimate: boolean;
-}
-
 export const estimateTrainingRows = (files: AnnotatedFilesetFile[], validUtf8 = true): RowCount =>
   files.reduce<RowCount>(
     (total, file) => {
@@ -70,9 +72,9 @@ export const estimateTrainingRows = (files: AnnotatedFilesetFile[], validUtf8 = 
 
 /** The picked reward environment, with what its `nemo-environment.yaml` says about itself. */
 export interface DraftEnvironment {
-  ref: string;
-  name?: string;
-  description?: string;
+  /** The picked fileset, as `workspace/name`. */
+  fileset: string;
+  manifest: GymEnvironmentManifest | null;
 }
 
 /** The user's picks. Fixed: the draft decides how to train them, never which ones. */
@@ -130,14 +132,14 @@ const applyInputs = (
   { model, dataset, environment }: DraftInputs
 ): Job => {
   const modelRef = getEntityReference(model);
-  const validationRef = dataset.hasValidation ? dataset.ref : undefined;
+  const validationRef = dataset.hasValidation ? dataset.fileset : undefined;
   if (backend === 'automodel') {
     const training = { ...record(job.training) };
     delete training.teacher_model;
     return {
       ...job,
       model: modelRef,
-      dataset: { ...record(job.dataset), training: dataset.ref, validation: validationRef },
+      dataset: { ...record(job.dataset), training: dataset.fileset, validation: validationRef },
       training,
     };
   }
@@ -145,10 +147,10 @@ const applyInputs = (
     return {
       ...job,
       model: { ...record(job.model), name: modelRef },
-      dataset: { ...record(job.dataset), path: dataset.ref, validation_path: validationRef },
+      dataset: { ...record(job.dataset), path: dataset.fileset, validation_path: validationRef },
     };
   }
-  return { ...job, model: modelRef, dataset: dataset.ref, environment: environment?.ref };
+  return { ...job, model: modelRef, dataset: dataset.fileset, environment: environment?.fileset };
 };
 
 /**
@@ -290,19 +292,19 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     };
   }
 
-  const values = jobToFormFields({ spec } as unknown as CustomizationJob);
+  const asJob = { spec } as unknown as CustomizationJob;
+  const values = jobToFormFields(asJob);
   const method = resolveTrainingType(
     values.backend,
     values.automodel.training.training_type,
     values.grpo.trainingType
   );
   const variant = inputs.dataset.schema?.variant;
-  const methods = variant ? methodsForVariant(variant) : null;
-  if (variant && methods && !methods.includes(method)) {
+  if (variant && !methodsForVariant(variant).includes(method)) {
     return {
       status: 'invalid',
       errors: [
-        `The dataset is in ${CUSTOMIZER_SCHEMA_LABELS[variant]} format, which only works with ${methods.join(' or ')}, but the job trains ${method}.`,
+        `The dataset is in ${CUSTOMIZER_SCHEMA_LABELS[variant]} format, which only works with ${methodsForVariant(variant).join(' or ')}, but the job trains ${method}.`,
       ],
     };
   }
@@ -314,22 +316,11 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     values.outputName;
   values.description = typeof output.description === 'string' ? output.description : '';
 
-  // Nemotron's Mamba layers consume out_proj.weight directly through custom kernels, so an
-  // adapter there trains but never takes effect. Same exclusion the templates carry.
-  const lora = values.automodel.training.lora;
-  if (
-    backend === 'automodel' &&
-    inputs.model.spec?.mamba_config?.is_hybrid &&
-    values.automodel.training.finetuning_type !== 'all_weights' &&
-    !lora?.target_modules?.length &&
-    !lora?.exclude_modules?.length
-  ) {
-    values.automodel.training.lora = { ...lora, exclude_modules: ['*.out_proj'] };
-  }
-
   const formErrors = formatIssues(
-    customizationFormSchema.safeParse(values).error?.issues ?? []
-  ).filter((error) => !DEFERRABLE_FIELDS.has(error.slice(0, error.indexOf(':'))));
+    (customizationFormSchema.safeParse(values).error?.issues ?? []).filter(
+      (issue) => !DEFERRABLE_FIELDS.has(issue.path.join('.'))
+    )
+  );
   if (formErrors.length > 0) return { status: 'invalid', errors: formErrors };
 
   return {
@@ -339,11 +330,11 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     summary: {
       method,
       backend,
-      finetuningType: getFinetuningType({ spec } as unknown as CustomizationJob),
+      finetuningType: getFinetuningType(asJob),
       outputName: values.outputName,
       baseModel: getEntityReference(inputs.model),
-      dataset: inputs.dataset.ref,
-      environment: method === 'grpo' ? (inputs.environment?.ref ?? null) : null,
+      dataset: inputs.dataset.fileset,
+      environment: method === 'grpo' ? (inputs.environment?.fileset ?? null) : null,
       settings: settingsOf(job),
       rationale: draft.rationale,
       needsFromUser: draft.needs_from_user,

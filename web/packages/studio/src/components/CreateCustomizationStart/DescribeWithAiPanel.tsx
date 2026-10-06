@@ -3,14 +3,13 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { useModelSearch } from '@nemo/common/src/api/models/useModelSearch';
-import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
+import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
 import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
-import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { Banner, Flex, FormField, Grid, Select, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Flex, FormField, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   type DraftInputs,
   estimateTrainingRows,
@@ -37,11 +36,7 @@ const GOAL_HELP =
 
 const NO_ENVIRONMENT = '__none__';
 
-/** Workspaces collect dozens of datasets; uncapped, the list runs off the screen. */
-const DROPDOWN_SIZE = {
-  SelectContent: { className: 'w-(--radix-popper-anchor-width)' },
-  SelectListbox: { className: 'max-h-80 overflow-y-auto' },
-};
+const NO_ENVIRONMENT_OPTION = [{ value: NO_ENVIRONMENT, label: 'None' }];
 
 export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, onDraft }) => {
   const draftingModelSearch = useModelSearch({ workspace });
@@ -64,17 +59,6 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     dataset.encoding.ok
   );
 
-  // Same requests as the form's dataset and environment pickers.
-  const datasets = useFilesListFilesets(workspace, {
-    page_size: 100,
-    sort: 'created_at',
-    filter: { purpose: 'dataset' },
-  });
-  const environments = useFilesListFilesets(
-    workspace,
-    { page_size: 100, sort: '-updated_at', filter: { purpose: 'environment' } },
-    { query: { enabled: isGymDataset } }
-  );
   const pickedEnvironment = isGymDataset ? environmentRef : null;
   const environmentParts = pickedEnvironment ? getPartsFromReference(pickedEnvironment) : null;
   const environment = useGymEnvironmentManifest({
@@ -89,7 +73,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     return {
       model: baseModel,
       dataset: {
-        ref: datasetRef,
+        fileset: datasetRef,
         schema: dataset.schema,
         hasValidation: dataset.hasValidation,
         shape: dataset.schemaShape,
@@ -97,11 +81,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
         rowCountIsEstimate,
       },
       environment: pickedEnvironment
-        ? {
-            ref: pickedEnvironment,
-            name: environment.manifest?.envName,
-            description: environment.manifest?.description,
-          }
+        ? { fileset: pickedEnvironment, manifest: environment.manifest }
         : null,
     };
   }, [
@@ -155,26 +135,6 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     control: form.control,
     name: 'baseModel',
   });
-
-  const datasetItems = useMemo(
-    () =>
-      (datasets.data?.data ?? []).map((fileset) => ({
-        value: getEntityReference(fileset),
-        children: fileset.name,
-      })),
-    [datasets.data?.data]
-  );
-
-  const environmentItems = useMemo(
-    () => [
-      { value: NO_ENVIRONMENT, children: 'None' },
-      ...(environments.data?.data ?? []).map((fileset) => {
-        const ref = getEntityReference(fileset);
-        return { value: ref, children: ref };
-      }),
-    ],
-    [environments.data?.data]
-  );
 
   // KUI puts onKeyDown on the textarea's wrapper; the key event bubbles up to it.
   const submitOnModEnter = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -234,22 +194,21 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
           </FormField>
 
           <Stack gap="density-md">
-            <ControlledSelect
+            <FilesetSearchableSelect
+              workspace={workspace}
+              purpose="dataset"
               useControllerProps={{ control: form.control, name: 'dataset' }}
               formFieldProps={{
                 slotLabel: 'Training dataset',
                 slotHelp: datasetSummary,
                 required: true,
               }}
-              items={datasetItems}
-              placeholder="Select a dataset"
-              disabled={isGenerating || datasets.isPending}
-              onChange={(ref) => {
-                setDatasetRef(ref);
+              triggerPlaceholder="Select a dataset"
+              disabled={isGenerating}
+              onChange={(reference) => {
+                setDatasetRef(reference);
                 clearDraft();
               }}
-              attributes={DROPDOWN_SIZE}
-              aria-label="Training dataset"
             />
             {dataset.discoveryError ? (
               <Banner kind="inline" status="error">
@@ -259,22 +218,23 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
           </Stack>
 
           {isGymDataset ? (
-            <FormField
-              slotLabel="Reward environment"
-              slotHelp="Detected a NeMo Gym dataset. Optionally pick the environment that scores its rollouts — or pick it later in the form."
-            >
-              <Select
-                items={environmentItems}
-                value={environmentRef ?? NO_ENVIRONMENT}
-                onValueChange={(next) => {
-                  setEnvironmentRef(next === NO_ENVIRONMENT ? null : next);
-                  clearDraft();
-                }}
-                disabled={isGenerating || environments.isPending}
-                attributes={DROPDOWN_SIZE}
-                aria-label="Reward environment"
-              />
-            </FormField>
+            <FilesetSearchableSelect
+              workspace={workspace}
+              purpose="environment"
+              useControllerProps={{ control: form.control, name: 'environment' }}
+              formFieldProps={{
+                slotLabel: 'Reward environment',
+                slotHelp:
+                  'Detected a NeMo Gym dataset. Optionally pick the environment that scores its rollouts — or pick it later in the form.',
+              }}
+              leadingOptions={NO_ENVIRONMENT_OPTION}
+              triggerPlaceholder="None"
+              disabled={isGenerating}
+              onChange={(reference) => {
+                setEnvironmentRef(reference === NO_ENVIRONMENT ? null : reference);
+                clearDraft();
+              }}
+            />
           ) : null}
         </Grid>
 

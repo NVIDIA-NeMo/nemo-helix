@@ -5,6 +5,7 @@ import type { ModelEntity, ModelSpec } from '@nemo/sdk/generated/platform/schema
 import type {
   CustomizationDraft,
   DraftDataset,
+  DraftEnvironment,
   DraftInputs,
 } from '@studio/components/CreateCustomizationStart/aiDraft';
 import { CUSTOMIZER_SCHEMA_LABELS } from '@studio/util/customizerSchema';
@@ -35,7 +36,7 @@ const detection = (variant: NonNullable<DraftDataset['schema']>['variant']) => (
 });
 
 const CHAT_DATASET: DraftDataset = {
-  ref: 'default/tickets',
+  fileset: 'default/tickets',
   schema: detection('sft-chat'),
   trainingRowCount: 3000,
   rowCountIsEstimate: false,
@@ -44,7 +45,7 @@ const CHAT_DATASET: DraftDataset = {
 };
 
 export const PREFERENCE_DATASET: DraftDataset = {
-  ref: 'default/prefs',
+  fileset: 'default/prefs',
   schema: detection('dpo-binary-preference'),
   trainingRowCount: 2000,
   rowCountIsEstimate: false,
@@ -54,7 +55,7 @@ export const PREFERENCE_DATASET: DraftDataset = {
 
 export const GYM_DATASET: DraftDataset = {
   ...PREFERENCE_DATASET,
-  ref: 'default/gym',
+  fileset: 'default/gym',
   schema: detection('grpo-gym'),
 };
 
@@ -64,10 +65,15 @@ export const INPUTS: DraftInputs = {
   environment: null,
 };
 
-export const SQL_ENVIRONMENT = {
-  ref: 'default/sql-env',
-  name: 'text2sql',
-  description: 'Executes generated SQL and rewards matching result sets.',
+export const SQL_ENVIRONMENT: DraftEnvironment = {
+  fileset: 'default/sql-env',
+  manifest: {
+    format: 'adapter-wheels-v1',
+    agent: 'verifiers_agent',
+    envName: 'text2sql',
+    description: 'Executes generated SQL and rewards matching result sets.',
+    wheelCount: 1,
+  },
 };
 
 type Job = CustomizationDraft['job'];

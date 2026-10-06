@@ -35,6 +35,8 @@ const describeWithAiFormSchema = z.object({
   model: z.string().min(1, 'Choose a model to draft the config.'),
   baseModel: z.string().min(1, 'Pick the model to fine-tune.'),
   dataset: z.string().min(1, 'Pick the training dataset.'),
+  /** Only offered for NeMo Gym datasets; empty means pick it later in the form. */
+  environment: z.string(),
   prompt: z.string().trim().min(1, 'Describe the goal of this fine-tune.'),
 });
 
@@ -68,7 +70,7 @@ export const useDescribeWithAi = (
 ): DescribeWithAiState => {
   const form = useForm<DescribeWithAiFormValues>({
     resolver: zodResolver(describeWithAiFormSchema),
-    defaultValues: { model: '', baseModel: '', dataset: '', prompt: '' },
+    defaultValues: { model: '', baseModel: '', dataset: '', environment: '', prompt: '' },
   });
   const [validation, setValidation] = useState<DraftValidation | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);

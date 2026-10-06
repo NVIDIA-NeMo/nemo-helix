@@ -114,7 +114,7 @@ export const describeModel = (model: ModelEntity): string => {
 };
 
 const describeDataset = ({
-  ref,
+  fileset,
   schema,
   trainingRowCount,
   rowCountIsEstimate,
@@ -129,7 +129,7 @@ const describeDataset = ({
         .join(' or ')}`
     : 'unknown';
   return [
-    ref,
+    fileset,
     `- Format: ${format}`,
     `- Training examples: ${rowCountIsEstimate ? `about ${trainingRowCount} (estimated from file sizes)` : trainingRowCount}`,
     `- Validation split: ${hasValidation ? 'provided' : 'none (10% of training is held out automatically)'}`,
@@ -139,8 +139,14 @@ const describeDataset = ({
 
 const describeEnvironment = (environment: DraftEnvironment | null): string => {
   if (!environment) return 'Not picked.';
-  const about = [environment.name, environment.description].filter(Boolean).join(': ');
-  return about ? `${environment.ref} — ${about}` : environment.ref;
+  const { fileset, manifest } = environment;
+  if (!manifest) return fileset;
+  const about = [manifest.envName, manifest.description].filter(Boolean).join(': ');
+  return [
+    `${fileset} — ${about}`,
+    `- Format: ${manifest.format}`,
+    ...(manifest.agent ? [`- Agent: ${manifest.agent}`] : []),
+  ].join('\n');
 };
 
 const buildSystemPrompt = ({ model, dataset, environment }: DraftInputs): string =>
