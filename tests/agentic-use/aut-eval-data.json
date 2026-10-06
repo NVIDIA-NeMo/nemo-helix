@@ -284,28 +284,28 @@
     }
   },
   {
-    "id": "auditor-target-crud-cli-easy",
-    "task_name": "auditor-target-crud-cli-easy",
-    "input_obj": "# Auditor Target CRUD Operations (CLI)\n\nYou have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\nThe `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n## Task\n\nComplete the following Auditor target operations using the `nemo` CLI.\n\n1. **Create** an audit target named `harbor-audit-target` that points to a model endpoint. Use the following details:\n   - Model: `mock-model-endpoint`\n   - Type: `nim`\n   - Description: `Initial audit target for harbor testing`\n\n2. **List** all audit targets and confirm `harbor-audit-target` appears in the list.\n\n3. **Get** the audit target `harbor-audit-target` by name and review its details.\n\n4. **Update** the audit target `harbor-audit-target` - change its description to `Updated audit target for harbor testing`.\n\n5. **Delete** the audit target `harbor-audit-target`.\n\n6. **Create** a final audit target named `harbor-audit-target-final` with the following details:\n   - Model: `final-model-endpoint`\n   - Type: `openai`\n   - Description: `Final audit target that persists for verification`\n\n## Available CLI Commands\n\n- `nemo auditor targets create <name> -d '<json>'` - Create an audit target. The JSON body must include `model`, `type`, and optionally `description`.\n- `nemo auditor targets list` - List all audit targets\n- `nemo auditor targets get <name>` - Retrieve an audit target by name\n- `nemo auditor targets update <name> -d '<json>'` - Update an audit target. Include the current `model` and `type` plus any changed fields.\n- `nemo auditor targets delete <name>` - Delete an audit target\n\nExample create body:\n\n```json\n{\"model\": \"mock-model-endpoint\", \"type\": \"nim\", \"description\": \"Initial audit target for harbor testing\"}\n```\n\n### Target Types\n\nThe `type` field in the JSON payload specifies the model endpoint type. Common values: `nim`, `openai`.\n\n## Success Criteria\n\nThe task is complete when:\n- All six operations above have been performed successfully\n- The target `harbor-audit-target` has been deleted (should no longer exist)\n- The target `harbor-audit-target-final` exists with the correct configuration",
+    "id": "garak-plugin-target-crud-cli-easy",
+    "task_name": "garak-plugin-target-crud-cli-easy",
+    "input_obj": "# Garak Plugin Target CRUD Operations (CLI)\n\nYou have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\nThe `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n## Task\n\nComplete the following Garak Plugin target operations using the `nemo` CLI.\n\n1. **Create** a scan target named `harbor-scan-target` that points to a model endpoint. Use the following details:\n   - Model: `mock-model-endpoint`\n   - Type: `nim`\n   - Description: `Initial scan target for harbor testing`\n\n2. **List** all scan targets and confirm `harbor-scan-target` appears in the list.\n\n3. **Get** the scan target `harbor-scan-target` by name and review its details.\n\n4. **Update** the scan target `harbor-scan-target` - change its description to `Updated scan target for harbor testing`.\n\n5. **Delete** the scan target `harbor-scan-target`.\n\n6. **Create** a final scan target named `harbor-scan-target-final` with the following details:\n   - Model: `final-model-endpoint`\n   - Type: `openai`\n   - Description: `Final scan target that persists for verification`\n\n## Available CLI Commands\n\n- `nemo garak-plugin targets create <name> -d '<json>'` - Create a scan target. The JSON body must include `model`, `type`, and optionally `description`.\n- `nemo garak-plugin targets list` - List all scan targets\n- `nemo garak-plugin targets get <name>` - Retrieve a scan target by name\n- `nemo garak-plugin targets update <name> -d '<json>'` - Update a scan target. Include the current `model` and `type` plus any changed fields.\n- `nemo garak-plugin targets delete <name>` - Delete a scan target\n\nExample create body:\n\n```json\n{\"model\": \"mock-model-endpoint\", \"type\": \"nim\", \"description\": \"Initial scan target for harbor testing\"}\n```\n\n### Target Types\n\nThe `type` field in the JSON payload specifies the model endpoint type. Common values: `nim`, `openai`.\n\n## Success Criteria\n\nThe task is complete when:\n- All six operations above have been performed successfully\n- The target `harbor-scan-target` has been deleted (should no longer exist)\n- The target `harbor-scan-target-final` exists with the correct configuration",
     "expected_output_obj": "",
     "expected_trajectory": [],
     "full_dataset_entry": {
-      "task_name": "auditor-target-crud-cli-easy",
+      "task_name": "garak-plugin-target-crud-cli-easy",
       "inputs": {
-        "instruction": "auditor-target-crud-cli-easy/instruction.md",
-        "task_toml": "auditor-target-crud-cli-easy/task.toml",
-        "workflow": "auditor-target-crud-cli-easy/workflow.yml",
-        "environment_dockerfile": "auditor-target-crud-cli-easy/environment/Dockerfile",
+        "instruction": "garak-plugin-target-crud-cli-easy/instruction.md",
+        "task_toml": "garak-plugin-target-crud-cli-easy/task.toml",
+        "workflow": "garak-plugin-target-crud-cli-easy/workflow.yml",
+        "environment_dockerfile": "garak-plugin-target-crud-cli-easy/environment/Dockerfile",
         "environment_setup_scripts": []
       },
       "correctness_oracle": {
-        "pytest_file": "auditor-target-crud-cli-easy/tests/test_outputs.py"
+        "pytest_file": "garak-plugin-target-crud-cli-easy/tests/test_outputs.py"
       },
       "task_metadata": {
         "difficulty": "easy",
-        "category": "cli-auditor",
+        "category": "cli-garak-plugin",
         "tags": [
-          "auditor",
+          "garak-plugin",
           "targets",
           "crud",
           "cli"
@@ -325,28 +325,28 @@
     }
   },
   {
-    "id": "auditor-config-crud-cli-easy",
-    "task_name": "auditor-config-crud-cli-easy",
-    "input_obj": "# Auditor Config CRUD Operations (CLI)\n\nYou have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\n## Task\n\nComplete the following auditor configuration CRUD operations using the `nemo` CLI:\n\n1. List the existing audit configs to understand the available structure\n2. Create an audit config named `harbor-test-config` with description `Test config for harbor eval` that uses the `dan.AutoDANCached` probe\n3. Verify the config was created by retrieving it with a get command\n4. List all configs in the workspace and confirm `harbor-test-config` appears\n5. Update `harbor-test-config` to change its description to `Updated test config`\n6. Verify the update was applied by retrieving the config again\n7. Delete the config `harbor-test-config`\n8. Create a new config named `harbor-final-config` with description `Final config for verification` that uses the `dan.DanInTheWild` probe\n\n## Available CLI Commands\n\nThe `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n### Audit Config Commands\n\n- `nemo auditor configs list` - List all audit configs in the workspace\n- `nemo auditor configs create <name> -d '<json>'` - Create a config\n- `nemo auditor configs get <name>` - Retrieve a config by name\n- `nemo auditor configs update <name> -d '<json>'` - Update a config\n- `nemo auditor configs delete <name>` - Delete a config\n\n### Config JSON Structure\n\nAudit configs require JSON for `plugins`, `reporting`, `run`, and `system` fields. A minimal example:\n\n- **plugins**: `{\"probe_spec\": \"dan.AutoDANCached\"}` \u2014 the `probe_spec` string specifies which probes to run\n- **reporting**: `{}`\n- **run**: `{}`\n- **system**: `{\"lite\": true}`\n\nExample create body:\n\n```json\n{\"description\": \"Test config for harbor eval\", \"plugins\": {\"probe_spec\": \"dan.AutoDANCached\"}, \"reporting\": {}, \"run\": {}, \"system\": {\"lite\": true}}\n```\n\n## Success Criteria\n\nThe task is complete when:\n- The config `harbor-test-config` was created, updated, and then deleted\n- A config named `harbor-final-config` exists with description `Final config for verification`\n- The `harbor-final-config` uses the `dan.DanInTheWild` probe\n- The config `harbor-test-config` no longer exists (was deleted)",
+    "id": "garak-plugin-config-crud-cli-easy",
+    "task_name": "garak-plugin-config-crud-cli-easy",
+    "input_obj": "# Garak Plugin Config CRUD Operations (CLI)\n\nYou have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.\n\n## Task\n\nComplete the following garak-plugin configuration CRUD operations using the `nemo` CLI:\n\n1. List the existing scan configs to understand the available structure\n2. Create a scan config named `harbor-test-config` with description `Test config for harbor eval` that uses the `dan.AutoDANCached` probe\n3. Verify the config was created by retrieving it with a get command\n4. List all configs in the workspace and confirm `harbor-test-config` appears\n5. Update `harbor-test-config` to change its description to `Updated test config`\n6. Verify the update was applied by retrieving the config again\n7. Delete the config `harbor-test-config`\n8. Create a new config named `harbor-final-config` with description `Final config for verification` that uses the `dan.DanInTheWild` probe\n\n## Available CLI Commands\n\nThe `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the local NeMo Helix API server at http://localhost:8080 by default.\n\n### Scan Config Commands\n\n- `nemo garak-plugin configs list` - List all scan configs in the workspace\n- `nemo garak-plugin configs create <name> -d '<json>'` - Create a config\n- `nemo garak-plugin configs get <name>` - Retrieve a config by name\n- `nemo garak-plugin configs update <name> -d '<json>'` - Update a config\n- `nemo garak-plugin configs delete <name>` - Delete a config\n\n### Config JSON Structure\n\nScan configs require JSON for `plugins`, `reporting`, `run`, and `system` fields. A minimal example:\n\n- **plugins**: `{\"probe_spec\": \"dan.AutoDANCached\"}` \u2014 the `probe_spec` string specifies which probes to run\n- **reporting**: `{}`\n- **run**: `{}`\n- **system**: `{\"lite\": true}`\n\nExample create body:\n\n```json\n{\"description\": \"Test config for harbor eval\", \"plugins\": {\"probe_spec\": \"dan.AutoDANCached\"}, \"reporting\": {}, \"run\": {}, \"system\": {\"lite\": true}}\n```\n\n## Success Criteria\n\nThe task is complete when:\n- The config `harbor-test-config` was created, updated, and then deleted\n- A config named `harbor-final-config` exists with description `Final config for verification`\n- The `harbor-final-config` uses the `dan.DanInTheWild` probe\n- The config `harbor-test-config` no longer exists (was deleted)",
     "expected_output_obj": "",
     "expected_trajectory": [],
     "full_dataset_entry": {
-      "task_name": "auditor-config-crud-cli-easy",
+      "task_name": "garak-plugin-config-crud-cli-easy",
       "inputs": {
-        "instruction": "auditor-config-crud-cli-easy/instruction.md",
-        "task_toml": "auditor-config-crud-cli-easy/task.toml",
-        "workflow": "auditor-config-crud-cli-easy/workflow.yml",
-        "environment_dockerfile": "auditor-config-crud-cli-easy/environment/Dockerfile",
+        "instruction": "garak-plugin-config-crud-cli-easy/instruction.md",
+        "task_toml": "garak-plugin-config-crud-cli-easy/task.toml",
+        "workflow": "garak-plugin-config-crud-cli-easy/workflow.yml",
+        "environment_dockerfile": "garak-plugin-config-crud-cli-easy/environment/Dockerfile",
         "environment_setup_scripts": []
       },
       "correctness_oracle": {
-        "pytest_file": "auditor-config-crud-cli-easy/tests/test_outputs.py"
+        "pytest_file": "garak-plugin-config-crud-cli-easy/tests/test_outputs.py"
       },
       "task_metadata": {
         "difficulty": "easy",
-        "category": "cli-auditor",
+        "category": "cli-garak-plugin",
         "tags": [
-          "auditor",
+          "garak-plugin",
           "configs",
           "crud",
           "cli"

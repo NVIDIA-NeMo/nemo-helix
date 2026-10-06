@@ -351,6 +351,8 @@ def install(
     typer.echo(f"Installed {len(skills)} skill(s) for {installer.display_name}:")
     for path in result_paths:
         typer.echo(f"  {path}")
+    for removed in getattr(installer, "removed_renamed", []):
+        typer.echo(f"Removed superseded skill (renamed): {removed}")
 
 
 _SKILLS_COMMAND_ORDER = {

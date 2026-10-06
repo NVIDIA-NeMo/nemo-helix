@@ -170,7 +170,7 @@ def test_deepagents_runtime_can_load_packaged_skill_library() -> None:
 
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak-plugin",
         "benchmark-execution",
         "entities",
         "evaluator",
@@ -219,7 +219,7 @@ def test_fabric_compatibility_resolves_packaged_skills_in_virtual_mode() -> None
     skills, error = _list_skills_with_errors(backend, skill_sources[0])
     assert error is None
     assert {skill["name"] for skill in skills} == {
-        "auditor",
+        "garak-plugin",
         "benchmark-execution",
         "entities",
         "evaluator",
@@ -1260,8 +1260,8 @@ def test_get_client_prefers_platform_base_url(monkeypatch: pytest.MonkeyPatch) -
             {"name": "job-1", "status": "done"},
         ),
         (
-            "auditor",
-            SimpleNamespace(auditor=SimpleNamespace(get_job=lambda name: {"name": name, "status": "done"})),
+            "garak_plugin",
+            SimpleNamespace(garak_plugin=SimpleNamespace(get_job=lambda name: {"name": name, "status": "done"})),
             {"name": "job-1", "status": "done"},
         ),
         (

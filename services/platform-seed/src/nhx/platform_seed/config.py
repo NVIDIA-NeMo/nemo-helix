@@ -3,6 +3,7 @@
 
 """Configuration for platform seeding."""
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,12 @@ from pydantic import Field, TypeAdapter
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BOOL_ENV_PARSER = TypeAdapter(bool)
+
+
+logger = logging.getLogger(__name__)
+
+# Seed toggles of plugins that were renamed; read as a fallback for one release.
+_LEGACY_SEED_ENABLED_ENV_VARS = {"garak-plugin": "NHX_PLATFORM_SEED_AUDITOR_ENABLED"}
 
 
 class HelixSeedConfig(BaseSettings):
@@ -61,6 +68,11 @@ class HelixSeedConfig(BaseSettings):
         """Return whether a discovered plugin seed job should run."""
         env_var = self.plugin_seed_enabled_env_var(plugin_name)
         raw_value = os.getenv(env_var)
+        if raw_value is None:
+            legacy_env_var = _LEGACY_SEED_ENABLED_ENV_VARS.get(plugin_name)
+            raw_value = os.getenv(legacy_env_var) if legacy_env_var else None
+            if raw_value is not None:
+                logger.warning("%s is deprecated and will be removed; use %s instead.", legacy_env_var, env_var)
         if raw_value is None:
             return True
         return _BOOL_ENV_PARSER.validate_python(raw_value)

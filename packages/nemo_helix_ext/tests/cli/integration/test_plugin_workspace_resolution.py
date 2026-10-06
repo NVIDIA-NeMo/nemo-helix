@@ -244,7 +244,7 @@ def test_falls_back_to_default_when_config_has_no_workspace(
 def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Path) -> None:
     """A real hand-written plugin command resolves from the config file.
 
-    ``nemo auditor configs list`` is hand-written (not a generated verb): it
+    ``nemo garak-plugin configs list`` is hand-written (not a generated verb): it
     declares the flag with the shared ``WorkspaceOption`` alias rather than a
     programmatic signature, so it exercises a different construction path from
     the generated verbs above against the same state object the top-level
@@ -271,7 +271,7 @@ def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Pat
     with patch.object(httpx, "Client", _factory):
         result = runner.invoke(
             app,
-            ["auditor", "configs", "list"],
+            ["garak-plugin", "configs", "list"],
             obj=CLIContext(overrides={}),
         )
 

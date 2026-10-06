@@ -29,11 +29,11 @@ _SAFE_JOB_TYPE_BUCKETS = frozenset(
         "agent",
         "agents",
         "anonymizer",
-        "audit",
         "customization",
         "data-designer",
         "evaluation",
         "evaluator",
+        "garak-plugin",
         "insights",
         "job",
     }

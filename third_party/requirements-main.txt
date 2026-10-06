@@ -15,7 +15,7 @@
     #   nhx-files
 -e ./packages/garak_api ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
-    #   nemo-auditor-plugin
+    #   garak-plugin
     #   nemo-helix
     #   nemohelix
 -e ./packages/models ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -29,10 +29,10 @@
     #   nemo-optimization-plugin
 -e ./packages/nemo_helix ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
+    #   garak-plugin
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
     #   nemo-guardrails-plugin
     #   nemo-insights-plugin
     #   nemo-optimization-plugin
@@ -46,10 +46,10 @@
 -e ./packages/nemo_helix_plugin ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   data-designer-nemo
+    #   garak-plugin
     #   nemo-agent-optimization-plugin
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-data-designer-plugin
@@ -117,6 +117,10 @@
     #   nhx-platform
 -e ./packages/sandboxed_gym ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via nemo-evaluator-sdk
+-e ./plugins/garak-plugin ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
+    # via
+    #   nemo-helix
+    #   nhx-platform-seed
 -e ./plugins/nemo-agent-optimization ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
     # via
     #   nemo-helix
@@ -131,10 +135,6 @@
     #   nemo-agents-plugin
     #   nemo-helix
 -e ./plugins/nemo-anonymizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
--e ./plugins/nemo-auditor ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
-    # via
-    #   nemo-helix
-    #   nhx-platform-seed
 -e ./plugins/nemo-automodel ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-customizer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
 -e ./plugins/nemo-data-designer ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')
@@ -1272,6 +1272,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   fastapi-cloud-cli
     #   fastmcp-slim
     #   garak-api
+    #   garak-plugin
     #   google-genai
     #   harbor
     #   httpx-retries
@@ -1284,7 +1285,6 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-agents-plugin
     #   nemo-anonymizer
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
     #   nemo-data-designer-plugin
     #   nemo-deployments-plugin
     #   nemo-evaluator-sdk
@@ -3023,6 +3023,7 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   fastapi
     #   fastapi-cloud-cli
     #   fastmcp-slim
+    #   garak-plugin
     #   google-genai
     #   harbor
     #   insight-agent
@@ -3040,7 +3041,6 @@ pydantic==2.13.4 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   mlflow-skinny
     #   nemo-agent-optimization-plugin
     #   nemo-anonymizer
-    #   nemo-auditor-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-deployments-plugin
@@ -3296,6 +3296,7 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   datasets
     #   fastmcp-slim
     #   garak-api
+    #   garak-plugin
     #   harbor
     #   huggingface-hub
     #   insight-agent
@@ -3308,7 +3309,6 @@ pyyaml==6.0.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   mlx-lm
     #   nemo-agents-plugin
     #   nemo-anonymizer-plugin
-    #   nemo-auditor-plugin
     #   nemo-deployments-plugin
     #   nemo-helix
     #   nemo-helix-ext
@@ -4046,10 +4046,10 @@ typer==0.25.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   data-designer
     #   fastapi-cli
     #   fastapi-cloud-cli
+    #   garak-plugin
     #   harbor
     #   instructor
     #   nemo-agent-optimization-plugin
-    #   nemo-auditor-plugin
     #   nemo-automodel-plugin
     #   nemo-customizer-plugin
     #   nemo-evaluator-plugin

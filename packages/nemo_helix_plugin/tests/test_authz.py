@@ -266,3 +266,13 @@ def test_submit_remote_forwards_authorization_header() -> None:
 
     assert result == {"id": "job-123", "status": "queued"}
     assert captured.get("authorization") == "Bearer test-token"
+
+
+def test_authz_scope_legacy_scopes_extend_read_and_write_and_survive_child() -> None:
+    from nemo_helix_plugin.authz import AuthzScope
+
+    scope = AuthzScope("new-area", legacy_scopes=("old-area",)).child("jobs")
+
+    assert scope.read_scopes() == ["new-area:read", "platform:read", "old-area:read"]
+    assert scope.write_scopes() == ["new-area:write", "platform:write", "old-area:write"]
+    assert AuthzScope("plain").read_scopes() == ["plain:read", "platform:read"]

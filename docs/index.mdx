@@ -15,7 +15,7 @@ NeMo Helix exposes the same local services through the CLI, Python SDK, Studio, 
 
 ## What You Can Do
 
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), Auditor (red-teaming via garak), Anonymizer (PII handling for training data).
+- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), Garak Plugin (red-teaming via garak), Anonymizer (PII handling for training data).
 - **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. [Harbor](https://www.harborframework.com/)-backed eval suites for regression testing.
 - **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
 - **Build agents.** Create platform-managed agents with agent.yaml, with legacy support for NAT-based LangGraph agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
@@ -54,12 +54,12 @@ flowchart TB
         Guardrails["Guardrails"]
         Evaluator["Evaluator"]
         FineTuning["Fine Tuning"]
-        Auditor["Auditor"]
+        GarakPlugin["Garak Plugin"]
         DataDesigner["Data Designer"]
         Anonymizer["Anonymizer"]
         SafeSynthesizer["Safe Synthesizer"]
         Agents ~~~ Optimization ~~~ Guardrails
-        Evaluator ~~~ FineTuning ~~~ Auditor
+        Evaluator ~~~ FineTuning ~~~ GarakPlugin
         DataDesigner ~~~ Anonymizer ~~~ SafeSynthesizer
     end
 

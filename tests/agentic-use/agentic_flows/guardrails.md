@@ -45,7 +45,7 @@ The Guardrails service provides runtime safety controls for model inputs and out
 - Safe content passes through
 - Harmful content blocked
 - Canned response returned for blocked content
-- Blocking logged for audit
+- Blocking logged for scan
 
 ---
 

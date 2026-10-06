@@ -1,0 +1,82 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Selecting Probes"
+description: ""
+---
+<a id="garak-plugin-configs-probes"></a>
+
+An `ScanConfig`'s `plugins.probe_spec` field controls which garak probes run during a scan. Two related fields refine the selection: `plugins.detector_spec` chooses how outputs are scored, and `run.probe_tags` filters the selected probes by hazard tag.
+
+## `probe_spec`
+
+`probe_spec` is a comma-separated string. Each entry is one of:
+
+- `"all"` — every probe in the garak library.
+- A category — every probe in that category (for example, `latentinjection` runs every `latentinjection.*` probe).
+- A fully-qualified probe class — `category.ProbeClass` (for example, `encoding.InjectROT13`).
+
+Combine entries with commas. There is no negation syntax; if you need a subset of a category, list the probes explicitly.
+
+### Examples
+
+A single category, useful when you want broad coverage of one failure mode:
+
+```python
+ScanPluginsData(probe_spec="latentinjection")
+```
+
+Two specific probe classes — useful for fast smoke tests:
+
+```python
+ScanPluginsData(probe_spec="encoding.InjectROT13,dan.AutoDANCached")
+```
+
+A category mixed with a specific class from another category:
+
+```python
+ScanPluginsData(probe_spec="latentinjection,goodside.Tag")
+```
+
+## `probe_tags`
+
+`run.probe_tags` is a comma-separated list of tags (such as `"owasp:llm06"` or `"payload:hallucination"`). When set together with `probe_spec`, the probes selected by `probe_spec` are then **filtered to only those that also match the tag list** — the two fields combine by intersection, not union.
+
+```python
+ScanConfig(
+    name="owasp-llm06-scan",
+    workspace="default",
+    plugins=ScanPluginsData(probe_spec="all"),
+    run=ScanRunData(probe_tags="owasp:llm06"),
+)
+```
+
+Leave `probe_tags` unset (the default `None`) to run every probe selected by `probe_spec` without tag filtering.
+
+## `detector_spec`
+
+`plugins.detector_spec` selects how garak scores each generated response. The default `"auto"` lets each probe choose its own detectors — appropriate for most scans.
+
+```python
+ScanPluginsData(probe_spec="latentinjection", detector_spec="auto")
+```
+
+Specify a detector explicitly only when you have a reason to override the probe-recommended default:
+
+```python
+ScanPluginsData(
+    probe_spec="latentinjection",
+    detector_spec="dan.DAN",
+)
+```
+
+## Where to Find the Full Probe List
+
+The probe library is owned by the [garak project](https://github.com/NVIDIA/garak). For canonical, up-to-date documentation:
+
+- [Probes reference](https://reference.garak.ai/en/latest/probes.html) — every probe, grouped by category, with descriptions.
+- [Probe tiers](https://reference.garak.ai/en/latest/garak.probes._tier.html) — garak's importance tiers (1 is highest), useful for picking a small representative sample.
+- [garak on GitHub](https://github.com/NVIDIA/garak) — source for the probe taxonomy and tags.
+
+The plugin invokes the garak version installed in the interpreter at `~/.garak-plugin/.venv/bin/python` (or wherever `NEMO_GARAK_PLUGIN_GARAK_PYTHON` points). If a probe name is unknown, check that your installed garak version exposes it.

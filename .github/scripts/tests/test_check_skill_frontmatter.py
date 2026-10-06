@@ -87,7 +87,7 @@ def test_is_canonical_skill_matches_nemo_helix_ext():
 
 
 def test_is_canonical_skill_matches_plugin_skills():
-    assert is_canonical_skill(Path("plugins/nemo-auditor/src/nemo_auditor/skills/auditor/SKILL.md"))
+    assert is_canonical_skill(Path("plugins/garak-plugin/src/garak_plugin/skills/garak_plugin/SKILL.md"))
 
 
 def test_is_canonical_skill_matches_framework_skills():

@@ -57,11 +57,11 @@ export const SKILL_ACTION_TEMPLATES = {
     icon: <Database size={18} />,
     requiredFeatureFlags: ['datasetsEnabled'],
   },
-  auditor: {
+  'garak-plugin': {
     title: 'Run a security audit',
     description: 'Scan an agent target for vulnerabilities and risky behavior.',
     prompt:
-      'Use the auditor skill to configure and run a security audit for a NeMo Helix agent target.',
+      'Use the garak-plugin skill to configure and run a security audit for a NeMo Helix agent target.',
     icon: <SearchCheck size={18} />,
     requiredFeatureFlags: ['agentsEnabled'],
   },

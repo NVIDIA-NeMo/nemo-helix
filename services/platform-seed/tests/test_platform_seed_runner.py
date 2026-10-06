@@ -200,3 +200,21 @@ async def test_run_platform_seed_model_provider_conflict(config_enabled, entity_
 
     assert result.models_ok is True
     assert result.errors == []
+
+
+def test_renamed_plugin_seed_toggle_honours_the_deprecated_env_var(monkeypatch, caplog) -> None:
+    config = HelixSeedConfig(enabled=True)
+    monkeypatch.delenv("NHX_PLATFORM_SEED_GARAK_PLUGIN_ENABLED", raising=False)
+    monkeypatch.setenv("NHX_PLATFORM_SEED_AUDITOR_ENABLED", "false")
+
+    with caplog.at_level("WARNING"):
+        assert config.is_plugin_seed_enabled("garak-plugin") is False
+    assert "deprecated" in caplog.text
+
+    monkeypatch.setenv("NHX_PLATFORM_SEED_GARAK_PLUGIN_ENABLED", "true")
+    assert config.is_plugin_seed_enabled("garak-plugin") is True
+
+
+def test_other_plugins_ignore_the_deprecated_seed_env_var(monkeypatch) -> None:
+    monkeypatch.setenv("NHX_PLATFORM_SEED_AUDITOR_ENABLED", "false")
+    assert HelixSeedConfig(enabled=True).is_plugin_seed_enabled("guardrails") is True

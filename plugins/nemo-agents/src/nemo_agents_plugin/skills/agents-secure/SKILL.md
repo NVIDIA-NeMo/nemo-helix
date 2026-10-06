@@ -331,5 +331,5 @@ nemo inference gateway model post v1/chat/completions <vm-name> \
   syntax for wiring guardrail middleware in front of a chat model.
 - `nemo-guardrails` — CLI reference for guardrails configs and self-check
   rails.
-- `nemo-auditor` — for jailbreak / red-team scanning of a candidate model
+- `garak-plugin` — for jailbreak / red-team scanning of a candidate model
   before promotion.

@@ -170,7 +170,10 @@ def test_code_output_never_references_the_generated_sdk(tmp_path: Path) -> None:
 def _installed_plugin_groups() -> tuple[str, ...]:
     from importlib.metadata import entry_points
 
-    return tuple(sorted({ep.name for ep in entry_points(group="nemo.cli")}))
+    from nemo_helix_ext.cli.manifest import DEPRECATED_PLUGIN_ALIASES
+
+    # Deprecated aliases stay callable but are intentionally left out of `nemo --help`.
+    return tuple(sorted({ep.name for ep in entry_points(group="nemo.cli")} - DEPRECATED_PLUGIN_ALIASES))
 
 
 PLUGIN_GROUPS: tuple[str, ...] = _installed_plugin_groups()

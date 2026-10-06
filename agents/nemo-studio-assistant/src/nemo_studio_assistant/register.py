@@ -1035,7 +1035,7 @@ def check_status(service: str, job_name: str, workspace: str | None = None) -> s
         if service == "data_designer":
             result = _resolve_resource(client, service).get_job_resource(job_name).get_job_status()
             return json.dumps(_serialize(result), indent=2, default=str)
-        if service == "auditor":
+        if service == "garak_plugin":
             result = _resolve_resource(client, service).get_job(job_name)
             return json.dumps(_serialize(result), indent=2, default=str)
         if service.startswith("customization."):

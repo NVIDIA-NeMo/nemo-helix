@@ -4,7 +4,7 @@
 [project]
 name = "nhx-platform-seed"
 version = "0.0.1"
-description = "Platform seed service and task - runs centralized seeding (auth, guardrails, auditor, and plugin seed jobs) after dependencies are ready"
+description = "Platform seed service and task - runs centralized seeding (auth, guardrails, garak-plugin, and plugin seed jobs) after dependencies are ready"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
 
@@ -12,7 +12,7 @@ dependencies = [
   "nhx-common",
   "nhx-auth",
   "nhx-guardrails",
-  "nemo-auditor-plugin",
+  "garak-plugin",
 ]
 
 [project.scripts]
@@ -22,7 +22,7 @@ platform-seed = "nhx.platform_seed.__main__:main"
 nhx-common = { workspace = true }
 nhx-auth = { workspace = true }
 nhx-guardrails = { workspace = true }
-nemo-auditor-plugin = { workspace = true }
+garak-plugin = { workspace = true }
 
 [dependency-groups]
 dev = [

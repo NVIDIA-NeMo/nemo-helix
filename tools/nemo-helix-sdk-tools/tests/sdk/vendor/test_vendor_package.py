@@ -152,11 +152,11 @@ services = ["fastapi>=1"]
 [tool.bundle-package]
 nhx-auth = { source = "../../services/core/auth/src/nhx/core/auth", module = "nhx/core/auth", deps_group = "auth-service" }
 nhx-files = { source = "../../services/core/files/src/nhx/core/files", module = "nhx/core/files", deps_group = "files-service" }
-nhx-auditor = { source = "../../services/auditor/src/nhx/auditor", module = "nhx/auditor", deps_group = "auditor-service" }
+nhx-garak-plugin = { source = "../../services/garak_plugin/src/nhx/garak_plugin", module = "nhx/garak_plugin", deps_group = "garak-plugin-service" }
 nhx-platform-seed = { source = "../../services/platform-seed/src/nhx/platform_seed", module = "nhx/platform_seed", deps_group = "platform-seed-service" }
 nhx-safe-synthesizer = { source = "../../services/safe-synthesizer/src/nhx/safe_synthesizer", module = "nhx/safe_synthesizer", deps_group = "safe-synthesizer-service", include_in_services = false }
 nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/platform_runner", module = "nhx/platform_runner", deps_group = "services" }
-nemo-auditor-plugin = { source = "../../plugins/nemo-auditor/src/nemo_auditor", module = "nemo_auditor" }
+garak-plugin = { source = "../../plugins/garak-plugin/src/garak_plugin", module = "garak_plugin" }
 nemo-evaluator-plugin = { source = "../../plugins/nemo-evaluator/src/nemo_evaluator", module = "nemo_evaluator" }
 nemo-switchyard-plugin = { source = "../../plugins/nemo-switchyard/src/nemo_switchyard", module = "nemo_switchyard", deps_group = "nemo-switchyard" }
 nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_plugin", module = "nemo_helix_plugin" }
@@ -177,14 +177,14 @@ nemo-helix-plugin = { source = "../../packages/nemo_helix_plugin/src/nemo_helix_
         "nemo-helix[files-service]",
     ]
     assert list(wrapper_optional["plugins"]) == [
-        "nemo-helix[nemo-auditor-plugin]",
+        "nemo-helix[garak-plugin]",
         "nemo-helix[nemo-evaluator-plugin]",
         "nemo-helix[nemo-switchyard]",
     ]
     assert list(wrapper_optional["services"]) == [
         "nemo-helix[core-service]",
         "nemo-helix[platform-seed-service]",
-        "nemo-helix[auditor-service]",
+        "nemo-helix[garak-plugin-service]",
         "nemo-helix[plugins]",
         "fastapi>=1",
     ]
@@ -769,11 +769,11 @@ nemo = "nemo_helix.cli.app:cli"
 manual-script = "example:main"
 
 [project.entry-points."nemo.cli"]
-auditor = "nemo_auditor.cli:AuditorPluginCLI"
+garak-plugin = "garak_plugin.cli:GarakPluginCLI"
 manual = "example:manual"
 
 [project.entry-points."nemo.docs"]
-auditor = "nemo_auditor.docs:get_docs_path"
+garak-plugin = "garak_plugin.docs:get_docs_path"
 
 [project.entry-points."manual"]
 manual = "example:manual"
@@ -782,13 +782,13 @@ manual = "example:manual"
     updated = vendor_package._annotate_generated_project_entries(
         content,
         {"nemo"},
-        {"nemo.cli": {"auditor"}, "nemo.docs": {"auditor"}},
+        {"nemo.cli": {"garak-plugin"}, "nemo.docs": {"garak-plugin"}},
     )
 
     # Wholly-generated table gets a header marker.
     assert (
         f'{vendor_package.GENERATED_BUNDLE_TABLE_COMMENT}\n[project.entry-points."nemo.docs"]\n'
-        'auditor = "nemo_auditor.docs:get_docs_path"'
+        'garak-plugin = "garak_plugin.docs:get_docs_path"'
     ) in updated
     # Mixed tables (`[project.scripts]`, `[project.entry-points."nemo.cli"]`)
     # are left unannotated — no per-key markers.
@@ -813,7 +813,7 @@ manual = "example:manual"
 
 [project.entry-points."nemo.cli"]
 # Generated from [tool.bundle-package]; do not edit by hand.
-auditor = "nemo_auditor.cli:AuditorPluginCLI"
+garak-plugin = "garak_plugin.cli:GarakPluginCLI"
 manual = "example:manual"
 
 [tool.example]
@@ -825,7 +825,7 @@ manual = "example:manual"
     assert 'nemo = "nemo_helix.cli.app:cli"' not in updated
     assert 'manual = "example:main"' in updated
     assert '[project.entry-points."nemo.cli"]' in updated
-    assert 'auditor = "nemo_auditor.cli:AuditorPluginCLI"' not in updated
+    assert 'garak-plugin = "garak_plugin.cli:GarakPluginCLI"' not in updated
     assert '[project.entry-points."manual"]' in updated
     assert "[tool.example]" in updated
 

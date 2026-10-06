@@ -737,7 +737,7 @@ def test_merge_executor_profiles_skips_docker_when_unavailable_under_docker_runt
     custom = [
         DockerJobExecutionProfile(
             provider="cpu",
-            profile="auditor",
+            profile="garak-plugin",
             backend="docker",
             config=DockerJobExecutionProfileConfig(),
         ),

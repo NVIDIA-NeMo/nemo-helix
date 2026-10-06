@@ -9,6 +9,10 @@ from pathlib import Path
 import yaml
 from nemo_helix_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name, validate_skill_name
 
+# Skills that were renamed, mapped new name -> previous names. Installing the new skill also removes
+# the stale copy of the old one, since installs are keyed by name and would otherwise leave both behind.
+RENAMED_SKILLS: dict[str, tuple[str, ...]] = {"garak-plugin": ("auditor",)}
+
 
 def format_agent_skill_content(skill: Skill) -> str:
     """Return standard Agent Skills content with normalized NeMo metadata."""
@@ -33,9 +37,12 @@ class BaseAgentInstaller:
         """Format skill content for this agent. Default: return raw content."""
         return skill.raw
 
+    removed_renamed: list[Path]
+
     def install(self, scope: Scope, project_root: Path, skills: dict[str, Skill]) -> list[Path]:
         """Install all skills. Returns list of paths written."""
         paths: list[Path] = []
+        self.removed_renamed = []
         pending: list[tuple[Skill, Path]] = []
         destinations: dict[Path, str] = {}
         for skill_name, skill in skills.items():
@@ -50,7 +57,22 @@ class BaseAgentInstaller:
             path.write_text(self.format_content(skill))
             self._copy_companion_files(skill, path)
             paths.append(path)
+        self.removed_renamed = self._remove_renamed_skills(scope, project_root, skills)
         return paths
+
+    def _remove_renamed_skills(self, scope: Scope, project_root: Path, skills: dict[str, Skill]) -> list[Path]:
+        """Delete installed copies of skills that were renamed to one of *skills*; returns removed directories."""
+        removed: list[Path] = []
+        for new_name, old_names in RENAMED_SKILLS.items():
+            if new_name not in skills:
+                continue
+            for old_name in old_names:
+                skill_file = self.get_install_path(scope, project_root, old_name)
+                skill_dir = skill_file.parent
+                if skill_file.is_file() and skill_dir.is_dir() and not skill_dir.is_symlink():
+                    shutil.rmtree(skill_dir)
+                    removed.append(skill_dir)
+        return removed
 
     def _copy_companion_files(self, skill: Skill, installed_path: Path) -> None:
         """Copy non-SKILL.md files from source_dir to the installed skill's directory."""

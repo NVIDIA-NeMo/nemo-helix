@@ -42,7 +42,7 @@ OPENAPI_OPT_OUT_KEY = "x-not-in-openapi"
 # in permissions and scopes. Most segments map to themselves; the exception is
 # inference-gateway, whose registry/permission name is "inference".
 _API_AREA_URL_MAP = {
-    "audit": "audit",
+    "garak-plugin": "garak-plugin",
     "auth": "auth",
     "customization": "customization",
     "data-designer": "data-designer",
@@ -59,7 +59,7 @@ _API_AREA_URL_MAP = {
 }
 
 _NESTED_RESOURCE_SEGMENTS = frozenset(
-    {"evaluation", "customization", "guardrails", "audit", "data-designer", "safe-synthesizer"}
+    {"evaluation", "customization", "guardrails", "garak-plugin", "data-designer", "safe-synthesizer"}
 )
 
 
@@ -410,7 +410,7 @@ def infer_scopes(path: str, method: str) -> List[str]:
     # Fallback: try to infer from the resource name for non-/apis/ paths
     resource = infer_resource_from_path(path)
     known_resources = [
-        "audit",
+        "garak-plugin",
         "auth",
         "customization",
         "data-designer",
@@ -1076,7 +1076,7 @@ def stats(
 
 
 AREA_DISPLAY_NAMES = {
-    "audit": "Audit API",
+    "garak-plugin": "Garak Plugin API",
     "data-designer": "Data Designer API",
     "datasets": "Datasets API",
     "datastore": "Datastore API",

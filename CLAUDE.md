@@ -35,7 +35,7 @@ User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
 - `nemo-status`: read-only health dashboard. Run this before assuming the platform is up.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills live under `plugins/*/src/*/skills/` and handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, auditor, and Analyst telemetry analysis.
+Plugin-owned skills live under `plugins/*/src/*/skills/` and handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, garak-plugin, and Analyst telemetry analysis.
 
 ### Working in a sandboxed coding-agent environment
 
@@ -49,7 +49,7 @@ If you are running inside a macOS sandbox, a CI container, or any environment wh
 
 NeMo Helix brings together NVIDIA NeMo libraries under one CLI, Python SDK, and web UI. Current capabilities:
 
-- **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), auditor (red-teaming via garak), anonymizer (PII handling for training data).
+- **Harden agents**: guardrails (content safety, jailbreak detection, PII redaction), garak-plugin (red-teaming via garak), anonymizer (PII handling for training data).
 - **Evaluate agents**: evaluator (LLM-as-judge, deterministic, agentic, RAG benchmarks), Harbor-backed eval suites.
 - **Tune agents and models**: skill optimization, prompt/hyperparameter tuning, Switchyard model routing, and fine-tuning through Customizer.
 - **Build agents**: NeMo Agent Toolkit (NAT) for LangGraph-based agents. Broader framework support on the roadmap.

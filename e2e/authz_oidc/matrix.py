@@ -34,8 +34,8 @@ from typing import Literal
 NOT_403 = "not-403"
 
 # Paths under test (placeholders substituted at runtime).
-TARGETS = "/apis/auditor/v2/workspaces/{wsA}/targets"
-TARGETS_B = "/apis/auditor/v2/workspaces/{wsB}/targets"
+TARGETS = "/apis/garak-plugin/v2/workspaces/{wsA}/targets"
+TARGETS_B = "/apis/garak-plugin/v2/workspaces/{wsB}/targets"
 WORKSPACES = "/apis/entities/v2/workspaces"
 EVAL_HELLO = "/apis/evaluator/v1/hello/world"
 EVAL_HEALTHZ = "/apis/evaluator/v1/healthz"
@@ -46,7 +46,7 @@ UNRULED_OK = "/apis/harness-unruled/ruled"
 UNRULED_BAD = "/apis/harness-unruled/unruled"
 BROKEN_SUB = "/apis/harness-broken/anything"
 BROKEN_BARE = "/apis/harness-broken"
-UNKNOWN_PATH = "/apis/auditor/v2/path-that-matches-no-rule"
+UNKNOWN_PATH = "/apis/garak-plugin/v2/path-that-matches-no-rule"
 IAM_BINDINGS = "/apis/auth/v2/iam/role-bindings"
 PDP_ALLOW = "/apis/auth/v2/authz/allow"
 
@@ -184,33 +184,33 @@ MATRIX: list[Case] = [
     Case(
         "D1",
         "scopes",
-        "auditor:read scope allows GET",
+        "garak-plugin:read scope allows GET",
         "GET",
         TARGETS,
         "alice",
         {200},
-        scopes=["auditor:read"],
+        scopes=["garak-plugin:read"],
     ),
     Case(
         "D2",
         "scopes",
-        "auditor:read scope denies POST",
+        "garak-plugin:read scope denies POST",
         "POST",
         TARGETS,
         "alice",
         {403},
-        scopes=["auditor:read"],
+        scopes=["garak-plugin:read"],
         body=TARGET_BODY,
     ),
     Case(
         "D3",
         "scopes",
-        "auditor:write scope allows POST",
+        "garak-plugin:write scope allows POST",
         "POST",
         TARGETS,
         "alice",
         {201},
-        scopes=["auditor:write"],
+        scopes=["garak-plugin:write"],
         body=TARGET_BODY,
     ),
     Case(

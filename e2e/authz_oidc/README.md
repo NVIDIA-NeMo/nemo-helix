@@ -61,7 +61,7 @@ Not part of CI: everything is marked `e2e` and skipped without `--run-e2e`.
 | authn | valid sig 200; no/expired/wrong-iss/wrong-aud/unknown-key/unsigned/garbage token → 401 |
 | bindings | no binding → 403; Viewer read-not-write; cross-workspace isolation |
 | no-workspace-get | permission-stamped no-`{workspace}` GET requires the permission in `system`; permissionless sibling stays open |
-| scopes | `auditor:read` token: GET 200 / POST 403; `:write` POST 201; OIDC-only scopes = full power (documented); agents-gateway read/write method split |
+| scopes | `garak-plugin:read` token: GET 200 / POST 403; `:write` POST 201; OIDC-only scopes = full power (documented); agents-gateway read/write method split |
 | caller-kind | service principal denied on `callers=[principal]` route (symmetric half); human denied on service-only route (HelixAdmin keeps its global bypass); service no-match bypass pinned as documented behavior |
 | fence | unenumerable plugin namespace denied for human/service/HelixAdmin incl. bare prefix; unruled route denied for everyone while ruled sibling works |
 | knobs | quarantine fences the whole offending plugin |

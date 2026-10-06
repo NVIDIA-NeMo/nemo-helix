@@ -1,0 +1,60 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Migrating from NeMo Auditor"
+description: "Rename map and upgrade steps for installs that used the NeMo Auditor plugin name."
+---
+
+<a id="garak-plugin-migration-guide"></a>
+
+NeMo Auditor is now the **Garak Plugin** (`garak-plugin`). The plugin is related to, but not the same thing as, the open-source garak library and CLI you can also run on their own, so the new name keeps the two apart.
+Audit configurations, targets, and jobs are now **scan** configurations, targets, and jobs.
+
+The old names keep working for **one release** where noted below, then they are removed. Everything marked *not aliased* must be updated before you upgrade.
+
+## What changed
+
+| Area | Before | Now | Old name still works? |
+|------|--------|-----|-----------------------|
+| CLI group | `nemo auditor ...` | `nemo garak-plugin ...` | Yes, hidden alias that warns on stderr |
+| CLI job verb | `nemo auditor audit ...` | `nemo garak-plugin scan ...` | Yes, through the `nemo auditor` alias only |
+| Python SDK | `client.auditor` | `client.garak_plugin` | Yes, emits a `DeprecationWarning` |
+| Python types | `AuditConfig`, `AuditTarget`, `AuditJob` | `ScanConfig`, `ScanTarget`, `ScanJob` | No |
+| Typed client module | `nemo_helix_plugin.auditor` | `nemo_helix_plugin.garak_plugin` (methods `*_audit_*` are now `*_scan_*`) | No |
+| REST API | `/apis/auditor/v2/workspaces/{workspace}/{configs,targets,jobs/audit}` | `/apis/garak-plugin/v2/workspaces/{workspace}/{configs,targets,jobs/scan}` | **No (not aliased)** |
+| OAuth scopes | `auditor:read`, `auditor:write` | `garak-plugin:read`, `garak-plugin:write` | Yes, both are accepted |
+| Permission ids | `auditor.configs.*`, `auditor.targets.*`, `auditor.audit.*` | `garak-plugin.configs.*`, `garak-plugin.targets.*`, `garak-plugin.scan.*` | **No (not aliased)** |
+| Install extras | `nemo-helix[nemo-auditor-plugin]`, `nemo-helix[auditor-service]` | `nemo-helix[garak-plugin]`, `nemo-helix[garak-plugin-service]` | Yes |
+| Platform config section | `auditor:` | `garak-plugin:` | Yes, read with a warning when the new section is absent |
+| Plugin allowlists | `auditor` in `NEMO_PLUGIN_ALLOWLIST` or `NEMO_PLUGIN_<SURFACE>_ALLOWLIST` | `garak-plugin` (`garak_plugin` for the SDK surface) | **No (not aliased)** |
+| Seed toggle | `NHX_PLATFORM_SEED_AUDITOR_ENABLED` | `NHX_PLATFORM_SEED_GARAK_PLUGIN_ENABLED` | Yes, with a warning |
+| garak interpreter variable | `NEMO_AUDITOR_GARAK_PYTHON` | `NEMO_GARAK_PLUGIN_GARAK_PYTHON` | Yes, with a warning |
+| Default garak virtualenv | `~/.auditor/.venv` | `~/.garak-plugin/.venv` | Yes, used when the new path does not exist |
+| Container image | `nhx-auditor-tasks` | `nhx-garak-plugin-tasks` | Yes, both names are pushed from the same build |
+| Agent skill | `auditor` (installed as `nemo-auditor`) | `garak-plugin` (installed as `nemo-garak-plugin`) | No, see below |
+| Docs | `/documentation/vulnerability-scanning/tutorials/run-an-audit-locally` | `/documentation/vulnerability-scanning/tutorials/run-a-scan-locally` | Yes, redirected |
+
+## Data you already have
+
+Nothing needs exporting. When the platform seed job next runs, it moves your existing data to the new names:
+
+- Audit configurations and targets stored as `auditor_audit_config` and `auditor_audit_target` entities are recreated as `garak_plugin_scan_config` and `garak_plugin_scan_target` in the same workspace, then removed under the old type. Names and contents are unchanged. Internal entity ids change.
+- Jobs submitted before the upgrade are re-labelled with the new service name so they appear in `nemo garak-plugin scan` listings again. Job names, specs, and results are unchanged. A job that has not finished and was started with the old image or command should be resubmitted rather than rerun.
+
+The migration is safe to repeat. If it cannot complete it logs a warning and retries on the next start without blocking the rest of seeding.
+
+## Upgrade checklist
+
+1. **Update REST callers and gateway routes** from `/apis/auditor/...` to `/apis/garak-plugin/...`, and `jobs/audit` to `jobs/scan`.
+2. **Update custom role bindings** that reference `auditor.*` permission ids. Tokens that carry only `auditor:read` or `auditor:write` keep working for this release, but re-issue them with the new scope names.
+3. **Update plugin allowlists**, if you set any, so `garak-plugin` is listed. Leaving only `auditor` hides the renamed plugin.
+4. **Rename the platform config section** `auditor:` to `garak-plugin:` in `config.yaml` and Helm `platformConfig`. Rename a custom executor profile only if you also changed `job_executor_profile` to match.
+5. **Update image references** from `nhx-auditor-tasks` to `nhx-garak-plugin-tasks` in Helm values, compose files, and image allowlists. Both names resolve for this release.
+6. **Update scripts and CI** that call `nemo auditor ...`, and replace `audit` with `scan` for job commands.
+7. **Update environment variables** and, if you can, move the garak virtualenv to `~/.garak-plugin/.venv`.
+8. **Reinstall agent skills.** Run `nemo skills install --agent <agent>` (add `--user` if you installed at user scope). The installer now removes the stale `nemo-auditor` skill directory when it installs `nemo-garak-plugin`. If you manage skills by hand, delete the old `nemo-auditor` directory yourself.
+
+## Removal timeline
+
+The aliases and fallbacks above are deleted one release after this one: the `nemo auditor` group, `client.auditor`, the legacy scopes, config section, environment variables, the `nhx-auditor-tasks` image tag, the extras aliases, and the data migration. Complete the checklist before upgrading past that release.

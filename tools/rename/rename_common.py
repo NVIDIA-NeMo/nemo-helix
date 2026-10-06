@@ -95,7 +95,7 @@ LEGACY_ACRONYM_PATTERN = re.compile("|".join(f"(?:{rule.pattern})" for _, rule, 
 
 # These are first-party published image names that predate the common prefix.
 UNPREFIXED_IMAGES = [
-    "auditor-tasks",
+    "garak-plugin-tasks",
     "guardrails-callout-mock-llm",
     "guardrails-callout",
     "safe-synthesizer-tasks",

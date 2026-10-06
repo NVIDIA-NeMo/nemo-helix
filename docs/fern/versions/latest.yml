@@ -348,29 +348,31 @@ navigation:
           - page: Observability
             path: ../../guardrails/observability.mdx
       - section: Vulnerability Scanning
-        path: ../../auditor/index.mdx
+        path: ../../garak-plugin/index.mdx
         contents:
           - section: Tutorials
-            path: ../../auditor/tutorials/index.mdx
+            path: ../../garak-plugin/tutorials/index.mdx
             contents:
-              - page: Run an Audit Locally
-                path: ../../auditor/tutorials/run-audit-locally.mdx
+              - page: Run a Scan Locally
+                path: ../../garak-plugin/tutorials/run-scan-locally.mdx
           - page: SDK Resources
-            path: ../../auditor/sdk-resources.mdx
+            path: ../../garak-plugin/sdk-resources.mdx
+          - page: Rename Migration Guide
+            path: ../../garak-plugin/migration-guide.mdx
           - section: Configurations
-            path: ../../auditor/configs/index.mdx
+            path: ../../garak-plugin/configs/index.mdx
             contents:
               - page: Selecting Probes
-                path: ../../auditor/configs/probes.mdx
+                path: ../../garak-plugin/configs/probes.mdx
               - page: Schema
-                path: ../../auditor/configs/schema.mdx
+                path: ../../garak-plugin/configs/schema.mdx
           - section: Targets
-            path: ../../auditor/targets/index.mdx
+            path: ../../garak-plugin/targets/index.mdx
             contents:
               - page: Inference Gateway
-                path: ../../auditor/targets/inference-gateway.mdx
+                path: ../../garak-plugin/targets/inference-gateway.mdx
               - page: Schema
-                path: ../../auditor/targets/schema.mdx
+                path: ../../garak-plugin/targets/schema.mdx
       - section: Studio
         path: ../../studio/index.mdx
         contents:

@@ -177,7 +177,7 @@ readme:
       params: {}
     pagination:
       type: request
-      endpoint: get /apis/audit/v2/workspaces/{workspace}/jobs
+      endpoint: get /apis/garak-plugin/v2/workspaces/{workspace}/jobs/scan
       params: {}
 
 # security_schemes:

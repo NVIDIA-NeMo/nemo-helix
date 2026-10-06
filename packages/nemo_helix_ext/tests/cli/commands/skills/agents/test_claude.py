@@ -124,3 +124,33 @@ def test_install_copies_companion_files(tmp_path: Path):
     assert (skill_dir / "SKILL.md").exists()
     assert (skill_dir / "resources" / "llm-judge.md").exists()
     assert (skill_dir / "resources" / "llm-judge.md").read_text() == "# LLM Judge Guide"
+
+
+def test_install_removes_the_stale_copy_of_a_renamed_skill(tmp_path: Path):
+    stale = tmp_path / ".claude" / "skills" / "nemo-auditor"
+    stale.mkdir(parents=True)
+    (stale / "SKILL.md").write_text("old")
+    (stale / "extra.md").write_text("old companion")
+    unrelated = tmp_path / ".claude" / "skills" / "nemo-inference"
+    unrelated.mkdir()
+    (unrelated / "SKILL.md").write_text("keep")
+
+    installer = ClaudeInstaller()
+    installer.install(Scope.PROJECT, tmp_path, {"garak-plugin": _make_skill("garak-plugin")})
+
+    assert not stale.exists()
+    assert installer.removed_renamed == [stale]
+    assert (tmp_path / ".claude" / "skills" / "nemo-garak-plugin" / "SKILL.md").is_file()
+    assert (unrelated / "SKILL.md").read_text() == "keep"
+
+
+def test_install_leaves_old_skill_alone_when_the_renamed_skill_is_not_installed(tmp_path: Path):
+    stale = tmp_path / ".claude" / "skills" / "nemo-auditor"
+    stale.mkdir(parents=True)
+    (stale / "SKILL.md").write_text("old")
+
+    installer = ClaudeInstaller()
+    installer.install(Scope.PROJECT, tmp_path, {"inference": _make_skill("inference")})
+
+    assert (stale / "SKILL.md").is_file()
+    assert installer.removed_renamed == []

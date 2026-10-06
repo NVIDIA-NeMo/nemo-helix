@@ -1,11 +1,11 @@
 # Extended nightly manifest (non-compose tasks).
-auditor-config-crud-cli
-auditor-config-crud-cli-easy
-auditor-custom-probes-cli
-auditor-default-job-cli
-auditor-default-job-cli-easy
-auditor-target-crud-cli
-auditor-target-crud-cli-easy
+garak-plugin-config-crud-cli
+garak-plugin-config-crud-cli-easy
+garak-plugin-custom-probes-cli
+garak-plugin-default-job-cli
+garak-plugin-default-job-cli-easy
+garak-plugin-target-crud-cli
+garak-plugin-target-crud-cli-easy
 auth-authorization-cli
 auth-authorization-cli-easy
 data-designer-config-cli

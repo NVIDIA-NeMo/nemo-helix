@@ -159,6 +159,9 @@ class AuthzScope:
     # a real permission namespace is never empty. Keeping the field ``str`` (not ``str | None``)
     # means ``namespace`` is always the effective dotted prefix for readers and the type checker.
     namespace: str = ""
+    # Deprecated scope areas whose tokens are still accepted (``<legacy>:read`` / ``<legacy>:write``)
+    # while a renamed plugin's callers migrate. Appended after the current scopes; empty for most plugins.
+    legacy_scopes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.namespace:
@@ -166,7 +169,7 @@ class AuthzScope:
 
     def child(self, *segments: str) -> AuthzScope:
         """Return a scope whose permission namespace is deepened by *segments*; scope unchanged."""
-        return AuthzScope(self.scope, ".".join((self.namespace, *segments)))
+        return AuthzScope(self.scope, ".".join((self.namespace, *segments)), self.legacy_scopes)
 
     @property
     def resource(self) -> str:
@@ -198,11 +201,11 @@ class AuthzScope:
         Built from :attr:`scope`, not :attr:`namespace`, so a :meth:`child` scope keeps the
         parent area. This is the raw list; :attr:`read` is the route decorator built from it.
         """
-        return scopes_for(self.scope, write=False)
+        return [*scopes_for(self.scope, write=False), *(f"{legacy}:read" for legacy in self.legacy_scopes)]
 
     def write_scopes(self) -> list[str]:
         """The write scope strings for this area, e.g. ``["agents:write", "platform:write"]``."""
-        return scopes_for(self.scope, write=True)
+        return [*scopes_for(self.scope, write=True), *(f"{legacy}:write" for legacy in self.legacy_scopes)]
 
     @property
     def read(self) -> Callable[[_F], _F]:

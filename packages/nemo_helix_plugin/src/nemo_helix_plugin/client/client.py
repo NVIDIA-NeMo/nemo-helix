@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import time
+import warnings
 from collections.abc import AsyncIterable, AsyncIterator, Callable, Iterable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
@@ -734,10 +735,19 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         return self._resource_client(AgentsClient, AsyncAgentsClient)
 
     @property
-    def auditor(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.auditor.client import AsyncAuditorClient, AuditorClient
+    def garak_plugin(self) -> NemoClient | AsyncNemoClient:
+        from nemo_helix_plugin.garak_plugin.client import AsyncGarakPluginClient, GarakPluginClient
 
-        return self._resource_client(AuditorClient, AsyncAuditorClient)
+        return self._resource_client(GarakPluginClient, AsyncGarakPluginClient)
+
+    @property
+    def auditor(self) -> NemoClient | AsyncNemoClient:
+        warnings.warn(
+            "`client.auditor` is deprecated and will be removed; use `client.garak_plugin` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.garak_plugin
 
     @property
     def guardrail(self) -> NemoClient | AsyncNemoClient:

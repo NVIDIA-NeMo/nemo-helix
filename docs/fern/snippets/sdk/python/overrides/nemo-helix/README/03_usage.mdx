@@ -156,7 +156,7 @@ client = NeMoHelix(
     base_url="http://nemo.test",
 )
 
-audit_config = client.audit.configs.create(
+scan_config = client.garak_plugin.configs.create(
     workspace="my-workspace",
     name="name",
     plugins={
@@ -174,7 +174,7 @@ audit_config = client.audit.configs.create(
     run={},
     system={},
 )
-print(audit_config.plugins)
+print(scan_config.plugins)
 ```
 
 ## Handling Errors

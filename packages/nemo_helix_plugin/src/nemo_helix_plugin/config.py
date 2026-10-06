@@ -232,6 +232,15 @@ class Configuration:
     def global_settings_to_service_config(global_settings: dict, service_config: Type[_T_config]) -> _T_config:
         key = service_config.global_settings_key()
         if key not in global_settings:
+            legacy_key = next(
+                (name for name in getattr(service_config, "legacy_plugin_names", ()) if name in global_settings), None
+            )
+            if legacy_key is not None:
+                logger.warning(
+                    "Config section '%s' is deprecated and will stop being read; rename it to '%s'.", legacy_key, key
+                )
+                key = legacy_key
+        if key not in global_settings:
             logger.debug(
                 f"Settings for service '{key}' not found in global settings, using default values for '{key}' service."
             )
@@ -1003,6 +1012,10 @@ class NemoConfig(ServiceConfig, metaclass=_NemoConfigMeta):
 
     # Marker read by _NemoConfigMeta to distinguish NemoConfig itself from subclasses.
     __is_nemo_config_base__: ClassVar[bool] = True
+
+    # Deprecated YAML section names still honoured (with a warning) when ``plugin_name``'s section is absent,
+    # so a renamed plugin keeps reading its old config block for one release.
+    legacy_plugin_names: ClassVar[tuple[str, ...]] = ()
 
     # Default model_config — overridden per concrete subclass by _NemoConfigMeta.
     model_config = SettingsConfigDict(

@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[project]
+name = "garak-plugin"
+description = "Garak Plugin scaffold for NeMo Helix."
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "garak-api",
+    "httpx>=0.27",
+    "nemo-helix-plugin",
+    "nemo-helix",
+    "pydantic>=2.10.6",
+    "pyyaml>=6.0.2",
+    "typer>=0.20.0",
+]
+version = "0.0.0"
+
+[project.entry-points."nemo.services"]
+garak-plugin = "garak_plugin.service:GarakPluginService"
+
+[project.entry-points."nemo.cli"]
+garak-plugin = "garak_plugin.cli:GarakPluginCLI"
+auditor = "garak_plugin._legacy_cli:AuditorAliasCLI"
+
+[project.entry-points."nemo.sdk"]
+garak_plugin = "garak_plugin.sdk:garak_plugin_sdk_resources"
+auditor = "garak_plugin._legacy_sdk:auditor_sdk_resources"
+
+[project.entry-points."nemo.jobs"]
+"garak-plugin.scan" = "garak_plugin.jobs.scan:ScanJob"
+
+[project.entry-points."nemo.seed"]
+garak-plugin = "garak_plugin.seed_job:GarakPluginSeedJob"
+
+[project.entry-points."nemo.skills"]
+garak-plugin = "garak_plugin.skills:get_skills_path"
+
+[project.entry-points."nemo.docs"]
+garak-plugin = "garak_plugin.docs:get_docs_path"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/garak_plugin"]
+
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.3",
+    "ruff>=0.11.8",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.pyright]
+extraPaths = ["src"]
+
+# Opt this plugin into OpenAPI spec generation
+[tool.nemo.openapi]

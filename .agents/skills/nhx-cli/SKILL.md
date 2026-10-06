@@ -35,7 +35,7 @@ Plugin and service code must **not import `nemo_helix_ext`** — plugins only de
 | Category | Location | Description |
 |----------|----------|-------------|
 | **Core resource groups** | `commands/<group>.py` (`files`, `inference/`, `jobs`, `models`, `secrets`, `workspaces`, hidden `adapters`, `iam`, `projects`) | Hand-written on typed clients, registered in `commands/manifest_registry.py` |
-| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `auditor`, ...) | Appear only when the package is installed |
+| **Plugin-hosted groups** | owning package, `nemo.cli` entry point (`guardrail` → `plugins/nemo-guardrails`, `intake`/`experiments` → `services/intake`, `insights`, `agents`, `garak-plugin`, ...) | Appear only when the package is installed |
 | **Generated job/function verbs** | `nemo_helix_plugin/commands.py` | `submit`/`explain`/`run` for every `NemoJob`/`NemoFunction` a plugin registers |
 | **Setup / use cases** | `commands/setup.py`, `commands/use_cases/`, `commands/auth.py`, `commands/config.py` | Wizards and workflows (`chat`, `wait`, ...) |
 | **Services** | `commands/services/`, `commands/quickstart/` | Run the platform locally (imports server packages by design) |

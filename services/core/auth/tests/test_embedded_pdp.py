@@ -855,7 +855,7 @@ class TestPerAreaScopes:
 
     # Map URL prefix to expected scope area
     AREA_MAP: ClassVar[dict[str, str]] = {
-        "/apis/audit/": "audit",
+        "/apis/garak-plugin/": "garak-plugin",
         "/apis/auth/": "auth",
         "/apis/data-designer/": "data-designer",
         "/apis/entities/": "entities",
@@ -979,21 +979,21 @@ class TestPerAreaScopes:
         assert post_config.get("scopes") == ["entities:write", "platform:write"]
         assert post_config.get("permissions") == ["workspaces.create"]
 
-    def test_audit_workspace_endpoints_have_audit_scopes(self, static_authz_data):
-        """All workspace-scoped audit endpoints should have audit:read/audit:write scopes."""
+    def test_garak_plugin_workspace_endpoints_have_garak_plugin_scopes(self, static_authz_data):
+        """All workspace-scoped garak-plugin endpoints should have garak-plugin:read/garak-plugin:write scopes."""
         endpoints = static_authz_data["authz"]["endpoints"]
         missing = []
 
         for path, methods in endpoints.items():
-            if not path.startswith("/apis/audit/v2/workspaces/"):
+            if not path.startswith("/apis/garak-plugin/v2/workspaces/"):
                 continue
             for method, config in methods.items():
                 scopes = config.get("scopes", [])
-                has_audit = any(s.startswith("audit:") for s in scopes)
-                if not has_audit:
+                has_scope = any(s.startswith("garak-plugin:") for s in scopes)
+                if not has_scope:
                     missing.append(f"{method.upper()} {path}")
 
-        assert not missing, "Workspace audit endpoints missing audit:* scope:\n" + "\n".join(missing)
+        assert not missing, "Workspace garak-plugin endpoints missing garak-plugin:* scope:\n" + "\n".join(missing)
 
 
 class TestWasmNativeBuiltins:

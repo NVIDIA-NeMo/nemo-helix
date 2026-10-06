@@ -8560,14 +8560,14 @@ nemo guardrail configs update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-### nemo auditor
+### nemo garak-plugin
 
-Plugin commands for auditor.
+Plugin commands for garak-plugin.
 
 **Usage:**
 
 ```shell
-nemo auditor [OPTIONS] COMMAND [ARGS]...
+nemo garak-plugin [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8577,35 +8577,35 @@ nemo auditor [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `info`: Print the current plugin status.
-* `configs`: Manage audit configurations.
-* `targets`: Manage audit targets.
+* `configs`: Manage scan configurations.
+* `targets`: Manage scan targets.
 
 *Jobs:*
 
-* `audit`: Run an auditor scan against a configured target.
+* `scan`: Run an garak_plugin scan against a configured target.
 
-#### nemo auditor info
+#### nemo garak-plugin info
 
 Print the current plugin status.
 
 **Usage:**
 
 ```shell
-nemo auditor info [OPTIONS]
+nemo garak-plugin info [OPTIONS]
 ```
 
 **Help:**
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor configs
+#### nemo garak-plugin configs
 
-Manage audit configurations.
+Manage scan configurations.
 
 **Usage:**
 
 ```shell
-nemo auditor configs [OPTIONS] COMMAND [ARGS]...
+nemo garak-plugin configs [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8620,12 +8620,12 @@ nemo auditor configs [OPTIONS] COMMAND [ARGS]...
 * `update`
 * `delete`
 
-##### nemo auditor configs create
+##### nemo garak-plugin configs create
 
 **Usage:**
 
 ```shell
-nemo auditor configs create [OPTIONS] NAME
+nemo garak-plugin configs create [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8646,12 +8646,12 @@ nemo auditor configs create [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs list
+##### nemo garak-plugin configs list
 
 **Usage:**
 
 ```shell
-nemo auditor configs list [OPTIONS]
+nemo garak-plugin configs list [OPTIONS]
 ```
 
 **Options:**
@@ -8672,12 +8672,12 @@ nemo auditor configs list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo auditor configs get
+##### nemo garak-plugin configs get
 
 **Usage:**
 
 ```shell
-nemo auditor configs get [OPTIONS] NAME
+nemo garak-plugin configs get [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8696,12 +8696,12 @@ nemo auditor configs get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs update
+##### nemo garak-plugin configs update
 
 **Usage:**
 
 ```shell
-nemo auditor configs update [OPTIONS] NAME
+nemo garak-plugin configs update [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8722,12 +8722,12 @@ nemo auditor configs update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor configs delete
+##### nemo garak-plugin configs delete
 
 **Usage:**
 
 ```shell
-nemo auditor configs delete [OPTIONS] NAME
+nemo garak-plugin configs delete [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8742,14 +8742,14 @@ nemo auditor configs delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor targets
+#### nemo garak-plugin targets
 
-Manage audit targets.
+Manage scan targets.
 
 **Usage:**
 
 ```shell
-nemo auditor targets [OPTIONS] COMMAND [ARGS]...
+nemo garak-plugin targets [OPTIONS] COMMAND [ARGS]...
 ```
 
 **Help:**
@@ -8764,12 +8764,12 @@ nemo auditor targets [OPTIONS] COMMAND [ARGS]...
 * `update`
 * `delete`
 
-##### nemo auditor targets create
+##### nemo garak-plugin targets create
 
 **Usage:**
 
 ```shell
-nemo auditor targets create [OPTIONS] NAME
+nemo garak-plugin targets create [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8790,12 +8790,12 @@ nemo auditor targets create [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets list
+##### nemo garak-plugin targets list
 
 **Usage:**
 
 ```shell
-nemo auditor targets list [OPTIONS]
+nemo garak-plugin targets list [OPTIONS]
 ```
 
 **Options:**
@@ -8816,12 +8816,12 @@ nemo auditor targets list [OPTIONS]
 
 * `--all-pages`: Fetch all pages
 
-##### nemo auditor targets get
+##### nemo garak-plugin targets get
 
 **Usage:**
 
 ```shell
-nemo auditor targets get [OPTIONS] NAME
+nemo garak-plugin targets get [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8840,12 +8840,12 @@ nemo auditor targets get [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets update
+##### nemo garak-plugin targets update
 
 **Usage:**
 
 ```shell
-nemo auditor targets update [OPTIONS] NAME
+nemo garak-plugin targets update [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8866,12 +8866,12 @@ nemo auditor targets update [OPTIONS] NAME
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
 
-##### nemo auditor targets delete
+##### nemo garak-plugin targets delete
 
 **Usage:**
 
 ```shell
-nemo auditor targets delete [OPTIONS] NAME
+nemo garak-plugin targets delete [OPTIONS] NAME
 ```
 
 **Arguments:**
@@ -8886,14 +8886,14 @@ nemo auditor targets delete [OPTIONS] NAME
 
 * `--help, -h`: Show this message and exit.
 
-#### nemo auditor audit
+#### nemo garak-plugin scan
 
-Run an auditor scan against a configured target.
+Run an garak_plugin scan against a configured target.
 
 **Usage:**
 
 ```shell
-nemo auditor audit [OPTIONS] [COMMAND] [ARGS]...
+nemo garak-plugin scan [OPTIONS] [COMMAND] [ARGS]...
 ```
 
 **Help:**
@@ -8917,7 +8917,7 @@ nemo auditor audit [OPTIONS] [COMMAND] [ARGS]...
 * `--profile`: Execution profile (operator-configured). Required unless the active cluster has a 'default' profile.
 * `--workspace, -w`: Workspace scope for the submission. Resolution order: (1) this --workspace flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
-Job Spec flags are generated from the AuditInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
+Job Spec flags are generated from the ScanInputSpec Pydantic schema. Precedence: --spec-file (base) → --spec JSON (overlay) → per-flag values (top).
 
 Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply them with --spec or --spec-file. Individual flags override values from the supplied spec.
 ​
@@ -8926,14 +8926,14 @@ Some spec fields cannot be represented as CLI flags: `config`, `target`. Supply 
 
 * `explain`: Show input/output schemas.
 
-##### nemo auditor audit explain
+##### nemo garak-plugin scan explain
 
 Show input/output schemas.
 
 **Usage:**
 
 ```shell
-nemo auditor audit explain [OPTIONS]
+nemo garak-plugin scan explain [OPTIONS]
 ```
 
 **Options:**

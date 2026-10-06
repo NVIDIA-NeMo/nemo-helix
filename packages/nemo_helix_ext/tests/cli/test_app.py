@@ -758,3 +758,16 @@ def test_root_no_args_prints_help_successfully():
     # No ANSI escape codes should appear (colors stripped for non-TTY)
     # TODO: This fails after vendoring, will fix it later
     # assert "\x1b[" not in result.stdout
+
+
+def test_deprecated_plugin_alias_is_callable_but_hidden_from_help():
+    plugin_entry_points = {
+        "garak-plugin": SimpleNamespace(value="plugin.module:GarakPluginCLI"),
+        "auditor": SimpleNamespace(value="plugin.module:AuditorAliasCLI"),
+    }
+
+    visible = build_top_level_entries((), plugin_entry_points, include_hidden=False)
+    everything = build_top_level_entries((), plugin_entry_points, include_hidden=True)
+
+    assert [entry.name for entry in visible] == ["garak-plugin"]
+    assert {entry.name for entry in everything} == {"garak-plugin", "auditor"}

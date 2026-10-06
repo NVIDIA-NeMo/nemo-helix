@@ -28,7 +28,7 @@ The generator no longer emits one spec per microservice and merges them. It now 
 | Plugin | Output File |
 |--------|-------------|
 | Agents | `plugins/nemo-agents/openapi/openapi.yaml` |
-| Auditor | `plugins/nemo-auditor/openapi/openapi.yaml` |
+| Garak Plugin | `plugins/garak-plugin/openapi/openapi.yaml` |
 | Customization | `plugins/nemo-customizer/openapi/openapi.yaml` |
 | Data Designer | `plugins/nemo-data-designer/openapi/openapi.yaml` |
 | Deployments | `plugins/nemo-deployments/openapi/openapi.yaml` |

@@ -194,7 +194,7 @@ jobs:
         run: |
           make docker-print TARGET=docker-cpu
           make docker-print TARGET=docker-gpu
-          make docker-print TARGET=docker-auditor
+          make docker-print TARGET=docker-garak-plugin
           make docker-print TARGET=docker-python-base
           make docker-print TARGET=nhx-automodel-gpu-wheels
           make docker-print TARGET=nhx-automodel
@@ -363,8 +363,8 @@ jobs:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
-  build-auditor-test-image:
-    name: Build auditor test image
+  build-garak-plugin-test-image:
+    name: Build garak-plugin test image
     needs: [changes]
     if: >
       !cancelled() && (
@@ -420,11 +420,11 @@ jobs:
 
       - name: Print Docker bake graph
         shell: bash
-        run: make docker-print TARGET=docker-auditor
+        run: make docker-print TARGET=docker-garak-plugin
 
-      - name: Build auditor image
+      - name: Build garak-plugin image
         shell: bash
-        run: make docker-build TARGET=docker-auditor
+        run: make docker-build TARGET=docker-garak-plugin
 
   build-safe-synthesizer-test-image:
     name: Build Safe Synthesizer test image

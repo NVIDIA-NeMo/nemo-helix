@@ -32,8 +32,8 @@ The answer is *mostly* yes. The one counter example is inference-chat-completion
 
 | Eval | Std Result | Std Time | # Std Tokens | # Std Tools | Easy Result | Easy Time | # Easy Tokens | # Easy Tools | Time Diff | # Token Diff | # Tool Diff |
 |------|-----------|----------|--------------|-------------|-------------|-----------|---------------|--------------|-----------|--------------|-------------|
-| auditor-config-crud | PASS | 5:11 | 1.9M | 34 | PASS | 3:46 | 1.0M | 23 | -27% | -46% | -32% |
-| auditor-target-crud | PASS | 4:09 | 974.1k | 25 | PASS | 2:23 | 529.0k | 15 | -43% | -46% | -40% |
+| garak-plugin-config-crud | PASS | 5:11 | 1.9M | 34 | PASS | 3:46 | 1.0M | 23 | -27% | -46% | -32% |
+| garak-plugin-target-crud | PASS | 4:09 | 974.1k | 25 | PASS | 2:23 | 529.0k | 15 | -43% | -46% | -40% |
 | auth-authorization | PASS | 4:17 | 1.3M | 30 | PASS | 2:25 | 602.6k | 19 | -44% | -53% | -37% |
 | data-designer-config | PASS | 2:35 | 943.2k | 20 | PASS | 1:23 | 484.6k | 11 | -46% | -49% | -45% |
 | entities-basic | PASS | 4:02 | 1.1M | 25 | PASS | 2:58 | 758.6k | 19 | -27% | -31% | -24% |
@@ -51,8 +51,8 @@ The answer is *mostly* yes. The one counter example is inference-chat-completion
 ```
 Eval                                       Standard       Easy
 --------------------------------------------------------------
-auditor-config-crud-cli                        PASS       PASS
-auditor-target-crud-cli                        PASS       PASS
+garak-plugin-config-crud-cli                        PASS       PASS
+garak-plugin-target-crud-cli                        PASS       PASS
 auth-authorization-cli                         PASS       PASS
 data-designer-config-cli                       PASS       PASS
 entities-basic-cli                             PASS       PASS

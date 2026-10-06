@@ -41,7 +41,7 @@ def test_cli_docs_use_supported_plugins_regardless_of_environment(monkeypatch):
     assert documented_plugin_clis == (
         "agents",
         "anonymizer",
-        "auditor",
+        "garak-plugin",
         "customization",
         "data-designer",
         "evaluator",

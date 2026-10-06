@@ -29,6 +29,9 @@ PANEL_DESCRIPTIONS: dict[PanelName, str] = {
     "Functional plugins": "Functional service and plugin commands",
 }
 
+# Renamed plugins whose old command group stays callable for one release but is left out of `nemo --help`.
+DEPRECATED_PLUGIN_ALIASES = frozenset({"auditor"})
+
 TOP_LEVEL_COMMAND_ORDER: dict[PanelName, tuple[str, ...]] = {
     "Setup": ("setup", "auth", "services", "skills"),
     "CLI functions": ("chat", "docs", "wait", "agent", "plugins"),
@@ -37,7 +40,7 @@ TOP_LEVEL_COMMAND_ORDER: dict[PanelName, tuple[str, ...]] = {
         "agents",
         "data-designer",
         "guardrail",
-        "auditor",
+        "garak-plugin",
         "anonymizer",
         "evaluator",
         "customization",
@@ -109,9 +112,15 @@ def build_top_level_entries(
                 "Ignoring plugin CLI entry point %r because it collides with a top-level command", plugin_name
             )
             continue
-        entries_by_panel["Functional plugins"].append(
-            functional_plugin_entry(plugin_name, entry_point.value, source="plugin")
+        plugin_entry = functional_plugin_entry(
+            plugin_name,
+            entry_point.value,
+            source="plugin",
+            hidden=plugin_name in DEPRECATED_PLUGIN_ALIASES,
         )
+        if plugin_entry.hidden and not include_hidden:
+            continue
+        entries_by_panel["Functional plugins"].append(plugin_entry)
 
     return tuple(
         entry for panel in PANEL_ORDER for entry in sorted(entries_by_panel[panel], key=top_level_entry_sort_key)

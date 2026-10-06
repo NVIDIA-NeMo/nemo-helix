@@ -36,7 +36,7 @@ User-facing skills in `packages/nemo_helix_ext/src/nemo_helix_ext/skills/`:
 - `nemo-status`: read-only health dashboard. Run this before assuming the platform is up.
 - `nemo-teardown`: guided shutdown with confirmation.
 
-Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, and auditor.
+Plugin-owned skills under `plugins/*/src/*/skills/` handle their own routing for customization, guardrails, evaluations, optimization, data designer, anonymizer, and garak-plugin.
 
 ## Sandboxed environments
 

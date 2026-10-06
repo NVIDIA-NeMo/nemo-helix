@@ -67,7 +67,7 @@ services/guardrails/callouts/internal/server/
   additional NVIDIA modification header.
 
 --------------------------------------------------------------------------------
-services/auditor/third-party/
+plugins/garak-plugin/ (garak is installed in the nhx-garak-plugin-tasks container)
   Garak v0.14.1 — LLM vulnerability scanner
   License: Apache-2.0
   Home: https://github.com/NVIDIA/garak

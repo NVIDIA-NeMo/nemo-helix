@@ -21,7 +21,7 @@ The task uses the same platform config as the rest of the platform (e.g. `NHX_CO
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NHX_PLATFORM_SEED_ENABLED` | true | Master switch |
-| `NHX_PLATFORM_SEED_AUDITOR_ENABLED` | true | Seed auditor configs |
+| `NHX_PLATFORM_SEED_GARAK_PLUGIN_ENABLED` | true | Seed garak-plugin configs (the pre-rename `NHX_PLATFORM_SEED_AUDITOR_ENABLED` is still read for one release) |
 | `NHX_PLATFORM_SEED_AUTH_ENABLED` | true | Seed auth role bindings (HelixAdmin plus wildcard Editor, Viewer, and WorkspaceCreator bindings) |
 | `NHX_PLATFORM_SEED_GUARDRAILS_ENABLED` | true | Seed guardrail configs |
 | `NHX_PLATFORM_SEED_MODEL_PROVIDER_ENABLED` | true | Seed nvidia-build model provider |

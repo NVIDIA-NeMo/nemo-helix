@@ -28,6 +28,9 @@ redirects:
   # Hand-maintained: Secure Agents split into Add Guardrails to an Agent + Scan Trace Data
   - source: "/documentation/agents/secure-agents"
     destination: "/documentation/agents/add-guardrails"
+  # Hand-maintained: the tutorial was renamed with the plugin (Run an Audit Locally -> Run a Scan Locally)
+  - source: "/documentation/vulnerability-scanning/tutorials/run-an-audit-locally"
+    destination: "/documentation/vulnerability-scanning/tutorials/run-a-scan-locally"
   - source: "/index.html"
     destination: "/latest"
   - source: "/index"

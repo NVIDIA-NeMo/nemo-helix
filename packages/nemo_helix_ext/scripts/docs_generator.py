@@ -705,7 +705,7 @@ def _escape_mdx_line(line: str) -> str:
 _DOCUMENTED_PLUGIN_CLIS = (
     "agents",
     "anonymizer",
-    "auditor",
+    "garak-plugin",
     "customization",
     "data-designer",
     "evaluator",
