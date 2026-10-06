@@ -309,9 +309,15 @@ EOF
 #
 # These run after the removals rather than before, as they did when the blocks were one. None of
 # them reaches ray or PyNvVideoCodec, so there is nothing for them to reintroduce.
-RUN <<"EOF" bash -exu
+RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
+    <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
+OTEL_UPGRADE=()
+for pin in "${OTEL_PINS[@]}"; do
+    OTEL_UPGRADE+=(--reinstall-package "${pin%%==*}")
+done
 
 # Gym sandbox CLIENT SDK (OpenSandbox provider). The OpenSandbox SERVER is deployed separately on
 # the cluster; this is the client the Gym stack imports to call it. Source-independent, so it stays
@@ -320,10 +326,14 @@ uv pip install --python /opt/nemo_rl_venv/bin/python "opensandbox>=0.1.9" "tenac
 
 # Logging integrations ship scanner-visible Python and Go artifacts. Keep them
 # above fixed floors even when NeMo-RL's lock has older wheels.
-uv pip install --python /opt/nemo_rl_venv/bin/python \
+# --directory /tmp avoids resolving this project's broader OpenTelemetry constraints.
+uv pip install --directory /tmp --python /opt/nemo_rl_venv/bin/python \
+    --upgrade-package wandb \
+    "${OTEL_UPGRADE[@]}" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
-    "wandb>=0.29.0"
+    "wandb>=0.30.0" \
+    "${OTEL_PINS[@]}"
 
 # NeMo-Gym and nemo-sandboxed-gym in the BASE venv, for the DRIVER - not duplicates of the
 # nemo_gym extra above. `spinup_nemo_gym_actor` runs in the driver process and, on the sandboxed
@@ -438,9 +448,15 @@ ARG NEMO_GYM_PREFETCH_CONFIGS=""
 ARG NEMO_GYM_CUDA=cu130
 ARG NEMO_GYM_VLLM_VERSION=0.20.0
 ARG TARGETARCH
-RUN <<"EOF" bash -exu
+RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
+    <<"EOF" bash -exu
 umask 022
 export UV_LINK_MODE=symlink
+mapfile -t OTEL_PINS < <(grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt)
+OTEL_UPGRADE=()
+for pin in "${OTEL_PINS[@]}"; do
+    OTEL_UPGRADE+=(--reinstall-package "${pin%%==*}")
+done
 mkdir -p /opt/gym_venvs
 if [ -n "${NEMO_GYM_PREFETCH_CONFIGS:-}" ]; then
     cd /opt/nemo-rl
@@ -496,8 +512,14 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
     fi
-    if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
-        uv pip install --python "${py}" --upgrade-package wandb "wandb>=0.29.0"
+    if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") or importlib.util.find_spec("opentelemetry") else 1)'; then
+        # Outside the project, or uv keeps opentelemetry-api on the wrong release line.
+        args=(--directory /tmp --python "${py}" "${OTEL_UPGRADE[@]}" "${OTEL_PINS[@]}")
+        if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") else 1)'; then
+            uv pip install "${args[@]}" --upgrade-package wandb "wandb>=0.30.0"
+        else
+            uv pip install "${args[@]}"
+        fi
     fi
     # Full mlflow needs cryptography<50 and an exact-version skinny; this image uses skinny
     # plus cryptography>=50. pynvml is a deprecated shim; nvidia-ml-py still provides the

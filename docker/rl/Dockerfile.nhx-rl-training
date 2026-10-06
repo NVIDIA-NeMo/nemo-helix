@@ -52,13 +52,19 @@ RUN UV_CACHE_DIR=/root/.cache/uv \
 # base doesn't have are still installed fresh. `| grep '==' ` drops git/URL installs (TE, flash-attn,
 # mamba) from the overrides — the glue never requests those, so they stay untouched anyway.
 #
+# OpenTelemetry is the exception: its frozen lines are replaced by docker/rl/opentelemetry-overrides.txt,
+# which pins one matched release line (see that file for why).
+#
 # UV_CACHE_DIR is overridden to the build-only mount here: the base sets it to /opt/uv_cache, which
 # this step must not write into (that cache is shipped read-only, see below).
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
     umask 022 && \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip freeze --python /opt/nemo_rl_venv/bin/python --exclude-editable \
-        | grep -E '^[A-Za-z0-9._-]+==' > /tmp/base-overrides.txt && \
+        | grep -E '^[A-Za-z0-9._-]+==' \
+        | grep -Ev '^opentelemetry-' > /tmp/base-overrides.txt && \
+    grep -Ev '^[[:space:]]*(#|$)' /tmp/opentelemetry-overrides.txt >> /tmp/base-overrides.txt && \
     UV_CACHE_DIR=/root/.cache/uv \
     uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache \
         --overrides /tmp/base-overrides.txt \
