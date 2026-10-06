@@ -6,16 +6,7 @@ import {
   filesListFilesetFiles,
   filesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
-
-export interface FilesetEntry {
-  readonly path: string;
-  readonly file: File;
-}
-
-export interface FilesetLocation {
-  readonly workspace: string;
-  readonly name: string;
-}
+import type { FilesetEntry, FilesetLocation } from '@studio/api/files/types';
 
 // One request per file, so a 500-file upload is 500 round trips. Run a bounded number at
 // once: unbounded Promise.all would queue them all against the browser's per-host limit

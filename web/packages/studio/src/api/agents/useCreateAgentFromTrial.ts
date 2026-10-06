@@ -4,22 +4,16 @@
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { agentsCreateAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
-import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
 import { filesCreateFileset, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { claimFileset, rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import { copyFilesetFiles, type FilesetLocation } from '@studio/api/files/uploadFilesetEntries';
+import type {
+  CreateAgentFromTrialParams,
+  UseCreateAgentFromTrialOptions,
+} from '@studio/api/agents/types';
+import { copyFilesetFiles } from '@studio/api/files/uploadFilesetEntries';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
-import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
-
-export interface CreateAgentFromTrialParams {
-  workspace: string;
-  name: string;
-  /** The agent the study optimized, whose spec fileset the new agent needs a copy of. */
-  source: FilesetLocation & Pick<Agent, 'description' | 'config_format'>;
-  config: CreateAgentRequestConfig;
-  replaceOrphanedFileset?: boolean;
-}
+import { useMutation } from '@tanstack/react-query';
 
 const retrieveFileset = async (
   workspace: string,
@@ -74,11 +68,6 @@ export const createAgentFromTrial = async ({
     throw error;
   }
 };
-
-export type UseCreateAgentFromTrialOptions = Omit<
-  UseMutationOptions<Agent, Error, CreateAgentFromTrialParams>,
-  'mutationFn'
->;
 
 export const useCreateAgentFromTrial = (options?: UseCreateAgentFromTrialOptions) =>
   useMutation({ ...options, mutationFn: createAgentFromTrial });
