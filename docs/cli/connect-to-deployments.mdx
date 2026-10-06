@@ -2,17 +2,45 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Connect the CLI to Deployments"
-description: "Configure, authenticate, and switch between NeMo Helix deployments."
+title: "Connect with CLI Contexts"
+description: "Use CLI contexts to connect the NeMo CLI and Python SDK to local and remote NeMo Helix deployments."
 ---
 
-Use named CLI contexts to connect to one or more local or remote NeMo Helix deployments.
+A CLI context is a named set of connection settings: the deployment URL, your credentials, a default workspace, and output preferences. The NeMo CLI and the Python SDK both read the current context, so you configure a deployment once and every `nemo` command and SDK client targets it.
+
+Tutorials and guides in this documentation assume that your current context points at the deployment you want to use.
 
 ## Prerequisites
 
 - Install the NeMo CLI as described in [Setup](/documentation/get-started).
 - Obtain the base URL for each deployment.
 - For an authenticated deployment, obtain an account that can complete its login flow.
+
+## How contexts work
+
+Contexts are saved in the CLI configuration file, `~/.config/nhx/config.yaml` by default. A single file can hold contexts for any number of local and remote deployments. Each context references a cluster entry (the base URL) and a user entry (the credentials), and stores its own default workspace:
+
+```yaml
+current_context: local
+clusters:
+- name: local-cluster
+  base_url: http://localhost:8080/
+- name: production-cluster
+  base_url: https://nhx.example.com/
+contexts:
+- name: local
+  cluster: local-cluster
+  user: local-user
+  workspace: default
+- name: production
+  cluster: production-cluster
+  user: production-user
+  workspace: team-a
+```
+
+You don't need to edit this file by hand. `nemo setup`, `nemo config set`, and `nemo auth login` write it for you. Context names such as `local`, `staging`, and `production` are labels you choose.
+
+`current_context` is the default. Commands and SDK clients use it unless you select another context explicitly. For file location options, see the [configuration reference](/documentation/reference/cli-reference/configuration).
 
 ## Connect to a remote deployment
 
@@ -34,52 +62,9 @@ If the deployment requires authentication, log in after configuring the URL:
 nemo auth login
 ```
 
+The login stores credentials in the context, and the CLI and Python SDK refresh them as needed.
+
 You can also run `nemo setup`. During interactive onboarding, setup offers to connect to a remote deployment when the configured platform is unreachable. It verifies and saves the URL, then runs the same authentication flow.
-
-## Connect to multiple deployments
-
-A context is a user-defined name for a set of connection settings. Names such as `staging`, `production`, and `local` are labels you choose. Each context keeps its own URL, authentication credentials, workspace, and output preferences.
-
-Create a context for each deployment. Use `--activate` to make one of them current:
-
-```bash
-nemo config set --context staging --base-url https://nhx.staging.example.com
-nemo config set --context production --base-url https://nhx.example.com --activate
-```
-
-If the saved configuration has no current context, the next written context becomes current automatically. Otherwise, creating another context does not switch the current context.
-
-For authenticated deployments, log in to each context separately:
-
-```bash
-nemo auth login --context staging
-nemo auth login --context production
-```
-
-Switch the current context:
-
-```bash
-nemo config use-context staging
-```
-
-Verify the switch:
-
-```bash
-nemo config current-context
-nemo config view
-```
-
-Inspect all saved connections:
-
-```bash
-nemo config view --all-contexts
-```
-
-To target a context for one command without switching, use the global `--context` option:
-
-```bash
-nemo --context production models list
-```
 
 ## Connect to a local deployment
 
@@ -98,6 +83,113 @@ nemo config set --context local-tls --base-url https://localhost:8443 --certific
 
 The saved cluster entry uses the `certificate_authority` key.
 
+## Manage multiple contexts
+
+Create a context for each deployment. Use `--activate` to make one of them current:
+
+```bash
+nemo config set --context staging --base-url https://nhx.staging.example.com
+nemo config set --context production --base-url https://nhx.example.com --activate
+```
+
+If the saved configuration has no current context, the next written context becomes current automatically. Otherwise, creating another context does not switch the current context.
+
+For authenticated deployments, log in to each context separately:
+
+```bash
+nemo auth login --context staging
+nemo auth login --context production
+```
+
+### Switch the current context
+
+Switch the default context for all later commands and SDK clients:
+
+```bash
+nemo config use-context staging
+```
+
+Verify the switch:
+
+```bash
+nemo config current-context
+nemo config view
+```
+
+Inspect all saved connections:
+
+```bash
+nemo config view --all-contexts
+```
+
+### Use a context for one command
+
+To target a context for one command without switching, use the global `--context` option:
+
+```bash
+nemo --context production models list
+```
+
+To target a context for every command in the current shell, set `NHX_CURRENT_CONTEXT`:
+
+```bash
+export NHX_CURRENT_CONTEXT=production
+```
+
+### Set the default workspace
+
+Each context stores a default workspace, which starts as `default`. Commands and SDK clients use it for workspace-scoped resources unless you pass a workspace explicitly. Change it for the current context:
+
+```bash
+nemo config set --workspace my-workspace
+```
+
+Some tutorials create a dedicated workspace and set it as the default this way. To return to the original workspace afterward, run `nemo config set --workspace default`.
+
+## Use contexts from the Python SDK
+
+`NemoClient.from_config()` builds a client from the current context, including its base URL, default workspace, and credentials from `nemo auth login`:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+
+for workspace in client.workspaces.list_workspaces().items():
+    print(workspace.name)
+```
+
+To use a specific context without switching the current one, pass its name:
+
+```python
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config(context="production")
+```
+
+`AsyncNemoClient.from_config()` accepts the same arguments. Because the client reads the same configuration as the CLI, switching contexts with `nemo config use-context` changes the target of both. For all connection options, see [Client APIs](/documentation/reference/python-sdk/client-ap-is).
+
+<a id="when-to-use-nhx-base-url"></a>
+
+## When to use `NHX_BASE_URL`
+
+The `NHX_BASE_URL` environment variable overrides the base URL of every context. Most workflows don't need it. Use the following guidelines:
+
+- **The NeMo CLI and `NemoClient.from_config()`:** leave `NHX_BASE_URL` unset. Setting it, even to a local default, overrides the deployment saved in your context.
+- **Tools that need a URL directly**, such as `curl` or an OpenTelemetry exporter: these can't read the CLI configuration. Examples in this documentation use `${NHX_BASE_URL:-http://localhost:8080}`, which falls back to a local deployment only when the variable is unset. If your context points at a remote deployment, export its URL first. For an authenticated deployment, pass a token from the current context with `nemo auth token`:
+
+  ```bash
+  export NHX_BASE_URL=https://nhx.example.com
+  curl -H "Authorization: Bearer $(nemo auth token)" \
+    "${NHX_BASE_URL:-http://localhost:8080}/apis/entities/v2/workspaces"
+  ```
+
+- **Environments without a configuration file**, such as CI jobs, containers, and hosted notebooks like Google Colab: set `NHX_BASE_URL`, and `NHX_ACCESS_TOKEN` for an authenticated deployment. The CLI and `NemoClient.from_config()` both read these variables.
+
+<Note>
+`NHX_BASE_URL` and `NHX_CURRENT_CONTEXT` override saved configuration for all contexts. If switching contexts does not change the target deployment, unset those variables or update them for the current shell.
+</Note>
+
 ## Delete a context
 
 Delete a context when you no longer need it:
@@ -110,12 +202,8 @@ This follows the same convention as `kubectl config delete-context`: the
 context is removed, but cluster and user records remain. To also remove
 unreferenced cluster and user records, pass `--prune-orphans`.
 
-<Note>
-`NHX_BASE_URL` and `NHX_CURRENT_CONTEXT` override saved configuration for all contexts. If switching contexts does not change the target deployment, unset those variables or update them for the current shell.
-</Note>
-
 ## Next Steps
 
-- Review the [configuration reference](/documentation/reference/cli-reference/configuration) for fields and precedence.
+- Review the [configuration reference](/documentation/reference/cli-reference/configuration) for fields, environment variables, and precedence.
 - Run `nemo workspaces list` to verify platform access.
 - Use [CLI troubleshooting](/documentation/reference/cli-reference/troubleshooting) if the connection fails.

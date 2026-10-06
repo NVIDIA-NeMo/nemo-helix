@@ -10,7 +10,7 @@ The NeMo CLI uses a configuration file to store connection settings, credentials
 ## Prerequisites
 
 - Install the NeMo CLI as described in [Setup](/documentation/get-started).
-- To create connections or switch contexts, follow [Connect the CLI to Deployments](/documentation/reference/cli-reference/connect-to-deployments).
+- To create connections, switch contexts, or use contexts from the Python SDK, follow [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ## Configuration file
 
@@ -49,18 +49,11 @@ The saved cluster entry uses the `certificate_authority` key.
 
 When setting an access token, you'll be prompted to enter it securely (input is hidden).
 
-Delete a context without deleting its referenced cluster or user records:
-
-```bash
-nemo config delete-context local-tls
-```
-
-To also remove cluster and user records that are no longer referenced by any
-context, pass `--prune-orphans`.
+To create, switch, or delete contexts, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ## Environment variables
 
-Environment variables override configuration file settings. This is useful for CI/CD pipelines or temporary overrides.
+Environment variables override configuration file settings. This is useful for CI/CD pipelines or temporary overrides. For interactive use, prefer saved contexts. For guidance on when to set `NHX_BASE_URL`, see [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 | Variable | Description |
 |----------|-------------|
@@ -213,6 +206,6 @@ The notice appears only once, and you can opt out at any time using one of the m
 
 ## Next Steps
 
-- [Connect the CLI to one or more deployments](/documentation/reference/cli-reference/connect-to-deployments).
+- [Connect the CLI and Python SDK to one or more deployments with contexts](/documentation/reference/cli-reference/connect-to-deployments).
 - See the [full CLI reference](/documentation/reference/cli-reference/full-cli-reference) for every command and option.
 - Use [CLI troubleshooting](/documentation/reference/cli-reference/troubleshooting) if configuration does not resolve as expected.
