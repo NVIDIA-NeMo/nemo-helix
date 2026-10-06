@@ -29,7 +29,6 @@ from nhx.core.files.app.backends.git import (
     GitStorageConfig,
     GitStorageImpl,
     GitUnavailableError,
-    _access_checks,
     _classify_failure,
     _fetched_commits,
     _last_touched,
@@ -126,10 +125,9 @@ async def _read(impl: GitStorageImpl, path: str, byte_range: ByteRange | None = 
 
 
 @pytest.fixture(autouse=True)
-def _forget_listings_and_access_checks():
+def _forget_process_state():
     yield
     _listings.clear()
-    _access_checks.clear()
     _fetched_commits.clear()
     _last_touched.clear()
 
@@ -774,54 +772,22 @@ class TestRepair:
 
 
 class TestAccess:
-    async def test_another_key_is_checked_with_the_remote_even_when_the_commit_is_cached(self, remote, tmp_path):
-        config = _config(remote["url"], revision=remote["main"])
-        await _impl(config, tmp_path / "cache").list_files()
-        shutil.rmtree(remote["dir"])
-        with pytest.raises(GitConfigError):
-            await _impl(config, tmp_path / "cache", secrets={"ssh_key": "another key"}).list_files()
-
-    async def test_a_cached_commit_rechecks_the_key_once_the_last_check_is_stale(self, remote, tmp_path):
+    async def test_a_cached_commit_is_read_without_contacting_the_remote(self, remote, tmp_path):
         config = _config(remote["url"], revision=remote["main"])
         await _impl(config, tmp_path / "cache").list_files()
         shutil.rmtree(remote["dir"])
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
 
-        for check in _access_checks.values():
-            check.checked_at -= 10 * 60
+    async def test_registering_with_another_key_checks_it_even_when_the_commit_is_cached(
+        self, remote, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        shutil.rmtree(remote["dir"])
         with pytest.raises(GitConfigError):
-            await _impl(config, tmp_path / "cache").list_files()
-
-    async def test_an_outage_serves_cached_commits_to_a_recently_accepted_key(self, remote, tmp_path, monkeypatch):
-        config = _config(remote["url"], revision=remote["main"])
-        await _impl(config, tmp_path / "cache").list_files()
-        for check in _access_checks.values():
-            check.checked_at -= 10 * 60
-        attempts = 0
-
-        async def unreachable(self, *_args, **_kwargs):
-            nonlocal attempts
-            attempts += 1
-            raise GitUnavailableError("Could not reach the remote: Network is unreachable")
-
-        monkeypatch.setattr(GitStorageImpl, "_remote_git", unreachable)
-        for _ in range(2):
-            assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
-        assert attempts == 1
-
-    async def test_an_outage_refuses_a_key_not_accepted_for_a_day(self, remote, tmp_path, monkeypatch):
-        config = _config(remote["url"], revision=remote["main"])
-        await _impl(config, tmp_path / "cache").list_files()
-        for check in _access_checks.values():
-            check.checked_at -= 25 * 60 * 60
-            check.accepted_at -= 25 * 60 * 60
-
-        async def unreachable(self, *_args, **_kwargs):
-            raise GitUnavailableError("Could not reach the remote: Network is unreachable")
-
-        monkeypatch.setattr(GitStorageImpl, "_remote_git", unreachable)
-        with pytest.raises(GitUnavailableError):
-            await _impl(config, tmp_path / "cache").list_files()
+            await _impl(config, tmp_path / "cache", secrets={"ssh_key": "another key"}).validate_storage()
 
 
 class TestRegistration:
