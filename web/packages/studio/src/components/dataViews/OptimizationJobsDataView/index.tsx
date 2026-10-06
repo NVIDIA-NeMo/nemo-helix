@@ -128,9 +128,10 @@ const sortValue = (
 
 export interface TrialsDataViewProps {
   results: StudyResults;
+  onDeploy?: (trial: Trial) => void;
 }
 
-export const TrialsDataView: FC<TrialsDataViewProps> = ({ results }) => {
+export const TrialsDataView: FC<TrialsDataViewProps> = ({ results, onDeploy }) => {
   const { trials, metricNames } = results;
   const primaryMetric = metricNames[0];
 
@@ -267,12 +268,18 @@ export const TrialsDataView: FC<TrialsDataViewProps> = ({ results }) => {
         ),
     }),
     display({
-      id: 'promote',
-      header: 'Promote',
+      id: 'deploy',
+      header: 'Deploy',
       size: 130,
-      cell: () => (
-        <Button kind="secondary" size="small" disabled>
-          Promote
+      cell: ({ row }) => (
+        <Button
+          kind="secondary"
+          size="small"
+          disabled={!onDeploy || row.original.state !== 'COMPLETE'}
+          onClick={() => onDeploy?.(row.original)}
+          aria-label={`Deploy trial ${row.original.number}`}
+        >
+          Deploy
         </Button>
       ),
     }),
