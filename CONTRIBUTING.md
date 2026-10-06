@@ -250,15 +250,15 @@ Alternatively, you can use the SDK/license maintenance CLI directly:
 
 ```bash
 # Generate license reports for Python and Go dependencies
-uv run nemo-helix-sdk-tools license generate
+uv run nemo-helix-tools license generate
 
 # Find packages with missing licenses
-uv run nemo-helix-sdk-tools license find-missing
+uv run nemo-helix-tools license find-missing
 ```
 
 The license generation process creates intermediate JSON files (`third_party/osv-licenses*.json`) which are marked as generated files in `.gitattributes`. The main `third_party/osv-licenses.json` file is the merged artifact used by downstream reports.
 
-License overrides for packages where osv-scanner cannot determine the correct license are maintained in `tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/license/overrides.yaml`. This YAML file supports comments to document the source of license information.
+License overrides for packages where osv-scanner cannot determine the correct license are maintained in `tools/nemo-helix-tools/src/nemo_helix_tools/license/overrides.yaml`. This YAML file supports comments to document the source of license information.
 
 This may be added as a pre-commit job in the future.
 

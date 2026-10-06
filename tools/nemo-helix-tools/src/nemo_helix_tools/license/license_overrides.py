@@ -25,9 +25,9 @@ from typing import Any
 
 import requests
 import yaml
-from nemo_helix_sdk_tools.license.find_missing import get_packages_needing_overrides
-from nemo_helix_sdk_tools.license.generator import get_projects
-from nemo_helix_sdk_tools.license.license_utils import get_local_packages
+from nemo_helix_tools.license.find_missing import get_packages_needing_overrides
+from nemo_helix_tools.license.generator import get_projects
+from nemo_helix_tools.license.license_utils import get_local_packages
 from requests.adapters import HTTPAdapter
 from urllib3 import Retry
 
@@ -227,7 +227,7 @@ def print_override_suggestions(overrides: dict[str, str]) -> None:
     print("\n" + "=" * 80)
     print("SUGGESTED LICENSE OVERRIDES")
     print("=" * 80)
-    print("\nAdd these to tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/license/overrides.yaml:\n\n")
+    print("\nAdd these to tools/nemo-helix-tools/src/nemo_helix_tools/license/overrides.yaml:\n\n")
     print("overrides:")
 
     for key in sorted(overrides.keys()):

@@ -4,7 +4,7 @@
 from pathlib import Path
 
 import tomlkit
-from nemo_helix_sdk_tools.sdk.vendor import vendor_package
+from nemo_helix_tools.vendor import vendor_package
 
 
 def test_create_core_local_extra_prepends_services_self_reference(tmp_path: Path, monkeypatch) -> None:

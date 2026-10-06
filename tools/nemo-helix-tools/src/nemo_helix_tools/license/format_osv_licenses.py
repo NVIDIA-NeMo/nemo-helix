@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from nemo_helix_sdk_tools.license.license_utils import (
+from nemo_helix_tools.license.license_utils import (
     ALLOWED_LICENSES,
     get_override_key_for_package,
     normalize_package_name,

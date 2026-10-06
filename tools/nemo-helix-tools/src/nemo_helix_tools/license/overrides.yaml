@@ -17,7 +17,7 @@
 # Use SPDX identifiers: https://spdx.org/licenses/
 #
 # You can generate entries for this file by running:
-#   nemo-helix-sdk-tools license discover-overrides
+#   nemo-helix-tools license discover-overrides
 #
 # That script will fetch licenses from PyPI for packages with UNKNOWN or
 # NON-STANDARD licenses. Review all changes before committing.

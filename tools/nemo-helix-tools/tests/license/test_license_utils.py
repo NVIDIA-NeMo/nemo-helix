@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from nemo_helix_sdk_tools.license.license_utils import (
+from nemo_helix_tools.license.license_utils import (
     get_override_key_for_package,
     normalize_package_name,
     normalize_version_for_override,
@@ -180,7 +180,7 @@ class TestOverrideAppliedForCu129Version:
 
     def test_format_licenses_table_keeps_same_name_across_ecosystems(self):
         """PyPI and Go packages with the same normalized name should remain separate rows."""
-        from nemo_helix_sdk_tools.license.format_osv_licenses import format_licenses_table
+        from nemo_helix_tools.license.format_osv_licenses import format_licenses_table
 
         json_data = {
             "results": [
@@ -207,7 +207,7 @@ class TestOverrideAppliedForCu129Version:
 
     def test_format_licenses_table_applies_override_for_cu129_version(self):
         """Package with version 0.14.1+cu129 and empty licenses gets override license."""
-        from nemo_helix_sdk_tools.license.format_osv_licenses import format_licenses_table
+        from nemo_helix_tools.license.format_osv_licenses import format_licenses_table
 
         # OSV-style package with +cu129 version and no license from scanner
         json_data = {
@@ -235,7 +235,7 @@ class TestFormatLicenses:
 
     def test_generate_lockfile_sanitizes_header_without_dropping_export_flags(self, tmp_path, monkeypatch):
         """The generated requirements header keeps export selectors without absolute paths."""
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         output_lockfile = tmp_path / "third_party" / "requirements-main.txt"
 
@@ -273,7 +273,7 @@ class TestFormatLicenses:
         import yaml
 
         repo_root = Path(__file__).parents[4]
-        overrides_file = Path(__file__).parents[2] / "src" / "nemo_helix_sdk_tools" / "license" / "overrides.yaml"
+        overrides_file = Path(__file__).parents[2] / "src" / "nemo_helix_tools" / "license" / "overrides.yaml"
         inventory_file = repo_root / "third_party" / "licenses.jsonl"
         overrides = yaml.safe_load(overrides_file.read_text(encoding="utf-8"))["overrides"]
         normalized_overrides = {normalize_package_name(name): license for name, license in overrides.items()}
@@ -303,7 +303,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_fills_missing_osv_package_from_overrides(self, tmp_path):
         """A reviewed override fills an exported requirement omitted by OSV."""
-        from nemo_helix_sdk_tools.license.generator import format_licenses
+        from nemo_helix_tools.license.generator import format_licenses
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -326,7 +326,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_deduplicates_osv_and_override_fallback_rows(self, tmp_path):
         """Reviewed override fallback rows should not duplicate packages already emitted by OSV."""
-        from nemo_helix_sdk_tools.license.generator import format_licenses
+        from nemo_helix_tools.license.generator import format_licenses
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -369,7 +369,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_ignores_osv_packages_missing_from_exported_requirements(self, tmp_path):
         """OSV-only conditional packages should not affect generated license reports."""
-        from nemo_helix_sdk_tools.license.generator import format_licenses
+        from nemo_helix_tools.license.generator import format_licenses
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -410,7 +410,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_keeps_go_packages_missing_from_python_requirements(self, tmp_path):
         """Only PyPI packages are filtered through the uv-exported requirements file."""
-        from nemo_helix_sdk_tools.license.generator import format_licenses
+        from nemo_helix_tools.license.generator import format_licenses
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -463,7 +463,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_csv_uses_third_party_license_columns(self, tmp_path, monkeypatch):
         """CSV output is Package, License, License URL and supports custom output directories."""
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -506,7 +506,7 @@ class TestFormatLicenses:
 
     def test_format_licenses_csv_escapes_formula_license_urls(self, tmp_path, monkeypatch):
         """CSV license URLs are escaped before spreadsheet import can evaluate them."""
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -543,7 +543,7 @@ class TestFormatLicenses:
 
     def test_get_projects_allows_report_output_file_override(self, tmp_path):
         """The formatted report path can be overridden independently of scan artifacts."""
-        from nemo_helix_sdk_tools.license.generator import get_projects
+        from nemo_helix_tools.license.generator import get_projects
 
         workspace_root = tmp_path / "repo"
         output_file = tmp_path / "reports" / "licenses.csv"
@@ -562,7 +562,7 @@ class TestFormatLicenses:
         """additional_lockfiles remains before groups for existing positional callers."""
         import inspect
 
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         parameters = list(inspect.signature(generator.generate_project_licenses).parameters)
 
@@ -570,7 +570,7 @@ class TestFormatLicenses:
 
     def test_generate_project_licenses_merges_additional_lockfile_scans(self, tmp_path, monkeypatch):
         """Python and Go OSV scan results are merged before report formatting."""
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         license_dir = tmp_path / "third_party"
         license_dir.mkdir()
@@ -647,7 +647,7 @@ class TestPypiMetadata:
     """Tests for PyPI metadata handling."""
 
     def test_get_pypi_json_skips_invalid_json_and_uses_next_url(self, monkeypatch):
-        from nemo_helix_sdk_tools.license import generator
+        from nemo_helix_tools.license import generator
 
         class FakeResponse:
             def __init__(self, payload: dict[str, Any] | None = None, error: Exception | None = None):
@@ -681,7 +681,7 @@ class TestPypiMetadata:
         ]
 
     def test_license_url_from_pypi_info_accepts_only_http_urls(self):
-        from nemo_helix_sdk_tools.license.generator import _license_url_from_pypi_info
+        from nemo_helix_tools.license.generator import _license_url_from_pypi_info
 
         assert (
             _license_url_from_pypi_info(

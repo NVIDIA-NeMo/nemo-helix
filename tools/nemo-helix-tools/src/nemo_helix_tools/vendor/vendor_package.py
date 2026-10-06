@@ -10,8 +10,8 @@ import rich
 import tomlkit
 import tomlkit.items
 import typer
-from nemo_helix_sdk_tools.sdk.core.common import get_project_dir
-from nemo_helix_sdk_tools.sdk.vendor.dependency_utils import merge_dependencies
+from nemo_helix_tools.common import get_project_dir
+from nemo_helix_tools.vendor.dependency_utils import merge_dependencies
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -262,7 +262,7 @@ def _bundle_inherit_patterns(pkg_config: dict, key: str) -> list[str]:
         raise ValueError(f"[tool.bundle-package] inherit.{key} must be a boolean or list of wildcard patterns")
     if not all(isinstance(pattern, str) for pattern in value):
         raise ValueError(f"[tool.bundle-package] inherit.{key} must contain only string wildcard patterns")
-    return list(value)
+    return [pattern for pattern in value if isinstance(pattern, str)]
 
 
 def _is_bundled_plugin_entry(pkg_config: dict) -> bool:
@@ -436,7 +436,7 @@ def _copy_table_without_comments(table: tomlkit.items.Table, comments: set[str])
         if isinstance(item, tomlkit.items.Comment) and item.as_string().strip() in comments:
             continue
         if key is None:
-            cleaned.add(item)
+            cleaned.add(item)  # type: ignore
         else:
             cleaned.add(key, item)
     while cleaned._value.body and isinstance(cleaned._value.body[0][1], tomlkit.items.Whitespace):
@@ -484,7 +484,7 @@ def _remove_marked_child_tables(
             if isinstance(item, tomlkit.items.Whitespace):
                 changed = True
                 continue
-            cleaned.add(item)
+            cleaned.add(item)  # type: ignore
             continue
 
         if skip_next_child and key is not None:
@@ -494,7 +494,7 @@ def _remove_marked_child_tables(
                 continue
 
         if key is None:
-            cleaned.add(item)
+            cleaned.add(item)  # type: ignore
         else:
             cleaned.add(key, item)
 
@@ -521,7 +521,7 @@ def _remove_marked_project_table_entries(table: tomlkit.items.Table) -> tuple[to
             continue
 
         if key is None:
-            cleaned.add(item)
+            cleaned.add(item)  # type: ignore
         else:
             cleaned.add(key, item)
 

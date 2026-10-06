@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from nemo_helix_sdk_tools.sdk.vendor.dependency_utils import merge_dependencies, merge_version_specifiers
+from nemo_helix_tools.vendor.dependency_utils import merge_dependencies, merge_version_specifiers
 
 
 class TestSimplifySpecifiers:

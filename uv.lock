@@ -40,7 +40,7 @@ members = [
     "nemo-helix",
     "nemo-helix-ext",
     "nemo-helix-plugin",
-    "nemo-helix-sdk-tools",
+    "nemo-helix-tools",
     "nemo-insights-plugin",
     "nemo-nb",
     "nemo-optimization-plugin",
@@ -6821,9 +6821,9 @@ requires-dist = [
 provides-extras = ["filesets", "nemo-evaluator-sdk", "nemo-helix-ext"]
 
 [[package]]
-name = "nemo-helix-sdk-tools"
+name = "nemo-helix-tools"
 version = "0.0.0"
-source = { editable = "tools/nemo-helix-sdk-tools" }
+source = { editable = "tools/nemo-helix-tools" }
 dependencies = [
     { name = "click", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7481,7 +7481,7 @@ dev = [
     { name = "nemo-helix", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-ext", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-helix-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "nemo-helix-sdk-tools", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "nemo-helix-tools", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-nb", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nemo-safe-synthesizer-plugin", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "nest-asyncio", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -7742,7 +7742,7 @@ dev = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-ext", editable = "packages/nemo_helix_ext" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "nemo-helix-sdk-tools", editable = "tools/nemo-helix-sdk-tools" },
+    { name = "nemo-helix-tools", editable = "tools/nemo-helix-tools" },
     { name = "nemo-nb", editable = "packages/nemo_nb" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nest-asyncio", specifier = "==1.6.0" },
