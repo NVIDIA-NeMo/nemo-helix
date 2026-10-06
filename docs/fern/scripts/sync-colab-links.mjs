@@ -99,13 +99,21 @@ function notebookFilename(notebookPath) {
   return notebookPath.split(sep).pop() ?? "notebook.ipynb";
 }
 
-function notebookActionsFor(notebookPath) {
+async function inlineDownloadUrlFor(notebookPath) {
+  const notebook = await readFile(notebookPath, "utf8");
+  return `data:application/x-ipynb+json;charset=utf-8,${encodeURIComponent(notebook)}`;
+}
+
+async function notebookActionsFor(notebookPath) {
   return [
-    "<NotebookActions",
-    `  colabUrl="${colabUrlFor(notebookPath)}"`,
-    `  downloadUrl="${downloadUrlFor(notebookPath)}"`,
-    `  filename="${notebookFilename(notebookPath)}"`,
-    "/>",
+    '<div className="notebook-actions">',
+    `  <a href="${colabUrlFor(notebookPath)}" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">`,
+    '    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>',
+    '  </a>',
+    `  <a href="${await inlineDownloadUrlFor(notebookPath)}" className="notebook-actions__button notebook-actions__button--secondary" download="${notebookFilename(notebookPath)}">`,
+    '    <span>Download notebook</span>',
+    '  </a>',
+    '</div>',
   ].join("\n");
 }
 
@@ -127,13 +135,13 @@ function splitFrontmatter(source) {
   };
 }
 
-function syncMarkdownColabLink(source, notebookPath) {
+async function syncMarkdownColabLink(source, notebookPath) {
   const { frontmatter, body } = splitFrontmatter(source);
   const bodyWithoutActions = body.replace(TOP_COLAB_LINK_RE, "").replace(NOTEBOOK_ACTIONS_RE, "");
   if (!notebookPath) {
     return `${frontmatter}${bodyWithoutActions}`;
   }
-  return `${frontmatter}\n${notebookActionsFor(notebookPath)}\n\n${bodyWithoutActions.replace(/^\n+/, "")}`;
+  return `${frontmatter}\n${await notebookActionsFor(notebookPath)}\n\n${bodyWithoutActions.replace(/^\n+/, "")}`;
 }
 
 function syncNotebookViewerColabUrl(source, notebookPath) {
@@ -186,7 +194,7 @@ async function main() {
 
     const updated = hasNotebookViewer
       ? syncNotebookViewerColabUrl(source, notebookPath)
-      : syncMarkdownColabLink(source, notebookPath);
+      : await syncMarkdownColabLink(source, notebookPath);
 
     if (updated !== source) {
       changed.push(repoRelative(mdxPath));
