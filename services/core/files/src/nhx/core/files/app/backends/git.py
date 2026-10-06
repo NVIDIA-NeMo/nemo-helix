@@ -1,14 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Git storage backend for repositories read over SSH.
-
-A fileset is pinned to a commit. That commit's listing of paths, blob ids and
-sizes is written to the files service's default storage on first use. File
-contents stream from a per-URL bare repository and are cached by the files
-service like any external backend's. The bare repository can be deleted at
-any time and only costs a fetch.
-"""
+"""Git storage backend: filesets pinned to a commit of a repository read over SSH."""
 
 from __future__ import annotations
 
@@ -57,7 +50,7 @@ _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueD
 # Git's regular-file blob modes; directories, submodules and symlinks are not served as files.
 _REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
-# Bounds the git and ssh commands one files service runs at once, across every request; file streams are not counted.
+# File streams are not counted.
 _GIT_SLOTS = asyncio.Semaphore(16)
 
 
@@ -166,10 +159,12 @@ def normalize_private_key(key: str) -> str:
 
 
 def _pick_ref(refs: dict[str, str], revision: str) -> str | None:
-    # Tags before branches, as git resolves a name; a peeled "^{}" line names an annotated tag's commit.
+    # git's order for a name; a peeled "^{}" line names an annotated tag's commit.
     for name in (
         f"{revision}^{{}}",
         revision,
+        f"refs/{revision}^{{}}",
+        f"refs/{revision}",
         f"refs/tags/{revision}^{{}}",
         f"refs/tags/{revision}",
         f"refs/heads/{revision}",
@@ -243,8 +238,27 @@ _MAX_LISTED_FILES = 100_000
 _FETCH_REPOSITORY_IDLE_SECONDS = 7 * 24 * 60 * 60
 _LATEST_REF = "refs/nhx/latest"
 
-# A path -> (blob id, size) listing of one commit, scoped to a fileset's directory.
 Snapshot = dict[str, tuple[str, int]]
+
+
+_BLOB_ID = re.compile(r"[0-9a-f]{40}")
+
+
+def _parse_listing(raw: bytes, sha: str) -> Snapshot | None:
+    try:
+        listing = json.loads(raw)
+        if listing.get("version") != _LISTING_VERSION or listing.get("commit") != sha:
+            return None
+        snapshot: Snapshot = {}
+        for path, blob, size in listing["files"]:
+            if not isinstance(path, str) or not isinstance(blob, str) or not _BLOB_ID.fullmatch(blob):
+                return None
+            if type(size) is not int or size < 0:
+                return None
+            snapshot[path] = (blob, size)
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    return snapshot
 
 
 async def _single_chunk(body: bytes) -> AsyncIterator[bytes]:
@@ -252,7 +266,7 @@ async def _single_chunk(body: bytes) -> AsyncIterator[bytes]:
 
 
 # Listings are immutable once written, so parsed ones are shared across requests.
-_LISTED_FILES_IN_MEMORY = 1_000_000
+_LISTED_FILES_IN_MEMORY = 250_000
 _listings: OrderedDict[str, Snapshot] = OrderedDict()
 
 
@@ -280,7 +294,6 @@ def _finish_even_if_cancelled[T](work: Coroutine[Any, Any, T]) -> Awaitable[T]:
     return asyncio.shield(task)
 
 
-# Commits known to be in each fetch repository, so a read prepares a repository once per process.
 _fetched_commits: dict[str, set[str]] = {}
 _last_touched: dict[str, float] = {}
 _TOUCH_INTERVAL_SECONDS = 60
@@ -516,10 +529,10 @@ class GitStorageImpl(StorageImpl):
                 except OSError as exc:
                     raise GitServerFault(f"The git cache at {repo.parent} is not writable: {exc}") from exc
                 await self._git("init", "--bare", "--quiet", str(repo), env=self._base_env(), subject=str(repo))
-            if ask_remote and await self._has_commit(repo, sha):
-                # The server, not our cache, decides whether this key may fetch the commit.
+            present = await self._has_commit(repo, sha)
+            if present and ask_remote:
                 await self._fetch(repo, sha)
-            elif not await self._has_commit(repo, sha):
+            elif not present:
                 await self._fetch(repo, sha)
                 if not await self._has_commit(repo, sha):
                     raise GitConfigError(f"{self.config.url} has no commit {sha}")
@@ -552,13 +565,13 @@ class GitStorageImpl(StorageImpl):
         if self._snapshot_memo is None:
             sha = await self._commit()
             key = self._listing_key(sha)
-            snapshot = await self._read_listing(key)
+            snapshot = await self._read_listing(key, sha)
             if snapshot is None:
                 snapshot = await _finish_even_if_cancelled(self._materialize(sha, key))
             self._snapshot_memo = snapshot
         return self._snapshot_memo
 
-    async def _read_listing(self, key: str) -> Snapshot | None:
+    async def _read_listing(self, key: str, sha: str) -> Snapshot | None:
         if key in _listings:
             _listings.move_to_end(key)
             return _listings[key]
@@ -567,15 +580,8 @@ class GitStorageImpl(StorageImpl):
             raw = b"".join([chunk async for chunk in stream])
         except NotFoundError:
             return None
-        except Exception:
-            logger.warning("Rebuilding a git listing that could not be read from %s", key, exc_info=True)
-            return None
-        try:
-            listing = json.loads(raw)
-            if listing.get("version") != _LISTING_VERSION:
-                return None
-            snapshot = {path: (blob, int(size)) for path, blob, size in listing["files"]}
-        except (ValueError, TypeError, KeyError, AttributeError):
+        snapshot = _parse_listing(raw, sha)
+        if snapshot is None:
             logger.warning("Rebuilding an unreadable git listing at %s", key)
             return None
         _remember_listing(key, snapshot)
@@ -584,7 +590,7 @@ class GitStorageImpl(StorageImpl):
     async def _materialize(self, sha: str, key: str) -> Snapshot:
         tree = f"{sha}:{self.config.path}" if self.config.path else sha
 
-        await _finish_even_if_cancelled(self._ensure_commit(self._repo_dir, sha))
+        await self._prepare_repository()
         output = await self._git(
             "-C", str(self._repo_dir), "ls-tree", "-r", "-l", "-z", tree, env=self._base_env(), subject=self._subject()
         )

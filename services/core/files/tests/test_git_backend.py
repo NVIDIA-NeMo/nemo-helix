@@ -5,6 +5,7 @@
 
 import asyncio
 import functools
+import json
 import os
 import shutil
 import stat
@@ -220,7 +221,8 @@ class TestGitStorageConfig:
             ("ssh://git@host.example/org/repo.git", "ssh://git@host.example/org/repo.git"),
             ("ssh://host.example/srv/git/repo.git", "ssh://host.example/srv/git/repo.git"),
             ("host.example:srv/git/repo.git", "host.example:srv/git/repo.git"),
-            ("ssh://host.example:022/org/repo.git", "ssh://host.example:22/org/repo.git"),
+            ("ssh://host.example:022/org/repo.git", "ssh://host.example/org/repo.git"),
+            ("ssh://git@host.example:22/org/repo.git", "ssh://git@host.example/org/repo.git"),
             ("ssh://git@host.example:12051/org/repo.git", "ssh://git@host.example:12051/org/repo.git"),
             ("  git@host.example:/srv/git/repo.git ", "git@host.example:/srv/git/repo.git"),
         ],
@@ -382,6 +384,16 @@ class TestRefResolution:
         _git(Path(remote["dir"]), "branch", "v1", "main")
         resolved = await _impl(_config(remote["url"], revision="v1"), tmp_path / "cache").resolve_config()
         assert resolved.revision == remote["first"]
+
+    @pytest.mark.parametrize(
+        ("revision", "expected"),
+        [("tags/v1", "first"), ("heads/main", "main"), ("refs/heads/v1", "main"), ("pull/5/head", "first")],
+    )
+    async def test_names_under_refs_resolve_as_in_git(self, remote, tmp_path, revision, expected):
+        _git(Path(remote["dir"]), "branch", "v1", "main")
+        _git(Path(remote["dir"]), "update-ref", "refs/pull/5/head", remote["first"])
+        resolved = await _impl(_config(remote["url"], revision=revision), tmp_path / "cache").resolve_config()
+        assert resolved.revision == remote[expected]
 
     async def test_annotated_tag_pins_to_the_commit(self, remote, tmp_path):
         for revision in ("v1", "refs/tags/v1"):
@@ -545,7 +557,7 @@ class TestListings:
             listing.write_text("{not json")
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
 
-    async def test_a_listing_that_cannot_be_read_from_storage_is_rebuilt(self, remote, tmp_path, monkeypatch):
+    async def test_a_storage_failure_reading_a_listing_is_not_hidden(self, remote, tmp_path, monkeypatch):
         config = _config(remote["url"], revision=remote["main"])
         await _impl(config, tmp_path / "cache").list_files()
         _listings.clear()
@@ -554,7 +566,33 @@ class TestListings:
             raise RuntimeError("storage is down")
 
         monkeypatch.setattr(LocalStorageImpl, "download", broken)
-        assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
+        with pytest.raises(RuntimeError, match="storage is down"):
+            await _impl(config, tmp_path / "cache").list_files()
+
+    @pytest.mark.parametrize(
+        "damage",
+        [
+            {"commit": "b" * 40},
+            {"files": [["README.md", "a" * 40, -1]]},
+            {"files": [["README.md", "a" * 40, True]]},
+            {"files": [["README.md", "not-a-blob", 1]]},
+            {"files": [["README.md", "a" * 40]]},
+            {"files": "README.md"},
+        ],
+    )
+    async def test_a_listing_of_the_wrong_commit_or_shape_is_rebuilt(self, remote, tmp_path, damage):
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        _listings.clear()
+        (listing,) = _durable_files(tmp_path)
+        listing.write_text(json.dumps(json.loads(listing.read_text()) | damage))
+
+        files = await _impl(config, tmp_path / "cache").list_files()
+        assert {(file.path, file.size) for file in files} == {
+            ("README.md", 8),
+            ("agents/support/agent.yaml", 14),
+            ("agents/support/prompt.md", 10),
+        }
 
     async def test_listings_in_memory_are_bounded_by_their_files(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr(git_backend, "_LISTED_FILES_IN_MEMORY", 4)
@@ -720,6 +758,24 @@ class TestAccess:
             _config(remote["url"], revision=revision), tmp_path / "cache", {"ssh_key": "second"}
         ).validate_storage()
         assert keys == (["second"] if pinned else [])
+
+    async def test_registering_a_cold_pinned_commit_checks_for_it_only_around_the_fetch(
+        self, remote, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
+        checks = 0
+        has_commit = GitStorageImpl._has_commit
+
+        async def counting(self, repo, sha):
+            nonlocal checks
+            checks += 1
+            return await has_commit(self, repo, sha)
+
+        monkeypatch.setattr(GitStorageImpl, "_has_commit", counting)
+        impl = _impl(_config(remote["url"], revision=remote["main"], path="agents"), tmp_path / "cache")
+        await impl.validate_storage()
+        assert checks == 2
 
     async def test_registering_a_pinned_commit_skips_ls_remote(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
