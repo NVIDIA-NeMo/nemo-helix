@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
+from nemo_deployments_plugin.service import DeploymentsService
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
@@ -41,6 +42,7 @@ from nhx.core.models.controllers.context import ModelContext
 from nhx.core.models.controllers.models_controller import ModelsController
 from nhx.core.models.service import ModelsService
 from nhx.core.secrets.config import SecretsServiceConfig
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
 from nhx.testing.blockbuster import blockbuster_fixture
 from nhx.testing.docker import (
@@ -57,6 +59,13 @@ from nhx.testing.docker import (
 import docker
 
 blockbuster = blockbuster_fixture(autouse=True)
+
+
+class _TestDeploymentsService(NemoServiceAdapter):
+    """The deployments plugin mounted as a platform service, as the runner does."""
+
+    def __init__(self) -> None:
+        super().__init__(DeploymentsService())
 
 
 @pytest.fixture
@@ -391,9 +400,11 @@ def test_clients() -> Generator[ClientContext, None, None]:
     """Create all client types sharing the same app for controller tests.
 
     The controller needs an async client, but we also need the sync client/test client
-    to create test data. ClientContext provides all of these sharing one app.
+    to create test data. ClientContext provides all of these sharing one app. The
+    deployments plugin's API is mounted too: the deployments-plugin backend is a pure
+    HTTP consumer of it.
     """
-    with create_test_client(ModelsService, client_type=ClientContext) as clients:
+    with create_test_client(ModelsService, _TestDeploymentsService, client_type=ClientContext) as clients:
         yield clients
 
 

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
+from nemo_deployments_plugin.service import DeploymentsService
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.config import Runtime
 from nhx.core.inference_gateway.api.dependencies import global_model_cache
@@ -26,6 +27,7 @@ from nhx.core.models.controllers.backends.deployments_plugin.backend import Depl
 from nhx.core.models.controllers.backends.registry import BackendRegistry
 from nhx.core.models.controllers.models_controller import ModelsController
 from nhx.core.models.service import ModelsService
+from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
 from nhx.testing.docker import (
     MOCK_NIM_IMAGE_TAG,
@@ -120,15 +122,24 @@ class MockServiceBackend(ServiceBackend):
 # =============================================================================
 
 
+class _TestDeploymentsService(NemoServiceAdapter):
+    """The deployments plugin mounted as a platform service, as the runner does."""
+
+    def __init__(self) -> None:
+        super().__init__(DeploymentsService())
+
+
 @pytest.fixture
 def test_clients() -> Generator[ClientContext, None, None]:
     """Create all client types sharing the same app for IGW + controller tests.
 
-    Creates Models Service, Entities Service, and Inference Gateway Service
-    with background cache refresh disabled to avoid event loop conflicts.
+    Creates the Models, Deployments, Entities and Inference Gateway services
+    with background cache refresh disabled to avoid event loop conflicts. The
+    deployments-plugin backend reaches the Deployments service over HTTP.
     """
     with create_test_client(
         ModelsService,
+        _TestDeploymentsService,
         InferenceGatewayService,
         client_type=ClientContext,
         service_configs={

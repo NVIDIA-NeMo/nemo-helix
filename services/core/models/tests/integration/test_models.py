@@ -13,7 +13,7 @@ Uses the create_test_client pattern for fast in-memory testing.
 """
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
@@ -1521,13 +1521,10 @@ def test_backend_config_key_deployments_plugin_works_end_to_end():
         "deployments_plugin": config.controller.backends["deployments_plugin"],
     }
 
-    with patch(
-        "nhx.core.models.controllers.backends.deployments_plugin.backend.NemoEntitiesClient",
-    ):
-        registry = BackendRegistry.from_config(
-            client=AsyncMock(),
-            backend_configs=backend_configs,
-            huggingface_model_puller=config.huggingface_model_puller,
-        )
+    registry = BackendRegistry.from_config(
+        client=AsyncMock(),
+        backend_configs=backend_configs,
+        huggingface_model_puller=config.huggingface_model_puller,
+    )
 
     assert registry.list_backends() == ["deployments_plugin"]
