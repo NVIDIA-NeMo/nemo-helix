@@ -12,7 +12,9 @@
 
 Make the agents you ship faster, more accurate, and safer.
 
-NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and web UI. Hardening, evaluation, and tuning for the agents you put in production.
+NeMo Helix is an open source control plane for improving and hardening production agents. It runs on your infrastructure and plugs into your platform. Evaluate behavior, test changes and measure the results through repeatable workflows. Run Helix locally or on Kubernetes, and access it through REST APIs, a CLI or a Python SDK. Helix also includes NeMo Studio, a lightweight web UI for observability and orchestration.
+
+NeMo Helix uses modular plugins for the infrastructure agents need to run at scale. Choose the capabilities you need, from agent execution and sandboxing to file storage, secrets, authentication, model management and inference middleware. Each comes with a default implementation that you can replace with your own infrastructure or tools.
 
 ## Get started
 
