@@ -229,6 +229,14 @@ class SynthBenignSpec(BaseModel):
     run_name: str | None = None
     source_run: str | None = None
 
+    @field_validator("manifest_id")
+    @classmethod
+    def _manifest_id_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("manifest_id must be a non-empty manifest name")
+        return stripped
+
 
 class WarGameJobRequest(BaseModel):
     name: str | None = None

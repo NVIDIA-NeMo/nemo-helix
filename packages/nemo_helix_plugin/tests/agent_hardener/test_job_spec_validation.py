@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import pytest
-from nemo_helix_plugin.agent_hardener.types import WarGameSpec
+from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec, WarGameSpec
 from pydantic import ValidationError
 
 
@@ -25,3 +25,12 @@ def test_validate_only_with_a_replay_hitlog_is_accepted() -> None:
 def test_a_normal_war_game_does_not_need_a_replay_hitlog() -> None:
     assert WarGameSpec(manifest_id="m1").replay_hitlog_fileset is None
 
+
+@pytest.mark.parametrize("manifest_id", ["", "   ", "\t\n"])
+def test_blank_synth_manifest_id_is_rejected(manifest_id: str) -> None:
+    with pytest.raises(ValidationError, match="manifest_id"):
+        SynthBenignSpec(manifest_id=manifest_id)
+
+
+def test_synth_manifest_id_is_stripped() -> None:
+    assert SynthBenignSpec(manifest_id="  clockbot  ").manifest_id == "clockbot"
