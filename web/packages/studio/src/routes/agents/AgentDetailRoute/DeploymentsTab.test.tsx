@@ -22,8 +22,7 @@ const failedDeployment = {
 } as AgentDeployment;
 
 const source = (revision: string): AgentSpecSource => ({
-  owner: 'acme',
-  repo: 'agents',
+  github: { owner: 'acme', repo: 'agents' },
   repository: 'acme/agents',
   trackedRevision: 'main',
   revision,

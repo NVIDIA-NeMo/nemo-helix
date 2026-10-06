@@ -23,6 +23,9 @@ const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
 const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
+const HOST_KEYS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/ssh-host-keys/scan`;
+const HOST_KEY_LINE = 'gitlab.example.com ssh-ed25519 AAAA';
+const FIND_FILES_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/git-repositories/find-files`;
 const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
 
 const FABRIC_YAML = `config_format: nemo-agents-spec-v1
@@ -153,9 +156,9 @@ const openPromptTab = (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Coding agent prompt' }));
 };
 
-const openGitHubTab = async (dialog: HTMLElement) => {
-  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
-  await within(dialog).findByRole('textbox', { name: 'Repository' });
+const openGitTab = async (dialog: HTMLElement) => {
+  fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from Git' }));
+  await within(dialog).findByRole('textbox', { name: 'Git Repository' });
 };
 
 const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
@@ -441,13 +444,13 @@ describe('NewAgentModal oversized pick', () => {
   });
 });
 
-describe('NewAgentModal GitHub import', () => {
+describe('NewAgentModal Git import', () => {
   const typeRepo = async (
     dialog: HTMLElement,
     user: ReturnType<typeof userEvent.setup>,
     spec = 'github.com/owner/repo'
   ) => {
-    await user.type(within(dialog).getByRole('textbox', { name: 'Repository' }), spec);
+    await user.type(within(dialog).getByRole('textbox', { name: 'Git Repository' }), spec);
     await user.tab();
   };
 
@@ -457,7 +460,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() =>
       expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
@@ -475,7 +478,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
     await typeRepo(dialog, user, 'github.com/owner/repo@v2#agents/calc');
     await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
     await submit(dialog, user);
@@ -498,7 +501,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
     await submit(dialog, user);
@@ -514,7 +517,7 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
     await typeRepo(dialog, user, 'github.com/owner/my-repo');
 
     await waitFor(() => expect(within(dialog).getByDisplayValue('my-repo')).toBeInTheDocument());
@@ -526,9 +529,9 @@ describe('NewAgentModal GitHub import', () => {
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
     await user.type(
-      within(dialog).getByRole('textbox', { name: 'Repository' }),
+      within(dialog).getByRole('textbox', { name: 'Git Repository' }),
       'https://gitlab.com/owner/repo'
     );
 
@@ -540,22 +543,462 @@ describe('NewAgentModal GitHub import', () => {
     expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
-  it('rolls the fileset back when the repository has no agent.yaml', async () => {
-    const user = userEvent.setup();
-    const { created, deleted } = mockHelix();
+  const mockHostKeys = () =>
     server.use(
-      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
+      http.post(HOST_KEYS_URL, () =>
+        HttpResponse.json({
+          host: 'gitlab.example.com',
+          keys: [
+            {
+              key_type: 'ssh-ed25519',
+              fingerprint: 'SHA256:tpqkiXZfC92uxW2cbtsytSTUAkCrBCJ29o5pXdMIdY4',
+              known_hosts_line: HOST_KEY_LINE,
+            },
+            {
+              key_type: 'ssh-rsa',
+              fingerprint: 'SHA256:RzFdjL/XAZiJOYD4zCgQaXfJsyc5cqzncSHK0A6m1kY',
+              known_hosts_line: 'gitlab.example.com ssh-rsa BBBB',
+            },
+          ],
+        })
+      )
+    );
+
+  const mockAgentSearch = (
+    paths: string[],
+    requests: unknown[] = [],
+    answered: Promise<void> = Promise.resolve()
+  ) =>
+    server.use(
+      http.post(FIND_FILES_URL, async ({ request }) => {
+        requests.push(await request.json());
+        await answered;
+        return HttpResponse.json({ revision: 'a'.repeat(40), paths });
+      })
+    );
+
+  const trustHost = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) =>
+    user.click(
+      await within(dialog).findByRole('checkbox', { name: /trust this host/ }, { timeout: 3000 })
+    );
+
+  // The key picker is the first combobox; Agent Directory follows it.
+  const chooseKey = async (dialog: HTMLElement, user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(within(dialog).getAllByRole('combobox')[0] as HTMLElement);
+    await user.click(await screen.findByRole('option', { name: /huggingface-token/ }));
+  };
+
+  const registerEnabled = (dialog: HTMLElement) =>
+    waitFor(() => expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled(), {
+      timeout: 3000,
+    });
+
+  it('backs the spec fileset with an SSH remote, its key, and the host key it confirmed', async () => {
+    const user = userEvent.setup();
+    const { filesets, created } = mockHelix();
+    mockHostKeys();
+    mockAgentSearch(['calc/agent.yaml']);
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git@v2#calc');
+
+    expect(within(dialog).getByText('SSH Private Key')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    expect(
+      await within(dialog).findByText('ED25519 key fingerprint', undefined, { timeout: 3000 })
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/authenticity of host 'gitlab.example.com' cannot be established/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Agent Name' })).toBeDisabled();
+    expect(
+      within(dialog).getByText('SHA256:tpqkiXZfC92uxW2cbtsytSTUAkCrBCJ29o5pXdMIdY4')
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    expect(within(dialog).queryByText(/RzFdjL/)).not.toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('checkbox', { name: /trust this host/ }));
+    await chooseKey(dialog, user);
+    await waitFor(() => expect(within(dialog).getByDisplayValue('calc')).toBeInTheDocument());
+    await registerEnabled(dialog);
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(filesets[0]?.storage).toEqual({
+      type: 'git',
+      url: 'git@gitlab.example.com:acme/agents.git',
+      revision: 'v2',
+      path: 'calc',
+      ssh_key_secret: 'huggingface-token',
+      known_hosts: HOST_KEY_LINE,
+    });
+  });
+
+  it('keeps Register disabled while the host key is being looked up', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    let answer: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    server.use(
+      http.post(HOST_KEYS_URL, async () => {
+        await answered;
+        return HttpResponse.json({
+          host: 'gitlab.example.com',
+          keys: [
+            { key_type: 'ssh-ed25519', fingerprint: 'SHA256:abc', known_hosts_line: HOST_KEY_LINE },
+          ],
+        });
+      })
     );
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
-    await openGitHubTab(dialog);
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+
+    expect(within(dialog).getByText('Fetching host key…')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('checkbox', { name: /trust this host/ })
+    ).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    answer();
+
+    expect(
+      await within(dialog).findByRole('checkbox', { name: /trust this host/ }, { timeout: 3000 })
+    ).not.toBeChecked();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('withdraws trust as soon as the host in the URL changes', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    mockHostKeys();
+    mockAgentSearch(['agent.yaml']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await trustHost(dialog, user);
+    await chooseKey(dialog, user);
+    await registerEnabled(dialog);
+
+    const repository = within(dialog).getByRole('textbox', { name: 'Git Repository' });
+    await user.clear(repository);
+    await user.type(repository, 'git@evil.example.com:acme/agents.git');
+
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+    expect(within(dialog).getByText('Fetching host key…')).toBeInTheDocument();
+  });
+
+  it('waits for the repository field to be left before looking anything up', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    const scans: unknown[] = [];
+    server.use(
+      http.post(HOST_KEYS_URL, async ({ request }) => {
+        scans.push(await request.json());
+        return HttpResponse.json({ host: 'gitlab.example.com', keys: [] });
+      })
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'Git Repository' }),
+      'git@gitlab.example.com:acme/agents.git'
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(scans).toHaveLength(0);
+
+    await user.tab();
+
+    await waitFor(() => expect(scans).toHaveLength(1));
+  });
+
+  it('shows a lone agent at the repository root read-only', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    mockHostKeys();
+    mockAgentSearch(['agent.yaml']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await trustHost(dialog, user);
+    await chooseKey(dialog, user);
+    await registerEnabled(dialog);
+
+    const directory = within(dialog).getByRole('combobox', { name: 'Agent Directory' });
+    expect(directory).toHaveTextContent('Repository root');
+    expect(directory).toBeDisabled();
+  });
+
+  it('lets the one agent directory be chosen when the URL points elsewhere', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    mockHostKeys();
+    mockAgentSearch(['agents/support/agent.yaml']);
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await trustHost(dialog, user);
+    await chooseKey(dialog, user);
+
+    const directory = within(dialog).getByRole('combobox', { name: 'Agent Directory' });
+    await waitFor(() => expect(directory).toBeEnabled(), { timeout: 3000 });
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('names the allowlist entry to add when the host is not allowed', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.post(HOST_KEYS_URL, () =>
+        HttpResponse.json(
+          {
+            detail: "Storage host or endpoint not in allowed list: Host 'ssh://gitlab.example.com'",
+          },
+          { status: 400 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+
+    expect(
+      await within(dialog).findByText(/isn't an allowed host/, undefined, { timeout: 3000 })
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText('ssh://gitlab.example.com')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('textbox', { name: 'Host keys' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+  });
+
+  it('never sends an SSH key secret as a GitHub token', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    mockHostKeys();
+    mockAgentSearch(['agent.yaml']);
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await trustHost(dialog, user);
+    await chooseKey(dialog, user);
+
+    const repository = within(dialog).getByRole('textbox', { name: 'Git Repository' });
+    await user.clear(repository);
+    await user.type(repository, 'github.com/acme/agents');
+    await user.tab();
+    await registerEnabled(dialog);
+    await submit(dialog, user);
+
+    await waitFor(() => expect(filesets).toHaveLength(1));
+    expect(filesets[0]?.storage).not.toHaveProperty('token_secret');
+  });
+
+  it('retries a failed host key lookup instead of keeping the failure', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    let allowed = false;
+    server.use(
+      http.post(HOST_KEYS_URL, () =>
+        allowed
+          ? HttpResponse.json({
+              host: 'gitlab.example.com',
+              keys: [
+                {
+                  key_type: 'ssh-ed25519',
+                  fingerprint: 'SHA256:abc',
+                  known_hosts_line: HOST_KEY_LINE,
+                },
+              ],
+            })
+          : HttpResponse.json({ detail: 'could not reach the host' }, { status: 502 })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    expect(
+      await within(dialog).findByText(/Could not look up the host key/, undefined, {
+        timeout: 3000,
+      })
+    ).toBeInTheDocument();
+
+    allowed = true;
+    await user.click(within(dialog).getByRole('button', { name: 'Retry' }));
+
+    expect(
+      await within(dialog).findByRole('checkbox', { name: /trust this host/ }, { timeout: 3000 })
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole('textbox', { name: 'Host keys' })).not.toBeInTheDocument();
+  });
+
+  it('finds the agent directories before submit and only registers one that has agent.yaml', async () => {
+    const user = userEvent.setup();
+    const { filesets, created } = mockHelix();
+    const searches: unknown[] = [];
+    mockHostKeys();
+    let answerSearch: () => void = () => {};
+    const searchAnswered = new Promise<void>((resolve) => {
+      answerSearch = resolve;
+    });
+    mockAgentSearch(
+      ['agents/billing/agent.yaml', 'agents/support/agent.yaml'],
+      searches,
+      searchAnswered
+    );
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git@main');
+    await trustHost(dialog, user);
+    await chooseKey(dialog, user);
+
+    expect(
+      await within(dialog).findByText('Looking for agents in the repository…')
+    ).toBeInTheDocument();
+    const directory = within(dialog).getByRole('combobox', { name: 'Agent Directory' });
+    expect(directory).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    answerSearch();
+
+    await waitFor(() => expect(directory).toBeEnabled(), { timeout: 3000 });
+    expect(searches).toEqual([
+      {
+        storage: {
+          type: 'git',
+          url: 'git@gitlab.example.com:acme/agents.git',
+          revision: 'main',
+          ssh_key_secret: 'huggingface-token',
+          known_hosts: HOST_KEY_LINE,
+        },
+        file_name: 'agent.yaml',
+      },
+    ]);
+    expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
+
+    await user.click(directory);
+    await user.click(await screen.findByRole('option', { name: 'agents/support' }));
+
+    expect(
+      within(dialog).getByDisplayValue('git@gitlab.example.com:acme/agents.git@main#agents/support')
+    ).toBeInTheDocument();
+    await registerEnabled(dialog);
+    expect(searches).toHaveLength(1);
+
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(filesets[0]?.storage).toMatchObject({ revision: 'main', path: 'agents/support' });
+  });
+
+  it('asks for neither an SSH key nor host keys for a GitHub repository', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user);
+
+    expect(within(dialog).getByText('Access token secret')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('textbox', { name: 'Host keys' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('host-key-confirmation')).not.toBeInTheDocument();
+  });
+
+  it('offers the agent directories it finds when the root has no agent.yaml', async () => {
+    const user = userEvent.setup();
+    const { created, filesets, deleted } = mockHelix();
+    let rootRead = true;
+    server.use(
+      http.get(UPLOAD_URL, () => {
+        if (rootRead) {
+          rootRead = false;
+          return HttpResponse.json({ detail: 'not found' }, { status: 404 });
+        }
+        return HttpResponse.text(FABRIC_YAML);
+      }),
+      http.get(`${FILESET_URL}/files`, () =>
+        HttpResponse.json({
+          data: [
+            { path: 'README.md', size: 1 },
+            { path: 'agents/calc/agent.yaml', size: 1 },
+            { path: 'agents/support/agent.yaml', size: 1 },
+          ],
+        })
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'github.com/owner/repo@main');
+    await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
+    await submit(dialog, user);
+
+    expect(await within(dialog).findByText(/Choose an agent directory below/)).toBeInTheDocument();
+    await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+
+    await user.click(within(dialog).getByRole('combobox', { name: 'Agent Directory' }));
+    await user.click(await screen.findByRole('option', { name: 'agents/support' }));
+
+    expect(within(dialog).getByDisplayValue('owner/repo@main#agents/support')).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue('support')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Choose an agent directory below/)).not.toBeInTheDocument();
+
+    await submit(dialog, user);
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(filesets.at(-1)?.storage).toMatchObject({ revision: 'main', path: 'agents/support' });
+  });
+
+  it('rolls the fileset back when the repository has no agent.yaml', async () => {
+    const user = userEvent.setup();
+    const { created, deleted } = mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 })),
+      http.get(`${FILESET_URL}/files`, () => HttpResponse.json({ data: [] }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
     await typeRepo(dialog, user);
     await waitFor(() => expect(within(dialog).getByDisplayValue('repo')).toBeInTheDocument());
 
     await submit(dialog, user);
 
-    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/no agent\.yaml anywhere in owner\/repo/)
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByRole('combobox', { name: 'Agent Directory' })
+    ).not.toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
   });

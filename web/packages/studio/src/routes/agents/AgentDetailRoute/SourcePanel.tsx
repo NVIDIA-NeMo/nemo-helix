@@ -116,9 +116,13 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
             <KVPair
               label="Repository"
               value={
-                <ExternalLink href={source.webUrl} textKind="body/semibold/md">
-                  {source.repository}
-                </ExternalLink>
+                source.webUrl ? (
+                  <ExternalLink href={source.webUrl} textKind="body/semibold/md">
+                    {source.repository}
+                  </ExternalLink>
+                ) : (
+                  source.repository
+                )
               }
             />
             {source.trackedRevision ? (
@@ -126,8 +130,9 @@ export const SourcePanel: FC<SourcePanelProps> = ({ workspace, agentName }) => {
             ) : null}
             <KVPair label="Revision" value={shortRevision(source.revision)} truncate />
             <Text kind="body/regular/sm">
-              Files are read from GitHub on demand at this commit. Deployments stage the commit they
-              were created with, so updating here leaves running deployments where they are.
+              Files are read from {source.github ? 'GitHub on demand' : 'the repository over SSH'}{' '}
+              at this commit. Deployments stage the commit they were created with, so updating here
+              leaves running deployments where they are.
             </Text>
           </Stack>
         )}

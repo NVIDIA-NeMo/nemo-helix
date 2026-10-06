@@ -7,7 +7,11 @@ import {
   getFilesRetrieveFilesetQueryKey,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
-import type { FilesetOutput, GithubStorageConfig } from '@nemo/sdk/generated/platform/schema';
+import type {
+  FilesetOutput,
+  GitStorageConfig,
+  GithubStorageConfig,
+} from '@nemo/sdk/generated/platform/schema';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import {
   type UseMutationResult,
@@ -17,15 +21,15 @@ import {
 } from '@tanstack/react-query';
 
 export interface AgentSpecSource {
-  owner: string;
-  repo: string;
-  /** `owner/repo`, with the sub-directory appended when the fileset is scoped to one. */
+  /** Set for a GitHub fileset, whose commits and tree can be linked. */
+  github?: { owner: string; repo: string };
+  /** `owner/repo` or the SSH remote, with the sub-directory appended when the fileset is scoped to one. */
   repository: string;
   /** The mutable ref the fileset tracks, if any. Absent when it was pinned to an id. */
   trackedRevision?: string;
   /** The immutable id the fileset is pinned to. */
   revision: string;
-  webUrl: string;
+  webUrl?: string;
 }
 
 /** Encode a repository path, keeping the separators between its segments. */
@@ -34,25 +38,37 @@ const encodePath = (value: string): string => value.split('/').map(encodeURIComp
 export const githubCommitUrl = (owner: string, repo: string, revision: string): string =>
   `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commit/${encodeURIComponent(revision)}`;
 
-const isGithubStorage = (
+const isRepositoryStorage = (
   storage: FilesetOutput['storage'] | undefined
-): storage is GithubStorageConfig => storage?.type === 'github';
+): storage is GithubStorageConfig | GitStorageConfig =>
+  storage?.type === 'github' || storage?.type === 'git';
 
 export const agentSpecSource = (
   fileset: FilesetOutput | undefined
 ): AgentSpecSource | undefined => {
-  if (!fileset || !isGithubStorage(fileset.storage)) return undefined;
+  if (!fileset || !isRepositoryStorage(fileset.storage)) return undefined;
 
+  const storage = fileset.storage;
   // The service pins revision to a resolved commit before it stores the fileset, so it is
   // only optional in the generated type because the model carries a default.
-  const { owner, repo, path, revision = 'HEAD', original_revision: tracked } = fileset.storage;
+  const { path, revision = 'HEAD', original_revision: tracked } = storage;
+  // A ref equal to the commit it resolved to cannot move, so it is not tracking anything.
+  const trackedRevision = tracked && tracked !== revision ? tracked : undefined;
+
+  // `type` is optional in the generated types, so it does not narrow the union; `url` does.
+  if ('url' in storage) {
+    return {
+      repository: path ? `${storage.url}#${path}` : storage.url,
+      trackedRevision,
+      revision,
+    };
+  }
+
+  const { owner, repo } = storage;
   return {
-    owner,
-    repo,
+    github: { owner, repo },
     repository: path ? `${owner}/${repo}/${path}` : `${owner}/${repo}`,
-    // The service records the requested ref even when it was already a commit, and a ref
-    // equal to what it resolved to cannot name anything else — so it is not tracking.
-    trackedRevision: tracked && tracked !== revision ? tracked : undefined,
+    trackedRevision,
     revision,
     webUrl: `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree/${encodeURIComponent(revision)}${path ? `/${encodePath(path)}` : ''}`,
   };

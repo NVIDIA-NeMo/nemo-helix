@@ -23,11 +23,11 @@ interface DeploymentRowProps {
   onViewLogs: (deployment: AgentDeployment) => void;
 }
 
-/** A commit, linked to GitHub when the source it came from is still known. */
+/** A commit, linked to GitHub when it came from a GitHub source that is still known. */
 const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source, revision }) =>
-  source ? (
+  source?.github ? (
     <ExternalLink
-      href={githubCommitUrl(source.owner, source.repo, revision)}
+      href={githubCommitUrl(source.github.owner, source.github.repo, revision)}
       textKind="body/regular/xs"
     >
       {shortRevision(revision)}

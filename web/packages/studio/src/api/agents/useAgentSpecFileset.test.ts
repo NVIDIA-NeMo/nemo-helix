@@ -64,6 +64,24 @@ describe('agentSpecSource', () => {
     expect(source?.trackedRevision).toBeUndefined();
   });
 
+  it('reads an SSH-backed fileset without GitHub links', () => {
+    const source = agentSpecSource(
+      fileset({
+        type: 'git',
+        url: 'git@gitlab.example.com:acme/agents.git',
+        revision: 'abc123',
+        original_revision: 'main',
+        path: 'calc',
+      })
+    );
+
+    expect(source).toEqual({
+      repository: 'git@gitlab.example.com:acme/agents.git#calc',
+      trackedRevision: 'main',
+      revision: 'abc123',
+    });
+  });
+
   it('ignores a fileset that is not repository-backed', () => {
     expect(agentSpecSource(fileset({ type: 'local', path: '/data/calc' }))).toBeUndefined();
     expect(agentSpecSource(undefined)).toBeUndefined();
