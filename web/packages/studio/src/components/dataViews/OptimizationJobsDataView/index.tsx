@@ -12,7 +12,7 @@ import type {
   Trial,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { Ban, CircleCheck, CircleX, RefreshCw } from 'lucide-react';
-import { type ComponentProps, type FC, useMemo } from 'react';
+import { type ComponentProps, type FC, memo, useCallback, useMemo } from 'react';
 
 const EM_DASH = '—';
 
@@ -131,7 +131,7 @@ export interface TrialsDataViewProps {
   onDeploy?: (trial: Trial) => void;
 }
 
-export const TrialsDataView: FC<TrialsDataViewProps> = ({ results, onDeploy }) => {
+export const TrialsDataView: FC<TrialsDataViewProps> = memo(({ results, onDeploy }) => {
   const { trials, metricNames } = results;
   const primaryMetric = metricNames[0];
 
@@ -178,112 +178,117 @@ export const TrialsDataView: FC<TrialsDataViewProps> = ({ results, onDeploy }) =
     [processedTrials, safePageIndex, pageSize]
   );
 
-  const makeColumns: ComponentProps<typeof StudioDataView<Trial>>['makeColumns'] = ({
-    accessor,
-    display,
-  }) => [
-    accessor('number', {
-      id: 'number',
-      header: 'Trial',
-      size: 110,
-      enableSorting: true,
-      cell: ({ row }) => <Text kind="body/semibold/md">Trial {row.original.number}</Text>,
-    }),
-    ...metricNames.map((name) =>
-      accessor((row: Trial) => row.metrics.find((metric) => metric.name === name)?.value ?? null, {
-        id: `${METRIC_SORT_PREFIX}${name}`,
-        header: name,
-        size: 140,
+  const makeColumns = useCallback<
+    NonNullable<ComponentProps<typeof StudioDataView<Trial>>['makeColumns']>
+  >(
+    ({ accessor, display }) => [
+      accessor('number', {
+        id: 'number',
+        header: 'Trial',
+        size: 110,
+        enableSorting: true,
+        cell: ({ row }) => <Text kind="body/semibold/md">Trial {row.original.number}</Text>,
+      }),
+      ...metricNames.map((name) =>
+        accessor(
+          (row: Trial) => row.metrics.find((metric) => metric.name === name)?.value ?? null,
+          {
+            id: `${METRIC_SORT_PREFIX}${name}`,
+            header: name,
+            size: 140,
+            enableSorting: true,
+            cell: ({ row }) => (
+              <Text className="tabular-nums">
+                {formatMetric(
+                  row.original.metrics.find((metric) => metric.name === name)?.value ?? null
+                )}
+              </Text>
+            ),
+          }
+        )
+      ),
+      ...paramNames.map((name) =>
+        accessor((row: Trial) => paramValue(row, name) ?? '', {
+          id: `${PARAM_SORT_PREFIX}${name}`,
+          header: name,
+          size: 150,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const value = paramValue(row.original, name);
+            return (
+              <Text className={`${numericParams.has(name) ? 'tabular-nums' : ''}`}>
+                {value === undefined || value === '' ? EM_DASH : formatParamValue(value)}
+              </Text>
+            );
+          },
+        })
+      ),
+      accessor('durationSeconds', {
+        id: 'duration',
+        header: 'Duration',
+        size: 120,
         enableSorting: true,
         cell: ({ row }) => (
           <Text className="tabular-nums">
-            {formatMetric(
-              row.original.metrics.find((metric) => metric.name === name)?.value ?? null
-            )}
+            {row.original.durationSeconds === null
+              ? EM_DASH
+              : formatDurationMs(row.original.durationSeconds * 1_000)}
           </Text>
         ),
-      })
-    ),
-    ...paramNames.map((name) =>
-      accessor((row: Trial) => paramValue(row, name) ?? '', {
-        id: `${PARAM_SORT_PREFIX}${name}`,
-        header: name,
-        size: 150,
+      }),
+      accessor('state', {
+        id: 'state',
+        header: 'Status',
+        size: 140,
         enableSorting: true,
-        cell: ({ row }) => {
-          const value = paramValue(row.original, name);
-          return (
-            <Text className={`${numericParams.has(name) ? 'tabular-nums' : ''}`}>
-              {value === undefined || value === '' ? EM_DASH : formatParamValue(value)}
+        cell: ({ row }) =>
+          row.original.state ? (
+            <StatusBadge
+              status={row.original.state}
+              statusConfig={TRIAL_STATUS_CONFIG}
+              fallback={{ label: formatState(row.original.state), color: 'gray' }}
+            />
+          ) : (
+            <Text kind="body/regular/sm" className="text-placeholder">
+              {EM_DASH}
             </Text>
-          );
-        },
-      })
-    ),
-    accessor('durationSeconds', {
-      id: 'duration',
-      header: 'Duration',
-      size: 120,
-      enableSorting: true,
-      cell: ({ row }) => (
-        <Text className="tabular-nums">
-          {row.original.durationSeconds === null
-            ? EM_DASH
-            : formatDurationMs(row.original.durationSeconds * 1_000)}
-        </Text>
-      ),
-    }),
-    accessor('state', {
-      id: 'state',
-      header: 'Status',
-      size: 140,
-      enableSorting: true,
-      cell: ({ row }) =>
-        row.original.state ? (
-          <StatusBadge
-            status={row.original.state}
-            statusConfig={TRIAL_STATUS_CONFIG}
-            fallback={{ label: formatState(row.original.state), color: 'gray' }}
-          />
-        ) : (
-          <Text kind="body/regular/sm" className="text-placeholder">
-            {EM_DASH}
-          </Text>
+          ),
+      }),
+      accessor('paretoOptimal', {
+        id: 'frontier',
+        header: 'Frontier',
+        size: 130,
+        enableSorting: true,
+        cell: ({ row }) =>
+          row.original.paretoOptimal ? (
+            <Badge kind="outline" color="green">
+              On frontier
+            </Badge>
+          ) : (
+            <Text kind="body/regular/sm" className="text-placeholder">
+              {EM_DASH}
+            </Text>
+          ),
+      }),
+      display({
+        id: 'deploy',
+        header: 'Deploy',
+        size: 130,
+        cell: ({ row }) => (
+          <Button
+            kind="secondary"
+            size="small"
+            disabled={!onDeploy || row.original.state !== 'COMPLETE'}
+            onClick={() => onDeploy?.(row.original)}
+            aria-label={`Deploy trial ${row.original.number}`}
+          >
+            Deploy
+          </Button>
         ),
-    }),
-    accessor('paretoOptimal', {
-      id: 'frontier',
-      header: 'Frontier',
-      size: 130,
-      enableSorting: true,
-      cell: ({ row }) =>
-        row.original.paretoOptimal ? (
-          <Badge kind="outline" color="green">
-            On frontier
-          </Badge>
-        ) : (
-          <Text kind="body/regular/sm" className="text-placeholder">
-            {EM_DASH}
-          </Text>
-        ),
-    }),
-    display({
-      id: 'deploy',
-      header: 'Deploy',
-      size: 130,
-      cell: ({ row }) => (
-        <Button
-          kind="secondary"
-          size="small"
-          disabled={!onDeploy || row.original.state !== 'COMPLETE'}
-          onClick={() => onDeploy?.(row.original)}
-          aria-label={`Deploy trial ${row.original.number}`}
-        >
-          Deploy
-        </Button>
-      ),
-    }),
-  ];
+      }),
+    ],
+    [metricNames, paramNames, numericParams, onDeploy]
+  );
 
   return (
     <StudioDataView<Trial>
@@ -311,4 +316,6 @@ export const TrialsDataView: FC<TrialsDataViewProps> = ({ results, onDeploy }) =
       }}
     />
   );
-};
+});
+
+TrialsDataView.displayName = 'TrialsDataView';

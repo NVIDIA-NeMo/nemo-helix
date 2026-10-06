@@ -195,7 +195,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             <TrialsDataView results={results} onDeploy={setDeployTrial} />
             <DeployTrialModal
               workspace={workspace}
-              spec={job.spec}
+              job={job}
               trial={deployTrial}
               onClose={() => setDeployTrial(null)}
             />

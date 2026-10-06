@@ -1,11 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
+import {
+  filesDownloadFile,
+  filesListFilesetFiles,
+  filesUploadFile,
+} from '@nemo/sdk/generated/platform/files';
 
 export interface FilesetEntry {
   readonly path: string;
   readonly file: File;
+}
+
+export interface FilesetLocation {
+  readonly workspace: string;
+  readonly name: string;
 }
 
 // One request per file, so a 500-file upload is 500 round trips. Run a bounded number at
@@ -13,19 +22,15 @@ export interface FilesetEntry {
 // and lose the first error behind hundreds of in-flight requests.
 const UPLOAD_CONCURRENCY = 6;
 
-export const uploadFilesetEntries = async (
-  workspace: string,
-  filesetName: string,
-  entries: readonly FilesetEntry[]
+const forEachBounded = async <T>(
+  items: readonly T[],
+  task: (item: T) => Promise<void>
 ): Promise<void> => {
-  const queue = [...entries];
+  const queue = [...items];
   const worker = async (): Promise<void> => {
-    for (let entry = queue.shift(); entry; entry = queue.shift()) {
+    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
       try {
-        const blob = new Blob([await entry.file.arrayBuffer()], {
-          type: 'application/octet-stream',
-        });
-        await filesUploadFile(workspace, filesetName, entry.path, blob);
+        await task(item);
       } catch (error) {
         // Stop the other workers; the caller rolls the fileset back on this error.
         queue.length = 0;
@@ -35,6 +40,29 @@ export const uploadFilesetEntries = async (
   };
 
   await Promise.all(
-    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, entries.length) }, () => worker())
+    Array.from({ length: Math.min(UPLOAD_CONCURRENCY, items.length) }, () => worker())
   );
+};
+
+const asOctetStream = async (data: Blob): Promise<Blob> =>
+  new Blob([await data.arrayBuffer()], { type: 'application/octet-stream' });
+
+export const uploadFilesetEntries = (
+  workspace: string,
+  filesetName: string,
+  entries: readonly FilesetEntry[]
+): Promise<void> =>
+  forEachBounded(entries, async (entry) => {
+    await filesUploadFile(workspace, filesetName, entry.path, await asOctetStream(entry.file));
+  });
+
+export const copyFilesetFiles = async (
+  source: FilesetLocation,
+  target: FilesetLocation
+): Promise<void> => {
+  const { data: files } = await filesListFilesetFiles(source.workspace, source.name);
+  await forEachBounded(files, async ({ path }) => {
+    const data = await filesDownloadFile(source.workspace, source.name, path);
+    await filesUploadFile(target.workspace, target.name, path, await asOctetStream(data));
+  });
 };

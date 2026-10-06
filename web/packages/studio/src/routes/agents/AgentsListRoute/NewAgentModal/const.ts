@@ -37,12 +37,14 @@ export const IGNORED_FILENAMES = new Set(['.DS_Store', 'Thumbs.db']);
 
 export const IGNORED_EXTENSIONS = ['.pyc', '.pyo', '.pyd', '.so', '.dylib', '.dll'];
 
+export const agentNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'Name is required')
+  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens');
+
 export const uploadAgentFormSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, 'Name is required')
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Use lowercase letters, numbers, and hyphens'),
+  name: agentNameSchema,
   repoUrl: z.string().trim().default(''),
   secretKey: z.string().default(''),
   deploy: z.boolean().default(true),

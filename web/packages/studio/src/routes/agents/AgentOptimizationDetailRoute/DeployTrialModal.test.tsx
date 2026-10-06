@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -15,14 +16,17 @@ import { http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
-const FILE_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name/-/:path`;
+const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
+const FILE_URL = `${FILESETS_URL}/:name/-/:path`;
 
 const SPEC = {
   strategy: 'legacy',
   agent: 'hermes',
   optimize_config: 'optimize.yaml',
-  optimize_config_fileset: `${workspace}/hermes-bundle`,
+  optimize_config_fileset: 'hermes-bundle',
 };
+
+const JOB: RunStrategyJob = { name: 'study', spec: SPEC, created_at: '2026-04-02T00:00:00Z' };
 
 const OPTIMIZE_YAML = `
 optimizer:
@@ -36,6 +40,7 @@ const SOURCE_CONFIG = {
   default_harness: 'main',
   harnesses: { main: { kind: 'hermes' } },
   models: { default: { provider: 'nvidia', model: 'llama', temperature: 0.7 } },
+  telemetry: { enabled: true, agent_name: 'hermes' },
 };
 
 const TRIAL: Trial = {
@@ -50,11 +55,24 @@ const TRIAL: Trial = {
 interface CapturedAgent {
   name?: string;
   config_format?: string;
-  config?: { name?: string; models?: { default?: { temperature?: number } } };
+  config?: {
+    name?: string;
+    models?: Record<string, { model?: string; temperature?: number }>;
+    telemetry?: { agent_name?: string };
+  };
 }
 
-const mockHelix = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => {
-  const captured: { body: CapturedAgent } = { body: {} };
+interface Captured {
+  agent: CapturedAgent;
+  bundleWorkspace?: string;
+  createdFilesets: string[];
+}
+
+const mockHelix = ({
+  optimizeYaml = OPTIMIZE_YAML,
+  agentUpdatedAt = '2026-04-01T00:00:00Z',
+}: { optimizeYaml?: string; agentUpdatedAt?: string } = {}): Captured => {
+  const captured: Captured = { agent: {}, createdFilesets: [] };
   server.use(
     http.get(`${AGENTS_URL}/:name`, ({ params }) =>
       HttpResponse.json({
@@ -65,30 +83,48 @@ const mockHelix = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => {
         config: SOURCE_CONFIG,
         config_format: 'nemo-agents-spec-v1',
         created_at: '2026-04-01T00:00:00Z',
+        updated_at: agentUpdatedAt,
       })
     ),
-    http.get(FILE_URL, () => new HttpResponse(optimizeYaml)),
+    // Neither the source agent's spec fileset nor the new agent's exists.
+    http.get(`${FILESETS_URL}/:name`, () => new HttpResponse(null, { status: 404 })),
+    http.post(FILESETS_URL, async ({ request }) => {
+      captured.createdFilesets.push(((await request.json()) as { name: string }).name);
+      return HttpResponse.json({});
+    }),
+    http.get(FILE_URL, ({ params }) => {
+      captured.bundleWorkspace = String(params['workspace']);
+      return new HttpResponse(optimizeYaml);
+    }),
     http.post(AGENTS_URL, async ({ request }) => {
-      captured.body = (await request.json()) as CapturedAgent;
-      return HttpResponse.json({ ...captured.body, workspace });
+      captured.agent = (await request.json()) as CapturedAgent;
+      return HttpResponse.json({ ...captured.agent, workspace });
     })
   );
   return captured;
 };
 
-const renderModal = (trial: Trial = TRIAL) =>
+const renderModal = (trial: Trial = TRIAL, job: RunStrategyJob = JOB) =>
   renderRoute(undefined, {
     history: getAgentOptimizationDetailRoute(workspace, 'study'),
     routes: [
       {
         path: ROUTES.workspace.agentOptimizationDetail,
         element: (
-          <DeployTrialModal workspace={workspace} spec={SPEC} trial={trial} onClose={vi.fn()} />
+          <DeployTrialModal workspace={workspace} job={job} trial={trial} onClose={vi.fn()} />
         ),
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent detail page</div> },
     ],
   });
+
+const deployButton = async () => {
+  const dialog = await screen.findByRole('dialog');
+  // The loading spinner is part of the button's name until the agent and config load.
+  const deploy = await within(dialog).findByRole('button', { name: 'Deploy' });
+  await waitFor(() => expect(deploy).toBeEnabled());
+  return { dialog, deploy };
+};
 
 describe('DeployTrialModal', () => {
   it('creates an agent with the trial configuration and opens it', async () => {
@@ -96,85 +132,91 @@ describe('DeployTrialModal', () => {
     const captured = mockHelix();
     renderModal();
 
-    const dialog = await screen.findByRole('dialog');
+    const { dialog, deploy } = await deployButton();
     expect(within(dialog).getByRole('textbox')).toHaveValue('hermes-trial-4');
-    await within(dialog).findByText('models.default.temperature');
-
-    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
-    await waitFor(() => expect(deploy).toBeEnabled());
+    expect(within(dialog).getByText('models.default.temperature')).toBeInTheDocument();
     await user.click(deploy);
 
     expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
-    expect(captured.body.name).toBe('hermes-trial-4');
-    expect(captured.body.config_format).toBe('nemo-agents-spec-v1');
-    expect(captured.body.config?.name).toBe('hermes-trial-4');
-    expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
+    expect(captured.bundleWorkspace).toBe(workspace);
+    expect(captured.createdFilesets).toEqual([]);
+    expect(captured.agent.name).toBe('hermes-trial-4');
+    expect(captured.agent.config_format).toBe('nemo-agents-spec-v1');
+    expect(captured.agent.config?.name).toBe('hermes-trial-4');
+    expect(captured.agent.config?.telemetry?.agent_name).toBe('hermes-trial-4');
+    expect(captured.agent.config?.models?.default?.temperature).toBe(0.2);
   });
 
-  it('deploys the rest of a trial when some params tune a study-only model', async () => {
+  it('rejects a name the platform would not accept', async () => {
     const user = userEvent.setup();
-    const captured = mockHelix(`
-optimizer:
-  search_space:
-    temperature: {type: fabric, path: models.default.temperature, values: [0.0, 0.2]}
-    judge_temperature: {type: fabric, path: models.judge.temperature, values: [0.0, 0.5]}
-models:
-  judge: {provider: nvidia, model: judge-model}
-`);
-    renderModal({
-      ...TRIAL,
-      params: [...TRIAL.params, { name: 'judge_temperature', value: '0.5' }],
-    });
-
-    const dialog = await screen.findByRole('dialog');
-    expect(await within(dialog).findByText('Not applied')).toBeInTheDocument();
-    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
-    await waitFor(() => expect(deploy).toBeEnabled());
-    await user.click(deploy);
-
-    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
-    expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
-    expect(captured.body.config?.models).not.toHaveProperty('judge');
-  });
-
-  it('deploys a trial whose optimize config restates the agent model under another id', async () => {
-    const user = userEvent.setup();
-    const captured = mockHelix(`${OPTIMIZE_YAML}
-models:
-  default: {provider: nvidia, model: nvidia/llama}
-`);
+    mockHelix();
     renderModal();
 
-    const dialog = await screen.findByRole('dialog');
+    const { dialog } = await deployButton();
+    const name = within(dialog).getByRole('textbox');
+    await user.clear(name);
+    await user.type(name, 'Hermes_Trial');
+
     expect(
-      await within(dialog).findByText(/The study ran the "default" model as/)
+      await within(dialog).findByText('Use lowercase letters, numbers, and hyphens')
     ).toBeInTheDocument();
-    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
-    await waitFor(() => expect(deploy).toBeEnabled());
+  });
+
+  it('adds the models only the optimize config defines', async () => {
+    const user = userEvent.setup();
+    const captured = mockHelix({
+      optimizeYaml: `${OPTIMIZE_YAML}
+models:
+  fast: {provider: nvidia, model: llama-mini}
+`,
+    });
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    expect(within(dialog).getByText(/Also adds "fast" model/)).toBeInTheDocument();
     await user.click(deploy);
 
     expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
-    expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
+    expect(captured.agent.config?.models?.fast).toEqual({
+      provider: 'nvidia',
+      model: 'llama-mini',
+    });
+  });
+
+  it('warns when the study ran the agent model with different settings', async () => {
+    const user = userEvent.setup();
+    const captured = mockHelix({
+      optimizeYaml: `${OPTIMIZE_YAML}
+models:
+  default: {provider: nvidia, model: nvidia/llama, temperature: 0.7}
+`,
+    });
+    renderModal();
+
+    const { dialog, deploy } = await deployButton();
+    expect(
+      within(dialog).getByText(/The study ran the "default" model with different settings/)
+    ).toHaveTextContent('(model)');
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.agent.config?.models?.default).toMatchObject({
+      model: 'llama',
+      temperature: 0.2,
+    });
+  });
+
+  it('warns when the agent changed after the study ran', async () => {
+    mockHelix({ agentUpdatedAt: '2026-04-03T00:00:00Z' });
+    renderModal();
+
+    const { dialog } = await deployButton();
+    expect(within(dialog).getByText(/was changed after this study ran/)).toBeInTheDocument();
   });
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
     mockHelix();
-    renderRoute(undefined, {
-      history: getAgentOptimizationDetailRoute(workspace, 'study'),
-      routes: [
-        {
-          path: ROUTES.workspace.agentOptimizationDetail,
-          element: (
-            <DeployTrialModal
-              workspace={workspace}
-              spec={{ strategy: 'legacy', agent: 'hermes' }}
-              trial={TRIAL}
-              onClose={vi.fn()}
-            />
-          ),
-        },
-      ],
-    });
+    renderModal(TRIAL, { ...JOB, spec: { strategy: 'legacy', agent: 'hermes' } });
 
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(/has no optimize config fileset/)).toBeInTheDocument();
