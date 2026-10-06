@@ -78,17 +78,13 @@ flowchart LR
 Upload your model checkpoint files (from Hugging Face, NGC, or local storage) to a FileSet:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.schema import SecretRef
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 # Create a FileSet from Hugging Face

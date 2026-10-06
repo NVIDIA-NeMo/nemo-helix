@@ -242,15 +242,11 @@ For illustrative purposes only, we show an example entry as multi-line JSON.
 When your dataset uses the same set of tools across all examples, include the shared tool definitions in **each training row** (Automodel jobs do not accept a separate `dataset_parameters` block).
 
 ```python
-import os
 from nemo_automodel_plugin.schema import AutomodelJobInput
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 # Create an Automodel job (include tools in each JSONL training example)
@@ -277,13 +273,9 @@ print(f"Submitted job: {job.job.name}")
 You can retrieve a Model Entity to check if it's a chat model by examining the `spec.is_chat` field:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Get a specific model
 model = client.models.get_model(name="llama-3-2-1b", workspace="default").data()
@@ -306,13 +298,9 @@ Before running inference, ensure your model is deployed. See [about](/documentat
 
 </Note>
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Use Inference Gateway with OpenAI-compatible client
 
@@ -358,13 +346,9 @@ Before running inference, ensure your model is deployed. See [about](/documentat
 
 </Note>
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Use Inference Gateway with OpenAI-compatible client
 oai_client = client.models.get_openai_client(workspace="default")

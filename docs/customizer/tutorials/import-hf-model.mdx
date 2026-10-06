@@ -59,10 +59,9 @@ For a complete list of tested models, see the [Model Catalog](/documentation/cus
 
 ### 1. Initialize the SDK
 
-The SDK needs the server URL for your NeMo Helix deployment. By default, this tutorial uses `http://localhost:8080`.
+The SDK connects to the deployment in your current CLI context. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). Export your Hugging Face token:
 
 ```sh
-export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 export HF_TOKEN=<YOUR_HUGGINGFACE_TOKEN>
 ```
 
@@ -105,8 +104,7 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
     return check
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 ```
 
@@ -478,11 +476,13 @@ print(lora_response["choices"][0]["message"]["content"])
 
 <Tab title="cURL">
 
+This example uses `NHX_BASE_URL` when it is set and falls back to `http://localhost:8080`. If your CLI context points at a remote deployment, export its URL first. Refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
+
 ```bash
 export OUTPUT_NAME="<output adapter name from the Python job block>"
 export INFERENCE_MODEL_NAME="default--${OUTPUT_NAME}"
 
-curl -s "${NHX_BASE_URL}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/inference-gateway/v2/workspaces/default/openai/-/v1/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "'${INFERENCE_MODEL_NAME}'",

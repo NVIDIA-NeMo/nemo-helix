@@ -28,10 +28,14 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize the SDK
 
-The SDK needs the server URL for your NeMo Helix deployment. By default `http://localhost:8080` is used; set `NHX_BASE_URL` to override:
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
-```sh
-export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
 ```
 
 ```python
@@ -72,8 +76,7 @@ def max_wait_time_checker(seconds: int, label: str = ""):
     return check
 
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 ```
 

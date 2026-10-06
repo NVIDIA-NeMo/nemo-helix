@@ -17,12 +17,7 @@ To get **detailed execution progress** (step-by-step status, training metrics li
 
 Before you can list active customization jobs, make sure that you have:
 
-- Obtained the base URL of your NeMo Helix deployment.
-- Set the `NHX_BASE_URL` environment variable to your NeMo Helix deployment endpoint
-
-```bash
-export NHX_BASE_URL="https://your-nhx-base-url"
-```
+- Configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
@@ -31,15 +26,11 @@ export NHX_BASE_URL="https://your-nhx-base-url"
 Use the SDK to list jobs, filtering by `source="customization"` and by `status` to return only active customization jobs:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.types import ListJobsQueryParams
 
 # Initialize the client
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # List active customization jobs
 jobs = client.jobs.list_jobs(

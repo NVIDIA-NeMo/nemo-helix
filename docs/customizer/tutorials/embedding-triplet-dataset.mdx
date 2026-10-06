@@ -46,8 +46,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest
 from filesets import FilesetFileSystem
 from nemo_helix_plugin.files.client import FilesClient
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient.from_config()
 
 DATASET_SIZE = int(os.environ.get("SPECTER_ROWS", "3000"))
 VALIDATION_SPLIT = 0.05

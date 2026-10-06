@@ -73,10 +73,14 @@ pip install evaluate rouge_score datasets
 
 ### 1. Initialize SDK
 
-The SDK needs to know the server URL for your NeMo Helix deployment. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
-```sh
-export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
+In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
+
+```python
+import os
+
+os.environ["NHX_BASE_URL"] = "<YOUR_NHX_BASE_URL>"
 ```
 
 ```python
@@ -106,11 +110,7 @@ from nemo_helix_plugin.files.client import FilesClient
 from pydantic import SecretStr
 from nemo_helix_plugin.schema import SecretRef
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(
-    base_url=NHX_BASE_URL,
-    workspace="default"
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 ```
 

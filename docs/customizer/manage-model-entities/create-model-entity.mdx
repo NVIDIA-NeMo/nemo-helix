@@ -11,27 +11,19 @@ Create a Model Entity that references your FileSet to enable customization jobs.
 ## Prerequisites
 
 - Created a FileSet containing your model checkpoint (refer to [Create a Model FileSet](/documentation/customizer-reference/manage-model-entities/create-a-model-file-set)).
-- Set the `NHX_BASE_URL` environment variable.
-
-```bash
-export NHX_BASE_URL="https://your-nemo-helix-url"
-```
+- Configured a CLI context that points at your NeMo Helix deployment. Refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 
 ## Create the Model Entity
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nemo_customizer.sdk import Customization
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 try:

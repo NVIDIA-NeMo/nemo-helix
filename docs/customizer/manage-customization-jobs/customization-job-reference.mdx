@@ -58,12 +58,11 @@ For generated REST API details, see the [Customizer API Reference](/documentatio
 Both backends accept the same `integrations` object on the job spec. Add a `wandb` block to request W&B tracking; the training runtime activates it when the required credentials are available.
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NemoClient(base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"), workspace="default")
+client = NemoClient.from_config()
 customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(
