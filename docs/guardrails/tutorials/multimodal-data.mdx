@@ -45,6 +45,7 @@ import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
@@ -151,16 +152,18 @@ nemo inference virtual-models create guarded-multimodal \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-multimodal",
-    default_model_entity="default/meta-llama-3-2-90b-vision-instruct",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/multimodal-guardrails-config",
-        }
-    ],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-multimodal",
+        default_model_entity="default/meta-llama-3-2-90b-vision-instruct",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/multimodal-guardrails-config",
+            )
+        ],
+    ),
 )
 ```
 
@@ -297,7 +300,7 @@ print(response.model_dump_json(indent=2))
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete(name="guarded-multimodal")
+client.inference.virtual_models.delete_virtual_model(name="guarded-multimodal")
 client.guardrail.delete_guardrail_config(name=config_name)
 print("Cleanup complete")
 ```

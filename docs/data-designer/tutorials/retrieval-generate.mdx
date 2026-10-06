@@ -114,7 +114,7 @@ if gen_status != "completed":
 from nemo_helix_plugin.jobs.client import JobsClient
 
 jobs_client = JobsClient.from_client(client)
-results_page = jobs_client.list_job_results(job.name, workspace="default").data()
+results_page = jobs_client.list_job_results(name=job.name, workspace="default").data()
 rows = results_page.data
 sdg_ref = None
 for row in rows:

@@ -30,6 +30,7 @@ import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
@@ -98,16 +99,18 @@ nemo inference virtual-models create guarded-tracing \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-tracing",
-    default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/tracing-config",
-        }
-    ],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-tracing",
+        default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/tracing-config",
+            )
+        ],
+    ),
 )
 ```
 
@@ -224,7 +227,7 @@ The `service.name` for all spans is determined by the platform's `OTEL_SERVICE_N
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete(name="guarded-tracing")
+client.inference.virtual_models.delete_virtual_model(name="guarded-tracing")
 client.guardrail.delete_guardrail_config(name="tracing-config")
 print("Cleanup complete")
 ```

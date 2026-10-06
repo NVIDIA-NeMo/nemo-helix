@@ -73,7 +73,7 @@ OAuth scopes requested during login are not group claims and do not grant worksp
 
 ### Non-Interactive Login (CI/CD)
 
-For CI pipelines, use the password grant to obtain a token without a browser: `nemo auth login --username <user> --password <pass>` (or set `NHX_OIDC_USERNAME` / `NHX_OIDC_PASSWORD` environment variables). If your CI system can obtain tokens directly (e.g., workload identity federation), pass the token via `access_token` as shown in [Make API Calls](#make-api-calls) below.
+For CI pipelines, use the password grant to obtain a token without a browser: `nemo auth login --username <user> --password <pass>` (or set `NHX_OIDC_USERNAME` / `NHX_OIDC_PASSWORD` environment variables). If your CI system can obtain tokens directly (e.g., workload identity federation), pass the token via `auth` as shown in [Make API Calls](#make-api-calls) below.
 
 <Warning>
 

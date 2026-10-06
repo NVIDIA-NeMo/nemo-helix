@@ -351,11 +351,12 @@ Completed upload to fileset-a1b2c3d4
 
 ```python
 # Upload a single file
-client.files.upload_file(
-    name="my-files",
-    path="training/data.jsonl",
-    content=open("./data.jsonl", "rb").read(),
-)
+with open("./data.jsonl", "rb") as f:
+    client.files.upload_file(
+        name="my-files",
+        path="training/data.jsonl",
+        content=f.read(),
+    )
 ```
 
 </Tab>

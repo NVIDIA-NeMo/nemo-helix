@@ -74,13 +74,13 @@ if SECRET_NAME not in [secret.name for secret in existing_secrets]:
         raise ValueError(
             "Set NVIDIA_API_KEY to a key with access to NVIDIA Build models"
         )
-        client.secrets.create_secret(
-            body=HelixSecretCreateRequest(
-                name=SECRET_NAME,
-                value=SecretStr(PROVIDER_API_KEY),
-                description="NVIDIA Build API key",
-            )
+    client.secrets.create_secret(
+        body=HelixSecretCreateRequest(
+            name=SECRET_NAME,
+            value=SecretStr(PROVIDER_API_KEY),
+            description="NVIDIA Build API key",
         )
+    )
 
 existing_providers = client.models.list_providers().items()
 if PROVIDER_NAME not in [provider.name for provider in existing_providers]:
