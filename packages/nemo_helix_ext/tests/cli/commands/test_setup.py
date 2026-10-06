@@ -16,10 +16,8 @@ import httpx
 import nemo_helix_ext.cli.commands.setup as setup_commands
 import pytest
 import typer
-import yaml as _yaml
 from click.exceptions import Exit as ClickExit
 from nemo_helix_ext.cli.commands.setup import (
-    _AGENT_API_READINESS_POLL_INTERVAL,
     _AGENT_DEPLOY_POLL_INTERVAL,
     _AGENT_MARKERS,
     _CONTROLLER_HEALTH_RETRY_DELAY,
@@ -34,9 +32,6 @@ from nemo_helix_ext.cli.commands.setup import (
     KeyValidationResult,
     ModelPair,
     SetupClients,
-    _agent_exists,
-    _agents_api_ready,
-    _agents_plugin_available,
     _auto_setup,
     _bootstrap_config_if_missing,
     _check_controller_health,
@@ -45,11 +40,9 @@ from nemo_helix_ext.cli.commands.setup import (
     _check_platform_reachable_with_retries,
     _configure_local_connection,
     _create_provider,
-    _deploy_setup_agent,
     _detect_coding_agents,
     _detect_startup_port_conflict,
     _ensure_port_available_for_start,
-    _ensure_workspace_exists,
     _filter_agents_by_scope,
     _find_project_root,
     _is_preferred_vendor,
@@ -57,7 +50,6 @@ from nemo_helix_ext.cli.commands.setup import (
     _last_startup_service,
     _load_persisted_data_dir,
     _load_skills_with_warnings,
-    _maybe_deploy_sample_agent,
     _maybe_install_skills,
     _maybe_start_services,
     _model_parameter_size,
@@ -75,14 +67,11 @@ from nemo_helix_ext.cli.commands.setup import (
     _resolve_setup_workspace,
     _run_auto_mode,
     _run_interactive_mode,
-    _sample_agent_config_path,
     _save_data_dir,
     _select_model_pair,
     _select_usable_model_pair,
     _services_log_suggests_port_conflict,
     _start_services_background,
-    _upload_sample_dataset,
-    _upload_sample_eval_config,
     _validate_api_key,
     _verify_platform_health,
     _wait_for_models,
@@ -93,6 +82,7 @@ from nemo_helix_ext.cli.commands.setup import (
 from nemo_helix_ext.cli.commands.skills import registry as skills_registry
 from nemo_helix_ext.cli.commands.skills.base import Scope, Skill
 from nemo_helix_ext.cli.commands.skills.registry import UnsupportedAgentError
+from nemo_helix_ext.cli.telemetry.events import TaskStatusEnum
 from nemo_helix_ext.config.config import Config
 from nemo_helix_ext.config.models import (
     DEFAULT_BASE_URL,
@@ -115,27 +105,15 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
 from nemo_helix_plugin.client.types import RetryPolicy
-from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelProviderRequest, UpsertModelProviderRequest
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretUpdateRequest
-from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from pydantic import SecretStr
 
 SETUP_MOD = "nemo_helix_ext.cli.commands.setup"
-_TEST_FABRIC_CONFIG = (
-    "config_format: nemo-agents-spec-v1\n"
-    "name: email-security-triage\n"
-    "models:\n"
-    "  default:\n"
-    "    provider: nvidia\n"
-    "    model: bundled-model\n"
-)
 
 
 @pytest.fixture(autouse=True)
@@ -144,14 +122,12 @@ def _silence_telemetry():
 
     These are direct-call unit tests with no telemetry intent. Several exercise
     the real setup wrappers (`_create_provider`, `_wait_for_models`,
-    `_deploy_setup_agent`, `_auto_setup`), which call the real `emit_event`. With
+    `_auto_setup`), which call the real `emit_event`. With
     telemetry enabled by default that constructs a `TelemetryHandler` and
     schedules `_flush_events`, whose orphaned coroutine surfaces later as a
     "coroutine ... was never awaited" RuntimeWarning (blamed on whichever
     mock-heavy test triggers GC, not the emitting one). Patch emit_event at module
-    scope so no handler is ever built. No test in this file asserts on emit_event
-    (the telemetry assertions live in test_onboarding_events.py), so this weakens
-    nothing.
+    scope so no handler is ever built.
     """
     with patch("nemo_helix_ext.cli.telemetry.emit.emit_event"):
         yield
@@ -503,173 +479,6 @@ def _upsert_body(client: Any) -> UpsertModelProviderRequest:
     body = client.models.upsert_provider.call_args.kwargs["body"]
     assert isinstance(body, UpsertModelProviderRequest)
     return body
-
-
-class TestEnsureWorkspaceExists:
-    def test_existing_workspace_is_reused(self):
-        workspaces_client = MagicMock(spec=WorkspacesClient)
-        workspaces_client.get_workspace.return_value = _entity_response(MagicMock())
-
-        created = _ensure_workspace_exists(
-            workspaces_client,
-            "sample",
-            description="Sample workspace created by the NeMo setup flow.",
-        )
-
-        assert created is False
-        workspaces_client.get_workspace.assert_called_once_with(name="sample")
-        workspaces_client.create_workspace.assert_not_called()
-
-    def test_missing_workspace_is_created(self):
-        workspaces_client = MagicMock(spec=WorkspacesClient)
-        workspaces_client.get_workspace.side_effect = _not_found_error()
-        workspaces_client.create_workspace.return_value = _entity_response(MagicMock())
-
-        created = _ensure_workspace_exists(
-            workspaces_client,
-            "sample",
-            description="Sample workspace created by the NeMo setup flow.",
-        )
-
-        assert created is True
-        workspaces_client.create_workspace.assert_called_once_with(
-            body=CreateWorkspaceRequest(
-                name="sample",
-                description="Sample workspace created by the NeMo setup flow.",
-            )
-        )
-
-    def test_concurrent_creation_is_treated_as_success(self):
-        workspaces_client = MagicMock(spec=WorkspacesClient)
-        workspaces_client.get_workspace.side_effect = [
-            _not_found_error(),
-            _entity_response(MagicMock()),
-        ]
-        workspaces_client.create_workspace.side_effect = RuntimeError("already exists")
-
-        created = _ensure_workspace_exists(workspaces_client, "sample")
-
-        assert created is False
-        assert workspaces_client.get_workspace.call_count == 2
-
-    def test_creation_error_is_raised_when_workspace_is_still_missing(self):
-        workspaces_client = MagicMock(spec=WorkspacesClient)
-        workspaces_client.get_workspace.side_effect = [_not_found_error(), _not_found_error()]
-        workspaces_client.create_workspace.side_effect = RuntimeError("permission denied")
-
-        with pytest.raises(RuntimeError, match="permission denied"):
-            _ensure_workspace_exists(workspaces_client, "sample")
-
-
-class TestUploadSampleDataset:
-    def test_creates_dataset_fileset_and_uploads_packaged_jsonl(self):
-        files_client = MagicMock(spec=FilesClient)
-        fileset = MagicMock(purpose=FilesetPurpose.DATASET)
-        files_client.create_fileset.return_value = _entity_response(fileset)
-        files_client.upload_file.return_value = _entity_response(MagicMock())
-        dataset = MagicMock()
-        dataset.read_bytes.return_value = b'{"user_message":"review"}\n'
-
-        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=dataset):
-            uploaded = _upload_sample_dataset(files_client, "sample")
-
-        assert uploaded is True
-        files_client.create_fileset.assert_called_once_with(
-            workspace="sample",
-            body=CreateFilesetRequest(
-                name="esec-eval-data",
-                description="Evaluation dataset for the NeMo setup sample email security agent.",
-                purpose=FilesetPurpose.DATASET,
-            ),
-            exist_ok=True,
-        )
-        files_client.update_fileset.assert_not_called()
-        files_client.upload_file.assert_called_once_with(
-            workspace="sample",
-            name="esec-eval-data",
-            path="dataset.jsonl",
-            content=b'{"user_message":"review"}\n',
-        )
-
-    def test_promotes_an_existing_generic_fileset_to_dataset(self):
-        files_client = MagicMock(spec=FilesClient)
-        files_client.create_fileset.return_value = _entity_response(MagicMock(purpose=FilesetPurpose.GENERIC))
-        files_client.update_fileset.return_value = _entity_response(MagicMock())
-        files_client.upload_file.return_value = _entity_response(MagicMock())
-        dataset = MagicMock()
-        dataset.read_bytes.return_value = b"{}\n"
-
-        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=dataset):
-            uploaded = _upload_sample_dataset(files_client, "sample")
-
-        assert uploaded is True
-        files_client.update_fileset.assert_called_once_with(
-            workspace="sample",
-            name="esec-eval-data",
-            body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
-        )
-
-    def test_skips_upload_when_packaged_dataset_is_missing(self):
-        files_client = MagicMock(spec=FilesClient)
-
-        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=None):
-            uploaded = _upload_sample_dataset(files_client, "sample")
-
-        assert uploaded is False
-        files_client.create_fileset.assert_not_called()
-        files_client.upload_file.assert_not_called()
-
-
-class TestUploadSampleEvalConfig:
-    def test_uploads_dataset_driven_config_with_resolved_dataset(self):
-        files_client = MagicMock(spec=FilesClient)
-        files_client.upload_file.return_value = _entity_response(MagicMock())
-        config_asset = MagicMock()
-        config_asset.read_text.return_value = "dataset: <workspace>/<fileset>#dataset.jsonl\nmetrics: []\n"
-
-        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=config_asset):
-            uploaded = _upload_sample_eval_config(files_client, "sample")
-
-        assert uploaded is True
-        config_asset.read_text.assert_called_once_with(encoding="utf-8")
-        files_client.upload_file.assert_called_once()
-        upload = files_client.upload_file.call_args.kwargs
-        assert upload["workspace"] == "sample"
-        assert upload["name"] == "esec-eval-data"
-        assert upload["path"] == "eval-config.yaml"
-        assert _yaml.safe_load(upload["content"]) == {
-            "dataset": "sample/esec-eval-data#dataset.jsonl",
-            "metrics": [],
-        }
-
-    def test_skips_upload_when_packaged_config_is_missing(self):
-        files_client = MagicMock(spec=FilesClient)
-
-        with patch(f"{SETUP_MOD}._sample_asset_path", return_value=None):
-            uploaded = _upload_sample_eval_config(files_client, "sample")
-
-        assert uploaded is False
-        files_client.upload_file.assert_not_called()
-
-    def test_reports_invalid_packaged_config(self):
-        files_client = MagicMock(spec=FilesClient)
-        config_asset = MagicMock()
-        config_asset.read_text.return_value = "- not\n- a\n- mapping\n"
-
-        with (
-            patch(f"{SETUP_MOD}._sample_asset_path", return_value=config_asset),
-            patch(f"{SETUP_MOD}.console") as mock_console,
-        ):
-            uploaded = _upload_sample_eval_config(files_client, "sample")
-
-        assert uploaded is False
-        files_client.upload_file.assert_not_called()
-        assert "packaged eval config must be a mapping" in mock_console.print.call_args.args[0]
-
-
-# ---------------------------------------------------------------------------
-# Provider creation
-# ---------------------------------------------------------------------------
 
 
 class TestCreateProvider:
@@ -2152,23 +1961,8 @@ class TestMaybeInstallSkills:
 
 
 # ---------------------------------------------------------------------------
-# Agent deployment helpers
+# Project root helpers
 # ---------------------------------------------------------------------------
-
-
-class TestAgentsPluginAvailable:
-    def test_returns_true_when_importable(self):
-        with patch("nemo_helix_ext.cli.commands.setup.importlib.util.find_spec", return_value=MagicMock()):
-            assert _agents_plugin_available() is True
-
-    def test_returns_false_when_missing(self):
-        def side_effect(name):
-            if name == "nemo_agents_plugin":
-                return None
-            return MagicMock()
-
-        with patch("nemo_helix_ext.cli.commands.setup.importlib.util.find_spec", side_effect=side_effect):
-            assert _agents_plugin_available() is False
 
 
 class TestFindProjectRoot:
@@ -2421,6 +2215,10 @@ class TestInteractiveModelPairSelection:
         )
         wait_for_deployment.assert_called_once_with(agents_client, sample, submitted=True)
         print_sample_setup_complete.assert_called_once_with("http://localhost:8080", sample.workspace, complete=True)
+        event = setup_commands.emit.emit_event.call_args.args[0]
+        assert event.step == "agent_deployed"
+        assert event.task_status == TaskStatusEnum.COMPLETED
+        assert event.agent_deployed is True
         assert event_order == [
             "skills",
             "complete",
@@ -3684,7 +3482,6 @@ class TestPollingConstants:
             _SERVICE_STARTUP_POLL_INTERVAL,
             _MODEL_DISCOVERY_POLL_INTERVAL,
             _AGENT_DEPLOY_POLL_INTERVAL,
-            _AGENT_API_READINESS_POLL_INTERVAL,
         ],
     )
     def test_poll_intervals_are_at_most_one_second(self, constant):
@@ -4037,354 +3834,6 @@ class TestWaitForModelsEarlyExit:
 
 # ---------------------------------------------------------------------------
 # Direct agent API helper TLS
-# ---------------------------------------------------------------------------
-
-
-class TestAgentApiTLS:
-    _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_agent_exists_uses_context_certificate_authority_when_env_unset(self):
-        resp = MagicMock()
-        resp.status_code = 200
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch(f"{self._MOD}.httpx.get", return_value=resp) as mock_get,
-        ):
-            assert (
-                _agent_exists(
-                    "https://nemo.example.com",
-                    "default",
-                    certificate_authority="/ctx/ca.pem",
-                )
-                is True
-            )
-
-        mock_get.assert_called_once_with(
-            "https://nemo.example.com/apis/agents/v2/workspaces/default/agents/email-security-triage",
-            headers=None,
-            timeout=10.0,
-            verify="/ctx/ca.pem",
-        )
-
-    def test_agents_api_ready_uses_context_certificate_authority_when_env_unset(self):
-        resp = MagicMock()
-        resp.status_code = 200
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch(f"{self._MOD}.httpx.get", return_value=resp) as mock_get,
-        ):
-            assert (
-                _agents_api_ready(
-                    "https://nemo.example.com",
-                    "default",
-                    certificate_authority="/ctx/ca.pem",
-                )
-                is True
-            )
-
-        mock_get.assert_called_once_with(
-            "https://nemo.example.com/apis/agents/v2/workspaces/default/agents",
-            headers=None,
-            timeout=3.0,
-            verify="/ctx/ca.pem",
-        )
-
-    def test_deploy_setup_agent_uses_context_certificate_authority_for_httpx_calls(self, tmp_path, spinner_console):
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG, encoding="utf-8")
-        exists_resp = MagicMock()
-        exists_resp.status_code = 404
-        create_resp = MagicMock()
-        create_resp.status_code = 200
-        create_resp.raise_for_status = MagicMock()
-        deploy_resp = MagicMock()
-        deploy_resp.status_code = 200
-        deploy_resp.raise_for_status = MagicMock()
-        deploy_resp.json.return_value = {"name": "email-security-triage-abc12345"}
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {"status": "running"}
-
-        with (
-            patch.dict("os.environ", {}, clear=True),
-            patch(f"{self._MOD}.httpx.get", side_effect=[exists_resp, status_resp]) as mock_get,
-            patch(f"{self._MOD}.httpx.post", side_effect=[create_resp, deploy_resp]) as mock_post,
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            assert (
-                _deploy_setup_agent(
-                    "https://nemo.example.com",
-                    "default",
-                    config,
-                    default_model="m",
-                    certificate_authority="/ctx/ca.pem",
-                )
-                is True
-            )
-
-        assert [call.kwargs.get("verify") for call in mock_get.call_args_list] == ["/ctx/ca.pem", "/ctx/ca.pem"]
-        assert [call.kwargs.get("verify") for call in mock_post.call_args_list] == ["/ctx/ca.pem", "/ctx/ca.pem"]
-
-
-# ---------------------------------------------------------------------------
-# Progress spinner tests — _deploy_setup_agent
-# ---------------------------------------------------------------------------
-
-
-class TestDeploySampleAgentSpinner:
-    _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_sample_agent_config_path_uses_packaged_resource(self):
-        config = _sample_agent_config_path()
-
-        assert config is not None
-        assert config.name == "agent.yaml"
-        assert "name: email-security-triage" in config.read_text(encoding="utf-8")
-
-    def _mock_deploy_responses(self, *, status_sequence):
-        """Build httpx response mocks for create + deployment status polling.
-
-        The deploy POST returns the full entity including its unique ``name``
-        so the polling loop can GET that specific deployment by name.
-        """
-        create_resp = MagicMock()
-        create_resp.status_code = 200
-        create_resp.raise_for_status = MagicMock()
-
-        deploy_resp = MagicMock()
-        deploy_resp.status_code = 200
-        deploy_resp.raise_for_status = MagicMock()
-        deploy_resp.json.return_value = {
-            "name": "email-security-triage-abc12345",
-            "agent": "email-security-triage",
-            "status": "pending",
-        }
-
-        status_resps = []
-        for s in status_sequence:
-            r = MagicMock()
-            r.status_code = 200
-            r.json.return_value = {
-                "name": "email-security-triage-abc12345",
-                "agent": "email-security-triage",
-                "status": s,
-            }
-            status_resps.append(r)
-
-        return [create_resp, deploy_resp] + status_resps
-
-    def test_shows_spinner_during_deployment_wait(self, tmp_path, spinner_console):
-        """console.status() should be active while polling deployment status."""
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG)
-
-        responses = self._mock_deploy_responses(status_sequence=["pending", "running"])
-        mock_console, _ = spinner_console
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3]),
-        ):
-            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
-
-        assert result is True
-        mock_console.status.assert_called()
-
-    def test_reports_deployed_only_after_running_status(self, tmp_path, spinner_console):
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG)
-
-        responses = self._mock_deploy_responses(status_sequence=["failed"])
-        mock_console, _ = spinner_console
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
-
-        printed = [str(call.args[0]) for call in mock_console.print.call_args_list]
-        assert result is False
-        assert not any("Deployed agent" in message for message in printed)
-        assert any("Agent deployment failed" in message for message in printed)
-
-    def test_spinner_updates_with_elapsed_time(self, tmp_path, spinner_console):
-        """status.update() should include elapsed seconds during deploy polling."""
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG)
-
-        responses = self._mock_deploy_responses(status_sequence=["pending", "pending", "running"])
-        _, mock_status = spinner_console
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2, 3, 4, 5]),
-        ):
-            _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
-
-        update_texts = [c.args[0] for c in mock_status.update.call_args_list]
-        assert any("s)" in t for t in update_texts), f"Expected elapsed time in updates: {update_texts}"
-
-    def test_uses_reduced_http_timeout(self, tmp_path, spinner_console):
-        """Deployment status GET should use a short HTTP timeout (<=3s)."""
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG)
-
-        responses = self._mock_deploy_responses(status_sequence=["running"])
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]) as mock_get,
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
-
-        get_calls = mock_get.call_args_list
-        for c in get_calls:
-            assert c.kwargs.get("timeout", 999) <= 3.0
-
-    def test_polls_specific_deployment_by_name(self, tmp_path, spinner_console):
-        """The poll must GET the specific deployment, not list all deployments."""
-        config = tmp_path / "agent.yaml"
-        config.write_text(_TEST_FABRIC_CONFIG)
-
-        responses = self._mock_deploy_responses(status_sequence=["running"])
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]) as mock_get,
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]),
-            patch(f"{self._MOD}._agent_exists", return_value=False),
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            result = _deploy_setup_agent("http://localhost:8080", "default", config, default_model="m")
-
-        assert result is True
-        url = mock_get.call_args_list[0].args[0]
-        assert "/deployments/email-security-triage-abc12345" in url
-
-    def test_deploys_named_fabric_agent_with_setup_model(self, tmp_path, spinner_console):
-        config = tmp_path / "agent.yaml"
-        config.write_text(
-            "\n".join(
-                [
-                    "config_format: nemo-agents-spec-v1",
-                    "name: email-security-triage",
-                    "models:",
-                    "  default:",
-                    "    provider: nvidia",
-                    "    model: bundled-model",
-                    "",
-                ]
-            )
-        )
-        responses = self._mock_deploy_responses(status_sequence=["running"])
-
-        with (
-            patch(f"{self._MOD}.httpx.get", side_effect=responses[2:]),
-            patch(f"{self._MOD}.httpx.post", side_effect=responses[:2]) as mock_post,
-            patch(f"{self._MOD}._agent_exists", return_value=False) as agent_exists,
-            patch(f"{self._MOD}._pause"),
-            patch(f"{self._MOD}.time.monotonic", side_effect=[0, 0, 1, 2]),
-        ):
-            result = _deploy_setup_agent(
-                "http://localhost:8080",
-                "sample",
-                config,
-                default_model="default/selected-model",
-                agent_name="email-security-triage",
-                description="Setup sample",
-            )
-
-        assert result is True
-        agent_exists.assert_called_once_with(
-            "http://localhost:8080",
-            "sample",
-            headers=None,
-            agent_name="email-security-triage",
-            certificate_authority=None,
-        )
-        create_payload = mock_post.call_args_list[0].kwargs["json"]
-        assert create_payload == {
-            "name": "email-security-triage",
-            "description": "Setup sample",
-            "config_format": "nemo-agents-spec-v1",
-            "config": {
-                "config_format": "nemo-agents-spec-v1",
-                "name": "email-security-triage",
-                "models": {
-                    "default": {
-                        "provider": "nvidia",
-                        "model": "selected-model",
-                        "base_url": (
-                            "http://localhost:8080/apis/inference-gateway/v2/workspaces/"
-                            "default/model/selected-model/-/v1"
-                        ),
-                    }
-                },
-            },
-        }
-        assert mock_post.call_args_list[1].kwargs["json"] == {"agent": "email-security-triage"}
-
-
-class TestMaybeDeploySampleAgent:
-    _MOD = "nemo_helix_ext.cli.commands.setup"
-
-    def test_deploys_packaged_agent_in_sample_workspace(self):
-        config = MagicMock()
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._sample_agent_config_path", return_value=config),
-            patch(f"{self._MOD}._wait_for_agents_api", return_value=True),
-            patch(f"{self._MOD}._deploy_setup_agent", return_value=True) as deploy_agent,
-        ):
-            result = _maybe_deploy_sample_agent(
-                "http://localhost:8080",
-                "sample",
-                "sample/selected-model",
-                headers={"Authorization": "Bearer token"},
-                certificate_authority="/tmp/ca.pem",
-            )
-
-        assert result is True
-        deploy_agent.assert_called_once_with(
-            "http://localhost:8080",
-            "sample",
-            config,
-            "sample/selected-model",
-            headers={"Authorization": "Bearer token"},
-            agent_name="email-security-triage",
-            description="Email security triage sample agent created by the NeMo setup flow.",
-            certificate_authority="/tmp/ca.pem",
-        )
-
-    def test_skips_when_default_model_is_unavailable(self):
-        with (
-            patch(f"{self._MOD}._agents_plugin_available", return_value=True),
-            patch(f"{self._MOD}._sample_agent_config_path") as config_path,
-            patch(f"{self._MOD}._deploy_setup_agent") as deploy_agent,
-        ):
-            result = _maybe_deploy_sample_agent("http://localhost:8080", "sample", None)
-
-        assert result is False
-        config_path.assert_not_called()
-        deploy_agent.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Custom provider prompt
 # ---------------------------------------------------------------------------
 
 

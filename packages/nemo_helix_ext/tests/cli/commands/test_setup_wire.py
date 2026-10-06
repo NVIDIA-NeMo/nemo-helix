@@ -235,23 +235,62 @@ class TestAutoSetupWire:
 class TestSampleSetupWire:
     @pytest.mark.parametrize(
         ("sample_status", "http_status", "expected_message"),
-        [("created", 201, "Created sample workspace"), ("already_exists", 200, "already exists")],
+        [("created", 201, "Created sample workspace"), ("already_exists", 200, "Found existing sample workspace")],
     )
     def test_complete_sample_path_calls_agents_api_and_uses_returned_workspace(
         self, sample_status: str, http_status: int, expected_message: str
     ) -> None:
+        created = sample_status == "created"
+        workspace = "sample-uuid123"
+        frames = [
+            {
+                "kind": "progress",
+                "component": "workspace",
+                "status": "created" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "agent",
+                "status": "created" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "deployment",
+                "status": "submitted" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "dataset",
+                "status": "uploaded" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "progress",
+                "component": "evaluation_config",
+                "status": "uploaded" if created else "existing",
+                "workspace": workspace,
+            },
+            {
+                "kind": "done",
+                "result": {
+                    "status": sample_status,
+                    "workspace": workspace,
+                    "studio_url": f"/studio/workspaces/{workspace}/dashboard",
+                    "agent": "email-security-triage",
+                    "deployment": "email-security-triage-123",
+                    "deployment_status": "pending",
+                },
+            },
+        ]
         recorder = Recorder(
             [
                 httpx.Response(
                     http_status,
-                    json={
-                        "status": sample_status,
-                        "workspace": "sample-uuid123",
-                        "studio_url": "/studio/workspaces/sample-uuid123/dashboard",
-                        "agent": "email-security-triage",
-                        "deployment": "email-security-triage-123",
-                        "deployment_status": "pending",
-                    },
+                    text="\n".join(json.dumps(frame) for frame in frames) + "\n",
+                    headers={"content-type": "application/x-ndjson"},
                 ),
                 httpx.Response(
                     200,
