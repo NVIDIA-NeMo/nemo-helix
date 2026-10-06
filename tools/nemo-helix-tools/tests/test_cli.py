@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import click
-from nemo_helix_sdk_tools.cli import app
+from nemo_helix_tools.cli import app
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -15,7 +15,7 @@ def test_main_help_lists_preserved_command_groups() -> None:
     assert "generate-cli" not in result.output
     assert "license" in result.output
     assert "openapi-stainless" not in result.output
-    assert "post-generation" in result.output
+    assert "post-generation" not in result.output
     assert "publish" not in result.output
     assert "vendor" in result.output
 
@@ -33,11 +33,3 @@ def test_license_generate_help_includes_output_option() -> None:
 
     assert result.exit_code == 0
     assert "--output" in click.unstyle(result.output)
-
-
-def test_post_generation_help_lists_license_header_command() -> None:
-    result = runner.invoke(app, ["post-generation", "--help"])
-
-    assert result.exit_code == 0
-    assert "update-license-headers" in result.output
-    assert "update-pyproject" not in result.output

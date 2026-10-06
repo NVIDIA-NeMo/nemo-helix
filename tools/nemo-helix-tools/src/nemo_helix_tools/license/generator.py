@@ -22,9 +22,9 @@ from typing import Any, Iterator, Optional
 from urllib.parse import urlparse
 
 import requests
-from nemo_helix_sdk_tools.license.format_osv_licenses import format_licenses_table
-from nemo_helix_sdk_tools.license.formats import get_formatter
-from nemo_helix_sdk_tools.license.license_utils import (
+from nemo_helix_tools.license.format_osv_licenses import format_licenses_table
+from nemo_helix_tools.license.formats import get_formatter
+from nemo_helix_tools.license.license_utils import (
     ALLOWED_LICENSES,
     get_local_packages,
     get_override_key_for_package,

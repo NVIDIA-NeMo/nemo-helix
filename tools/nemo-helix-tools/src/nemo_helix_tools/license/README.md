@@ -13,16 +13,16 @@ Generate and manage license reports for the Platform monorepo.
 
 ```bash
 # Generate licenses in default table format
-nemo-helix-sdk-tools license generate
+nemo-helix-tools license generate
 
 # Generate in JSONL format (recommended for automation)
-nemo-helix-sdk-tools license generate --format jsonl
+nemo-helix-tools license generate --format jsonl
 
 # Generate in CSV format (good for spreadsheets)
-nemo-helix-sdk-tools license generate --format csv
+nemo-helix-tools license generate --format csv
 
 # Generate CSV at a custom path
-nemo-helix-sdk-tools license generate --format csv --output third_party/licenses.csv
+nemo-helix-tools license generate --format csv --output third_party/licenses.csv
 ```
 
 ## Available Formats
@@ -32,7 +32,7 @@ nemo-helix-sdk-tools license generate --format csv --output third_party/licenses
 **Best for automation and machine parsing**
 
 ```bash
-nemo-helix-sdk-tools license generate --format jsonl
+nemo-helix-tools license generate --format jsonl
 ```
 
 Output: One JSON object per line
@@ -67,7 +67,7 @@ jq -r '.license' third_party/licenses.jsonl | sort | uniq -c
 **Best for spreadsheets**
 
 ```bash
-nemo-helix-sdk-tools license generate --format csv
+nemo-helix-tools license generate --format csv
 ```
 
 Output:
@@ -85,7 +85,7 @@ Opens directly in Excel or Google Sheets.
 **Best for documentation**
 
 ```bash
-nemo-helix-sdk-tools license generate --format markdown
+nemo-helix-tools license generate --format markdown
 ```
 
 Output:
@@ -104,7 +104,7 @@ Renders nicely in GitHub/GitLab.
 **Standard JSON array**
 
 ```bash
-nemo-helix-sdk-tools license generate --format json
+nemo-helix-tools license generate --format json
 ```
 
 Output: Standard JSON array format, good for API responses.
@@ -114,7 +114,7 @@ Output: Standard JSON array format, good for API responses.
 **Simple tab-separated values**
 
 ```bash
-nemo-helix-sdk-tools license generate --format text
+nemo-helix-tools license generate --format text
 ```
 
 Output:
@@ -129,7 +129,7 @@ numpy 1.24.0 BSD-3-CLAUSE ✔
 **Rich Unicode table for terminal viewing**
 
 ```bash
-nemo-helix-sdk-tools license generate  # or --format table
+nemo-helix-tools license generate  # or --format table
 ```
 
 Output: The current beautiful terminal table format.
@@ -140,20 +140,20 @@ Output: The current beautiful terminal table format.
 
 ```bash
 # Generate licenses
-nemo-helix-sdk-tools license generate --format jsonl
+nemo-helix-tools license generate --format jsonl
 
 # Find packages needing overrides
-nemo-helix-sdk-tools license find-missing
+nemo-helix-tools license find-missing
 
 # Discover license information from PyPI
-nemo-helix-sdk-tools license discover-overrides
+nemo-helix-tools license discover-overrides
 ```
 
 ### 2. CI/CD Validation
 
 ```bash
 # Generate JSONL for easy parsing
-nemo-helix-sdk-tools license generate --format jsonl
+nemo-helix-tools license generate --format jsonl
 
 # Check for incompatible licenses
 if grep -q '"compatible": false' third_party/licenses.jsonl; then
@@ -167,13 +167,13 @@ fi
 
 ```bash
 # For human viewing in terminal
-nemo-helix-sdk-tools license generate --format table
+nemo-helix-tools license generate --format table
 
 # For automation/scripts
-nemo-helix-sdk-tools license generate --format jsonl
+nemo-helix-tools license generate --format jsonl
 
 # For documentation
-nemo-helix-sdk-tools license generate --format markdown
+nemo-helix-tools license generate --format markdown
 ```
 
 ## Commands
@@ -183,7 +183,7 @@ nemo-helix-sdk-tools license generate --format markdown
 Generate license report for the main project.
 
 ```bash
-nemo-helix-sdk-tools license generate [OPTIONS]
+nemo-helix-tools license generate [OPTIONS]
 ```
 
 **Options:**
@@ -198,7 +198,7 @@ nemo-helix-sdk-tools license generate [OPTIONS]
 Find packages with UNKNOWN or NON-STANDARD licenses.
 
 ```bash
-nemo-helix-sdk-tools license find-missing
+nemo-helix-tools license find-missing
 ```
 
 Scans the OSV JSON files (format-independent) and reports which packages need manual license overrides.
@@ -210,7 +210,7 @@ Scans the OSV JSON files (format-independent) and reports which packages need ma
 Fetch license information from PyPI for packages with missing licenses.
 
 ```bash
-nemo-helix-sdk-tools license discover-overrides [--verbose]
+nemo-helix-tools license discover-overrides [--verbose]
 ```
 
 Prints suggested YAML overrides that can be added to `third_party/license_overrides.yaml`.
@@ -220,7 +220,7 @@ Prints suggested YAML overrides that can be added to `third_party/license_overri
 To override licenses for specific packages, edit:
 
 ```bash
-tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/license/overrides.yaml
+tools/nemo-helix-tools/src/nemo_helix_tools/license/overrides.yaml
 ```
 
 Format:

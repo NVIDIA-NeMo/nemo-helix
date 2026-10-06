@@ -17,15 +17,8 @@ from pathlib import Path
 import pytest
 import tomlkit
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
+REPO_ROOT = Path(__file__).resolve().parents[4]
 WRAPPER_PYPROJECT = REPO_ROOT / "packages" / "nemo_helix" / "pyproject.toml"
-
-# Pre-existing gaps in the shipped wheel that predate this check, as
-# (bundle, entry-point group, entry-point key). Remove an entry once the
-# vendoring config exposes it.
-KNOWN_MISSING: frozenset[tuple[str, str, str]] = frozenset(
-    {("nemo-evaluator-sdk", "nemo.fabric.task_hooks", "mcp_run_binding")}
-)
 
 
 def _load(path: Path) -> dict:
@@ -66,10 +59,7 @@ def test_bundled_nemo_entry_points_are_exposed_by_the_wrapper(bundle_name: str, 
         pytest.skip(f"{bundle_name} declares no nemo.* entry points")
 
     exposed = _exposed_entry_points()
-    missing = {
-        group: sorted(key for key in keys - exposed.get(group, set()) if (bundle_name, group, key) not in KNOWN_MISSING)
-        for group, keys in declared.items()
-    }
+    missing = {group: sorted(keys - exposed.get(group, set())) for group, keys in declared.items()}
     missing = {group: keys for group, keys in missing.items() if keys}
 
     assert not missing, (

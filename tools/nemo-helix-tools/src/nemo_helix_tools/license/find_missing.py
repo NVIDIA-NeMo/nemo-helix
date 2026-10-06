@@ -8,8 +8,8 @@ from typing import Optional
 
 import typer
 import yaml
-from nemo_helix_sdk_tools.license.generator import OVERRIDES_FILE, get_projects
-from nemo_helix_sdk_tools.license.license_utils import (
+from nemo_helix_tools.license.generator import OVERRIDES_FILE, get_projects
+from nemo_helix_tools.license.license_utils import (
     ALLOWED_LICENSES,
     get_local_packages,
     get_override_key_for_package,
@@ -17,7 +17,7 @@ from nemo_helix_sdk_tools.license.license_utils import (
     normalize_package_name,
     resolve_license,
 )
-from nemo_helix_sdk_tools.printer import print_color
+from nemo_helix_tools.printer import print_color
 from rich import get_console
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def find_missing_licenses():
 
         if missing_files:
             print_color(
-                "Warning: OSV JSON files not found. Run 'nemo-helix-sdk-tools license generate' first.",
+                "Warning: OSV JSON files not found. Run 'nemo-helix-tools license generate' first.",
                 "yellow",
             )
             for f in missing_files:
@@ -162,14 +162,14 @@ def find_missing_licenses():
         console.print(f"\n[bold]Total packages needing overrides:[/bold] {total} ({summary_parts})")
 
         if total > 0:
-            license_path = "tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/license/overrides.yaml"
+            license_path = "tools/nemo-helix-tools/src/nemo_helix_tools/license/overrides.yaml"
             print_color("\nNext steps:", "yellow")
-            console.print("1. Run: [cyan]nemo-helix-sdk-tools license discover-overrides[/cyan]")
+            console.print("1. Run: [cyan]nemo-helix-tools license discover-overrides[/cyan]")
             console.print(f"2. Manually add suggested overrides to {license_path}")
             console.print(
                 f"3. If the licenses are present but need to be approved (e.g., LGPL), then add them to {license_path}"
             )
-            console.print("4. Re-run: [cyan]nemo-helix-sdk-tools license generate[/cyan]")
+            console.print("4. Re-run: [cyan]nemo-helix-tools license generate[/cyan]")
             raise typer.Exit(1)
 
     except typer.Exit:

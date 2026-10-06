@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from nemo_helix_sdk_tools.license.find_missing import find_missing_licenses
-from nemo_helix_sdk_tools.license.generator import LicenseGenerationError, generate_all_licenses
-from nemo_helix_sdk_tools.license.license_overrides import generate_overrides
-from nemo_helix_sdk_tools.license.license_utils import get_workspace_root
-from nemo_helix_sdk_tools.printer import print_color
+from nemo_helix_tools.license.find_missing import find_missing_licenses
+from nemo_helix_tools.license.generator import LicenseGenerationError, generate_all_licenses
+from nemo_helix_tools.license.license_overrides import generate_overrides
+from nemo_helix_tools.license.license_utils import get_workspace_root
+from nemo_helix_tools.printer import print_color
 from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ def generate(
         generate_all_licenses(ws_root, parallel=not sequential, format_type=output_format, output_file=output_path)
 
         # Get the actual output paths from the generator
-        from nemo_helix_sdk_tools.license.generator import get_projects
+        from nemo_helix_tools.license.generator import get_projects
 
         projects = get_projects(ws_root, output_file=output_path)
 
