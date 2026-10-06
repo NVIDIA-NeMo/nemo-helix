@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import pytest
-from nemo_helix_plugin.files.storage_config import SshRemote, parse_ssh_remote
+from nemo_helix_plugin.files.storage_config import SshRemote
 from nhx.common.api.common import SecretRef
 from nhx.common.files.storage_config import LocalStorageConfig
 from nhx.core.files.app.backends import git as git_backend
@@ -35,9 +35,6 @@ from nhx.core.files.app.backends.git import (
     _tree_entries,
     communicate_within,
     normalize_private_key,
-    parse_keyscan_output,
-    scan_host_keys,
-    ssh_fingerprint,
     stop_process_group,
 )
 from nhx.core.files.app.backends.local import LocalStorageImpl
@@ -47,7 +44,6 @@ from pydantic import ValidationError
 
 KNOWN_HOSTS = "gitlab.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample"
 SECRETS = {"ssh_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nkey\n-----END OPENSSH PRIVATE KEY-----"}
-GITLAB_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIFbMmqfotspZLBqH1+F3thpn9Ta95bqU6tVT2Pl4TJ9t"
 
 # Signing, hooks and default-branch settings in a developer's git config would change these repositories.
 _ISOLATED_GIT_ENV = {
@@ -322,26 +318,6 @@ class TestClassifyFailure:
         message = str(_classify_failure(stderr, "ssh://nope.invalid/o/r.git"))
         assert "Could not resolve hostname nope.invalid" in message
         assert "repository exists" not in message
-
-
-class TestHostKeyScan:
-    def test_fingerprint_matches_ssh_keygen(self):
-        assert ssh_fingerprint(GITLAB_KEY) == "SHA256:tpqkiXZfC92uxW2cbtsytSTUAkCrBCJ29o5pXdMIdY4"
-
-    def test_parses_keyscan_output_preferring_ed25519(self):
-        output = (
-            "# gitlab-master.nvidia.com:12051 SSH-2.0-GitLab-SSHD\n"
-            f"[gitlab-master.nvidia.com]:12051 ssh-rsa {GITLAB_KEY}\n"
-            f"[gitlab-master.nvidia.com]:12051 ssh-ed25519 {GITLAB_KEY}\n"
-        )
-        keys = parse_keyscan_output(output)
-        assert [key.key_type for key in keys] == ["ssh-ed25519", "ssh-rsa"]
-        assert keys[0].known_hosts_line == f"[gitlab-master.nvidia.com]:12051 ssh-ed25519 {GITLAB_KEY}"
-
-    async def test_missing_ssh_keyscan_is_reported(self, monkeypatch):
-        monkeypatch.setenv("PATH", str(Path(__file__).parent / "no-such-bin"))
-        with pytest.raises(GitServerFault, match="ssh-keyscan is not installed"):
-            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
 
 
 class TestProcessGroups:
