@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Button, FormField, Stack, Stepper, Text, TextInput } from '@nvidia/foundations-react-core';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { BudgetSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/BudgetSection';
 import { EvaluationSection } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/EvaluationSection';
 import {
@@ -15,6 +17,7 @@ import { IntentSection } from '@studio/routes/agents/AgentDetailRoute/optimizati
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 import { optimizationTargets } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
 import { RunSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/RunSummaryPanel';
+import { useStudyRowCount } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/useStudyRowCount';
 import {
   budgetById,
   intentById,
@@ -33,11 +36,8 @@ export interface NewOptimizationFormProps {
   /** Returns to the studies table; also the target of the breadcrumb above the header. */
   onBack: () => void;
   /**
-   * Starts the study from the validated answers.
-   *
-   * Left unset for now, which is what holds the run button closed: generating the optimize config,
-   * staging the evaluation's rows, and creating the job are the submit path, and they land
-   * separately. Wiring this up is the whole of that change at this call site.
+   * Starts the study from the validated answers. A rejection is shown beside the run button, so
+   * its message should be one a user can act on. Left unset, the run button stays closed.
    */
   onSubmit?: (values: OptimizationFormOutput) => Promise<void>;
 }
@@ -59,6 +59,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   onBack,
   onSubmit,
 }) => {
+  const workspace = useWorkspaceFromPath();
   const targets = useMemo(() => optimizationTargets(evals), [evals]);
 
   const methods = useForm<OptimizationFormValues, unknown, OptimizationFormOutput>({
@@ -116,6 +117,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   }, [experimentId, targets, setValue]);
 
   const target = targets.find((candidate) => candidate.experimentId === experimentId);
+  const { rowCount, error: rowsError } = useStudyRowCount(workspace, target);
 
   const nameError = touchedFields.name ? errors.name?.message : undefined;
 
@@ -133,9 +135,16 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
               ? 'Running a study from here is not available yet.'
               : undefined;
 
+  const [submitError, setSubmitError] = useState<string | undefined>();
+
   const submit = handleSubmit(async (values) => {
     if (!onSubmit) return;
-    await onSubmit(values);
+    setSubmitError(undefined);
+    try {
+      await onSubmit(values);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error as Error, 'Could not start the optimization.'));
+    }
   });
 
   return (
@@ -222,8 +231,9 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             intent={intent}
             budget={budget}
             searchSpace={searchSpace}
-            target={target}
+            rows={rowCount}
             blockingReason={blockingReason}
+            submitError={rowsError ?? submitError}
             isSubmitting={isSubmitting}
             onRun={() => void submit()}
           />
