@@ -240,6 +240,7 @@ functional-services = [
   # kept out of `enabled-plugins` so bare `uv sync` on unsupported hosts (older glibc,
   # older macOS) does not hard-fail. The api image runs on a compatible base.
   "nemo-deployments-plugin[openshell]",
+  "nhx-jobs[openshell]",
   "nhx-studio",
   "nhx-guardrails",
   "nemo-data-designer-plugin[retrieval-sdg]",

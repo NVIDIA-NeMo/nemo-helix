@@ -17,6 +17,7 @@ share these definitions.
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.config import NHX_CONFIG_WARNINGS_DISABLED_ENV_VAR
@@ -446,6 +447,170 @@ class SubprocessJobExecutionProfile(BaseExecutionProfile):
     @property
     def supports_persistent_storage(self) -> bool:
         return True
+
+
+# ---------------------------------------------------------------------------
+# OpenShell
+# ---------------------------------------------------------------------------
+
+
+class OpenShellJobTLSConfig(BaseModel):
+    """mTLS material for an https OpenShell gateway. Unused for plaintext gateways."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ca_cert_path: str | None = Field(default=None, description="Path to the CA bundle that signed the gateway cert.")
+    client_cert_path: str | None = Field(default=None, description="Path to the client certificate (mTLS).")
+    client_key_path: str | None = Field(default=None, description="Path to the client private key (mTLS).")
+
+    @model_validator(mode="after")
+    def validate_client_identity_pair(self) -> OpenShellJobTLSConfig:
+        if (self.client_cert_path is None) != (self.client_key_path is None):
+            raise ValueError("client_cert_path and client_key_path must be set together")
+        return self
+
+
+class OpenShellJobEgressConfig(BaseModel):
+    """The NeMo Helix endpoint a job sandbox must be able to reach directly.
+
+    Becomes the platform egress rule in the generated sandbox policy. This shape
+    is separate from the deployments plugin's ``HelixEgressConfig`` so the jobs
+    service does not depend on that plugin; the values track it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(default="host.docker.internal", description="Platform host reachable from inside a sandbox.")
+    port: int = Field(default=8080, ge=1, description="Platform port (the inference gateway / API listener).")
+    # Value sets track OpenShell's authored policy schema: protocol also allows "graphql" and
+    # "" (L4-only). TLS "" inspects automatically, "skip" turns inspection off.
+    protocol: Literal["rest", "websocket", "graphql", "sql", ""] = Field(
+        default="rest",
+        description='OpenShell L7 protocol: "rest", "websocket", "graphql", "sql", or "" for L4-only.',
+    )
+    tls: Literal["", "skip"] = Field(
+        default="",
+        description='TLS handling: "" (default) for automatic inspection, "skip" to disable inspection.',
+    )
+    access: Literal["read-only", "read-write", "full"] = Field(
+        default="full",
+        description='OpenShell access preset: "read-only", "read-write", or "full".',
+    )
+    binaries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Binaries permitted to open the egress connection. Empty uses the backend default set, "
+            "which must include the jobs-launcher and the task venv python."
+        ),
+    )
+
+
+class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
+    """Configuration for the OpenShell job execution profile.
+
+    Schedules job steps as OpenShell sandboxes via the gateway gRPC API. The
+    sandbox runs the jobs-launcher as its canonical main process
+    (``SandboxSpec.command``), which fetches the step config from the platform
+    (``jobs-launcher run --fetch-step-config``) and then runs the task command.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gateway_endpoint: str = Field(
+        default="http://127.0.0.1:17670",
+        description=(
+            "OpenShell gateway endpoint as a URL (http://host:port or https://host:port). "
+            "The gRPC target is the same host:port; http implies plaintext, https implies TLS."
+        ),
+    )
+    workspace: str = Field(
+        default="default",
+        description="OpenShell gateway workspace that every sandbox RPC is scoped to. The gateway creates 'default'.",
+    )
+    insecure: bool | None = Field(
+        default=None,
+        description="Force plaintext (True) or TLS (False). When None, derived from the endpoint scheme.",
+    )
+    tls: OpenShellJobTLSConfig | None = Field(default=None, description="mTLS material for an https gateway.")
+    request_timeout_seconds: int = Field(
+        default=120,
+        ge=1,
+        description="Per-RPC deadline for control-plane calls (create/get/delete/list).",
+    )
+    platform_egress: OpenShellJobEgressConfig | None = Field(
+        default_factory=OpenShellJobEgressConfig,
+        description=(
+            "Platform endpoint a job sandbox reaches directly. Drives the generated default sandbox "
+            "policy and is injected into a policy_path policy as a mandatory egress rule. Set to null "
+            "to grant the sandbox NO direct egress (breaks secrets fetch and OTLP log export)."
+        ),
+    )
+    policy_path: str | None = Field(
+        default=None,
+        description=(
+            "Path to a hand-written OpenShell SandboxPolicy YAML applied to created sandboxes. When unset, "
+            "a default-deny policy is generated from platform_egress plus the sandbox filesystem defaults."
+        ),
+    )
+    image: str | None = Field(
+        default=None,
+        description=(
+            "Sandbox image for job steps. When unset, falls back to the platform CPU tasks image "
+            "(nhx-tasks); OpenShell needs the openshell variant (nhx-tasks-openshell)."
+        ),
+    )
+    default_entrypoint: list[str] | None = Field(
+        default=None,
+        description=(
+            "Entrypoint for job steps that do not declare one. The OpenShell supervisor ignores "
+            "the image ENTRYPOINT, so the sandbox command must name the binary explicitly. "
+            "When unset, defaults to the nhx-tasks entrypoint (/app/.venv/bin/nemo-helix)."
+        ),
+    )
+    egress_proxy: str | None = Field(
+        default=None,
+        description=(
+            "HTTP proxy URL injected as HTTP_PROXY/HTTPS_PROXY for the sandbox workload. "
+            "The docker driver gives sandboxes no network of their own: all egress goes "
+            "through the supervisor's proxy at http://127.0.0.1:3128, which enforces the "
+            "sandbox policy. The k8s driver fences with NetworkPolicies instead, so leave "
+            "this unset there."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_endpoint(self) -> OpenShellJobExecutionProfileConfig:
+        parsed = urlparse(self.gateway_endpoint)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("gateway_endpoint must be a URL like http://host:port or https://host:port")
+        return self
+
+    def grpc_target(self) -> str:
+        """host:port for the gRPC channel, derived from the endpoint URL."""
+        parsed = urlparse(self.gateway_endpoint)
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return f"{host}:{port}"
+
+    def use_insecure(self) -> bool:
+        """Whether to open a plaintext channel (explicit override, else scheme-derived)."""
+        if self.insecure is not None:
+            return self.insecure
+        return urlparse(self.gateway_endpoint).scheme == "http"
+
+
+class OpenShellJobExecutionProfile(BaseExecutionProfile):
+    """Execution configuration for an OpenShell job."""
+
+    backend: Literal["openshell"] = "openshell"
+    config: OpenShellJobExecutionProfileConfig = Field(
+        description="Additional configuration for the OpenShell executor",
+    )
+
+    @property
+    def supports_persistent_storage(self) -> bool:
+        """OpenShell sandboxes do not support persistent storage."""
+        return False
 
 
 # ---------------------------------------------------------------------------
