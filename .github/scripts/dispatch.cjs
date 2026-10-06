@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+const { dispatchRelease } = require("./release-dispatch.cjs");
 const { resolveNightlyBaseVersion } = require("./release-plan.cjs");
 
 async function dispatchCiConsumer({ core, github, context, env }) {
@@ -48,6 +49,15 @@ async function dispatchCiConsumer({ core, github, context, env }) {
     request.client_payload.release_version = version;
   }
 
+  if (release) {
+    return dispatchRelease({
+      core,
+      github,
+      env,
+      eventType: request.event_type,
+      clientPayload: request.client_payload,
+    });
+  }
   if (env.ACT === "true") {
     core.info(`ACT=true; would dispatch: ${JSON.stringify(request)}`);
     return;

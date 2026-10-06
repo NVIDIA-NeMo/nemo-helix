@@ -11,7 +11,23 @@ place.
 
 Anyone with permission to run repository workflows can start a release. A
 stable release requires a specific source commit and version; a nightly can use
-the default branch head.
+the selected release branch commit.
+
+## Maintenance releases
+
+Run this workflow from the matching `release/0.5` or `release/0.6` branch.
+Set the repository variable `CI_LEGACY_DISPATCH_REF` to the maintenance tooling
+branch before live runs; keep the existing dispatch destination and token secrets.
+The downstream tooling must support `release-branch-payload` before enabling
+these branch-push requests.
+
+Pushes request container builds tagged with the source SHA and readiness for the
+next patch version. Before a stable release, check that
+`release/container-readiness/<version>` is successful for the selected SHA.
+The release workflow does not enforce that status automatically. It publishes
+the existing containers from `nemo-platform-dev` under the patch version,
+while still building wheels and packaging Helm. Nightlies build new artifacts.
+Maintenance releases do not request deployment to shared environments.
 
 ## Before starting a stable release
 
@@ -54,7 +70,7 @@ and select **Run workflow**. The form shows the allowed custom artifact IDs.
 | Input | Use |
 | --- | --- |
 | `release-type` | `nightly` by default. Select `stable` for a versioned release. Every successful non-dry-run stable release creates or confirms its Git tag and GitHub Release. |
-| `source-sha` | Required for stable releases. Optional for nightlies; a normal nightly with no SHA uses the current default-branch head. A dry-run nightly with no SHA uses the workflow commit so a branch can be validated. |
+| `source-sha` | Required for stable releases. Optional for nightlies; a nightly launched from a release branch with no SHA uses that workflow commit. A dry-run nightly with no SHA uses the workflow commit so a branch can be validated. |
 | `version` | Required for stable releases. Enter the `MAJOR.MINOR.PATCH` release version. |
 | `release-scope` | `all` by default. Select `wheels`, `containers`, `helm`, or `custom` for a subset. Scope selects artifacts only; it does not control the stable tag or GitHub Release. |
 | `wheel-ids`, `container-ids` | Comma-separated IDs used only with `release-scope: custom`. Each ID must be in the catalog above; duplicates and empty entries fail validation. |
@@ -87,7 +103,7 @@ America/Los_Angeles.
 2. Checks out the selected source and validates the selected wheel paths,
    Docker Bake targets, and NGC overview files.
 3. Optionally synchronizes NGC metadata, when requested on a non-dry-run.
-4. Dispatches wheel, container, and stable-release registration work to the
+4. Dispatches wheel builds, nightly container builds, and stable-release registration to the
    configured internal release repository. The selected source SHA, release
    type, version, and selected IDs are passed with the dispatch.
 5. Packages the Helm chart with the planned chart version. A nightly chart uses
@@ -106,10 +122,7 @@ America/Los_Angeles.
    exists, and fails when the version tag points to a different SHA or a draft
    release exists. GitHub generates the release notes from the previous numeric
    SemVer tag.
-8. After polling succeeds, releases that include the Helm chart dispatch a
-   deployment signal to the configured internal release repository. The
-   downstream workflow creates a pending GitHub Deployment, and the deployment
-   controller completes it independently. Releases without Helm skip this step.
+8. Deployment signaling is disabled for maintenance releases.
 
 ## Publication destinations
 
@@ -117,7 +130,7 @@ America/Los_Angeles.
 | --- | --- | --- |
 | Wheels | [pypi.nvidia.com](https://pypi.nvidia.com) | [PyPI](https://pypi.org) |
 | Containers | `ghcr.io/nvidia-nemo/nemo-platform/<id>:nightly-...` | `nvcr.io/nvidia/nemo-platform/<id>:<version>` and the public NGC catalog |
-| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-platform` | Initially staged at `0921617854601259/nemo-platform`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-platform) |
+| Helm chart | OCI chart at `oci://ghcr.io/nvidia-nemo/nemo-platform` | Initially staged at `0921617854601259/nemo-platform-dev`, then promoted to the public [NGC Helm repository](https://helm.ngc.nvidia.com/nvidia/nemo-platform) |
 
 The stable Helm promotion is external to this workflow. The workflow polls the
 public NGC Helm repository, not the internal staging endpoint, before it marks
