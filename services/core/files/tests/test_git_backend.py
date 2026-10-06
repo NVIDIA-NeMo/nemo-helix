@@ -28,6 +28,7 @@ from nhx.core.files.app.backends.git import (
     GitUnavailableError,
     _classify_failure,
     _fetched_commits,
+    _last_touched,
     _listings,
     _pick_ref,
     _prune_fetch_repositories,
@@ -120,6 +121,7 @@ def _forget_process_state():
     yield
     _listings.clear()
     _fetched_commits.clear()
+    _last_touched.clear()
 
 
 def _durable_files(tmp_path: Path) -> list[Path]:
@@ -289,6 +291,7 @@ class TestClassifyFailure:
             ("fatal: Server does not allow request for unadvertised object abc123", GitConfigError),
             ("error: unable to create file objects/ab: Permission denied", GitServerFault),
             ("fatal: unable to write new index file: No space left on device", GitServerFault),
+            ("error: cannot run ssh: No such file or directory", GitServerFault),
             ("fatal: the remote end hung up unexpectedly", GitUnavailableError),
             ("Timeout, server gitlab.example.com not responding.", GitUnavailableError),
             ("ssh: connect to host gitlab.example.com port 22: Host is down", GitUnavailableError),
@@ -391,6 +394,14 @@ class TestRefResolution:
         resolved = await _impl(_config(remote["url"], revision=remote["first"]), tmp_path / "cache").resolve_config()
         assert resolved.revision == remote["first"]
         assert resolved.tracked_revision is None
+
+    async def test_a_sha256_repository_is_refused(self, remote, tmp_path, monkeypatch):
+        async def sha256_refs(self, *_args, **_kwargs):
+            return f"{'a' * 64}\trefs/heads/main\n".encode()
+
+        monkeypatch.setattr(GitStorageImpl, "_remote_git", sha256_refs)
+        with pytest.raises(GitConfigError, match="SHA-256"):
+            await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").resolve_config()
 
     async def test_unknown_ref_is_a_config_error(self, remote, tmp_path):
         with pytest.raises(GitConfigError, match="no branch or tag named 'nope'"):
@@ -599,6 +610,17 @@ class TestColdRepositories:
         monkeypatch.setattr(GitStorageImpl, "_fetch", no_fetch)
         assert await _read(impl, "README.md") == b"changed\n"
 
+    async def test_reads_keep_a_repository_from_looking_idle(self, remote, tmp_path):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        await impl.list_files()
+        repository = _fetch_repository(tmp_path / "cache")
+        week_ago = time.time() - 8 * 24 * 60 * 60
+        os.utime(repository, (week_ago, week_ago))
+        _last_touched.clear()
+
+        await _read(impl, "README.md")
+        assert repository.stat().st_mtime > week_ago + 24 * 60 * 60
+
     async def test_fetching_again_prunes_other_repositories(self, remote, tmp_path):
         cache = tmp_path / "cache"
         impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
@@ -634,23 +656,47 @@ class TestAccess:
         shutil.rmtree(remote["dir"])
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
 
-    async def test_registering_with_another_key_checks_it_even_when_the_commit_is_cached(
-        self, remote, tmp_path, monkeypatch
+    @pytest.mark.parametrize("pinned", [True, False])
+    async def test_registering_a_cached_commit_asks_the_remote_with_the_new_key(
+        self, remote, tmp_path, monkeypatch, pinned
     ):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
+        revision = remote["main"] if pinned else "main"
+        await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").list_files()
+        keys: list[str] = []
+        fetch = GitStorageImpl._fetch
+
+        async def recording(self, repo, sha):
+            keys.append(self.secrets["ssh_key"])
+            await fetch(self, repo, sha)
+
+        monkeypatch.setattr(GitStorageImpl, "_fetch", recording)
+        await _impl(
+            _config(remote["url"], revision=revision), tmp_path / "cache", {"ssh_key": "second"}
+        ).validate_storage()
+        assert keys == (["second"] if pinned else [])
+
+    async def test_a_key_the_remote_refuses_cannot_register_a_cached_commit(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
         monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         config = _config(remote["url"], revision=remote["main"])
         await _impl(config, tmp_path / "cache").list_files()
-        shutil.rmtree(remote["dir"])
-        with pytest.raises(GitConfigError):
-            await _impl(config, tmp_path / "cache", secrets={"ssh_key": "another key"}).validate_storage()
+
+        async def refuse(self, repo, sha):
+            raise GitAccessError("The SSH key was rejected")
+
+        monkeypatch.setattr(GitStorageImpl, "_fetch", refuse)
+        with pytest.raises(GitAccessError):
+            await _impl(config, tmp_path / "cache", {"ssh_key": "second"}).validate_storage()
 
 
 class TestRegistration:
-    async def test_resolving_a_pinned_config_keeps_the_branch_it_came_from(self, remote, tmp_path):
-        config = _config(remote["url"], revision=remote["main"], original_revision="main")
+    async def test_a_client_supplied_original_revision_cannot_repoint_a_pin(self, remote, tmp_path):
+        config = _config(remote["url"], revision=remote["first"], original_revision="main")
         resolved = await _impl(config, tmp_path / "cache").resolve_config()
-        assert (resolved.revision, resolved.original_revision) == (remote["main"], "main")
+        assert (resolved.revision, resolved.original_revision) == (remote["first"], remote["first"])
+        assert resolved.tracked_revision is None
 
     async def test_validate_storage_refuses_a_pinned_commit_the_remote_lacks(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
