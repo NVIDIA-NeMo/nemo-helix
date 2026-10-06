@@ -68,6 +68,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
 )
 from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import PrepareContext, SubmitContext, TaskKindAdapter
+from nemo_evaluator.jobs.metric_resolution import resolve_deferred_metric_models
 from nemo_evaluator.jobs.publication import publish_agent_eval_result
 from nemo_evaluator.jobs.registered_agent_resolution import expand_mcp_secret_env, resolve_registered_agent
 from nemo_evaluator.jobs.result_persistence import persist_agent_eval_result
@@ -309,6 +310,14 @@ def _staged_agent_files(target: FabricRunnerTarget | HarborRunnerTarget, ctx: Jo
             "step did not run or did not complete"
         )
     return staged
+
+
+def _with_deferred_metric_models(
+    task: ResolvedTask, *, workspace: str, async_client: AsyncNemoClient | None
+) -> ResolvedTask:
+    """Return the task with cloudpickle metric model references resolved in the worker."""
+    metrics = resolve_deferred_metric_models(task.spec.metrics, workspace=workspace, async_client=async_client)
+    return task.model_copy(update={"spec": task.spec.model_copy(update={"metrics": metrics})})
 
 
 class _AgentEvalJobBase(NemoJob):
@@ -693,6 +702,14 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
+        spec = spec.model_copy(
+            update={
+                "tasks": [
+                    _with_deferred_metric_models(task, workspace=ctx.workspace, async_client=async_client)
+                    for task in spec.tasks
+                ]
+            }
+        )
         prepare_ctx = PrepareContext(
             storage_root=ctx.storage.persistent,
             client=platform_client if isinstance(platform_client, NemoClient) else None,

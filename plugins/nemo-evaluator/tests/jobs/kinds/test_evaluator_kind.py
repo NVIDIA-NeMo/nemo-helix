@@ -8,6 +8,7 @@ from nemo_evaluator.api.schemas import EvaluatorTaskDefinition, TaskInputs
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.api.task_definitions.provenance import TaskProvenance
 from nemo_evaluator.entities import TaskEntity, TaskRevisionEntity
+from nemo_evaluator.jobs.agent_evaluate import _with_deferred_metric_models
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalTaskInput,
     AgentTarget,
@@ -24,6 +25,7 @@ from nemo_evaluator.jobs.kinds.registry import KIND_ADAPTERS, get_adapter
 from nemo_evaluator.jobs.kinds.types import LoadedTask, PrepareContext, SubmitContext
 from nemo_evaluator.jobs.metric_resolution import to_inline
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
+from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, allow_cloudpickle_loading
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
 from nemo_evaluator_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus
@@ -32,6 +34,7 @@ from nemo_evaluator_sdk.metrics.llm_judge import LLMJudgeMetric
 from nemo_evaluator_sdk.values import GenericAgent, Model, ModelRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.models.refs import ResolvedModelReference
 from pydantic import BaseModel, field_serializer
 
 
@@ -185,6 +188,42 @@ async def test_evaluator_scoring_validation(problem, message):
     )
     with pytest.raises(ValueError, match=message):
         EvaluatorTaskAdapter().validate_scoring([task], target=None, trials=[])
+
+
+def test_worker_resolves_cloudpickle_judge_before_scoring_validation(mocker):
+    async def resolve_model_reference(self, ref):
+        assert ref == "default/judge"
+        return ResolvedModelReference(url="https://igw.example.test/v1/chat/completions", name="judge", host_url=None)
+
+    mocker.patch(
+        "nemo_evaluator.jobs.metric_resolution.AsyncModelsClient.resolve_model_reference", resolve_model_reference
+    )
+    judge = LLMJudgeMetric(
+        model=ModelRef("default/judge"),
+        scores=[RangeScore(name="quality", minimum=0, maximum=1, parser=JSONScoreParser(json_path="quality"))],
+    )
+    task = ResolvedTask(
+        id="task",
+        spec=ResolvedEvaluatorTaskDefinition(
+            kind="evaluator",
+            intent="Do it",
+            metrics=[to_inline(bundle_metric(judge, CloudpickleMetricBundlePackager()))],
+        ),
+    )
+    adapter = EvaluatorTaskAdapter()
+    adapter.validate_scoring([task], target=None, trials=[])
+
+    with allow_cloudpickle_loading():
+        with pytest.raises(ValueError, match="must be resolved"):
+            adapter.validate_scoring([task], target=None, trials=[])
+        resolved = _with_deferred_metric_models(
+            task, workspace="default", async_client=AsyncNemoClient(base_url="http://unused.test")
+        )
+        adapter.validate_scoring([resolved], target=None, trials=[])
+        runtime = adapter.prepare([resolved], PrepareContext(Path("."), None, None, None, [], KIND_ADAPTERS))
+
+    assert isinstance(runtime[0].metrics[0], LLMJudgeMetric)
+    assert isinstance(runtime[0].metrics[0].model, Model)
 
 
 def test_loaded_task_is_exactly_one_origin():

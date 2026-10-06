@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import pickle
 from pathlib import Path
@@ -735,6 +736,45 @@ async def test_evaluate_job_local_to_spec_resolves_cloudpickle_metric_model_refs
         metric = unbundle_metric(to_runtime_bundle(canonical.metrics[0]))
     assert isinstance(metric, LLMJudgeMetric)
     assert isinstance(metric.model, Model)
+
+
+class _StopBeforeScoring(Exception):
+    pass
+
+
+async def test_evaluate_job_worker_resolves_cloudpickle_metric_model_refs_deferred_by_api(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    _patch_async_model_reference_resolution(mocker)
+    bundle = bundle_metric(_llm_judge_ref_metric(), CloudpickleMetricBundlePackager())
+    canonical = await EvaluateJob.to_spec(
+        EvaluateInputSpec.model_validate(
+            {"metrics": [bundle.model_dump(mode="json")], "dataset": [{"output_text": "hello"}]}
+        ),
+        workspace="default",
+        entity_client=object(),
+        async_sdk=_async_sdk(),
+        is_local=False,
+    )
+    compiled = await EvaluateJob.compile(
+        workspace="default", spec=canonical, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    config = cast(dict[str, Any], HelixJobSpec.model_validate(compiled).steps[0].config)
+    scored_specs: list[EvaluateSpec] = []
+
+    def stop_before_scoring(self: EvaluateJob, spec: EvaluateSpec, **kwargs: Any) -> None:
+        scored_specs.append(spec)
+        raise _StopBeforeScoring
+
+    mocker.patch.object(EvaluateJob, "_run_evaluator", stop_before_scoring)
+    with pytest.raises(_StopBeforeScoring):
+        await asyncio.to_thread(_run_evaluate_job, config, tmp_path)
+
+    with allow_cloudpickle_loading():
+        metric = unbundle_metric(to_runtime_bundle(scored_specs[0].metrics[0]))
+    assert isinstance(metric, LLMJudgeMetric)
+    assert isinstance(metric.model, Model)
+    assert metric.model.url == "https://igw.example.test/v1/chat/completions"
 
 
 async def test_evaluate_job_compile_produces_online_model_job() -> None:

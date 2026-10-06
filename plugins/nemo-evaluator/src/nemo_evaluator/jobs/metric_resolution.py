@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from nemo_evaluator.api.schemas import MetricInline
+from nemo_evaluator.jobs.utils import run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRef, MetricRefOrInline, resolve_metric_specs
 from nemo_evaluator.shared.metric_bundles.bundles import (
     MetricBundle,
@@ -30,6 +31,7 @@ from nemo_evaluator_sdk.resolver_protocols import ModelResolver, SecretResolver
 from nemo_evaluator_sdk.values import Model, ModelRef
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -50,9 +52,14 @@ def unresolved_model_refs(metrics: list[Metric]) -> list[str]:
     return sorted(refs)
 
 
+def is_cloudpickle(metric: MetricBundle | MetricInline) -> bool:
+    """Whether the metric is executable user code, which only a job worker may hydrate."""
+    return metric.payload.kind == CLOUDPICKLE_KIND
+
+
 def loadable_here(metric: MetricBundle | MetricInline) -> bool:
     """Whether this process may hydrate the metric; cloudpickle waits for the job worker."""
-    return metric.payload.kind != CLOUDPICKLE_KIND or cloudpickle_loading_allowed()
+    return not is_cloudpickle(metric) or cloudpickle_loading_allowed()
 
 
 def to_inline(bundle: MetricBundle) -> MetricInline:
@@ -151,6 +158,31 @@ class HelixMetricSecretResolver(SecretResolver):
         except NotFoundError:
             return None
         return response.data().value
+
+
+def resolve_deferred_metric_models(
+    metrics: Sequence[MetricInline],
+    *,
+    workspace: str,
+    async_client: AsyncNemoClient | None,
+) -> list[MetricInline]:
+    """Resolve the model references the API server left on cloudpickle metrics.
+
+    Runs in the job worker, where the metrics may be hydrated. Inline metrics were already
+    resolved at submission, so a spec without cloudpickle metrics is returned unchanged.
+    """
+    if not any(is_cloudpickle(metric) for metric in metrics):
+        return list(metrics)
+    if not unresolved_model_refs(to_runtime_metrics(metrics)):
+        return list(metrics)
+    if async_client is None:
+        raise ValueError("resolving metric model references requires a platform client")
+    return run_with_isolated_async_client(
+        async_client,
+        lambda client: resolve_metrics_to_inline(
+            list(metrics), workspace=workspace, entity_client=None, async_client=client
+        ),
+    )
 
 
 async def resolve_metrics_to_inline(
