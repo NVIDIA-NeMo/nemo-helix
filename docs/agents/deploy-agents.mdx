@@ -28,15 +28,15 @@ A-Z), digits (0-9), underscores, hyphens, and dots. For example:
 deployment. The default is `subprocess`; `docker` and `k8s` run the agent as a
 durable container through the deployments plugin.
 
-| Mode | Runs as | Survives a platform restart | Requires |
+| Mode | Runs as | Survives a Helix restart | Requires |
 | ------ | --------- | ----------------------------- | ---------- |
-| `subprocess` (default) | A local FastAPI server on the platform host | No | Nothing extra for the agent process |
+| `subprocess` (default) | A local FastAPI server on the Helix host | No | Nothing extra for the agent process |
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
 
 <Note>
 
-Subprocess agent deploy does not mean the **platform** can start without Docker. Default local platform startup still starts the deployments controller with a Docker-backed executor for on-platform model deployments. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+Subprocess agent deploy does not mean Helix can start without Docker. Default local Helix startup still starts the deployments controller with a Docker-backed executor for model deployments that Helix hosts. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
 
 </Note>
 
