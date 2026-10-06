@@ -399,7 +399,7 @@ class GitStorageConfig(BaseStorageConfig):
     @field_validator("url")
     @classmethod
     def require_ssh_remote(cls, v: str) -> str:
-        # Rebuilt from its parts, so ssh, the host key scan and known_hosts all name the host the same way.
+        # Lowercase host without a trailing dot, so ssh and known_hosts name the host the same way.
         return parse_ssh_remote(v.strip()).url
 
     @field_validator("read_chunk_size")
