@@ -119,7 +119,7 @@ Choose the remote option and enter the deployment's base URL. Setup verifies the
 
 This connects the local CLI to an existing deployment; it does not install the platform on a remote host.
 
-To configure remote access without rerunning setup, or to keep separate local and remote targets, follow [Connect the CLI to Deployments](/documentation/reference/cli-reference/connect-to-deployments).
+The CLI and Python SDK then use this deployment for every command and tutorial. To configure remote access without rerunning setup, or to keep separate local and remote targets, follow [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ### Auth and OIDC source installs
 
@@ -135,8 +135,7 @@ nemo services run
 You can set `platform.seed_on_startup: true` in platform config instead. If services are already running, wait for readiness and run the seed task manually from the repository root:
 
 ```bash
-# Set NHX_BASE_URL first if services are not on http://localhost:8080.
-curl -sf http://localhost:8080/health/ready
+curl -sf "${NHX_BASE_URL:-http://localhost:8080}/health/ready"
 uv run python -m nhx.platform_seed
 ```
 
@@ -221,7 +220,7 @@ nemo setup --auto --start-services --install-skills
 export OPENAI_API_KEY=sk-...
 nemo setup --auto
 
-# Connect to an authenticated remote platform without prompts
+# Connect to an authenticated remote platform without prompts or a saved CLI context
 export NHX_BASE_URL=https://nhx.example.com
 export NHX_ACCESS_TOKEN=...
 export OPENAI_API_KEY=sk-...
@@ -254,20 +253,9 @@ from nemo_helix_plugin.client.client import NemoClient
 client = NemoClient.from_config()
 ```
 
-For scripts or CI where you want explicit control:
+The client uses the deployment, default workspace, and credentials from your current CLI context, so it follows `nemo config use-context` the same way the CLI does. In CI jobs or containers without a CLI configuration file, set `NHX_BASE_URL` and, for authenticated deployments, `NHX_ACCESS_TOKEN`; `from_config()` reads them. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
-```python
-import os
-
-from nemo_helix_plugin.client.client import NemoClient
-
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
-```
-
-An asynchronous client, `AsyncNemoClient`, is also available (construct it the same way, or with `AsyncNemoClient.from_config()`). See the [SDK reference](/documentation/reference/python-sdk) for details.
+An asynchronous client, `AsyncNemoClient`, is also available with `AsyncNemoClient.from_config()`. See the [SDK reference](/documentation/reference/python-sdk) for details.
 
 ## Troubleshooting
 
