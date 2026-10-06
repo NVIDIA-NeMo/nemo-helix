@@ -37,7 +37,11 @@ from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
 from nhx.common.auth import AuthContext
 from nhx.common.config import get_platform_config, nhx_user_data_dir
 from nhx.common.jobs.constants import (
+    CONFIG_TASK_STORAGE_PATH_ENVVAR,
+    DEFAULT_CONFIG_STORAGE_PATH,
     DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
+    DEFAULT_TASK_STORAGE_PATH,
+    EPHEMERAL_TASK_STORAGE_PATH_ENVVAR,
     NEMO_JOB_ATTEMPT_ID_ENVVAR,
     NEMO_JOB_FILESET_ENVVAR,
     NEMO_JOB_ID_ENVVAR,
@@ -324,6 +328,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 NEMO_JOB_TASK_ENVVAR: task_id,
                 NEMO_JOB_WORKSPACE_ENVVAR: step.workspace,
                 NEMO_JOB_FILESET_ENVVAR: step.fileset,
+                EPHEMERAL_TASK_STORAGE_PATH_ENVVAR: DEFAULT_TASK_STORAGE_PATH,
+                CONFIG_TASK_STORAGE_PATH_ENVVAR: DEFAULT_CONFIG_STORAGE_PATH,
                 NEMO_JOB_STEP_CONFIG_FILE_PATH_ENVVAR: DEFAULT_NEMO_JOB_STEP_CONFIG_FILE_PATH,
                 # The launcher fetches the step config from the jobs API instead of a
                 # pre-written file, so it must be able to reach the platform.
@@ -403,6 +409,13 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         try:
             self._client.create(workspace=self._workspace, spec=spec, name=sandbox_name, labels=labels)
         except grpc.RpcError as exc:
+            # The name is unique per attempt, so an existing sandbox is this attempt's own
+            # (created by an earlier schedule whose PENDING update was not persisted).
+            if _rpc_code(exc) == grpc.StatusCode.ALREADY_EXISTS:
+                return JobUpdate(
+                    status=HelixJobStatus.PENDING,
+                    status_details={"message": f"Sandbox {sandbox_name} already exists; awaiting READY"},
+                )
             return JobUpdate(
                 status=HelixJobStatus.ERROR,
                 status_details={"message": f"CreateSandbox failed: {_rpc_detail(exc)}"},
@@ -417,27 +430,34 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
 
     def sync(self, step: HelixJobStepWithContext) -> JobUpdate:
         sandbox_name = _sandbox_name(step.workspace, step.job, step.attempt_id, step.name)
+        step_status = HelixJobStatus(getattr(step.status, "value", step.status))
         try:
             sandbox = self._client.get_sandbox(sandbox_name, workspace=self._workspace)
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
+                if step_status == HelixJobStatus.CANCELLING:
+                    return JobUpdate(status=HelixJobStatus.CANCELLED, status_details={"message": "Sandbox deleted"})
                 return JobUpdate(
                     status=HelixJobStatus.ERROR,
                     status_details={"message": f"Sandbox {sandbox_name} not found"},
                 )
+            # Transient gateway error: keep the current status so the next sync retries.
             return JobUpdate(
-                status=HelixJobStatus.PENDING,
+                status=step_status,
                 status_details={"message": f"GetSandbox error: {_rpc_detail(exc)}"},
             )
 
         phase = sandbox.status.phase
+        terminal = phase in (pb.SANDBOX_PHASE_COMPLETED, pb.SANDBOX_PHASE_ERROR)
 
-        # A cancel request stops the sandbox so the main process dies.
-        step_status = getattr(step.status, "value", step.status)
-        if step_status in ("cancelling", "cancelled") and phase not in (
-            pb.SANDBOX_PHASE_COMPLETED,
-            pb.SANDBOX_PHASE_ERROR,
-        ):
+        # A cancel request stops the sandbox so the main process dies. A sandbox that
+        # already finished is cancelled as-is: CANCELLING cannot move to COMPLETED.
+        if step_status == HelixJobStatus.CANCELLING:
+            if terminal:
+                return JobUpdate(
+                    status=HelixJobStatus.CANCELLED,
+                    status_details={"message": f"Sandbox already finished ({_phase_name(phase)})"},
+                )
             try:
                 self._client.delete(sandbox_name, workspace=self._workspace, allow_missing=True)
             except grpc.RpcError as exc:
@@ -451,6 +471,15 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                     status_details={"message": f"Sandbox delete failed, retrying: {_rpc_detail(exc)}"},
                 )
             return JobUpdate(status=HelixJobStatus.CANCELLED, status_details={"message": "Sandbox deleted"})
+
+        if not terminal and (timeout := self._sync_ttl_exceeded(step, step_status, phase)) is not None:
+            self._delete_sandbox_best_effort(sandbox_name)
+            message = f"Job timed out after reaching max TTL of {timeout} seconds"
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={"message": message},
+                error_details={"message": message},
+            )
 
         # exit_code is a proto3 optional: unset reads as 0, so presence must be checked.
         exit_code = sandbox.status.exit_code if sandbox.status.HasField("exit_code") else None
@@ -478,15 +507,32 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             )
 
         phase_name = _phase_name(phase)
-        return JobUpdate(
-            status=_PHASE_TO_STATUS[phase_name],
-            status_details={"message": f"Sandbox phase {phase_name}"},
-        )
+        status = _PHASE_TO_STATUS.get(phase_name, step_status)
+        # An ACTIVE step never moves back to PENDING (e.g. a STOPPING sandbox).
+        if status == HelixJobStatus.PENDING and step_status == HelixJobStatus.ACTIVE:
+            status = HelixJobStatus.ACTIVE
+        return JobUpdate(status=status, status_details={"message": f"Sandbox phase {phase_name}"})
+
+    def _sync_ttl_exceeded(self, step: HelixJobStepWithContext, step_status: HelixJobStatus, phase: int) -> int | None:
+        """The exceeded TTL in seconds for a non-terminal sandbox, or None."""
+        config = self._execution_profile_config
+        if step_status == HelixJobStatus.ACTIVE:
+            return config.ttl_seconds_active if self.check_step_ttl(step, config.ttl_seconds_active) else None
+        not_started = _PHASE_TO_STATUS.get(_phase_name(phase)) == HelixJobStatus.PENDING
+        if (
+            step_status == HelixJobStatus.PENDING
+            and not_started
+            and self.should_enforce_before_active_ttl(step)
+            and self.check_step_ttl_before_active(step, config.ttl_seconds_before_active)
+        ):
+            return config.ttl_seconds_before_active
+        return None
 
     def cleanup_steps(self) -> None:
         try:
             sandboxes = self._client.list_all(workspace=self._workspace, label_selector=self._cleanup_label_selector())
-        except grpc.RpcError:
+        except (grpc.RpcError, SandboxError):
+            # SandboxError: the SDK pager rejects a repeated or over-budget page token.
             logger.warning("Failed to list sandboxes for cleanup", exc_info=True)
             return
 
@@ -502,7 +548,14 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
 
             # Verify the step is terminal before cleaning up, so a resource that was
             # marked active is never reclaimed early and then reported as error.
-            if not self.check_step_is_terminal(job=job, step_name=step_name, workspace=workspace):
+            step = self.get_step_safe(job=job, step_name=step_name, workspace=workspace)
+            if step is not None and step.status not in ("cancelled", "error", "completed"):
+                continue
+
+            # A sandbox still running under a terminal step (e.g. a timed-out step whose
+            # delete failed) or whose step entity is gone has nothing left to inspect.
+            if step is None or sandbox.phase not in (pb.SANDBOX_PHASE_COMPLETED, pb.SANDBOX_PHASE_ERROR):
+                self._delete_sandbox_best_effort(sandbox.name)
                 continue
 
             if (
@@ -512,7 +565,9 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 self._delete_sandbox_best_effort(sandbox.name)
                 continue
 
-            # The TTL runs from the terminal transition, which only the full proto carries.
+            # The TTL runs from the sandbox's terminal transition, which only the full
+            # proto carries and only some compute drivers stamp; otherwise from the
+            # step's last update, i.e. when it went terminal.
             try:
                 finished_at = self._terminal_transition_time(
                     self._client.get_sandbox(sandbox.name, workspace=self._workspace)
@@ -521,9 +576,8 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 logger.warning("Failed to read sandbox %s for TTL cleanup", sandbox.name, exc_info=True)
                 continue
             if finished_at is None:
-                self._delete_sandbox_best_effort(sandbox.name)
-                continue
-            if finished_at + datetime.timedelta(
+                finished_at = _aware(step.updated_at)
+            if finished_at is None or finished_at + datetime.timedelta(
                 seconds=self._execution_profile_config.ttl_seconds_after_finished
             ) < datetime.datetime.now(datetime.timezone.utc):
                 self._delete_sandbox_best_effort(sandbox.name)
@@ -585,6 +639,13 @@ def _rpc_detail(exc: Any) -> str:
     details_getter = getattr(exc, "details", None)
     details = details_getter() if callable(details_getter) else str(exc)
     return f"{code.name if code is not None else 'UNKNOWN'}: {details}"
+
+
+def _aware(value: datetime.datetime | None) -> datetime.datetime | None:
+    """Treat a naive datetime as UTC."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=datetime.timezone.utc)
 
 
 def _optional_path(path: str | None) -> Path | None:

@@ -36,16 +36,13 @@ from openshell import SandboxRef, SandboxStatusRef, TlsConfig
 from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
 
 
-def _backend(mock_nhx_client, mock_platform_config, **config_overrides) -> OpenShellJobBackend:
+def _backend(mock_nemo_client, mock_platform_config, **config_overrides) -> OpenShellJobBackend:
     config = OpenShellJobExecutionProfileConfig(**config_overrides)
-    with (
-        patch("nhx.core.jobs.controllers.backends.base.client_from_platform"),
-        patch(
-            "nhx.core.jobs.controllers.backends.openshell.backend.get_platform_config",
-            return_value=mock_platform_config,
-        ),
+    with patch(
+        "nhx.core.jobs.controllers.backends.openshell.backend.get_platform_config",
+        return_value=mock_platform_config,
     ):
-        backend = OpenShellJobBackend(mock_nhx_client, config, profile_name="default")
+        backend = OpenShellJobBackend(mock_nemo_client, config, profile_name="default")
     backend._client = MagicMock()
     return backend
 
@@ -89,28 +86,28 @@ class TestClient:
     """How the profile's endpoint and TLS material become a ``SandboxClient``."""
 
     @staticmethod
-    def _client_kwargs(mock_nhx_client, mock_platform_config, **config_overrides) -> dict[str, Any]:
+    def _client_kwargs(mock_nemo_client, mock_platform_config, **config_overrides) -> dict[str, Any]:
         _ensure_openshell()
         with patch.object(backend_module, "JobsSandboxClient") as client_cls:
-            _backend(mock_nhx_client, mock_platform_config, **config_overrides)
+            _backend(mock_nemo_client, mock_platform_config, **config_overrides)
         (target,) = client_cls.call_args.args
         return {"target": target, **client_cls.call_args.kwargs}
 
-    def test_http_endpoint_is_plaintext(self, mock_nhx_client, mock_platform_config) -> None:
-        kwargs = self._client_kwargs(mock_nhx_client, mock_platform_config, gateway_endpoint="http://gw:17670")
+    def test_http_endpoint_is_plaintext(self, mock_nemo_client, mock_platform_config) -> None:
+        kwargs = self._client_kwargs(mock_nemo_client, mock_platform_config, gateway_endpoint="http://gw:17670")
 
         assert kwargs["target"] == "gw:17670"
         assert kwargs["tls"] is None
 
-    def test_https_without_material_uses_system_roots(self, mock_nhx_client, mock_platform_config) -> None:
-        kwargs = self._client_kwargs(mock_nhx_client, mock_platform_config, gateway_endpoint="https://gw")
+    def test_https_without_material_uses_system_roots(self, mock_nemo_client, mock_platform_config) -> None:
+        kwargs = self._client_kwargs(mock_nemo_client, mock_platform_config, gateway_endpoint="https://gw")
 
         assert kwargs["target"] == "gw:443"
         assert kwargs["tls"] == TlsConfig()
 
-    def test_https_with_mtls_material(self, mock_nhx_client, mock_platform_config) -> None:
+    def test_https_with_mtls_material(self, mock_nemo_client, mock_platform_config) -> None:
         kwargs = self._client_kwargs(
-            mock_nhx_client,
+            mock_nemo_client,
             mock_platform_config,
             gateway_endpoint="https://gw:8443",
             tls=OpenShellJobTLSConfig(
@@ -122,9 +119,9 @@ class TestClient:
             ca_path=Path("/c/ca.crt"), cert_path=Path("/c/tls.crt"), key_path=Path("/c/tls.key")
         )
 
-    def test_insecure_override_wins_over_https(self, mock_nhx_client, mock_platform_config) -> None:
+    def test_insecure_override_wins_over_https(self, mock_nemo_client, mock_platform_config) -> None:
         kwargs = self._client_kwargs(
-            mock_nhx_client, mock_platform_config, gateway_endpoint="https://gw", insecure=True
+            mock_nemo_client, mock_platform_config, gateway_endpoint="https://gw", insecure=True
         )
 
         assert kwargs["tls"] is None
@@ -172,9 +169,9 @@ class TestSandboxName:
 
 class TestSchedule:
     def test_creates_sandbox_with_launcher_command(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+        self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend = _backend(mock_nemo_client, mock_platform_config)
         step = test_step_pending
         executor = step.step_spec.executor
 
@@ -190,6 +187,10 @@ class TestSchedule:
         assert env["NEMO_JOB_STEP"] == step.name
         assert env["NEMO_JOB_WORKSPACE"] == step.workspace
         assert env["NEMO_JOB_STEP_CONFIG_FILE_PATH"].endswith("job_step_config.json")
+        # Task storage paths: the task dispatcher refuses to run without the ephemeral one.
+        # The fixture step overrides it; the config path keeps the default.
+        assert env["NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"] == "/var/tmp"
+        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/var/run/scratch/config"
         assert env["PATH"].startswith("/app/.venv/bin")
         assert env["VIRTUAL_ENV"] == "/app/.venv"
         assert env["HOME"] == "/home/sandbox"
@@ -203,9 +204,9 @@ class TestSchedule:
         assert labels["nhx.nvidia.com/job_execution_backend"] == "openshell"
 
     def test_default_image_when_step_declares_none(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+        self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend = _backend(mock_nemo_client, mock_platform_config)
 
         update = backend.schedule(_no_container_executor(), test_step_pending)
 
@@ -213,16 +214,16 @@ class TestSchedule:
         request = _create_request(backend)
         assert request.spec.template.image.endswith("/nhx-tasks-openshell:local")
 
-    def test_profile_image_overrides_default(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config, image="registry.example/nhx-tasks-openshell:1")
+    def test_profile_image_overrides_default(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, image="registry.example/nhx-tasks-openshell:1")
 
         backend.schedule(_no_container_executor(), test_step_pending)
 
         request = _create_request(backend)
         assert request.spec.template.image == "registry.example/nhx-tasks-openshell:1"
 
-    def test_step_entrypoint_wins_over_default(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_step_entrypoint_wins_over_default(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         executor = SimpleNamespace(
             container=SimpleNamespace(image="img", entrypoint=["/custom/bin"], command=["--flag"])
         )
@@ -233,9 +234,9 @@ class TestSchedule:
         assert request.spec.command == [_LAUNCHER_PATH, "run", "--fetch-step-config", "--", "/custom/bin", "--flag"]
 
     def test_egress_proxy_injected_when_configured(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+        self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config, egress_proxy="http://127.0.0.1:3128")
+        backend = _backend(mock_nemo_client, mock_platform_config, egress_proxy="http://127.0.0.1:3128")
 
         backend.schedule(_no_container_executor(), test_step_pending)
 
@@ -246,10 +247,10 @@ class TestSchedule:
         assert env["NO_PROXY"] == "127.0.0.1,localhost"
 
     def test_platform_urls_rewritten_to_egress_host(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+        self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
         backend = _backend(
-            mock_nhx_client,
+            mock_nemo_client,
             mock_platform_config,
             platform_egress=OpenShellJobEgressConfig(host="nemo-helix-api.nemo-helix.svc.cluster.local", port=8080),
         )
@@ -265,9 +266,9 @@ class TestSchedule:
         )
 
     def test_platform_urls_unchanged_without_egress(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+        self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config, platform_egress=None)
+        backend = _backend(mock_nemo_client, mock_platform_config, platform_egress=None)
 
         backend.schedule(_no_container_executor(), test_step_pending)
 
@@ -275,8 +276,31 @@ class TestSchedule:
         env = dict(request.spec.environment)
         assert env["NHX_BASE_URL"] == "http://localhost:8080"
 
-    def test_create_failure_returns_error(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_task_storage_defaults_without_step_override(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending.model_copy(deep=True)
+        step.step_spec.environment = []
+
+        backend.schedule(step.step_spec.executor, step)
+
+        env = dict(_create_request(backend).spec.environment)
+        assert env["NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH"] == "/var/run/scratch/task"
+        assert env["NEMO_JOB_STEP_CONFIG_STORAGE_PATH"] == "/var/run/scratch/config"
+
+    def test_existing_sandbox_for_attempt_is_adopted(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.create.side_effect = _rpc_error(grpc.StatusCode.ALREADY_EXISTS)
+
+        update = backend.schedule(test_step_pending.step_spec.executor, test_step_pending)
+
+        assert update.status == HelixJobStatus.PENDING
+
+    def test_create_failure_returns_error(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.create.side_effect = _rpc_error(grpc.StatusCode.INTERNAL, "boom")
 
         update = backend.schedule(_no_container_executor(), test_step_pending)
@@ -314,16 +338,16 @@ def _sandbox(
 
 
 class TestSync:
-    def test_completed_zero_exit(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_completed_zero_exit(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
 
         update = backend.sync(test_step_pending)
 
         assert update.status == HelixJobStatus.COMPLETED
 
-    def test_completed_nonzero_exit_is_error(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_completed_nonzero_exit_is_error(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=7)
 
         update = backend.sync(test_step_pending)
@@ -331,8 +355,8 @@ class TestSync:
         assert update.status == HelixJobStatus.ERROR
         assert update.error_details == {"exit_code": 7}
 
-    def test_error_phase(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_error_phase(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(
             pb.SANDBOX_PHASE_ERROR, condition_messages=("policy denied",)
         )
@@ -344,8 +368,8 @@ class TestSync:
         # The main process never ran, so there is no exit code to report.
         assert update.error_details == {"sandbox_phase": "SANDBOX_PHASE_ERROR"}
 
-    def test_error_phase_with_exit_code(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_error_phase_with_exit_code(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_ERROR, exit_code=3)
 
         update = backend.sync(test_step_pending)
@@ -353,8 +377,8 @@ class TestSync:
         assert update.status_details["message"] == "Job exited with code 3"
         assert update.error_details == {"sandbox_phase": "SANDBOX_PHASE_ERROR", "exit_code": 3}
 
-    def test_unrecognized_phase_is_pending(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_unrecognized_phase_is_pending(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(999)
 
         update = backend.sync(test_step_pending)
@@ -369,24 +393,24 @@ class TestSync:
             (pb.SANDBOX_PHASE_STARTING, HelixJobStatus.PENDING),
         ],
     )
-    def test_lifecycle_phases(self, mock_nhx_client, mock_platform_config, test_step_pending, phase, expected) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_lifecycle_phases(self, mock_nemo_client, mock_platform_config, test_step_pending, phase, expected) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(phase)
 
         update = backend.sync(test_step_pending)
 
         assert update.status == expected
 
-    def test_not_found_is_error(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_not_found_is_error(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.side_effect = _rpc_error(grpc.StatusCode.NOT_FOUND)
 
         update = backend.sync(test_step_pending)
 
         assert update.status == HelixJobStatus.ERROR
 
-    def test_cancel_deletes_sandbox(self, mock_nhx_client, mock_platform_config, test_step_pending) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_cancel_deletes_sandbox(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
         step = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLING})
 
@@ -395,10 +419,95 @@ class TestSync:
         assert update.status == HelixJobStatus.CANCELLED
         assert backend._client.delete.called
 
-    def test_cancel_delete_failure_stays_cancelling(
-        self, mock_nhx_client, mock_platform_config, test_step_pending
+    def test_cancel_of_finished_sandbox_is_cancelled(
+        self, mock_nemo_client, mock_platform_config, test_step_cancelling
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        """CANCELLING cannot transition to COMPLETED; reporting it would 409 forever."""
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
+
+        update = backend.sync(test_step_cancelling)
+
+        assert update.status == HelixJobStatus.CANCELLED
+        assert not backend._client.delete.called
+
+    def test_cancel_of_missing_sandbox_is_cancelled(
+        self, mock_nemo_client, mock_platform_config, test_step_cancelling
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.side_effect = _rpc_error(grpc.StatusCode.NOT_FOUND)
+
+        update = backend.sync(test_step_cancelling)
+
+        assert update.status == HelixJobStatus.CANCELLED
+
+    def test_transient_get_error_keeps_status(self, mock_nemo_client, mock_platform_config, test_step_active) -> None:
+        """ACTIVE cannot transition back to PENDING."""
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.side_effect = _rpc_error(grpc.StatusCode.UNAVAILABLE)
+
+        update = backend.sync(test_step_active)
+
+        assert update.status == HelixJobStatus.ACTIVE
+
+    def test_active_step_does_not_regress_to_pending(
+        self, mock_nemo_client, mock_platform_config, test_step_active
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_STOPPING)
+
+        update = backend.sync(test_step_active)
+
+        assert update.status == HelixJobStatus.ACTIVE
+
+    def test_unmapped_phase_name_keeps_status(self, mock_nemo_client, mock_platform_config, test_step_active) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+
+        with patch.object(backend_module, "_phase_name", return_value="SANDBOX_PHASE_FROM_A_NEWER_SDK"):
+            update = backend.sync(test_step_active)
+
+        assert update.status == HelixJobStatus.ACTIVE
+
+    @pytest.mark.parametrize(("age_seconds", "timed_out"), [(30, False), (7200, True)])
+    def test_active_ttl(self, mock_nemo_client, mock_platform_config, test_step_active, age_seconds, timed_out) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, ttl_seconds_active=3600)
+        backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
+        step = _aged(test_step_active, age_seconds)
+
+        update = backend.sync(step)
+
+        assert update.status == (HelixJobStatus.ERROR if timed_out else HelixJobStatus.ACTIVE)
+        assert backend._client.delete.called is timed_out
+        if timed_out:
+            assert "3600 seconds" in update.status_details["message"]
+
+    @pytest.mark.parametrize(
+        ("phase", "timed_out"),
+        [
+            (pb.SANDBOX_PHASE_PROVISIONING, True),
+            # Already running: the step moves to ACTIVE instead of timing out.
+            (pb.SANDBOX_PHASE_READY, False),
+            # Already finished: the result wins over the timeout.
+            (pb.SANDBOX_PHASE_COMPLETED, False),
+        ],
+    )
+    def test_before_active_ttl(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, phase, timed_out
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, ttl_seconds_before_active=600)
+        backend._client.get_sandbox.return_value = _sandbox(phase, exit_code=0)
+        step = _aged(test_step_pending, 1200)
+
+        update = backend.sync(step)
+
+        assert (update.status == HelixJobStatus.ERROR) is timed_out
+        assert backend._client.delete.called is timed_out
+
+    def test_cancel_delete_failure_stays_cancelling(
+        self, mock_nemo_client, mock_platform_config, test_step_pending
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_READY)
         backend._client.delete.side_effect = _rpc_error(grpc.StatusCode.UNAVAILABLE, "gateway down")
         step = test_step_pending.model_copy(update={"status": HelixJobStatus.CANCELLING})
@@ -409,14 +518,25 @@ class TestSync:
         assert "gateway down" in update.status_details["message"]
 
 
+def _aged(step: Any, age_seconds: int) -> Any:
+    then = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=age_seconds)
+    return step.model_copy(update={"created_at": then, "updated_at": then})
+
+
+def _step_state(status: str = "error", finished_ago: datetime.timedelta | None = None) -> SimpleNamespace:
+    """The step entity cleanup reads: its status and when it last changed."""
+    updated_at = datetime.datetime.now(datetime.timezone.utc) - (finished_ago or datetime.timedelta())
+    return SimpleNamespace(status=status, updated_at=updated_at)
+
+
 class TestCleanup:
     def test_deletes_completed_sandbox_when_configured(
-        self, mock_nhx_client, mock_platform_config, test_step_completed
+        self, mock_nemo_client, mock_platform_config, test_step_completed
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend = _backend(mock_nemo_client, mock_platform_config)
         sandbox = _owned_sandbox(backend, pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
         backend._client.list_all.return_value = [_ref(sandbox)]
-        backend.check_step_is_terminal = MagicMock(return_value=True)  # type: ignore[method-assign]
+        backend.get_step_safe = MagicMock(return_value=_step_state("completed"))  # type: ignore[method-assign]
 
         backend.cleanup_steps()
 
@@ -427,39 +547,81 @@ class TestCleanup:
     @pytest.mark.parametrize(
         ("finished_ago", "deleted"), [(datetime.timedelta(minutes=5), False), (datetime.timedelta(hours=2), True)]
     )
-    def test_errored_sandbox_waits_for_ttl(self, mock_nhx_client, mock_platform_config, finished_ago, deleted) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config, ttl_seconds_after_finished=3600)
+    def test_errored_sandbox_waits_for_ttl(self, mock_nemo_client, mock_platform_config, finished_ago, deleted) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, ttl_seconds_after_finished=3600)
         sandbox = _owned_sandbox(backend, pb.SANDBOX_PHASE_ERROR, exit_code=1)
         sandbox.status.conditions.add().transition_time.FromDatetime(
             datetime.datetime.now(datetime.timezone.utc) - finished_ago
         )
         backend._client.list_all.return_value = [_ref(sandbox)]
         backend._client.get_sandbox.return_value = sandbox
-        backend.check_step_is_terminal = MagicMock(return_value=True)  # type: ignore[method-assign]
+        # The step went terminal just now; the sandbox's own transition time wins.
+        backend.get_step_safe = MagicMock(return_value=_step_state())  # type: ignore[method-assign]
 
         backend.cleanup_steps()
 
         assert backend._client.delete.called is deleted
 
-    def test_keeps_sandbox_when_step_not_terminal(
-        self, mock_nhx_client, mock_platform_config, test_step_active
+    @pytest.mark.parametrize(
+        ("finished_ago", "deleted"), [(datetime.timedelta(minutes=5), False), (datetime.timedelta(hours=2), True)]
+    )
+    def test_ttl_falls_back_to_step_time_without_transition_time(
+        self, mock_nemo_client, mock_platform_config, finished_ago, deleted
     ) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
-        sandbox = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
+        """The docker driver stamps no condition transition_time."""
+        backend = _backend(mock_nemo_client, mock_platform_config, ttl_seconds_after_finished=3600)
+        sandbox = _owned_sandbox(backend, pb.SANDBOX_PHASE_ERROR, exit_code=1)
+        sandbox.status.conditions.add(message="no timestamp")
         backend._client.list_all.return_value = [_ref(sandbox)]
-        backend.check_step_is_terminal = MagicMock(return_value=False)  # type: ignore[method-assign]
+        backend._client.get_sandbox.return_value = sandbox
+        backend.get_step_safe = MagicMock(return_value=_step_state(finished_ago=finished_ago))  # type: ignore[method-assign]
+
+        backend.cleanup_steps()
+
+        assert backend._client.delete.called is deleted
+
+    @pytest.mark.parametrize("step_state", [_step_state("error"), None], ids=["terminal-step", "missing-step"])
+    def test_running_sandbox_under_finished_step_is_reclaimed(
+        self, mock_nemo_client, mock_platform_config, step_state
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        sandbox = _owned_sandbox(backend, pb.SANDBOX_PHASE_READY)
+        backend._client.list_all.return_value = [_ref(sandbox)]
+        backend.get_step_safe = MagicMock(return_value=step_state)  # type: ignore[method-assign]
+
+        backend.cleanup_steps()
+
+        backend._client.delete.assert_called_once_with("nhx-digest", workspace="default", allow_missing=True)
+
+    def test_keeps_sandbox_when_step_not_terminal(
+        self, mock_nemo_client, mock_platform_config, test_step_active
+    ) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        sandbox = _owned_sandbox(backend, pb.SANDBOX_PHASE_READY)
+        backend._client.list_all.return_value = [_ref(sandbox)]
+        backend.get_step_safe = MagicMock(return_value=_step_state("active"))  # type: ignore[method-assign]
 
         backend.cleanup_steps()
 
         assert not backend._client.delete.called
 
-    def test_terminal_transition_time_is_tz_aware(self, mock_nhx_client, mock_platform_config) -> None:
+    def test_list_pager_error_is_logged_not_raised(self, mock_nemo_client, mock_platform_config) -> None:
+        from openshell import SandboxError
+
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        backend._client.list_all.side_effect = SandboxError("pager received a repeated continuation token")
+
+        backend.cleanup_steps()
+
+        assert not backend._client.delete.called
+
+    def test_terminal_transition_time_is_tz_aware(self, mock_nemo_client, mock_platform_config) -> None:
         """The TTL comparison must not raise on naive vs aware datetimes."""
         import datetime
 
         from google.protobuf.timestamp_pb2 import Timestamp
 
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend = _backend(mock_nemo_client, mock_platform_config)
         sandbox = _sandbox(pb.SANDBOX_PHASE_ERROR, exit_code=1)
         ts = Timestamp()
         ts.FromDatetime(datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2))
@@ -470,11 +632,11 @@ class TestCleanup:
         assert finished_at is not None
         assert finished_at.tzinfo is not None
 
-    def test_terminal_transition_time_skips_unset_timestamps(self, mock_nhx_client, mock_platform_config) -> None:
+    def test_terminal_transition_time_skips_unset_timestamps(self, mock_nemo_client, mock_platform_config) -> None:
         """An unset transition_time must not read as the epoch; fall back to the last real one."""
         import datetime
 
-        backend = _backend(mock_nhx_client, mock_platform_config)
+        backend = _backend(mock_nemo_client, mock_platform_config)
         sandbox = _sandbox(pb.SANDBOX_PHASE_ERROR, exit_code=1)
         recent = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=5)
         sandbox.status.conditions.add(message="timestamped").transition_time.FromDatetime(recent)
@@ -487,8 +649,8 @@ class TestCleanup:
 
 
 class TestPolicy:
-    def test_generated_policy_is_restricted(self, mock_nhx_client, mock_platform_config) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config)
+    def test_generated_policy_is_restricted(self, mock_nemo_client, mock_platform_config) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config)
         policy = backend._build_executor_policy()
 
         assert policy.version == 1
@@ -503,13 +665,13 @@ class TestPolicy:
         binaries = [b.path for b in network["nemo_helix"].binaries]
         assert binaries == ["/tools/jobs-launcher", "/usr/local/bin/python3*"]
 
-    def test_platform_egress_null_yields_no_network_rules(self, mock_nhx_client, mock_platform_config) -> None:
-        backend = _backend(mock_nhx_client, mock_platform_config, platform_egress=None)
+    def test_platform_egress_null_yields_no_network_rules(self, mock_nemo_client, mock_platform_config) -> None:
+        backend = _backend(mock_nemo_client, mock_platform_config, platform_egress=None)
         policy = backend._build_executor_policy()
 
         assert not policy.network_policies
 
-    def test_policy_path_is_loaded_and_egress_injected(self, mock_nhx_client, mock_platform_config, tmp_path) -> None:
+    def test_policy_path_is_loaded_and_egress_injected(self, mock_nemo_client, mock_platform_config, tmp_path) -> None:
         policy_file = tmp_path / "policy.yaml"
         policy_file.write_text(
             "version: 1\n"
@@ -525,7 +687,7 @@ class TestPolicy:
             "      - host: example.com\n"
             "        port: 443\n"
         )
-        backend = _backend(mock_nhx_client, mock_platform_config, policy_path=str(policy_file))
+        backend = _backend(mock_nemo_client, mock_platform_config, policy_path=str(policy_file))
         policy = backend._build_executor_policy()
 
         # The hand-written rule is kept and the mandatory platform egress is injected.
