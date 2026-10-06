@@ -27,6 +27,8 @@ from urllib.parse import urlparse
 import httpx
 import typer
 import yaml as _yaml
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.types import CreateSampleAgentRequest, SampleAgentResponse
 from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
@@ -272,8 +274,6 @@ _SAMPLE_DATASET_FILENAME = "dataset.jsonl"
 _SAMPLE_DATASET_DESCRIPTION = "Evaluation dataset for the NeMo setup sample email security agent."
 _SAMPLE_EVAL_CONFIG_SOURCE = "eval-config.dataset-driven.yml"
 _SAMPLE_EVAL_CONFIG_FILENAME = "eval-config.yaml"
-_SAMPLE_WORKSPACE_NAME = "sample"
-_SAMPLE_WORKSPACE_DESCRIPTION = "Sample workspace created by the NeMo setup flow."
 _LOCAL_CONTEXT_NAME = "local"
 
 
@@ -1841,10 +1841,10 @@ def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> boo
     return True
 
 
-def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
+def _print_sample_setup_complete(base_url: str, workspace: str, *, complete: bool) -> None:
     """Print the sample workspace completion card."""
-    studio_url = f"{display_url(base_url)}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
-    remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
+    studio_url = f"{display_url(base_url)}/studio/workspaces/{workspace}/dashboard"
+    remove_command = f"nemo workspaces delete {workspace}"
     if complete:
         status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
         message = "Explore the sample agent, dataset, and evaluation configuration in Studio."
@@ -2131,6 +2131,29 @@ def _maybe_deploy_sample_agent(
     except Exception as exc:
         console.print(f"  {WARN} Sample agent deployment failed: {exc}")
         return False
+
+
+def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse) -> bool:
+    """Wait for the deployment returned by the sample-agent API to reach running."""
+    status = sample.deployment_status
+    deadline = time.monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
+    with console.status(f"[bold cyan]Deploying agent '{sample.agent}'..."):
+        while status not in {"running", "failed"} and time.monotonic() < deadline:
+            try:
+                status = agents_client.get_deployment(workspace=sample.workspace, name=sample.deployment).data().status
+            except Exception:
+                logger.debug("Sample agent deployment status poll failed", exc_info=True)
+            if status not in {"running", "failed"}:
+                _pause(_AGENT_DEPLOY_POLL_INTERVAL)
+
+    if status == "running":
+        console.print(f"  {CHECK} Deployed agent '{sample.agent}'")
+        return True
+    if status == "failed":
+        console.print(f"  {CROSS} Agent deployment failed")
+    else:
+        console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -2974,32 +2997,44 @@ def _run_interactive_mode(
 
         selected_path = _prompt_post_setup_path()
         if selected_path == "sample":
-            workspaces_client = cli_context.typed_client(WorkspacesClient)
-            try:
-                workspace_created = _ensure_workspace_exists(
-                    workspaces_client,
-                    _SAMPLE_WORKSPACE_NAME,
-                    description=_SAMPLE_WORKSPACE_DESCRIPTION,
-                )
-            except Exception as exc:
-                console.print(f"  {WARN} Could not create workspace '{_SAMPLE_WORKSPACE_NAME}': {exc}")
+            if not default_model:
+                console.print(f"  {WARN} No default model selected, skipping sample agent setup")
                 return selected_path
-            if workspace_created:
-                console.print(f"  {CHECK} Created workspace '{_SAMPLE_WORKSPACE_NAME}'")
-            agent_ready = _maybe_deploy_sample_agent(
-                base_url,
-                _SAMPLE_WORKSPACE_NAME,
-                default_model,
-                headers=_platform_request_headers(cli_context),
-                certificate_authority=certificate_authority,
+
+            agents_client = cli_context.typed_client(AgentsClient)
+            try:
+                sample = agents_client.create_sample_agent(body=CreateSampleAgentRequest(model=default_model)).data()
+            except NemoHTTPError as exc:
+                detail = exc.body.get("detail") if isinstance(exc.body, dict) else None
+                if isinstance(detail, dict):
+                    workspace_name = detail.get("workspace")
+                    if isinstance(workspace_name, str):
+                        console.print(
+                            f"  {WARN} Sample agent setup failed at {detail.get('failed_step', 'provisioning')}"
+                        )
+                        _print_sample_setup_complete(base_url, workspace_name, complete=False)
+                        return selected_path
+                console.print(f"  {WARN} Could not create sample agent: {exc.detail}")
+                return selected_path
+            except Exception as exc:
+                console.print(f"  {WARN} Could not create sample agent: {exc}")
+                return selected_path
+
+            if sample.status == "already_exists":
+                console.print(f"  {CHECK} Sample workspace '{sample.workspace}' already exists")
+            elif sample.status == "resumed":
+                console.print(f"  {CHECK} Resumed sample workspace '{sample.workspace}'")
+            elif sample.status == "created":
+                console.print(f"  {CHECK} Created sample workspace '{sample.workspace}'")
+            agent_ready = _wait_for_sample_deployment(agents_client, sample)
+            emit.emit_event(
+                OnboardingStepEvent(
+                    step="agent_deployed",
+                    task_status=TaskStatusEnum.COMPLETED if agent_ready else TaskStatusEnum.ERROR,
+                    agent_deployed=agent_ready,
+                )
             )
-            files_client = cli_context.typed_client(FilesClient)
-            dataset_ready = _upload_sample_dataset(files_client, _SAMPLE_WORKSPACE_NAME)
-            eval_config_ready = dataset_ready and _upload_sample_eval_config(files_client, _SAMPLE_WORKSPACE_NAME)
-            _print_sample_setup_complete(
-                base_url,
-                complete=all((agent_ready, dataset_ready, eval_config_ready)),
-            )
+            _print_sample_setup_complete(base_url, sample.workspace, complete=agent_ready)
         return selected_path
 
     except UserCancelled:

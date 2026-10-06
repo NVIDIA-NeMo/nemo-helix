@@ -87,6 +87,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _verify_platform_health,
     _wait_for_models,
     _wait_for_platform,
+    _wait_for_sample_deployment,
     setup_command,
 )
 from nemo_helix_ext.cli.commands.skills import registry as skills_registry
@@ -105,6 +106,8 @@ from nemo_helix_ext.config.models import (
 )
 from nemo_helix_ext.local.process import PortConflict
 from nemo_helix_ext.ui.prompts import UserCancelled
+from nemo_helix_plugin.agents.client import AgentsClient
+from nemo_helix_plugin.agents.types import AgentDeployment, CreateSampleAgentRequest, SampleAgentResponse
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import FilesClient
@@ -2332,6 +2335,16 @@ class TestInteractiveModelPairSelection:
             default="default/claude-sonnet-4-6",
             fast="default/claude-haiku-4-5-20251001",
         )
+        sample = SampleAgentResponse(
+            status="created",
+            workspace="sample-uuid123",
+            studio_url="/studio/workspaces/sample-uuid123/dashboard",
+            agent="email-security-triage",
+            deployment="email-security-triage-123",
+            deployment_status="pending",
+        )
+        agents_client = cli_context.typed_client.return_value
+        agents_client.create_sample_agent.return_value.data.side_effect = lambda: event_order.append("api") or sample
 
         with (
             patch(
@@ -2361,21 +2374,9 @@ class TestInteractiveModelPairSelection:
                 side_effect=lambda *args, **kwargs: event_order.append("post_setup") or "sample",
             ),
             patch(
-                f"{self._MOD}._ensure_workspace_exists",
-                side_effect=lambda *args, **kwargs: event_order.append("workspace") or True,
-            ) as ensure_workspace,
-            patch(
-                f"{self._MOD}._maybe_deploy_sample_agent",
-                side_effect=lambda *args, **kwargs: event_order.append("agent") or True,
-            ) as deploy_sample_agent,
-            patch(
-                f"{self._MOD}._upload_sample_dataset",
-                side_effect=lambda *args, **kwargs: event_order.append("dataset") or True,
-            ) as upload_sample_dataset,
-            patch(
-                f"{self._MOD}._upload_sample_eval_config",
-                side_effect=lambda *args, **kwargs: event_order.append("evaluation") or True,
-            ) as upload_sample_eval_config,
+                f"{self._MOD}._wait_for_sample_deployment",
+                side_effect=lambda *args, **kwargs: event_order.append("deployment") or True,
+            ) as wait_for_deployment,
             patch(
                 f"{self._MOD}._print_sample_setup_complete",
                 side_effect=lambda *args, **kwargs: event_order.append("sample_complete"),
@@ -2391,37 +2392,33 @@ class TestInteractiveModelPairSelection:
 
         select_model_pair.assert_called_once_with(client, "default", provider_name="anthropic")
         assert selected_path == "sample"
-        workspaces_client = cli_context.typed_client.return_value
-        ensure_workspace.assert_called_once_with(
-            workspaces_client,
-            "sample",
-            description="Sample workspace created by the NeMo setup flow.",
+        cli_context.typed_client.assert_called_once_with(AgentsClient)
+        agents_client.create_sample_agent.assert_called_once_with(
+            body=CreateSampleAgentRequest(model=model_pair.default)
         )
-        deploy_sample_agent.assert_called_once_with(
-            "http://localhost:8080",
-            "sample",
-            "default/claude-sonnet-4-6",
-            headers=None,
-            certificate_authority=None,
-        )
-        upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=True)
+        wait_for_deployment.assert_called_once_with(agents_client, sample)
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", sample.workspace, complete=True)
         assert event_order == [
             "skills",
             "complete",
             "post_setup",
-            "workspace",
-            "agent",
-            "dataset",
-            "evaluation",
+            "api",
+            "deployment",
             "sample_complete",
         ]
 
-    def test_marks_sample_setup_incomplete_when_dataset_upload_fails(self):
+    def test_marks_sample_setup_incomplete_when_api_reports_partial_failure(self):
         client = MagicMock()
         cli_context = MagicMock()
         model_pair = ModelPair(default="default/model", fast="default/fast-model")
+        agents_client = cli_context.typed_client.return_value
+        agents_client.create_sample_agent.side_effect = NemoHTTPError(
+            httpx.Response(
+                502,
+                json={"detail": {"workspace": "sample-uuid123", "failed_step": "sample files", "retryable": True}},
+                request=httpx.Request("POST", "http://localhost:8080/apis/agents/v2/sample-agent"),
+            )
+        )
 
         with (
             patch(
@@ -2435,10 +2432,6 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_install_skills"),
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
-            patch(f"{self._MOD}._ensure_workspace_exists", return_value=True),
-            patch(f"{self._MOD}._maybe_deploy_sample_agent", return_value=True),
-            patch(f"{self._MOD}._upload_sample_dataset", return_value=False),
-            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
             patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
         ):
             selected_path = _run_interactive_mode(
@@ -2450,13 +2443,23 @@ class TestInteractiveModelPairSelection:
             )
 
         assert selected_path == "sample"
-        upload_sample_eval_config.assert_not_called()
-        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=False)
+        agents_client.create_sample_agent.assert_called_once_with(
+            body=CreateSampleAgentRequest(model=model_pair.default)
+        )
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", "sample-uuid123", complete=False)
 
-    def test_workspace_creation_failure_warns_and_skips_sample_steps(self):
+    def test_api_permission_failure_warns_without_completion_card(self):
         client = MagicMock()
         cli_context = MagicMock()
         model_pair = ModelPair(default="default/model", fast="default/fast-model")
+        agents_client = cli_context.typed_client.return_value
+        agents_client.create_sample_agent.side_effect = NemoHTTPError(
+            httpx.Response(
+                403,
+                json={"detail": "forbidden"},
+                request=httpx.Request("POST", "http://localhost:8080/apis/agents/v2/sample-agent"),
+            )
+        )
 
         with (
             patch(
@@ -2470,10 +2473,6 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_install_skills"),
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
-            patch(f"{self._MOD}._ensure_workspace_exists", side_effect=PermissionError("forbidden")),
-            patch(f"{self._MOD}._maybe_deploy_sample_agent") as deploy_sample_agent,
-            patch(f"{self._MOD}._upload_sample_dataset") as upload_sample_dataset,
-            patch(f"{self._MOD}._upload_sample_eval_config") as upload_sample_eval_config,
             patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
             patch(f"{self._MOD}.console") as mock_console,
         ):
@@ -2486,12 +2485,9 @@ class TestInteractiveModelPairSelection:
             )
 
         assert selected_path == "sample"
-        deploy_sample_agent.assert_not_called()
-        upload_sample_dataset.assert_not_called()
-        upload_sample_eval_config.assert_not_called()
         print_sample_setup_complete.assert_not_called()
         printed = " ".join(str(call) for call in mock_console.print.call_args_list)
-        assert "Could not create workspace 'sample': forbidden" in printed
+        assert "Could not create sample agent: forbidden" in printed
 
     def test_skips_default_model_picker_when_new_provider_has_no_models(self):
         """When the new provider is still syncing, setup should not show a misleading picker."""
@@ -2554,9 +2550,6 @@ class TestInteractiveModelPairSelection:
             patch(f"{self._MOD}._maybe_install_skills"),
             patch(f"{self._MOD}._print_setup_complete"),
             patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
-            patch(f"{self._MOD}._maybe_deploy_sample_agent", return_value=True) as deploy_sample_agent,
-            patch(f"{self._MOD}._upload_sample_dataset", return_value=True) as upload_sample_dataset,
-            patch(f"{self._MOD}._upload_sample_eval_config", return_value=True) as upload_sample_eval_config,
             patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
             patch(f"{self._MOD}.console") as mock_console,
         ):
@@ -2569,21 +2562,14 @@ class TestInteractiveModelPairSelection:
             )
 
         mock_select_model_pair.assert_not_called()
-        deploy_sample_agent.assert_called_once_with(
-            "http://localhost:8080",
-            "sample",
-            None,
-            headers=None,
-            certificate_authority=None,
-        )
-        upload_sample_dataset.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        upload_sample_eval_config.assert_called_once_with(cli_context.typed_client.return_value, "sample")
-        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", complete=True)
+        cli_context.typed_client.assert_not_called()
+        print_sample_setup_complete.assert_not_called()
         printed_lines = [call.args[0] for call in mock_console.print.call_args_list if call.args]
         assert any(
             "Models from existing providers are available, but not from 'my-ollama-custom' yet." in line
             for line in printed_lines
         )
+        assert any("No default model selected, skipping sample agent setup" in line for line in printed_lines)
 
     def test_picker_only_includes_models_from_selected_provider(self):
         """Models from another provider in the workspace must not enter the picker."""
@@ -4939,22 +4925,60 @@ class TestPrintSetupComplete:
             _print_setup_complete("http://localhost:8080", "nvidia-build", None)
 
 
+class TestWaitForSampleDeployment:
+    def test_waits_for_returned_deployment(self):
+        agents_client = MagicMock()
+        agents_client.get_deployment.return_value.data.return_value = AgentDeployment(status="running")
+        sample = SampleAgentResponse(
+            status="created",
+            workspace="sample-uuid123",
+            studio_url="/studio/workspaces/sample-uuid123/dashboard",
+            agent="email-security-triage",
+            deployment="email-security-triage-123",
+            deployment_status="pending",
+        )
+
+        with patch(f"{SETUP_MOD}.console") as mock_console:
+            assert _wait_for_sample_deployment(agents_client, sample)
+
+        agents_client.get_deployment.assert_called_once_with(
+            workspace="sample-uuid123", name="email-security-triage-123"
+        )
+        assert "Deployed agent" in mock_console.print.call_args.args[0]
+
+    def test_failed_deployment_is_not_reported_ready(self):
+        agents_client = MagicMock()
+        sample = SampleAgentResponse(
+            status="resumed",
+            workspace="sample-uuid123",
+            studio_url="/studio/workspaces/sample-uuid123/dashboard",
+            agent="email-security-triage",
+            deployment="email-security-triage-123",
+            deployment_status="failed",
+        )
+
+        with patch(f"{SETUP_MOD}.console"):
+            assert not _wait_for_sample_deployment(agents_client, sample)
+
+        agents_client.get_deployment.assert_not_called()
+
+
 class TestPrintSampleSetupComplete:
     def test_shows_studio_link_and_workspace_removal_command(self):
         with patch(f"{SETUP_MOD}.console") as mock_console:
-            _print_sample_setup_complete("http://localhost:8080/", complete=True)
+            _print_sample_setup_complete("http://localhost:8080/", "sample-uuid123", complete=True)
 
         panel = mock_console.print.call_args.args[0]
         assert panel.title == "[bold]Sample agent[/bold]"
         assert panel.border_style == "green"
         assert "Sample workspace ready" in panel.renderable
-        assert "http://localhost:8080/studio/workspaces/sample/dashboard" in panel.renderable
-        assert "nemo workspaces delete sample" in panel.renderable
+        assert "http://localhost:8080/studio/workspaces/sample-uuid123/dashboard" in panel.renderable
+        assert "nemo workspaces delete sample-uuid123" in panel.renderable
         assert "optimization" not in panel.renderable.lower()
 
     def test_warns_when_sample_setup_is_incomplete(self):
         with patch(f"{SETUP_MOD}.console") as mock_console:
-            _print_sample_setup_complete("http://localhost:8080/", complete=False)
+            _print_sample_setup_complete("http://localhost:8080/", "sample-uuid123", complete=False)
 
         panel = mock_console.print.call_args.args[0]
         assert panel.border_style == "yellow"
