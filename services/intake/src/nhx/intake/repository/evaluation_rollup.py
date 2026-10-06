@@ -16,6 +16,7 @@ class ScoreRollup:
     p95: float | None
     p99: float | None
     count: int
+    failed_count: int = 0
 
 
 @dataclass

@@ -201,8 +201,8 @@ def test_usage_show_sdk_download_failure_exits_cleanly(app, monkeypatch) -> None
 
     sdk = type("_BoomSDK", (), {"build_files_client": lambda self: BoomFiles()})()
     monkeypatch.setattr(
-        "nemo_agents_plugin.usage.sources.fileset.client_from_platform",
-        lambda _platform, _client_cls: BoomFiles(),
+        "nemo_agents_plugin.usage.sources.fileset.FilesClient.from_client",
+        lambda _platform: BoomFiles(),
     )
     with patch("nemo_agents_plugin.usage.cli._build_sdk", return_value=sdk):
         result = runner.invoke(app, ["usage", "show", "missing-fileset"])
@@ -346,7 +346,7 @@ def test_fileset_path_stages_nested_paths_preserving_relative(app, tmp_path: Pat
 
     from nemo_agents_plugin.usage.sources.fileset import FilesetRef, fileset_path
 
-    with fileset_path(FilesetRef("nested-fs"), sdk=fake, workspace="default") as staged_dir:
+    with fileset_path(FilesetRef("nested-fs"), client=fake, workspace="default") as staged_dir:
         assert (staged_dir / "top.txt").read_text() == "top"
         assert (staged_dir / "configs" / "v1" / "config.json").read_text() == '{"a": 1}'
 
@@ -386,10 +386,10 @@ def test_usage_show_fileset_builds_sdk_with_context_base_url_and_auth(app, tmp_n
     captured: dict[str, object] = {}
 
     @contextmanager
-    def fake_fileset_path(_ref, *, sdk, workspace):
-        assert isinstance(sdk, NemoClient)
-        captured["base_url"] = sdk.base_url
-        captured["default_headers"] = sdk.default_headers
+    def fake_fileset_path(_ref, *, client, workspace):
+        assert isinstance(client, NemoClient)
+        captured["base_url"] = client.base_url
+        captured["default_headers"] = client.default_headers
         yield tmp_natjobs_dir
 
     with patch("nemo_agents_plugin.usage.cli.fileset_path", fake_fileset_path):

@@ -49,7 +49,7 @@ contexts:
 
 Basic Usage:
 ```python
-from nemo_helix.config import get_context
+from nemo_helix_ext.config import get_context
 
 # Get the resolved configuration context
 context = get_context()
@@ -92,7 +92,9 @@ With CLI (Typer) - using dependency injection:
 from pathlib import Path
 from typing import Optional
 import typer
-from nemo_helix.config import get_context, ConfigParams, OutputFormat, Context
+from nemo_helix_ext.config import get_context
+from nemo_helix_ext.config.models import ConfigParams, Context
+from nemo_helix_ext.config.types import OutputFormat
 
 app = typer.Typer()
 
@@ -105,7 +107,7 @@ def main(
     workspace: Optional[str] = typer.Option(None, "--workspace", "-n"),
     output: Optional[OutputFormat] = typer.Option(None, "--output", "-o"),
 ):
-    """nemo_helix CLI."""
+    """nemo CLI."""
     # Build config parameters from CLI options
     params: ConfigParams = {}
     if context:
@@ -138,7 +140,8 @@ def status(ctx: typer.Context):
 
 With SDK Parameters:
 ```python
-from nemo_helix.config import get_context, ConfigParams
+from nemo_helix_ext.config import get_context
+from nemo_helix_ext.config.models import ConfigParams
 
 # Set parameters programmatically
 params: ConfigParams = {
@@ -155,7 +158,7 @@ print(f"Using: {context.context_name} / {context.workspace}")
 
 Advanced Usage with Config class:
 ```python
-from nemo_helix.config import Config
+from nemo_helix_ext.config.config import Config
 
 # Load config and use it explicitly (for more control)
 config = Config.load(config_path="/path/to/config.yaml")

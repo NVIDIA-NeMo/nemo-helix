@@ -6,9 +6,9 @@ interface for building authenticated
 :class:`~nemo_helix_plugin.client.client.NemoClient` /
 :class:`~nemo_helix_plugin.client.client.AsyncNemoClient` handles.
 
-This is the :class:`~nemo_helix_plugin.client.client.NemoClient` sibling of
-:mod:`nemo_helix_plugin.sdk_provider`.  Plugin authors call
-:func:`get_nemo_client` / :func:`get_async_nemo_client` here instead of
+Plugin authors call :func:`get_nemo_client` / :func:`get_async_nemo_client`
+(and :func:`get_task_nemo_client` / :func:`get_async_task_nemo_client` inside
+task containers) here instead of
 importing from ``nhx.common``.  This keeps ``nemo-helix-plugin`` free of any
 ``nhx-common`` dependency while still allowing the platform to register a richer
 provider (URL routing, shared HTTP clients, OTEL headers, workload identity,
@@ -93,8 +93,7 @@ class NemoClientProvider(Protocol):
     ) -> NemoClient:
         """Build a sync NemoClient for use inside a task container.
 
-        Mirrors ``nhx.common.sdk_factory.get_task_sdk``: authenticate as
-        ``service:{service_name}`` while acting on behalf of the job creator
+        Authenticate as ``service:{service_name}`` while acting on behalf of the job creator
         (read from ``NHX_PRINCIPAL``), or bootstrap workload-identity bearer-token
         exchange when ``NHX_WORKLOAD_IDENTITY_TOKEN_FILE`` is set.
         """
@@ -174,7 +173,7 @@ def _build_headers(
         # An explicit override wins over any on-behalf-of delegation carried by
         # the env principal.  Drop the principal's stale sub-headers so we don't
         # ship a mismatched delegated identity (correct id but wrong
-        # email/groups) -- mirrors nhx.common.sdk_factory._get_default_headers.
+        # email/groups).
         headers.pop("X-NHX-Principal-On-Behalf-Of-Email", None)
         headers.pop("X-NHX-Principal-On-Behalf-Of-Groups", None)
         headers.pop("X-NHX-Subject-Account-Id", None)
@@ -211,9 +210,8 @@ def _effective_on_behalf_of(principal: dict[str, Any]) -> tuple[str, list[str], 
 def _build_task_headers(service_name: str) -> dict[str, str]:
     """Headers for a task container: service principal + creator delegation.
 
-    Wire-equivalent to ``get_task_sdk(as_service=service_name)`` in the
-    non-workload-identity path -- ``service:{service_name}`` plus the full
-    ``X-NHX-Principal-On-Behalf-Of*`` set derived from ``NHX_PRINCIPAL``.
+    In the non-workload-identity path this is ``service:{service_name}`` plus
+    the full ``X-NHX-Principal-On-Behalf-Of*`` set derived from ``NHX_PRINCIPAL``.
     """
     headers: dict[str, str] = {
         _INTERNAL_REQUEST_HEADER: "true",
@@ -473,8 +471,7 @@ def get_async_nemo_client(
 def get_task_nemo_client(service_name: str, *, workspace: str | None = None) -> NemoClient:
     """Build a sync NemoClient for use inside a task container.
 
-    NemoClient counterpart of ``nhx.common.sdk_factory.get_task_sdk``.  Reads the
-    job creator's principal from ``NHX_PRINCIPAL`` and authenticates as
+    Reads the job creator's principal from ``NHX_PRINCIPAL`` and authenticates as
     ``service:{service_name}`` while acting on behalf of that creator, or --
     when ``NHX_WORKLOAD_IDENTITY_TOKEN_FILE`` is set -- bootstraps
     workload-identity bearer-token exchange instead of trusted ``X-NHX-*``
@@ -494,8 +491,8 @@ def get_async_task_nemo_client(service_name: str, *, workspace: str | None = Non
 def get_forwarding_headers(client: NemoClient | AsyncNemoClient) -> dict[str, str]:
     """Return default headers that should be forwarded to nested platform calls.
 
-    This is the NemoClient equivalent of
-    :func:`nemo_helix_plugin.sdk_provider.get_forwarding_headers`. Guardrails
+    Use this when forwarding identity and observability context through a
+    non-NemoClient HTTP client (e.g. LangChain's ``ChatNVIDIA``). Guardrails
     middleware uses it to propagate service-principal and tracing headers into
     model calls made by cached LangChain clients.
     """

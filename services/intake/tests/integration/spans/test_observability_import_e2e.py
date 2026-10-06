@@ -10,10 +10,11 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.intake.client import IntakeClient
+from nhx.testing import nemo_client_for_test_client
 
 ROOT = Path(__file__).resolve().parents[5]
 SCRIPTS = ROOT / "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-intake/scripts"
@@ -29,17 +30,6 @@ def _import_scripts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.syspath_prepend(str(SCRIPTS))
 
 
-class _TestClientSession:
-    def __init__(self, client: TestClient) -> None:
-        self.client = client
-
-    def request(self, method: str, url: str, **kwargs: Any) -> Any:
-        kwargs.pop("follow_redirects", None)
-        kwargs.pop("timeout", None)
-        parsed = urlsplit(url)
-        return self.client.request(method, parsed.path, follow_redirects=False, **kwargs)
-
-
 @pytest.mark.parametrize("provider", ["mlflow", "langsmith", "phoenix", "braintrust"])
 def test_provider_fixture_full_import_is_lossless_and_replay_safe(client: TestClient, provider: str) -> None:
     common = importlib.import_module("_import_common")
@@ -47,9 +37,9 @@ def test_provider_fixture_full_import_is_lossless_and_replay_safe(client: TestCl
     _rebase_span_times_inside_retention(bundle)
     golden = _json(f"expected-{provider}.json")
     writer = common.IntakeWriter(
-        base_url="http://127.0.0.1:8080",
+        base_url=None,
         workspace="default",
-        session=_TestClientSession(client),
+        client=nemo_client_for_test_client(client, IntakeClient, workspace="default"),
     )
 
     first = writer.write(bundle, batch_size=2)

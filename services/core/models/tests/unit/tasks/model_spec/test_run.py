@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.metadata import FilesetMetadata
 from nemo_helix_plugin.files.storage_config import LocalStorageConfig
@@ -119,15 +119,17 @@ def _fileset(tmp_path: Path) -> FilesetOutput:
 
 
 def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path) -> None:
-    files_sdk = MagicMock()
-    files_sdk.list.return_value = SimpleNamespace(
+    transfer_mock = MagicMock()
+    transfer_mock.list_files.return_value = SimpleNamespace(
         data=[
             SimpleNamespace(path="config.json"),
             SimpleNamespace(path="model.safetensors"),
         ]
     )
-    files_sdk.download.side_effect = lambda **kwargs: kwargs["local_path"].mkdir(parents=True, exist_ok=True)
-    sdk = cast(NeMoHelix, SimpleNamespace(files=files_sdk))
+    transfer_mock.download.side_effect = lambda _files, **kwargs: Path(kwargs["local_path"]).mkdir(
+        parents=True, exist_ok=True
+    )
+    client = MagicMock(spec=NemoClient)
 
     model_name = "qwen3-0-6b-automodel"
     model_entity = _model_entity(model_name)
@@ -144,13 +146,6 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
 
     files_client = MagicMock()
     files_client.get_fileset.return_value = _Response(fileset)
-
-    def client_factory(_sdk: NeMoHelix, client_cls: type[Any]) -> Any:
-        if client_cls is ModelsClient:
-            return models_client
-        if client_cls is FilesClient:
-            return files_client
-        raise AssertionError(f"Unexpected client class: {client_cls}")
 
     inferred_spec = _core_model_spec()
     parallelism_api = types.ModuleType("nhx.core.models.parallelism.api")
@@ -182,9 +177,11 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
                 "nhx.core.models.parallelism.api": parallelism_api,
             },
         ),
-        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", side_effect=client_factory),
+        patch.object(ModelsClient, "from_client", return_value=models_client),
+        patch.object(FilesClient, "from_client", return_value=files_client),
+        patch("nhx.core.models.tasks.model_spec.run.transfer", transfer_mock),
     ):
-        runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
+        runner = ModelSpecRunner(client=client, job_ctx=job_ctx)
         result = runner.analyze_checkpoint(ModelSpecTaskConfig(workspace="default", name=model_name))
 
     models_client.update_model.assert_called_once()
@@ -219,9 +216,10 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         "file_listing": ["config.json", "model.safetensors"],
     }
 
-    files_sdk.download.assert_called_once_with(
+    transfer_mock.download.assert_called_once_with(
+        files_client,
         remote_path=["config.json"],
-        local_path=tmp_path / "model",
+        local_path=str(tmp_path / "model"),
         fileset="qwen3-fileset",
         workspace="default",
     )

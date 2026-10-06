@@ -13,7 +13,7 @@ from nemo_deployments_plugin.backends.base import DeploymentBackend, MissingBack
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
 from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 from nemo_deployments_plugin.backends.openshell.backend import OpenShellDeploymentBackend
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class ExecutorRegistry:
     @classmethod
     def from_config(
         cls,
-        sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         specs: list[ExecutorSpec],
         *,
         default_executor: str | None = None,
@@ -80,7 +80,7 @@ class ExecutorRegistry:
                 if spec.backend not in classes:
                     raise UnknownBackendTypeError(f"Unknown backend type '{spec.backend}' for executor '{spec.name}'.")
                 try:
-                    executors[spec.name] = classes[spec.backend](sdk, spec.config)
+                    executors[spec.name] = classes[spec.backend](client, spec.config)
                 except MissingBackendDependencyError as exc:
                     # Capability missing (optional packaging extra, unreachable Docker
                     # daemon, etc.): skip just that executor so the deployments service

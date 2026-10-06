@@ -4,7 +4,8 @@
 """Concise examples for the Evaluator plugin SDK surfaces.
 
 These functions are intentionally not called at import time. Copy the one that
-matches the feature being used and supply a configured NeMo Helix client.
+matches the feature being used and supply an object whose ``evaluator`` attribute is a
+``nemo_evaluator.sdk.Evaluator`` built from an ``EvaluatorClient``.
 """
 
 from __future__ import annotations

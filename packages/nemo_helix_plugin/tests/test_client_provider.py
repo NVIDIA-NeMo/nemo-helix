@@ -108,7 +108,7 @@ class TestBuildHeaders:
         # An explicit on_behalf_of must not leave behind the env principal's
         # delegated email/groups sub-headers: those describe a different
         # identity.  Only the overridden -On-Behalf-Of id should survive, matching
-        # nhx.common.sdk_factory._get_default_headers.
+        # nhx.common.platform_client_context._request_principal_headers.
         monkeypatch.setenv(
             "NHX_PRINCIPAL",
             json.dumps(

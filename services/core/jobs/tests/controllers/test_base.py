@@ -587,9 +587,11 @@ def _make_task(status: str = "active", updated_at: datetime.datetime | None = No
     return task
 
 
-def _make_backend(mock_sdk: NemoClient | None = None) -> MockKubernetesCPUJobBackend:
-    sdk = mock_sdk or NemoClient(base_url="http://localhost:8000")
-    return MockKubernetesCPUJobBackend(nhx_sdk=sdk, execution_profile_config=MagicMock(), profile_name="default")
+def _make_backend(mock_client: NemoClient | None = None) -> MockKubernetesCPUJobBackend:
+    nemo_client = mock_client or NemoClient(base_url="http://localhost:8000")
+    return MockKubernetesCPUJobBackend(
+        nemo_client=nemo_client, execution_profile_config=MagicMock(), profile_name="default"
+    )
 
 
 @contextmanager
@@ -597,8 +599,7 @@ def _patched_jobs_client(backend):
     """Stub the backend's held ``self._jobs`` handle and yield the mock ``JobsClient``.
 
     The backend builds its typed Jobs client once in ``JobBackend.__init__`` and
-    reuses it as ``self._jobs``, so tests stub that handle directly (rather than
-    patching ``client_from_platform``). ``check_step_is_stale`` fetches tasks via
+    reuses it as ``self._jobs``, so tests stub that handle directly. ``check_step_is_stale`` fetches tasks via
     ``self._jobs.list_job_step_tasks(...).data()``; the returned page exposes the
     task list on its ``.data`` attribute.
     """

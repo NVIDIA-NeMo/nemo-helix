@@ -38,8 +38,7 @@ from nhx.common.jobs.log_client import dep_job_logs_client
 def jobs_client(test_client: AsyncClient) -> AsyncJobsClient:
     """A typed AsyncJobsClient bound to the in-memory Jobs app.
 
-    Mirrors how ``test_sdk`` builds the Stainless SDK, but returns the new
-    typed client so responses flow through ``NemoClient.send()``.
+    Responses flow through ``NemoClient.send()``.
     """
     return AsyncJobsClient(base_url=str(test_client.base_url), http_client=test_client)
 

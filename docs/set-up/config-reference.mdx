@@ -620,9 +620,9 @@ models:
     drift_recovery_base_delay_seconds: 30
     # Maximum delay in seconds between drift recovery attempts (caps exponential backoff) | default: 300
     drift_recovery_max_delay_seconds: 300
-    # Per-request timeout in seconds for GET /v1/models provider autodiscovery via the inference gateway. External providers (e.g. NVIDIA Build) can return large model lists and need longer than the SDK default. | default: 180
+    # Per-request timeout in seconds for GET /v1/models provider autodiscovery via the inference gateway. External providers (e.g. NVIDIA Build) can return large model lists and need longer than the client default. | default: 180
     provider_discovery_timeout_seconds: 180
-    # SDK retry count for provider autodiscovery requests. The controller loop already retries on each cycle; disabling SDK retries avoids multi-minute retry storms on slow upstreams. | default: 0
+    # Client retry count for provider autodiscovery requests. The controller loop already retries on each cycle; disabling client retries avoids multi-minute retry storms on slow upstreams. | default: 0
     provider_discovery_max_retries: 0
   # Parallelism estimation heuristics (model size thresholds, TP/PP/DP/CP/EP costs, balance bonuses)
   parallelism:

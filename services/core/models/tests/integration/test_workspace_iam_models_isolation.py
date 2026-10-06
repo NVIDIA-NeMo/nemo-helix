@@ -250,7 +250,7 @@ class TestWorkspaceIamIsolationTypedClient:
 
 @pytest.mark.integration
 class TestWorkspaceIamIsolationHttpRequests:
-    """Same flow: ``requests`` to models/entities; fileset setup uses the NeMo file APIs via SDK (matches other integration tests)."""
+    """Same flow: ``requests`` to models/entities; fileset setup uses the NeMo file APIs via the typed client (matches other integration tests)."""
 
     def test_model_and_adapter_iam(
         self,

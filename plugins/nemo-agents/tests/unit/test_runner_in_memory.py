@@ -609,8 +609,11 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
     with (
         patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=_files_client_at(STAGED_SHA)),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch(
+            "nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client",
+            return_value=_files_client_at(STAGED_SHA),
+        ),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
         info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
@@ -641,8 +644,8 @@ async def test_create_deployment_cleans_base_dir_when_staging_fails(tmp_path: Pa
 
     with (
         patch("nemo_agents_plugin.runner.in_memory.stage_fabric_ethos_dir", _stage_fabric_ethos_dir),
-        patch("nemo_agents_plugin.runner.in_memory.get_async_platform_sdk", MagicMock()),
-        patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.get_async_nemo_client", MagicMock()),
+        patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=MagicMock()),
     ):
         with pytest.raises(FabricArtifactStagingError, match="skills/review"):
             await backend.create_deployment("ws", "fabric-dep", config, port=0, agent="fabric-agent")
@@ -698,10 +701,10 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
         with (
             patch("nemo_agents_plugin.runner.in_memory.validate_platform_agent_config", _validate),
             patch(
-                "nemo_agents_plugin.runner.in_memory.get_async_platform_sdk",
+                "nemo_agents_plugin.runner.in_memory.get_async_nemo_client",
                 return_value=MagicMock(),
             ),
-            patch("nemo_agents_plugin.runner.in_memory.client_from_platform", return_value=files_client),
+            patch("nemo_agents_plugin.runner.in_memory.AsyncFilesClient.from_client", return_value=files_client),
             patch("nemo_agents_plugin.runner.fabric_artifact_staging._download_fileset", _download_fileset),
             patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
         ):

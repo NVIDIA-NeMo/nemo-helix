@@ -12,8 +12,7 @@ from typing import Any
 from kubernetes import client, config
 from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import job_storage_subpath as build_job_storage_subpath
 from nemo_helix_plugin.jobs.execution_profiles import (
@@ -1159,8 +1158,8 @@ def create_pod_template_spec(
 
     # Set auth context env var for job containers to make authenticated API calls
     if step.auth_context and not workload_identity_enabled:
-        sdk_auth_context = step.auth_context
-        auth_context = AuthContext.model_validate(sdk_auth_context.model_dump(mode="python", exclude_none=True))
+        step_auth_context = step.auth_context
+        auth_context = AuthContext.model_validate(step_auth_context.model_dump(mode="python", exclude_none=True))
         principal = auth_context.to_principal()
         env_var_dict = principal.get_env_var()
         for name, value in env_var_dict.items():
@@ -1380,7 +1379,7 @@ def create_pod_template_spec(
 
 
 def update_all_tasks(
-    nhx_sdk: NeMoHelix,
+    nemo_client: NemoClient,
     core_v1: client.CoreV1Api,
     namespace: str,
     step: HelixJobStepWithContext,
@@ -1416,7 +1415,7 @@ def update_all_tasks(
             error_details["message"] = f"Pod {pod_status.name} is in error state"
 
         # Upsert the task against the Jobs API.
-        client_from_platform(nhx_sdk, JobsClient).update_job_step_task(
+        JobsClient.from_client(nemo_client).update_job_step_task(
             name=pod_status.task_id,
             workspace=step.workspace,
             job=step.job,

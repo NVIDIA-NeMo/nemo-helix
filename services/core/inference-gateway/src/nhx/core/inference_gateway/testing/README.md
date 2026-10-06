@@ -110,15 +110,15 @@ These run the same code as production:
 3. **Plugin code** — `process_request` / `process_response` / `process_post_response` are the production methods.
 4. **Real HTTP from IGW to the upstream** — `aiohttp` connects to `pytest_httpserver` over a real socket. Header dropping, body framing, content-length all behave as in production.
 5. **Real HTTP from plugin outbound calls** — plugin-originated requests (e.g. Guardrails' rail calls) terminate at the same socket.
-6. **SDK clients** — `NeMoHelix` (sync) and `AsyncNeMoHelix` (async) via `httpx.ASGITransport`.
-7. **Entity store** — in-memory; entities created via the SDK persist and are read back during cache refreshes.
+6. **Typed clients** — `NemoClient` (sync) and `AsyncNemoClient` (async) via `httpx.ASGITransport`.
+7. **Entity store** — in-memory; entities created via the typed clients persist and are read back during cache refreshes.
 8. **Cache refresh** — `refresh_virtual_model_cache` and `refresh_model_cache` with real implementations.
 9. **Middleware config pre-resolution** — `validate_middleware_config` runs for every VM with middleware entries.
 
 ## What is mocked or substituted
 
 1. **The upstream NIM** — `MockChatCompletionsHandler` serves canned responses. The only unavoidable mock.
-2. **SDK transport** — `httpx.ASGITransport` (no real port for IGW). The loopback variant adds a real port.
+2. **Client transport** — `httpx.ASGITransport` (no real port for IGW). The loopback variant adds a real port.
 3. **Plugin discovery** — bypassed when using `use_plugin`. Use `load_plugin` for production parity.
 4. **`get_platform_config()`** — patched in the loopback variant so the resolver returns the loopback URL.
 5. **`global_http_client`** — replaced with per-request sessions in the loopback variant (loop-binding workaround).
@@ -142,7 +142,7 @@ These run the same code as production:
 |---|---|
 | `add_provider(workspace, served_models, ...)` | Register a `ModelProvider` routed at the mock NIM. Call **before** `add_virtual_model`. Tracked for entity-store cleanup. |
 | `add_virtual_model(workspace, name, ...)` | Create a `VirtualModel` and refresh caches so it routes immediately. Tracked for entity-store cleanup. |
-| `create_secret(workspace, name, value, ...)` | Create a Secret via the SDK and track it for harness cleanup. Use this instead of `harness.sdk.secrets.create(...)` so the secret is deleted between tests in a module-scoped fixture. |
+| `create_secret(workspace, name, value, ...)` | Create a Secret through the typed secrets client and track it for harness cleanup. Use this instead of `SecretsClient.from_client(harness.client).create_secret(...)` so the secret is deleted between tests in a module-scoped fixture. |
 | `mock_chat_completions(model, responses)` | Queue mock responses for a model. Responses are consumed in order; the last is reused if drained. |
 | `load_plugin(name)` / `use_plugin(name, instance)` | Register a plugin (context manager). |
 | `refresh_caches()` | Full model + VM cache refresh. Needed when `api_key_secret_name` is set on a provider. |
@@ -158,7 +158,7 @@ the fixture changes.
 
 | Method | Description |
 |---|---|
-| `chat_completions(workspace, body)` | Non-streaming chat completion via the SDK. |
+| `chat_completions(workspace, body)` | Non-streaming chat completion through the gateway client. |
 | `stream_chat_completions(workspace, body)` | Streaming chat completion. Returns parsed SSE chunks (`list[dict]`) for `text/event-stream` responses, or the raw JSON body (`dict`) when a plugin short-circuits with an immediate response. |
 | `achat_completions(workspace, body)` | Async sibling of `chat_completions`. |
 
@@ -222,7 +222,7 @@ After deletion the in-memory caches are rebuilt so the next test's
 `add_provider` doesn't see ghost `ModelProviderInfo` rows.
 
 **Only entities created through the harness are tracked.** A direct
-`harness.sdk.<entity>.create(...)` call leaks across tests under
+`XClient.from_client(harness.client).create_<entity>(...)` call leaks across tests under
 module scope, and may then be picked up by the next
 `refresh_model_cache` — triggering `notify_upserted` on a dead VM, or
 making `add_provider` see stale provider rows.
@@ -232,12 +232,12 @@ you need to create outside the harness, either append to the relevant
 tracking list yourself (e.g. `harness._secrets.append((ws, name))`) or
 delete in an explicit `try/finally` around the test body.
 
-## Plugin lifecycle and shared SDK clients
+## Plugin lifecycle and shared clients
 
 `use_plugin` / `load_plugin` run the plugin's `on_startup` on enter
 and `on_shutdown` on exit. The catch with module scope: the shared
-SDK HTTP client now lives across tests, so a plugin's `on_shutdown`
-calling `await sdk.close()` (as `nemo-guardrails` does) would close
+HTTP client now lives across tests, so a plugin's `on_shutdown`
+calling `await client.close()` (as `nemo-guardrails` does) would close
 the shared client and break every later test in the module.
 
 The module fixture monkey-patches the shared client's `aclose` to a
@@ -246,7 +246,7 @@ nothing actually leaks. Plugin authors don't need to do anything
 special — `on_shutdown` still runs; only the close is intercepted.
 
 If your plugin owns separate resources (custom pools, background
-tasks, on-disk caches), close those normally — only the shared SDK's
+tasks, on-disk caches), close those normally — only the shared client's
 close is intercepted.
 
 ## Limitations under module scope
@@ -262,7 +262,7 @@ module scope:
   (`os.environ.setdefault(...)` at module level) or in a
   `scope="module", autouse=True` fixture. The `nemo-guardrails`
   conftest's `HF_HUB_OFFLINE` setup is the worked example.
-* **Direct `harness.sdk.<entity>.create(...)` calls** — leaks; see
+* **Direct `XClient.from_client(harness.client).create_<entity>(...)` calls** — leaks; see
   [Entity teardown](#entity-teardown-across-tests).
 * **Per-call extra services to `igw_loopback_harness`** — now raises
   `TypeError`. Override `_igw_extra_services` instead.

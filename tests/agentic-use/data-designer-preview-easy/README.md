@@ -3,8 +3,8 @@
 
 # Data Designer Preview - Harbor Test (Easy)
 
-> **Note:** This eval uses a mix of CLI and Python SDK. The `nemo data-designer preview`
-> CLI command does not exist — the agent must use the Python SDK
+> **Note:** This eval uses a mix of CLI and Python client. The `nemo data-designer preview`
+> CLI command does not exist — the agent must use the Python client
 > (`DataDesignerConfigBuilder` + `client.data_designer.preview()`) to run the preview.
 > Model registration also requires the SDK (`inference.providers.update_status`).
 > Only secrets and provider creation use the CLI. The easy variant provides full
@@ -18,7 +18,7 @@ preview with sampler columns, column relationships, and LLM-generated text.
 - Setting up an inference provider (secret, provider, served model registration)
 - Constructing a Data Designer configuration with sampler and LLM text columns
 - Configuring column relationships (subcategory depends on category)
-- Running a preview via the Python SDK and verifying output
+- Running a preview via the Python client and verifying output
 
 ## Columns
 

@@ -17,9 +17,6 @@ from fastapi import HTTPException, Request
 from fastapi import status as http_status
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.inference_middleware import (
@@ -29,6 +26,7 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareError,
     InferenceResponse,
 )
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
@@ -973,7 +971,7 @@ async def virtual_model_proxy(
     request: Request,
     workspace: str,
     vm_name: str,
-    virtual_model: "SDKVirtualModel",
+    virtual_model: VirtualModel,
     trailing_uri: str,
     json_body: dict[str, Any],
     http_client: ClientSession,
@@ -1323,14 +1321,14 @@ async def virtual_model_proxy(
     return final_response
 
 
-async def retrieve_secret_value(workspace: str, secret_name: str, secrets_sdk: AsyncNeMoHelix) -> str:
+async def retrieve_secret_value(workspace: str, secret_name: str, client: AsyncNemoClient) -> str:
     """
     Retrieve a raw API key from the Platform Secrets service.
 
     Args:
         workspace: The workspace containing the secret
         secret_name: The name of the secret to retrieve
-        secrets_sdk: The async NeMoHelix SDK client configured for secrets service
+        client: The async platform client used to reach the secrets service
 
     Returns:
         The raw secret string (e.g., "sk-ant-...")
@@ -1340,7 +1338,7 @@ async def retrieve_secret_value(workspace: str, secret_name: str, secrets_sdk: A
     """
     try:
         logger.debug(f"Retrieving API key from secrets service: {workspace}/{secret_name}")
-        secrets = client_from_platform(secrets_sdk, AsyncSecretsClient)
+        secrets = AsyncSecretsClient.from_client(client)
         response = (await secrets.access_secret(name=secret_name, workspace=workspace)).data()
         api_key = response.value
 

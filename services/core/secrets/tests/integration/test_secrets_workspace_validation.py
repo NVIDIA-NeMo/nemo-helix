@@ -17,11 +17,11 @@ from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 class TestSecretWorkspaceValidation:
     """Verify that secrets cannot be created in non-existent workspaces."""
 
-    def test_create_secret_in_nonexistent_workspace_fails(self, sdk: SecretsClient):
+    def test_create_secret_in_nonexistent_workspace_fails(self, secrets_client: SecretsClient):
         """Creating a secret in a workspace that doesn't exist should return 422."""
         workspace = "nonexistent-workspace"
         with pytest.raises(UnprocessableEntityError) as exc_info:
-            sdk.create_secret(
+            secrets_client.create_secret(
                 workspace=workspace,
                 body=HelixSecretCreateRequest(name="my-secret", value="my-secret-value"),
             )

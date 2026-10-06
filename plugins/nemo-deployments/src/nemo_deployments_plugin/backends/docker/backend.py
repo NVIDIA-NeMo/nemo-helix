@@ -103,7 +103,6 @@ from nemo_helix_plugin.auth.workload_identity import (
     workload_identity_env,
 )
 from nemo_helix_plugin.capabilities import docker_from_env_kwargs, probe_docker
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import (
@@ -210,7 +209,7 @@ class DockerDeploymentBackend(DeploymentBackend):
         self._docker = docker
         self._docker_errors = docker_errors
         self._executor_config = DockerExecutorConfig.model_validate(self._config)
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._nemo_client))
         self._workload_delegations = WorkloadDelegationStore(self._entities)
         self._gpu_pool = get_shared_gpu_pool()
         docker_host = self._executor_config.docker_host
@@ -297,7 +296,7 @@ class DockerDeploymentBackend(DeploymentBackend):
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
-            config = await resolve_deployment_config_secrets(self._sdk, config)
+            config = await resolve_deployment_config_secrets(self._nemo_client, config)
             plan = build_docker_plan(config)
         except DeploymentConfigError as exc:
             return BackendStatusUpdate(status="FAILED", status_message=str(exc))

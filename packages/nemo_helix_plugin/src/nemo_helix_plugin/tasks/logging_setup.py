@@ -16,8 +16,7 @@ dispatched through :mod:`nemo_helix_plugin.tasks.dispatcher`.
 Lookup order for the provider
 -----------------------------
 
-Mirrors :mod:`nemo_helix_plugin.client_provider` and
-:mod:`nemo_helix_plugin.sdk_provider`, for the same reason: it lets the
+Mirrors :mod:`nemo_helix_plugin.client_provider`, for the same reason: it lets the
 platform supply a richer implementation without ``nemo-helix-plugin`` ever
 depending on ``nhx-common``.
 
@@ -29,7 +28,7 @@ depending on ``nhx-common``.
 3. **Built-in default** - :class:`DefaultTaskLoggingProvider`, a plain stderr
    handler. Covers local development and any image without ``nhx-common``.
 
-Unlike the client and SDK providers, a provider that fails to load here is
+Unlike the client provider, a provider that fails to load here is
 downgraded to the default rather than raised: logging is diagnostic
 scaffolding, and failing a task because its logging setup broke would destroy
 the very evidence needed to debug it.

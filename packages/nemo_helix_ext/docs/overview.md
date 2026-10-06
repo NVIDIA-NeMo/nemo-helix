@@ -93,8 +93,9 @@ class CLIContext:
     # Lazy-loaded SDK context
     _sdk_context: Context | None = None
 
-    # Lazy-created client
-    _client: NeMoHelix | None = None
+    # Lazy-created typed clients
+    _client: NemoClient | None = None
+    _async_client: AsyncNemoClient | None = None
 
     # Additional settings
     quickstart_settings: QuickstartSettings | None = None

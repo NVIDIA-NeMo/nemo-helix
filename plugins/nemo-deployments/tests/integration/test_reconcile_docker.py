@@ -43,13 +43,13 @@ pytestmark = [
 
 @pytest.fixture
 def docker_registry() -> ExecutorRegistry:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"pull_images": True})
+        backend = DockerDeploymentBackend(mock_client, {"pull_images": True})
     return ExecutorRegistry({"docker": backend}, default_executor="docker")
 
 

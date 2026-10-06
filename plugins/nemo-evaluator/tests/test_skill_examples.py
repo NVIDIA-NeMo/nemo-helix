@@ -660,7 +660,7 @@ def test_agent_evaluation_shows_how_to_retrieve_stored_trials() -> None:
     )
 
     assert 'agent_eval_results.retrieve("<result-name>")' in reference
-    assert "sdk.files.download(remote_path=stored.bundle_ref" in reference
+    assert "print(stored.bundle_ref)" in reference
     assert 'read_trials("previous-run")' in reference
     assert "nemo jobs results download agent-eval-results" in reference
     assert callable(read_trials)

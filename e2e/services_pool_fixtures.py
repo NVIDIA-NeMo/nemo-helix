@@ -11,7 +11,6 @@ from pathlib import Path
 import httpx
 import pytest
 from _pytest.reports import TestReport
-from nemo_helix import DefaultHttpxClient, NeMoHelix
 from nemo_helix_plugin.client.auth import StaticToken, TokenProvider, TokenProviderAuth
 from nemo_helix_plugin.client.client import DEFAULT_TIMEOUT, NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
@@ -120,22 +119,6 @@ def _services_instance(
 @pytest.fixture(scope="module")
 def _services(_services_instance: RunningServices) -> Iterator[str]:
     yield _services_instance.url
-
-
-@pytest.fixture(scope="module", name="services_pool_sdk")
-def services_pool_sdk(_services: str, _services_instance: RunningServices) -> NeMoHelix:
-    access_token = os.environ.get("NHX_ACCESS_TOKEN")
-    context_name = os.environ.get("NHX_CONTEXT_NAME")
-    headers = admin_headers() if _services_instance.auth_enabled else {}
-    http_client = DefaultHttpxClient(base_url=_services, verify=True) if _services_instance.proc is not None else None
-    return NeMoHelix(
-        base_url=_services,
-        access_token=access_token,
-        context_name=context_name,
-        http_client=http_client,
-        max_retries=2,
-        default_headers=headers,
-    )
 
 
 def _services_pool_auth() -> TokenProvider | None:

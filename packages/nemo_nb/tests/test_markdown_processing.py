@@ -264,10 +264,9 @@ echo 'hello'
                 "# @nemo-nb: insert\n"
                 "# @nemo-nb: insert :sync: sdk\n"
                 "# @nemo-nb: wrap-cell-end :::\n"
-                "from nemo_helix import NeMoHelix\n\n"
-                "client = NeMoHelix(\n"
+                "from nemo_helix_plugin.client.client import NemoClient\n\n"
+                "client = NemoClient(\n"
                 '    base_url="http://nemo.test",\n'
-                '    inference_base_url="http://nim.test",\n'
                 ")\n\n"
                 "deployment = client.deployment.model_deployments.create(\n"
                 '    name="llama-3.1-8b-instruct",\n'
@@ -315,7 +314,7 @@ echo 'hello'
                 last_pos = pos
 
             # Ensure the main client code is in the same cell
-            assert "from nemo_helix import NeMoHelix" in source
+            assert "from nemo_helix_plugin.client.client import NemoClient" in source
             assert "deployment = client.deployment.model_deployments.create(" in source
             assert "print(deployment)" in source
 

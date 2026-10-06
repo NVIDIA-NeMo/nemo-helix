@@ -13,7 +13,7 @@ from nemo_deployments_plugin.backends.k8s.backend import K8sDeploymentBackend
 
 
 @pytest.fixture
-def mock_sdk() -> MagicMock:
+def mock_client() -> MagicMock:
     return MagicMock()
 
 
@@ -34,17 +34,17 @@ def mock_k8s_clients() -> MagicMock:
 
 @pytest.fixture
 def k8s_backend(
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
     mock_k8s_clients: MagicMock,
     mock_entities: AsyncMock,
 ) -> Iterator[K8sDeploymentBackend]:
     with (
         patch("nemo_deployments_plugin.backends.k8s.backend.KubernetesClients", return_value=mock_k8s_clients),
-        patch("nemo_deployments_plugin.backends.k8s.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.k8s.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.k8s.backend.NemoEntitiesClient", return_value=mock_entities),
     ):
         backend = K8sDeploymentBackend(
-            mock_sdk,
+            mock_client,
             {"default_namespace": "nemo-deployments", "request_timeout": 30},
         )
         backend._entities = mock_entities

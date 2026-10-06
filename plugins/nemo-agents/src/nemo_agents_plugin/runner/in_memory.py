@@ -50,9 +50,8 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos
 from nemo_agents_plugin.spec_revision import SpecRevision, stage_with_spec_revision
 from nemo_agents_plugin.utils import get_base_url
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -484,8 +483,8 @@ class InMemoryRunnerBackend(RunnerBackend):
         base_dir: Path,
     ) -> SpecRevision | None:
         """Deliver the agent's Ethos fileset into *base_dir* and report what it staged."""
-        sdk = get_async_platform_sdk(as_service="agents", internal=True) if agent else None
-        files_client = client_from_platform(sdk, AsyncFilesClient) if sdk else None
+        client = get_async_nemo_client(as_service="agents", internal=True) if agent else None
+        files_client = AsyncFilesClient.from_client(client) if client else None
 
         async def _stage() -> None:
             await stage_fabric_ethos_dir(

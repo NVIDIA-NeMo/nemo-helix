@@ -47,7 +47,7 @@ def assert_exit_code() -> Callable[[Result, int], None]:
 
 @pytest.fixture(scope="module")
 def client_context() -> Generator[ClientContext, None, None]:
-    """ClientContext with the Auth, Files and Models services and ASGI-backed SDK clients."""
+    """ClientContext with the Auth, Files and Models services and ASGI-backed typed clients."""
     with create_test_client(AuthService, FilesService, ModelsService, client_type=ClientContext) as context:
         yield context
 
@@ -66,7 +66,7 @@ def nemo_client(client_context: ClientContext) -> NemoClient:
 
 @pytest.fixture(scope="module")
 def files_client(nemo_client: NemoClient) -> FilesClient:
-    """Provide a FilesClient derived from the typed platform client."""
+    """Provide a FilesClient sharing the test client's transport."""
     return FilesClient.from_client(nemo_client)
 
 

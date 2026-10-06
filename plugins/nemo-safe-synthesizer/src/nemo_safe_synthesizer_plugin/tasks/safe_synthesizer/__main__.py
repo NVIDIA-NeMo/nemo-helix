@@ -25,7 +25,6 @@ from typing import cast
 import pandas as pd
 from datasets import Dataset, DatasetDict, load_dataset
 from filesets import FilesetFileSystem, parse_fileset_ref
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.config import get_platform_config
@@ -67,12 +66,12 @@ def download_from_fileset(fileset_url: str) -> pd.DataFrame:
     """Download a dataset from a fileset and load it as a DataFrame."""
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
     workspace, fileset_name, _ = parse_fileset_ref(fileset_url, workspace_fallback=workspace)
-    sdk = get_nemo_client()
+    client = get_nemo_client()
 
     file_manager = FilesetFileManager(
         workspace=workspace,
         fileset_name=fileset_name,
-        filesystem=FilesetFileSystem(client=client_from_platform(sdk, FilesClient)),
+        filesystem=FilesetFileSystem(client=FilesClient.from_client(client)),
         ensure_fileset_exists=False,
     )
 
@@ -149,17 +148,17 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         raise ValueError(f"{NEMO_JOB_ID_ENVVAR} is not set")
 
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
-    sdk = get_nemo_client()
+    client = get_nemo_client()
     fileset_name = f"job-results-{job_id}"
     file_manager = FilesetFileManager(
         workspace=workspace,
         fileset_name=fileset_name,
-        filesystem=FilesetFileSystem(client=client_from_platform(sdk, FilesClient)),
+        filesystem=FilesetFileSystem(client=FilesClient.from_client(client)),
         ensure_fileset_exists=True,
     )
     file_manager.validate_storage()
 
-    jobs_client = client_from_platform(sdk, JobsClient)
+    jobs_client = JobsClient.from_client(client)
     completion_tokens = result.summary.num_completion_tokens
     if completion_tokens is not None:
         HelixJobUsageReporter(
@@ -179,30 +178,30 @@ def upload_results(result: SafeSynthesizerResults, adapter_path: Path | None = N
         result_csv_path = temp_path / "result.csv"
         result.synthetic_data.to_csv(result_csv_path, index=False)
         artifact_url = file_manager.upload(result_csv_path, f"results/{attempt_id}/synthetic-data")
-        _create_job_result(sdk, workspace, job_id, "synthetic-data", artifact_url)
+        _create_job_result(client, workspace, job_id, "synthetic-data", artifact_url)
 
         summary_json_path = temp_path / "summary.json"
         with open(summary_json_path, "w", encoding="utf-8") as f:
             json.dump(result.summary.model_dump(), f)
         artifact_url = file_manager.upload(summary_json_path, f"results/{attempt_id}/summary")
-        _create_job_result(sdk, workspace, job_id, "summary", artifact_url)
+        _create_job_result(client, workspace, job_id, "summary", artifact_url)
 
         if result.evaluation_report_html:
             report_html_path = temp_path / "report.html"
             with open(report_html_path, "w", encoding="utf-8") as f:
                 f.write(result.evaluation_report_html)
             artifact_url = file_manager.upload(report_html_path, f"results/{attempt_id}/evaluation-report")
-            _create_job_result(sdk, workspace, job_id, "evaluation-report", artifact_url)
+            _create_job_result(client, workspace, job_id, "evaluation-report", artifact_url)
 
     if adapter_path is not None and adapter_path.exists():
         embed_run_config_in_adapter(adapter_path)
         artifact_url = file_manager.upload(adapter_path, f"results/{attempt_id}/adapter")
-        _create_job_result(sdk, workspace, job_id, "adapter", artifact_url)
+        _create_job_result(client, workspace, job_id, "adapter", artifact_url)
 
 
-def _create_job_result(sdk: NemoClient, workspace: str, job_name: str, result_name: str, artifact_url: str):
+def _create_job_result(client: NemoClient, workspace: str, job_name: str, result_name: str, artifact_url: str):
     """Create a job result record."""
-    client_from_platform(sdk, JobsClient).create_job_result(
+    JobsClient.from_client(client).create_job_result(
         name=result_name,
         job=job_name,
         workspace=workspace,
@@ -215,14 +214,14 @@ def _resolve_pretrained_model(
     job_config: SafeSynthesizerJobConfig,
     *,
     workspace: str,
-    sdk: NemoClient | None = None,
+    client: NemoClient | None = None,
 ) -> tuple[TmpDirPath | None, Path | None]:
     """Download a prior job's adapter artifact from Files when ``pretrained_model_job`` is set."""
     if not job_config.pretrained_model_job:
         return None, None
 
-    if sdk is None:
-        sdk = get_nemo_client()
+    if client is None:
+        client = get_nemo_client()
 
     model_workspace, model_job = parse_pretrained_model_job_ref(
         job_config.pretrained_model_job,
@@ -230,7 +229,7 @@ def _resolve_pretrained_model(
     )
     try:
         adapter_result = (
-            client_from_platform(sdk, JobsClient)
+            JobsClient.from_client(client)
             .get_job_result(name="adapter", job=model_job, workspace=model_workspace)
             .data()
         )
@@ -246,7 +245,7 @@ def _resolve_pretrained_model(
     file_manager = FilesetFileManager(
         workspace=fileset_workspace,
         fileset_name=fileset_name,
-        filesystem=FilesetFileSystem(client=client_from_platform(sdk, FilesClient)),
+        filesystem=FilesetFileSystem(client=FilesClient.from_client(client)),
         ensure_fileset_exists=False,
     )
     tmp_dir_path = file_manager.download_from_url(adapter_result.artifact_url)
@@ -367,7 +366,7 @@ def run_from_env() -> None:
     """Run in the platform task-container environment."""
     initialize_observability()
     workspace = os.environ.get(NEMO_JOB_WORKSPACE_ENVVAR, "default")
-    sdk = get_nemo_client()
+    client = get_nemo_client()
     files_url = get_platform_config().get_service_url("files")
     if files_url:
         logger.info("Initializing model weights from Files API...")
@@ -395,7 +394,7 @@ def run_from_env() -> None:
 
     job_config = SafeSynthesizerJobConfig.model_validate(raw_job_config)
     save_path = Path(os.environ.get(EPHEMERAL_TASK_STORAGE_PATH_ENVVAR, DEFAULT_TASK_STORAGE_PATH))
-    pretrained_model_tmp, adapter_path = _resolve_pretrained_model(job_config, workspace=workspace, sdk=sdk)
+    pretrained_model_tmp, adapter_path = _resolve_pretrained_model(job_config, workspace=workspace, client=client)
     try:
         result, adapter_path = run_config(
             job_config,

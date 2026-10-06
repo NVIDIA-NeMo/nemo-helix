@@ -5,7 +5,7 @@
 
 Two complementary checks:
 
-1. A static scan asserts no module under ``nemo_helix_ext.cli`` imports the
+1. A static scan asserts no module in the ``nemo_helix_ext`` package imports the
    generated ``nemo_helix`` SDK.
 2. A runtime check runs the CLI in a subprocess with ``nemo_helix`` made
    un-importable, proving the CLI's import graph and the migrated command
@@ -24,10 +24,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import nemo_helix_ext.cli as cli_package
+import nemo_helix_ext
 import pytest
 
-CLI_ROOT = Path(cli_package.__file__).parent
+PACKAGE_ROOT = Path(nemo_helix_ext.__file__).parent
 
 STAINLESS_PACKAGE = "nemo_helix"
 
@@ -45,18 +45,18 @@ def _imports_stainless(tree: ast.AST) -> list[str]:
     return hits
 
 
-def _cli_modules() -> list[Path]:
-    return sorted(p for p in CLI_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
+def _package_modules() -> list[Path]:
+    return sorted(p for p in PACKAGE_ROOT.rglob("*.py") if "__pycache__" not in p.parts)
 
 
-def test_cli_modules_do_not_import_generated_sdk() -> None:
+def test_package_modules_do_not_import_generated_sdk() -> None:
     offenders: dict[str, list[str]] = {}
-    for path in _cli_modules():
-        relative = path.relative_to(CLI_ROOT).as_posix()
+    for path in _package_modules():
+        relative = path.relative_to(PACKAGE_ROOT).as_posix()
         hits = _imports_stainless(ast.parse(path.read_text(encoding="utf-8")))
         if hits:
             offenders[relative] = hits
-    assert not offenders, f"CLI modules importing the generated SDK: {json.dumps(offenders, indent=2)}"
+    assert not offenders, f"nemo_helix_ext modules importing the generated SDK: {json.dumps(offenders, indent=2)}"
 
 
 _RUNTIME_PROBE = r"""

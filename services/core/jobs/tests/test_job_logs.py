@@ -55,7 +55,7 @@ class TestJobLogsAPI:
 
     @pytest.fixture
     def dispatcher(self):
-        """Create a real dispatcher with test entity store and mock SDK."""
+        """Create a real dispatcher with test entity store and mock clients."""
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
             mock_files = AsyncMock()

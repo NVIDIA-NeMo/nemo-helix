@@ -7,6 +7,7 @@ import argparse
 import base64
 import importlib
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from unittest.mock import Mock
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.intake.client import IntakeClient
+from nhx.testing import mock_nemo_client
 
 ROOT = Path(__file__).resolve().parents[4]
 SCRIPTS = ROOT / "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-intake/scripts"
@@ -268,41 +271,37 @@ def test_provider_mapper_reports_missing_required_start_time(provider: str, fiel
         mapper(payload, project="fixture", include_feedback=False)
 
 
-def test_intake_writer_uses_config_bootstrap_for_context_and_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
-    common = importlib.import_module("_import_common")
-    client = Mock(base_url="https://platform.example.com", workspace="oauth-workspace")
-    client._client = Mock()
-    factory = Mock(return_value=client)
-    monkeypatch.setattr(common, "build_nemo_client", factory)
-    intake_client = Mock()
-    from_client = Mock(return_value=intake_client)
-    monkeypatch.setattr(common.IntakeClient, "from_client", from_client)
-
-    writer = common.IntakeWriter(base_url=None, workspace=None)
-
-    assert writer.base_url == "https://platform.example.com"
-    assert writer.workspace == "oauth-workspace"
-    factory.assert_called_once_with(base_url=None, access_token=None, timeout=60.0, retry=None)
-    from_client.assert_called_once_with(client)
-    verify_spans = Mock()
-    monkeypatch.setattr(writer, "_verify_spans", verify_spans)
-    span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
-
-    writer.write(common.ImportBundle(source="langsmith", spans=[span]), batch_size=500)
-
-    intake_client.create_spans.assert_called_once()
-    call = intake_client.create_spans.call_args
-    assert call.kwargs["workspace"] == "oauth-workspace"
-    body = call.kwargs["body"]
-    assert isinstance(body, common.DirectSpansIngestRequest)
-    assert body.source == "langsmith"
-    assert [item.span_id for item in body.spans] == ["span-1"]
-    verify_spans.assert_called_once_with([span], source="langsmith")
-    writer.close()
-    client.close.assert_called_once_with()
+def _intake_client(handler: Callable[[httpx.Request], httpx.Response]) -> IntakeClient:
+    return mock_nemo_client(handler, IntakeClient, base_url="https://platform.example.com", workspace="default")
 
 
-def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def _page(items: list[dict[str, Any]], *, page: int = 1, total_pages: int = 1) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "data": items,
+            "pagination": {
+                "page": page,
+                "page_size": 1000,
+                "current_page_size": len(items),
+                "total_pages": total_pages,
+                "total_results": len(items),
+            },
+        },
+    )
+
+
+def _annotation_row(annotation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "annotation_id": "annotation-1",
+        "workspace": "default",
+        "created_at": "2026-08-14T12:00:00Z",
+        "ingested_at": "2026-08-14T12:00:00Z",
+        **annotation,
+    }
+
+
+def test_intake_writer_builds_a_typed_client_from_the_cli_context(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
     captured: list[httpx.Request] = []
 
@@ -310,78 +309,101 @@ def test_intake_writer_sends_spans_through_typed_intake_client(monkeypatch: pyte
         captured.append(request)
         return httpx.Response(201)
 
-    # The config bootstrap seeds Authorization into default_headers; mirror that here.
-    client = NemoClient(
-        base_url="https://platform.example.com",
-        workspace="typed-workspace",
-        default_headers={"Authorization": "Bearer test-token"},
-        http_client=httpx.Client(transport=httpx.MockTransport(handle)),
+    nemo_client = mock_nemo_client(
+        handle, NemoClient, base_url="https://platform.example.com", workspace="oauth-workspace"
     )
-    monkeypatch.setattr(common, "build_nemo_client", Mock(return_value=client))
+    build = Mock(return_value=nemo_client)
+    monkeypatch.setattr(common, "build_nemo_client", build)
     span = {"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}
 
     with common.IntakeWriter(base_url=None, workspace=None) as writer:
         monkeypatch.setattr(writer, "_verify_spans", Mock())
+        assert writer.base_url == "https://platform.example.com"
+        assert writer.workspace == "oauth-workspace"
         summary = writer.write(common.ImportBundle(source="langsmith", spans=[span]), batch_size=500)
 
+    build.assert_called_once_with(base_url=None, access_token=None, timeout=60.0, retry=None)
     assert summary["spans"] == 1
     assert [request.method for request in captured] == ["POST"]
-    assert captured[0].url.path == "/apis/intake/v2/workspaces/typed-workspace/ingest/spans"
-    assert captured[0].headers["authorization"] == "Bearer test-token"
+    assert captured[0].url.path == "/apis/intake/v2/workspaces/oauth-workspace/ingest/spans"
     payload = json.loads(captured[0].content)
     assert payload["source"] == "langsmith"
     assert payload["spans"][0]["span_id"] == "span-1"
     assert payload["spans"][0]["trace_id"] == "trace-1"
 
 
-def test_intake_writer_bootstrap_branch_requests_through_the_client_transport(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without an injected session the writer's raw requests ride the bootstrap client's own httpx
-    client: its Authorization header, repeated query params encoded by httpx, and a close() that
-    releases the transport.
-    """
+def test_intake_writer_batches_spans_by_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
     captured: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
         captured.append(request)
-        return httpx.Response(200, json={"data": []})
+        return httpx.Response(201)
 
-    # build_nemo_client puts the context's Authorization on the httpx client and owns it.
-    transport = httpx.Client(
-        transport=httpx.MockTransport(handle),
-        headers={"Authorization": "Bearer bootstrap-token"},
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
+    monkeypatch.setattr(writer, "_verify_spans", Mock())
+    spans = [
+        {"span_id": f"span-{index}", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"} for index in range(3)
+    ]
+
+    writer.write(common.ImportBundle(source="langsmith", spans=spans), batch_size=2)
+
+    assert [len(json.loads(request.content)["spans"]) for request in captured] == [2, 1]
+
+
+def test_intake_writer_posts_evaluator_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    common = importlib.import_module("_import_common")
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path.endswith("/evaluator-results"):
+            return httpx.Response(
+                201,
+                json={
+                    "evaluator_result_id": "result-1",
+                    "span_id": "span-1",
+                    "session_id": "session-1",
+                    "workspace": "default",
+                    "name": "langsmith.score",
+                    "value": 0.5,
+                    "data_type": "NUMERIC",
+                    "created_at": "2026-08-14T12:00:00Z",
+                    "ingested_at": "2026-08-14T12:00:00Z",
+                },
+            )
+        return httpx.Response(201)
+
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
+    monkeypatch.setattr(writer, "_verify_spans", Mock())
+    result = {
+        "span_id": "span-1",
+        "session_id": "session-1",
+        "name": "langsmith.score",
+        "data_type": "NUMERIC",
+        "value": 0.5,
+        "comment": None,
+    }
+    bundle = common.ImportBundle(
+        source="langsmith",
+        spans=[{"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}],
+        evaluator_results=[result],
     )
-    client = NemoClient(
-        base_url="https://platform.example.com",
-        workspace="bootstrap-workspace",
-        http_client=transport,
-        owns_http_client=True,
-    )
-    monkeypatch.setattr(common, "build_nemo_client", Mock(return_value=client))
 
-    writer = common.IntakeWriter(base_url=None, workspace=None)
+    writer.write(bundle, batch_size=500)
 
-    assert writer.session is transport
-    assert writer.headers == {}
-
-    payload = writer._request(
-        "GET",
-        f"{writer.prefix}/annotations",
-        params=[("filter[trace_id]", "trace-1"), ("filter[trace_id]", "trace-2")],
-        expected={200},
-    )
-
-    assert payload == {"data": []}
-    request = captured[0]
-    assert request.url.path == "/apis/intake/v2/workspaces/bootstrap-workspace/annotations"
-    assert request.url.params.get_list("filter[trace_id]") == ["trace-1", "trace-2"]
-    assert request.headers["authorization"] == "Bearer bootstrap-token"
-
-    writer.close()
-
-    assert transport.is_closed
+    assert [request.url.path for request in captured] == [
+        "/apis/intake/v2/workspaces/default/ingest/spans",
+        "/apis/intake/v2/workspaces/default/evaluator-results",
+    ]
+    assert json.loads(captured[1].content) == {
+        "span_id": "span-1",
+        "session_id": "session-1",
+        "name": "langsmith.score",
+        "data_type": "NUMERIC",
+        "value": 0.5,
+        "comment": None,
+    }
 
 
 def test_intake_writer_reports_only_new_annotation_writes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -392,105 +414,120 @@ def test_intake_writer_reports_only_new_annotation_writes(monkeypatch: pytest.Mo
         "session_id": "session-1",
         "text": "already imported",
     }
-    session = Mock()
-    session.request.side_effect = [
-        _Response({}, status_code=201),
-        _Response({"data": [annotation], "pagination": {"page": 1, "total_pages": 1}}),
-    ]
-    writer = common.IntakeWriter(
-        base_url="https://platform.example.com",
-        workspace="default",
-        session=session,
-    )
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "GET":
+            return _page([_annotation_row(annotation)])
+        return httpx.Response(201)
+
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
     monkeypatch.setattr(writer, "_verify_spans", Mock())
     bundle = common.ImportBundle(
         source="langsmith",
-        spans=[{"span_id": "span-1", "trace_id": "trace-1"}],
+        spans=[{"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}],
         annotations=[annotation],
     )
 
     summary = writer.write(bundle, batch_size=500)
 
     assert summary["annotations"] == 0
-    assert session.request.call_count == 2
-    assert session.request.call_args_list[0].args[0] == "POST"
-    assert session.request.call_args_list[1].args[0] == "GET"
+    assert [request.method for request in captured] == ["POST", "GET"]
+    assert captured[1].url.path == "/apis/intake/v2/workspaces/default/annotations"
+    assert json.loads(captured[1].url.params["filter"]) == {
+        "session_id": "session-1",
+        "kind": "note",
+        "span_id": "span-1",
+    }
 
 
 def test_intake_writer_fetches_existing_annotations_once_per_target(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
     first = {"kind": "note", "span_id": "span-1", "session_id": "session-1", "text": "first"}
     second = {**first, "text": "second"}
-    session = Mock()
-    session.request.side_effect = [
-        _Response({}, status_code=201),
-        _Response({"data": [], "pagination": {"page": 1, "total_pages": 1}}),
-        _Response({}, status_code=201),
-        _Response({}, status_code=201),
-    ]
-    writer = common.IntakeWriter(
-        base_url="https://platform.example.com",
-        workspace="default",
-        session=session,
-    )
+    captured: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.method == "GET":
+            return _page([])
+        return httpx.Response(201, json=_annotation_row(first))
+
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
     monkeypatch.setattr(writer, "_verify_spans", Mock())
     bundle = common.ImportBundle(
         source="langsmith",
-        spans=[{"span_id": "span-1", "trace_id": "trace-1"}],
+        spans=[{"span_id": "span-1", "trace_id": "trace-1", "started_at": "2026-08-14T12:00:00Z"}],
         annotations=[first, second],
     )
 
     summary = writer.write(bundle, batch_size=500)
 
     assert summary["annotations"] == 2
-    methods = [call.args[0] for call in session.request.call_args_list]
-    assert methods == ["POST", "GET", "POST", "POST"]
+    assert [request.method for request in captured] == ["POST", "GET", "POST", "POST"]
 
 
-def test_intake_writer_accepts_injected_httpx_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_intake_writer_verifies_imported_spans_by_trace_and_source() -> None:
     common = importlib.import_module("_import_common")
-    requests: list[httpx.Request] = []
+    captured: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(201)
+        captured.append(request)
+        return _page([_span_row("span-1", "trace-1")])
 
-    with httpx.Client(transport=httpx.MockTransport(handle)) as session:
-        writer = common.IntakeWriter(
-            base_url="https://platform.example.com",
-            workspace="default",
-            session=session,
-        )
-        monkeypatch.setattr(writer, "_verify_spans", Mock())
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
 
-        summary = writer.write(
-            common.ImportBundle(source="langsmith", spans=[{"span_id": "span-1", "trace_id": "trace-1"}]),
-            batch_size=500,
+    writer._verify_spans([{"span_id": "span-1", "trace_id": "trace-1"}], source="langsmith")
+
+    assert json.loads(captured[0].url.params["filter"]) == {"trace_id": "trace-1", "source": "langsmith"}
+    with pytest.raises(RuntimeError, match=r"did not find imported spans: \['span-2'\]"):
+        writer._verify_spans(
+            [{"span_id": "span-1", "trace_id": "trace-1"}, {"span_id": "span-2", "trace_id": "trace-1"}],
+            source="langsmith",
         )
 
-    assert summary["spans"] == 1
-    assert [request.method for request in requests] == ["POST"]
 
-
-def test_intake_writer_paginated_data_advances_pages_and_enforces_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_intake_writer_pagination_enforces_the_page_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     common = importlib.import_module("_import_common")
-    session = Mock()
-    session.request.side_effect = [
-        _Response({"data": [{"span_id": "one"}], "pagination": {"page": 1, "total_pages": 3}}),
-        _Response({"data": [{"span_id": "two"}], "pagination": {"page": 2, "total_pages": 3}}),
-    ]
-    writer = common.IntakeWriter(
-        base_url="https://platform.example.com",
-        workspace="default",
-        session=session,
-    )
+    pages_requested: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", "1"))
+        pages_requested.append(str(page))
+        return _page([_span_row(f"span-{page}", "trace-1")], page=page, total_pages=3)
+
+    writer = common.IntakeWriter(base_url=None, workspace="default", client=_intake_client(handle))
     monkeypatch.setattr(common, "MAX_INTAKE_PAGES", 2)
 
     with pytest.raises(RuntimeError, match="pagination exceeded 2 pages"):
-        list(writer._paginated_data("/spans", filters=[("filter[source]", "langsmith")]))
+        writer._verify_spans([{"span_id": "span-9", "trace_id": "trace-1"}], source="langsmith")
 
-    pages = [dict(call.kwargs["params"])["page"] for call in session.request.call_args_list]
-    assert pages == [1, 2]
+    assert pages_requested == ["1", "2", "3"]
+
+
+def test_intake_writer_rejects_a_non_origin_base_url() -> None:
+    common = importlib.import_module("_import_common")
+    client = mock_nemo_client(
+        lambda _request: httpx.Response(201), IntakeClient, base_url="https://platform.example.com/prefix"
+    )
+
+    with pytest.raises(ValueError, match="origin without a path"):
+        common.IntakeWriter(base_url=None, workspace=None, client=client)
+
+
+def _span_row(span_id: str, trace_id: str) -> dict[str, Any]:
+    return {
+        "span_id": span_id,
+        "trace_id": trace_id,
+        "session_id": "session-1",
+        "workspace": "default",
+        "kind": "LLM",
+        "source": "langsmith",
+        "started_at": "2026-08-14T12:00:00Z",
+        "ingested_at": "2026-08-14T12:00:00Z",
+        "status": "success",
+    }
 
 
 class _Response:

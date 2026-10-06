@@ -11,7 +11,7 @@ from typing import Self
 
 from nhx.common.entities.values import DatetimeFilter, Filter
 from nhx.intake.spans.domain import EvaluatorResult as DomainEvaluatorResult
-from nhx.intake.spans.domain import EvaluatorResultDataType
+from nhx.intake.spans.domain import EvaluatorResultDataType, EvaluatorResultStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -48,6 +48,7 @@ class EvaluatorResultFilter(BaseModel):
     session_id: str | None = Field(default=None, description="Filter by target session id.")
     name: str | None = Field(default=None, description="Filter by evaluator/metric name.")
     data_type: EvaluatorResultDataType | None = Field(default=None, description="Filter by data_type.")
+    status: EvaluatorResultStatus | None = Field(default=None, description="Filter by status (SCORED or FAILED).")
     created_by: str | None = Field(default=None, description="Filter by principal/system that wrote the row.")
     value: FloatFilter | None = Field(default=None, description="Filter by numeric value (range supported).")
     created_at: DatetimeFilter | None = Field(
@@ -81,10 +82,22 @@ class EvaluatorResultInput(BaseModel):
     data_type: EvaluatorResultDataType = Field(
         description="Discriminator for which of value / string_value carries the payload."
     )
+    status: EvaluatorResultStatus = Field(
+        default=EvaluatorResultStatus.SCORED,
+        description=(
+            "SCORED when the evaluator produced a value; FAILED when it ran but could not score this target "
+            "(no value or string_value; put the reason in `comment`). Rollups count a FAILED result as a "
+            "failed attempt instead of inferring failure from a missing row."
+        ),
+    )
     comment: str | None = Field(default=None, description="Free-text rationale or explanation.")
 
     @model_validator(mode="after")
     def _enforce_value_coherence(self) -> Self:
+        if self.status == EvaluatorResultStatus.FAILED:
+            if self.value is not None or self.string_value is not None:
+                raise ValueError("A FAILED evaluator result carries no `value` or `string_value`.")
+            return self
         if self.data_type in (EvaluatorResultDataType.NUMERIC, EvaluatorResultDataType.BOOLEAN):
             if self.value is None:
                 raise ValueError(f"`value` is required when data_type is {self.data_type.value}.")
@@ -107,6 +120,7 @@ class EvaluatorResult(BaseModel):
     value: float | None = None
     string_value: str | None = None
     data_type: EvaluatorResultDataType
+    status: EvaluatorResultStatus = EvaluatorResultStatus.SCORED
     comment: str | None = None
     created_by: str | None = None
     created_at: datetime
@@ -123,6 +137,7 @@ class EvaluatorResult(BaseModel):
             value=result.value,
             string_value=result.string_value,
             data_type=result.data_type,
+            status=result.status,
             comment=result.comment,
             created_by=result.created_by,
             created_at=result.created_at,

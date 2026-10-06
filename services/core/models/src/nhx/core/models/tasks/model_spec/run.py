@@ -18,8 +18,8 @@ import logging
 import os
 from pathlib import Path
 
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from filesets import transfer
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
     InternalServerError,
     NemoClientError,
@@ -42,9 +42,9 @@ from nemo_helix_plugin.models.types import (
 from nemo_helix_plugin.models.types import (
     ModelSpec as PluginModelSpec,
 )
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.entities.utils import parse_entity_ref
 from nhx.common.model_utils import is_embedding_model
-from nhx.common.sdk_factory import get_platform_sdk
 from nhx.core.models.config import config as models_config
 from nhx.core.models.schemas import ModelSpec, ToolCallConfig
 from nhx.core.models.tasks.model_spec.schemas import ModelSpecTaskConfig, NHXJobContext
@@ -85,11 +85,11 @@ def get_config(config_path: Path) -> ModelSpecTaskConfig:
 class ModelSpecRunner:
     """Runner for creating model entities."""
 
-    def __init__(self, sdk: NeMoHelix, job_ctx: NHXJobContext):
-        self.sdk = sdk
+    def __init__(self, client: NemoClient, job_ctx: NHXJobContext):
+        self.client = client
         self.job_ctx = job_ctx
-        self._models = client_from_platform(sdk, ModelsClient)
-        self._files = client_from_platform(sdk, FilesClient)
+        self._models = ModelsClient.from_client(client)
+        self._files = FilesClient.from_client(client)
 
     @staticmethod
     def _merge_fileset_metadata(fs: FilesetOutput, model_spec: ModelSpec) -> None:
@@ -231,10 +231,7 @@ class ModelSpecRunner:
 
         dest_dir: Path = self.job_ctx.storage_path / "model"
 
-        response = self.sdk.files.list(
-            fileset=fs.name,
-            workspace=fs.workspace,
-        )
+        response = transfer.list_files(self._files, fileset=fs.name, workspace=fs.workspace)
         all_file_paths = [f.path for f in response.data]
         non_tensor_files = []
         binary_suffixes = (
@@ -253,9 +250,10 @@ class ModelSpecRunner:
 
             non_tensor_files.append(f.path)
 
-        self.sdk.files.download(
+        transfer.download(
+            self._files,
             remote_path=non_tensor_files,
-            local_path=dest_dir,
+            local_path=str(dest_dir),
             fileset=fs.name,
             workspace=fs.workspace,
         )
@@ -328,12 +326,12 @@ class ModelSpecRunner:
         return me
 
 
-def run(*, sdk: NeMoHelix | None = None, job_ctx: NHXJobContext | None = None) -> int:
+def run(*, client: NemoClient | None = None, job_ctx: NHXJobContext | None = None) -> int:
     """Execute the model entity creation task.
 
     Args:
-        sdk: Optional SDK instance for dependency injection (for testing).
-            If None, creates one via get_platform_sdk().
+        client: Optional platform client for dependency injection (for testing).
+            If None, creates one via get_nemo_client().
         job_ctx: Optional job context for dependency injection (for testing).
             If None, creates one via NHXJobContext.from_env().
 
@@ -342,13 +340,14 @@ def run(*, sdk: NeMoHelix | None = None, job_ctx: NHXJobContext | None = None) -
     """
     job_ctx = job_ctx or NHXJobContext.from_env()
 
-    sdk_owned = sdk is None
+    client_owned = client is None
     try:
-        sdk = sdk or get_platform_sdk(
+        client = client or get_nemo_client(
             as_service="models",
             internal=True,
-        ).with_options(workspace=job_ctx.workspace)
-        runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
+            workspace=job_ctx.workspace,
+        )
+        runner = ModelSpecRunner(client=client, job_ctx=job_ctx)
 
         if job_ctx.config_path is None:
             raise ModelSpecCreationError("Failed to create model spec: job step config path is not configured")
@@ -356,7 +355,7 @@ def run(*, sdk: NeMoHelix | None = None, job_ctx: NHXJobContext | None = None) -
 
         logger.info(f"Starting model spec task with job context: {job_ctx}")
         logger.info(f"Config: {config.model_dump_json(indent=2)}")
-        logger.info(f"NeMo Helix service URL: {sdk.base_url}")
+        logger.info(f"NeMo Helix service URL: {client.base_url}")
 
         # Create the model spec
         result = runner.analyze_checkpoint(config)
@@ -370,5 +369,5 @@ def run(*, sdk: NeMoHelix | None = None, job_ctx: NHXJobContext | None = None) -
         logger.exception(f"Model spec task failed: {e}")
         return 1
     finally:
-        if sdk_owned and sdk is not None:
-            sdk.close()
+        if client_owned and client is not None:
+            client.close()

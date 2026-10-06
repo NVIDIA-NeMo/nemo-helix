@@ -12,6 +12,7 @@ import httpx
 import pytest
 from docker.errors import APIError, NotFound
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
+from nemo_helix_plugin.jobs.types import AuthContext as JobStepAuthContext
 from nhx.common.auth import (
     NHX_PRINCIPAL_ENVVAR,
     AuthContext,
@@ -181,11 +182,11 @@ def docker_client_mock(monkeypatch):
 
 
 @pytest.fixture
-def docker_job(mock_nhx_client, docker_client_mock, mock_platform_config) -> Iterator[CPUDockerJobBackend]:
+def docker_job(mock_nemo_client, docker_client_mock, mock_platform_config) -> Iterator[CPUDockerJobBackend]:
     """Create a DockerJobBackend instance with mocked docker client."""
     with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
         docker_job = CPUDockerJobBackend(
-            mock_nhx_client,
+            mock_nemo_client,
             DockerJobExecutionProfileConfig(storage=DockerJobStorageConfig(volume_name="test_jobs_storage")),
             profile_name="default",
         )
@@ -791,7 +792,7 @@ def test_docker_job_nemo_job_secrets_format_same_and_cross_workspace(docker_job,
     }
 
 
-def test_docker_job_profile_environment_applied(mock_nhx_client, docker_client_mock, mock_platform_config):
+def test_docker_job_profile_environment_applied(mock_nemo_client, docker_client_mock, mock_platform_config):
     """Profile environment (e.g. HOME=/tmp) is applied to scheduled job containers."""
     provider = CPUExecutionProvider(container=ContainerSpec(image="test-image:latest"))
     config = DockerJobExecutionProfileConfig(
@@ -799,7 +800,7 @@ def test_docker_job_profile_environment_applied(mock_nhx_client, docker_client_m
         env={"HOME": "/tmp"},
     )
     with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=mock_platform_config):
-        backend = CPUDockerJobBackend(mock_nhx_client, config, profile_name="default")
+        backend = CPUDockerJobBackend(mock_nemo_client, config, profile_name="default")
         backend._client = docker_client_mock
 
     test_job_step = HelixJobStepWithContext(
@@ -835,7 +836,7 @@ def test_docker_job_profile_environment_applied(mock_nhx_client, docker_client_m
     assert env_vars.get("ENV_VAR") == "test_value"
 
 
-def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nhx_client, docker_client_mock, test_job_step):
+def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nemo_client, docker_client_mock, test_job_step):
     """Job containers use routable service_discovery URLs instead of local in-process service URLs."""
     platform_config = HelixConfig(  # type: ignore[abstract]
         base_url="http://127.0.0.1:8080",
@@ -848,7 +849,7 @@ def test_docker_job_uses_service_discovery_urls_for_job_runtime(mock_nhx_client,
     )
     with patch("nhx.core.jobs.controllers.backends.docker.get_platform_config", return_value=platform_config):
         backend = CPUDockerJobBackend(
-            mock_nhx_client,
+            mock_nemo_client,
             DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1232,7 +1233,7 @@ def test_docker_job_execution_profile_config_has_no_workload_identity_surface():
     assert "workload_identity" not in properties
 
 
-def test_schedule_docker_gpu(mock_nhx_client, docker_client_mock):
+def test_schedule_docker_gpu(mock_nemo_client, docker_client_mock):
     """Test GPU job scheduling defers when the pool is temporarily full."""
 
     gpus = 2
@@ -1315,7 +1316,7 @@ def test_schedule_docker_gpu(mock_nhx_client, docker_client_mock):
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1371,7 +1372,7 @@ def test_schedule_docker_gpu(mock_nhx_client, docker_client_mock):
     assert len([v for v in executor.gpu_pool.gpu_to_workload_id.values() if v is None]) == 1
 
 
-def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nhx_client, docker_client_mock):
+def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nemo_client, docker_client_mock):
     """Full but sufficient GPU pools should defer scheduling instead of erroring."""
     gpu_executor_config = GPUExecutionProvider.model_validate(
         {
@@ -1389,7 +1390,7 @@ def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nhx_c
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1403,7 +1404,7 @@ def test_gpu_configure_container_defers_when_pool_is_temporarily_full(mock_nhx_c
     assert executor.gpu_pool.gpu_to_workload_id == {0: "already-running"}
 
 
-def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nhx_client, docker_client_mock):
+def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nemo_client, docker_client_mock):
     """GPU requests larger than the pool are permanent resource allocation errors."""
     gpu_executor_config = GPUExecutionProvider.model_validate(
         {
@@ -1420,7 +1421,7 @@ def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nhx_clien
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1434,7 +1435,7 @@ def test_gpu_configure_container_errors_when_request_exceeds_pool(mock_nhx_clien
     assert executor.gpu_pool.gpu_to_workload_id == {0: None}
 
 
-def test_gpu_cleanup_on_job_completion(mock_nhx_client, docker_client_mock):
+def test_gpu_cleanup_on_job_completion(mock_nemo_client, docker_client_mock):
     """Test that GPU resources are released when a job completes successfully."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1475,7 +1476,7 @@ def test_gpu_cleanup_on_job_completion(mock_nhx_client, docker_client_mock):
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1535,7 +1536,7 @@ def test_gpu_cleanup_on_job_completion(mock_nhx_client, docker_client_mock):
     assert executor.gpu_pool.gpu_to_workload_id[0] is None
 
 
-def test_gpu_cleanup_on_job_error(mock_nhx_client, docker_client_mock):
+def test_gpu_cleanup_on_job_error(mock_nemo_client, docker_client_mock):
     """Test that GPU resources are released when a job fails with an error."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1576,7 +1577,7 @@ def test_gpu_cleanup_on_job_error(mock_nhx_client, docker_client_mock):
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1682,13 +1683,13 @@ def _gpu_step(
     )
 
 
-def _gpu_backend(mock_nhx_client, docker_client_mock) -> GPUDockerJobBackend:
+def _gpu_backend(mock_nemo_client, docker_client_mock) -> GPUDockerJobBackend:
     with patch("nhx.core.jobs.controllers.backends.docker.SharedResourceManager") as mock_srm:
         mock_pool = DockerGPUPool(reserved_gpu_device_ids=[0])
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1732,10 +1733,10 @@ def _gpu_container(
     return container
 
 
-def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nhx_client, docker_client_mock):
+def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nemo_client, docker_client_mock):
     """A deleted step before container start must not leave its GPU allocation orphaned."""
     step = _gpu_step(step_id="deleted-step-id", job="job-deleted-before-start", name="gpu-deleted-step")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
 
     executor.gpu_pool.allocate_gpu(step.id)
     assert executor.gpu_pool.gpu_to_workload_id[0] == step.id
@@ -1749,10 +1750,10 @@ def test_gpu_pool_released_when_deleted_step_stops_scheduling(mock_nhx_client, d
 
 @pytest.mark.parametrize("terminal_status", [HelixJobStatus.CANCELLED, HelixJobStatus.PAUSED])
 def test_gpu_pool_released_when_cancel_scheduling_sees_terminal_step(
-    mock_nhx_client, docker_client_mock, terminal_status
+    mock_nemo_client, docker_client_mock, terminal_status
 ):
     step = _gpu_step(step_id=f"{terminal_status.value}-step-id")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     refreshed_step = MagicMock()
     refreshed_step.status = terminal_status
 
@@ -1774,10 +1775,10 @@ def test_gpu_pool_released_when_cancel_scheduling_sees_terminal_step(
     ],
 )
 def test_gpu_pool_released_when_cancel_scheduling_removes_created_container_before_release(
-    mock_nhx_client, docker_client_mock, refreshed_status, expected_update_status
+    mock_nemo_client, docker_client_mock, refreshed_status, expected_update_status
 ):
     step = _gpu_step(step_id=f"{refreshed_status.value}-created-container-step-id")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     container_mock = _gpu_container(step, status="created", task_id="task-pre-start-stop")
     refreshed_step = MagicMock()
     refreshed_step.status = refreshed_status
@@ -1804,9 +1805,9 @@ def test_gpu_pool_released_when_cancel_scheduling_removes_created_container_befo
         assert executor._jobs.update_job_step_status.call_args.kwargs["body"].status == expected_update_status
 
 
-def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_nhx_client, docker_client_mock):
+def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_nemo_client, docker_client_mock):
     step = _gpu_step(step_id="cancelling-lost-step-id")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     refreshed_step = MagicMock()
     refreshed_step.status = HelixJobStatus.CANCELLING
 
@@ -1819,7 +1820,7 @@ def test_gpu_pool_released_when_cancel_scheduling_status_update_loses_step(mock_
     executor._jobs.update_job_step_status.assert_called_once()
 
 
-def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nhx_client, docker_client_mock):
+def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_nemo_client, docker_client_mock):
     """Cleanup after job deletion releases GPUs even when terminal sync never saw the step."""
     step_id = "deleted-terminal-step-id"
 
@@ -1828,7 +1829,7 @@ def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_
         mock_srm.get_instance.return_value.get_gpu_pool.return_value = mock_pool
 
         executor = GPUDockerJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=DockerJobExecutionProfileConfig(
                 storage=DockerJobStorageConfig(volume_name="test_jobs_storage"),
             ),
@@ -1871,7 +1872,7 @@ def test_gpu_cleanup_releases_deleted_step_container_without_terminal_sync(mock_
 
 
 def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_sync(
-    mock_nhx_client, docker_client_mock
+    mock_nemo_client, docker_client_mock
 ):
     """Retained terminal containers must free GPUs before the cleanup TTL expires."""
     step = _gpu_step(
@@ -1879,7 +1880,7 @@ def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_s
         job="job-retained-deleted-before-sync",
         name="gpu-step",
     )
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     executor._execution_profile_config.cleanup_completed_jobs_immediately = False
     executor._execution_profile_config.ttl_seconds_after_finished = 300
 
@@ -1898,10 +1899,10 @@ def test_gpu_cleanup_releases_retained_deleted_step_container_without_terminal_s
 
 
 def test_gpu_pool_released_when_failed_schedule_after_configure_container(
-    mock_nhx_client, docker_client_mock, mock_platform_config
+    mock_nemo_client, docker_client_mock, mock_platform_config
 ):
     step = _gpu_step(step_id="submit-failed-step-id", job="job-submit-failed")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     executor._container_run_threadpool = MagicMock()
     executor._container_run_threadpool.submit.side_effect = RuntimeError("threadpool unavailable")
 
@@ -1928,9 +1929,9 @@ def test_gpu_pool_released_when_failed_schedule_after_configure_container(
             executor._container_start_admission.release()
 
 
-def test_gpu_failed_schedule_removes_created_container_before_releasing_pool(mock_nhx_client, docker_client_mock):
+def test_gpu_failed_schedule_removes_created_container_before_releasing_pool(mock_nemo_client, docker_client_mock):
     step = _gpu_step(step_id="run-failed-created-container-step-id", job="job-run-failed")
-    executor = _gpu_backend(mock_nhx_client, docker_client_mock)
+    executor = _gpu_backend(mock_nemo_client, docker_client_mock)
     container_mock = _gpu_container(step, status="created", task_id="task-run-failed")
 
     executor.gpu_pool.allocate_gpu(step.id)
@@ -3119,6 +3120,41 @@ def test_docker_job_schedule_with_auth_context_no_email():
     assert principal_data["id"] == "service-account"
     assert principal_data.get("email") is None
     assert principal_data["groups"] == ["service-accounts"]
+
+
+def test_docker_job_schedule_with_job_step_auth_context_none_groups(
+    docker_job, docker_client_mock, test_job_step_with_auth_context
+):
+    """Test that a job step auth context with principal_groups=None is handled correctly."""
+
+    test_job_step_with_auth_context.auth_context = JobStepAuthContext.model_construct(
+        principal_id="user@example.com",
+        principal_email="user@example.com",
+        principal_groups=None,
+    )
+
+    # This should not raise a validation error - exercises the actual code path
+    docker_job.schedule(test_job_step_with_auth_context.step_spec.executor, test_job_step_with_auth_context)
+
+    # Wait for background thread to complete
+    docker_job._container_run_threadpool.shutdown(wait=True)
+    docker_job._container_run_threadpool = MagicMock()  # Reset for cleanup
+
+    # Get the job container call arguments (create call)
+    create_call_args = docker_client_mock.containers.create.call_args
+    kwargs = create_call_args[1] if create_call_args[1] else create_call_args[0][0]
+
+    # Verify NHX_PRINCIPAL env var is set correctly
+    env = kwargs["environment"]
+    assert NHX_PRINCIPAL_ENVVAR in env
+
+    # Verify JSON structure - groups should be empty list (default) not None
+    principal_json = env[NHX_PRINCIPAL_ENVVAR]
+    principal_data = json.loads(principal_json)
+
+    assert principal_data["id"] == "user@example.com"
+    assert principal_data["email"] == "user@example.com"
+    assert principal_data["groups"] == []  # Default factory kicks in, not None
 
 
 def test_cleanup_single_container_checks_storage_cleanup_allowed(docker_job, docker_client_mock):

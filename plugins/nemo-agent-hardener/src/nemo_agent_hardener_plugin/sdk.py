@@ -3,7 +3,7 @@
 
 """SDK resources for the Agent Hardener plugin.
 
-Mounted on :class:`~nemo_helix.NeMoHelix` as ``client.agent_hardener`` via the ``nemo.sdk``
+Mounted on platform clients as ``client.agent_hardener`` via the ``nemo.sdk``
 entry-point. Exposes ``run(config=..., env_file=..., workspace=...)`` which executes the
 ``agent-hardener.war-game`` job locally, in-process, plus ``client.agent_hardener.runs`` to read run records.
 """

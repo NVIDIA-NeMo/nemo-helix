@@ -42,11 +42,12 @@ nemo auditor audit --spec '{"config": "default/<config-name>", "target": "defaul
 
 ## Python Examples
 
-Read the plugin service status through the platform SDK namespace:
+Read the plugin service status through `AuditorPluginResource`:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_auditor.sdk import AuditorPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(base_url="http://localhost:8000")
-status = client.auditor.plugin_status()
+auditor = AuditorPluginResource(NemoClient(base_url="http://localhost:8000"))
+status = auditor.plugin_status()
 ```

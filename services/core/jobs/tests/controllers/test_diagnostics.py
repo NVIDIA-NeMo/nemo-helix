@@ -4,6 +4,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from nemo_helix_plugin.jobs.client import JobsClient
 from nhx.core.jobs.controllers.diagnostics import _MAX_ERROR_STACK_CHARS, collect_job_diagnostics
 
 from services.core.jobs.tests.controllers.client_mocks import data_response
@@ -44,15 +45,15 @@ def _make_jobs_client_with_logs() -> Mock:
 
 
 def test_collect_job_diagnostics_omits_raw_job_logs_by_default() -> None:
-    sdk = Mock()
+    nemo_client = Mock()
     jobs = _make_jobs_client_with_logs()
 
     with (
-        patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
+        patch.object(JobsClient, "from_client", return_value=jobs),
         patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", False),
     ):
         diagnostics = collect_job_diagnostics(
-            sdk,
+            nemo_client,
             workspace="default",
             job_name="job-1",
             step_name="step-1",
@@ -64,15 +65,15 @@ def test_collect_job_diagnostics_omits_raw_job_logs_by_default() -> None:
 
 
 def test_collect_job_diagnostics_includes_raw_job_logs_when_enabled() -> None:
-    sdk = Mock()
+    nemo_client = Mock()
     jobs = _make_jobs_client_with_logs()
 
     with (
-        patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs),
+        patch.object(JobsClient, "from_client", return_value=jobs),
         patch("nhx.core.jobs.controllers.diagnostics.config.include_job_logs_in_diagnostics", True),
     ):
         diagnostics = collect_job_diagnostics(
-            sdk,
+            nemo_client,
             workspace="default",
             job_name="job-1",
             step_name="step-1",
@@ -84,7 +85,7 @@ def test_collect_job_diagnostics_includes_raw_job_logs_when_enabled() -> None:
 
 
 def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
-    sdk = Mock()
+    nemo_client = Mock()
     jobs = Mock()
     long_error = "traceback-" + ("x" * (_MAX_ERROR_STACK_CHARS + 50))
     expected_trimmed = long_error[-_MAX_ERROR_STACK_CHARS:]
@@ -143,9 +144,9 @@ def test_collect_job_diagnostics_trims_long_error_details_tracebacks() -> None:
         )
     )
 
-    with patch("nhx.core.jobs.controllers.diagnostics.client_from_platform", return_value=jobs):
+    with patch.object(JobsClient, "from_client", return_value=jobs):
         diagnostics = collect_job_diagnostics(
-            sdk,
+            nemo_client,
             workspace="default",
             job_name="job-1",
             step_name="step-1",

@@ -42,6 +42,7 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
                     "p95": 1.0,
                     "p99": 1.0,
                     "count": 4,
+                    "failed_count": 1,
                 }
             ],
             [
@@ -83,6 +84,7 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     assert rollup.run_count == 3
     assert rollup.test_case_count == 2
     assert rollup.evaluator_names == ["reward"]
+    assert rollup.evaluator_scores["reward"].failed_count == 1
     assert rollup.model_names == ["model-a", "model-b"]
     assert rollup.agent_names == ["agent-a"]
     assert rollup.agent_versions == ["1.0.0", "1.0.1"]
@@ -136,6 +138,11 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     assert "FROM evaluator_results FINAL" in statements[1]
     assert "quantileExact(0.5)(value) AS median" in statements[1]
     assert "quantileExact(0.99)(value) AS p99" in statements[1]
+    # Failed attempts already sit in the zero-filled distribution; stage 2 counts them per test case and
+    # the final SELECT sums those, so no extra pass over evaluator_results is needed.
+    assert "countIf(scores.failed = 1) AS failed_sessions" in statements[1]
+    assert "sum(failed_sessions) AS failed_count" in statements[1]
+    assert statements[1].count("FROM evaluator_results FINAL") == 2
     assert "AND (workspace, session_id) IN (" in statements[1]
     assert "sessions.session_id = results.session_id" in statements[1]
     # Scores are reduced to one value per (session, evaluator), then averaged per test case before the
@@ -183,11 +190,18 @@ def test_score_rollup_cte_builders_compose_the_pipeline():
     # Fixed denominator: distinct sessions per test case.
     assert "count(DISTINCT session_id) AS session_count" in _test_case_sessions_cte()
 
+    # Stage 1 also carries the FAILED flag from the same scan, so stage 2 can count failed sessions.
+    assert "OR status = 'FAILED'" in session_scores
+    assert "max(results.status = 'FAILED') AS failed" in session_scores
+
     # Evaluator axis of the grid: distinct evaluators, read from evaluator_results (not session_scores).
+    # FAILED results are admitted so an evaluator that failed everywhere still gets a zero row instead
+    # of vanishing from the grid.
     evaluators = _evaluators_cte("evaluator_results")
     assert "SELECT DISTINCT" in evaluators
     assert "FROM evaluator_results FINAL" in evaluators
     assert "session_scores" not in evaluators
+    assert "OR status = 'FAILED'" in evaluators
 
     # Stage 2: zero-filled per-(test case, evaluator) score using the fixed denominator.
     test_case_scores = _test_case_scores_cte()

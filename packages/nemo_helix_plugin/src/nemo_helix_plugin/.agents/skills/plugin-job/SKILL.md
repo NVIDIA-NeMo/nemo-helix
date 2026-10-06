@@ -41,7 +41,7 @@ class GenerateJob(NemoJob):
         return {"rows": _generate(cfg)}
 
     @classmethod
-    async def compile(cls, *, workspace, spec, entity_client, job_name, sdk, profile=None, options=None):
+    async def compile(cls, *, workspace, spec, entity_client, job_name, async_sdk, profile=None, options=None):
         # See Compilation section.
         ...
 ```
@@ -87,7 +87,7 @@ class TrainJob(NemoJob):
     input_spec_schema = InputSpec
 
     @classmethod
-    async def to_spec(cls, input_spec, *, workspace, entity_client, sdk):
+    async def to_spec(cls, input_spec, *, workspace, entity_client, async_sdk, is_local):
         model = await entity_client.get(Model, name=input_spec.model_name, workspace=workspace)
         return CanonicalSpec(model_id=model.id)
 ```
@@ -127,7 +127,7 @@ Passthrough kwargs:
 ## Compilation
 
 `compile` is an `async classmethod` —
-`compile(workspace, spec, entity_client, job_name, sdk, profile, options) -> HelixJobSpec` —
+`compile(workspace, spec, entity_client, job_name, async_sdk, profile, options) -> HelixJobSpec` —
 that turns the validated spec into the concrete step / container / resources description that runs in the cluster.
 
 > **Placeholder — full compilation reference is handled separately.**

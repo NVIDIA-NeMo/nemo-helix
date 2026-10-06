@@ -14,7 +14,6 @@ from nemo_deployments_plugin.backends.registry import ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.controller import DeploymentsController, _orphan_protected_ids
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite, StatusEvent
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 
@@ -78,23 +77,23 @@ async def test_controller_swallows_conflict_on_deployment() -> None:
 
 
 @pytest.mark.asyncio
-@patch("nemo_deployments_plugin.controller.client_from_platform")
-@patch("nemo_deployments_plugin.controller.get_async_platform_sdk")
+@patch("nemo_deployments_plugin.controller.AsyncEntitiesClient.from_client")
+@patch("nemo_deployments_plugin.controller.get_async_nemo_client")
 @patch("nemo_deployments_plugin.config.DeploymentsConfig.get")
 async def test_controller_on_startup(
     mock_config_get: AsyncMock,
-    mock_sdk: AsyncMock,
+    mock_client: AsyncMock,
     mock_adapter: AsyncMock,
 ) -> None:
     from nemo_deployments_plugin.config import DeploymentsConfig
 
     mock_config_get.return_value = DeploymentsConfig()
-    mock_sdk.return_value = AsyncMock()
+    mock_client.return_value = AsyncMock()
 
     ctrl = DeploymentsController()
     await ctrl.on_startup()
 
-    mock_adapter.assert_called_once_with(mock_sdk.return_value, AsyncEntitiesClient)
+    mock_adapter.assert_called_once_with(mock_client.return_value)
     assert ctrl._entities is not None
     assert ctrl._registry is not None
     assert ctrl.interval_seconds == 5.0

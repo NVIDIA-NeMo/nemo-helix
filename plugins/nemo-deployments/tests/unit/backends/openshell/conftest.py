@@ -13,7 +13,7 @@ from nemo_deployments_plugin.backends.openshell.backend import OpenShellDeployme
 
 
 @pytest.fixture
-def mock_sdk() -> MagicMock:
+def mock_client() -> MagicMock:
     return MagicMock()
 
 
@@ -32,14 +32,14 @@ def mock_stub() -> MagicMock:
 
 @pytest.fixture
 def openshell_backend(
-    mock_sdk: MagicMock, mock_entities: AsyncMock, mock_stub: MagicMock
+    mock_client: MagicMock, mock_entities: AsyncMock, mock_stub: MagicMock
 ) -> Iterator[OpenShellDeploymentBackend]:
     with (
-        patch("nemo_deployments_plugin.backends.openshell.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.openshell.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.openshell.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("grpc.insecure_channel", return_value=MagicMock()),
     ):
-        backend = OpenShellDeploymentBackend(mock_sdk, {"gateway_endpoint": "http://127.0.0.1:17670"})
+        backend = OpenShellDeploymentBackend(mock_client, {"gateway_endpoint": "http://127.0.0.1:17670"})
         backend._stub = mock_stub
         backend._entities = mock_entities
         yield backend

@@ -234,7 +234,7 @@ def cpu_execution_provider():
 
 @pytest.fixture
 def kubernetes_job(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     mock_platform_config,
@@ -248,7 +248,7 @@ def kubernetes_job(
         ),
     ):
         # Convert the Pydantic model to dict format expected by the base class
-        k8s_job = CPUKubernetesJobBackend(mock_nhx_client, kubernetes_execution_profile_config, profile_name="default")
+        k8s_job = CPUKubernetesJobBackend(mock_nemo_client, kubernetes_execution_profile_config, profile_name="default")
         k8s_job._batch_v1 = kubernetes_client_mock["batch_v1"]
         k8s_job._core_v1 = kubernetes_client_mock["core_v1"]
         yield k8s_job
@@ -890,7 +890,7 @@ def test_created_step_does_not_ttl_before_backend_acceptance(kubernetes_job, cpu
 
 
 def test_kubernetes_job_profile_environment_applied(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     mock_platform_config,
@@ -908,7 +908,7 @@ def test_kubernetes_job_profile_environment_applied(
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nhx_client, profile_config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nemo_client, profile_config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
 
@@ -924,7 +924,7 @@ def test_kubernetes_job_profile_environment_applied(
 
 
 def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     kubernetes_execution_profile_config,
     cpu_execution_provider,
@@ -948,7 +948,7 @@ def test_kubernetes_job_uses_service_discovery_urls_for_job_runtime(
         ),
     ):
         backend = CPUKubernetesJobBackend(
-            mock_nhx_client,
+            mock_nemo_client,
             kubernetes_execution_profile_config,
             profile_name="default",
         )
@@ -1735,7 +1735,7 @@ def test_name_for_job_truncation(kubernetes_job):
     assert not job_name.endswith("-")
 
 
-def test_schedule_kubernetes_gpu(mock_nhx_client, kubernetes_execution_profile_config):
+def test_schedule_kubernetes_gpu(mock_nemo_client, kubernetes_execution_profile_config):
     """Test successful job scheduling."""
 
     gpu_executor_config = GPUExecutionProvider.model_validate(
@@ -1773,7 +1773,7 @@ def test_schedule_kubernetes_gpu(mock_nhx_client, kubernetes_execution_profile_c
     with patch("kubernetes.config.load_incluster_config"):
         assert step is not None
         executor = GPUKubernetesJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=kubernetes_execution_profile_config,
             profile_name="default",
         )
@@ -2853,7 +2853,7 @@ def test_cleanup_steps_proceeds_when_job_entity_not_found_with_persistent_storag
 
 
 def test_scheduler_name_applied_to_pod_spec(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     mock_platform_config,
     cpu_execution_provider,
@@ -2881,7 +2881,7 @@ def test_scheduler_name_applied_to_pod_spec(
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nhx_client, config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nemo_client, config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
         backend.schedule(cpu_execution_provider, test_step_pending)
@@ -2892,7 +2892,7 @@ def test_scheduler_name_applied_to_pod_spec(
 
 
 def test_scheduler_name_not_set_by_default(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     mock_platform_config,
     cpu_execution_provider,
@@ -2913,7 +2913,7 @@ def test_scheduler_name_not_set_by_default(
             return_value=mock_platform_config,
         ),
     ):
-        backend = CPUKubernetesJobBackend(mock_nhx_client, config, profile_name="default")
+        backend = CPUKubernetesJobBackend(mock_nemo_client, config, profile_name="default")
         backend._batch_v1 = kubernetes_client_mock["batch_v1"]
         backend._core_v1 = kubernetes_client_mock["core_v1"]
         backend.schedule(cpu_execution_provider, test_step_pending)

@@ -121,7 +121,7 @@ def access_key_lifecycle_middleware(auth_config_oidc_disabled, monkeypatch: pyte
                 access_key_lifecycle_http_client=http_client,
             )
             with patch(
-                "nhx.common.sdk_factory.Configuration.get_platform_config",
+                "nhx.common.platform_client_context.Configuration.get_platform_config",
                 return_value=HelixConfig(base_url=base_url, services=""),
             ):
                 yield middleware
@@ -746,7 +746,7 @@ class TestBearerTokenAuth:
             )
             with (
                 patch(
-                    "nhx.common.sdk_factory._get_platform_config",
+                    "nhx.common.platform_client_context.Configuration.get_platform_config",
                     return_value=HelixConfig(base_url="unix:///tmp/nemo-helix.sock", services=""),
                 ),
                 patch(
@@ -985,7 +985,7 @@ class TestBearerTokenAuth:
         try:
             with (
                 patch(
-                    "nhx.common.sdk_factory.Configuration.get_platform_config",
+                    "nhx.common.platform_client_context.Configuration.get_platform_config",
                     return_value=HelixConfig(base_url="https://platform.example.com", services=""),
                 ),
                 patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock()) as resolver,
