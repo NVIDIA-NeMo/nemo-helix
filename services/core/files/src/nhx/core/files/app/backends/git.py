@@ -63,7 +63,7 @@ _FULL_HISTORY = 2147483647
 # Bounds the git and ssh processes one files service starts at once, across every request.
 _GIT_SLOTS = asyncio.Semaphore(16)
 
-# Separate from the slots above, so slow clients streaming files cannot starve fetches and access checks.
+# Separate from the slots above, so slow clients streaming files cannot starve fetches and listings.
 _STREAM_SLOTS = asyncio.Semaphore(32)
 
 
@@ -353,30 +353,6 @@ def _remember_listing(key: str, snapshot: Snapshot) -> None:
         _listings.popitem(last=False)
 
 
-_ACCESS_RECHECK_SECONDS = 5 * 60
-# While the remote is unreachable, a key it accepted this recently keeps reading what is already cached.
-_ACCESS_OUTAGE_GRACE_SECONDS = 24 * 60 * 60
-_ACCESS_OUTAGE_RETRY_SECONDS = 60
-
-
-@dataclass
-class _AccessCheck:
-    accepted_at: float
-    checked_at: float
-
-
-_access_checks: dict[tuple[str, str], _AccessCheck] = {}
-
-
-def _record_accepted(access: tuple[str, str]) -> None:
-    now = time.monotonic()
-    for stale in [
-        key for key, check in _access_checks.items() if now - check.accepted_at >= _ACCESS_OUTAGE_GRACE_SECONDS
-    ]:
-        del _access_checks[stale]
-    _access_checks[access] = _AccessCheck(accepted_at=now, checked_at=now)
-
-
 # Strong references to work that outlives a cancelled request; the event loop keeps only weak ones.
 _background_work: set[asyncio.Task[Any]] = set()
 
@@ -628,10 +604,7 @@ class GitStorageImpl(StorageImpl):
 
     async def _remote_git(self, *args: str, subject: str) -> bytes:
         with self._ssh_env() as env:
-            output = await self._git(*args, env=env, subject=subject)
-        # Only a command that reached the remote with this key proves the remote still accepts it.
-        _record_accepted(self._access_key())
-        return output
+            return await self._git(*args, env=env, subject=subject)
 
     async def _ls_remote(self) -> str:
         revision = self.config.revision
@@ -659,22 +632,6 @@ class GitStorageImpl(StorageImpl):
                 self.config.revision if is_commit_sha(self.config.revision) else await self._ls_remote()
             )
         return self._resolved_sha
-
-    def _access_key(self) -> tuple[str, str]:
-        return (self.config.url, hashlib.sha256(self.secrets.get("ssh_key", "").encode()).hexdigest())
-
-    async def _check_access(self) -> None:
-        access = self._access_key()
-        check = _access_checks.get(access)
-        if check is not None and time.monotonic() - check.checked_at < _ACCESS_RECHECK_SECONDS:
-            return
-        try:
-            await self._remote_git("ls-remote", "--", self.config.url, "HEAD", subject=self.config.url)
-        except GitUnavailableError:
-            if check is None or time.monotonic() - check.accepted_at >= _ACCESS_OUTAGE_GRACE_SECONDS:
-                raise
-            logger.warning("Serving cached files of %s while it is unreachable", self.config.url)
-            check.checked_at = time.monotonic() - _ACCESS_RECHECK_SECONDS + _ACCESS_OUTAGE_RETRY_SECONDS
 
     async def _has_commit(self, repo: Path, sha: str) -> bool:
         returncode, _, _ = await self._run("-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}", env=self._base_env())
@@ -780,7 +737,6 @@ class GitStorageImpl(StorageImpl):
     async def _snapshot(self) -> Snapshot:
         if self._snapshot_memo is None:
             sha = await self._commit()
-            await self._check_access()
             key = self._listing_key(sha)
             snapshot = await self._read_listing(key)
             if snapshot is None:
