@@ -4,6 +4,7 @@
 """Tests for the Git storage backend, run against a real repository over the file protocol."""
 
 import asyncio
+import functools
 import os
 import shutil
 import stat
@@ -39,7 +40,7 @@ from nhx.core.files.app.backends.git import (
     stop_process_group,
 )
 from nhx.core.files.app.backends.local import LocalStorageImpl
-from nhx.core.files.app.external_hosts import validate_external_host
+from nhx.core.files.app.external_hosts import ExternalHostNotAllowedError, validate_external_host
 from nhx.core.files.exceptions import NotFoundError
 from pydantic import ValidationError
 
@@ -292,6 +293,7 @@ class TestClassifyFailure:
             ("error: unable to create file objects/ab: Permission denied", GitServerFault),
             ("fatal: unable to write new index file: No space left on device", GitServerFault),
             ("error: cannot run ssh: No such file or directory", GitServerFault),
+            ("No user exists for uid 10001\nfatal: Could not read from remote repository.", GitServerFault),
             ("fatal: the remote end hung up unexpectedly", GitUnavailableError),
             ("Timeout, server gitlab.example.com not responding.", GitUnavailableError),
             ("ssh: connect to host gitlab.example.com port 22: Host is down", GitUnavailableError),
@@ -375,6 +377,11 @@ class TestRefResolution:
         assert resolved.revision == remote["main"]
         assert resolved.original_revision == "main"
         assert resolved.tracked_revision == "main"
+
+    async def test_a_tag_wins_over_a_branch_of_the_same_name_as_in_git(self, remote, tmp_path):
+        _git(Path(remote["dir"]), "branch", "v1", "main")
+        resolved = await _impl(_config(remote["url"], revision="v1"), tmp_path / "cache").resolve_config()
+        assert resolved.revision == remote["first"]
 
     async def test_annotated_tag_pins_to_the_commit(self, remote, tmp_path):
         for revision in ("v1", "refs/tags/v1"):
@@ -538,6 +545,23 @@ class TestListings:
             listing.write_text("{not json")
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
 
+    async def test_a_listing_that_cannot_be_read_from_storage_is_rebuilt(self, remote, tmp_path, monkeypatch):
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        _listings.clear()
+
+        async def broken(*_args, **_kwargs):
+            raise RuntimeError("storage is down")
+
+        monkeypatch.setattr(LocalStorageImpl, "download", broken)
+        assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
+
+    async def test_listings_in_memory_are_bounded_by_their_files(self, remote, tmp_path, monkeypatch):
+        monkeypatch.setattr(git_backend, "_LISTED_FILES_IN_MEMORY", 4)
+        await _impl(_config(remote["url"]), tmp_path / "cache").list_files()
+        await _impl(_config(remote["url"], path="agents"), tmp_path / "cache").list_files()
+        assert [len(listing) for listing in _listings.values()] == [2]
+
     async def test_a_listing_that_cannot_be_stored_is_still_served(self, remote, tmp_path, monkeypatch):
         async def full(*_args, **_kwargs):
             raise OSError("No space left on device")
@@ -621,6 +645,26 @@ class TestColdRepositories:
         await _read(impl, "README.md")
         assert repository.stat().st_mtime > week_ago + 24 * 60 * 60
 
+    async def test_finding_a_commit_already_fetched_counts_as_use(self, remote, tmp_path):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        await impl.get_file("README.md")
+        repository = _fetch_repository(tmp_path / "cache")
+        week_ago = time.time() - 8 * 24 * 60 * 60
+        os.utime(repository, (week_ago, week_ago))
+        _last_touched.clear()
+
+        await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").get_file("README.md")
+        assert repository.stat().st_mtime > week_ago + 24 * 60 * 60
+
+    async def test_use_is_recorded_at_most_once_a_minute(self, tmp_path):
+        repository = tmp_path / "repo"
+        repository.mkdir()
+        await git_backend._touch(repository)
+        week_ago = time.time() - 8 * 24 * 60 * 60
+        os.utime(repository, (week_ago, week_ago))
+        await git_backend._touch(repository)
+        assert repository.stat().st_mtime == pytest.approx(week_ago)
+
     async def test_fetching_again_prunes_other_repositories(self, remote, tmp_path):
         cache = tmp_path / "cache"
         impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
@@ -676,6 +720,32 @@ class TestAccess:
             _config(remote["url"], revision=revision), tmp_path / "cache", {"ssh_key": "second"}
         ).validate_storage()
         assert keys == (["second"] if pinned else [])
+
+    async def test_registering_a_pinned_commit_skips_ls_remote(self, remote, tmp_path, monkeypatch):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
+
+        async def no_ls_remote(self):
+            raise AssertionError("ls-remote ran for a pinned commit")
+
+        monkeypatch.setattr(GitStorageImpl, "_ls_remote", no_ls_remote)
+        await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").validate_storage()
+
+    async def test_a_host_outside_the_allowlist_is_refused_before_git_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "nhx.core.files.app.backends.git.validate_external_host",
+            functools.partial(validate_external_host, allowed_hosts=["ssh://allowed.example"]),
+        )
+
+        async def no_git(*_args, **_kwargs):
+            raise AssertionError("git ran for a host outside the allowlist")
+
+        monkeypatch.setattr(GitStorageImpl, "_run", no_git)
+        config = GitStorageConfig(
+            url="git@elsewhere.example:org/repo.git", ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS
+        )
+        with pytest.raises(ExternalHostNotAllowedError):
+            await _impl(config, tmp_path / "cache").validate_storage()
 
     async def test_a_key_the_remote_refuses_cannot_register_a_cached_commit(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
