@@ -619,6 +619,12 @@ class TestRenderFabricDockerfile:
         # Relay 0.9 CLI for telemetry and git for the agent's own GitHub work.
         assert "nemo-relay-cli-bin" in result
         assert "ca-certificates curl git" in result
+        # The RUN block must render as a real multi-line Dockerfile instruction with
+        # backslash-newline continuations — not collapse to one physical line.
+        assert " \\\n    curl -fsSL" in result
+        assert "uv pip install --no-sources --prerelease=allow" in result
+        # Guarded symlink staging (fail-fast if the descriptor is missing, not a dangling link).
+        assert 'test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json"' in result
         # The descriptor is linked into the Fabric share/ tree for preinstalled discovery.
         assert "share/nemo-fabric/adapters/pi" in result
         assert "pi.fabric-adapter.json" in result

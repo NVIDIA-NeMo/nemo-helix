@@ -136,9 +136,8 @@ _IMAGE_WORKDIR = "/workspace"
 # Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
 PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
 
-# Pi harness (nvidia.fabric.pi) is a Node/npm adapter, not a Python one: Fabric's
-# Rust core spawns `node dist/cli.js` for it. The image installs Node + the npm
-# adapter + the Pi SDK peers additively, alongside the Python/Rust Fabric stack.
+# Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
+# npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
 # Pi 0.84.x requires Node >= 22.19.0.
 PINNED_NODE_MAJOR = "22"
 PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.4.0"
@@ -334,22 +333,21 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
 ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
 {% endif %}
 {% if install_pi %}
-# Pi harness: Fabric's Rust core spawns the Node Pi adapter (`node dist/cli.js`),
-# so Node and the npm Pi adapter + Pi SDK peers are installed additively, next to
-# the Python/Rust Fabric stack. NeMo Relay 0.9 (installed into the venv) must be on
-# PATH for Pi telemetry; the adapter descriptor is linked into the Fabric share/
-# tree so the Rust core's `preinstalled` discovery resolves `nvidia.fabric.pi`.
-RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \
-    curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \
-    . /workspace/.venv/bin/activate && \
-    uv pip install "{{ pi_relay_cli_spec }}" && \
-    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \
-    FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \
-    mkdir -p "${FABRIC_SHARE}" && \
-    ln -sf "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" "${FABRIC_SHARE}/pi.fabric-adapter.json" && \
+# Pi is a Node adapter (Fabric spawns `node dist/cli.js`), so install Node + the npm
+# adapter + Pi SDK peers additively, and link the descriptor into the Fabric share/
+# tree for `preinstalled` discovery to resolve `nvidia.fabric.pi`.
+RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
+    curl -fsSL https://deb.nodesource.com/setup_{{ pinned_node_major }}.x | bash - && \\
+    apt-get install -y --no-install-recommends nodejs && \\
+    rm -rf /var/lib/apt/lists/* && \\
+    npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
+    . /workspace/.venv/bin/activate && \\
+    uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
+    PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
+    FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
+    test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
+    mkdir -p "${FABRIC_SHARE}" && \\
+    ln -sf "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" "${FABRIC_SHARE}/pi.fabric-adapter.json" && \\
     chmod -R a+rX {{ pi_npm_prefix }} "${FABRIC_SHARE}"
 ENV PATH="{{ pi_npm_prefix }}/bin:$PATH"
 {% endif %}
