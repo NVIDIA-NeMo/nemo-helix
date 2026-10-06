@@ -28,6 +28,7 @@ from nemo_evaluator.api.schemas import MetricRefOrInline
 from nemo_evaluator.authz import scope
 from nemo_evaluator.jobs.metric_resolution import (
     HelixMetricSecretResolver,
+    loadable_here,
     resolve_metrics_to_inline,
     to_runtime_bundle,
 )
@@ -292,6 +293,11 @@ async def _resolve_metrics(
         entity_client=entity_client if isinstance(entity_client, EntityClient) else None,
         async_client=async_client,
     )
+    if not all(loadable_here(metric) for metric in resolved):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="cloudpickle metrics are not supported on /live. Submit an evaluate job to run custom metric code.",
+        )
     runtime = [unbundle_metric(to_runtime_bundle(metric)) for metric in resolved]
     model_backed = [metric for metric in runtime if isinstance(metric, MetricWithModels)]
     if len(model_backed) > MAX_MODEL_BACKED_METRICS:

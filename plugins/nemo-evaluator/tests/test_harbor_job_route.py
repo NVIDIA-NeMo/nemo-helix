@@ -43,11 +43,11 @@ async def test_post_snapshots_tasks_before_creating_job(entity_store, monkeypatc
     if invalid in {"duplicate-metric", "invalid-view"}:
         from nemo_evaluator.jobs.metric_resolution import to_inline
         from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
-        from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+        from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
         from nemo_evaluator_sdk.metrics.runner_rewards import HarborRewardMetric
 
         if invalid == "duplicate-metric":
-            task.spec.metrics = [to_inline(bundle_metric(HarborRewardMetric(), CloudpickleMetricBundlePackager()))]
+            task.spec.metrics = [to_inline(bundle_metric(HarborRewardMetric(), InlineMetricBundlePackager()))]
         else:
             task.spec.views = {
                 "bad": SemanticView.model_validate(

@@ -806,7 +806,7 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
     from nemo_evaluator.jobs.agent_evaluate import AgentEvalJob
     from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec
     from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
-    from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+    from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
     from nemo_evaluator_sdk.agent_eval.tasks import SemanticView
     from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
     from nemo_evaluator_sdk.metrics.runner_rewards import GymRewardMetric
@@ -815,7 +815,7 @@ async def test_direct_evaluator_references_resolve_and_compile(kind, entity_stor
     metric = (
         GymRewardMetric() if kind == "gym" else ExactMatchMetric(reference="DONE", candidate="{{sample.output_text}}")
     )
-    bundle = bundle_metric(metric, CloudpickleMetricBundlePackager())
+    bundle = bundle_metric(metric, InlineMetricBundlePackager())
     resolved_metrics = []
 
     async def resolve_metric(ref, **kwargs):

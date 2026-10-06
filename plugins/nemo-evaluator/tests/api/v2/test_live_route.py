@@ -11,6 +11,7 @@ would block the worker for the whole of generation plus judging.
 from __future__ import annotations
 
 import asyncio
+import pickle
 from collections.abc import Iterator
 from typing import Any
 
@@ -23,7 +24,7 @@ from nemo_evaluator.api.v2 import live as live_routes
 from nemo_evaluator.entities import MetricBundleEntity
 from nemo_evaluator.jobs import metric_resolution
 from nemo_evaluator.shared.metric_bundles.bundles import bundle_metric
-from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager
+from nemo_evaluator.shared.metric_bundles.cloudpickle import CloudpickleMetricBundlePackager, CloudpickleMetricPayload
 from nemo_evaluator.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_evaluator_sdk import inference as sdk_inference
 from nemo_evaluator_sdk.execution import benchmark_execution
@@ -46,6 +47,17 @@ def _exact_match_metric() -> dict[str, Any]:
     metric = ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}")
     bundle = bundle_metric(metric, InlineMetricBundlePackager())
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
+
+
+class _Detonator:
+    def __reduce__(self):
+        return (pytest.fail, ("/live deserialized a cloudpickle payload",))
+
+
+def _cloudpickle_metric_with_hostile_blob() -> dict[str, Any]:
+    bundle = bundle_metric(ExactMatchMetric(reference="a", candidate="a"), CloudpickleMetricBundlePackager())
+    hostile = bundle.model_copy(update={"payload": CloudpickleMetricPayload.from_blob(pickle.dumps(_Detonator()))})
+    return MetricInline.model_validate_json(hostile.model_dump_json()).model_dump(mode="json")
 
 
 def _build_app(concurrency: int = 64) -> FastAPI:
@@ -327,7 +339,7 @@ def _judge_metric(secret: str | None) -> dict[str, Any]:
         scores=[RangeScore(name="helpfulness", minimum=1, maximum=5, parser=JSONScoreParser(json_path="helpfulness"))],
         job_type=SupportedJobTypes.OFFLINE,
     )
-    bundle = bundle_metric(metric, CloudpickleMetricBundlePackager())
+    bundle = bundle_metric(metric, InlineMetricBundlePackager())
     return MetricInline.model_validate_json(bundle.model_dump_json()).model_dump(mode="json")
 
 
@@ -409,7 +421,7 @@ def test_one_failing_metric_does_not_hide_the_others(client: TestClient) -> None
     # string does not, so this metric fails while the exact-match beside it succeeds.
     broken = ToolCallingMetric(reference="{{item.not_tool_calls}}")
     broken_inline = MetricInline.model_validate_json(
-        bundle_metric(broken, CloudpickleMetricBundlePackager()).model_dump_json()
+        bundle_metric(broken, InlineMetricBundlePackager()).model_dump_json()
     ).model_dump(mode="json")
 
     resp = client.post(
@@ -491,7 +503,7 @@ def test_stored_metric_reference_is_resolved_and_scored(monkeypatch: pytest.Monk
     """
     bundle = bundle_metric(
         ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"),
-        CloudpickleMetricBundlePackager(),
+        InlineMetricBundlePackager(),
     )
     payload = bundle.model_dump_json().encode()
     entity = MetricBundleEntity(
@@ -542,9 +554,7 @@ def test_targeted_run_keeps_sibling_scores_when_one_metric_fails(
     monkeypatch.setattr(benchmark_execution, "make_inference_request", fake_inference)
 
     broken = MetricInline.model_validate_json(
-        bundle_metric(
-            ToolCallingMetric(reference="{{item.expected}}"), CloudpickleMetricBundlePackager()
-        ).model_dump_json()
+        bundle_metric(ToolCallingMetric(reference="{{item.expected}}"), InlineMetricBundlePackager()).model_dump_json()
     ).model_dump(mode="json")
 
     resp = client.post(
@@ -589,3 +599,17 @@ def test_failed_target_generation_is_not_reported_as_metric_errors(
     assert resp.status_code == 502, resp.text
     assert "target generation failed" in resp.text
     assert "503 Service Unavailable" in resp.text
+
+
+def test_cloudpickle_metric_is_rejected_without_deserializing() -> None:
+    with TestClient(_build_app()) as client:
+        resp = client.post(
+            _BASE,
+            json={
+                "dataset": [{"expected": "a", "output_text": "a"}],
+                "metrics": [_cloudpickle_metric_with_hostile_blob()],
+            },
+        )
+
+    assert resp.status_code == 422, resp.text
+    assert "cloudpickle metrics are not supported on /live" in resp.text

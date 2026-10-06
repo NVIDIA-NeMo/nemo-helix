@@ -56,6 +56,8 @@ from nemo_evaluator_sdk.metrics.tool_calling import ToolCallingMetric
 from nemo_evaluator_sdk.values import Model, SecretRef
 from nemo_evaluator_sdk.values.scores import JSONScoreParser, RangeScore, RemoteScore
 
+pytestmark = pytest.mark.usefixtures("cloudpickle_loading")
+
 
 class _CustomMetric:
     type = "custom-score"

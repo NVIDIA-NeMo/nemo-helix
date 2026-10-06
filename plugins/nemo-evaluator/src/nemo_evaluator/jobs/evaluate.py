@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ from nemo_evaluator.api.schemas import MetricInline
 from nemo_evaluator.filesets import FilesetRef, download_dataset, download_dataset_sync
 from nemo_evaluator.jobs.agent_spec import target_agent_identity
 from nemo_evaluator.jobs.metric_resolution import (
+    loadable_here,
     resolve_metrics_to_inline,
     to_runtime_bundle,
     unresolved_model_refs,
@@ -31,6 +33,7 @@ from nemo_evaluator.jobs.token_usage import report_row_evaluation_usage
 from nemo_evaluator.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
 from nemo_evaluator.shared.metric_bundles.bundles import unbundle_metric
+from nemo_evaluator.shared.metric_bundles.cloudpickle import allow_cloudpickle_loading
 from nemo_evaluator_sdk.execution.config import resolve_params
 from nemo_evaluator_sdk.metrics.protocol import Metric
 from nemo_evaluator_sdk.metrics.utils import metric_type_name
@@ -201,7 +204,9 @@ class EvaluateSpec(_EvaluateSpecCommon):
 
     @model_validator(mode="after")
     def reject_unresolved_metric_model_refs(self) -> Self:
-        unresolved_refs = unresolved_model_refs([unbundle_metric(to_runtime_bundle(metric)) for metric in self.metrics])
+        unresolved_refs = unresolved_model_refs(
+            [unbundle_metric(to_runtime_bundle(metric)) for metric in self.metrics if loadable_here(metric)]
+        )
         if unresolved_refs:
             raise ValueError(
                 "EvaluateSpec metric models must be resolved before compile/run: " + ", ".join(unresolved_refs)
@@ -287,19 +292,19 @@ class _EvaluateJobBase(NemoJob):
         is_local: bool,
     ) -> BaseModel:
         """Resolve submitter-facing model and metric references into the canonical evaluation spec."""
-        del is_local
         submit_spec = (
             input_spec.model_copy(deep=True)
             if isinstance(input_spec, EvaluateInputSpec)
             else EvaluateInputSpec.model_validate_json(input_spec.model_dump_json())
         )
         entity_client = entity_client if isinstance(entity_client, EntityClient) else None
-        metrics = await resolve_metrics_to_inline(
-            submit_spec.metrics,
-            workspace=workspace,
-            entity_client=entity_client,
-            async_client=async_sdk,
-        )
+        with allow_cloudpickle_loading() if is_local else nullcontext():
+            metrics = await resolve_metrics_to_inline(
+                submit_spec.metrics,
+                workspace=workspace,
+                entity_client=entity_client,
+                async_client=async_sdk,
+            )
         return EvaluateSpec(
             metrics=metrics,
             dataset=submit_spec.dataset,
@@ -456,9 +461,10 @@ class _EvaluateJobBase(NemoJob):
         client: NemoClient,
     ) -> dict:
         """Run the evaluator job locally through sync typed clients."""
-        spec = EvaluateSpec.model_validate(config)
-        dataset = _resolve_run_dataset(spec.dataset, ctx=ctx, client=client)
-        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        with allow_cloudpickle_loading():
+            spec = EvaluateSpec.model_validate(config)
+            dataset = _resolve_run_dataset(spec.dataset, ctx=ctx, client=client)
+            run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
         with async_client_from_sync_client(client) as async_client:
             self._persist_result(
                 run.result,
@@ -504,9 +510,10 @@ class AsyncEvaluateJob(_EvaluateJobBase):
         async_client: AsyncNemoClient,
     ) -> dict:
         """Run the evaluator job in a task container through async typed clients."""
-        spec = EvaluateSpec.model_validate(config)
-        dataset = _resolve_run_dataset_async(spec.dataset, ctx=ctx, async_client=async_client)
-        run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
+        with allow_cloudpickle_loading():
+            spec = EvaluateSpec.model_validate(config)
+            dataset = _resolve_run_dataset_async(spec.dataset, ctx=ctx, async_client=async_client)
+            run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
         self._persist_result(
             run.result,
             spec=spec,
