@@ -13,6 +13,8 @@ import { server } from '@studio/mocks/node';
 import { render, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { type FC } from 'react';
+import { useForm } from 'react-hook-form';
 
 vi.mock('@studio/api/datasets/useDatasetFileContent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/api/datasets/useDatasetFileContent')>()),
@@ -31,7 +33,10 @@ const fileEntry = (path: string) => ({
 const mockFilesets = (paths: string[]) => {
   server.use(
     http.get(mockApiUrl(getFilesListFilesetsQueryKey, ':workspace'), () =>
-      HttpResponse.json({ data: [{ name: 'generated', workspace: DEFAULT_WORKSPACE }] })
+      HttpResponse.json({
+        data: [{ name: 'generated', workspace: DEFAULT_WORKSPACE }],
+        pagination: { total: 1, page: 1, page_size: 20 },
+      })
     ),
     http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
       HttpResponse.json({ data: paths.map(fileEntry) })
@@ -49,23 +54,38 @@ const mockFileContent = (read: () => Promise<string>) => {
   );
 };
 
-const renderPicker = (props: Partial<React.ComponentProps<typeof FilesetDatasetPicker>> = {}) => {
-  const onPick = vi.fn();
-  const onClear = vi.fn();
-  render(
-    <FilesetDatasetPicker
+interface PickerFormValues {
+  fileset: string;
+}
+
+const PickerHarness: FC<
+  Pick<React.ComponentProps<typeof FilesetDatasetPicker>, 'onPick' | 'onClear'>
+> = (props) => {
+  const { control } = useForm<PickerFormValues>({ defaultValues: { fileset: '' } });
+  return (
+    <FilesetDatasetPicker<PickerFormValues>
       workspace={DEFAULT_WORKSPACE}
-      onPick={onPick}
-      onClear={onClear}
+      filesetControllerProps={{ control, name: 'fileset' }}
       {...props}
     />
   );
+};
+
+const renderPicker = () => {
+  const onPick = vi.fn();
+  const onClear = vi.fn();
+  render(<PickerHarness onPick={onPick} onClear={onClear} />);
   return { onPick, onClear };
 };
 
-const choose = async (user: ReturnType<typeof userEvent.setup>, select: string, option: string) => {
-  await user.click(await screen.findByRole('combobox', { name: select }));
-  await user.click(await screen.findByRole('option', { name: option }));
+const chooseFileset = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
+  await user.click(await screen.findByRole('option', { name }));
+};
+
+const chooseFile = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  await user.click(await screen.findByRole('combobox', { name: 'File' }));
+  await user.click(await screen.findByRole('option', { name }));
 };
 
 afterEach(() => {
@@ -79,8 +99,8 @@ describe('FilesetDatasetPicker', () => {
     const user = userEvent.setup();
     const { onPick } = renderPicker();
 
-    await choose(user, 'Fileset', 'generated');
-    await choose(user, 'File', 'rows.jsonl');
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'rows.jsonl');
 
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
     const file: File = onPick.mock.calls[0][0];
@@ -94,8 +114,8 @@ describe('FilesetDatasetPicker', () => {
     const user = userEvent.setup();
     const { onPick } = renderPicker();
 
-    await choose(user, 'Fileset', 'generated');
-    await choose(user, 'File', 'output/part-0.parquet');
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'output/part-0.parquet');
 
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1));
     expect(onPick.mock.calls[0][0].name).toBe('part-0.jsonl');
@@ -106,7 +126,7 @@ describe('FilesetDatasetPicker', () => {
     const user = userEvent.setup();
     renderPicker();
 
-    await choose(user, 'Fileset', 'generated');
+    await chooseFileset(user, 'generated');
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
 
     expect(await screen.findByRole('option', { name: 'rows.jsonl' })).toBeInTheDocument();
@@ -122,8 +142,8 @@ describe('FilesetDatasetPicker', () => {
     const user = userEvent.setup();
     const { onPick } = renderPicker();
 
-    await choose(user, 'Fileset', 'generated');
-    await choose(user, 'File', 'rows.jsonl');
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'rows.jsonl');
 
     expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
     expect(onPick).not.toHaveBeenCalled();

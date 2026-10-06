@@ -171,6 +171,7 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
+  datasetFileset: z.string(),
   parallelism: z.coerce
     .number()
     .int('Use a whole number')
@@ -230,6 +231,7 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
+  datasetFileset: '',
   parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
@@ -1066,6 +1068,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                     value={datasetSource}
                     onValueChange={(value) => {
                       clearDatasetPick();
+                      setValue('datasetFileset', '');
                       setDatasetSource(value as DatasetSource);
                     }}
                     items={DATASET_SOURCE_ITEMS}
@@ -1077,8 +1080,9 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                       <Text className="text-secondary" kind="body/regular/sm">
                         A JSONL, JSON, or Parquet file in a fileset. Parquet is converted to JSONL.
                       </Text>
-                      <FilesetDatasetPicker
+                      <FilesetDatasetPicker<SubmitEvaluationFormData>
                         workspace={workspace}
+                        filesetControllerProps={{ control, name: 'datasetFileset' }}
                         disabled={isPending}
                         error={datasetError}
                         onPick={(file) => void handleDatasetPicked({ file })}

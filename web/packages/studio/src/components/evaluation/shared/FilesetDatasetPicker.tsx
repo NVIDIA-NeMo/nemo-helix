@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useFilesListFilesetFiles, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
+import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
+import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
 import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
-import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useRef, useState } from 'react';
+import { type ReactElement, useRef, useState } from 'react';
+import { type FieldValues, type UseControllerProps, useWatch } from 'react-hook-form';
 
 const DATASET_FORMATS = ['json', 'jsonl', 'parquet'];
 
@@ -19,42 +20,48 @@ const pickedFileName = (path: string): string => {
     : baseName;
 };
 
-interface FilesetDatasetPickerProps {
+const filesetOption = (fileset: { name: string }) => ({
+  value: fileset.name,
+  label: fileset.name,
+});
+
+interface FilesetDatasetPickerProps<T extends FieldValues> {
   workspace: string;
+  /** Form field holding the chosen fileset name. */
+  filesetControllerProps: UseControllerProps<T>;
   disabled?: boolean;
   error?: string;
   onPick: (file: File) => void;
   onClear: () => void;
 }
 
-export const FilesetDatasetPicker: FC<FilesetDatasetPickerProps> = ({
+export function FilesetDatasetPicker<T extends FieldValues>({
   workspace,
+  filesetControllerProps,
   disabled,
   error,
   onPick,
   onClear,
-}) => {
+}: FilesetDatasetPickerProps<T>): ReactElement {
   const queryClient = useQueryClient();
-  const [filesetName, setFilesetName] = useState('');
+  const filesetName: string = useWatch({
+    control: filesetControllerProps.control,
+    name: filesetControllerProps.name,
+  });
   const [path, setPath] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestId = useRef(0);
 
-  const filesetsQuery = useFilesListFilesets(workspace, { page_size: DEFAULT_LARGE_PAGE_SIZE });
   const filesQuery = useFilesListFilesetFiles(workspace, filesetName, undefined, {
     query: { enabled: !!filesetName },
   });
 
-  const filesetItems = (filesetsQuery.data?.data ?? []).flatMap((fileset) =>
-    fileset.name ? [{ value: fileset.name, children: fileset.name }] : []
-  );
   const fileItems = (filesQuery.data?.data ?? [])
     .filter((file) => DATASET_FORMATS.includes(formatFromFileName(file.path)))
     .map((file) => ({ value: file.path, children: file.path }));
 
-  const handleFilesetChange = (value: string) => {
+  const handleFilesetChange = () => {
     requestId.current += 1;
-    setFilesetName(value);
     setPath('');
     setLoadError(null);
     onClear();
@@ -87,15 +94,14 @@ export const FilesetDatasetPicker: FC<FilesetDatasetPickerProps> = ({
 
   return (
     <Stack gap="density-sm">
-      <FormField slotLabel="Fileset">
-        <Select
-          disabled={disabled}
-          items={filesetItems}
-          value={filesetName}
-          onValueChange={handleFilesetChange}
-          placeholder={filesetsQuery.isLoading ? 'Loading filesets...' : 'Select a fileset'}
-        />
-      </FormField>
+      <FilesetSearchableSelect<T>
+        workspace={workspace}
+        useControllerProps={filesetControllerProps}
+        formFieldProps={{ slotLabel: 'Fileset' }}
+        renderOption={filesetOption}
+        onChange={handleFilesetChange}
+        disabled={disabled}
+      />
       <FormField
         slotLabel="File"
         slotHelp={noDatasetFiles ? 'This fileset has no JSONL, JSON, or Parquet files.' : undefined}
@@ -112,4 +118,4 @@ export const FilesetDatasetPicker: FC<FilesetDatasetPickerProps> = ({
       </FormField>
     </Stack>
   );
-};
+}
