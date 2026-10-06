@@ -5,7 +5,9 @@ import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/s
 import {
   applyTrialToAgentConfig,
   coerceParamValue,
-  parseSearchSpace,
+  parseStudyConfig,
+  type SearchSpace,
+  type StudyConfig,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
 
 const trial = (params: Record<string, string>): Trial => ({
@@ -22,13 +24,21 @@ const specAgent = (harnessModel?: Record<string, unknown>) => ({
   name: 'hermes',
   default_harness: 'main',
   harnesses: { main: { kind: 'hermes', ...(harnessModel ? { model: harnessModel } : {}) } },
-  models: { default: { provider: 'nvidia', model: 'llama', temperature: 0.7 } },
+  models: {
+    default: { provider: 'nvidia', model: 'llama', temperature: 0.7 },
+    fast: { provider: 'nvidia', model: 'llama-mini', temperature: 0.5 },
+  },
 });
 
-describe('parseSearchSpace', () => {
+const study = (searchSpace: SearchSpace, overlayModels: string[] = []): StudyConfig => ({
+  searchSpace,
+  overlayModels: new Set(overlayModels),
+});
+
+describe('parseStudyConfig', () => {
   it('keys entries by param name and keeps categorical values', () => {
     expect(
-      parseSearchSpace({
+      parseStudyConfig({
         optimizer: {
           search_space: {
             temperature: { type: 'fabric', path: 'models.default.temperature', values: [0, 0.2] },
@@ -36,15 +46,21 @@ describe('parseSearchSpace', () => {
             broken: { type: 'fabric' },
           },
         },
-      })
+      }).searchSpace
     ).toEqual({
       temperature: { path: 'models.default.temperature', values: [0, 0.2] },
       top_p: { path: 'models.default.top_p', values: undefined },
     });
   });
 
-  it('returns an empty space when the optimizer section is missing', () => {
-    expect(parseSearchSpace({})).toEqual({});
+  it('collects the models the optimize config merges over the agent', () => {
+    expect(
+      parseStudyConfig({ optimizer: {}, models: { judge: { model: 'x' } } }).overlayModels
+    ).toEqual(new Set(['judge']));
+  });
+
+  it('returns an empty study config when the optimizer section is missing', () => {
+    expect(parseStudyConfig({})).toEqual({ searchSpace: {}, overlayModels: new Set() });
   });
 });
 
@@ -61,10 +77,10 @@ describe('coerceParamValue', () => {
 });
 
 describe('applyTrialToAgentConfig', () => {
-  const searchSpace = {
+  const searchSpace = study({
     temperature: { path: 'models.default.temperature' },
     max_tokens: { path: 'models.default.max_tokens' },
-  };
+  });
 
   it('writes trial values onto models.default without mutating the source', () => {
     const source = specAgent();
@@ -76,6 +92,7 @@ describe('applyTrialToAgentConfig', () => {
 
     expect(next.models).toEqual({
       default: { provider: 'nvidia', model: 'llama', temperature: 0.2, max_tokens: 1024 },
+      fast: { provider: 'nvidia', model: 'llama-mini', temperature: 0.5 },
     });
     expect(source.models.default.temperature).toBe(0.7);
   });
@@ -93,11 +110,52 @@ describe('applyTrialToAgentConfig', () => {
     expect((next.models as { default: { temperature: number } }).default.temperature).toBe(0.7);
   });
 
+  it('writes a secondary model through under its own key', () => {
+    const next = applyTrialToAgentConfig(
+      specAgent({ provider: 'nvidia', model: 'nemotron' }),
+      trial({ fast_temperature: '0.1' }),
+      study({ fast_temperature: { path: 'models.fast.temperature' } })
+    );
+
+    expect((next.models as { fast: { temperature: number } }).fast.temperature).toBe(0.1);
+  });
+
+  it('rejects a model the study replaced from its optimize config', () => {
+    expect(() =>
+      applyTrialToAgentConfig(specAgent(), trial({ temperature: '0.2' }), {
+        ...searchSpace,
+        overlayModels: new Set(['default']),
+      })
+    ).toThrow(/replaced the agent's "default" model/);
+  });
+
+  it('rejects a model that only the optimize config defines', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ judge_temperature: '0' }),
+        study({ judge_temperature: { path: 'models.judge.temperature' } }, ['judge'])
+      )
+    ).toThrow(/not part of this agent/);
+  });
+
+  it('rejects a model the agent does not define', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ slow_temperature: '0' }),
+        study({ slow_temperature: { path: 'models.slow.temperature' } })
+      )
+    ).toThrow(/does not define/);
+  });
+
   it('rejects non-model paths on a platform agent', () => {
     expect(() =>
-      applyTrialToAgentConfig(specAgent(), trial({ depth: '3' }), {
-        depth: { path: 'adapter.settings.depth' },
-      })
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ depth: '3' }),
+        study({ depth: { path: 'adapter.settings.depth' } })
+      )
     ).toThrow(/only model settings are supported/);
   });
 

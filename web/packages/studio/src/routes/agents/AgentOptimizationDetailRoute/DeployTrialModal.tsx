@@ -18,11 +18,11 @@ import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/s
 import {
   applyTrialToAgentConfig,
   buildTrialAgentName,
-  fetchSearchSpace,
+  fetchStudyConfig,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/trialAgentConfig';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useMemo } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { z } from 'zod';
@@ -63,7 +63,6 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const sourceRef = resolveAgentRef(spec?.agent, workspace);
-  const [applyError, setApplyError] = useState<string>();
 
   const {
     data: sourceAgent,
@@ -74,12 +73,12 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
   });
 
   const {
-    data: searchSpace,
-    isLoading: isLoadingSearchSpace,
-    error: searchSpaceError,
+    data: studyConfig,
+    isLoading: isLoadingStudyConfig,
+    error: studyConfigError,
   } = useQuery({
-    queryKey: ['optimize-search-space', spec?.optimize_config_fileset, spec?.optimize_config],
-    queryFn: ({ signal }) => fetchSearchSpace(spec, signal),
+    queryKey: ['optimize-study-config', spec?.optimize_config_fileset, spec?.optimize_config],
+    queryFn: ({ signal }) => fetchStudyConfig(spec, signal),
     enabled: open,
     retry: false,
   });
@@ -116,21 +115,25 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trial, sourceRef?.name, resetForm]);
 
+  const applied = useMemo(() => {
+    if (!trial || !sourceAgent || !studyConfig) return undefined;
+    try {
+      return { config: applyTrialToAgentConfig(sourceAgent.config ?? {}, trial, studyConfig) };
+    } catch (error) {
+      return {
+        error: getErrorMessage(error as Error, 'Failed to apply the trial configuration'),
+      };
+    }
+  }, [trial, sourceAgent, studyConfig]);
+
   const resetAndClose = () => {
     resetMutation();
-    setApplyError(undefined);
     onClose();
   };
 
   const onSubmit: SubmitHandler<DeployTrialFormData> = async ({ name }) => {
-    if (!trial || !sourceAgent || !searchSpace) return;
-    let config: Record<string, unknown>;
-    try {
-      config = applyTrialToAgentConfig(sourceAgent.config ?? {}, trial, searchSpace);
-    } catch (error) {
-      setApplyError(getErrorMessage(error as Error, 'Failed to apply the trial configuration'));
-      return;
-    }
+    if (!sourceAgent || !applied?.config) return;
+    const config = { ...applied.config };
     if (typeof config.name === 'string') config.name = name.trim();
     try {
       await createAgent({
@@ -151,14 +154,14 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
     ? 'This study has no agent under test, so its trials cannot be deployed.'
     : agentError
       ? getErrorMessage(agentError as Error, `Could not load agent "${sourceRef.name}"`)
-      : searchSpaceError
-        ? getErrorMessage(searchSpaceError, 'Could not load the study search space')
+      : studyConfigError
+        ? getErrorMessage(studyConfigError, 'Could not load the study optimize config')
         : undefined;
   const errorText =
     loadError ??
-    applyError ??
+    applied?.error ??
     (createError ? getErrorMessage(createError as Error, 'Failed to create agent') : undefined);
-  const isLoading = isLoadingAgent || isLoadingSearchSpace;
+  const isLoading = isLoadingAgent || isLoadingStudyConfig;
 
   return (
     <FormModal
@@ -174,7 +177,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending || isLoading}
-      submitDisabled={!!loadError || !sourceAgent || !searchSpace}
+      submitDisabled={!!loadError || !applied?.config}
       errorText={errorText}
     >
       <ControlledTextInput
@@ -189,7 +192,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
             {trial.params.map((param) => (
               <Flex key={param.name} justify="between" gap="4">
                 <Text kind="body/regular/sm" className="text-secondary">
-                  {searchSpace?.[param.name]?.path ?? param.name}
+                  {studyConfig?.searchSpace[param.name]?.path ?? param.name}
                 </Text>
                 <Text kind="body/regular/sm" className="tabular-nums">
                   {param.value}

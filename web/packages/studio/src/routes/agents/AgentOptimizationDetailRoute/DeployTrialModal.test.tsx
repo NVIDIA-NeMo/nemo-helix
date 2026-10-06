@@ -53,7 +53,7 @@ interface CapturedAgent {
   config?: { name?: string; models?: { default?: { temperature?: number } } };
 }
 
-const mockPlatform = (): { body: CapturedAgent } => {
+const mockPlatform = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => {
   const captured: { body: CapturedAgent } = { body: {} };
   server.use(
     http.get(`${AGENTS_URL}/:name`, ({ params }) =>
@@ -67,7 +67,7 @@ const mockPlatform = (): { body: CapturedAgent } => {
         created_at: '2026-04-01T00:00:00Z',
       })
     ),
-    http.get(FILE_URL, () => new HttpResponse(OPTIMIZE_YAML)),
+    http.get(FILE_URL, () => new HttpResponse(optimizeYaml)),
     http.post(AGENTS_URL, async ({ request }) => {
       captured.body = (await request.json()) as CapturedAgent;
       return HttpResponse.json({ ...captured.body, workspace });
@@ -109,6 +109,20 @@ describe('DeployTrialModal', () => {
     expect(captured.body.config_format).toBe('nemo-agents-spec-v1');
     expect(captured.body.config?.name).toBe('hermes-trial-4');
     expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
+  });
+
+  it('blocks deploying a trial tuned on a model the study swapped in', async () => {
+    mockPlatform(`${OPTIMIZE_YAML}
+models:
+  default: {provider: nvidia, model: nemotron}
+`);
+    renderModal();
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      await within(dialog).findByText(/replaced the agent's "default" model/)
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
   });
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
