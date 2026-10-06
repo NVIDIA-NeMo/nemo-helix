@@ -40,7 +40,7 @@ Available preview surfaces:
 
 | Surface                          | Where it runs                       | Local paths | `model_configs` required |
 |----------------------------------|--------------------------------------|-------------|--------------------------|
-| `sdk.anonymizer.preview(...)`    | Anonymizer plugin service (remote)  | Rejected    | Required                 |
+| `client.anonymizer.preview(...)` | Anonymizer plugin service (remote)  | Rejected    | Required                 |
 | `nemo anonymizer preview`        | Anonymizer plugin service (remote)  | Rejected    | Required                 |
 
 ## Step 1: Build a `PreviewRequest`
@@ -54,8 +54,10 @@ from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
+from nemo_helix_plugin.client.client import NemoClient
 
-WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
+client = NemoClient.from_config()
+WORKSPACE = client.workspace
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
@@ -96,14 +98,7 @@ Field reference:
 ## Step 2: Run with the Python SDK
 
 ```python
-import os
-from nemo_helix_plugin.client.client import NemoClient
-
-sdk = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
-preview = sdk.anonymizer.preview(request)
+preview = client.anonymizer.preview(request)
 
 preview.dataset            # pandas DataFrame of anonymized records
 preview.trace_dataset      # detection trace
@@ -117,9 +112,7 @@ The CLI accepts the same request as a YAML or JSON spec file and streams NDJSON 
 
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml \
-  --workspace "${NHX_WORKSPACE:-default}" \
-  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
+  --spec-file /tmp/anonymizer-preview.yaml
 ```
 
 <Accordion title="Async client">
@@ -128,18 +121,14 @@ nemo anonymizer preview \
 
 ```python
 import asyncio
-import os
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def run_preview():
-    async_sdk = AsyncNemoClient(
-        base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-        workspace=WORKSPACE,
-    )
+    async_client = AsyncNemoClient.from_config()
     try:
-        return await async_sdk.anonymizer.preview(request)
+        return await async_client.anonymizer.preview(request)
     finally:
-        await async_sdk.close()
+        await async_client.close()
 
 preview = asyncio.run(run_preview())
 ```
@@ -165,7 +154,7 @@ preview.dataset.to_parquet("anonymized-preview.parquet", index=False)
 
 The plugin accepts two forms for `data.source`:
 
-| Form                                  | `sdk.anonymizer.preview` | `nemo anonymizer preview` |
+| Form                                  | `client.anonymizer.preview` | `nemo anonymizer preview` |
 |---------------------------------------|--------------------------|---------------------------|
 | HTTP(S) URL (`https://.../input.csv`) | Yes                      | Yes                       |
 | Fileset reference                     | Yes                      | Yes                       |

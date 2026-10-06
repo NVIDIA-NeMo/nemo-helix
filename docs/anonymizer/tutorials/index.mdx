@@ -39,7 +39,6 @@ from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
 from nemo_helix_plugin.client.client import NemoClient
 
-WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
@@ -52,10 +51,8 @@ model_configs = [
     ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
 ]
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
+client = NemoClient.from_config()
+WORKSPACE = client.workspace
 anonymizer = client.anonymizer
 
 preview = anonymizer.preview(
@@ -103,21 +100,17 @@ These tutorials route inference through an [Inference Gateway](/documentation/mo
 `client.anonymizer.preview`, `nemo anonymizer preview`, and `nemo anonymizer run` reject local file paths, so the tutorials read from a fileset. Create a small CSV containing PII and upload it to a fileset named `anonymizer-inputs`:
 
 ```python
-import os
 import tempfile
 from pathlib import Path
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
 FILESET = "anonymizer-inputs"
 INPUT_FILENAME = "anonymizer-input.csv"
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
+client = NemoClient.from_config()
+WORKSPACE = client.workspace
 
 with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
     f.write(

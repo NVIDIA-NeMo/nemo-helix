@@ -46,22 +46,17 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 Connect to the running platform and reach the auditor sub-resource:
 
 ```python
-import os
-
 from nemo_auditor.sdk import AuditorPluginResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 auditor = AuditorPluginResource(client)
 
 print(auditor.plugin_status())
 # {'plugin': 'auditor', 'status': 'ok', ...}
 ```
 
-If `plugin_status()` raises a connection error, the platform is not running or `NHX_BASE_URL` is misconfigured. Refer back to [Setup](/documentation/get-started).
+If `plugin_status()` raises a connection error, the platform is not running or your current CLI context points at the wrong deployment. Run `nemo config view` to check the context, and refer back to [Setup](/documentation/get-started) or [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ---
 

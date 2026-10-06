@@ -52,8 +52,10 @@ from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import AnonymizerRequest
+from nemo_helix_plugin.client.client import NemoClient
 
-WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
+client = NemoClient.from_config()
+WORKSPACE = client.workspace
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
@@ -95,9 +97,7 @@ Submit the spec to NeMo Helix Jobs worker:
 
 ```bash
 nemo anonymizer run \
-  --spec-file /tmp/anonymizer-run.yaml \
-  --workspace "${NHX_WORKSPACE:-default}" \
-  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
+  --spec-file /tmp/anonymizer-run.yaml
 ```
 
 The command prints the assigned job name. You need that name to poll status and download artifacts in Step 4.
@@ -105,13 +105,6 @@ The command prints the assigned job name. You need that name to poll status and 
 The SDK equivalent is `client.anonymizer.run(request)`. It posts the request to the plugin's `/jobs/run` endpoint and returns an `AnonymizerJobResource`:
 
 ```python
-import os
-from nemo_helix_plugin.client.client import NemoClient
-
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
 job = client.anonymizer.run(request)
 ```
 
@@ -123,8 +116,8 @@ Track the platform job first. The job is ready for artifact download when its st
 
 ```bash
 # Replace with the job name printed by `nemo anonymizer run`.
-nemo jobs get-status <job-name> --workspace "${NHX_WORKSPACE:-default}"
-nemo jobs get-logs <job-name> --workspace "${NHX_WORKSPACE:-default}"
+nemo jobs get-status <job-name>
+nemo jobs get-logs <job-name>
 ```
 
 To download from the CLI, fetch the `artifacts` result and extract it:
@@ -132,7 +125,6 @@ To download from the CLI, fetch the `artifacts` result and extract it:
 ```bash
 nemo jobs results download artifacts \
   --job <job-name> \
-  --workspace "${NHX_WORKSPACE:-default}" \
   --output-file /tmp/anonymizer-artifacts.tar.gz
 
 mkdir -p /tmp/anonymizer-artifacts

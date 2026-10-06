@@ -18,14 +18,10 @@ The `AuditorPluginResource` is the sync SDK object for working with the NeMo Aud
 It is built explicitly from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_auditor.sdk import AuditorPluginResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 auditor = AuditorPluginResource(client)
 ```
 
@@ -206,14 +202,10 @@ The `AsyncAuditorPluginResource` provides the same surface for an `AsyncNemoClie
 Async methods must be awaited.
 
 ```python
-import os
 from nemo_auditor.sdk import AsyncAuditorPluginResource
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
-client = AsyncNemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = AsyncNemoClient.from_config()
 async_auditor = AsyncAuditorPluginResource(client)
 ```
 

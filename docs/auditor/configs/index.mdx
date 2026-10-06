@@ -12,15 +12,10 @@ An `AuditConfig` selects which garak probes and detectors run during an audit, h
 ## Initialize the SDK
 
 ```python
-import os
-
 from nemo_auditor.sdk import AuditorPluginResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 auditor = AuditorPluginResource(client)
 ```
 

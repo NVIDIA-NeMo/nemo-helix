@@ -14,14 +14,9 @@ The `nemo_safe_synthesizer_plugin.sdk` module provides NeMo Helix-specific helpe
 `SafeSynthesizerResource` is the entry point mounted on a `NemoClient`:
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 safe_synthesizer = client.safe_synthesizer
 ```
 

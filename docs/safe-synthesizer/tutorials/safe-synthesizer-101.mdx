@@ -54,15 +54,10 @@ Set up the client to connect to your Safe Synthesizer deployment:
 
 {/* @nemo-docs: skip-python-type-check */}
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
 # Configure the client
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-    auth=os.environ.get("NHX_ACCESS_TOKEN"),
-)
+client = NemoClient.from_config()
 # set to none by default, update it if you need an hf_token
 hf_secret_name = None
 
@@ -381,7 +376,7 @@ print(f"Total jobs: {len(all_jobs.items())}")
 
 **Connection errors:**
 
-- Verify `NHX_BASE_URL` is correct
+- Verify that your current CLI context points at the right deployment (`nemo config view`); see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments)
 - Check that Safe Synthesizer service is running
 - Ensure network connectivity
 

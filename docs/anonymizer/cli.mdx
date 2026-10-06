@@ -38,16 +38,13 @@ The command does not accept `data.source`. Input-source validation happens durin
 
 ```bash
 nemo anonymizer preview \
-  --spec-file /tmp/anonymizer-preview.yaml \
-  --workspace "${NHX_WORKSPACE:-default}" \
-  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
+  --spec-file /tmp/anonymizer-preview.yaml
 ```
 
 | Flag             | Description                                                                            |
 |------------------|----------------------------------------------------------------------------------------|
 | `--spec-file`    | Path to the `PreviewRequest` YAML or JSON.                                             |
 | `--workspace`    | Workspace used for fileset resolution and Inference Gateway providers.                 |
-| `--base-url`     | Plugin-service base URL.                                                              |
 | `--request-id`   | Optional `X-Request-ID` header value for tracing the request.                         |
 
 `preview` calls the plugin service and streams NDJSON frames to stdout. It rejects local file paths in `data.source` (use a fileset reference or `http(s)` URL) and requires explicit `model_configs`.
@@ -56,9 +53,7 @@ nemo anonymizer preview \
 
 ```bash
 nemo anonymizer run \
-  --spec-file /tmp/anonymizer-run.yaml \
-  --workspace "${NHX_WORKSPACE:-default}" \
-  --base-url "${NHX_BASE_URL:-http://localhost:8080}"
+  --spec-file /tmp/anonymizer-run.yaml
 ```
 
 | Flag             | Description                                                                                       |
@@ -86,12 +81,15 @@ nemo anonymizer run \
 Track and pull artifacts using either the standard `nemo jobs ...` commands or the Python SDK:
 
 ```bash
-nemo jobs get-status anonymizer-run-2026-05-12-abc123 --workspace "${NHX_WORKSPACE:-default}"
-nemo jobs get-logs anonymizer-run-2026-05-12-abc123 --workspace "${NHX_WORKSPACE:-default}"
+nemo jobs get-status anonymizer-run-2026-05-12-abc123
+nemo jobs get-logs anonymizer-run-2026-05-12-abc123
 ```
 
 ```python
-job = sdk.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient.from_config()
+job = client.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
 job.wait_until_done()
 results = job.download_artifacts()
 dataset = results.load_dataset()

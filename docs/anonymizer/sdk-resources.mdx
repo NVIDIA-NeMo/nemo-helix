@@ -16,13 +16,9 @@ The `AnonymizerResource` is the entry point for working with Anonymizer on NeMo 
 A `AnonymizerResource` is accessed directly from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 anonymizer = client.anonymizer  # AnonymizerResource
 ```
 

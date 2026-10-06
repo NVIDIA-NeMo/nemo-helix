@@ -40,15 +40,10 @@ To restrict workspace creation, remove that wildcard `WorkspaceCreator` binding 
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 workspace = client.workspaces.create_workspace(
     body=CreateWorkspaceRequest(
@@ -107,14 +102,9 @@ To list workspaces, call the list endpoint. When authentication is enabled, only
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 for workspace in client.workspaces.list_workspaces().items():
     print(f"{workspace.name}: {workspace.description}")
@@ -139,14 +129,9 @@ To retrieve a specific workspace by its `name`:
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 workspace = client.workspaces.get_workspace(name="ml-team").data()
 ```
@@ -170,15 +155,10 @@ To update a workspace, only the `description` field can be modified. The `name` 
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.workspaces.types import UpdateWorkspaceRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 workspace = client.workspaces.update_workspace(
     name="ml-team",
@@ -210,14 +190,9 @@ During cleanup, the workspace is no longer visible to users. If cleanup fails, t
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 client.workspaces.delete_workspace(name="ml-team").data()
 ```
