@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# CI validates by running: helm template nemo-helix . -f ci/25-core-controller-extra-volumes.yaml
+# Exercises core controller extra volume/mount rendering with a ConfigMap.
+
+core:
+  controller:
+    extraVolumes:
+      - name: extra-config
+        configMap:
+          name: controller-extra-config
+    extraVolumeMounts:
+      - name: extra-config
+        mountPath: /etc/nhx/extra-config
+        readOnly: true
