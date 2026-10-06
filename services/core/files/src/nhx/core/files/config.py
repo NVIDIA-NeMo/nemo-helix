@@ -79,6 +79,13 @@ class FilesConfig(create_service_config_class("files")):  # type: ignore
         description="Maximum Hugging Face retry delay in seconds.",
     )
 
+    git_cache_max_bytes: int = Field(
+        default=10 * 1024**3,
+        gt=0,
+        description="Size the repositories git filesets fetch into may reach before the least recently used are "
+        "removed. A removed repository is fetched again when next needed.",
+    )
+
 
 # TODO(v2): CONFIG
 @cache
