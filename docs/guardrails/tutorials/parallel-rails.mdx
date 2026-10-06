@@ -55,9 +55,12 @@ Instantiate the platform client.
 
 ```python
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -123,11 +126,13 @@ guardrails_config = {
 
 config_name = "parallel-rails-config"
 try:
-    config = client.guardrail.configs.create(
-        name=config_name,
-        description="Parallel rails guardrail configuration",
-        data=guardrails_config,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name=config_name,
+            description="Parallel rails guardrail configuration",
+            data=guardrails_config,
+        ),
+    ).data()
 except ConflictError:
     print(f"Config {config_name} already exists, continuing...")
 
@@ -154,23 +159,25 @@ nemo inference virtual-models create guarded-parallel-rails \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create(
-    name="guarded-parallel-rails",
-    default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    request_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/parallel-rails-config",
-        }
-    ],
-    response_middleware=[
-        {
-            "name": "nemo-guardrails",
-            "config_type": "guardrail_config",
-            "config_id": "default/parallel-rails-config",
-        }
-    ],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="guarded-parallel-rails",
+        default_model_entity="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/parallel-rails-config",
+            )
+        ],
+        response_middleware=[
+            MiddlewareCall(
+                name="nemo-guardrails",
+                config_type="guardrail_config",
+                config_id="default/parallel-rails-config",
+            )
+        ],
+    ),
 )
 ```
 
@@ -268,8 +275,8 @@ Inspect `guardrails_data.log.activated_rails` in the response — it's a list, w
 ## Cleanup
 
 ```python
-client.inference.virtual_models.delete(name="guarded-parallel-rails")
-client.guardrail.configs.delete(name=config_name)
+client.inference.virtual_models.delete_virtual_model(name="guarded-parallel-rails")
+client.guardrail.delete_guardrail_config(name=config_name)
 print("Cleanup complete")
 ```
 

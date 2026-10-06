@@ -7,19 +7,21 @@ description: ""
 ---
 <a id="auditor-configs"></a>
 
-An `AuditConfig` selects which garak probes and detectors run during an audit, how many generations to make per probe, and where the reports land. Configurations are persisted in NeMo Helix entity store and referenced by name from `client.auditor.run(...)`.
+An `AuditConfig` selects which garak probes and detectors run during an audit, how many generations to make per probe, and where the reports land. Configurations are persisted in NeMo Helix entity store and referenced by name from `auditor.run(...)`.
 
 ## Initialize the SDK
 
 ```python
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_auditor.sdk import AuditorPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+auditor = AuditorPluginResource(client)
 ```
 
 ## What an AuditConfig Holds
@@ -40,11 +42,11 @@ The full field reference is in [Configuration Schema](/documentation/vulnerabili
 The plugin seeds a `default` configuration in the `system` workspace at install time. Retrieve it to see a reasonable starting point:
 
 ```python
-default_config = client.auditor.configs.get(workspace="system", name="default")
+default_config = auditor.configs.get(workspace="system", name="default")
 print(default_config.model_dump_json(indent=2))
 ```
 
-You can pass `"system/default"` directly to `client.auditor.run(config=..., ...)` to run an audit with the seeded configuration without creating your own.
+You can pass `"system/default"` directly to `auditor.run(config=..., ...)` to run an audit with the seeded configuration without creating your own.
 
 ## Create a Configuration
 
@@ -58,7 +60,7 @@ from nemo_auditor.entities import (
     AuditSystemData,
 )
 
-config = client.auditor.configs.create(
+config = auditor.configs.create(
     workspace="default",
     name="quick-scan",
     description="Bounded scan using one probe and one generation.",
@@ -74,7 +76,7 @@ The `probe_spec` field takes a comma-separated list of probe categories or fully
 ## List Configurations
 
 ```python
-listing = client.auditor.configs.list(workspace="default")
+listing = auditor.configs.list(workspace="default")
 for entry in listing["data"]:
     print(entry["name"], entry["description"])
 ```
@@ -84,7 +86,7 @@ for entry in listing["data"]:
 ## Retrieve a Configuration
 
 ```python
-config = client.auditor.configs.get(workspace="default", name="quick-scan")
+config = auditor.configs.get(workspace="default", name="quick-scan")
 ```
 
 ## Update a Configuration
@@ -92,7 +94,7 @@ config = client.auditor.configs.get(workspace="default", name="quick-scan")
 `update()` replaces every sub-block — any sub-block you omit resets to its default. Pass each block you want to keep.
 
 ```python
-updated = client.auditor.configs.update(
+updated = auditor.configs.update(
     workspace="default",
     name="quick-scan",
     description="Updated probe selection.",
@@ -106,5 +108,5 @@ updated = client.auditor.configs.update(
 ## Delete a Configuration
 
 ```python
-client.auditor.configs.delete(workspace="default", name="quick-scan")
+auditor.configs.delete(workspace="default", name="quick-scan")
 ```

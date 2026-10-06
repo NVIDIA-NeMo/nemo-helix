@@ -14,10 +14,10 @@ This tutorial walks through running a single audit end-to-end with the NeMo Audi
 
 **What you will learn:**
 
-- Initialize NeMo Helix SDK and reach the `client.auditor` resource.
+- Initialize NeMo Helix SDK and reach the `auditor` resource.
 - Create an `AuditConfig` selecting which garak probes to run.
 - Create an `AuditTarget` pointing at a model through the Inference Gateway.
-- Execute the audit locally with `client.auditor.run(...)`.
+- Execute the audit locally with `auditor.run(...)`.
 - Read the JSONL, HTML, and hitlog report artifacts the run produces.
 
 <Tip>
@@ -37,7 +37,7 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 
 - **`AuditConfig`** — Selects probes, detectors, and reporting settings for a garak run. Persisted in the entity store.
 - **`AuditTarget`** — Identifies the model under test (generator class, model identifier, endpoint options). Persisted in the entity store.
-- **In-process run** — `client.auditor.run(...)` shells out to garak on the host running the SDK call, writes report artifacts under a temporary directory, and returns their file paths. There is no remote job submission.
+- **In-process run** — `auditor.run(...)` shells out to garak on the host running the SDK call, writes report artifacts under a temporary directory, and returns their file paths. There is no remote job submission.
 
 ---
 
@@ -48,13 +48,14 @@ Connect to the running platform and reach the auditor sub-resource:
 ```python
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_auditor.sdk import AuditorPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-auditor = client.auditor
+auditor = AuditorPluginResource(client)
 
 print(auditor.plugin_status())
 # {'plugin': 'auditor', 'status': 'ok', ...}
@@ -97,8 +98,8 @@ For the full set of options on each sub-block, see [Configuration Schema](/docum
 First, list the providers registered in your deployment so you can pick one that exists:
 
 ```python
-providers = client.inference.providers.list(workspace="default")
-for provider in providers.data:
+providers = client.models.list_providers(workspace="default")
+for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
@@ -221,7 +222,7 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 : The plugin couldn't find a garak install. Either install garak at `~/.auditor/.venv/bin/python`, or set `NEMO_AUDITOR_GARAK_PYTHON` to the absolute path of a Python interpreter that has garak installed.
 
 **`RuntimeError: Failed to resolve inference gateway provider '<workspace>/<provider>'`**
-: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.inference.providers.list(workspace="default")` and update the target to reference an existing one.
+: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List your providers with `client.models.list_providers(workspace="default")` and update the target to reference an existing one.
 
 **`status == "failed"` with empty `results`**
 : The audit could not complete any probe. Inspect `result.get("error")` for the failure reason, and verify the model is reachable through the provider you configured.
@@ -233,7 +234,7 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 
 ## Summary and Next Steps
 
-You created an `AuditConfig` and `AuditTarget`, ran a single audit locally with `client.auditor.run(...)`, and loaded the resulting reports.
+You created an `AuditConfig` and `AuditTarget`, ran a single audit locally with `auditor.run(...)`, and loaded the resulting reports.
 
 - For the full SDK surface — including async variants — see [SDK Resources](/documentation/vulnerability-scanning/sdk-resources).
 - For more probe selection options, see [Selecting Probes](/documentation/vulnerability-scanning/configurations/selecting-probes).

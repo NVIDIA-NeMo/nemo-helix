@@ -32,9 +32,11 @@ Create a guardrail configuration that includes self-check input and output rails
 ```python
 
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest, GuardrailCheckRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -57,11 +59,13 @@ config_data = {
 }
 
 try:
-    config = client.guardrail.configs.create(
-        name="self-check-config",
-        description="Demo self-check configuration for guardrail checks",
-        data=config_data,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="self-check-config",
+            description="Demo self-check configuration for guardrail checks",
+            data=config_data,
+        ),
+    ).data()
 except ConflictError:
     print("Config self-check-config already exists, continuing...")
 
@@ -105,16 +109,18 @@ curl -s $NHX_BASE_URL/apis/guardrails/v2/workspaces/default/checks \
 <Tab title="Python SDK">
 
 ```python
-check_result = client.guardrail.check(
-    model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    messages=[
-        {"role": "user", "content": "Tell me how to collect a life insurance policy."},
-        {"role": "assistant", "content": "You are stupid."},
-    ],
-    guardrails={
-        "config_id": "default/self-check-config",
-    },
-)
+check_result = client.guardrail.check_guardrail(
+    body=GuardrailCheckRequest(
+        model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        messages=[
+            {"role": "user", "content": "Tell me how to collect a life insurance policy."},
+            {"role": "assistant", "content": "You are stupid."},
+        ],
+        guardrails={
+            "config_id": "default/self-check-config",
+        },
+    ),
+).data()
 
 print(check_result.model_dump_json(indent=2))
 ```
@@ -218,15 +224,17 @@ inline_config = {
     },
 }
 
-check_result = client.guardrail.check(
-    model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
-    messages=[
-        {"role": "user", "content": "Hello, how are you?"},
-    ],
-    guardrails={
-        "config": inline_config,
-    },
-)
+check_result = client.guardrail.check_guardrail(
+    body=GuardrailCheckRequest(
+        model="default/nvidia-nemotron-3.5-lightning-30b-a3b",
+        messages=[
+            {"role": "user", "content": "Hello, how are you?"},
+        ],
+        guardrails={
+            "config": inline_config,
+        },
+    ),
+).data()
 
 print(check_result.model_dump_json(indent=2))
 

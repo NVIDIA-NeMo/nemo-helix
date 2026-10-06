@@ -41,10 +41,10 @@ traffic and denied unlabelled or managed-job egress traffic.
 
 </Tab>
 
-<Tab title="Python SDK">
+<Tab title="Python">
 
-The Python SDK does not create Kind clusters, install Helm charts, or run
-Kubernetes NetworkPolicy probes. After the CLI smoke test passes, use the SDK
+The Python client does not create Kind clusters, install Helm charts, or run
+Kubernetes NetworkPolicy probes. After the CLI smoke test passes, use the client
 only for a post-smoke API check if you expose the API with `kubectl
 port-forward`:
 
@@ -53,10 +53,10 @@ kubectl -n "$KUBE_NAMESPACE" port-forward svc/nemo-helix-api 8080:8080
 ```
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(base_url="http://localhost:8080")
-for workspace in client.workspaces.list().data:
+client = NemoClient(base_url="http://localhost:8080")
+for workspace in client.workspaces.list_workspaces().items():
     print(workspace.name)
 ```
 

@@ -273,27 +273,28 @@ Agent Hardener resources are available on the platform client as `client.agent_h
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-manifest = client.agent_hardener.manifests.get("react-agent")
-result = client.agent_hardener.run(manifest_id="react-agent")
+manifest = client.agent_hardener.get_manifest(name="react-agent").data()
 
-for run in client.agent_hardener.runs.list(limit=5):
-    print(run["name"], run["status"])
+for run in client.agent_hardener.list_runs(
+    query_params={"page_size": 5}
+).items():
+    print(run.name, run.status)
 ```
 
 | Resource | Methods |
 |----------|---------|
-| `client.agent_hardener.manifests` | `list`, `get`, `create`, `update`, `refresh`, `inspect_project`, `validate_model` |
-| `client.agent_hardener.runs` | `list`, `latest` |
-| `client.agent_hardener` | `run`, `synth_benign`, `submit`, `sanity_check` |
+| `client.agent_hardener` | `get_manifest`, `list_manifests`, `create_manifest`, `update_manifest`, `refresh_manifest`, `delete_manifest`, `inspect_agent`, `validate_model` |
+| `client.agent_hardener` | `get_run`, `list_runs`, `delete_run`, `apply_mitigation`, `compose_defense`, `ingest_event`, `get_events` |
+| `client.agent_hardener` | `create_war_game_job`, `get_war_game_job`, `list_war_game_jobs`, `cancel_war_game_job`, `create_synth_benign_job`, `get_synth_benign_job`, `list_synth_benign_jobs` |
 
-`inspect_project` takes a project fileset rather than a manifest name.
+`inspect_project` takes a project fileset request body rather than a manifest name.
 
 ## Related Topics
 

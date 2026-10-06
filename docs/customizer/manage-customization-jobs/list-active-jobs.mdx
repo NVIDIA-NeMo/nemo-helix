@@ -32,44 +32,49 @@ Use the SDK to list jobs, filtering by `source="customization"` and by `status` 
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.jobs.types import ListJobsQueryParams
 
 # Initialize the client
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
 # List active customization jobs
-jobs = client.jobs.list(
+jobs = client.jobs.list_jobs(
     workspace="default",
-    filter={
-        "source": "customization",
-        "status": "active",
-    },
-    page=1,
-    page_size=10,
-    sort="created_at",
+    query_params=ListJobsQueryParams(
+        filter={
+            "source": "customization",
+            "status": "active",
+        },
+        page=1,
+        page_size=10,
+        sort="created_at",
+    ),
 )
 
-print(f"Found {len(jobs.data)} jobs")
-for job in jobs.data:
+print(f"Found {len(jobs.items())} jobs")
+for job in jobs.items():
     print(f"Job {job.name}: {job.status}")
 
 # Add more filters (optional)
 # Valid filter fields: workspace, project, name, status, source, created_at, updated_at
-filtered_jobs = client.jobs.list(
+filtered_jobs = client.jobs.list_jobs(
     workspace="default",
-    filter={
-        "source": "customization",
-        "status": "active",
-        "project": "my-finetuning-project",
-    },
-    sort="-created_at",  # Sort by created_at descending
+    query_params=ListJobsQueryParams(
+        filter={
+            "source": "customization",
+            "status": "active",
+            "project": "my-finetuning-project",
+        },
+        sort="-created_at",  # Sort by created_at descending
+    ),
 )
 
-print(f"Found {len(filtered_jobs.data)} jobs")
-for job in filtered_jobs.data:
+print(f"Found {len(filtered_jobs.items())} jobs")
+for job in filtered_jobs.items():
     print(f"Job {job.name}: {job.status}")
 ```
 
