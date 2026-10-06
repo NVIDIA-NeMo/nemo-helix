@@ -13,9 +13,10 @@ import {
   useAgentsGetAgent,
 } from '@nemo/sdk/generated/agents/agents';
 import type { CreateAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/CreateAgentRequestConfig';
-import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Badge, Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import {
+  type AppliedTrialConfig,
   applyTrialToAgentConfig,
   buildTrialAgentName,
   fetchStudyConfig,
@@ -44,6 +45,8 @@ const resolveAgentRef = (
     ? { workspace: first, name: rest.join('/') }
     : { workspace: jobWorkspace, name: first };
 };
+
+type ApplyResult = ({ ok: true } & AppliedTrialConfig) | { ok: false; error: string };
 
 export interface DeployTrialModalProps {
   workspace: string;
@@ -115,16 +118,21 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trial, sourceRef?.name, resetForm]);
 
-  const applied = useMemo(() => {
+  const applied = useMemo((): ApplyResult | undefined => {
     if (!trial || !sourceAgent || !studyConfig) return undefined;
     try {
-      return { config: applyTrialToAgentConfig(sourceAgent.config ?? {}, trial, studyConfig) };
+      return {
+        ok: true,
+        ...applyTrialToAgentConfig(sourceAgent.config ?? {}, trial, studyConfig),
+      };
     } catch (error) {
       return {
+        ok: false,
         error: getErrorMessage(error as Error, 'Failed to apply the trial configuration'),
       };
     }
   }, [trial, sourceAgent, studyConfig]);
+  const appliedConfig = applied?.ok ? applied : undefined;
 
   const resetAndClose = () => {
     resetMutation();
@@ -132,8 +140,8 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
   };
 
   const onSubmit: SubmitHandler<DeployTrialFormData> = async ({ name }) => {
-    if (!sourceAgent || !applied?.config) return;
-    const config = { ...applied.config };
+    if (!sourceAgent || !appliedConfig) return;
+    const config = { ...appliedConfig.config };
     if (typeof config.name === 'string') config.name = name.trim();
     try {
       await createAgent({
@@ -159,7 +167,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
         : undefined;
   const errorText =
     loadError ??
-    applied?.error ??
+    (applied?.ok === false ? applied.error : undefined) ??
     (createError ? getErrorMessage(createError as Error, 'Failed to create agent') : undefined);
   const isLoading = isLoadingAgent || isLoadingStudyConfig;
 
@@ -177,9 +185,16 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending || isLoading}
-      submitDisabled={!!loadError || !applied?.config}
+      submitDisabled={!!loadError || !appliedConfig}
       errorText={errorText}
     >
+      {appliedConfig?.modelMismatches.map(({ modelKey, studyModel, agentModel }) => (
+        <Banner key={modelKey} kind="inline" status="warning">
+          The study ran the &quot;{modelKey}&quot; model as <code>{studyModel}</code>, but this
+          agent uses <code>{agentModel}</code>. The trial&apos;s values for it will be applied to{' '}
+          <code>{agentModel}</code>.
+        </Banner>
+      ))}
       <ControlledTextInput
         useControllerProps={{ control, name: 'name' }}
         label="New agent name"
@@ -189,17 +204,36 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({
         <Stack gap="2">
           <Text kind="label/semibold/md">Configuration from trial {trial.number}</Text>
           <Stack gap="1" data-testid="deploy-trial-params">
-            {trial.params.map((param) => (
-              <Flex key={param.name} justify="between" gap="4">
-                <Text kind="body/regular/sm" className="text-secondary">
-                  {studyConfig?.searchSpace[param.name]?.path ?? param.name}
-                </Text>
-                <Text kind="body/regular/sm" className="tabular-nums">
-                  {param.value}
-                </Text>
-              </Flex>
-            ))}
+            {trial.params.map((param) => {
+              const isSkipped = appliedConfig?.skipped.includes(param.name) ?? false;
+              return (
+                <Flex key={param.name} justify="between" align="center" gap="4">
+                  <Text kind="body/regular/sm" className="text-secondary">
+                    {studyConfig?.searchSpace[param.name]?.path ?? param.name}
+                  </Text>
+                  <Flex align="center" gap="2">
+                    {isSkipped && (
+                      <Badge kind="outline" color="gray">
+                        Not applied
+                      </Badge>
+                    )}
+                    <Text
+                      kind="body/regular/sm"
+                      className={isSkipped ? 'tabular-nums text-placeholder' : 'tabular-nums'}
+                    >
+                      {param.value}
+                    </Text>
+                  </Flex>
+                </Flex>
+              );
+            })}
           </Stack>
+          {!!appliedConfig?.skipped.length && (
+            <Text kind="body/regular/sm" className="text-secondary">
+              Parameters marked Not applied tune models defined only by the study&apos;s optimize
+              config (such as an evaluation judge), so they are not part of the new agent.
+            </Text>
+          )}
         </Stack>
       )}
     </FormModal>

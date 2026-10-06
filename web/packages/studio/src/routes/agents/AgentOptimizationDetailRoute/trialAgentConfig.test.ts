@@ -30,10 +30,10 @@ const specAgent = (harnessModel?: Record<string, unknown>) => ({
   },
 });
 
-const study = (searchSpace: SearchSpace, overlayModels: string[] = []): StudyConfig => ({
-  searchSpace,
-  overlayModels: new Set(overlayModels),
-});
+const study = (
+  searchSpace: SearchSpace,
+  overlayModels: StudyConfig['overlayModels'] = {}
+): StudyConfig => ({ searchSpace, overlayModels });
 
 describe('parseStudyConfig', () => {
   it('keys entries by param name and keeps categorical values', () => {
@@ -55,12 +55,13 @@ describe('parseStudyConfig', () => {
 
   it('collects the models the optimize config merges over the agent', () => {
     expect(
-      parseStudyConfig({ optimizer: {}, models: { judge: { model: 'x' } } }).overlayModels
-    ).toEqual(new Set(['judge']));
+      parseStudyConfig({ optimizer: {}, models: { judge: { model: 'x' }, broken: 'nope' } })
+        .overlayModels
+    ).toEqual({ judge: { model: 'x' } });
   });
 
   it('returns an empty study config when the optimizer section is missing', () => {
-    expect(parseStudyConfig({})).toEqual({ searchSpace: {}, overlayModels: new Set() });
+    expect(parseStudyConfig({})).toEqual({ searchSpace: {}, overlayModels: {} });
   });
 });
 
@@ -84,7 +85,7 @@ describe('applyTrialToAgentConfig', () => {
 
   it('writes trial values onto models.default without mutating the source', () => {
     const source = specAgent();
-    const next = applyTrialToAgentConfig(
+    const { config: next, skipped } = applyTrialToAgentConfig(
       source,
       trial({ temperature: '0.2', max_tokens: '1024' }),
       searchSpace
@@ -95,10 +96,11 @@ describe('applyTrialToAgentConfig', () => {
       fast: { provider: 'nvidia', model: 'llama-mini', temperature: 0.5 },
     });
     expect(source.models.default.temperature).toBe(0.7);
+    expect(skipped).toEqual([]);
   });
 
   it('writes onto the default harness model when the harness pins one', () => {
-    const next = applyTrialToAgentConfig(
+    const { config: next } = applyTrialToAgentConfig(
       specAgent({ provider: 'nvidia', model: 'nemotron' }),
       trial({ temperature: '0.1' }),
       searchSpace
@@ -111,7 +113,7 @@ describe('applyTrialToAgentConfig', () => {
   });
 
   it('writes a secondary model through under its own key', () => {
-    const next = applyTrialToAgentConfig(
+    const { config: next } = applyTrialToAgentConfig(
       specAgent({ provider: 'nvidia', model: 'nemotron' }),
       trial({ fast_temperature: '0.1' }),
       study({ fast_temperature: { path: 'models.fast.temperature' } })
@@ -120,23 +122,64 @@ describe('applyTrialToAgentConfig', () => {
     expect((next.models as { fast: { temperature: number } }).fast.temperature).toBe(0.1);
   });
 
-  it('rejects a model the study replaced from its optimize config', () => {
-    expect(() =>
-      applyTrialToAgentConfig(specAgent(), trial({ temperature: '0.2' }), {
-        ...searchSpace,
-        overlayModels: new Set(['default']),
-      })
-    ).toThrow(/replaced the agent's "default" model/);
+  it('applies values on a model the optimize config restates', () => {
+    const { config: next, modelMismatches } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ temperature: '0.2' }),
+      { ...searchSpace, overlayModels: { default: { provider: 'nvidia', model: 'llama' } } }
+    );
+
+    expect((next.models as { default: { temperature: number } }).default.temperature).toBe(0.2);
+    expect(modelMismatches).toEqual([]);
   });
 
-  it('rejects a model that only the optimize config defines', () => {
+  it('reports when the study ran a model under a different id than the agent', () => {
+    const { config: next, modelMismatches } = applyTrialToAgentConfig(
+      specAgent({ provider: 'nvidia', model: 'nemotron' }),
+      trial({ temperature: '0.2', max_tokens: '512' }),
+      { ...searchSpace, overlayModels: { default: { model: 'nvidia/nemotron' } } }
+    );
+
+    expect(next.harnesses).toEqual({
+      main: {
+        kind: 'hermes',
+        model: { provider: 'nvidia', model: 'nemotron', temperature: 0.2, max_tokens: 512 },
+      },
+    });
+    expect(modelMismatches).toEqual([
+      { modelKey: 'default', studyModel: 'nvidia/nemotron', agentModel: 'nemotron' },
+    ]);
+  });
+
+  it('skips params on a model that only the optimize config defines', () => {
+    const { config: next, skipped } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ temperature: '0.2', judge_temperature: '0' }),
+      study(
+        {
+          temperature: { path: 'models.default.temperature' },
+          judge_temperature: { path: 'models.judge.temperature' },
+        },
+        { judge: { model: 'judge-model' } }
+      )
+    );
+
+    expect(skipped).toEqual(['judge_temperature']);
+    expect(next.models).not.toHaveProperty('judge');
+    expect((next.models as { default: { temperature: number } }).default.temperature).toBe(0.2);
+  });
+
+  it('rejects a trial whose params all tune study-only models', () => {
     expect(() =>
       applyTrialToAgentConfig(
         specAgent(),
         trial({ judge_temperature: '0' }),
-        study({ judge_temperature: { path: 'models.judge.temperature' } }, ['judge'])
+        study(
+          { judge_temperature: { path: 'models.judge.temperature' } },
+          { judge: { model: 'judge-model' } }
+        )
       )
-    ).toThrow(/not part of this agent/);
+    ).toThrow(/None of trial 3's parameters apply/);
   });
 
   it('rejects a model the agent does not define', () => {

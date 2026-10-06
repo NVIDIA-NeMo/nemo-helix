@@ -30,11 +30,18 @@ export type SearchSpace = Record<string, SearchSpaceEntry>;
 export interface StudyConfig {
   searchSpace: SearchSpace;
   /**
-   * Keys of the optimize config's own `models` map. The study merges these over the agent's
-   * models, replacing any model with the same key, so a trial value tuned on one of them was not
-   * measured against the agent's model.
+   * The optimize config's own `models` map, which the study merges over the agent's models by key.
+   * Optimize configs routinely restate the agent's `default` model (to point it at a different
+   * endpoint or credential), and add evaluation-only models such as a `judge`.
    */
-  overlayModels: ReadonlySet<string>;
+  overlayModels: Readonly<Record<string, ConfigMapping>>;
+}
+
+/** A model the study ran under a different model id than the agent declares for the same key. */
+export interface ModelMismatch {
+  modelKey: string;
+  studyModel: string;
+  agentModel: string;
 }
 
 export const buildTrialAgentName = (sourceName: string, trial: Trial): string =>
@@ -62,7 +69,13 @@ const parseSearchSpace = (optimizeConfig: ConfigMapping): SearchSpace => {
 
 export const parseStudyConfig = (optimizeConfig: ConfigMapping): StudyConfig => ({
   searchSpace: parseSearchSpace(optimizeConfig),
-  overlayModels: new Set(isMapping(optimizeConfig.models) ? Object.keys(optimizeConfig.models) : []),
+  overlayModels: isMapping(optimizeConfig.models)
+    ? Object.fromEntries(
+        Object.entries(optimizeConfig.models).filter((entry): entry is [string, ConfigMapping] =>
+          isMapping(entry[1])
+        )
+      )
+    : {},
 });
 
 /**
@@ -106,53 +119,71 @@ const defaultHarnessModelPath = (config: ConfigMapping): string | undefined => {
   return isMapping(harness) && isMapping(harness.model) ? `harnesses.${harnessName}.model` : undefined;
 };
 
-/** The model keys the study saw for this agent, before its optimize config was merged in. */
-const agentModelKeys = (config: ConfigMapping): Set<string> => {
-  const keys = new Set(isMapping(config.models) ? Object.keys(config.models) : []);
-  if (config.config_format === PLATFORM_AGENT_FORMAT && defaultHarnessModelPath(config)) {
-    keys.add(FABRIC_DEFAULT_MODEL_KEY);
+/**
+ * Where the agent keeps the model the study saw under `modelKey`, before the optimize config was
+ * merged in. A spec-v1 default harness that pins its own model is what Fabric publishes as
+ * `default`, ahead of `models.default`.
+ */
+const agentModelPath = (config: ConfigMapping, modelKey: string): string | undefined => {
+  if (modelKey === FABRIC_DEFAULT_MODEL_KEY && config.config_format === PLATFORM_AGENT_FORMAT) {
+    const harnessModelPath = defaultHarnessModelPath(config);
+    if (harnessModelPath) return harnessModelPath;
   }
-  return keys;
+  const models = config.models;
+  return isMapping(models) && isMapping(models[modelKey]) ? `models.${modelKey}` : undefined;
 };
 
+const getByDottedPath = (config: ConfigMapping, path: string): unknown =>
+  path
+    .split('.')
+    .reduce<unknown>((node, segment) => (isMapping(node) ? node[segment] : undefined), config);
+
+interface ResolvedPath {
+  /** Where to write on the agent config, or null for a study-only model with nothing to apply. */
+  path: string | null;
+  /** The model key the Fabric path tunes, for model paths. */
+  modelKey?: string;
+}
+
 /**
- * Translate a Fabric path back onto the stored agent config. Throws when the path tunes a model
- * the trial did not run with the agent's own settings, since applying it would deploy a
- * configuration that was never evaluated.
+ * Translate a Fabric path back onto the stored agent config. Throws for a path the agent cannot
+ * take, so a configuration that was never evaluated is not deployed.
  */
-const toAgentConfigPath = (
+const resolveAgentPath = (
   config: ConfigMapping,
   fabricPath: string,
-  overlayModels: ReadonlySet<string>
-): string => {
-  const isPlatformAgent = config.config_format === PLATFORM_AGENT_FORMAT;
+  overlayModels: StudyConfig['overlayModels']
+): ResolvedPath => {
   const [root, modelKey, ...rest] = fabricPath.split('.');
   if (root !== 'models' || !modelKey) {
-    if (isPlatformAgent) {
+    if (config.config_format === PLATFORM_AGENT_FORMAT) {
       throw new Error(
         `Cannot apply "${fabricPath}" to a ${PLATFORM_AGENT_FORMAT} agent; only model settings are supported.`
       );
     }
-    return fabricPath;
+    return { path: fabricPath };
   }
 
-  const onAgent = agentModelKeys(config).has(modelKey);
-  if (overlayModels.has(modelKey)) {
-    throw new Error(
-      onAgent
-        ? `The study replaced the agent's "${modelKey}" model with one from its optimize config, so "${fabricPath}" was not tuned against this agent's model.`
-        : `"${fabricPath}" tunes the "${modelKey}" model from the study's optimize config, which is not part of this agent.`
-    );
-  }
-  if (!onAgent) {
+  const modelPath = agentModelPath(config, modelKey);
+  if (!modelPath) {
+    // An evaluation-only model (a judge, say) that the optimize config added: not part of the agent.
+    if (modelKey in overlayModels) return { path: null, modelKey };
     throw new Error(`"${fabricPath}" tunes a "${modelKey}" model this agent does not define.`);
   }
+  return { path: [modelPath, ...rest].join('.'), modelKey };
+};
 
-  const harnessModelPath = isPlatformAgent ? defaultHarnessModelPath(config) : undefined;
-  if (modelKey === FABRIC_DEFAULT_MODEL_KEY && harnessModelPath) {
-    return [harnessModelPath, ...rest].join('.');
-  }
-  return fabricPath;
+/** The study's model id for `modelKey`, when it differs from the one the agent declares. */
+const findModelMismatch = (
+  config: ConfigMapping,
+  modelKey: string,
+  overlayModels: StudyConfig['overlayModels']
+): ModelMismatch | undefined => {
+  const studyModel = overlayModels[modelKey]?.model;
+  const modelPath = agentModelPath(config, modelKey);
+  const agentModel = modelPath ? getByDottedPath(config, `${modelPath}.model`) : undefined;
+  if (typeof studyModel !== 'string' || typeof agentModel !== 'string') return undefined;
+  return studyModel === agentModel ? undefined : { modelKey, studyModel, agentModel };
 };
 
 /** Mirrors `nemo_optimization.config_overlay.set_by_dotted_path`: intermediate maps are created. */
@@ -169,26 +200,46 @@ const setByDottedPath = (config: ConfigMapping, path: string, value: unknown): v
   node[leaf] = value;
 };
 
+export interface AppliedTrialConfig {
+  config: ConfigMapping;
+  /** Names of the trial params left out because they tune a study-only model. */
+  skipped: string[];
+  /** Models whose trial values were tuned against a different model id than the agent uses. */
+  modelMismatches: ModelMismatch[];
+}
+
 /**
  * A copy of the agent's stored config with the trial's sampled params written over it, the same
- * way the study wrote them over the agent when it ran the trial.
+ * way the study wrote them over the agent when it ran the trial. Params on study-only models are
+ * skipped; throws when none of the trial's params apply to the agent. Paths resolve against the
+ * source config so an earlier param cannot change where a later one lands.
  */
 export const applyTrialToAgentConfig = (
   config: ConfigMapping,
   trial: Trial,
   { searchSpace, overlayModels }: StudyConfig
-): ConfigMapping => {
+): AppliedTrialConfig => {
   const next = structuredClone(config);
+  const skipped: string[] = [];
+  const mismatches = new Map<string, ModelMismatch>();
   for (const param of trial.params) {
     const entry = searchSpace[param.name];
     if (!entry) {
       throw new Error(`Parameter "${param.name}" is not in the study's search space.`);
     }
-    setByDottedPath(
-      next,
-      toAgentConfigPath(next, entry.path, overlayModels),
-      coerceParamValue(param.value, entry)
+    const { path, modelKey } = resolveAgentPath(config, entry.path, overlayModels);
+    if (path === null) {
+      skipped.push(param.name);
+      continue;
+    }
+    setByDottedPath(next, path, coerceParamValue(param.value, entry));
+    const mismatch = modelKey ? findModelMismatch(config, modelKey, overlayModels) : undefined;
+    if (mismatch) mismatches.set(mismatch.modelKey, mismatch);
+  }
+  if (trial.params.length > 0 && skipped.length === trial.params.length) {
+    throw new Error(
+      `None of trial ${trial.number}'s parameters apply to this agent; they all tune models from the study's optimize config.`
     );
   }
-  return next;
+  return { config: next, skipped, modelMismatches: [...mismatches.values()] };
 };

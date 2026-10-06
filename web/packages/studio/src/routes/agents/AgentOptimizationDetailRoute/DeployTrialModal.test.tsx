@@ -76,14 +76,14 @@ const mockPlatform = (optimizeYaml = OPTIMIZE_YAML): { body: CapturedAgent } => 
   return captured;
 };
 
-const renderModal = () =>
+const renderModal = (trial: Trial = TRIAL) =>
   renderRoute(undefined, {
     history: getAgentOptimizationDetailRoute(workspace, 'study'),
     routes: [
       {
         path: ROUTES.workspace.agentOptimizationDetail,
         element: (
-          <DeployTrialModal workspace={workspace} spec={SPEC} trial={TRIAL} onClose={vi.fn()} />
+          <DeployTrialModal workspace={workspace} spec={SPEC} trial={trial} onClose={vi.fn()} />
         ),
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent detail page</div> },
@@ -111,18 +111,48 @@ describe('DeployTrialModal', () => {
     expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
   });
 
-  it('blocks deploying a trial tuned on a model the study swapped in', async () => {
-    mockPlatform(`${OPTIMIZE_YAML}
+  it('deploys the rest of a trial when some params tune a study-only model', async () => {
+    const user = userEvent.setup();
+    const captured = mockPlatform(`
+optimizer:
+  search_space:
+    temperature: {type: fabric, path: models.default.temperature, values: [0.0, 0.2]}
+    judge_temperature: {type: fabric, path: models.judge.temperature, values: [0.0, 0.5]}
 models:
-  default: {provider: nvidia, model: nemotron}
+  judge: {provider: nvidia, model: judge-model}
+`);
+    renderModal({
+      ...TRIAL,
+      params: [...TRIAL.params, { name: 'judge_temperature', value: '0.5' }],
+    });
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('Not applied')).toBeInTheDocument();
+    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
+    await waitFor(() => expect(deploy).toBeEnabled());
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
+    expect(captured.body.config?.models).not.toHaveProperty('judge');
+  });
+
+  it('deploys a trial whose optimize config restates the agent model under another id', async () => {
+    const user = userEvent.setup();
+    const captured = mockPlatform(`${OPTIMIZE_YAML}
+models:
+  default: {provider: nvidia, model: nvidia/llama}
 `);
     renderModal();
 
     const dialog = await screen.findByRole('dialog');
-    expect(
-      await within(dialog).findByText(/replaced the agent's "default" model/)
-    ).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
+    expect(await within(dialog).findByText(/The study ran the "default" model as/)).toBeInTheDocument();
+    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
+    await waitFor(() => expect(deploy).toBeEnabled());
+    await user.click(deploy);
+
+    expect(await screen.findByText('Agent detail page')).toBeInTheDocument();
+    expect(captured.body.config?.models?.default?.temperature).toBe(0.2);
   });
 
   it('blocks deploying when the study has no optimize config fileset', async () => {
