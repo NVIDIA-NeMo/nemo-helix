@@ -1691,6 +1691,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             no_truncate=no_truncate,
             columns=columns,
             all_pages=all_pages,
+            project_tabular_rows=_project_deployment_display_endpoints,
         )
 
     @deps_app.command(name="get")
@@ -2120,17 +2121,48 @@ def _register_environment_commands(app: typer.Typer) -> None:
 # ---------------------------------------------------------------------------
 
 _TERMINAL_STATUSES = {"running", "failed"}
+_TABULAR_LIST_FORMATS = frozenset({"table", "markdown", "csv"})
+_HTTP_ENDPOINT_PROTOCOLS = frozenset({"http", "https"})
 
 
 def _deployment_address(dep: dict[str, Any]) -> str:
-    """Best-effort address for CLI output (loopback endpoint or first projected URL)."""
+    """Address shown for a deployment: scalar endpoint, else a projected URL.
+
+    Container modes leave ``endpoint`` empty and store the routable address in
+    ``endpoints``. Prefer the first HTTP(S) URL, then any URL, so displayed
+    output matches the address invoke would use.
+    """
     endpoint = dep.get("endpoint")
     if isinstance(endpoint, str) and endpoint:
         return endpoint
+    fallback = ""
     for ep in dep.get("endpoints") or []:
-        if isinstance(ep, dict) and ep.get("url"):
-            return str(ep["url"])
-    return ""
+        if not isinstance(ep, dict):
+            continue
+        url = ep.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if ep.get("protocol") in _HTTP_ENDPOINT_PROTOCOLS:
+            return url
+        if not fallback:
+            fallback = url
+    return fallback
+
+
+def _project_deployment_display_endpoints(response: Any) -> None:
+    """Copy a display URL onto in-memory list rows. Does not persist the entity."""
+    items = response.get("data") if isinstance(response, dict) else getattr(response, "data", None)
+    if not isinstance(items, list):
+        return
+    for index, item in enumerate(items):
+        if isinstance(item, dict):
+            address = _deployment_address(item)
+            if address:
+                item["endpoint"] = address
+        elif hasattr(item, "model_dump") and hasattr(item, "model_copy"):
+            address = _deployment_address(item.model_dump(mode="json"))
+            if address:
+                items[index] = item.model_copy(update={"endpoint": address})
 
 
 def _wait_for_deployment(
@@ -2752,8 +2784,13 @@ def _print_list(
     no_truncate: bool | None,
     columns: str | None,
     all_pages: bool,
+    project_tabular_rows: Callable[[Any], None] | None = None,
 ) -> None:
-    """Run one ``AgentsClient`` list *method* and render it like every other ``nemo`` list command."""
+    """Run one ``AgentsClient`` list *method* and render it like every other ``nemo`` list command.
+
+    *project_tabular_rows* may adjust the in-memory rows for table/markdown/csv display only;
+    JSON/YAML output keeps the server's response unchanged.
+    """
     resolved_output_format = resolve_output_format(ctx, output_format)
     check_output_columns_with_format(columns, resolved_output_format)
     if resolved_output_format == "code":
@@ -2770,6 +2807,8 @@ def _print_list(
         "GET agent API",
         lambda: collect_offset_pages(getattr(client, method)(**kwargs), all_pages=all_pages),
     )
+    if project_tabular_rows is not None and resolved_output_format in _TABULAR_LIST_FORMATS:
+        project_tabular_rows(result)
     format_output(
         result,
         is_list=True,

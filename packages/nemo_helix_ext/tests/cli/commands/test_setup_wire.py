@@ -21,6 +21,7 @@ import pytest
 import yaml
 from nemo_helix_ext.cli.commands.setup import (
     KeyValidationResult,
+    KeyValidationStatus,
     ModelPair,
     SetupClients,
     _auto_setup,
@@ -142,7 +143,7 @@ def _quiet(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[None]:
     with (
         patch("nemo_helix_ext.cli.telemetry.emit.emit_event"),
         patch(f"{SETUP_MOD}._pause"),
-        patch(f"{SETUP_MOD}._validate_api_key", return_value=KeyValidationResult(passed=True, message="")),
+        patch(f"{SETUP_MOD}._validate_api_key", return_value=KeyValidationResult(status=KeyValidationStatus.VALID)),
     ):
         yield
 
