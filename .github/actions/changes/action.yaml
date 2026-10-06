@@ -262,6 +262,8 @@ runs:
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/src/nhx/common/jobs/**'
+            - 'packages/nhx_testing/src/nhx/testing/**'
           ngc-metadata:
             - '.github/scripts/ngc_metadata.py'
             - '.github/scripts/tests/test_ngc_metadata.py'
