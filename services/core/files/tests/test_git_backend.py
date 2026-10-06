@@ -22,15 +22,12 @@ from nhx.core.files.app.backends.git import (
     GitAccessError,
     GitBackendError,
     GitConfigError,
-    GitRepositoryDamaged,
-    GitRepositoryLocked,
     GitServerFault,
     GitStorageConfig,
     GitStorageImpl,
     GitUnavailableError,
     _classify_failure,
     _fetched_commits,
-    _last_touched,
     _listings,
     _pick_ref,
     _prune_fetch_repositories,
@@ -113,7 +110,6 @@ def _impl(config: GitStorageConfig, cache_root: Path, secrets: dict[str, str] | 
         config,
         SECRETS if secrets is None else secrets,
         cache_root=cache_root,
-        cache_max_bytes=1024**3,
         durable=_durable(cache_root.parent / "durable"),
         allowed_protocols="file",
     )
@@ -128,7 +124,6 @@ def _forget_process_state():
     yield
     _listings.clear()
     _fetched_commits.clear()
-    _last_touched.clear()
 
 
 def _durable_files(tmp_path: Path) -> list[Path]:
@@ -306,11 +301,10 @@ class TestClassifyFailure:
                 "to view it.\nfatal: Could not read from remote repository.",
                 GitConfigError,
             ),
-            ("fatal: Unable to create '/cache/r/shallow.lock': File exists.", GitRepositoryLocked),
+            ("fatal: Unable to create '/cache/r/shallow.lock': File exists.", GitBackendError),
             ("git@host: Permission denied (password,keyboard-interactive).", GitAccessError),
             ("git@host: Permission denied (gssapi-with-mic).", GitAccessError),
-            ("warning: unrelated\nerror: inflate: data stream error (incorrect header check)", GitRepositoryDamaged),
-            ("fatal: cannot change to '/cache/r': No such file or directory", GitRepositoryDamaged),
+            ("warning: unrelated\nerror: inflate: data stream error (incorrect header check)", GitBackendError),
             ("fatal: something new", GitBackendError),
             ("Connection closed by 10.0.0.1 port 22", GitUnavailableError),
             ("fetch-pack: unexpected disconnect while reading sideband packet\nfatal: early EOF", GitUnavailableError),
@@ -612,16 +606,6 @@ class TestDownloads:
         shutil.rmtree(tmp_path / "cache")
         assert await _read(impl, "README.md") == b"changed\n"
 
-    async def test_a_fetch_repository_missing_objects_is_started_over_on_read(self, remote, tmp_path):
-        cache = tmp_path / "cache"
-        impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
-        await impl.list_files()
-        for pack in (_fetch_repository(cache) / "objects").rglob("*"):
-            if pack.is_file():
-                pack.chmod(0o644)
-                pack.write_bytes(b"garbage")
-        assert await _read(impl, "agents/support/prompt.md") == b"0123456789"
-
     async def test_a_pinned_commit_is_recovered_after_its_branch_moves(self, remote, tmp_path, monkeypatch):
         fetch = GitStorageImpl._fetch
 
@@ -651,17 +635,6 @@ class TestColdRepositories:
         monkeypatch.setattr(GitStorageImpl, "_fetch", no_fetch)
         assert await _read(impl, "README.md") == b"changed\n"
 
-    async def test_reads_keep_a_repository_from_looking_idle(self, remote, tmp_path):
-        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
-        await impl.list_files()
-        repository = _fetch_repository(tmp_path / "cache")
-        week_ago = time.time() - 8 * 24 * 60 * 60
-        os.utime(repository, (week_ago, week_ago))
-        _last_touched.clear()
-
-        await _read(impl, "README.md")
-        assert repository.stat().st_mtime > week_ago + 24 * 60 * 60
-
     async def test_fetching_again_prunes_other_repositories(self, remote, tmp_path):
         cache = tmp_path / "cache"
         impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
@@ -677,71 +650,7 @@ class TestColdRepositories:
         assert not idle.exists()
 
 
-class TestRepair:
-    async def test_a_damaged_fetch_repository_is_started_over(self, remote, tmp_path):
-        cache = tmp_path / "cache"
-        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
-        shutil.rmtree(_fetch_repository(cache) / "objects")
-
-        files = await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
-        assert len(files) == 3
-
-    async def test_a_stale_lock_is_removed_and_the_repository_kept(self, remote, tmp_path):
-        cache = tmp_path / "cache"
-        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
-        repository = _fetch_repository(cache)
-        identity = repository.stat().st_ino
-        lock = repository / "shallow.lock"
-        lock.touch()
-        hour_ago = time.time() - 60 * 60
-        os.utime(lock, (hour_ago, hour_ago))
-
-        assert len(await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()) == 3
-        assert repository.stat().st_ino == identity
-        assert not lock.exists()
-
-    async def test_a_lock_in_use_is_reported_busy_and_left_alone(self, remote, tmp_path):
-        cache = tmp_path / "cache"
-        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
-        repository = _fetch_repository(cache)
-        identity = repository.stat().st_ino
-        lock = repository / "shallow.lock"
-        lock.touch()
-
-        with pytest.raises(GitUnavailableError, match="busy"):
-            await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
-        assert lock.exists()
-        assert repository.stat().st_ino == identity
-
-    def test_a_lock_outside_the_repository_is_never_removed(self, tmp_path):
-        outside = tmp_path / "elsewhere.lock"
-        outside.touch()
-        os.utime(outside, (0, 0))
-        (tmp_path / "repo").mkdir()
-        assert not git_backend._remove_stale_lock(tmp_path / "repo", outside)
-        assert outside.exists()
-
-    @pytest.mark.parametrize(
-        "failure",
-        [
-            GitUnavailableError("Could not reach the remote: Connection reset by peer"),
-            GitServerFault("git could not write its files: No space left on device"),
-        ],
-    )
-    async def test_failures_that_are_not_damage_keep_the_fetch_repository(self, remote, tmp_path, monkeypatch, failure):
-        cache = tmp_path / "cache"
-        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
-        repository = _fetch_repository(cache)
-        objects = sorted(path.name for path in (repository / "objects").rglob("*"))
-
-        async def failing(self, repo, want, *, depth=1):
-            raise failure
-
-        monkeypatch.setattr(GitStorageImpl, "_fetch", failing)
-        with pytest.raises(type(failure)):
-            await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
-        assert sorted(path.name for path in (repository / "objects").rglob("*")) == objects
-
+class TestServerFaults:
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
     async def test_an_unwritable_cache_is_a_server_fault(self, remote, tmp_path):
         locked = tmp_path / "locked"
@@ -816,18 +725,6 @@ class TestFetchRepositoryPruning:
             os.utime(directory, (week_ago, week_ago))
 
         async with _repo_lock(busy):
-            await _prune_fetch_repositories(tmp_path, tmp_path / "fetching", max_bytes=1024**3)
+            await _prune_fetch_repositories(tmp_path, tmp_path / "fetching")
 
         assert (idle.exists(), busy.exists(), recent.exists()) == (False, True, True)
-
-    async def test_the_least_recently_used_are_removed_past_the_size_cap(self, tmp_path):
-        now = time.time()
-        repositories = [tmp_path / name for name in ("oldest", "older", "newest")]
-        for age, repository in zip((300, 200, 100), repositories, strict=True):
-            repository.mkdir()
-            (repository / "pack").write_bytes(b"x" * 10)
-            os.utime(repository, (now - age, now - age))
-
-        await _prune_fetch_repositories(tmp_path, tmp_path / "fetching", max_bytes=15)
-
-        assert [repository.exists() for repository in repositories] == [False, False, True]
