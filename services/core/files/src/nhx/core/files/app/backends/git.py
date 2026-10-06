@@ -94,6 +94,9 @@ _SERVER_FAULTS = (
     "Read-only file system",
     # Only a local file; ssh's "Permission denied (publickey,password)" is matched before this.
     ": Permission denied",
+    "cannot run ssh",
+    "ssh: not found",
+    "ssh: command not found",
 )
 
 _MISSING_FROM_REMOTE = (
@@ -278,6 +281,16 @@ def _finish_even_if_cancelled[T](work: Coroutine[Any, Any, T]) -> Awaitable[T]:
 
 # Commits known to be in each fetch repository, so a read prepares a repository once per process.
 _fetched_commits: dict[str, set[str]] = {}
+_last_touched: dict[str, float] = {}
+_TOUCH_INTERVAL_SECONDS = 60
+
+
+async def _touch(repo: Path) -> None:
+    now = time.monotonic()
+    if now - _last_touched.get(str(repo), -_TOUCH_INTERVAL_SECONDS) >= _TOUCH_INTERVAL_SECONDS:
+        _last_touched[str(repo)] = now
+        with suppress(OSError):
+            await asyncio.to_thread(os.utime, repo)
 
 
 async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
@@ -294,6 +307,7 @@ async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
             with suppress(OSError):
                 if repo.stat().st_mtime < cutoff:
                     _fetched_commits.pop(str(repo), None)
+                    _last_touched.pop(str(repo), None)
                     await asyncio.to_thread(shutil.rmtree, repo, True)
 
 
@@ -464,6 +478,8 @@ class GitStorageImpl(StorageImpl):
             raise GitConfigError(
                 f"{self.config.url} has no branch or tag named {revision!r}; abbreviated SHAs are not supported"
             )
+        if not is_commit_sha(sha):
+            raise GitConfigError(f"{self.config.url} uses SHA-256 object ids, which are not supported")
         return sha
 
     async def _commit(self) -> str:
@@ -493,7 +509,7 @@ class GitStorageImpl(StorageImpl):
             subject=f"{self.config.url} at {sha}",
         )
 
-    async def _ensure_commit(self, repo: Path, sha: str) -> None:
+    async def _ensure_commit(self, repo: Path, sha: str, *, ask_remote: bool = False) -> None:
         fetched = False
         async with _repo_lock(repo):
             if not await asyncio.to_thread((repo / "HEAD").exists):
@@ -502,7 +518,10 @@ class GitStorageImpl(StorageImpl):
                 except OSError as exc:
                     raise GitServerFault(f"The git cache at {repo.parent} is not writable: {exc}") from exc
                 await self._git("init", "--bare", "--quiet", str(repo), env=self._base_env(), subject=str(repo))
-            if not await self._has_commit(repo, sha):
+            if ask_remote and await self._has_commit(repo, sha):
+                # The server, not our cache, decides whether this key may fetch the commit.
+                await self._fetch(repo, sha)
+            elif not await self._has_commit(repo, sha):
                 await self._fetch(repo, sha)
                 if not await self._has_commit(repo, sha):
                     raise GitConfigError(f"{self.config.url} has no commit {sha}")
@@ -527,9 +546,9 @@ class GitStorageImpl(StorageImpl):
     async def resolve_config(self) -> GitStorageConfig:
         """Pin the revision to a commit SHA so the fileset cannot shift under a deployment."""
         sha = await self._commit()
-        # A config already pinned keeps the branch or tag it was resolved from, so refreshes still track it.
-        original = self.config.original_revision if is_commit_sha(self.config.revision) else None
-        return self.config.model_copy(update={"revision": sha, "original_revision": original or self.config.revision})
+        # Recorded unconditionally, as for GitHub: a client-supplied original_revision would let a pinned fileset
+        # refresh onto an unrelated branch. Refresh points revision at the tracked ref before calling this.
+        return self.config.model_copy(update={"revision": sha, "original_revision": self.config.revision})
 
     async def _snapshot(self) -> Snapshot:
         if self._snapshot_memo is None:
@@ -626,6 +645,8 @@ class GitStorageImpl(StorageImpl):
                 if isinstance(failure, GitServerFault):
                     raise failure
                 raise GitBackendError(f"The fetch repository for {self.config.url} could not read {blob}: {failure}")
+            # Reads count as use, so idle pruning does not remove a repository that is still being read.
+            await _touch(repo)
         except BaseException as exc:
             await asyncio.shield(stop_process_group(proc))
             if isinstance(exc, TimeoutError):
@@ -691,7 +712,10 @@ class GitStorageImpl(StorageImpl):
     async def validate_storage(self):
         validate_external_host(self.config.remote.host_url)
         self._resolved_sha = await self._ls_remote()
-        # ls-remote vouches for a branch or tag but not a commit SHA, and an empty directory reads like a missing one.
+        if is_commit_sha(self.config.revision):
+            # ls-remote vouches for a branch or tag but not a commit, which another key may already have cached.
+            await _finish_even_if_cancelled(self._ensure_commit(self._repo_dir, self._resolved_sha, ask_remote=True))
+        # An empty directory reads like a missing one.
         if is_commit_sha(self.config.revision) or self.config.path:
             await self._snapshot()
 
