@@ -42,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import zipfile
 from pathlib import Path
 
 import yaml
@@ -220,13 +221,18 @@ def write_policy_model_config(out_dir: Path, fmt: str, server: Path) -> Path:
     return target
 
 
-def server_requirement_lines(pkg_server_dir: Path) -> list[str]:
-    """The server's own requirements, without the editable Gym checkout line.
+_GYM_SERVER_TREES = (
+    "resources_servers",
+    "responses_api_agents",
+    "responses_api_models",
+    "benchmarks",
+    "environments",
+    "environment_servers",
+)
 
-    ``-e nemo-gym[dev] @ ../../`` only resolves inside a Gym tree. A platform package is not
-    one, so Gym rewrites that line to ``nemo-gym==<image version>`` and imports the image's
-    Gym. Building a wheel of the checkout to satisfy it packs every built-in server.
-    """
+
+def server_requirement_lines(pkg_server_dir: Path) -> list[str]:
+    """The server's own requirements, without the editable Gym checkout line."""
     reqs = pkg_server_dir / "requirements.txt"
     if not reqs.is_file():
         return []
@@ -294,14 +300,73 @@ def _download_with_sdist_fallback(download_cmd: list[str], wheels: Path, max_bui
         builds += 1
 
 
-def drop_image_gym_wheel(wheels: Path) -> None:
-    """Remove the nemo-gym wheel after the closure has been resolved against it.
+def gym_wheel_ships_server_trees(wheel: Path) -> bool:
+    with zipfile.ZipFile(wheel) as archive:
+        return any(name.split("/", 1)[0] in _GYM_SERVER_TREES for name in archive.namelist())
 
-    The training image already has Gym. Installing this wheel shadows that tree
-    and its patched verifiers pin.
-    """
+
+def drop_image_gym_wheel(wheels: Path) -> None:
     for wheel in wheels.glob("nemo_gym-*.whl"):
-        wheel.unlink()
+        if gym_wheel_ships_server_trees(wheel):
+            wheel.unlink()
+
+
+def write_library_gym_project(gym_root: Path, dest: Path, version: str) -> None:
+    project = tomllib.loads((gym_root / "pyproject.toml").read_text(encoding="utf-8")).get("project", {})
+    dependencies = project.get("dependencies", [])
+    dev = project.get("optional-dependencies", {}).get("dev", [])
+    source = gym_root / "nemo_gym"
+    if not source.is_dir():
+        raise SystemExit(f"{gym_root} has no nemo_gym package")
+
+    def array(items: list[str]) -> str:
+        return "[\n" + "".join(f"  {json.dumps(item)},\n" for item in items) + "]"
+
+    dest.mkdir(parents=True)
+    shutil.copytree(
+        source,
+        dest / "nemo_gym",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    (dest / "pyproject.toml").write_text(
+        f"""\
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemo-gym"
+version = {json.dumps(version)}
+dependencies = {array(dependencies)}
+
+[project.optional-dependencies]
+dev = {array(dev)}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nemo_gym", "nemo_gym.*"]
+""",
+        encoding="utf-8",
+    )
+
+
+def build_library_gym_wheel(gym_root: Path, dest: Path) -> Path:
+    version = nemo_gym_version(gym_root)
+    dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="nemo-gym-lib-") as tmp:
+        project = Path(tmp) / "nemo-gym"
+        write_library_gym_project(gym_root, project, version)
+        subprocess.run(
+            ["uv", "build", "--wheel", "--no-config", "--out-dir", str(dest), str(project)],
+            check=True,
+        )
+    built = sorted(dest.glob("nemo_gym-*.whl"))
+    if len(built) != 1:
+        names = ", ".join(path.name for path in built) or "none"
+        raise SystemExit(f"expected one nemo-gym library wheel in {dest}, got {names}")
+    if gym_wheel_ships_server_trees(built[0]):
+        raise SystemExit(f"{built[0].name} contains a Gym server tree")
+    return built[0]
 
 
 def validate_required_wheel_versions(wheels: Path) -> None:
@@ -432,6 +497,7 @@ def vendor_wheels(
     ray_version: str,
     openai_version: str,
     nemo_rl_root: Path,
+    gym_root: Path,
 ) -> Path:
     """Resolve and download the offline closure for the selected server.
 
@@ -440,12 +506,10 @@ def vendor_wheels(
     the build host omits a linux-only dependency (sqlalchemy's greenlet) and can add a
     darwin-only one. ``pip download`` then fetches exactly those pins for the target tags.
 
-    The closure is that server's ``requirements.txt`` plus the pins Gym adds to every
-    sub-venv (``ray[default]``, ``openai``, ``pip``, ``setuptools``, ``setuptools-scm``,
-    hydra, and omegaconf). It does not build or vendor ``nemo-gym``. The image already
-    provides it, and a wheel of the checkout would contain every built-in server.
-    setuptools is capped below 81, the release that removed ``pkg_resources``: Gym pins
-    hydra 1.3, which imports it at import time.
+    The closure is that server's ``requirements.txt``, the pins Gym adds to every
+    sub-venv, and ``nemo-gym[dev]`` from the ``nemo_gym`` library wheel. setuptools is
+    capped below 81, the release that removed ``pkg_resources``: Gym pins hydra 1.3,
+    which imports it at import time.
     """
     wheels = out_dir / "wheels"
     # Rebuild from empty: pip copies by filename, so a wheel from an earlier run survives
@@ -453,7 +517,14 @@ def vendor_wheels(
     if wheels.exists():
         shutil.rmtree(wheels)
     wheels.mkdir(parents=True)
-    requirements = server_closure_requirements(pkg_server_dir, ray_version, openai_version)
+    with tempfile.TemporaryDirectory(prefix="nemo-gym-wheel-") as built:
+        gym_wheel = build_library_gym_wheel(gym_root, Path(built))
+        staged = wheels / gym_wheel.name
+        shutil.copy2(gym_wheel, staged)
+    requirements = [
+        f"nemo-gym[dev] @ file://{staged}",
+        *server_closure_requirements(pkg_server_dir, ray_version, openai_version),
+    ]
 
     overrides, constraints = rl_dependency_policy(nemo_rl_root)
     with tempfile.TemporaryDirectory(prefix="closure-") as tmp:
@@ -521,6 +592,10 @@ def vendor_wheels(
 
     validate_required_wheel_versions(wheels)
     drop_image_gym_wheel(wheels)
+    library_wheels = list(wheels.glob("nemo_gym-*.whl"))
+    if len(library_wheels) != 1 or gym_wheel_ships_server_trees(library_wheels[0]):
+        names = ", ".join(path.name for path in library_wheels) or "none"
+        raise SystemExit(f"wheels/ must contain one nemo_gym library wheel, got {names}")
     stray = [f.name for f in wheels.iterdir() if f.is_file() and f.suffix != ".whl"]
     if stray:
         raise SystemExit(f"wheels/ must contain only .whl files, got: {stray}")
@@ -635,6 +710,7 @@ def main() -> int:
             ray_version,
             openai_version,
             nemo_rl_root,
+            gym_root,
         )
     manifest = write_manifest(args.out_dir, args.format, policy_relpath, config_paths, name, args.description)
 

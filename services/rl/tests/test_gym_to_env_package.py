@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -34,16 +35,46 @@ def test_server_closure_uses_the_selected_server_only(tmp_path: Path) -> None:
     assert not any("nemo-gym" in line for line in lines)
 
 
-def test_image_gym_wheel_is_not_shipped(tmp_path: Path) -> None:
-    _touch_wheels(
-        tmp_path,
-        "nemo_gym-0.7.0rc0-py3-none-any.whl",
-        "verifiers-0.3.1-py3-none-any.whl",
-    )
+def _zip_wheel(path: Path, *names: str) -> None:
+    with zipfile.ZipFile(path, "w") as archive:
+        for name in names:
+            archive.writestr(name, b"")
+
+
+def test_checkout_gym_wheel_is_dropped_and_the_library_wheel_stays(tmp_path: Path) -> None:
+    _zip_wheel(tmp_path / "nemo_gym-0.7.0rc0-py3-none-any.whl", "nemo_gym/__init__.py")
+    _zip_wheel(tmp_path / "nemo_gym-9.9.9-py3-none-any.whl", "resources_servers/math_with_judge/app.py")
+    (tmp_path / "verifiers-0.3.1-py3-none-any.whl").touch()
 
     MODULE.drop_image_gym_wheel(tmp_path)
 
-    assert [path.name for path in tmp_path.iterdir()] == ["verifiers-0.3.1-py3-none-any.whl"]
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "nemo_gym-0.7.0rc0-py3-none-any.whl",
+        "verifiers-0.3.1-py3-none-any.whl",
+    ]
+
+
+def test_library_gym_project_copies_the_library_only(tmp_path: Path) -> None:
+    gym = tmp_path / "Gym"
+    (gym / "nemo_gym").mkdir(parents=True)
+    (gym / "nemo_gym" / "package_info.py").write_text("MAJOR = 0\n", encoding="utf-8")
+    (gym / "resources_servers" / "math_with_judge").mkdir(parents=True)
+    (gym / "resources_servers" / "math_with_judge" / "app.py").write_text("pass\n", encoding="utf-8")
+    (gym / "pyproject.toml").write_text(
+        '[project]\nname = "nemo-gym"\ndependencies = ["anthropic<=0.109.2"]\n'
+        '[project.optional-dependencies]\ndev = ["mypy>=1.8.0"]\n',
+        encoding="utf-8",
+    )
+
+    dest = tmp_path / "stage"
+    MODULE.write_library_gym_project(gym, dest, "0.7.0rc0")
+
+    assert (dest / "nemo_gym" / "package_info.py").is_file()
+    assert not (dest / "resources_servers").exists()
+    text = (dest / "pyproject.toml").read_text(encoding="utf-8")
+    assert "anthropic<=0.109.2" in text
+    assert "mypy>=1.8.0" in text
+    assert 'include = ["nemo_gym", "nemo_gym.*"]' in text
 
 
 def test_required_wheel_versions_accept_supported_hydra_stack(tmp_path: Path) -> None:
