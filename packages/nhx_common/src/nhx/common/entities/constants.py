@@ -33,3 +33,6 @@ DEFAULT_WORKSPACE = "default"
 
 # System workspace used for platform-provided entities
 SYSTEM_WORKSPACE = "system"
+
+# Reserved for sample workspaces provisioned by the Agents service.
+SAMPLE_WORKSPACE_PREFIX = "sample-"

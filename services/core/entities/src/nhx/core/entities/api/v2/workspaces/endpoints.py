@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.models import Principal
+from nhx.common.entities.constants import SAMPLE_WORKSPACE_PREFIX
 from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, WorkspaceRepository
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
@@ -179,6 +180,8 @@ async def _delete_all_role_bindings(entity_repository: EntityRepository, workspa
         By default, this endpoint waits for the Admin role to propagate before returning.
         Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
 
+        Names beginning with `sample-` are reserved for the Agents sample flow.
+
         Example:
         ```
         POST /apis/entities/v2/workspaces
@@ -204,6 +207,12 @@ async def create_workspace(
     The creator is automatically granted Admin role on the workspace, keyed by email when
     available (otherwise principal ID).
     """
+    if workspace.name.startswith(SAMPLE_WORKSPACE_PREFIX) and auth_client.principal.id != "service:agents":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Workspace names beginning with '{SAMPLE_WORKSPACE_PREFIX}' are reserved for the sample flow",
+        )
+
     existing = await workspace_repository.get_workspace_by_name(name=workspace.name)
     if existing:
         raise HTTPException(
