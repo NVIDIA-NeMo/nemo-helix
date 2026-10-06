@@ -9,7 +9,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs';
 import { useAgentOptimizationGetRunStrategyJobStatus } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
-import { Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Button, Flex, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { ListChecks, ScrollText, SlidersHorizontal } from 'lucide-react';
 import type { FC } from 'react';
 
@@ -35,7 +35,9 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
   const {
     data: logs,
     isLoading: isLoadingLogs,
+    error: logsError,
     loadProgress,
+    refetch: refetchLogs,
   } = useJobLogs({ workspace, name: jobName, jobStatus: status, enabled: !!jobName });
 
   return (
@@ -100,17 +102,31 @@ export const StudyInProgress: FC<StudyInProgressProps> = ({ workspace, job, isQu
       )}
 
       <Panel slotHeading="Logs" slotIcon={<ScrollText />} elevation="high" density="compact">
-        <LogViewer
-          logs={logs}
-          isLoading={isLoadingLogs && logs.length === 0}
-          loadProgress={loadProgress}
-          downloadFilename={`optimize-${jobName}-logs.txt`}
-          emptyMessage={
-            isQueued
-              ? 'Logs appear once the study starts.'
-              : 'Waiting for the study to emit its first log lines...'
-          }
-        />
+        {logsError && logs.length === 0 ? (
+          <Banner
+            kind="inline"
+            status="error"
+            slotActions={
+              <Button kind="secondary" size="small" onClick={() => void refetchLogs()}>
+                Retry
+              </Button>
+            }
+          >
+            Could not load logs for this study.
+          </Banner>
+        ) : (
+          <LogViewer
+            logs={logs}
+            isLoading={isLoadingLogs && logs.length === 0}
+            loadProgress={loadProgress}
+            downloadFilename={`optimize-${jobName}-logs.txt`}
+            emptyMessage={
+              isQueued
+                ? 'Logs appear once the study starts.'
+                : 'Waiting for the study to emit its first log lines...'
+            }
+          />
+        )}
       </Panel>
     </Stack>
   );
