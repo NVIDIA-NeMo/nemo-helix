@@ -19,7 +19,7 @@ import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvalu
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -172,6 +172,38 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
       .mocked(filesUploadFile)
       .mock.calls.find(([, , name]) => name === 'dataset.jsonl');
     expect(await (datasetUpload?.[3] as File).text()).toBe(ROWS);
+  });
+
+  it('drops a fileset read that finishes after switching back to upload', async () => {
+    let finishRead: (text: string) => void = () => {};
+    vi.mocked(datasetFileContentQueryOptions).mockImplementation(
+      ({ path }) =>
+        ({
+          queryKey: ['test-file-content', path],
+          queryFn: () => new Promise<string>((resolve) => (finishRead = resolve)),
+        }) as never
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(await screen.findByRole('radio', { name: /Create a new experiment/ }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(await screen.findByLabelText('Name'), 'model-update-tests');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    await user.click(screen.getByRole('radio', { name: 'Choose from a fileset' }));
+    await user.click(await screen.findByRole('combobox', { name: 'Fileset' }));
+    await user.click(await screen.findByRole('option', { name: 'generated' }));
+    await user.click(await screen.findByRole('combobox', { name: 'File' }));
+    await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
+    await user.click(screen.getByRole('radio', { name: 'Upload a file' }));
+    await act(async () => {
+      finishRead(ROWS);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(screen.getByLabelText('Add Dataset')).toBeInTheDocument();
   });
 
   it('keeps Submit from sending a fileset dataset that was never picked', async () => {

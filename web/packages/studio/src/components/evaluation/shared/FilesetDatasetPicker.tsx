@@ -7,7 +7,7 @@ import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
 import { datasetFileContentQueryOptions } from '@studio/api/datasets/useDatasetFileContent';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { useQueryClient } from '@tanstack/react-query';
-import { type ReactElement, useRef, useState } from 'react';
+import { type ReactElement, useEffect, useRef, useState } from 'react';
 import { type FieldValues, type UseControllerProps, useWatch } from 'react-hook-form';
 
 const DATASET_FORMATS = ['json', 'jsonl', 'parquet'];
@@ -51,6 +51,13 @@ export function FilesetDatasetPicker<T extends FieldValues>({
   const [path, setPath] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestId = useRef(0);
+
+  useEffect(
+    () => () => {
+      requestId.current += 1;
+    },
+    []
+  );
 
   const filesQuery = useFilesListFilesetFiles(workspace, filesetName, undefined, {
     query: { enabled: !!filesetName },
