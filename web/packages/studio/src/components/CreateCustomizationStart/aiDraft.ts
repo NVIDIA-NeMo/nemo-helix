@@ -6,7 +6,6 @@ import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customi
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { FILE_PREVIEW_MAX_BYTES } from '@studio/api/datasets/useDatasetFileContent';
 import type { AnnotatedFilesetFile } from '@studio/hooks/useCustomizationDatasetValidation';
 import type { CustomizationBackend, CustomizationJob } from '@studio/util/customizationBackend';
 import { getFinetuningType } from '@studio/util/customizations';
@@ -42,9 +41,9 @@ export interface DraftDataset {
 }
 
 /**
- * Rows across the training files. Each file's count comes from a preview capped at
- * {@link FILE_PREVIEW_MAX_BYTES}, so a larger file is scaled up by its size — assuming the
- * rows read are typical of the rest.
+ * Rows across the training files. A count taken from a capped preview — fewer bytes read
+ * than the file holds — is scaled up by the file's size, assuming the rows read are typical
+ * of the rest. A count from the whole file is used as is.
  */
 interface RowCount {
   trainingRowCount: number;
@@ -55,11 +54,11 @@ export const estimateTrainingRows = (files: AnnotatedFilesetFile[]): RowCount =>
   files.reduce<RowCount>(
     (total, file) => {
       const rows = file.rowCount ?? 0;
-      const capped = file.size > FILE_PREVIEW_MAX_BYTES;
+      const bytesRead = file.bytesRead ?? file.size;
+      const capped = bytesRead > 0 && bytesRead < file.size;
       return {
         trainingRowCount:
-          total.trainingRowCount +
-          (capped ? Math.round((rows * file.size) / FILE_PREVIEW_MAX_BYTES) : rows),
+          total.trainingRowCount + (capped ? Math.round((rows * file.size) / bytesRead) : rows),
         rowCountIsEstimate: total.rowCountIsEstimate || capped,
       };
     },

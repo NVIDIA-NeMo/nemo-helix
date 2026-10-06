@@ -45,6 +45,8 @@ export interface EncodingFileError {
  */
 export interface AnnotatedFilesetFile extends FilesetFileOutput {
   rowCount?: number;
+  /** Bytes `rowCount` was taken from: below `size` when the content was a capped preview. */
+  bytesRead?: number;
 }
 
 /** Per-file completeness check results are capped to keep the UI fast. */
@@ -192,6 +194,7 @@ interface PerFileValidation {
   firstRow: Record<string, unknown> | null;
   /** Non-empty line count from the full content (independent of sampleLimit). */
   rowCount: number;
+  bytesRead: number;
   /**
    * Completeness errors collected for this file, capped at
    * MAX_COMPLETENESS_ERRORS_PER_FILE. Empty when the schema didn't detect
@@ -245,6 +248,7 @@ const validateOne = async (
   trainingType: TrainingType | undefined
 ): Promise<PerFileValidation> => {
   const rowCount = countRows(content);
+  const bytesRead = new TextEncoder().encode(content).length;
   const sample = buildSampleFile(file.path, content, sampleLimit);
   const formatResult = await validateFileFormat(sample);
   if (!formatResult.isValid || !formatResult.format) {
@@ -254,6 +258,7 @@ const validateOne = async (
       schema: null,
       firstRow: null,
       rowCount,
+      bytesRead,
       completenessErrors: [],
       encoding,
     };
@@ -301,6 +306,7 @@ const validateOne = async (
     schema,
     firstRow,
     rowCount,
+    bytesRead,
     completenessErrors,
     encoding,
   };
@@ -379,6 +385,7 @@ export const useCustomizationDatasetValidation = ({
               schema: null,
               firstRow: null,
               rowCount: 0,
+              bytesRead: 0,
               completenessErrors: [],
               // Don't double-count this in the encoding row — the format/error
               // row already carries the download failure for this file.
@@ -414,9 +421,13 @@ export const useCustomizationDatasetValidation = ({
   const rowCountsByPath: Record<string, number> = Object.fromEntries(
     allResults.map((r) => [r.file.path, r.rowCount])
   );
+  const bytesReadByPath: Record<string, number> = Object.fromEntries(
+    perFile.map((r) => [r.file.path, r.bytesRead])
+  );
   const annotate = (file: FilesetFileOutput): AnnotatedFilesetFile => ({
     ...file,
     rowCount: rowCountsByPath[file.path],
+    bytesRead: bytesReadByPath[file.path],
   });
   const annotatedTraining = training.map(annotate);
   const annotatedValidation = validation.map(annotate);
