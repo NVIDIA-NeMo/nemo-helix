@@ -29,7 +29,7 @@ from nhx.core.files.app.backends.huggingface import HuggingfaceStorageConfig
 from nhx.core.files.app.backends.local import LocalStorageConfig
 from nhx.core.files.app.backends.ngc import NGCStorageConfig
 from nhx.core.files.app.cache import CacheStatus
-from nhx.core.files.exceptions import NotFoundError, StorageAccessError
+from nhx.core.files.exceptions import NotFoundError, StorageAccessError, StorageServerFault
 
 
 @pytest.fixture
@@ -518,6 +518,25 @@ async def test_stream_file_download_setup_storage_access_error_returns_generic_5
 
     assert exc_info.value.status_code == HTTP_502_BAD_GATEWAY
     assert "referenced credentials are valid" in exc_info.value.detail
+
+
+async def test_stream_file_download_leaves_a_server_fault_to_the_server_error_handler(
+    mock_storage, mock_request, mock_background_tasks
+):
+    async def fault_on_first_chunk():
+        raise StorageServerFault("git is not installed in the files service")
+        yield  # pragma: no cover
+
+    mock_storage.download.return_value = fault_on_first_chunk()
+
+    with pytest.raises(StorageServerFault):
+        await stream_file_download(
+            storage=mock_storage,
+            path="file.txt",
+            request=mock_request,
+            file_size=100,
+            background_tasks=mock_background_tasks,
+        )
 
 
 async def test_stream_file_download_preflight_success_returns_streaming_response(

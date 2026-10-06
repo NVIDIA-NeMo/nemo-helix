@@ -287,6 +287,8 @@ files:
   hf_retry_initial_delay_seconds: 0.5
   # Maximum Hugging Face retry delay in seconds. | default: 5.0
   hf_retry_max_delay_seconds: 5.0
+  # Size the repositories git filesets fetch into may reach before the least recently used are removed. A removed repository is fetched again when next needed. | default: 10737418240
+  git_cache_max_bytes: 10737418240
 ```
 
 ### `inference_gateway`
