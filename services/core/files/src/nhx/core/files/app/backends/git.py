@@ -35,7 +35,6 @@ from nemo_helix_plugin.config import nhx_user_data_dir
 from nemo_helix_plugin.files.storage_config import is_commit_sha
 from nhx.common.files.storage_config import GitStorageConfig as GitStorageConfig
 from nhx.core.files.app.backends.base import (
-    REGULAR_FILE_MODES,
     ByteRange,
     FileInfo,
     StorageImpl,
@@ -55,8 +54,8 @@ logger = logging.getLogger(__name__)
 # Weak, so a URL's lock goes away once nothing holds or waits on it.
 _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
-# git's own "infinite" depth, which deepens a shallow repository to the full history of a ref.
-_FULL_HISTORY = 2147483647
+# Git's regular-file blob modes; directories, submodules and symlinks are not served as files.
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 # Bounds the git and ssh commands one files service runs at once, across every request; file streams are not counted.
 _GIT_SLOTS = asyncio.Semaphore(16)
@@ -218,7 +217,7 @@ def _tree_entries(ls_tree_output: bytes) -> Iterator[_TreeEntry]:
             continue
         meta, _, path = entry.partition("\t")
         mode, kind, blob, size = meta.split()
-        if kind == "blob" and mode in REGULAR_FILE_MODES:
+        if kind == "blob" and mode in _REGULAR_FILE_MODES:
             yield _TreeEntry(path=path, blob=blob, size=int(size))
 
 
@@ -478,36 +477,21 @@ class GitStorageImpl(StorageImpl):
         returncode, _, _ = await self._run("-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}", env=self._base_env())
         return returncode == 0
 
-    async def _fetch(self, repo: Path, want: str, *, depth: int = 1) -> None:
+    async def _fetch(self, repo: Path, sha: str) -> None:
         await self._remote_git(
             "-C",
             str(repo),
             "fetch",
             "--quiet",
-            f"--depth={depth}",
+            "--depth=1",
             "--no-tags",
             "--no-recurse-submodules",
             "--no-write-fetch-head",
             "--",
             self.config.url,
-            want,
-            subject=f"{self.config.url} at {want}",
+            sha,
+            subject=f"{self.config.url} at {sha}",
         )
-
-    async def _fetch_with_fallback(self, repo: Path, sha: str) -> None:
-        try:
-            await self._fetch(repo, sha)
-        except GitConfigError:
-            # Some servers refuse a SHA in a fetch request; the ref it was resolved from still works.
-            fallback = self.config.tracked_revision or (
-                None if is_commit_sha(self.config.revision) else self.config.revision
-            )
-            if not fallback:
-                raise
-            await self._fetch(repo, fallback)
-            if not await self._has_commit(repo, sha):
-                # The ref has moved past the pinned commit, so only its history still holds it.
-                await self._fetch(repo, fallback, depth=_FULL_HISTORY)
 
     async def _ensure_commit(self, repo: Path, sha: str) -> None:
         fetched = False
@@ -519,7 +503,7 @@ class GitStorageImpl(StorageImpl):
                     raise GitServerFault(f"The git cache at {repo.parent} is not writable: {exc}") from exc
                 await self._git("init", "--bare", "--quiet", str(repo), env=self._base_env(), subject=str(repo))
             if not await self._has_commit(repo, sha):
-                await self._fetch_with_fallback(repo, sha)
+                await self._fetch(repo, sha)
                 if not await self._has_commit(repo, sha):
                     raise GitConfigError(f"{self.config.url} has no commit {sha}")
                 # Keeps the newest commit's objects, so the next fetch of this repository is a delta.
@@ -543,7 +527,7 @@ class GitStorageImpl(StorageImpl):
     async def resolve_config(self) -> GitStorageConfig:
         """Pin the revision to a commit SHA so the fileset cannot shift under a deployment."""
         sha = await self._commit()
-        # A config already pinned keeps the branch or tag it was resolved from, for refreshes and fetch fallbacks.
+        # A config already pinned keeps the branch or tag it was resolved from, so refreshes still track it.
         original = self.config.original_revision if is_commit_sha(self.config.revision) else None
         return self.config.model_copy(update={"revision": sha, "original_revision": original or self.config.revision})
 

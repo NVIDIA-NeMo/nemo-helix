@@ -423,7 +423,7 @@ class GitStorageConfig(BaseStorageConfig):
     @field_validator("original_revision")
     @classmethod
     def require_plain_original_revision(cls, v: str | None) -> str | None:
-        # The fetch fallback hands this to git as a refspec, so it gets the same check as revision.
+        # A refresh resolves this with ls-remote, so it gets the same check as revision.
         return None if v is None else _require_ref_name("original_revision", v)
 
     @field_validator("known_hosts")

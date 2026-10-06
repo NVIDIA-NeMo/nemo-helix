@@ -484,10 +484,10 @@ class TestListings:
         fetches = 0
         fetch = GitStorageImpl._fetch
 
-        async def counting(self, repo, want, *, depth=1):
+        async def counting(self, repo, sha):
             nonlocal fetches
             fetches += 1
-            await fetch(self, repo, want, depth=depth)
+            await fetch(self, repo, sha)
 
         monkeypatch.setattr(GitStorageImpl, "_fetch", counting)
         config = _config(remote["url"], revision=remote["main"])
@@ -500,11 +500,11 @@ class TestListings:
         released = asyncio.Event()
         fetch = GitStorageImpl._fetch
 
-        async def held(self, repo, want, *, depth=1):
+        async def held(self, repo, sha):
             nonlocal fetches
             fetches += 1
             await released.wait()
-            await fetch(self, repo, want, depth=depth)
+            await fetch(self, repo, sha)
 
         monkeypatch.setattr(GitStorageImpl, "_fetch", held)
         config = _config(remote["url"], revision=remote["main"])
@@ -581,18 +581,6 @@ class TestDownloads:
         await impl.list_files()
         shutil.rmtree(tmp_path / "cache")
         assert await _read(impl, "README.md") == b"changed\n"
-
-    async def test_a_pinned_commit_is_recovered_after_its_branch_moves(self, remote, tmp_path, monkeypatch):
-        fetch = GitStorageImpl._fetch
-
-        async def refuse_shas(self, repo, want, *, depth=1):
-            if want == remote["first"]:
-                raise GitConfigError("not our ref")
-            await fetch(self, repo, want, depth=depth)
-
-        monkeypatch.setattr(GitStorageImpl, "_fetch", refuse_shas)
-        config = _config(remote["url"], revision=remote["first"], original_revision="main")
-        assert await _read(_impl(config, tmp_path / "cache"), "README.md") == b"readme\n"
 
 
 class TestColdRepositories:
@@ -675,20 +663,6 @@ class TestRegistration:
         monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").validate_storage()
         assert not (tmp_path / "cache").exists()
-
-    async def test_first_registration_falls_back_to_the_requested_branch(self, remote, tmp_path, monkeypatch):
-        fetch = GitStorageImpl._fetch
-        wants: list[str] = []
-
-        async def refuse_shas(self, repo, want, *, depth=1):
-            wants.append(want)
-            if want == remote["main"]:
-                raise GitConfigError("not our ref")
-            await fetch(self, repo, want, depth=depth)
-
-        monkeypatch.setattr(GitStorageImpl, "_fetch", refuse_shas)
-        assert len(await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").list_files()) == 3
-        assert wants == [remote["main"], "main"]
 
 
 class TestFetchRepositoryPruning:
