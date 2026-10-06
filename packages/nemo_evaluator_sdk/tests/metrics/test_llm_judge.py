@@ -1153,7 +1153,7 @@ class TestGenerateStructuredOutput:
                     name="accuracy",
                     minimum=1,
                     maximum=5,
-                    integer=True,
+                    is_integer=True,
                     parser=JSONScoreParser(json_path="score"),
                 )
             ],
@@ -1226,7 +1226,7 @@ class TestGenerateStructuredOutput:
     def test_integer_range_generates_integer_schema(self):
         metric = LLMJudgeMetric(
             model=_make_model(),
-            scores=[RangeScore(name="accuracy", minimum=1, maximum=5, integer=True)],
+            scores=[RangeScore(name="accuracy", minimum=1, maximum=5, is_integer=True)],
         )
         assert generate_structured_output(metric) == {
             "schema": {
