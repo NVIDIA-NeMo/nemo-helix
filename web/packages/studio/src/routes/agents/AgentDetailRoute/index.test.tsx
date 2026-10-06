@@ -191,7 +191,7 @@ describe('AgentDetailRoute', () => {
     expect(screen.getByText('••••••••')).toBeInTheDocument();
   });
 
-  it('clamps a long header description to one line and exposes the full text as a tooltip', async () => {
+  it("shows the agent's description in the overview Details panel, not the page header", async () => {
     const description = 'A long agent description that would otherwise bloat the header row.';
     server.use(
       http.get(
@@ -210,8 +210,11 @@ describe('AgentDetailRoute', () => {
     renderDetail();
 
     const descriptionEl = await screen.findByText(description);
-    expect(descriptionEl).toHaveClass('line-clamp-1');
-    expect(descriptionEl).toHaveAttribute('title', description);
+    expect(descriptionEl).toBeInTheDocument();
+    // The header carries the name and status only - no description, no model.
+    expect(
+      within(screen.getByTestId('nv-page-header-heading')).queryByText(description)
+    ).not.toBeInTheDocument();
   });
 
   describe('arriving with ?action=run-evaluation', () => {

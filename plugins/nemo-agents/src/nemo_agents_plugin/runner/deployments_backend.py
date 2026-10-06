@@ -66,13 +66,12 @@ from nemo_deployments_plugin.entities import (
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.workload_identity import get_workload_identity_token_audience
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -593,7 +592,7 @@ def build_deployment_config(
     init_containers: list[Container] = []
 
     # K8s only: init container stages workspace plugin wheels into a shared volume.
-    # Docker backend rejects init_containers in v1. Full wheel-source contract is AIRCORE-863.
+    # Docker backend rejects init_containers in v1. The full wheel-source contract is a follow-up.
     # Constructors use camelCase aliases (ty + pydantic alias validation).
     if mode == "k8s" and plugin_wheels_init_image:
         volume_mounts.append(VolumeMount(name=_PLUGIN_WHEELS_VOLUME, mountPath=_PLUGIN_WHEELS_MOUNT, readOnly=True))
@@ -603,7 +602,7 @@ def build_deployment_config(
                 image=plugin_wheels_init_image,
                 command=["sh", "-c"],
                 args=[
-                    f"echo 'plugin-wheels init stub; hardened in AIRCORE-863' "
+                    f"echo 'plugin-wheels init stub' "
                     f"&& mkdir -p {_PLUGIN_WHEELS_MOUNT} && touch {_PLUGIN_WHEELS_MOUNT}/.ready"
                 ],
             ).model_copy(
@@ -697,8 +696,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
 
     def _entity_client(self) -> NemoEntitiesClient:
         if self._entities is None:
-            sdk = get_async_platform_sdk(as_service="agents", internal=True)
-            self._entities = NemoEntitiesClient(client_from_platform(sdk, AsyncEntitiesClient))
+            client = get_async_nemo_client(as_service="agents", internal=True)
+            self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
         return self._entities
 
     async def create_deployment(
@@ -809,8 +808,8 @@ class DeploymentsRunnerBackend(RunnerBackend):
         if is_fabric and agent:
             agent_yaml_path = _fabric_config_mount_path(self._config.config_mount_path)
             try:
-                sdk = get_async_platform_sdk(as_service="agents", internal=True)
-                files_client = client_from_platform(sdk, AsyncFilesClient)
+                client = get_async_nemo_client(as_service="agents", internal=True)
+                files_client = AsyncFilesClient.from_client(client)
                 staged_config_files, staged_spec = await stage_with_spec_revision(
                     files_client,
                     workspace=workspace,

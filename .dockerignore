@@ -16,7 +16,6 @@ Dockerfile.bake
 **/__pycache__
 **/node_modules
 web/packages/sdk/generated/
-sdk/python/nemo-helix/_dev/nhx
 # Local pi agent state (git-ignored); stale sandbox worktrees break context scanning.
 .pi
 # nemo-agents optimize-skills artifacts. These ephemeral run outputs can

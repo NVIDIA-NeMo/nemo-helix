@@ -20,6 +20,7 @@ from nhx.intake.spans.api.evaluator_results_schemas import (
     EvaluatorResultFilter,
     EvaluatorResultInput,
     EvaluatorResultSortField,
+    EvaluatorResultStatus,
 )
 from nhx.intake.spans.api.query_filters import (
     filter_comparisons,
@@ -70,6 +71,7 @@ async def create_evaluator_result(
         value=body.value,
         string_value=body.string_value,
         data_type=body.data_type,
+        status=body.status,
         comment=body.comment,
         created_by=_resolve_created_by(auth_client),
         created_at=now,
@@ -171,6 +173,8 @@ def _evaluator_result_filter(workspace: str, parsed: ParsedFilter) -> EvaluatorR
             filters.name = require_string_value(comparison)
         elif comparison.field == "data_type":
             filters.data_type = require_enum_value(comparison, EvaluatorResultDataType)
+        elif comparison.field == "status":
+            filters.status = require_enum_value(comparison, EvaluatorResultStatus)
         elif comparison.field == "created_by":
             filters.created_by = require_string_value(comparison)
         elif comparison.field == "value" and comparison.operator == FilterOperator.GTE:

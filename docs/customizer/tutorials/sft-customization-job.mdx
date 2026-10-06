@@ -55,7 +55,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
+The SDK needs to know the URL of your NeMo Helix deployment. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
 
 ```sh
 export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
@@ -64,15 +64,18 @@ export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```python
 import json
 import os
-from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nemo_customizer.sdk import Customization
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(
-    base_url=NHX_BASE_URL,
-    workspace="default"
-)
 client = NemoClient(
     base_url=NHX_BASE_URL,
     workspace="default"
@@ -205,26 +208,27 @@ with open(f"{DATASET_PATH}/training.jsonl", 'r') as f:
 DATASET_NAME = "sft-dataset"
 
 try:
-    sdk.files.filesets.create(
-        workspace="default",
-        name=DATASET_NAME,
-        description="SFT training data"
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="SFT training data",
+        ),
+    ).data()
     print(f"Created fileset: {DATASET_NAME}")
 except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
 # Upload training data files individually to ensure correct structure
-sdk.files.upload(
-    local_path=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default"
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 
 # Validate training data is uploaded correctly
 print("Training data:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 ```
 
 ### 4. Secrets Setup
@@ -268,16 +272,14 @@ if not HF_TOKEN:
 
 def create_or_get_secret(name: str, value: str, label: str):
     try:
-        secret = sdk.secrets.create(
-            name=name,
-            workspace="default",
-            value=value,
-        )
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return sdk.secrets.retrieve(name=name, workspace="default")
+        return client.secrets.get_secret(name=name).data()
 
 
 # Create Hugging Face token secret
@@ -300,53 +302,52 @@ This tutorial's default model is gated, so the fileset includes `token_secret=hf
 import time
 
 # Create a fileset pointing to the desired Hugging Face model
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"
 
 # Ensure you have a Hugging Face token secret created
 try:
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description="Llama 3.2 1B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            # repo_id is the full model name from Hugging Face
-            repo_id=HF_REPO_ID,
-            repo_type="model",
-            # we use the secret created in the previous step
-            token_secret=hf_secret.name,
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Llama 3.2 1B base model from Hugging Face",
+            storage=HuggingfaceStorageConfig(
+                # repo_id is the full model name from Hugging Face
+                repo_id=HF_REPO_ID,
+                repo_type="model",
+                # we use the secret created in the previous step
+                token_secret=SecretRef(hf_secret.name),
+            ),
         ),
-    )
+    ).data()
     print(f"Created base model fileset: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model fileset already exists. Skipping creation.")
-    base_model_fs = sdk.files.filesets.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
 
 # Create the Model Entity representation.
 try:
-    base_model = sdk.models.create(
-        workspace="default",
-        name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=MODEL_NAME,
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
     print(f"Created Model Entity: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model already exists. Updating fileset if different.")
-    base_model = sdk.models.update(
-        workspace="default",
+    base_model = client.models.update_model(
         name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
 
 print(f"\nBase model fileset: fileset://default/{base_model.name}")
 print("Base model fileset files list:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=MODEL_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=MODEL_NAME).data().data], indent=2))
 
 # Wait for ModelSpec to be populated from the checkpoint
 print("\nWaiting for ModelSpec to be populated...")
@@ -356,10 +357,7 @@ while not base_model.spec:
     if time.time() - spec_start > SPEC_TIMEOUT_SECONDS:
         raise TimeoutError(f"ModelSpec not populated within {SPEC_TIMEOUT_SECONDS} seconds")
     time.sleep(2)
-    base_model = sdk.models.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 print(f"ModelSpec populated: {base_model.spec}")
 ```
@@ -418,9 +416,17 @@ print(f"Output model: {OUTPUT_NAME}")
 Poll until the job finishes. Each update shows the current step, how much of that step is done, and the latest loss. Once the backend reports a loss history, the cell charts loss by step.
 
 ```python
-from nemo_helix_ext.quickstart import wait_for_training
+import time
 
-wait_for_training(sdk, job.job.name)
+# Poll the job until it reaches a terminal state
+while True:
+    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    print(f"Status: {status.status}")
+    if status.status.lower() in ("completed", "failed", "cancelled", "error"):
+        break
+    time.sleep(15)
+
+assert status.status.lower() == "completed"
 
 ```
 
@@ -443,7 +449,7 @@ After training completes, deploy using the Deployment Management Service:
 
 ```python
 # Validate model entity exists
-model_entity = sdk.models.retrieve(workspace='default', name=OUTPUT_NAME)
+model_entity = client.models.get_model(name=OUTPUT_NAME).data()
 print(model_entity.model_dump_json(indent=2))
 ```
 
@@ -453,34 +459,41 @@ deploy_suffix = uuid.uuid4().hex[:4]
 DEPLOYMENT_CONFIG_NAME = f"sft-model-deployment-cfg-{deploy_suffix}"
 DEPLOYMENT_NAME = f"sft-model-deployment-{deploy_suffix}"
 
-deployment_config = sdk.inference.deployment_configs.create(
-    workspace="default",
-    name=DEPLOYMENT_CONFIG_NAME,
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": OUTPUT_NAME,
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "docker.io/vllm/vllm-openai",
-        "image_tag": "v0.22.1",
-    },
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
 )
 
+deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=DEPLOYMENT_CONFIG_NAME,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=OUTPUT_NAME,
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
+
 # Deploy model using deployment_config created above
-deployment = sdk.inference.deployments.create(
-    workspace="default",
-    name=DEPLOYMENT_NAME,
-    config=deployment_config.name
-)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name=DEPLOYMENT_NAME,
+        config=deployment_config.name,
+    ),
+).data()
 
 
 # Check deployment status
-deployment_status = sdk.inference.deployments.retrieve(
-    name=deployment.name,
-    workspace="default"
-)
+deployment_status = client.models.get_deployment(name=deployment.name).data()
 
 print(f"Deployment name: {deployment.name}")
 print(f"Deployment status: {deployment_status.status}")
@@ -497,20 +510,28 @@ The deployment service automatically:
 For larger models requiring multiple GPUs, increase `gpu` in `executor_config`. vLLM computes tensor parallelism from the GPU count and model architecture:
 
 ```python
-deployment_config = sdk.inference.deployment_configs.create(
-    workspace="default",
-    name="sft-model-config-multigpu",
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": OUTPUT_NAME,
-    },
-    executor_config={
-        "gpu": 2,
-        "image_name": "docker.io/vllm/vllm-openai",
-        "image_tag": "v0.22.1",
-    },
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
 )
+
+client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="sft-model-config-multigpu",
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=OUTPUT_NAME,
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=2,
+            image_name="docker.io/vllm/vllm-openai",
+            image_tag="v0.22.1",
+        ),
+    ),
+).data()
 ```
 
 **Single-Node Constraint:** Model deployments are limited to a single node. The maximum `gpu` value depends on the total GPUs available on a single node in your cluster. Multi-node deployments are not supported.
@@ -530,10 +551,7 @@ print(f"Monitoring deployment '{deployment.name}'...")
 print(f"Timeout: {TIMEOUT_MINUTES} minutes\n")
 
 while True:
-    deployment_status = sdk.inference.deployments.retrieve(
-        name=deployment.name,
-        workspace="default"
-    )
+    deployment_status = client.models.get_deployment(name=deployment.name).data()
 
     elapsed = time.time() - start_time
     elapsed_min = int(elapsed // 60)
@@ -547,7 +565,7 @@ while True:
     # Check if deployment is ready
     if deployment_status.status == "READY":
         print("\nDeployment is ready!")
-        if not sdk.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
+        if not client.models.wait_for_gateway(deployment.name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
 
@@ -576,17 +594,22 @@ question = "Who was the first person to walk on the Moon?"
 
 prompt = f"Context: {context} Question: {question} Answer:"
 
-response = sdk.inference.gateway.provider.post(
-    "v1/completions",
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+response = InferenceGatewayClient.from_client(client).provider_post(
     name=deployment.name,
     workspace="default",
-    body={
-        "model": f"default/{OUTPUT_NAME}",
-        "prompt": prompt,
-        "temperature": 0,
-        "max_tokens": 128
-    }
-)
+    trailing_uri="v1/completions",
+    body=JsonBody(
+        {
+            "model": f"default/{OUTPUT_NAME}",
+            "prompt": prompt,
+            "temperature": 0,
+            "max_tokens": 128,
+        }
+    ),
+).data()
 
 print("=" * 60)
 print("MODEL EVALUATION")
@@ -629,7 +652,7 @@ For detailed information on all available hyperparameters, recommended values, a
 - Confirm the model fileset uses `token_secret=hf_secret.name` for gated models
 - Check `AutomodelJobInput` references use the `workspace/name` format: `model=f"default/{MODEL_NAME}"` and `dataset={"training": f"default/{DATASET_NAME}"}` (for example, `default/llama-3-2-1b-base`, `default/sft-dataset`)
 - Verify the model entity points at the fileset: `fileset=f"default/{MODEL_NAME}"`
-- Check job status: `sdk.jobs.get_status(name=job.job.name, workspace="default")`
+- Check job status: `client.jobs.get_status(name=job.job.name)`
 
 **Job fails with OOM (Out of Memory) error:**
 1. **First try:** Reduce `global_batch_size` from 64 to 32 or 16 in `batch={...}`
@@ -656,9 +679,9 @@ For detailed information on all available hyperparameters, recommended values, a
 - Compare to baseline: Test base model to ensure fine-tuning improved performance
 
 **Deployment fails:**
-- Verify output model exists: `sdk.models.retrieve(name=OUTPUT_NAME, workspace="default")`
-- Check job logs: `sdk.jobs.get_logs(name=job.job.name, workspace="default")`
-- Check deployment status: `sdk.inference.deployments.retrieve(name=deployment.name, workspace="default")`
+- Verify output model exists: `client.models.get_model(name=OUTPUT_NAME)`
+- Check job logs: `client.jobs.get_logs(name=job.job.name)`
+- Check deployment status: `client.models.get_deployment(name=deployment.name)`
 - Ensure sufficient GPU resources for `executor_config={"gpu": 1, ...}`
 - Verify the deployment config matches this tutorial: `engine="vllm"` with `docker.io/vllm/vllm-openai:v0.22.1`
 

@@ -38,8 +38,7 @@ from nhx.common.jobs.log_client import dep_job_logs_client
 def jobs_client(test_client: AsyncClient) -> AsyncJobsClient:
     """A typed AsyncJobsClient bound to the in-memory Jobs app.
 
-    Mirrors how ``test_sdk`` builds the Stainless SDK, but returns the new
-    typed client so responses flow through ``NemoClient.send()``.
+    Responses flow through ``NemoClient.send()``.
     """
     return AsyncJobsClient(base_url=str(test_client.base_url), http_client=test_client)
 
@@ -74,7 +73,7 @@ async def test_get_execution_profiles_available_without_controller_ready_gate(
     """API must advertise merge-filtered profiles without a controller ready flag.
 
     Split topologies (API pod without controllers) previously 503'd forever when
-    readiness lived in controller-only process memory (AIRCORE-971).
+    readiness lived in controller-only process memory.
     """
     raw = await test_client.get("/apis/jobs/v2/execution-profiles")
     assert raw.status_code == 200

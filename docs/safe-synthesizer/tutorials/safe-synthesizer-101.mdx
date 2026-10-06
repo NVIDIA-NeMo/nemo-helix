@@ -55,15 +55,9 @@ Set up the client to connect to your Safe Synthesizer deployment:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 import os
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 
-# Configure the clients
-sdk = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-    access_token=os.environ.get("NHX_ACCESS_TOKEN"),
-)
+# Configure the client
 client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
@@ -84,9 +78,9 @@ Test the connection to ensure Safe Synthesizer is accessible:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 try:
-    jobs = sdk.safe_synthesizer.jobs.list(workspace="default")
+    jobs = client.safe_synthesizer.jobs.list(workspace="default")
     print("✅ Successfully connected to Safe Synthesizer service")
-    print(f"Found {len(jobs.data)} existing jobs")
+    print(f"Found {len(jobs.items())} existing jobs")
 except Exception as e:
     print(f"❌ Cannot connect to service: {e}")
     print("Please verify base_url and service status")
@@ -138,10 +132,10 @@ Without this setup, you may see classification errors and reduced detection qual
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
-    sdk.inference.providers.retrieve(provider_id, workspace=provider_workspace)
+    client.models.get_provider(name=provider_id, workspace=provider_workspace)
 else:
     provider_id = provider_name
-    sdk.inference.providers.retrieve(provider_id)
+    client.models.get_provider(name=provider_id)
 print(f"✅ Using model provider: {provider_name}")
 ```
 
@@ -163,13 +157,18 @@ If you're using private HuggingFace models or want to avoid rate limits, create 
 import os
 import time
 
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
 # Create a unique secret name (use hyphens, not underscores)
 hf_secret_name = f"hf-token-{int(time.time())}"
 hf_token = os.environ.get("HF_TOKEN")
 
 if hf_token:
     # Store your HuggingFace token as a platform secret
-    sdk.secrets.create(workspace="default", name=hf_secret_name, value=hf_token)
+    client.secrets.create_secret(
+        workspace="default",
+        body=HelixSecretCreateRequest(name=hf_secret_name, value=hf_token),
+    )
     print(f"✓ Created secret: {hf_secret_name}")
 else:
     hf_secret_name = None
@@ -182,11 +181,14 @@ Use the `SafeSynthesizerJobBuilder` to configure and create a job:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 import pandas as pd
+from nemo_helix_plugin.projects.types import CreateProjectRequest
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
 # Create a project for our jobs (creates if it doesn't exist)
 project_name = "test-project"
-sdk.projects.create(workspace="default", name=project_name, exist_ok=True)
+client.projects.create_project(
+    workspace="default", body=CreateProjectRequest(name=project_name), exist_ok=True
+)
 
 # Build the job configuration
 job_name = f"synthesis-test-{pd.Timestamp.now().strftime('%Y%m%d-%H%M%S')}"
@@ -363,11 +365,11 @@ List and optionally delete completed jobs:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 # List all jobs
-all_jobs = sdk.safe_synthesizer.jobs.list(workspace="default")
-print(f"Total jobs: {len(all_jobs.data)}")
+all_jobs = client.safe_synthesizer.jobs.list(workspace="default")
+print(f"Total jobs: {len(all_jobs.items())}")
 
 # Delete this job (optional)
-# sdk.safe_synthesizer.jobs.delete(job.job_name, workspace="default")
+# client.safe_synthesizer.jobs.list(workspace="default")
 # print(f"✅ Job {job.job_name} deleted")
 ```
 

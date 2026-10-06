@@ -11,7 +11,7 @@
 # and copying them onto a fresh base would break that.
 
 # Match the NCCL the pinned RL lock overrides. Bump with NEMO_RL_REF.
-ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:26.09-cuda13.4-devel-ubuntu24.04
 
 # Source. Default clones the soluwalana/RL fork at the given ref; override with a local checkout via
 # `--build-context nemo-rl=<path>` or point elsewhere via the NEMO_RL_{REPO,REF} build-args. Gym is
@@ -337,7 +337,8 @@ COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/n
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
+    /tmp/patches/nemo-rl-transformers-5.17-tokenizer.patch
 
 # Editable root only. Dependencies were installed by the syncs above.
 RUN <<"EOF" bash -eu
@@ -360,6 +361,7 @@ ARG TARGETARCH
 # mlflow-skinny, sqlparse, hydra-core, and OpenTelemetry afterwards, then drop
 # mlflow, pynvml, and mooncake.
 RUN --mount=type=bind,source=docker/rl/opentelemetry-overrides.txt,target=/tmp/opentelemetry-overrides.txt,readonly \
+    --mount=type=bind,source=docker/rl/hf-stack-overrides.txt,target=/tmp/hf-stack-overrides.txt,readonly \
     <<"EOF" bash -eu
 set -x
 umask 022
@@ -400,6 +402,12 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
     if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
+    fi
+    if "${py}" -c 'import importlib.metadata as m; m.version("transformers")' >/dev/null 2>&1; then
+        uv pip install --directory /tmp --python "${py}" \
+            --overrides /tmp/hf-stack-overrides.txt \
+            --upgrade-package transformers --upgrade-package huggingface-hub --upgrade-package tokenizers \
+            -r /tmp/hf-stack-overrides.txt
     fi
     if "${py}" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("wandb") or importlib.util.find_spec("opentelemetry") else 1)'; then
         # Outside the project, or uv keeps opentelemetry-api 1.45.

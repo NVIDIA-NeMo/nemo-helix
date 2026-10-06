@@ -26,7 +26,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK needs to know your NeMo Helix server URL. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
+The SDK needs to know the URL for your NeMo Helix deployment. By default, `http://localhost:8080` is used in accordance with the [Quickstart](/documentation/get-started) guide. If NeMo Helix is running at a custom location, you can override the URL by setting the `NHX_BASE_URL` environment variable:
 
 ```sh
 export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
@@ -35,15 +35,19 @@ export NHX_BASE_URL=<YOUR_NHX_BASE_URL>
 ```python
 import json
 import os
-from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nemo_customizer.sdk import Customization
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(
-    base_url=NHX_BASE_URL,
-    workspace="default"
-)
 client = NemoClient(
     base_url=NHX_BASE_URL,
     workspace="default"
@@ -140,26 +144,27 @@ print(f"Saved validation.jsonl with {len(validation_ds)} rows")
 # Create fileset to store SFT training data
 
 try:
-    sdk.files.filesets.create(
-        workspace="default",
-        name=DATASET_NAME,
-        description="SFT training data"
-    )
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="SFT training data",
+        ),
+    ).data()
     print(f"Created fileset: {DATASET_NAME}")
 except ConflictError:
     print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
 # Upload training data files individually to ensure correct structure
-sdk.files.upload(
-    local_path=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default"
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",  # Trailing slash uploads directory contents to fileset root
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 
 # Validate training data is uploaded correctly
 print("Training data:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 ```
 
 ### 3. Secrets Setup
@@ -199,16 +204,14 @@ def create_or_get_secret(name: str, value: str | None, label: str):
     if not value:
         raise ValueError(f"{label} environment variable is not set. Set it and try again.")
     try:
-        secret = sdk.secrets.create(
-            name=name,
-            workspace="default",
-            value=value,
-        )
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        return sdk.secrets.retrieve(name=name, workspace="default")
+        return client.secrets.get_secret(name=name).data()
 
 
 # Create Hugging Face token secret
@@ -229,7 +232,7 @@ Note: for public models, you can omit the `token_secret` parameter when creating
 
 ```python
 import time
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"
@@ -237,46 +240,45 @@ MODEL_NAME = "llama-3-2-1b-base"
 # Ensure you have a Hugging Face token secret created
 # Create a fileset pointing to the desired Hugging Face model
 try:
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description="Llama 3.2 1B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            # repo_id is the full model name from Hugging Face
-            repo_id=HF_REPO_ID,
-            repo_type="model",
-            # we use the secret created in the previous step
-            token_secret=hf_secret.name
-        )
-    )
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Llama 3.2 1B base model from Hugging Face",
+            storage=HuggingfaceStorageConfig(
+                # repo_id is the full model name from Hugging Face
+                repo_id=HF_REPO_ID,
+                repo_type="model",
+                # we use the secret created in the previous step
+                token_secret=SecretRef(hf_secret.name),
+            ),
+        ),
+    ).data()
     print(f"Created base model fileset: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model fileset already exists. Skipping creation.")
-    base_model_fs = sdk.files.filesets.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
 
 # Create the Model Entity representation.
 try:
-    base_model = sdk.models.create(
-        workspace="default",
-        name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=MODEL_NAME,
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
     print(f"Created Model Entity: {MODEL_NAME}")
 except ConflictError:
     print(f"Base model already exists. Updating fileset if different.")
-    base_model = sdk.models.update(
-        workspace="default",
+    base_model = client.models.update_model(
         name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-    )
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{MODEL_NAME}",
+        ),
+    ).data()
 
 print(f"\nBase model fileset: fileset://default/{base_model.name}")
 print("Base model fileset files list:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=MODEL_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=MODEL_NAME).data().data], indent=2))
 
 # Wait for ModelSpec to be populated from the checkpoint
 print("\nWaiting for ModelSpec to be populated...")
@@ -286,10 +288,7 @@ while not base_model.spec:
     if time.time() - spec_start > SPEC_TIMEOUT_SECONDS:
         raise TimeoutError(f"ModelSpec not populated within {SPEC_TIMEOUT_SECONDS} seconds")
     time.sleep(2)
-    base_model = sdk.models.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 print(f"ModelSpec populated: {base_model.spec}")
 ```
@@ -502,7 +501,7 @@ The cell below polls the job status every 10 seconds and renders a live dashboar
 import time
 from typing import cast
 from IPython.display import clear_output
-from nemo_helix.types.shared import HelixJobStatusResponse
+from nemo_helix_plugin.jobs.schemas import HelixJobStatusResponse
 
 # Timeout set to 30 minutes to accommodate typical LoRA training duration for this dataset size.
 # Actual training time will vary based on hardware, model size, and dataset complexity.
@@ -570,7 +569,7 @@ def wait_for_job(
             print("Job did not complete within the timeout period.")
             raise Exception(error_message)
 
-        status = sdk.jobs.get_status(name=job_name, workspace=workspace)
+        status = client.jobs.get_status(name=job_name, workspace=workspace)
 
         # -- Extract training progress from nested steps structure --
         step: int | None = None
@@ -770,24 +769,24 @@ else:
 - Sequence packed version should have a higher GPU utilization and higher GPU Memory Allocation.
 
 ```python
-from nemo_helix.types.jobs import HelixJobStep
+from nemo_helix_plugin.jobs.types import HelixJobStepResponse
 import pandas as pd
 
 STEP_NAME = "training"
 
-def get_elapsed_time(step: HelixJobStep) -> float:
+def get_elapsed_time(step: HelixJobStepResponse) -> float:
     """Calculate elapsed time in seconds from step's created_at to updated_at."""
     if step.created_at is None or step.updated_at is None:
         raise ValueError("Training step timestamps are unavailable")
     return (step.updated_at - step.created_at).total_seconds()
 
-step_with_sequence_packing = sdk.jobs.steps.retrieve(
+step_with_sequence_packing = client.jobs.steps.retrieve(
             name=STEP_NAME,
             workspace="default",
             job=job_with_sequence_packing.job.name,
 )
 
-step_without_sequence_packing = sdk.jobs.steps.retrieve(
+step_without_sequence_packing = client.jobs.steps.retrieve(
             name=STEP_NAME,
             workspace="default",
             job=job_without_sequence_packing.job.name,

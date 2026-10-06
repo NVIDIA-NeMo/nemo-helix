@@ -24,6 +24,9 @@ Quick install from PyPI:
 curl -LsSf https://astral.sh/uv/0.10.10/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv tool install "nemo-helix[all]"
+uv tool update-shell
+# Then restart the shell
+
 
 nemo setup
 ```
@@ -133,7 +136,7 @@ See the [current release notes](https://docs.nvidia.com/nemo-helix/documentation
 
 ## Skills
 
-`nemo setup` detects Claude Code, Cursor, Codex, and OpenCode and installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
+`nemo setup` installs NeMo skills into your agent of choice, either into the local directory or globally. NeMo Helix-level skills live under `packages/nemo_helix_ext/src/nemo_helix_ext/skills/` and ship with the `nemo-helix` package; plugin-owned skills live under `plugins/<plugin>/src/<plugin>/skills/`.
 
 To install or refresh skills for a built-in coding agent, use `--agent`. For another Agent Skills-compatible harness, point `--path` at that harness's skills directory.
 

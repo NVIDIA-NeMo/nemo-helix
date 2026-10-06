@@ -29,7 +29,7 @@ This tutorial focuses on understanding and discovery—no actual training jobs a
 
 ### What is a Model Entity?
 
-A **Model Entity** represents a model registered in the NeMo Helix. It contains:
+A **Model Entity** represents a model registered in NeMo Helix. It contains:
 
 1. **FileSet Reference**: Points to the model checkpoint files (weights, config, tokenizer)
 2. **Model Spec**: Auto-populated metadata about the model architecture (layers, parameters, etc.)
@@ -79,15 +79,12 @@ Upload your model checkpoint files (from Hugging Face, NGC, or local storage) to
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_customizer.sdk import Customization
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.schema import SecretRef
 
-sdk = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
 client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
@@ -95,35 +92,43 @@ client = NemoClient(
 customization = Customization.from_client(client)
 
 # Create a FileSet from Hugging Face
-fileset = sdk.files.filesets.create(
-    workspace="default",
-    name="llama-3-2-1b",
-    description="Llama 3.2 1B base model",
-    storage=HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id="meta-llama/Llama-3.2-1B-Instruct",
-        repo_type="model",
-        token_secret="my-hf-token",  # Secret containing Hugging Face token
+fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="llama-3-2-1b",
+        description="Llama 3.2 1B base model",
+        storage=HuggingfaceStorageConfig(
+            repo_id="meta-llama/Llama-3.2-1B-Instruct",
+            repo_type="model",
+            token_secret=SecretRef("my-hf-token"),  # Secret containing Hugging Face token
+        ),
     ),
-)
+).data()
 ```
 
 **2. Create a Model Entity pointing to the FileSet**
 
 ```python
-model = sdk.models.create(
-    workspace="default",
-    name="llama-3-2-1b",
-    fileset="default/llama-3-2-1b",  # Reference to the FileSet
-    description="Llama 3.2 1B base model",
+from nemo_helix_plugin.models.types import (
+    CreateModelAdapterRequest,
+    CreateModelEntityRequest,
+    FinetuningType,
+    UpdateAdapterRequest,
 )
+
+model = client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="llama-3-2-1b",
+        fileset="default/llama-3-2-1b",  # Reference to the FileSet
+        description="Llama 3.2 1B base model",
+    ),
+).data()
 
 # Wait for model spec to be auto-populated
 import time
 
 while not model.spec:
     time.sleep(5)
-    model = sdk.models.retrieve(workspace="default", name="llama-3-2-1b")
+    model = client.models.get_model(name="llama-3-2-1b").data()
 
 print(f"Model architecture: {model.spec.family}")
 print(f"Parameters: {model.spec.base_num_parameters:,}")
@@ -155,7 +160,7 @@ After training completes:
 
 ```python
 # For LoRA jobs - adapter is attached to the model
-model = sdk.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="llama-3-2-1b").data()
 
 for adapter in model.adapters:
     print(f"Adapter: {adapter.name}")
@@ -180,7 +185,7 @@ When you run a LoRA customization job:
 ### Viewing Adapters on a Model
 
 ```python
-model = sdk.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="llama-3-2-1b").data()
 
 print(f"Model: {model.name}")
 print(f"Adapters:")
@@ -196,22 +201,20 @@ for adapter in model.adapters or []:
 Adapters are enabled by default, but you can disable an adapter to remove it from inference without deleting it. When you set `enabled=False`, the sidecar running alongside the NIM automatically removes the adapter's files on its next reconciliation pass (every few seconds). Re-enabling the adapter causes the sidecar to re-download and serve it again.
 
 ```python
-sdk.models.adapters.update(
-    adapter="my-custom-lora",
+client.models.update_model_adapter(
     model_name="llama-3-2-1b",
-    workspace="default",
-    enabled=False,
+    adapter="my-custom-lora",
+    body=UpdateAdapterRequest(enabled=False),
 )
 ```
 
 To re-enable:
 
 ```python
-sdk.models.adapters.update(
-    adapter="my-custom-lora",
+client.models.update_model_adapter(
     model_name="llama-3-2-1b",
-    workspace="default",
-    enabled=True,
+    adapter="my-custom-lora",
+    body=UpdateAdapterRequest(enabled=True),
 )
 ```
 
@@ -220,13 +223,14 @@ sdk.models.adapters.update(
 You can also create adapters manually (e.g., from externally trained weights):
 
 ```python
-model = sdk.models.adapters.create(
+model = client.models.create_model_adapter(
     model_name="llama-3-2-1b",
-    workspace="default",
-    name="my-custom-lora",
-    fileset="default/my-lora-weights",
-    finetuning_type="lora",
-)
+    body=CreateModelAdapterRequest(
+        name="my-custom-lora",
+        fileset="default/my-lora-weights",
+        finetuning_type=FinetuningType.LORA,
+    ),
+).data()
 ```
 
 ---
@@ -387,24 +391,27 @@ flowchart TD
 You can import a Hugging Face checkpoint into a FileSet and register it as a Model Entity:
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
+from nemo_helix_plugin.schema import SecretRef
 
 # Create FileSet from Hugging Face
-fileset = sdk.files.filesets.create(
-    workspace="default",
-    name="my-custom-model",
-    storage=HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id="organization/model-name",
-        repo_type="model",
-        token_secret="my-hf-token",
+fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-custom-model",
+        storage=HuggingfaceStorageConfig(
+            repo_id="organization/model-name",
+            repo_type="model",
+            token_secret=SecretRef("my-hf-token"),
+        ),
     ),
-)
+).data()
 
 # Create Model Entity
-model = sdk.models.create(
-    workspace="default", name="my-custom-model", fileset="default/my-custom-model"
-)
+model = client.models.create_model(
+    body=CreateModelEntityRequest(name="my-custom-model", fileset="default/my-custom-model"),
+).data()
 ```
 
 For detailed guidance, see [Import Hugging Face Model](/documentation/customizer-reference/tutorials/import-hugging-face-models).
@@ -463,10 +470,10 @@ Import and fine-tune private Hugging Face models.
 
 ```python
 # List all Model Entities
-models = sdk.models.list(workspace="default")
+models = client.models.list_models()
 
 # Get a specific Model Entity with adapters
-model = sdk.models.retrieve(workspace="default", name="llama-3-2-1b")
+model = client.models.get_model(name="llama-3-2-1b").data()
 
 # Create an Automodel training job
 from nemo_automodel_plugin.schema import AutomodelJobInput
@@ -484,12 +491,13 @@ job = customization.automodel.jobs.create(
 )
 
 # Add an adapter to a model
-sdk.models.adapters.create(
+client.models.create_model_adapter(
     model_name="llama-3-2-1b",
-    workspace="default",
-    name="my-adapter",
-    fileset="default/adapter-weights",
-    finetuning_type="lora",
+    body=CreateModelAdapterRequest(
+        name="my-adapter",
+        fileset="default/adapter-weights",
+        finetuning_type=FinetuningType.LORA,
+    ),
 )
 ```
 

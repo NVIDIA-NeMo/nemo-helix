@@ -55,8 +55,8 @@ from nemo_deployments_plugin.entities import (
     WorkloadIdentitySpec,
 )
 from nemo_deployments_plugin.secrets import SecretResolutionError
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 pytest.importorskip("openshell")  # platform-restricted extra; skip where not installed (e.g. CI)
@@ -211,29 +211,25 @@ def test_registry_contains_openshell() -> None:
 
 
 async def test_load_deployment_config_wraps_an_entities_client_that_accepts_query_params() -> None:
-    """init() must adapt the SDK with client_from_platform(AsyncEntitiesClient), not wrap the
-    raw generated AsyncEntitiesResource (AIRCORE-977).
+    """init() must build an AsyncEntitiesClient from the platform client (AIRCORE-977).
 
-    NemoEntitiesClient.get() forwards a ``query_params`` kwarg. The generated resource does not
-    accept it, so wrapping the resource made every first reconcile die with
-    ``TypeError: ... unexpected keyword argument 'query_params'`` before any request left the box.
-    Drive the real contract with a live entities client over a mock transport: a 404 must surface
-    as NemoEntityNotFoundError, which is only reachable once ``get_entity_by_name(query_params=...)``
-    is accepted and the request actually goes out.
+    NemoEntitiesClient.get() forwards a ``query_params`` kwarg. Drive the real contract with a
+    live entities client over a mock transport: a 404 must surface as NemoEntityNotFoundError,
+    which is only reachable once ``get_entity_by_name(query_params=...)`` is accepted and the
+    request actually goes out.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"detail": "not found"}, request=request)
 
-    sdk = AsyncNeMoHelix(
+    client = AsyncNemoClient(
         base_url="http://entities.test",
         workspace="default",
         http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     with patch("grpc.insecure_channel", return_value=MagicMock()):
-        backend = OpenShellDeploymentBackend(sdk, {"gateway_endpoint": "http://127.0.0.1:17670"})
+        backend = OpenShellDeploymentBackend(client, {"gateway_endpoint": "http://127.0.0.1:17670"})
 
-    # Old (buggy) wrapping raised TypeError about query_params here; the fix reaches the 404.
     with pytest.raises(NemoEntityNotFoundError):
         await backend._load_deployment_config("default", "missing-config")
 
@@ -1203,7 +1199,7 @@ def test_liveness_probe_is_pending_when_the_marker_is_unusable(tmp_path: Path, m
     assert _run_probe(tmp_path, pid=None, marker=marker) == _SERVE_PENDING_EXIT
 
 
-# --- AIRCORE-999: config_files are delivered into the sandbox, or fail loudly ---
+# --- config_files are delivered into the sandbox, or fail loudly ---
 
 
 async def test_delivers_config_file_before_launch_streaming_content_on_stdin(

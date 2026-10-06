@@ -105,16 +105,6 @@ class HelixRuntimeContext:
             request_hooks=request_hooks,
         )
 
-    def sync_nemo_http_client(self, *, http_client: httpx.Client | None) -> httpx.Client:
-        if http_client is not None:
-            return http_client
-        return self.endpoint.sync_sdk_http_client()
-
-    def async_nemo_http_client(self, *, http_client: httpx.AsyncClient | None) -> httpx.AsyncClient:
-        if http_client is not None:
-            return http_client
-        return self.endpoint.async_sdk_http_client()
-
 
 class HelixAuthPlan(Protocol):
     @property

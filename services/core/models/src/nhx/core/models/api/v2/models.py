@@ -4,7 +4,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
@@ -25,8 +24,8 @@ from nhx.common.api.common import Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client, get_model_entity_service
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
@@ -153,7 +152,7 @@ async def create_model(
         logger.exception(f"Failed to create model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model entity")
 
-    # add sdk job creation here for checkpoint metadata
+    # add job creation here for checkpoint metadata
     if created_model.fileset:
         await start_update_model_spec_job(created_model)
     return created_model
@@ -265,7 +264,7 @@ async def get_model(
 
 
 async def start_update_model_spec_job(model_entity: ModelEntity):
-    sdk = get_async_platform_sdk(as_service="models", internal=True)
+    client = get_async_nemo_client(as_service="models", internal=True)
     model_spec_task_config = ModelSpecTaskConfig(workspace=model_entity.workspace, name=model_entity.name)
     task_spec = HelixJobSpec(
         steps=[
@@ -308,14 +307,14 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
         ]
     )
     try:
-        jobs = client_from_platform(sdk, AsyncJobsClient)
+        jobs = AsyncJobsClient.from_client(client)
         job_resp = (
             await jobs.create_job(
                 workspace=model_entity.workspace,
                 body=CreateHelixJobRequest(
                     source="models-system",
                     # ``task_spec`` is built from the api_factory ``*Param`` TypedDict
-                    # aliases (see AIRCORE-922); validate it into the plugin pydantic
+                    # aliases; validate it into the plugin pydantic
                     # ``HelixJobSpec`` the request model expects.
                     platform_spec=HelixJobSpecModel.model_validate(task_spec),
                     spec={},
@@ -328,6 +327,8 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
         logger.info("Job Created - %s", job_resp.name)
     except NemoClientError as err:
         logger.warning(f"Failed to create model spec job. {err}")
+    finally:
+        await client.close()
 
 
 @router.patch(

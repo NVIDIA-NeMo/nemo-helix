@@ -129,3 +129,42 @@ def test_re_post_same_target_with_different_value_upserts_latest(client: TestCli
     assert page["pagination"]["total_results"] == 1
     # Latest write wins.
     assert page["data"][0]["value"] == 0.42
+
+
+def test_create_failed_evaluator_result_carries_no_value(client: TestClient):
+    """An evaluator that ran but could not score records a FAILED row with the reason, not a value."""
+    body = _make_numeric_body(name="judge", status="FAILED", comment="judge endpoint unreachable")
+    del body["value"]
+    response = client.post(EVAL_BASE, json=body)
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["status"] == "FAILED"
+    assert "value" not in payload and "string_value" not in payload
+    assert payload["comment"] == "judge endpoint unreachable"
+
+    fetched = client.get(f"{EVAL_BASE}/{payload['evaluator_result_id']}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["status"] == "FAILED"
+
+
+def test_scored_results_default_to_scored_status(client: TestClient):
+    response = client.post(EVAL_BASE, json=_make_numeric_body())
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "SCORED"
+
+
+def test_create_failed_evaluator_result_rejects_a_value(client: TestClient):
+    response = client.post(EVAL_BASE, json=_make_numeric_body(status="FAILED"))
+    assert response.status_code == 422, response.text
+    assert "FAILED" in response.text
+
+
+def test_filter_evaluator_results_by_status(client: TestClient):
+    assert client.post(EVAL_BASE, json=_make_numeric_body(name="scored")).status_code == 201
+    failed = _make_numeric_body(name="failed", status="FAILED")
+    del failed["value"]
+    assert client.post(EVAL_BASE, json=failed).status_code == 201
+
+    listed = client.get(EVAL_BASE, params={"filter[status]": "FAILED", "page_size": 50})
+    assert listed.status_code == 200, listed.text
+    assert [row["name"] for row in listed.json()["data"]] == ["failed"]

@@ -21,7 +21,11 @@ import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgen
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
-import { AGENT_OPTIMIZATIONS_ENABLED, AGENT_OVERVIEW_ENABLED } from '@studio/constants/environment';
+import {
+  AGENT_OPTIMIZATION_FORM_ENABLED,
+  AGENT_OPTIMIZATIONS_ENABLED,
+  AGENT_OVERVIEW_ENABLED,
+} from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
@@ -34,7 +38,7 @@ import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
-import { OptimizeJobsTable } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizeJobsTable';
+import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
 import { SOURCE_PANEL_ID } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
 import {
@@ -52,9 +56,12 @@ import {
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
 import { getAgentsListRoute } from '@studio/routes/utils';
-import { Dot, GitCommitHorizontal } from 'lucide-react';
+import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
+
+const VIEW_SEARCH_PARAM = 'view';
+const VIEW_NEW = 'new';
 
 export const AgentDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -76,6 +83,10 @@ export const AgentDetailRoute: FC = () => {
   const [walkthroughDismissed, setWalkthroughDismissed] = useState(false);
   const tabFromUrl = searchParams.get(TAB_SEARCH_PARAM);
   const selectedTab: AgentDetailTab = isAgentDetailTab(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+  const isCreatingOptimization =
+    AGENT_OPTIMIZATION_FORM_ENABLED &&
+    selectedTab === 'optimizations' &&
+    searchParams.get(VIEW_SEARCH_PARAM) === VIEW_NEW;
 
   const {
     agent,
@@ -124,6 +135,16 @@ export const AgentDetailRoute: FC = () => {
     setSearchParams({ [TAB_SEARCH_PARAM]: tab }, { replace: true });
   };
 
+  const setOptimizationView = (creating: boolean) => {
+    const params = new URLSearchParams({ [TAB_SEARCH_PARAM]: 'optimizations' });
+    if (creating) params.set(VIEW_SEARCH_PARAM, VIEW_NEW);
+    setSearchParams(params);
+  };
+
+  // The in-tab form is still behind its own flag; until it ships, Optimize opens the launch modal.
+  const openOptimize = () =>
+    AGENT_OPTIMIZATION_FORM_ENABLED ? setOptimizationView(true) : setLaunchOptimizeOpen(true);
+
   const switchToChat = (deployment: AgentDeployment) => {
     setSelectedDeploymentName(deployment.name);
     setSelectedTab('chat');
@@ -166,13 +187,17 @@ export const AgentDetailRoute: FC = () => {
   useEffect(() => {
     if (!actionFromUrl || isAgentPending) return;
     if (actionFromUrl === 'run-evaluation' && canRunEvaluation) setSubmitEvalOpen(true);
-    if (actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && agent) {
-      setLaunchOptimizeOpen(true);
-    }
+    const optimizeRequested =
+      actionFromUrl === 'optimize' && AGENT_OPTIMIZATIONS_ENABLED && !!agent;
+    if (optimizeRequested && !AGENT_OPTIMIZATION_FORM_ENABLED) setLaunchOptimizeOpen(true);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
         next.delete(ACTION_SEARCH_PARAM);
+        if (optimizeRequested && AGENT_OPTIMIZATION_FORM_ENABLED) {
+          next.set(TAB_SEARCH_PARAM, 'optimizations');
+          next.set(VIEW_SEARCH_PARAM, VIEW_NEW);
+        }
         return next;
       },
       { replace: true }
@@ -199,41 +224,22 @@ export const AgentDetailRoute: FC = () => {
         <PageHeader
           className="shrink-0 p-0"
           slotHeading={
-            <Stack gap="1">
-              <Flex align="baseline" gap="3">
-                <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
-                <StatusBadge status={status} label={statusPillLabel} />
-                {specSource ? (
-                  <Link
-                    to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
-                    className="contents"
-                    aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
-                  >
-                    <Badge kind="solid" color="gray" className="cursor-pointer">
-                      <GitCommitHorizontal size={12} aria-hidden />
-                      {shortRevision(specSource.revision)}
-                    </Badge>
-                  </Link>
-                ) : null}
-              </Flex>
-              <Flex align="center" gap="1">
-                <Text kind="body/regular/sm" className="text-secondary">
-                  {modelNames.join(', ')}
-                </Text>
-                {agent?.description && (
-                  <>
-                    <Dot className="size-2" aria-hidden />
-                    <Text
-                      kind="body/regular/sm"
-                      className="line-clamp-1 text-secondary"
-                      title={agent.description}
-                    >
-                      {agent.description}
-                    </Text>
-                  </>
-                )}
-              </Flex>
-            </Stack>
+            <Flex align="baseline" gap="3">
+              <Text kind="title/md">{agent?.name ?? agentName ?? 'Agent details'}</Text>
+              <StatusBadge status={status} label={statusPillLabel} />
+              {specSource ? (
+                <Link
+                  to={{ search: `?${TAB_SEARCH_PARAM}=details`, hash: `#${SOURCE_PANEL_ID}` }}
+                  className="contents"
+                  aria-label={`Source: ${specSource.repository} at ${specSource.revision}`}
+                >
+                  <Badge kind="solid" color="gray" className="cursor-pointer">
+                    <GitCommitHorizontal size={12} aria-hidden />
+                    {shortRevision(specSource.revision)}
+                  </Badge>
+                </Link>
+              ) : null}
+            </Flex>
           }
           slotActions={
             <AgentDetailCTAs
@@ -242,11 +248,11 @@ export const AgentDetailRoute: FC = () => {
               canDeploy={canDeploy}
               canRunEvaluation={canRunEvaluation}
               isDeploying={isDeploying}
-              canOptimize
+              canOptimize={!isCreatingOptimization}
               deployButtonRef={deployButtonRef}
               onDeploy={() => setCreateDeploymentOpen(true)}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
-              onOptimize={() => setLaunchOptimizeOpen(true)}
+              onOptimize={openOptimize}
               onImportTraces={() => setImportTracesOpen(true)}
             />
           }
@@ -296,9 +302,13 @@ export const AgentDetailRoute: FC = () => {
 
           {AGENT_OPTIMIZATIONS_ENABLED && (
             <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="optimizations">
-              <OptimizeJobsTable
+              <OptimizationsTab
                 agentName={agentName}
-                onOptimize={() => setLaunchOptimizeOpen(true)}
+                evals={agentEvals}
+                isEvalsPending={isAgentEvalsPending}
+                isCreating={isCreatingOptimization}
+                onOptimize={openOptimize}
+                onCloseForm={() => setOptimizationView(false)}
               />
             </TabsContent>
           )}

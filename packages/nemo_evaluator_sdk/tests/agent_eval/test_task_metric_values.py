@@ -6,9 +6,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Iterator
-from importlib import import_module
 from pathlib import Path
-from typing import Any
 
 import pytest
 from nemo_evaluator_sdk.agent_eval.results import (
@@ -29,10 +27,6 @@ from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalTask, SemanticReducer, 
 from nemo_evaluator_sdk.metrics.protocol import Metric, MetricInput, MetricOutput, MetricResult
 from nemo_evaluator_sdk.values.protocol import MetricOutputSpec
 from pydantic import RootModel, ValidationError
-
-
-def _vendored_module(name: str) -> Any:
-    return import_module(f"nemo_helix.beta.evaluator.agent_eval.{name}")
 
 
 class _TokenCount(RootModel[int]):
@@ -699,7 +693,7 @@ def test_repeated_view_attempts_pair_signals_by_occurrence_and_retain_absent_sig
 
 
 def test_dead_trials_are_nameable_from_the_summary_alone() -> None:
-    # AALGO-428 needs to say *which* trial died to roll up exception types. Before records carried a
+    # The error rollup needs to say *which* trial died to roll up exception types. Before records carried a
     # trial id the summary could count dead trials but not name one; now it is a lookup key out to
     # trials.jsonl, where the error lives.
     tasks = [_task("task-a", _Metric("reward", MetricOutputSpec.continuous_score("score")))]
@@ -796,48 +790,6 @@ def test_pass_at_k_aggregates_keep_every_declaring_task_visible_at_each_k() -> N
 
 def test_summary_without_task_metric_values_loads_as_empty() -> None:
     assert AgentEvalSummary.model_validate({}).task_metric_values == {}
-
-
-def test_vendored_summary_accepts_task_metric_values() -> None:
-    VendoredAgentEvalSummary = _vendored_module("results").AgentEvalSummary
-
-    payload = {
-        "task_metric_values": {
-            "task-a": {"reward.score": [{"trial_id": "t0", "value": 1.0}, {"trial_id": "t1", "value": None}]}
-        }
-    }
-
-    # The payload deliberately omits value_type, so this doubles as the legacy-derivation regression.
-    records = VendoredAgentEvalSummary.model_validate(payload).task_metric_values
-    assert [(a.trial_id, a.value) for a in records["task-a"]["reward.score"]] == [("t0", 1.0), ("t1", None)]
-
-
-def test_vendored_module_exposes_the_public_value_api() -> None:
-    # The byte-copy test below proves file parity, not that the names are usable through the shipped
-    # package. These are the surface a consumer of nemo-helix actually imports.
-    vendored_results = _vendored_module("results")
-    VendoredSummary = vendored_results.AgentEvalSummary
-    VendoredValue = vendored_results.TrialMetricValue
-    VendoredType = vendored_results.TrialMetricValueType
-    vendored_numeric = vendored_results.numeric_metric_values
-
-    records = [VendoredValue(trial_id="t0", value=1.0), VendoredValue(trial_id="t1", value="good")]
-    assert vendored_numeric(records) == [1.0]  # the label is dropped, as in the source module
-    assert records[1].value_type is VendoredType.LABEL
-
-    summary = VendoredSummary(task_metric_values={"task-a": {"reward.score": records}})
-    [outcomes] = summary.task_outcomes()
-    assert outcomes.task_id == "task-a" and outcomes.outcomes[0].metric_name == "reward.score"
-
-
-def test_legacy_results_import_resolves_to_the_source_module() -> None:
-    # The SDK exposes this legacy path through a runtime alias, not a rewritten copy, so import
-    # compatibility should point at the canonical source file.
-    import nemo_evaluator_sdk.agent_eval.results as source
-
-    legacy = _vendored_module("results")
-
-    assert Path(legacy.__file__).resolve() == Path(source.__file__).resolve()
 
 
 def test_gym_example_rejects_a_bundle_written_before_task_metric_values(tmp_path: Path) -> None:

@@ -22,7 +22,7 @@ def _reset_capability_cache() -> Iterator[None]:
 
 
 @pytest.fixture
-def mock_sdk() -> MagicMock:
+def mock_client() -> MagicMock:
     return MagicMock()
 
 
@@ -44,14 +44,14 @@ def mock_docker_client() -> MagicMock:
 
 @pytest.fixture
 def docker_backend(
-    mock_sdk: MagicMock, mock_entities: AsyncMock, mock_docker_client: MagicMock
+    mock_client: MagicMock, mock_entities: AsyncMock, mock_docker_client: MagicMock
 ) -> Iterator[DockerDeploymentBackend]:
     with (
-        patch("nemo_deployments_plugin.backends.docker.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.docker.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.docker.backend.NemoEntitiesClient", return_value=mock_entities),
         patch("nemo_deployments_plugin.backends.docker.backend.get_shared_gpu_pool", return_value=None),
         patch("docker.from_env", return_value=mock_docker_client),
     ):
-        backend = DockerDeploymentBackend(mock_sdk, {"docker_timeout": 60, "pull_images": False})
+        backend = DockerDeploymentBackend(mock_client, {"docker_timeout": 60, "pull_images": False})
         backend._client = mock_docker_client
         yield backend

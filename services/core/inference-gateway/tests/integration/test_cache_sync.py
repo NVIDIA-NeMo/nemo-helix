@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
     CreateModelProviderRequest,
@@ -25,7 +25,11 @@ from nemo_helix_plugin.models.types import (
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 from nhx.core.inference_gateway.api.dependencies import global_model_cache, global_virtual_model_cache
-from nhx.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
+from nhx.core.inference_gateway.api.model_cache import (
+    ModelCache,
+    model_provider_getter_from_client,
+    refresh_model_cache,
+)
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache, refresh_virtual_model_cache
 from nhx.testing import ClientContext
 
@@ -51,16 +55,16 @@ def _create_provider(
 
 def _run_cache_refresh(
     model_cache: ModelCache,
-    async_sdk: AsyncNeMoHelix,
+    async_client: AsyncNemoClient,
 ) -> None:
     """Run cache refresh synchronously."""
 
     async def refresh() -> None:
-        model_provider_getter = model_provider_getter_from_sdk(async_sdk)
+        model_provider_getter = model_provider_getter_from_client(async_client)
         await refresh_model_cache(
             model_cache=model_cache,
             model_provider_getter=model_provider_getter,
-            secrets_sdk=async_sdk,
+            client=async_client,
         )
 
     loop = asyncio.new_event_loop()
@@ -89,7 +93,7 @@ def test_cache_syncs_providers_from_models_service(test_clients: ClientContext):
     assert provider.name == provider_name
 
     # Refresh the cache
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify the provider is now in the cache
     cached_provider = model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name)
@@ -128,7 +132,7 @@ def test_cache_includes_served_models_mapping(test_clients: ClientContext):
     )
 
     # Refresh cache
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify the provider is in the cache with served_models
     cached_provider = model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name)
@@ -163,14 +167,14 @@ def test_cache_invalidates_deleted_providers(test_clients: ClientContext):
     assert provider.name == provider_name
 
     # Refresh cache to pick up the provider
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name) is not None
 
     # Delete the provider
     _models(test_clients).delete_provider(name=provider_name, workspace=DEFAULT_WORKSPACE)
 
     # Refresh cache again
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify provider is no longer in cache
     assert model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name) is None
@@ -191,7 +195,7 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
     assert provider.name == provider_name
 
     # Refresh cache
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify initial host_url
     cached = model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name)
@@ -205,7 +209,7 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
     )
 
     # Refresh cache again
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify updated host_url
     cached = model_cache.get_from_provider(DEFAULT_WORKSPACE, provider_name)
@@ -214,12 +218,12 @@ def test_cache_updates_provider_host_url_on_refresh(test_clients: ClientContext)
 
 def _run_vm_cache_refresh(
     vm_cache: VirtualModelCache,
-    async_sdk: AsyncNeMoHelix,
+    async_client: AsyncNemoClient,
 ) -> None:
     """Run VirtualModel cache refresh synchronously."""
 
     async def refresh() -> None:
-        await refresh_virtual_model_cache(cache=vm_cache, sdk=async_sdk)
+        await refresh_virtual_model_cache(cache=vm_cache, client=async_client)
 
     loop = asyncio.new_event_loop()
     try:
@@ -248,7 +252,7 @@ def test_virtual_model_cache_syncs_from_entity_store(test_clients: ClientContext
     )
 
     # Refresh the VM cache
-    _run_vm_cache_refresh(vm_cache, test_clients.async_sdk)
+    _run_vm_cache_refresh(vm_cache, test_clients.async_client)
 
     # Verify it's now in the cache
     cached_vm = vm_cache.get(DEFAULT_WORKSPACE, vm_name)
@@ -276,7 +280,7 @@ def test_cache_handles_multiple_providers(test_clients: ClientContext):
         assert provider.name == provider_name
 
     # Refresh cache
-    _run_cache_refresh(model_cache, test_clients.async_sdk)
+    _run_cache_refresh(model_cache, test_clients.async_client)
 
     # Verify all providers are in cache
     for name in provider_names:

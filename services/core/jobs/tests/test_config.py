@@ -3,7 +3,7 @@
 
 import logging
 import pathlib
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -149,12 +149,8 @@ def test_job_spec_parameters(sample_job_dict):
     assert job.spec["parameters"]["test_param"] == "test_value"
 
 
-@patch("nhx.common.sdk_factory.get_platform_sdk")
-def test_full_integration_matching_test_registry(mock_get_sdk, sample_job_dict, backend_registry):
+def test_full_integration_matching_test_registry(sample_job_dict, backend_registry):
     """Test full integration flow matching the test_registry.py script."""
-    mock_sdk = MagicMock()
-    mock_get_sdk.return_value = mock_sdk
-
     # Get backend and validate
     backend = backend_registry.get_backend(profile="default", provider="cpu")
     assert backend is not None
@@ -181,12 +177,8 @@ def test_full_integration_matching_test_registry(mock_get_sdk, sample_job_dict, 
     assert entrypoint_list[1] == "a2"
 
 
-@patch("nhx.common.sdk_factory.get_platform_sdk")
-def test_gpu_step(mock_get_sdk, sample_job_dict, backend_registry):
+def test_gpu_step(sample_job_dict, backend_registry):
     """Test full integration flow matching the test_registry.py script."""
-    mock_sdk = MagicMock()
-    mock_get_sdk.return_value = mock_sdk
-
     # Get backend and validate
     backend = backend_registry.get_backend(profile="default", provider="gpu")
     assert backend is not None
@@ -407,17 +399,17 @@ def test_default_profiles_include_subprocess_for_none_runtime():
     assert [(p.provider, p.profile, p.backend) for p in profiles] == [("subprocess", "default", "subprocess")]
 
 
-def test_backend_registry_resolves_subprocess_default(mock_nhx_client):
+def test_backend_registry_resolves_subprocess_default(mock_nemo_client):
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
     profiles = get_default_executor_profiles_for_runtime(Runtime.NONE, DefaultExecutionProfileConfig())
 
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_client,
+        nemo_client=mock_nemo_client,
         profiles=profiles,
         backends={BackendKey("subprocess", "subprocess"): DummyBackend},
     )
@@ -425,15 +417,15 @@ def test_backend_registry_resolves_subprocess_default(mock_nhx_client):
     assert registry.get_backend(provider="subprocess", profile="default") is not None
 
 
-def test_backend_registry_skips_docker_when_unavailable(mock_nhx_client, caplog):
+def test_backend_registry_skips_docker_when_unavailable(mock_nemo_client, caplog):
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
     class ExplodingDockerBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
             raise AssertionError("docker backend should not be constructed when unavailable")
 
     profiles = [
@@ -456,7 +448,7 @@ def test_backend_registry_skips_docker_when_unavailable(mock_nhx_client, caplog)
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): ExplodingDockerBackend,
@@ -470,12 +462,12 @@ def test_backend_registry_skips_docker_when_unavailable(mock_nhx_client, caplog)
     assert "Skipping job executor profile cpu/default" in caplog.text
 
 
-def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nhx_client):
+def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nemo_client):
     """Registry boot must not permanently skip Docker after an earlier transient miss."""
 
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
@@ -496,7 +488,7 @@ def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nhx_client):
         ) as probe,
     ):
         registry = BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=profiles,
             backends={BackendKey("cpu", "docker"): DummyBackend},
         )
@@ -506,10 +498,10 @@ def test_backend_registry_boot_probe_clears_poisoned_cache(mock_nhx_client):
     assert registry.get_backend(provider="cpu", profile="default") is not None
 
 
-def test_backend_registry_registered_profile_keys_match_constructed_backends(mock_nhx_client):
+def test_backend_registry_registered_profile_keys_match_constructed_backends(mock_nemo_client):
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
             self.execution_profile_config = execution_profile_config
             self.profile_name = profile_name
 
@@ -532,7 +524,7 @@ def test_backend_registry_registered_profile_keys_match_constructed_backends(moc
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): DummyBackend,
@@ -543,15 +535,15 @@ def test_backend_registry_registered_profile_keys_match_constructed_backends(moc
     assert registry.registered_profile_keys() == frozenset({("subprocess", "default")})
 
 
-def test_backend_registry_skips_docker_init_connection_errors(mock_nhx_client, caplog):
+def test_backend_registry_skips_docker_init_connection_errors(mock_nemo_client, caplog):
     from docker.errors import DockerException
 
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
 
     class FailingDockerBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
             raise DockerException("Error while fetching server API version")
 
     profiles = [
@@ -571,7 +563,7 @@ def test_backend_registry_skips_docker_init_connection_errors(mock_nhx_client, c
     caplog.set_level(logging.WARNING)
     with patch("nhx.core.jobs.controllers.backends.registry.probe_docker", return_value=ProbeResult(available=True)):
         registry = BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=profiles,
             backends={
                 BackendKey("cpu", "docker"): FailingDockerBackend,
@@ -583,9 +575,9 @@ def test_backend_registry_skips_docker_init_connection_errors(mock_nhx_client, c
     assert "Docker backend initialization failed" in caplog.text
 
 
-def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nhx_client):
+def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nemo_client):
     class BrokenConfigDockerBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
             raise ValueError("bad executor config")
 
     profiles = [
@@ -602,16 +594,16 @@ def test_backend_registry_propagates_non_connection_errors_for_docker(mock_nhx_c
         pytest.raises(ValueError, match="bad executor config"),
     ):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=profiles,
             backends={BackendKey("cpu", "docker"): BrokenConfigDockerBackend},
         )
 
 
-def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nhx_client, caplog):
+def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nemo_client, caplog):
     class DummyBackend:
-        def __init__(self, nhx_sdk, execution_profile_config, profile_name):
-            self.nhx_sdk = nhx_sdk
+        def __init__(self, nemo_client, execution_profile_config, profile_name):
+            self.nemo_client = nemo_client
 
     advertised = [
         DockerJobExecutionProfile(
@@ -633,7 +625,7 @@ def test_from_config_prunes_skipped_docker_from_mutable_profiles(mock_nhx_client
         return_value=ProbeResult(available=False, detail="down"),
     ):
         registry = BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             profiles=advertised,
             backends={
                 BackendKey("cpu", "docker"): DummyBackend,

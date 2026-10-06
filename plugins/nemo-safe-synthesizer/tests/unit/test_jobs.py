@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -26,29 +28,19 @@ def _client_error(error_cls, status_code: int, detail: str):
     return error_cls(response)
 
 
-def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock):
-    """Patch ``client_from_platform`` in the generate module, dispatching by class.
+@contextmanager
+def _patch_jobs_client(jobs_client: MagicMock, files_client: MagicMock) -> Iterator[None]:
+    """Patch the typed clients the compiler derives from the platform client.
 
     The compiler validates the ``data_source`` fileset via
-    ``client_from_platform(sdk, AsyncFilesClient).get_fileset(...)`` and then resolves
-    the pretrained-model adapter via
-    ``client_from_platform(sdk, AsyncJobsClient).get_job_result(...)`` — return the
-    matching mock for each.
+    ``AsyncFilesClient.from_client(client).get_fileset(...)`` and then resolves
+    the pretrained-model adapter via ``AsyncJobsClient.from_client(client).get_job_result(...)``.
     """
-    from nemo_helix_plugin.files.client import AsyncFilesClient
-    from nemo_helix_plugin.jobs.client import AsyncJobsClient
-
-    def _dispatch(_sdk, client_cls):
-        if client_cls is AsyncJobsClient:
-            return jobs_client
-        if client_cls is AsyncFilesClient:
-            return files_client
-        raise AssertionError(f"unexpected client class: {client_cls!r}")
-
-    return patch(
-        "nemo_safe_synthesizer_plugin.jobs.generate.client_from_platform",
-        side_effect=_dispatch,
-    )
+    with (
+        patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=files_client),
+        patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncJobsClient.from_client", return_value=jobs_client),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -65,8 +57,6 @@ def mock_sdk(mock_files_client):
 
 @pytest.fixture(autouse=True)
 def models_client(mock_files_client):
-    from nemo_helix_plugin.models.client import AsyncModelsClient
-
     models_client = MagicMock()
     provider_response = MagicMock()
     provider_response.data.return_value = MagicMock(name="provider")
@@ -75,14 +65,11 @@ def models_client(mock_files_client):
         return_value="http://nhx-host/apis/inference-gateway/v2/workspaces/default/provider/my-nim/-/v1"
     )
 
-    def _dispatch(_sdk, client_cls):
-        if client_cls is AsyncModelsClient:
-            return models_client
-        return mock_files_client
-
-    with patch(
-        "nemo_safe_synthesizer_plugin.jobs.generate.client_from_platform",
-        side_effect=_dispatch,
+    with (
+        patch("nemo_safe_synthesizer_plugin.jobs.generate.AsyncModelsClient.from_client", return_value=models_client),
+        patch(
+            "nemo_safe_synthesizer_plugin.jobs.generate.AsyncFilesClient.from_client", return_value=mock_files_client
+        ),
     ):
         yield models_client
 

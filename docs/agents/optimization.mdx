@@ -161,30 +161,41 @@ What it does under the hood:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.inference_middleware import BackendFormat
+from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
+from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-client.inference.virtual_models.create(
-    name="routed-agent-model",
-    workspace="default",
-    models=[
-        {"model": "default/<strong-model-entity>", "backend_format": "OPENAI_CHAT"},
-        {"model": "default/<weak-model-entity>", "backend_format": "OPENAI_CHAT"},
-    ],
-    request_middleware=[{
-        "name": "nemo-switchyard",
-        "config_type": "random_routing",
-        "config": {
-            "strong": {"model": "default/<strong-model-entity>"},
-            "weak": {"model": "default/<weak-model-entity>"},
-            "strong_probability": 0.8,
-            "enable_stats": False,
-        },
-    }],
+client.inference.virtual_models.create_virtual_model(
+    body=CreateVirtualModelRequest(
+        name="routed-agent-model",
+        models=[
+            VirtualModelInferenceConfig(
+                model="default/<strong-model-entity>", backend_format=BackendFormat.OPENAI_CHAT
+            ),
+            VirtualModelInferenceConfig(
+                model="default/<weak-model-entity>", backend_format=BackendFormat.OPENAI_CHAT
+            ),
+        ],
+        request_middleware=[
+            MiddlewareCall(
+                name="nemo-switchyard",
+                config_type="random_routing",
+                config={
+                    "strong": {"model": "default/<strong-model-entity>"},
+                    "weak": {"model": "default/<weak-model-entity>"},
+                    "strong_probability": 0.8,
+                    "enable_stats": False,
+                },
+            )
+        ],
+    )
 )
 ```
 

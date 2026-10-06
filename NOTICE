@@ -14,13 +14,6 @@ below. Each component retains its original license, which can be found in the
 respective directory or package metadata.
 
 --------------------------------------------------------------------------------
-sdk/python/nemo-helix/LICENSE
-sdk/python/overrides/nemo-helix/LICENSE
-  These files are packaging copies of the root Apache-2.0 LICENSE used by the
-  generated Python SDK and its Stainless override inputs. They do not declare a
-  separate sub-component license from the repository root license.
-
---------------------------------------------------------------------------------
 packages/garak_api/
   Garak v0.14.1 — LLM vulnerability scanner
   Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.

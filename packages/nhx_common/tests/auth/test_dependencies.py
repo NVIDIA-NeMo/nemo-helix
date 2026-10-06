@@ -154,16 +154,16 @@ def auth_enabled():
         Configuration._overrides.pop(AuthConfig, None)
 
 
-def test_get_platform_sdk_includes_auth_headers_from_env(clean_env, monkeypatch, auth_enabled):
-    """Test that get_platform_sdk() includes auth headers from principal_from_env() context.
+def test_get_nemo_client_includes_auth_headers_from_env(clean_env, monkeypatch, auth_enabled):
+    """Test that get_nemo_client() includes auth headers from principal_from_env() context.
 
     This verifies the full chain: NHX_PRINCIPAL env var → principal_from_env() →
-    get_principal_auth_headers() → get_platform_sdk() default_headers.
+    platform auth headers → get_nemo_client() default_headers.
 
-    This is critical for job tasks - when principal_from_env() is active, SDK calls
+    This is critical for job tasks - when principal_from_env() is active, client calls
     must include the job creator's auth headers.
     """
-    from nhx.common.sdk_factory import get_platform_sdk
+    from nhx.common.client_factory import get_nemo_client
 
     monkeypatch.setenv(
         NHX_PRINCIPAL_ENVVAR,
@@ -176,24 +176,21 @@ def test_get_platform_sdk_includes_auth_headers_from_env(clean_env, monkeypatch,
         ),
     )
 
-    sdk = get_platform_sdk()
+    client = get_nemo_client()
 
-    # Verify the SDK has auth headers set
-    default_headers = sdk.default_headers
-    assert default_headers is not None, "SDK should have default headers set"
+    default_headers = client.default_headers
     assert default_headers.get("X-NHX-Principal-Id") == "task-user@example.com"
     assert default_headers.get("X-NHX-Principal-Email") == "task-user@example.com"
     assert default_headers.get("X-NHX-Principal-Groups") == "data-science,ml-ops"
 
 
-def test_get_platform_sdk_no_headers_without_principal(clean_env, auth_enabled):
-    """Test that get_platform_sdk() has no auth headers when NHX_PRINCIPAL is not set."""
-    from nhx.common.sdk_factory import get_platform_sdk
+def test_get_nemo_client_no_headers_without_principal(clean_env, auth_enabled):
+    """Test that get_nemo_client() has no auth headers when NHX_PRINCIPAL is not set."""
+    from nhx.common.client_factory import get_nemo_client
 
-    # No NHX_PRINCIPAL env var - should have no auth headers
-    sdk = get_platform_sdk()
+    client = get_nemo_client()
 
-    default_headers = sdk.default_headers or {}
+    default_headers = client.default_headers
     assert "X-NHX-Principal-Id" not in default_headers
     assert "X-NHX-Principal-Email" not in default_headers
     assert "X-NHX-Principal-Groups" not in default_headers
@@ -224,8 +221,10 @@ class TestDependencyProviderEntityClient:
             with (
                 patch.object(dp, "get_http_client", return_value=http_client),
                 patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
-                patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=entities_client),
-                patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+                patch(
+                    "nemo_helix_plugin.entities.client.AsyncEntitiesClient.from_client", return_value=entities_client
+                ),
+                patch("nhx.common.service.base.EntityClient", side_effect=lambda client: client),
             ):
                 result = dp.get_entity_client()
 
@@ -253,8 +252,8 @@ class TestDependencyProviderEntityClient:
         with (
             patch.object(dp, "get_http_client", return_value=http_client),
             patch("nhx.common.client_factory.get_async_nemo_client", return_value=nemo_client) as get_nemo_client,
-            patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=entities_client),
-            patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+            patch("nemo_helix_plugin.entities.client.AsyncEntitiesClient.from_client", return_value=entities_client),
+            patch("nhx.common.service.base.EntityClient", side_effect=lambda client: client),
         ):
             result = dp.get_entity_client()
 
@@ -283,8 +282,10 @@ class TestDependencyProviderEntityClient:
 
         try:
             with (
-                patch("nemo_helix_plugin.client.adapter.client_from_platform", return_value=object()) as adapter,
-                patch("nhx.common.entities.client.EntityClient", side_effect=lambda client: client),
+                patch(
+                    "nemo_helix_plugin.entities.client.AsyncEntitiesClient.from_client", return_value=object()
+                ) as adapter,
+                patch("nhx.common.service.base.EntityClient", side_effect=lambda client: client),
                 patch("nhx.common.platform_client_context.get_auth_config", return_value=config),
                 patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls,
             ):

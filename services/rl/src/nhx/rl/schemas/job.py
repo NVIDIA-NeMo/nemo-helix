@@ -788,6 +788,7 @@ class RlJobOutput(RlSchema):
     model_config = ConfigDict(protected_namespaces=())
 
     name: str | None = Field(default=None)
+    backend: Literal["rl"] = "rl"
     model: str = Field(description="Model entity reference ('name' or 'workspace/name').")
     dataset: str = Field(description="Dataset fileset reference ('name' or 'workspace/name').")
     environment: str | None = Field(default=None)

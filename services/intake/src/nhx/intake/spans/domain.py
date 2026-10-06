@@ -214,6 +214,18 @@ class EvaluatorResultDataType(StrEnum):
     TEXT = "TEXT"
 
 
+class EvaluatorResultStatus(StrEnum):
+    """Whether the evaluator produced a value for its target.
+
+    A FAILED result carries no value: the evaluator ran and could not score (judge unreachable,
+    unparseable output, errored trial). Rollups count it as a failed attempt rather than inferring
+    failure from the absence of a row.
+    """
+
+    SCORED = "SCORED"
+    FAILED = "FAILED"
+
+
 class EvaluatorResult(BaseModel):
     evaluator_result_id: str
     span_id: str
@@ -223,6 +235,7 @@ class EvaluatorResult(BaseModel):
     value: float | None = None
     string_value: str | None = None
     data_type: EvaluatorResultDataType
+    status: EvaluatorResultStatus = EvaluatorResultStatus.SCORED
     comment: str | None = None
     created_by: str | None = None
     created_at: datetime
@@ -235,6 +248,7 @@ class EvaluatorResultListFilter(BaseModel):
     session_id: str | None = None
     name: str | None = None
     data_type: EvaluatorResultDataType | None = None
+    status: EvaluatorResultStatus | None = None
     created_by: str | None = None
     value_gte: float | None = None
     value_lte: float | None = None

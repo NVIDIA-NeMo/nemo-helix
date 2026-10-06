@@ -98,7 +98,7 @@ def test_resolve_eval_config_fileset_downloads_via_sdk(tmp_path: Path, ctx: JobC
     manager.download_from_url.side_effect = _fake_download
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
     ):
@@ -129,7 +129,7 @@ def test_resolve_output_fileset_uploads_on_clean_exit(tmp_path: Path, ctx: JobCo
     manager = MagicMock()
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager) as manager_cls,
     ):
@@ -237,7 +237,7 @@ def test_resolve_eval_config_fileset_tempdir_lands_under_ctx_ephemeral(tmp_path:
     manager.download_from_url.side_effect = _fake_download
 
     with (
-        patch("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", return_value=manager),
     ):

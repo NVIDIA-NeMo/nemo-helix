@@ -1568,6 +1568,7 @@ def _aggregate(rollup: ScoreRollup) -> EvaluatorAggregate:
         p95=rollup.p95,
         p99=rollup.p99,
         count=rollup.count,
+        failed_count=rollup.failed_count,
     )
 
 

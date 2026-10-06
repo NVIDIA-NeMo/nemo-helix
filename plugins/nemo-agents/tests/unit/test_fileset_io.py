@@ -36,7 +36,7 @@ def test_resolve_staged_config_fileset_downloads_via_sdk(tmp_path: Path, ctx: Jo
     manager.download_from_url.side_effect = _fake_download
 
     with (
-        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager) as manager_factory,
     ):
         with resolve_staged_config(
@@ -89,7 +89,7 @@ def test_resolve_staged_config_rejects_path_escape(ctx: JobContext) -> None:
     sdk = MagicMock()
     manager = MagicMock()
     with (
-        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager),
         pytest.raises(ValueError, match="outside the downloaded fileset"),
     ):
@@ -115,7 +115,7 @@ def test_resolve_output_fileset_uploads_on_clean_exit(ctx: JobContext) -> None:
     manager = MagicMock()
 
     with (
-        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+        patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=MagicMock()),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager) as manager_factory,
     ):
         with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):
@@ -135,7 +135,7 @@ def test_resolve_output_fileset_skips_upload_when_body_raises(ctx: JobContext) -
     manager = MagicMock()
     with pytest.raises(RuntimeError, match="boom"):
         with (
-            patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=MagicMock()),
+            patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=MagicMock()),
             patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", return_value=manager),
         ):
             with resolve_output(FilesetRef("optimize-out"), workspace="default", ctx=ctx, sdk=sdk, kind="optimize"):

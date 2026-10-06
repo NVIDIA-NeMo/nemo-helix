@@ -631,6 +631,11 @@ def _fake_nemo_rl_checkout(root: Path, *, ray: str = "2.56.1", openai: str = "2.
     gym = root / "3rdparty/Gym-workspace/Gym"
     gym.mkdir(parents=True)
     (gym / "pyproject.toml").write_text('[project]\nname = "nemo-gym"\n', encoding="utf-8")
+    (gym / "nemo_gym").mkdir()
+    (gym / "nemo_gym" / "package_info.py").write_text(
+        'MAJOR = "0"\nMINOR = "5"\nPATCH = "0"\nPRE_RELEASE = "rc0"\n',
+        encoding="utf-8",
+    )
     (root / "uv.lock").write_text(
         f'[[package]]\nname = "ray"\nversion = "{ray}"\n\n'
         f'[[package]]\nname = "openai"\nversion = "{openai}"\n\n'
@@ -721,6 +726,18 @@ def test_nemo_rl_root_must_be_a_checkout(tmp_path: Path) -> None:
         )
 
 
+def _write_gym_checkout(root: Path, *, major: str = "0", minor: str = "5", patch: str = "0", pre: str = "rc0") -> None:
+    (root / "nemo_gym").mkdir(parents=True)
+    (root / "nemo_gym" / "package_info.py").write_text(
+        f"MAJOR = {major!r}\nMINOR = {minor!r}\nPATCH = {patch!r}\nPRE_RELEASE = {pre!r}\n",
+        encoding="utf-8",
+    )
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "nemo-gym"\ndependencies = ["pyyaml"]\n\n[project.optional-dependencies]\ndev = ["mypy"]\n',
+        encoding="utf-8",
+    )
+
+
 def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkeypatch) -> None:
     """nemo-gym is not on an index, so its deps only reach the closure via --gym-root."""
     from nhx.rl.tasks.environment import convert as convert_mod
@@ -743,6 +760,7 @@ def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkey
         return None
 
     monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    _write_gym_checkout(tmp_path / "Gym")
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -775,6 +793,7 @@ def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> N
         return None
 
     monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    _write_gym_checkout(tmp_path / "Gym", minor="4", pre="")
 
     with pytest.raises(RuntimeError, match="builds nemo-gym 0.4.0 but the image reports 0.5.0rc0"):
         convert_mod._agent_closure_requirements(

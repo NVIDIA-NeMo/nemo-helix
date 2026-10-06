@@ -70,7 +70,7 @@ def create_adapter_entity(
 
     ``workspace`` defaults to the base model's workspace so existing tests retain
     their single-workspace semantics. Pass an explicit value to construct
-    cross-workspace adapter rows (AALGO-129) — the entity store stores adapters
+    cross-workspace adapter rows — the entity store stores adapters
     parented by id, not by workspace, so ``Adapter.workspace`` may differ from
     ``parent.workspace``.
     """
@@ -781,7 +781,7 @@ async def test_get_model_entity_non_verbose_keeps_adapters(model_entity_service,
 
 
 # =============================================================================
-# Cross-workspace adapter resolution (AALGO-129)
+# Cross-workspace adapter resolution
 #
 # Adapters can live in a workspace different from their parent model. The
 # entity-store query that resolves adapters for a ModelEntity therefore must
@@ -882,7 +882,7 @@ async def test_update_model_entity_uses_all_workspaces_for_adapter_lookup(
 async def test_get_adapters_legacy_workspace_fallback_uses_caller_workspace(
     model_entity_service, mock_entity_client, sample_model
 ):
-    """Adapter rows without their own ``workspace`` (pre-AALGO-117) fall back to the caller-supplied workspace.
+    """Adapter rows without their own ``workspace`` (legacy) fall back to the caller-supplied workspace.
 
     This pins that the ``workspace`` parameter to ``get_adapters`` is still used
     as the schema-level fallback for legacy rows even though it is no longer
@@ -890,7 +890,7 @@ async def test_get_adapters_legacy_workspace_fallback_uses_caller_workspace(
     an empty ``workspace`` field after the cross-workspace query change.
 
     Uses a ``MagicMock``-shaped adapter to bypass the entity store's required
-    ``workspace`` field — it represents a row written before AALGO-117 added
+    ``workspace`` field — it represents a row written before first-class adapter workspaces were added
     first-class adapter workspaces.
     """
     legacy_adapter = MagicMock()

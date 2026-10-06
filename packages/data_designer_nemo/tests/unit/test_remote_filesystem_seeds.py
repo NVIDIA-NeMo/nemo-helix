@@ -38,7 +38,7 @@ async def test_validate_seed_returns_canonical_validated_filesystem_root() -> No
     builder.with_seed_dataset(dd.FileContentsSeedSource(path="docs#corpus", file_pattern="*.md"))
     config = builder.build()
 
-    with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
+    with patch("data_designer_nemo.seed.AsyncFilesClient.from_client", return_value=files):
         validated_root = await validate_seed(config, "default", client)
 
     assert validated_root == "default/docs#corpus"
@@ -62,7 +62,7 @@ async def test_validate_seed_rejects_fileset_root_with_no_files() -> None:
     config = builder.build()
 
     with pytest.raises(NDDInvalidConfigError, match="contains no files to use as seed data"):
-        with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
+        with patch("data_designer_nemo.seed.AsyncFilesClient.from_client", return_value=files):
             await validate_seed(config, "default", client)
 
     files.list_files.assert_awaited_once_with(
@@ -84,7 +84,7 @@ async def test_validate_seed_rejects_path_with_no_files() -> None:
     config = builder.build()
 
     with pytest.raises(NDDInvalidConfigError, match="contains no files to use as seed data"):
-        with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
+        with patch("data_designer_nemo.seed.AsyncFilesClient.from_client", return_value=files):
             await validate_seed(config, "default", client)
 
 
@@ -100,5 +100,5 @@ async def test_validate_seed_reports_missing_fileset_file() -> None:
     seed_source = FilesetFileSeedSource(path="docs#corpus/missing.parquet")
 
     with pytest.raises(NDDInvalidConfigError, match=r"File 'corpus/missing.parquet' not found"):
-        with patch("data_designer_nemo.seed.client_from_platform", return_value=files):
+        with patch("data_designer_nemo.seed.AsyncFilesClient.from_client", return_value=files):
             await _validate_seed_from_files_service(seed_source, "default", client)

@@ -61,8 +61,7 @@ class MyController(NemoController):
         return self._interval_seconds
 
     async def on_startup(self) -> None:
-        from nhx.common.sdk_factory import get_async_platform_sdk
-        from nemo_helix_plugin.client.adapter import client_from_platform
+        from nemo_helix_plugin.client_provider import get_async_nemo_client
         from nemo_helix_plugin.entities.client import AsyncEntitiesClient
         from nemo_helix_plugin.entity_client import NemoEntitiesClient
         from .config import MyPluginConfig
@@ -70,9 +69,8 @@ class MyController(NemoController):
         config = MyPluginConfig.get()
         self._interval_seconds = float(config.controller_interval)
 
-        sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
-        typed_client = client_from_platform(sdk, AsyncEntitiesClient)
-        self._entities = NemoEntitiesClient(typed_client)
+        client = get_async_nemo_client(as_service="my-plugin", internal=True)
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
     @property
     def entities(self) -> NemoEntitiesClient:
@@ -139,12 +137,12 @@ async def _reconcile_one(self, entity: MyEntity) -> None:
 Without `internal=True`, a controller polling every 5 seconds across 100 entities floods the entity store access log with 20 requests/second of noise.
 
 ```python
-sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
-#                                                     ^^^^^^^^^^^
-# Adds MARK_INTERNAL_REQUEST_HEADERS — suppresses access log on receiving service
+client = get_async_nemo_client(as_service="my-plugin", internal=True)
+#                                                    ^^^^^^^^^^^
+# Adds X-NHX-Internal: true — suppresses access log on receiving service
 ```
 
-Always use `internal=True` for controller/background SDK calls.
+Always use `internal=True` for controller/background client calls.
 
 ## Service vs. Controller Decoupling
 
@@ -160,21 +158,19 @@ This decoupling means the service returns fast and the controller handles all as
 Full pattern used in `on_startup()`:
 
 ```python
-from nhx.common.sdk_factory import get_async_platform_sdk
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
-sdk = get_async_platform_sdk(as_service="my-plugin", internal=True)
-typed_client = client_from_platform(sdk, AsyncEntitiesClient)
-self._entities = NemoEntitiesClient(typed_client)
+client = get_async_nemo_client(as_service="my-plugin", internal=True)
+self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 ```
 
 `as_service="my-plugin"` sets `X-NHX-Principal-Id: service:my-plugin` on all outgoing requests. Service principals have elevated permissions for cross-workspace listing.
 
 ## Authorization — Status-Write Routes
 
-A controller writes observed state back through the platform HTTP API, and its SDK carries a service-principal identity — `as_service="my-plugin"` sets `X-NHX-Principal-Id: service:my-plugin` (above). So any status-write route the plugin exposes *for* the controller must be gated to service principals only, or a normal user token could spoof observed status:
+A controller writes observed state back through the platform HTTP API, and its client carries a service-principal identity — `as_service="my-plugin"` sets `X-NHX-Principal-Id: service:my-plugin` (above). So any status-write route the plugin exposes *for* the controller must be gated to service principals only, or a normal user token could spoof observed status:
 
 ```python
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -204,13 +200,17 @@ Model these routes on `plugins/nemo-deployments/src/nemo_deployments_plugin/api/
 When a controller needs to access a user-owned secret:
 
 ```python
-from nhx.common.sdk_factory import get_async_platform_sdk, get_sdk_on_behalf_of
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
 async def _access_user_secret(self, entity: MyEntity) -> str:
-    service_sdk = get_async_platform_sdk(as_service="my-plugin")
-    user_sdk = get_sdk_on_behalf_of(service_sdk, entity.owner_principal_id)
-    return await user_sdk.secrets.access(entity.secret_name, workspace=entity.workspace)
+    client = get_async_nemo_client(as_service="my-plugin", internal=True, on_behalf_of=entity.owner_principal_id)
+    secrets_client = AsyncSecretsClient.from_client(client)
+    response = await secrets_client.access_secret(workspace=entity.workspace, name=entity.secret_name)
+    return response.data
 ```
+
+The secret read is authorized as `entity.owner_principal_id`, not with the service principal's own reach.
 
 ## Overriding reconcile() Entirely
 
@@ -272,7 +272,7 @@ class ExampleController(NemoController):
 
 ## Production State Machine Example
 
-Full pattern from a production deployment controller. Shows `__init__` sentinels + `on_startup` SDK factory + cross-workspace `list_objects` + state dispatch in `_reconcile_one` + optimistic lock catch:
+Full pattern from a production deployment controller. Shows `__init__` sentinels + `on_startup` client factory + cross-workspace `list_objects` + state dispatch in `_reconcile_one` + optimistic lock catch:
 
 ```python
 import logging
@@ -303,17 +303,15 @@ class DeploymentController(NemoController):
         return self._entities
 
     async def on_startup(self) -> None:
-        from nhx.common.sdk_factory import get_async_platform_sdk
-        from nemo_helix_plugin.client.adapter import client_from_platform
+        from nemo_helix_plugin.client_provider import get_async_nemo_client
         from nemo_helix_plugin.entities.client import AsyncEntitiesClient
         from nemo_helix_plugin.entity_client import NemoEntitiesClient
         from nemo_my_plugin.config import MyPluginConfig
 
         config = MyPluginConfig.get()
         self._interval_seconds = float(config.controller.interval_seconds)
-        sdk = get_async_platform_sdk(as_service="my-deployment", internal=True)
-        typed_client = client_from_platform(sdk, AsyncEntitiesClient)
-        self._entities = NemoEntitiesClient(typed_client)
+        client = get_async_nemo_client(as_service="my-deployment", internal=True)
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
     async def on_shutdown(self) -> None:
         logger.info("DeploymentController shutting down.")
@@ -348,7 +346,7 @@ class DeploymentController(NemoController):
 ## Gotchas
 
 - **ALL dependencies in `on_startup()`, NOT `__init__()`**: `__init__()` runs before the platform is ready. Accessing platform clients there will fail or connect before services are healthy.
-- **`internal=True` is required**: Without it, controller polling floods the access log. Always set when building the SDK for background use.
+- **`internal=True` is required**: Without it, controller polling floods the access log. Always set when building the client for background use.
 - **`NemoEntityConflictError` = optimistic lock → log debug, skip**: Do NOT log at error level, do NOT retry immediately. Next cycle retries automatically.
 - **`list_objects()` returns `[]` on exception**: Raising from `list_objects()` is caught by the default `reconcile()` error handler and logs an exception. Returning `[]` is silent and correct.
 - **`interval_seconds` is `@property`, not ClassVar**: ClassVar is set at import time before any config is loaded.

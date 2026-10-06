@@ -20,8 +20,8 @@ NemoGuard NIMs are specialized models built for specific use cases supported by 
 
 Before you begin:
 
-- You have access to a running NeMo Helix.
-- `NHX_BASE_URL` is set to the NeMo Helix base URL.
+- You have access to a running NeMo Helix deployment.
+- `NHX_BASE_URL` is set to NeMo Helix base URL.
 - Your infrastructure has 1 GPU available per NIM deployment.
 - Your NeMo Helix administrator configured an NGC API key for NIM image pulls. The key must be available through the `platform.ngc_api_key_secret` setting, which defaults to `system/ngc-api-key`.
 
@@ -29,13 +29,21 @@ Before you begin:
 
 ## Step 1: Configure the Client
 
-Instantiate the NeMoHelix SDK.
+Instantiate the NeMo Helix typed client.
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
+)
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -82,28 +90,32 @@ nemo wait inference deployment nemotron-safety-guard
 <Tab title="Python SDK">
 
 ```python
-client.inference.deployment_configs.create(
-    name="nemotron-safety-guard-config",
-    engine="nim",
-    model_spec={
-        "model_name": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
-        "image_tag": "1.14.0",
-        "additional_envs": {
-            "NIM_ENABLE_KV_CACHE_REUSE": "1",
-        },
-    },
+client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="nemotron-safety-guard-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_name="nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="nvcr.io/nim/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+            image_tag="1.14.0",
+            additional_envs={
+                "NIM_ENABLE_KV_CACHE_REUSE": "1",
+            },
+        ),
+    ),
 )
 
-client.inference.deployments.create(
-    name="nemotron-safety-guard",
-    config="nemotron-safety-guard-config",
+client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="nemotron-safety-guard",
+        config="nemotron-safety-guard-config",
+    ),
 )
 
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemotron-safety-guard",
     desired_status="READY",
 )
@@ -143,28 +155,32 @@ nemo wait inference deployment nemoguard-topic-control
 <Tab title="Python SDK">
 
 ```python
-client.inference.deployment_configs.create(
-    name="nemoguard-topic-control-config",
-    engine="nim",
-    model_spec={
-        "model_name": "nvidia/llama-3.1-nemoguard-8b-topic-control",
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control",
-        "image_tag": "1.10.1",
-        "additional_envs": {
-            "NIM_ENABLE_KV_CACHE_REUSE": "1",
-        },
-    },
+client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="nemoguard-topic-control-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_name="nvidia/llama-3.1-nemoguard-8b-topic-control",
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="nvcr.io/nim/nvidia/llama-3.1-nemoguard-8b-topic-control",
+            image_tag="1.10.1",
+            additional_envs={
+                "NIM_ENABLE_KV_CACHE_REUSE": "1",
+            },
+        ),
+    ),
 )
 
-client.inference.deployments.create(
-    name="nemoguard-topic-control",
-    config="nemoguard-topic-control-config",
+client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="nemoguard-topic-control",
+        config="nemoguard-topic-control-config",
+    ),
 )
 
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemoguard-topic-control",
     desired_status="READY",
 )
@@ -201,23 +217,27 @@ nemo wait inference deployment nemoguard-jailbreak
 <Tab title="Python SDK">
 
 ```python
-client.inference.deployment_configs.create(
-    name="nemoguard-jailbreak-config",
-    engine="nim",
-    model_spec={},
-    executor_config={
-        "gpu": 1,
-        "image_name": "nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
-        "image_tag": "1.10.1",
-    },
+client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="nemoguard-jailbreak-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
+            image_tag="1.10.1",
+        ),
+    ),
 )
 
-client.inference.deployments.create(
-    name="nemoguard-jailbreak",
-    config="nemoguard-jailbreak-config",
+client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="nemoguard-jailbreak",
+        config="nemoguard-jailbreak-config",
+    ),
 )
 
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemoguard-jailbreak",
     desired_status="READY",
 )
@@ -237,7 +257,7 @@ After the content safety and topic control NIMs are deployed, the Inference Gate
 List all Model Entities in your workspace to find the names:
 
 ```python
-models = client.models.list(workspace="default")
+models = client.models.list_models().items()
 for model in models:
     print(f"{model.workspace}/{model.name}")
 ```
@@ -268,22 +288,24 @@ Reference the Model Entities in your guardrail configuration using the `workspac
 Configure the jailbreak detection NIM using the `rails.config.jailbreak_detection` field. Set `nim_base_url` to the Inference Gateway provider route exposed by the deployment you created in Step 2. The URL follows the pattern `/apis/inference-gateway/v2/workspaces/{workspace}/provider/{deployment_name}/-/v1`, where `deployment_name` matches the deployment name from Step 2.
 
 ```python
-config = client.guardrail.configs.create(
-    name="nemoguard-jailbreak-config",
-    description="Jailbreak detection using self-hosted NemoGuard NIM",
-    data={
-        "rails": {
-            "config": {
-                "jailbreak_detection": {
-                    "nim_base_url": f"{os.environ['NHX_BASE_URL']}/apis/inference-gateway/v2/workspaces/default/provider/nemoguard-jailbreak/-/v1",
-                }
-            },
-            "input": {
-                "flows": ["jailbreak detection model"],
+config = client.guardrail.create_guardrail_config(
+    body=CreateGuardrailConfigRequest(
+        name="nemoguard-jailbreak-config",
+        description="Jailbreak detection using self-hosted NemoGuard NIM",
+        data={
+            "rails": {
+                "config": {
+                    "jailbreak_detection": {
+                        "nim_base_url": f"{os.environ['NHX_BASE_URL']}/apis/inference-gateway/v2/workspaces/default/provider/nemoguard-jailbreak/-/v1",
+                    }
+                },
+                "input": {
+                    "flows": ["jailbreak detection model"],
+                },
             },
         },
-    },
-)
+    ),
+).data()
 print(f"Created config: {config.name}")
 ```
 
@@ -316,26 +338,26 @@ nemo inference deployment-configs delete nemoguard-jailbreak-config
 <Tab title="Python SDK">
 
 ```python
-client.guardrail.configs.delete(name="nemoguard-jailbreak-config")
+client.guardrail.delete_guardrail_config(name="nemoguard-jailbreak-config")
 
 # Note: Deleting the deployment will free up its GPU(s) when complete
-client.inference.deployments.delete(name="nemotron-safety-guard")
-client.inference.deployments.delete(name="nemoguard-topic-control")
-client.inference.deployments.delete(name="nemoguard-jailbreak")
+client.models.delete_deployment(name="nemotron-safety-guard")
+client.models.delete_deployment(name="nemoguard-topic-control")
+client.models.delete_deployment(name="nemoguard-jailbreak")
 
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemotron-safety-guard", desired_status="DELETED"
 )
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemoguard-topic-control", desired_status="DELETED"
 )
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="nemoguard-jailbreak", desired_status="DELETED"
 )
 
-client.inference.deployment_configs.delete(name="nemotron-safety-guard-config")
-client.inference.deployment_configs.delete(name="nemoguard-topic-control-config")
-client.inference.deployment_configs.delete(name="nemoguard-jailbreak-config")
+client.models.delete_deployment_config(name="nemotron-safety-guard-config")
+client.models.delete_deployment_config(name="nemoguard-topic-control-config")
+client.models.delete_deployment_config(name="nemoguard-jailbreak-config")
 
 print("Cleanup complete")
 ```

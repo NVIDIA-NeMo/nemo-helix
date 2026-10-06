@@ -9,9 +9,7 @@ import time
 
 import httpx
 import jwt
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth.client import AsyncAuthenticationClient
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import (
     AuthenticationError,
     NemoHTTPError,
@@ -49,22 +47,21 @@ class AccessKeyLifecycleAuthenticator:
     def __init__(self, config: AuthConfig, http_client: httpx.AsyncClient | None = None) -> None:
         self._config = config
         self._http_client = http_client
-        self._sdk: AsyncNeMoHelix | None = None
+        self._auth_client: AsyncAuthenticationClient | None = None
         self._failure_count = 0
         self._circuit_open_until = 0.0
 
-    def _get_sdk(self) -> AsyncNeMoHelix:
-        if self._sdk is None:
-            # Import lazily to avoid an auth -> SDK factory import cycle.
-            from nhx.common.sdk_factory import get_async_platform_sdk
+    def _get_auth_client(self) -> AsyncAuthenticationClient:
+        if self._auth_client is None:
+            # Import lazily to avoid an auth -> client factory import cycle.
+            from nhx.common.client_factory import get_async_nemo_client
 
             http_client = self._http_client or resolve_platform_endpoint().async_sdk_http_client(follow_redirects=False)
-            sdk = get_async_platform_sdk(http_client=http_client)
-            self._sdk = sdk.with_options(
-                max_retries=0,
-                _extra_kwargs={"_strict_response_validation": True},
+            # The circuit breaker owns failure handling, so requests are not retried.
+            self._auth_client = AsyncAuthenticationClient.from_client(
+                get_async_nemo_client(http_client=http_client, retry=None)
             )
-        return self._sdk
+        return self._auth_client
 
     def _validate_authorization_transport(self) -> None:
         if self._http_client is not None and self._http_client.follow_redirects:
@@ -114,7 +111,7 @@ class AccessKeyLifecycleAuthenticator:
         try:
             self._validate_authorization_transport()
             auth_client = (
-                client_from_platform(self._get_sdk(), AsyncAuthenticationClient)
+                self._get_auth_client()
                 .with_headers({"Authorization": f"Bearer {token}"})
                 .with_options(timeout=self._config.policy_decision_point_request_timeout_seconds)
             )

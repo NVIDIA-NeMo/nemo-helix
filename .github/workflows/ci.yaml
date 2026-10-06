@@ -1263,7 +1263,7 @@ jobs:
         run: uv sync --frozen --package nemo-evaluator-sdk --no-dev
       # pytest is not in the package-only sync; install the runner only (do not add SDK deps).
       # WHY BOTH THIS JOB AND THE UNIT TEST:
-      # - Unit-test CI syncs the whole workspace: a sibling (e.g. nemo-helix-sdk) may already
+      # - Unit-test CI syncs the whole workspace: a sibling package may already
       #   provide httpx, so an undeclared SDK dep still imports — green here, broken for consumers
       #   who only installed nemo-evaluator-sdk.
       # - This job: `uv sync --package nemo-evaluator-sdk --no-dev` (no extras/siblings) so that

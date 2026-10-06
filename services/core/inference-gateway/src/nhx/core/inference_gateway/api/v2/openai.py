@@ -3,11 +3,12 @@
 
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.common.entities.utils import parse_adapters_suffix
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
@@ -39,9 +40,6 @@ from nhx.core.inference_gateway.api.validation import validate_entity_name, vali
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -51,7 +49,7 @@ def resolve_vm_for_model(
     virtual_model_cache: VirtualModelCache,
     workspace: str,
     model_name: str,
-) -> "SDKVirtualModel | None":
+) -> VirtualModel | None:
     """Resolve the VirtualModel a request should route through, LoRA-composite aware.
 
     A fine-tuned LoRA adapter is a *parented* entity whose composite model id has the

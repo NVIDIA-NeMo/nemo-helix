@@ -13,6 +13,7 @@ from nhx.intake.spans.domain import (
     EvaluatorResult,
     EvaluatorResultDataType,
     EvaluatorResultListFilter,
+    EvaluatorResultStatus,
 )
 from nhx.intake.spans.storage import dict_to_row, make_pagination
 
@@ -25,6 +26,7 @@ EVALUATOR_RESULT_COLUMNS = [
     "value",
     "string_value",
     "data_type",
+    "status",
     "comment",
     "created_by",
     "created_at",
@@ -144,6 +146,9 @@ def _evaluator_result_where(filters: EvaluatorResultListFilter) -> tuple[str, di
     if filters.data_type is not None:
         clauses.append("data_type = %(data_type)s")
         parameters["data_type"] = filters.data_type.value
+    if filters.status is not None:
+        clauses.append("status = %(status)s")
+        parameters["status"] = filters.status.value
     if filters.created_by is not None:
         clauses.append("created_by = %(created_by)s")
         parameters["created_by"] = filters.created_by
@@ -181,6 +186,7 @@ def _evaluator_result_to_row(result: EvaluatorResult) -> dict[str, Any]:
         "value": result.value,
         "string_value": result.string_value,
         "data_type": result.data_type.value,
+        "status": result.status.value,
         "comment": result.comment,
         "created_by": result.created_by,
         "created_at": result.created_at,
@@ -198,6 +204,7 @@ def _row_to_evaluator_result(row: dict[str, Any]) -> EvaluatorResult:
         value=row.get("value"),
         string_value=row.get("string_value"),
         data_type=EvaluatorResultDataType(row["data_type"]),
+        status=EvaluatorResultStatus(row.get("status") or EvaluatorResultStatus.SCORED),
         comment=row.get("comment"),
         created_by=row.get("created_by"),
         created_at=row["created_at"],

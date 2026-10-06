@@ -22,8 +22,6 @@ from aiohttp import ClientError
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
@@ -33,6 +31,8 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.core.inference_gateway.api.authz import MODEL_EXEC_PERMISSION
@@ -330,7 +330,7 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -350,15 +350,9 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -412,15 +406,9 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
             ),
             trailing_uri="v1/chat/completions",
             json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -490,7 +478,7 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -510,15 +498,9 @@ async def test_virtual_model_proxy_injects_request_context_annotations_without_r
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -621,7 +603,7 @@ async def test_virtual_model_proxy_injects_annotations_after_response_middleware
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -647,15 +629,9 @@ async def test_virtual_model_proxy_injects_annotations_after_response_middleware
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -694,7 +670,7 @@ async def test_virtual_model_proxy_with_unresolved_provider_secret_returns_424(m
                         served_model_name="secure-v1",
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             ),
             secret_value=None,
         )
@@ -711,15 +687,9 @@ async def test_virtual_model_proxy_with_unresolved_provider_secret_returns_424(m
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=model_entity_id,
             ),
             trailing_uri="v1/chat/completions",
@@ -793,15 +763,9 @@ async def test_virtual_model_proxy_preserves_request_middleware_backend_format_f
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         ),
         trailing_uri="v1/messages",
         json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -877,15 +841,9 @@ async def test_virtual_model_proxy_preserves_immediate_response_annotations_thro
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
         ),
         trailing_uri="v1/chat/completions",
         json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
@@ -970,7 +928,7 @@ async def test_virtual_model_proxy_post_response_receives_canonical_non_streamin
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -998,15 +956,9 @@ async def test_virtual_model_proxy_post_response_receives_canonical_non_streamin
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -1081,15 +1033,9 @@ async def test_virtual_model_proxy_broken_vm_returns_503_without_running_middlew
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=f"{workspace}/missing",
             ),
             trailing_uri="v1/chat/completions",
@@ -1118,7 +1064,7 @@ def _serving_provider(workspace: str, name: str, model_entity_id: str) -> ModelP
             created_at=datetime.now(),
             updated_at=datetime.now(),
             served_models=served_models,
-            status="READY",
+            status=ModelProviderStatus.READY,
         )
     )
 
@@ -1156,15 +1102,9 @@ async def _proxy_to_model_entity(
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -2211,7 +2151,7 @@ async def test_parse_sse_empty_stream_yields_nothing():
 
 
 # ---------------------------------------------------------------------------
-# AIRCORE-???: response model-field rewrite (served_model_name -> entity ref)
+# Response model-field rewrite (served_model_name -> entity ref)
 # ---------------------------------------------------------------------------
 #
 # After proxying, the user-facing response body must surface the model entity
@@ -2552,7 +2492,7 @@ async def test_virtual_model_proxy_scrubs_served_name_on_upstream_error(mock_pro
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2568,15 +2508,9 @@ async def test_virtual_model_proxy_scrubs_served_name_on_upstream_error(mock_pro
             request=request,
             workspace=workspace,
             vm_name=vm_name,
-            virtual_model=SDKVirtualModel(
-                id=f"{workspace}/{vm_name}",
-                entity_id=f"{workspace}/{vm_name}",
+            virtual_model=VirtualModel(
                 name=vm_name,
                 workspace=workspace,
-                parent=workspace,
-                db_version=1,
-                created_at="2026-01-01T00:00:00Z",
-                updated_at="2026-01-01T00:00:00Z",
                 default_model_entity=model_entity_id,
             ),
             trailing_uri="v1/chat/completions",
@@ -2699,7 +2633,7 @@ async def test_virtual_model_proxy_rewrites_response_model_non_streaming(mock_pr
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2714,15 +2648,9 @@ async def test_virtual_model_proxy_rewrites_response_model_non_streaming(mock_pr
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -2784,7 +2712,7 @@ async def test_virtual_model_proxy_rewrites_response_model_openai_streaming(mock
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2799,15 +2727,9 @@ async def test_virtual_model_proxy_rewrites_response_model_openai_streaming(mock
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",
@@ -2889,7 +2811,7 @@ async def test_virtual_model_proxy_rewrites_response_model_anthropic_streaming(m
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -2904,15 +2826,9 @@ async def test_virtual_model_proxy_rewrites_response_model_anthropic_streaming(m
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/messages",
@@ -2998,7 +2914,7 @@ async def test_virtual_model_proxy_rewrites_response_model_to_post_middleware_en
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -3018,15 +2934,9 @@ async def test_virtual_model_proxy_rewrites_response_model_to_post_middleware_en
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=None,
         ),
         trailing_uri="v1/chat/completions",
@@ -3104,7 +3014,7 @@ async def test_virtual_model_proxy_response_rewrite_runs_before_response_middlew
                         served_model_name=served_model_name,
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             )
         )
     )
@@ -3124,15 +3034,9 @@ async def test_virtual_model_proxy_response_rewrite_runs_before_response_middlew
         request=request,
         workspace=workspace,
         vm_name=vm_name,
-        virtual_model=SDKVirtualModel(
-            id=f"{workspace}/{vm_name}",
-            entity_id=f"{workspace}/{vm_name}",
+        virtual_model=VirtualModel(
             name=vm_name,
             workspace=workspace,
-            parent=workspace,
-            db_version=1,
-            created_at="2026-01-01T00:00:00Z",
-            updated_at="2026-01-01T00:00:00Z",
             default_model_entity=model_entity_id,
         ),
         trailing_uri="v1/chat/completions",

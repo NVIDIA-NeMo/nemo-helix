@@ -12,6 +12,7 @@ from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, TypeAdapter, model_validator, with_config
 
 EvaluatorResultDataType = Literal["NUMERIC", "BOOLEAN", "CATEGORICAL", "TEXT"]
+EvaluatorResultStatus = Literal["SCORED", "FAILED"]
 TraceMode = Literal["summary", "preview", "detailed"]
 TraceStatus = Literal["OK", "ERROR", "UNSET"] | str
 SpanMode = Literal["summary", "preview", "detailed"]
@@ -103,6 +104,7 @@ class EvaluatorResultCreateParams(TypedDict, total=False):
     value: float
     string_value: str
     data_type: Required[EvaluatorResultDataType]
+    status: EvaluatorResultStatus
     comment: str
 
 
@@ -117,10 +119,18 @@ class EvaluatorResultCreateRequest(BaseModel):
     value: float | None = None
     string_value: str | None = None
     data_type: EvaluatorResultDataType
+    status: EvaluatorResultStatus = Field(
+        default="SCORED",
+        description="FAILED when the evaluator ran but produced no value; carries no value/string_value.",
+    )
     comment: str | None = None
 
     @model_validator(mode="after")
     def _enforce_value_coherence(self) -> EvaluatorResultCreateRequest:
+        if self.status == "FAILED":
+            if self.value is not None or self.string_value is not None:
+                raise ValueError("A FAILED evaluator result carries no `value` or `string_value`.")
+            return self
         if self.data_type in ("NUMERIC", "BOOLEAN") and self.value is None:
             raise ValueError(f"`value` is required when data_type is {self.data_type}.")
         if self.data_type in ("CATEGORICAL", "TEXT") and self.string_value is None:
@@ -141,6 +151,7 @@ class EvaluatorResult(BaseModel):
     value: float | None = None
     string_value: str | None = None
     data_type: EvaluatorResultDataType
+    status: EvaluatorResultStatus = "SCORED"
     comment: str | None = None
     created_by: str | None = None
     created_at: datetime
@@ -159,6 +170,7 @@ class EvaluatorAggregate(BaseModel):
     p95: float | None = None
     p99: float | None = None
     count: int = 0
+    failed_count: int = 0
 
 
 class EvaluationCreateRequest(BaseModel):

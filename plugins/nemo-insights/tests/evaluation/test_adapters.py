@@ -39,13 +39,13 @@ _SIMS = [
 ]
 
 
-class _FakeSDK:
-    """Stand-in for the generated SDK that records whether it was closed."""
+class _FakeClient:
+    """Stand-in for the typed client that records whether it was closed."""
 
     def __init__(self) -> None:
         self.closed = False
 
-    async def __aenter__(self) -> "_FakeSDK":
+    async def __aenter__(self) -> "_FakeClient":
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -101,7 +101,7 @@ def test_intake_check_basic_auth_reports_missing_password_env_name(monkeypatch: 
 async def test_intake_analyze_basic_auth_injects_built_client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("GLAMR_INTAKE_USER", "intake")
     monkeypatch.setenv("GLAMR_INTAKE_PASSWORD", "secret")
-    sentinel = _FakeSDK()
+    sentinel = _FakeClient()
     built: dict[str, object] = {}
     calls: dict[str, object] = {}
 
@@ -146,7 +146,7 @@ def test_build_adapter_unknown_type_exits():
 
 async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     calls: dict[str, object] = {}
-    built_client = _FakeSDK()
+    built_client = _FakeClient()
 
     async def fake_run_analyst(**kwargs):
         calls.update(kwargs)
@@ -166,8 +166,8 @@ async def test_intake_analyze_calls_run_analyst(monkeypatch, tmp_path: Path):
     assert calls["enable_observability"] is True
 
 
-async def test_intake_analyze_closes_sdk_when_analyst_fails(monkeypatch, tmp_path: Path):
-    built_client = _FakeSDK()
+async def test_intake_analyze_closes_client_when_analyst_fails(monkeypatch, tmp_path: Path):
+    built_client = _FakeClient()
 
     async def failing_run_analyst(**kwargs):
         raise RuntimeError("analyst failed")
@@ -415,7 +415,7 @@ async def test_benchmark_analyze_uses_record(monkeypatch, tmp_path):
         return "REPORT-OK"
 
     monkeypatch.setattr("evaluation.adapters.run_analyst", fake_run_analyst)
-    built_client = _FakeSDK()
+    built_client = _FakeClient()
     monkeypatch.setattr("evaluation.adapters.make_client", lambda base_url: built_client)
 
     cfg = {**_CFG, "tau2_data_dir": str(tmp_path), "tau2_bin": "tau2"}

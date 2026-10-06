@@ -103,11 +103,9 @@ dev = [
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for agentic-use trajectory validation
-  "nemo-helix-sdk-tools",               # Include SDK/license tool migration target for testing
+  "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
   "nhx-dev-mcp",                                    # Include MCP dev tools
-  # These are the dev dependencies from `sdk/python/nemo-helix`.
-  # Including here until we find a better way to include them.
   "pyright==1.1.399",
   "mypy",
   "respx",
@@ -371,7 +369,7 @@ override-dependencies = [
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
   "ujson>=5.12.0",            # High – nhx-api/cpu-tasks/gpu-tasks
   "xgrammar>=0.1.32",         # High – customizer + nhx-gpu-tasks
-  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High); overrides vendored sdk/python/nemo-helix <3 constraint
+  "fastmcp>=3.2.0",           # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High)
   "wandb>=0.29.0",            # wandb-core Go CVEs (nspect); optional integrations + training images
   "cryptography>=50.0.0,<51", # GHSA-g6cj-pr64-35w5; overrides nvidia-nat-core's <47 cap after changelog review
   "click>=8.2.0",             # Below CVEs are based on constraints that garak has
@@ -405,10 +403,9 @@ nhx-models = { workspace = true }
 nhx-inference-gateway = { workspace = true }
 nhx-files = { workspace = true }
 nhx-entities = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 nemo-helix = { workspace = true }
 nemo-helix-ext = { workspace = true }
-nemo-helix-sdk-tools = { workspace = true }
+nemo-helix-tools = { workspace = true }
 nhx-core-mcp = { workspace = true }
 nemo-nb = { workspace = true }
 nhx-common = { workspace = true }
@@ -477,11 +474,9 @@ members = [
   "services/core/files",
   "services/core/secrets",
   "services/core/mcp",
-  "tools/nemo-helix-sdk-tools",
+  "tools/nemo-helix-tools",
   "tools/mcp-dev-tools",
   "packages/nhx_testing",
-  # SDK
-  "sdk/python/nemo-helix",
   "packages/nemo_helix_ext",
   "packages/nemo_evaluator_sdk",
   "packages/filesets",
@@ -628,6 +623,8 @@ extra-paths = [
   "plugins/_temporary-scaled-evals/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
+  # nemo-builder isn't a workspace member; its tests import the package under test.
+  "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.
   "packages/sandboxed_gym/src",
   # Agentic-use tests place both tests/agentic-use and tests/agentic-use/shared
@@ -708,9 +705,6 @@ exclude = [
   "docs/",
 
   "./sdk/",
-
-  "tools/nemo-helix-sdk-tools/src/nemo_helix_sdk_tools/sdk",
-  "tools/nemo-helix-sdk-tools/tests/sdk",
 ]
 
 # TEMPORARY — remove together with the fix in #1237, which is where this file is

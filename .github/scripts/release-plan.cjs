@@ -62,6 +62,7 @@ async function resolveReleasePlan({
   env,
   context,
   listBranches,
+  compareCommits,
   now = () => new Date(),
 }) {
   const allWheels = JSON.parse(env.RELEASE_WHEELS_JSON);
@@ -103,24 +104,34 @@ async function resolveReleasePlan({
         "A pinned nightly source must be an exact 40-character SHA.",
       );
     }
-    if (!sourceSha) {
-      const [branch] = (await listBranches())
-        .filter(({ name }) => /^release\/\d+\.\d+$/.test(name))
-        .sort((a, b) => {
-          const [aMajor, aMinor] = a.name
-            .slice("release/".length)
-            .split(".")
-            .map(Number);
-          const [bMajor, bMinor] = b.name
-            .slice("release/".length)
-            .split(".")
-            .map(Number);
-          return bMajor - aMajor || bMinor - aMinor;
-        });
-      if (!branch) {
-        throw new Error("No release/X.X branch found for nightly publication.");
+    const [branch] = (await listBranches())
+      .filter(({ name }) => /^release\/\d+\.\d+$/.test(name))
+      .sort((a, b) => {
+        const [aMajor, aMinor] = a.name
+          .slice("release/".length)
+          .split(".")
+          .map(Number);
+        const [bMajor, bMinor] = b.name
+          .slice("release/".length)
+          .split(".")
+          .map(Number);
+        return bMajor - aMajor || bMinor - aMinor;
+      });
+    if (!branch) {
+      throw new Error("No release/X.X branch found for nightly publication.");
+    }
+    sourceBranch = branch.name;
+    if (sourceSha) {
+      const { status } = await compareCommits(
+        sourceSha.toLowerCase(),
+        branch.commit.sha,
+      );
+      if (status !== "identical" && status !== "ahead") {
+        throw new Error(
+          `Pinned nightly source ${sourceSha} must be an ancestor of ${sourceBranch} (${branch.commit.sha}).`,
+        );
       }
-      sourceBranch = branch.name;
+    } else {
       sourceSha = branch.commit.sha;
     }
   }

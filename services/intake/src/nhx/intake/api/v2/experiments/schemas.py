@@ -249,6 +249,13 @@ class EvaluatorAggregate(BaseModel):
     p95: float | None = None
     p99: float | None = None
     count: int = 0
+    failed_count: int = Field(
+        default=0,
+        description=(
+            "Sessions whose evaluator recorded a FAILED result (ran, produced no value). They are already "
+            "counted as 0 in `mean`; this says how many of the attempts behind that mean were failures."
+        ),
+    )
 
 
 class EvaluationResponse(BaseModel):
@@ -541,6 +548,10 @@ class EvaluationSessionResponse(BaseModel):
             "text/categorical results are omitted."
         ),
     )
+    failed_evaluators: list[str] = Field(
+        default_factory=list,
+        description="Evaluators that recorded a FAILED result for this session (ran, produced no value).",
+    )
 
     @classmethod
     def from_row(
@@ -568,4 +579,5 @@ class EvaluationSessionResponse(BaseModel):
             cached_tokens=row.cached_tokens,
             cost_total_usd=row.cost_total_usd,
             evaluator_scores=row.evaluator_scores,
+            failed_evaluators=row.failed_evaluators,
         )

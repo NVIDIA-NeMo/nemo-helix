@@ -28,7 +28,7 @@ Once your IdP is connected, see [Using Authentication](/documentation/access-con
 | **Password grant** | `nemo auth login --username <user> --password <pass>` | CI/CD pipelines — non-interactive |
 | **Direct from IdP** | Use your IdP's token endpoint or workload identity | Custom integrations, service accounts |
 
-The CLI stores the token and auto-refreshes it before expiry. The SDK reads the stored token from the CLI config automatically — after `nemo auth login`, `NeMoHelix()` works with no arguments.
+The CLI stores the token and auto-refreshes it before expiry. The SDK reads the stored token from the CLI config automatically: after `nemo auth login`, `NemoClient.from_config()` works with no arguments.
 
 ## Discovery Endpoint
 

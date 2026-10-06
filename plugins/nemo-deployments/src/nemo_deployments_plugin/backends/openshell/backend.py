@@ -65,7 +65,6 @@ from nemo_deployments_plugin.entities import ConfigFile, Container, DeploymentCo
 from nemo_deployments_plugin.secrets import SecretResolutionError, resolve_deployment_config_secrets
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
@@ -227,7 +226,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
     def init(self) -> None:
         _ensure_openshell()
         self._executor_config = OpenShellExecutorConfig.model_validate(self._config)
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._nemo_client))
         # Build the policy once (fail fast on a bad path/shape). The gateway default
         # policy would not permit the agent's own exec paths, so we always apply one.
         self._policy = self._build_executor_policy()
@@ -357,7 +356,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
-            config = await resolve_deployment_config_secrets(self._sdk, config)
+            config = await resolve_deployment_config_secrets(self._nemo_client, config)
         except NemoEntityNotFoundError:
             return BackendStatusUpdate(
                 status="FAILED",

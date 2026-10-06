@@ -10,13 +10,12 @@ OTLP query endpoint using the typed FilesClient.
 
 import logging
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import OtlpLogQueryRequest
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.jobs.schemas import HelixJobLogPage, InvalidPageCursorError
-from nhx.common.sdk_factory import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +37,13 @@ class JobLogsClient:
     endpoint, which runs DuckDB queries with direct storage access.
     """
 
-    def __init__(self, sdk: AsyncNeMoHelix | None = None):
+    def __init__(self, client: AsyncNemoClient | None = None):
         """Initialize the log client.
 
         Args:
-            sdk: AsyncNeMoHelix SDK instance. If not provided,
-                 creates one using platform config.
+            client: Platform client. If not provided, creates one using platform config.
         """
-        self._sdk = sdk or get_async_platform_sdk()
-        self._files_client = client_from_platform(self._sdk, AsyncFilesClient)
+        self._files_client = AsyncFilesClient.from_client(client or get_async_nemo_client())
 
     async def query_logs(
         self,

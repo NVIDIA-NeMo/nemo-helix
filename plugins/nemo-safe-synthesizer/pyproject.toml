@@ -71,7 +71,6 @@ packages = ["src/nemo_safe_synthesizer_plugin"]
 [tool.uv.sources]
 nemo-helix = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 nhx-build-tools = { workspace = true }
 
 [tool.pytest.ini_options]

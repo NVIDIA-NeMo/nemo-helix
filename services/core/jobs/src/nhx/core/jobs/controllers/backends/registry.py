@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import Self, Sequence
 
 from docker.errors import DockerException
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.capabilities import (
     CapabilityUnavailableError,
     probe_docker,
     reset_capability_cache,
 )
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.core.jobs.app.profiles import ExecutionProfileT
 from nhx.core.jobs.app.schemas import BackendRef, ProfileRef, ProviderRef
 from nhx.core.jobs.controllers.backends.base import DEFAULT_PROFILE, DEFAULT_PROVIDER, JobBackend
@@ -107,7 +107,7 @@ class BackendRegistry:
     @classmethod
     def from_config(
         cls,
-        nhx_sdk: NeMoHelix,
+        nemo_client: NemoClient,
         profiles: Sequence[ExecutionProfileT],
         backends: BackendRegistryT = backend_registry,
     ) -> Self:
@@ -166,7 +166,7 @@ class BackendRegistry:
             # yet. Calling the backend constructor will serialize the raw
             # config into the backend's expected format and validate it
             try:
-                registry[registry_key] = backend(nhx_sdk, executor.config, executor.profile)
+                registry[registry_key] = backend(nemo_client, executor.config, executor.profile)
             except _DOCKER_BACKEND_INIT_SKIPPABLE_ERRORS as exc:
                 if executor.backend != "docker":
                     raise

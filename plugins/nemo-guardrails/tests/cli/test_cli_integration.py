@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from nemo_guardrails_plugin.cli import GuardrailCLI
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.client.client import NemoClient
-from nhx.testing import SDKTestClientAdapter, create_test_client
+from nhx.testing import TestClientHttpAdapter, create_test_client
 from typer.testing import CliRunner
 
 # Force offline before the service import so a developer shell with HF_HUB_OFFLINE=0 cannot hit the Hub.
@@ -39,7 +39,7 @@ def asgi_client() -> Iterator[NemoClient]:
     """Typed client whose transport is the in-process Guardrails ASGI app."""
     with create_test_client(GuardrailsService, client_type=TestClient) as test_client:
         yield NemoClient(
-            base_url=str(test_client.base_url), workspace="default", http_client=SDKTestClientAdapter(test_client)
+            base_url=str(test_client.base_url), workspace="default", http_client=TestClientHttpAdapter(test_client)
         )
 
 

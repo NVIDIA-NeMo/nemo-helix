@@ -11,12 +11,6 @@ import pytest
 
 ROOT = Path(__file__).parent.parent.parent
 WORKSPACE_SLICES = ("automodel", "customizer", "rl", "unsloth")
-SDK_EDITABLE_DOCKERFILES = (
-    Path("docker/Dockerfile.nhx-customizer-tasks"),
-    Path("docker/Dockerfile.nhx-unsloth-training"),
-    Path("docker/automodel/Dockerfile.nhx-automodel-training"),
-    Path("docker/rl/Dockerfile.nhx-rl-training"),
-)
 SDK_ALIAS_PACKAGES = ("filesets",)
 WANDB_PACKAGE_SPEC_RE = re.compile(r"(?<![\w./-])wandb(?:\[[^\]]+\])?(?:==|~=|!=|<=|>=|<|>)[^\\\s\"']+")
 DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
@@ -171,19 +165,6 @@ def test_docker_workspace_slice_contains_all_workspace_sources(slice_name):
             f"{slice_name} workspace is missing {sorted(missing_sources)} referenced by "
             f"{project_path.relative_to(ROOT)}"
         )
-
-
-@pytest.mark.parametrize(
-    "path",
-    [pytest.param(ROOT / path, id=str(path)) for path in SDK_EDITABLE_DOCKERFILES],
-)
-def test_sdk_editable_image_installs_sdk_alias_packages(path: Path) -> None:
-    """Editable SDK installs need source packages for SDK aliases available separately."""
-    text = path.read_text(encoding="utf-8")
-
-    assert "-e /app/sdk/python/nemo-helix" in text
-    for package in SDK_ALIAS_PACKAGES:
-        assert f"-e /app/packages/{package}" in text
 
 
 @pytest.mark.parametrize("slice_name", WORKSPACE_SLICES)

@@ -176,7 +176,7 @@ app.include_router(
 
 - Validates the body against `spec_schema` (422 on bad input).
 - Builds a `FunctionContext` from the workspace path parameter and the optional `X-Request-ID` header.
-- Resolves keyword-only DI parameters on `run` by name — `ctx`, `async_sdk` (sync `sdk` injection lands in a follow-up).
+- Resolves keyword-only DI parameters on `run` by name — `ctx`, `sdk` (request-scoped `NemoClient`), `async_sdk` (request-scoped `AsyncNemoClient`).
 - Awaits `run(spec, **resolved)` and serialises the result; returns `application/x-ndjson` with heartbeat injection if the return is an async iterator.
 - Stamps the route's authz from `authz=` — a `PRINCIPAL` `@path_rule` carrying a write-action invoke permission (`<namespace>.<function-name>`, e.g. `my-plugin.greet`) plus `@AuthzScope.write`. `permission_description` overrides that permission's description (it defaults to the function's `description`); passing it without `authz=` is a `ValueError`.
 
@@ -202,6 +202,7 @@ Only `{name}` is substituted; the workspace placeholder stays as a live FastAPI 
 `run` accepts framework-managed dependencies as keyword-only parameters. The route adapter resolves them by parameter name:
 
 ```python
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 
@@ -214,20 +215,20 @@ class WhoamiFunction(NemoFunction[GreetSpec]):
         spec: GreetSpec,
         *,
         ctx: FunctionContext,
-        async_sdk: object | None = None,
+        async_sdk: AsyncNemoClient | None = None,
     ) -> dict:
         return {
             "workspace": ctx.workspace,
             "request_id": ctx.request_id,
-            "sdk_present": async_sdk is not None,
+            "client_present": async_sdk is not None,
         }
 ```
 
 | Parameter | Source | Notes |
 |---|---|---|
 | `ctx: FunctionContext` | route adapter | `workspace` from the URL (set by the CLI's `--workspace`), `request_id` from `X-Request-ID` |
-| `async_sdk` | route adapter only (today) | Plugin services need `app.dependency_overrides[get_sdk_client]` to inject a real handle |
-| `sdk` | declared but currently bound to `None` | Sync placeholder lands with the SDK-builder follow-up |
+| `async_sdk: AsyncNemoClient` | route adapter (`Depends(get_nemo_client)`) | Request-scoped typed client carrying the caller's principal; derive service clients with `<Client>.from_client(async_sdk)` |
+| `sdk: NemoClient` | route adapter (`Depends(get_sync_nemo_client)`) | Sync counterpart for sync-only libraries |
 
 Parameters not declared on `run` aren't injected — there's no implicit context. Keep `run` signatures narrow.
 

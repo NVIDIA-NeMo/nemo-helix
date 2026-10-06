@@ -106,15 +106,15 @@ nemo auth login --unsigned-token --email other-user@example.com
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-# No arguments needed — the SDK reads base_url, workspace, and credentials
+# No arguments needed — from_config reads base_url, workspace, and credentials
 # from the active CLI context (set by `nemo auth login` or `nemo quickstart configure`).
 # See: Initializing the CLI and SDK in the quickstart for other init options.
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-workspaces = client.workspaces.list()
-print(f"Found {len(workspaces.data)} workspaces")
+workspaces = client.workspaces.list_workspaces().items()
+print(f"Found {len(list(workspaces))} workspaces")
 ```
 
 </Tab>

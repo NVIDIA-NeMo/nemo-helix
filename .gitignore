@@ -107,7 +107,6 @@ services/core/infrastructure/jobs/jobs.db
 
 # SDK artifacts
 sdk/openapi_schema_mapping_report.txt
-sdk/python/nemo-helix/uv.lock
 
 # Terraform
 **/.terraform
@@ -182,5 +181,4 @@ crash-dumps/
 plugins/_temporary-scaled-evals/deploy/k8s/local.env
 
 # Renames
-sdk/python/nemo-helix/
 services/core/auth/src/nmp/

@@ -37,12 +37,19 @@ def _make_adapter(
 
 
 @pytest.fixture
+def transfer_mock():
+    """Replace the ``filesets.transfer`` module used by the adapters controller."""
+    with patch("nhx.core.models.sidecars.adapters.main.transfer") as mock:
+        yield mock
+
+
+@pytest.fixture
 def controller(tmp_path):
     """Create an AdaptersController with __init__ bypassed."""
     with patch.object(AdaptersController, "__init__", lambda self, **kwargs: None):
         ctrl = AdaptersController()
         ctrl.nim_peft_source = str(tmp_path)
-        ctrl._sdk = MagicMock()
+        ctrl._files = MagicMock()
         ctrl._models = MagicMock()
         ctrl.workspace = "default"
         ctrl.model_name = "base-model"
@@ -155,7 +162,7 @@ class TestWriteAdapterMeta:
 class TestDownloadAdapter:
     """Tests for AdaptersController._download_adapter atomic behavior."""
 
-    def test_successful_download_creates_adapter_dir_atomically(self, controller, tmp_path):
+    def test_successful_download_creates_adapter_dir_atomically(self, controller, transfer_mock, tmp_path):
         """Verify that a successful download creates the adapter dir via rename."""
         adapter = _make_adapter("my-adapter", "ws/fileset-v1", updated_at=None, workspace="ws")
         dir_name = "ws--my-adapter"
@@ -163,7 +170,7 @@ class TestDownloadAdapter:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._download_adapter(adapter_dir, adapter, "ws")
 
@@ -172,7 +179,7 @@ class TestDownloadAdapter:
         temp_dirs = [e for e in os.listdir(tmp_path) if e.startswith(".")]
         assert temp_dirs == []
 
-    def test_failed_download_cleans_up_temp_dir(self, controller, tmp_path):
+    def test_failed_download_cleans_up_temp_dir(self, controller, transfer_mock, tmp_path):
         """Verify that a failed download (empty fileset) removes the temp dir."""
         adapter = _make_adapter("my-adapter", "default/empty-fs", updated_at=None)
         dir_name = "default--my-adapter"
@@ -180,7 +187,7 @@ class TestDownloadAdapter:
 
         mock_files_response = MagicMock()
         mock_files_response.data = []
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._download_adapter(adapter_dir, adapter, "default")
 
@@ -188,13 +195,13 @@ class TestDownloadAdapter:
         temp_dirs = [e for e in os.listdir(tmp_path) if e.startswith(".")]
         assert temp_dirs == []
 
-    def test_exception_during_download_cleans_up_temp_dir(self, controller, tmp_path):
+    def test_exception_during_download_cleans_up_temp_dir(self, controller, transfer_mock, tmp_path):
         """Verify that an exception during download removes the temp dir and re-raises."""
         adapter = _make_adapter("my-adapter", "default/bad-fs", updated_at=None)
         dir_name = "default--my-adapter"
         adapter_dir = str(tmp_path / dir_name)
 
-        controller._sdk.files.list.side_effect = RuntimeError("network error")
+        transfer_mock.list_files.side_effect = RuntimeError("network error")
 
         with pytest.raises(RuntimeError, match="network error"):
             controller._download_adapter(adapter_dir, adapter, "default")
@@ -203,7 +210,7 @@ class TestDownloadAdapter:
         temp_dirs = [e for e in os.listdir(tmp_path) if e.startswith(".")]
         assert temp_dirs == []
 
-    def test_replaces_existing_adapter_dir_on_success(self, controller, tmp_path):
+    def test_replaces_existing_adapter_dir_on_success(self, controller, transfer_mock, tmp_path):
         """Verify that re-downloading replaces the old adapter directory."""
         dir_name = "default--my-adapter"
         adapter_dir = tmp_path / dir_name
@@ -214,7 +221,7 @@ class TestDownloadAdapter:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._download_adapter(str(adapter_dir), adapter, "default")
 
@@ -222,7 +229,7 @@ class TestDownloadAdapter:
         assert not (adapter_dir / "old_file.bin").exists()
         assert (adapter_dir / ADAPTER_META_FILENAME).exists()
 
-    def test_bare_fileset_uses_adapter_workspace(self, controller, tmp_path):
+    def test_bare_fileset_uses_adapter_workspace(self, controller, transfer_mock, tmp_path):
         """A bare ``fileset`` (no ``"{ws}/"`` prefix) is anchored on the *adapter's* workspace.
 
         The fileset was uploaded by whoever created the adapter, so it lives in the
@@ -236,16 +243,18 @@ class TestDownloadAdapter:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._download_adapter(adapter_dir, adapter, "adapter-ws")
 
-        controller._sdk.files.list.assert_called_once_with(workspace="adapter-ws", fileset="fileset-only")
-        controller._sdk.files.download.assert_called_once_with(
-            fileset="fileset-only", workspace="adapter-ws", local_path=unittest.mock.ANY
+        transfer_mock.list_files.assert_called_once_with(
+            controller._files, workspace="adapter-ws", fileset="fileset-only"
+        )
+        transfer_mock.download.assert_called_once_with(
+            controller._files, fileset="fileset-only", workspace="adapter-ws", local_path=unittest.mock.ANY
         )
 
-    def test_qualified_fileset_overrides_adapter_workspace(self, controller, tmp_path):
+    def test_qualified_fileset_overrides_adapter_workspace(self, controller, transfer_mock, tmp_path):
         """A ``"{ws}/{name}"`` fileset reference uses the qualifier verbatim.
 
         Even when the adapter lives in ``adapter-ws``, an explicit ``other-ws/fs`` reference
@@ -257,16 +266,16 @@ class TestDownloadAdapter:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._download_adapter(adapter_dir, adapter, "adapter-ws")
 
-        controller._sdk.files.list.assert_called_once_with(workspace="other-ws", fileset="shared-fs")
-        controller._sdk.files.download.assert_called_once_with(
-            fileset="shared-fs", workspace="other-ws", local_path=unittest.mock.ANY
+        transfer_mock.list_files.assert_called_once_with(controller._files, workspace="other-ws", fileset="shared-fs")
+        transfer_mock.download.assert_called_once_with(
+            controller._files, fileset="shared-fs", workspace="other-ws", local_path=unittest.mock.ANY
         )
 
-    def test_temp_dir_uses_dir_name_not_adapter_name(self, controller, tmp_path):
+    def test_temp_dir_uses_dir_name_not_adapter_name(self, controller, transfer_mock, tmp_path):
         """Concurrent same-name adapters in different workspaces must not collide on the temp dir.
 
         The staging directory name must derive from the composite ``dir_name`` so that
@@ -280,13 +289,13 @@ class TestDownloadAdapter:
 
         captured_paths: list[str] = []
 
-        def _capture_local_path(*, fileset, workspace, local_path):
+        def _capture_local_path(_files, *, fileset, workspace, local_path):
             captured_paths.append(local_path)
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
-        controller._sdk.files.download.side_effect = _capture_local_path
+        transfer_mock.list_files.return_value = mock_files_response
+        transfer_mock.download.side_effect = _capture_local_path
 
         controller._download_adapter(adapter_dir, adapter, "ws-a")
 
@@ -384,7 +393,7 @@ class TestRewriteAdapterBaseModel:
 class TestUpdateLoraAdaptersRedownload:
     """Tests for _update_lora_adapters re-download on fileset change."""
 
-    def test_redownloads_when_fileset_changes(self, controller, tmp_path):
+    def test_redownloads_when_fileset_changes(self, controller, transfer_mock, tmp_path):
         """Verify that an adapter whose fileset changed is re-downloaded."""
         dir_name = "default--my-adapter"
         adapter_dir = tmp_path / dir_name
@@ -404,7 +413,7 @@ class TestUpdateLoraAdaptersRedownload:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -417,7 +426,7 @@ class TestUpdateLoraAdaptersRedownload:
             meta = json.load(f)
         assert meta["fileset"] == "default/new-fileset"
 
-    def test_skips_download_when_metadata_matches(self, controller, tmp_path):
+    def test_skips_download_when_metadata_matches(self, controller, transfer_mock, tmp_path):
         """Verify that an up-to-date adapter is not re-downloaded."""
         ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
         dir_name = "default--my-adapter"
@@ -438,10 +447,10 @@ class TestUpdateLoraAdaptersRedownload:
         controller._update_lora_adapters(dirs_to_keep)
 
         assert dir_name in dirs_to_keep
-        controller._sdk.files.list.assert_not_called()
-        controller._sdk.files.download.assert_not_called()
+        transfer_mock.list_files.assert_not_called()
+        transfer_mock.download.assert_not_called()
 
-    def test_downloads_new_adapter(self, controller, tmp_path):
+    def test_downloads_new_adapter(self, controller, transfer_mock, tmp_path):
         """Verify that a brand-new adapter (no directory) is downloaded with metadata."""
         ts = datetime(2026, 2, 1, tzinfo=timezone.utc)
         adapter = _make_adapter("new-adapter", "default/fileset-a", updated_at=ts)
@@ -453,7 +462,7 @@ class TestUpdateLoraAdaptersRedownload:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -462,7 +471,7 @@ class TestUpdateLoraAdaptersRedownload:
         assert dir_name in dirs_to_keep
         adapter_dir = tmp_path / dir_name
         assert adapter_dir.is_dir()
-        controller._sdk.files.download.assert_called_once()
+        transfer_mock.download.assert_called_once()
 
         meta_path = adapter_dir / ADAPTER_META_FILENAME
         assert meta_path.exists()
@@ -471,7 +480,7 @@ class TestUpdateLoraAdaptersRedownload:
         assert meta["fileset"] == "default/fileset-a"
         assert meta["updated_at"] == ts.isoformat()
 
-    def test_no_orphaned_temp_dirs_after_download(self, controller, tmp_path):
+    def test_no_orphaned_temp_dirs_after_download(self, controller, transfer_mock, tmp_path):
         """Verify that no temporary directories remain after a successful download."""
         adapter = _make_adapter("clean-adapter", "default/fileset-b", updated_at=None)
 
@@ -482,7 +491,7 @@ class TestUpdateLoraAdaptersRedownload:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -492,7 +501,7 @@ class TestUpdateLoraAdaptersRedownload:
         assert temp_dirs == [], f"Orphaned temp dirs found: {temp_dirs}"
         assert "default--clean-adapter" in entries
 
-    def test_failed_download_leaves_no_adapter_dir(self, controller, tmp_path):
+    def test_failed_download_leaves_no_adapter_dir(self, controller, transfer_mock, tmp_path):
         """Verify that a failed download cleans up the temp dir and creates no adapter dir."""
         adapter = _make_adapter("fail-adapter", "default/missing-fileset", updated_at=None)
 
@@ -503,7 +512,7 @@ class TestUpdateLoraAdaptersRedownload:
 
         mock_files_response = MagicMock()
         mock_files_response.data = []
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -513,7 +522,7 @@ class TestUpdateLoraAdaptersRedownload:
         temp_dirs = [e for e in entries if e.startswith(".")]
         assert temp_dirs == [], f"Orphaned temp dirs found: {temp_dirs}"
 
-    def test_failed_download_preserves_old_adapter(self, controller, tmp_path):
+    def test_failed_download_preserves_old_adapter(self, controller, transfer_mock, tmp_path):
         """Verify that a failed re-download leaves the old adapter intact."""
         dir_name = "default--my-adapter"
         adapter_dir = tmp_path / dir_name
@@ -532,7 +541,7 @@ class TestUpdateLoraAdaptersRedownload:
 
         mock_files_response = MagicMock()
         mock_files_response.data = []
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -547,9 +556,9 @@ class TestUpdateLoraAdaptersRedownload:
 
 
 class TestUpdateLoraAdaptersCrossWorkspace:
-    """Tests for the new ``{adapter_ws}--{adapter_name}`` on-disk encoding (AALGO-129)."""
+    """Tests for the new ``{adapter_ws}--{adapter_name}`` on-disk encoding."""
 
-    def test_two_adapters_same_name_different_workspaces_coexist(self, controller, tmp_path):
+    def test_two_adapters_same_name_different_workspaces_coexist(self, controller, transfer_mock, tmp_path):
         """Two adapters sharing ``adapter.name`` but in different workspaces materialize to distinct dirs."""
         adapter_a = _make_adapter("my-adapter", "ws-a/fileset-a", updated_at=None, workspace="ws-a")
         adapter_b = _make_adapter("my-adapter", "ws-b/fileset-b", updated_at=None, workspace="ws-b")
@@ -561,7 +570,7 @@ class TestUpdateLoraAdaptersCrossWorkspace:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -572,7 +581,7 @@ class TestUpdateLoraAdaptersCrossWorkspace:
         assert (tmp_path / "ws-a--my-adapter" / ADAPTER_META_FILENAME).exists()
         assert (tmp_path / "ws-b--my-adapter" / ADAPTER_META_FILENAME).exists()
 
-    def test_dir_name_uses_adapter_workspace_not_base_model_workspace(self, controller, tmp_path):
+    def test_dir_name_uses_adapter_workspace_not_base_model_workspace(self, controller, transfer_mock, tmp_path):
         """Cross-workspace adapter (lives in ``adapter-ws``, base model in ``base-ws``) uses adapter workspace."""
         adapter = _make_adapter("cross-ws-adapter", "adapter-ws/fs", updated_at=None, workspace="adapter-ws")
 
@@ -583,7 +592,7 @@ class TestUpdateLoraAdaptersCrossWorkspace:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)
@@ -594,7 +603,9 @@ class TestUpdateLoraAdaptersCrossWorkspace:
         assert not (tmp_path / "cross-ws-adapter").exists()
         assert not (tmp_path / "base-ws--cross-ws-adapter").exists()
 
-    def test_bare_fileset_for_cross_workspace_adapter_fetches_from_adapter_workspace(self, controller, tmp_path):
+    def test_bare_fileset_for_cross_workspace_adapter_fetches_from_adapter_workspace(
+        self, controller, transfer_mock, tmp_path
+    ):
         """End-to-end: a bare ``fileset`` on a cross-workspace adapter fetches from the
         adapter's workspace, not the base model's.
 
@@ -618,16 +629,16 @@ class TestUpdateLoraAdaptersCrossWorkspace:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         controller._update_lora_adapters(set())
 
-        controller._sdk.files.list.assert_called_once_with(workspace="adapter-ws", fileset="bare-fs")
-        controller._sdk.files.download.assert_called_once_with(
-            fileset="bare-fs", workspace="adapter-ws", local_path=unittest.mock.ANY
+        transfer_mock.list_files.assert_called_once_with(controller._files, workspace="adapter-ws", fileset="bare-fs")
+        transfer_mock.download.assert_called_once_with(
+            controller._files, fileset="bare-fs", workspace="adapter-ws", local_path=unittest.mock.ANY
         )
 
-    def test_step_gc_removes_stale_dir_after_adapter_workspace_change(self, controller, tmp_path):
+    def test_step_gc_removes_stale_dir_after_adapter_workspace_change(self, controller, transfer_mock, tmp_path):
         """``step()``'s GC pass removes a stale ``{ws_old}--{name}`` dir after the adapter is moved.
 
         Simulates an adapter being deleted from workspace ``ws-old`` and re-created in workspace
@@ -646,7 +657,7 @@ class TestUpdateLoraAdaptersCrossWorkspace:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         # No prompt-tuned models in this scenario.
         controller._models.list_models.return_value.items.return_value = iter([])
@@ -657,7 +668,7 @@ class TestUpdateLoraAdaptersCrossWorkspace:
         assert "ws-new--my-adapter" in entries
         assert "ws-old--my-adapter" not in entries
 
-    def test_adapter_changed_meta_check_works_against_new_dir_path(self, controller, tmp_path):
+    def test_adapter_changed_meta_check_works_against_new_dir_path(self, controller, transfer_mock, tmp_path):
         """``_adapter_changed`` must read metadata from the new ``{ws}--{name}`` path."""
         ts = datetime(2026, 5, 1, tzinfo=timezone.utc)
         dir_name = "ws-x--shared-adapter"
@@ -677,8 +688,8 @@ class TestUpdateLoraAdaptersCrossWorkspace:
         controller._update_lora_adapters(dirs_to_keep)
 
         assert dir_name in dirs_to_keep
-        controller._sdk.files.list.assert_not_called()
-        controller._sdk.files.download.assert_not_called()
+        transfer_mock.list_files.assert_not_called()
+        transfer_mock.download.assert_not_called()
 
 
 class TestEagerVllmAdapterLoad:
@@ -689,20 +700,20 @@ class TestEagerVllmAdapterLoad:
     model-provider discovery never surfaces it (the QA serving bug).
     """
 
-    def _model_entity(self, controller, adapter):
+    def _model_entity(self, controller, transfer_mock, adapter):
         me = MagicMock()
         me.workspace = "default"
         me.adapters = [adapter]
         controller._models.get_model.return_value.data.return_value = me
         files_resp = MagicMock()
         files_resp.data = [MagicMock()]
-        controller._sdk.files.list.return_value = files_resp
+        transfer_mock.list_files.return_value = files_resp
         return me
 
-    def test_new_adapter_is_loaded_into_vllm(self, controller, tmp_path):
+    def test_new_adapter_is_loaded_into_vllm(self, controller, transfer_mock, tmp_path):
         controller.vllm_endpoint = "http://localhost:49152"
         adapter = _make_adapter("my-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
@@ -713,7 +724,7 @@ class TestEagerVllmAdapterLoad:
         assert payload["lora_name"] == "default--my-adapter"
         assert payload["lora_path"].endswith("default--my-adapter")
 
-    def test_changed_adapter_is_unloaded_then_reloaded(self, controller, tmp_path):
+    def test_changed_adapter_is_unloaded_then_reloaded(self, controller, transfer_mock, tmp_path):
         controller.vllm_endpoint = "http://localhost:49152"
         dir_name = "default--my-adapter"
         adapter_dir = tmp_path / dir_name
@@ -723,7 +734,7 @@ class TestEagerVllmAdapterLoad:
 
         ts = datetime(2026, 3, 1, tzinfo=timezone.utc)
         adapter = _make_adapter("my-adapter", "default/new-fs", updated_at=ts)
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
@@ -731,7 +742,7 @@ class TestEagerVllmAdapterLoad:
         routes = [c.args[0] for c in api.call_args_list]
         assert routes == ["/v1/unload_lora_adapter", "/v1/load_lora_adapter"]
 
-    def test_unchanged_adapter_is_reloaded_idempotently(self, controller, tmp_path):
+    def test_unchanged_adapter_is_reloaded_idempotently(self, controller, transfer_mock, tmp_path):
         """An up-to-date adapter is not re-downloaded, but is still (idempotently)
         loaded so it survives a vLLM restart; vLLM tolerates the already-loaded case."""
         controller.vllm_endpoint = "http://localhost:49152"
@@ -743,34 +754,34 @@ class TestEagerVllmAdapterLoad:
             json.dump({"fileset": "default/fs", "updated_at": ts.isoformat()}, f)
 
         adapter = _make_adapter("my-adapter", "default/fs", updated_at=ts)
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
 
-        controller._sdk.files.download.assert_not_called()
+        transfer_mock.download.assert_not_called()
         api.assert_called_once()
         assert api.call_args.args[0] == "/v1/load_lora_adapter"
 
-    def test_nim_mode_does_not_call_vllm(self, controller, tmp_path):
+    def test_nim_mode_does_not_call_vllm(self, controller, transfer_mock, tmp_path):
         """With no vLLM endpoint (NIM), the sidecar never touches the runtime LoRA API."""
         controller.vllm_endpoint = ""
         adapter = _make_adapter("my-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
 
         with patch.object(controller, "_vllm_api_call") as api:
             controller._update_lora_adapters(set())
 
         api.assert_not_called()
 
-    def test_failed_new_download_does_not_load_into_vllm(self, controller, tmp_path):
+    def test_failed_new_download_does_not_load_into_vllm(self, controller, transfer_mock, tmp_path):
         """An empty fileset leaves no directory for a brand-new adapter, so the
         sidecar must not POST a non-existent ``lora_path`` to vLLM every cycle."""
         controller.vllm_endpoint = "http://localhost:49152"
         adapter = _make_adapter("my-adapter", "default/empty-fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         # Empty fileset -> download_fileset returns False -> nothing published.
-        controller._sdk.files.list.return_value.data = []
+        transfer_mock.list_files.return_value.data = []
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
@@ -778,7 +789,7 @@ class TestEagerVllmAdapterLoad:
         assert not (tmp_path / "default--my-adapter").exists()
         api.assert_not_called()
 
-    def test_failed_redownload_keeps_existing_adapter_without_flap(self, controller, tmp_path):
+    def test_failed_redownload_keeps_existing_adapter_without_flap(self, controller, transfer_mock, tmp_path):
         """A changed adapter whose re-download yields an empty fileset keeps its
         previous on-disk weights and must NOT be unloaded — unloading would briefly
         drop it from /v1/models on every refresh cycle. It is only idempotently
@@ -792,9 +803,9 @@ class TestEagerVllmAdapterLoad:
 
         ts = datetime(2026, 3, 1, tzinfo=timezone.utc)
         adapter = _make_adapter("my-adapter", "default/new-fs", updated_at=ts)
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         # Re-download fails (empty fileset); the old directory must remain.
-        controller._sdk.files.list.return_value.data = []
+        transfer_mock.list_files.return_value.data = []
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
             controller._update_lora_adapters(set())
@@ -803,27 +814,27 @@ class TestEagerVllmAdapterLoad:
         routes = [c.args[0] for c in api.call_args_list]
         assert routes == ["/v1/load_lora_adapter"]
 
-    def test_load_tolerates_already_loaded(self, controller):
+    def test_load_tolerates_already_loaded(self, controller, transfer_mock):
         controller.vllm_endpoint = "http://localhost:49152"
         with patch.object(controller, "_vllm_api_call", return_value=(400, "LoRA adapter x has already been loaded")):
             # Must not raise.
             controller._load_vllm_adapter("x", "/scratch/loras/x")
 
-    def test_load_failure_is_swallowed_for_retry(self, controller):
+    def test_load_failure_is_swallowed_for_retry(self, controller, transfer_mock):
         """vLLM not reachable yet: transport error must not crash the reconcile loop."""
         controller.vllm_endpoint = "http://localhost:49152"
         with patch.object(controller, "_vllm_api_call", side_effect=urllib.error.URLError("refused")):
             # Must not raise; retried on the next cycle.
             controller._ensure_vllm_adapter_loaded("x", "/scratch/loras/x", reload=False)
 
-    def test_step_unloads_removed_adapter_before_delete(self, controller, tmp_path):
+    def test_step_unloads_removed_adapter_before_delete(self, controller, transfer_mock, tmp_path):
         controller.vllm_endpoint = "http://localhost:49152"
         stale_dir = tmp_path / "default--gone-adapter"
         stale_dir.mkdir()
         (stale_dir / ADAPTER_META_FILENAME).write_text(json.dumps({"fileset": "default/fs", "updated_at": None}))
 
         adapter = _make_adapter("kept-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         controller._models.list_models.return_value.items.return_value = iter([])  # no prompt-tuned models
 
         with patch.object(controller, "_vllm_api_call", return_value=(200, "")) as api:
@@ -833,7 +844,7 @@ class TestEagerVllmAdapterLoad:
         unload_calls = [c for c in api.call_args_list if c.args[0] == "/v1/unload_lora_adapter"]
         assert any(c.args[1]["lora_name"] == "default--gone-adapter" for c in unload_calls)
 
-    def test_step_keeps_removed_adapter_dir_when_vllm_unreachable(self, controller, tmp_path):
+    def test_step_keeps_removed_adapter_dir_when_vllm_unreachable(self, controller, transfer_mock, tmp_path):
         """If vLLM is unreachable during GC, the removed adapter's directory is kept so
         the unload is retried next cycle, instead of deleting the only state that drives
         reconciliation and leaving the adapter served until a vLLM restart."""
@@ -843,7 +854,7 @@ class TestEagerVllmAdapterLoad:
         (stale_dir / ADAPTER_META_FILENAME).write_text(json.dumps({"fileset": "default/fs", "updated_at": None}))
 
         adapter = _make_adapter("kept-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         controller._models.list_models.return_value.items.return_value = iter([])  # no prompt-tuned models
 
         # vLLM unreachable: both the kept adapter's load and the stale one's unload
@@ -854,7 +865,7 @@ class TestEagerVllmAdapterLoad:
         # Stale dir preserved so the unload is retried on a later cycle.
         assert stale_dir.exists()
 
-    def test_step_deletes_removed_adapter_dir_when_vllm_answers_non_200(self, controller, tmp_path):
+    def test_step_deletes_removed_adapter_dir_when_vllm_answers_non_200(self, controller, transfer_mock, tmp_path):
         """A reachable vLLM that returns a non-200 (e.g. the adapter was already not
         loaded) still means the adapter is gone from vLLM, so the directory is reaped
         rather than lingering forever."""
@@ -864,7 +875,7 @@ class TestEagerVllmAdapterLoad:
         (stale_dir / ADAPTER_META_FILENAME).write_text(json.dumps({"fileset": "default/fs", "updated_at": None}))
 
         adapter = _make_adapter("kept-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         controller._models.list_models.return_value.items.return_value = iter([])  # no prompt-tuned models
 
         def _responses(route, payload):
@@ -877,7 +888,7 @@ class TestEagerVllmAdapterLoad:
 
         assert not stale_dir.exists()
 
-    def test_step_keeps_removed_adapter_dir_when_vllm_server_error(self, controller, tmp_path):
+    def test_step_keeps_removed_adapter_dir_when_vllm_server_error(self, controller, transfer_mock, tmp_path):
         """A 5xx from vLLM means the unload was NOT confirmed (the adapter may still be
         loaded), so the directory is kept and retried next cycle rather than deleted —
         deleting it would orphan the adapter in vLLM until a restart."""
@@ -887,7 +898,7 @@ class TestEagerVllmAdapterLoad:
         (stale_dir / ADAPTER_META_FILENAME).write_text(json.dumps({"fileset": "default/fs", "updated_at": None}))
 
         adapter = _make_adapter("kept-adapter", "default/fs", updated_at=None, workspace="default")
-        self._model_entity(controller, adapter)
+        self._model_entity(controller, transfer_mock, adapter)
         controller._models.list_models.return_value.items.return_value = iter([])  # no prompt-tuned models
 
         def _responses(route, payload):
@@ -913,7 +924,7 @@ class TestEagerVllmAdapterLoad:
             ("http://localhost:49152", urllib.error.URLError("refused"), False),  # unreachable -> retry
         ],
     )
-    def test_unload_return_contract(self, controller, endpoint, api_result, expected):
+    def test_unload_return_contract(self, controller, transfer_mock, endpoint, api_result, expected):
         """`_unload_vllm_adapter` returns "safe to delete the dir": True for NIM and
         any vLLM response < 500 (including 4xx "not loaded"); False for 5xx and
         transport errors so GC keeps the dir and retries."""
@@ -930,9 +941,9 @@ class TestEagerVllmAdapterLoad:
 class TestResolveAdapterWorkspaceFallback:
     """Tests for the temporary ``Adapter.workspace`` SDK-schema gap.
 
-    AALGO-117 introduces first-class :class:`Adapter` entities with their own
+    First-class :class:`Adapter` entities have their own
     ``workspace`` in the entity store, but at the time of writing the public
-    SDK ``Adapter`` schema does not yet expose the field. AALGO-129 needs the
+    SDK ``Adapter`` schema does not yet expose the field. Cross-workspace adapter resolution needs the
     adapter workspace to encode the directory layout, so the sidecar falls
     back to the base model's workspace until the SDK schema gains
     ``workspace``. These tests pin both halves of that contract: the fallback
@@ -969,7 +980,7 @@ class TestResolveAdapterWorkspaceFallback:
         adapter.workspace = "adapter-ws"
         assert AdaptersController._resolve_adapter_workspace(adapter, "base-ws") == "adapter-ws"
 
-    def test_update_lora_adapters_falls_back_to_base_model_workspace(self, controller, tmp_path):
+    def test_update_lora_adapters_falls_back_to_base_model_workspace(self, controller, transfer_mock, tmp_path):
         """End-to-end fallback path: an SDK Adapter without ``workspace`` is laid down under
         ``{base_model_workspace}--{adapter_name}`` so the wire format stays decodable.
         """
@@ -990,7 +1001,7 @@ class TestResolveAdapterWorkspaceFallback:
 
         mock_files_response = MagicMock()
         mock_files_response.data = [MagicMock()]
-        controller._sdk.files.list.return_value = mock_files_response
+        transfer_mock.list_files.return_value = mock_files_response
 
         dirs_to_keep: set[str] = set()
         controller._update_lora_adapters(dirs_to_keep)

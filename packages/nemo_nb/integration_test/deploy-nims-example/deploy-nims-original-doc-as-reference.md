@@ -22,11 +22,10 @@ Start deploying a NIM for Llama 3.1 8B Instruct. You'll use this NIM for evaluat
    :sync: sdk
 
    ```python
-   from nemo_helix import NeMoHelix
+   from nemo_helix_plugin.client.client import NemoClient
 
-   client = NeMoHelix(
+   client = NemoClient(
 	   base_url="http://nemo.test",
-	   inference_base_url="http://nim.test",
    )
 
    deployment = client.deployment.model_deployments.create(

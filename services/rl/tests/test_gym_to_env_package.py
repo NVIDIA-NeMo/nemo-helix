@@ -18,6 +18,22 @@ def _touch_wheels(directory: Path, *names: str) -> None:
         (directory / name).touch()
 
 
+def test_server_closure_uses_the_selected_server_only(tmp_path: Path) -> None:
+    server = tmp_path / "resources_servers" / "math_with_judge"
+    server.mkdir(parents=True)
+    (server / "requirements.txt").write_text(
+        "-e nemo-gym[dev] @ ../../\nmath-verify==0.8.0\n# comment\n\ndatasets\n",
+        encoding="utf-8",
+    )
+
+    lines = MODULE.server_closure_requirements(server, "2.56.1", "2.44.0")
+
+    assert lines[:2] == ["ray[default]==2.56.1", "openai==2.44.0"]
+    assert "math-verify==0.8.0" in lines
+    assert "datasets" in lines
+    assert not any("nemo-gym" in line for line in lines)
+
+
 def test_image_gym_wheel_is_not_shipped(tmp_path: Path) -> None:
     _touch_wheels(
         tmp_path,

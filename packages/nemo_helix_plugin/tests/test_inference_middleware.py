@@ -568,3 +568,25 @@ class TestDiscoverInferenceMiddleware:
 
         assert "nemo-switchyard" in manifests
         assert manifests["nemo-switchyard"].version == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_injected_platform_client_can_build_typed_service_clients() -> None:
+    from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+
+    class _ClientMiddleware(NemoInferenceMiddleware):
+        async def on_startup(self) -> None:
+            self.entities = AsyncEntitiesClient.from_client(self._get_platform_client("on_startup"))
+
+    client = AsyncNemoClient(
+        base_url="http://platform.test",
+        default_headers={"X-NHX-Principal-Id": "service:my-plugin", "X-NHX-Internal": "true"},
+    )
+    plugin = _ClientMiddleware()
+    plugin._inject_platform_client(client)
+    await plugin.on_startup()
+
+    assert isinstance(plugin.entities, AsyncEntitiesClient)
+    assert plugin.entities._http is client._http
+    assert plugin.entities.default_headers["X-NHX-Principal-Id"] == "service:my-plugin"
+    await client.close()

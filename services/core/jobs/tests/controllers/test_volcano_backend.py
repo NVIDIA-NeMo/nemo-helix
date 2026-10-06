@@ -141,7 +141,7 @@ def distributed_gpu_execution_provider():
 
 @pytest.fixture
 def volcano_job(
-    mock_nhx_client,
+    mock_nemo_client,
     kubernetes_client_mock,
     volcano_execution_profile_config,
     mock_platform_config,
@@ -156,7 +156,7 @@ def volcano_job(
     ):
         # Convert the Pydantic model to dict format expected by the base class
         volcano_job = VolcanoJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )
@@ -440,7 +440,7 @@ def test_created_step_does_not_ttl_before_backend_acceptance(
 
 def test_volcano_job_profile_environment_applied(
     kubernetes_client_mock,
-    mock_nhx_client,
+    mock_nemo_client,
     volcano_execution_profile_config,
     mock_platform_config,
     distributed_gpu_execution_provider,
@@ -458,7 +458,7 @@ def test_volcano_job_profile_environment_applied(
         ),
     ):
         backend = VolcanoJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=profile_config,
             profile_name="default",
         )
@@ -808,7 +808,7 @@ def test_single_node_no_networking_annotations(
 
 def test_networking_annotations_disabled_via_config(
     kubernetes_client_mock,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_platform_config,
     test_step_pending: HelixJobStepWithContext,
 ):
@@ -831,7 +831,7 @@ def test_networking_annotations_disabled_via_config(
         ),
     ):
         volcano_job = VolcanoJobBackend(
-            nhx_sdk=mock_nhx_client,
+            nemo_client=mock_nemo_client,
             execution_profile_config=volcano_execution_profile_config,
             profile_name="default",
         )

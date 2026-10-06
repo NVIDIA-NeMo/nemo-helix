@@ -17,11 +17,11 @@ from services.core.jobs.tests.controllers.client_mocks import paginated_response
 
 def test_job_reconciler_syncs_active_job(
     backend_registry: BackendRegistry,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_active: HelixJobStepWithContext,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nhx_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
 
     # Mock the jobs list response
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
@@ -59,13 +59,13 @@ def test_job_reconciler_syncs_active_job(
 
 def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
     backend_registry: BackendRegistry,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_active: HelixJobStepWithContext,
 ):
     mock_jobs_client.list_steps.return_value = paginated_response([test_step_active])
 
-    job_reconciler = JobReconciler(backend_registry, mock_nhx_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
     test_backend = job_reconciler._backend_registry.get_backend(provider="cpu", profile="default")
     assert isinstance(test_backend, MockDockerCPUJobBackend)
 
@@ -76,7 +76,7 @@ def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
         job_reconciler.step()
 
     log_diagnostics.assert_called_once_with(
-        mock_nhx_client,
+        mock_nemo_client,
         test_step_active,
         logger=job_reconciler._logger,
         context="step transitioned to error during reconciliation",
@@ -85,10 +85,10 @@ def test_job_reconciler_logs_diagnostics_for_error_transition_in_debug_mode(
 
 def test_job_reconciler_marks_itself_unhealthy_after_transport_failure(
     backend_registry: BackendRegistry,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
 ):
-    job_reconciler = JobReconciler(backend_registry, mock_nhx_client)
+    job_reconciler = JobReconciler(backend_registry, mock_nemo_client)
     mock_jobs_client.list_steps.return_value = paginated_response([])
     job_reconciler.step()
     assert job_reconciler.is_healthy
