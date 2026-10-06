@@ -23,10 +23,16 @@ A GRPO job needs three things that no deployment creates for you — a model ent
 
 ## 1. Build the environment package
 
+Run packaging from a dedicated virtualenv, not the project `.venv`:
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
+```
+
 `gym_to_env_package.py` packages **any** server from a Gym checkout:
 
 ```bash
-uv run scripts/grpo-examples/gym_to_env_package.py \
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
   --gym-root ~/workspace/Gym \
   --nemo-rl-root ~/workspace/RL \
   --server resources_servers/math_with_judge \
@@ -45,7 +51,7 @@ Gym commit that checkout records.
 The same script emits `native-v1` — one flag, not a second script:
 
 ```bash
-uv run scripts/grpo-examples/gym_to_env_package.py \
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
   --gym-root ~/workspace/Gym \
   --server resources_servers/math_with_judge \
   --format native-v1 \
@@ -79,7 +85,7 @@ For a `verifiers` / Prime Intellect environment use the converter instead, which
 checkout — note it vendors `x86_64` wheels today:
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion \
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --dataset-dir ./ascii-tree-data --validation-fraction 0.1
 ```
@@ -88,17 +94,17 @@ uv run --package nhx-rl pi-to-gym-conversion \
 
 `prepare_math_with_judge.py` builds Gym rollout rows from DAPO-Math-17k (train) plus a holdout
 or AIME24 (validation), adding the `agent_ref` every platform row needs and the
-`expected_answer` field `math_with_judge` scores against:
+`expected_answer` field `math_with_judge` scores against. `--no-project` keeps this off the project `.venv`:
 
 ```bash
-uv run --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
+uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judge.py \
   --out-dir /tmp/mwj-data --train-size 512
 ```
 
 ## 3. Validate and upload
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+.venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
 
 nemo files filesets create math-with-judge-env -w default --purpose environment --exist-ok
 nemo files upload /tmp/mwj-env/ math-with-judge-env -w default

@@ -15,10 +15,10 @@ resolves the execution profile.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_rl_plugin.schema import RlJobInput
 from nemo_rl_plugin.transform import transform_input_to_output
@@ -32,6 +32,12 @@ from nhx.rl.schemas import RlJobOutput
 from pydantic import BaseModel
 
 
+class RlJobsListFilter(BaseJobsListFilter):
+    """RL jobs only. ``backend`` is the literal stored on the job spec."""
+
+    backend: Literal["rl"] = "rl"
+
+
 class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
     """NeMo-RL DPO and GRPO training job under the customization router (submit-only)."""
 
@@ -40,6 +46,7 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
     job_collection_path: ClassVar[str | None] = "/rl/jobs"
     input_spec_schema: ClassVar[type[RlJobInput] | None] = RlJobInput
     spec_schema: ClassVar[type[RlJobOutput] | None] = RlJobOutput
+    jobs_list_filter: ClassVar[type[RlJobsListFilter]] = RlJobsListFilter
     runtime_label: ClassVar[str] = "NeMo-RL"
 
     @classmethod

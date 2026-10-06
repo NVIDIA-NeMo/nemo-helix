@@ -65,7 +65,6 @@ _nhx = "nemo_helix_ext.cli.app:cli"
 platform = "nemo_helix_ext.skills:skills_dir"
 
 [tool.uv.sources]
-nhx-testing = { workspace = true }
 nemo-helix-sdk = { workspace = true }
 
 [build-system]

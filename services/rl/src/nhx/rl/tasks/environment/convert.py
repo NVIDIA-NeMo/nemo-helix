@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import logging
 import os
 import re
@@ -373,10 +375,76 @@ def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str 
     return gym_root, ray_version, openai_version
 
 
+def _write_nemo_gym_metadata_project(gym_root: Path, dest: Path, version: str) -> None:
+    """A wheel that carries nemo-gym's dependency metadata and none of its server trees.
+
+    ``uv build`` of the checkout packs every built-in server. The wheel is only an input
+    to the resolver, and it is deleted before the package is written.
+    """
+    project = tomllib.loads((gym_root / "pyproject.toml").read_text(encoding="utf-8")).get("project", {})
+    dependencies = project.get("dependencies", [])
+    dev = project.get("optional-dependencies", {}).get("dev", [])
+
+    def array(items: list[str]) -> str:
+        return "[\n" + "".join(f"  {json.dumps(item)},\n" for item in items) + "]"
+
+    dest.mkdir(parents=True)
+    (dest / "pyproject.toml").write_text(
+        f"""\
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemo-gym"
+version = {json.dumps(version)}
+dependencies = {array(dependencies)}
+
+[project.optional-dependencies]
+dev = {array(dev)}
+
+[tool.setuptools]
+packages = []
+""",
+        encoding="utf-8",
+    )
+
+
+def _checkout_nemo_gym_version(gym_root: Path) -> str:
+    """Version this Gym checkout builds, from ``package_info.py``."""
+    info = gym_root / "nemo_gym" / "package_info.py"
+    if not info.is_file():
+        raise RuntimeError(f"{gym_root} has no nemo_gym/package_info.py")
+    text = info.read_text(encoding="utf-8")
+
+    def grab(name: str) -> str:
+        match = re.search(rf"^{name} = (.+)$", text, re.M)
+        if not match:
+            raise RuntimeError(f"{info} has no {name}")
+        value = ast.literal_eval(match.group(1))
+        return "" if value is None else str(value)
+
+    return f"{grab('MAJOR')}.{grab('MINOR')}.{grab('PATCH')}{grab('PRE_RELEASE')}"
+
+
 def _build_gym_fork_wheel(gym_root: Path, dest: Path, expect_version: str | None) -> Path:
-    """Build nemo-gym from ``gym_root`` so a fork is not replaced by the upstream release."""
+    """Build a metadata-only nemo-gym wheel so resolution uses this checkout's dependencies.
+
+    The file list of a real Gym wheel is every built-in server. Nothing in the uploaded
+    package installs that wheel; the image's Gym is the one the sandbox imports.
+    """
+    actual = _checkout_nemo_gym_version(gym_root)
+    if expect_version is not None and actual != expect_version:
+        raise RuntimeError(
+            f"--gym-root builds nemo-gym {actual} but the image reports {expect_version}. "
+            "Gym pins each per-server venv to the image's version, so this wheel would be "
+            "ignored and uv would resolve from an index instead."
+        )
     dest.mkdir(parents=True, exist_ok=True)
-    _run_build_step(["uv", "build", "--wheel", "--out-dir", str(dest), str(gym_root)])
+    with tempfile.TemporaryDirectory(prefix="nemo-gym-meta-") as tmp:
+        project = Path(tmp) / "nemo-gym"
+        _write_nemo_gym_metadata_project(gym_root, project, actual)
+        _run_build_step(["uv", "build", "--wheel", "--no-config", "--out-dir", str(dest), str(project)])
     built = sorted(dest.glob("nemo_gym-*.whl"))
     if len(built) != 1:
         raise RuntimeError(f"expected exactly one nemo_gym wheel, got {[p.name for p in built]}")
@@ -643,8 +711,10 @@ def _load_verifiers_environment(vf_env_id: str, vf_env_args: dict[str, Any]) -> 
             "verifiers is required for pi-to-gym-conversion dataset generation; it lives in "
             "the optional `conversion` extra. Sync it into a dedicated environment, not the "
             "repo .venv, which every `flox activate` prunes back to uv.lock: "
-            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl "
-            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`"
+            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl "
+            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`. "
+            "Do not use the project .venv: this installs into sys.executable, and a mutated "
+            "project environment makes the next flox activate fail"
         ) from exc
 
     return vf.load_environment(vf_env_id, **vf_env_args)

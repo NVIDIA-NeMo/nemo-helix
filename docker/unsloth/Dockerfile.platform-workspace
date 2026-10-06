@@ -21,4 +21,5 @@ COPY packages/nhx_common packages/nhx_common
 COPY packages/nhx_customization_common packages/nhx_customization_common
 COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY sdk/python/nemo-helix sdk/python/nemo-helix
+COPY packages/nemo_helix_ext packages/nemo_helix_ext
 COPY services/unsloth services/unsloth

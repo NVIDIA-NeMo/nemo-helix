@@ -9,15 +9,21 @@ platform calls it: the supported contract is the environment FileSet layout itse
 `nhx.rl.tasks.environment.validate` defines and which you can satisfy by hand. Use this to
 get a working package quickly, or as a starting point for your own build.
 
-    uv run scripts/grpo-examples/gym_to_env_package.py \\
+Run it with a dedicated interpreter, not ``uv run`` (that is the project ``.venv``).
+``wheels-v1`` calls ``sys.executable -m pip``, and installing into the project
+environment makes it diverge from ``uv.lock``. ``flox activate`` then fails trying
+to recreate ``.venv``, which blocks commits and uploads.
+
+    UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl
+    .venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \\
         --gym-root ~/workspace/Gym \\
         --nemo-rl-root ~/workspace/RL \\
         --server resources_servers/math_with_judge \\
         --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
-Then validate and upload:
+Then validate and upload, still with that interpreter:
 
-    uv run --package nhx-rl pi-to-gym-conversion --validate-only /tmp/mwj-env
+    .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
     nemo files filesets create my-env -w default --purpose environment --exist-ok
     nemo files upload /tmp/mwj-env/ my-env -w default
 
@@ -214,27 +220,37 @@ def write_policy_model_config(out_dir: Path, fmt: str, server: Path) -> Path:
     return target
 
 
-def build_fork_wheel(gym_root: Path, wheels: Path, expect_version: str | None) -> Path:
-    """Build nemo-gym from the checkout rather than taking it from an index.
+def server_requirement_lines(pkg_server_dir: Path) -> list[str]:
+    """The server's own requirements, without the editable Gym checkout line.
 
-    Gym pins each sub-venv to ``nemo-gym=={image version}``. If the cluster runs a fork, a
-    same-versioned wheel from PyPI is upstream code, so build from source and check the version.
+    ``-e nemo-gym[dev] @ ../../`` only resolves inside a Gym tree. A platform package is not
+    one, so Gym rewrites that line to ``nemo-gym==<image version>`` and imports the image's
+    Gym. Building a wheel of the checkout to satisfy it packs every built-in server.
     """
-    with tempfile.TemporaryDirectory(prefix="nemo-gym-build-") as tmp:
-        subprocess.run(["uv", "build", "--wheel", "--out-dir", tmp, str(gym_root)], check=True)
-        built = sorted(Path(tmp).glob("nemo_gym-*.whl"))
-        if len(built) != 1:
-            raise SystemExit(f"expected exactly one nemo_gym wheel, got {[p.name for p in built]}")
-        version = built[0].name.split("-")[1]
-        if expect_version is not None and version != expect_version:
-            raise SystemExit(
-                f"the checkout builds nemo-gym {version} but the image reports {expect_version}. "
-                "Gym pins sub-venvs to the image's version, so this wheel would be ignored and uv "
-                "would resolve from an index instead."
-            )
-        target = wheels / built[0].name
-        shutil.copy2(built[0], target)
-    return target
+    reqs = pkg_server_dir / "requirements.txt"
+    if not reqs.is_file():
+        return []
+    lines = []
+    for raw in reqs.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#") or "../.." in stripped or "nemo-gym" in stripped:
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def server_closure_requirements(pkg_server_dir: Path, ray_version: str, openai_version: str) -> list[str]:
+    """Pins Gym stamps onto the selected server's venv, plus that server's own requirements."""
+    return [
+        f"ray[default]=={ray_version}",
+        f"openai=={openai_version}",
+        f"hydra-core{HYDRA_CORE_SPEC}",
+        f"omegaconf{OMEGACONF_SPEC}",
+        "pip",
+        f"setuptools>=61,<{SETUPTOOLS_PKG_RESOURCES_CEILING}",
+        "setuptools-scm",
+        *server_requirement_lines(pkg_server_dir),
+    ]
 
 
 _NO_WHEEL_RE = re.compile(r"No matching distribution found for (\S+)")
@@ -411,34 +427,25 @@ def locked_distribution_versions(rl_root: Path) -> tuple[str, str]:
 
 def vendor_wheels(
     out_dir: Path,
-    gym_root: Path,
     pkg_server_dir: Path,
     arch: str,
-    expect_version: str | None,
     ray_version: str,
     openai_version: str,
     nemo_rl_root: Path,
 ) -> Path:
-    """Resolve and download the offline closure for the training nodes.
+    """Resolve and download the offline closure for the selected server.
 
     Resolution and download are separate steps. ``uv pip compile --python-platform`` picks
     the versions, because environment markers are evaluated during resolution: resolving on
     the build host omits a linux-only dependency (sqlalchemy's greenlet) and can add a
     darwin-only one. ``pip download`` then fetches exactly those pins for the target tags.
 
-    Beyond the server's own requirements the closure needs:
-
-    * ``nemo-gym[dev]`` at the image's version, built from ``gym_root`` so the resolve
-      matches this checkout rather than an index release. The wheel is deleted afterwards:
-      the training image's Gym is the one the sandbox imports;
-    * ``ray[default]`` and ``openai`` at the image's versions, which Gym appends to every
-      per-server install;
-    * ``pip``, installed by ``uv venv --seed`` into each venv before anything else;
-    * ``setuptools`` and ``setuptools-scm``, Gym's ``build-system.requires``. Servers that
-      resolve to the Gym tree take uv's editable branch and build ``nemo-gym`` from source,
-      which needs a PEP 517 build environment. setuptools is capped below 81, the release
-      that removed ``pkg_resources``: Gym pins hydra 1.3, which imports it at import time,
-      so a server venv that installs a newer setuptools dies before serving a rollout.
+    The closure is that server's ``requirements.txt`` plus the pins Gym adds to every
+    sub-venv (``ray[default]``, ``openai``, ``pip``, ``setuptools``, ``setuptools-scm``,
+    hydra, and omegaconf). It does not build or vendor ``nemo-gym``. The image already
+    provides it, and a wheel of the checkout would contain every built-in server.
+    setuptools is capped below 81, the release that removed ``pkg_resources``: Gym pins
+    hydra 1.3, which imports it at import time.
     """
     wheels = out_dir / "wheels"
     # Rebuild from empty: pip copies by filename, so a wheel from an earlier run survives
@@ -446,25 +453,7 @@ def vendor_wheels(
     if wheels.exists():
         shutil.rmtree(wheels)
     wheels.mkdir(parents=True)
-    fork_wheel = build_fork_wheel(gym_root, wheels, expect_version)
-
-    requirements = [
-        # The [dev] extra, not the bare wheel: servers that resolve into the Gym tree install
-        # `nemo-gym[dev]` (its own requirements.txt, and vllm_model's pyproject), so the
-        # closure has to cover pre-commit, mypy, ruff and the pytest set too.
-        f"nemo-gym[dev] @ file://{fork_wheel}",
-        f"ray[default]=={ray_version}",
-        f"openai=={openai_version}",
-        f"hydra-core{HYDRA_CORE_SPEC}",
-        f"omegaconf{OMEGACONF_SPEC}",
-        "pip",
-        f"setuptools>=61,<{SETUPTOOLS_PKG_RESOURCES_CEILING}",
-        "setuptools-scm",
-    ]
-    reqs = pkg_server_dir / "requirements.txt"
-    if reqs.is_file():
-        # The editable nemo-gym line is meaningless outside a checkout; Gym rewrites it.
-        requirements += [ln for ln in reqs.read_text(encoding="utf-8").splitlines() if ln.strip() and "../.." not in ln]
+    requirements = server_closure_requirements(pkg_server_dir, ray_version, openai_version)
 
     overrides, constraints = rl_dependency_policy(nemo_rl_root)
     with tempfile.TemporaryDirectory(prefix="closure-") as tmp:
@@ -641,10 +630,8 @@ def main() -> int:
         )
         wheels = vendor_wheels(
             args.out_dir,
-            gym_root,
             pkg_server_dir,
             args.arch,
-            gym_version,
             ray_version,
             openai_version,
             nemo_rl_root,
@@ -673,7 +660,7 @@ def main() -> int:
                 "ray_version": ray_version,
                 "openai_version": openai_version,
                 "wheel_count": len(list(wheels.glob("*.whl"))) if wheels else 0,
-                "next": [f"uv run --package nhx-rl pi-to-gym-conversion --validate-only {args.out_dir}"],
+                "next": [f"{Path(sys.executable).parent / 'pi-to-gym-conversion'} --validate-only {args.out_dir}"],
             },
             indent=2,
         )
