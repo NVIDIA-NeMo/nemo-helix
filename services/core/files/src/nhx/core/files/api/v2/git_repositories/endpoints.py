@@ -18,7 +18,7 @@ from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.common.service.dependencies import get_nemo_client, get_service_config_factory
 from nhx.core.files.api.endpoint_helpers import resolve_storage_secrets_for_user
-from nhx.core.files.app.backends.git import GitBackendError, GitStorageImpl, scan_host_keys
+from nhx.core.files.app.backends.git import GitStorageImpl, scan_host_keys
 from nhx.core.files.app.external_hosts import (
     ExternalHostInvalidError,
     ExternalHostNotAllowedError,
@@ -31,7 +31,7 @@ from nhx.core.files.exceptions import (
     StorageConfigError,
     StorageUnavailableError,
 )
-from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR, HTTP_502_BAD_GATEWAY
+from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_502_BAD_GATEWAY
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,6 @@ async def scan_ssh_host_keys(
 
     try:
         keys = await scan_host_keys(remote)
-    except GitBackendError as exc:
-        raise HTTPException(HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
     except StorageBackendError as exc:
         raise HTTPException(HTTP_502_BAD_GATEWAY, str(exc)) from exc
     return ScanSshHostKeysResponse(host=remote.host_url.removeprefix("ssh://"), keys=keys)
@@ -131,9 +129,6 @@ async def find_git_repository_files(
         raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid storage configuration: {exc}") from exc
     except StorageUnavailableError as exc:
         raise HTTPException(HTTP_502_BAD_GATEWAY, f"Storage backend unavailable: {exc}") from exc
-    except GitBackendError as exc:
-        # git itself failed on this server, such as a missing binary or an unwritable cache.
-        raise HTTPException(HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
     except StorageBackendError as exc:
         raise HTTPException(HTTP_400_BAD_REQUEST, str(exc)) from exc
 
