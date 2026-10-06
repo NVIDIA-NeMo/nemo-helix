@@ -47,7 +47,6 @@ jobs-server = "nhx.core.jobs.main:run_standalone"
 [tool.uv.sources]
 nhx-common = { workspace = true }
 nemo-helix-plugin = { workspace = true }
-nhx-testing = { workspace = true }
 
 
 
@@ -69,7 +68,6 @@ dev = [
     "ruff>=0.11.8",
     "ty>=0.0.1a14",
     "pytest-xdist>=3.8.0",
-    "nhx-testing",
 ]
 
 [tool.pytest.ini_options]
