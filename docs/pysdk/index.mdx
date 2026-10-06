@@ -11,7 +11,7 @@ The [NeMo Helix Python SDK](https://pypi.org/project/nemo-helix/) is a library f
 
 ## Installation
 
-Install the PyPI `nemo-helix` wrapper package using `pip`. The wrapper defines the `all` extra and includes the SDK. If you are working from a source checkout, run `make bootstrap` from the repository root instead; the generated SDK package under `sdk/python/nemo-helix/pyproject.toml` does not define the wrapper extras.
+Install the PyPI `nemo-helix` wrapper package using `pip`. The wrapper defines the `all` extra and includes the typed clients. If you are working from a source checkout, run `make bootstrap` from the repository root instead; the wrapper extras are defined by `packages/nemo_helix/pyproject.toml`.
 
 ```bash
 pip install "nemo-helix[all]"

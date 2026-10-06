@@ -19,9 +19,6 @@ import tomlkit
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 WRAPPER_PYPROJECT = REPO_ROOT / "packages" / "nemo_helix" / "pyproject.toml"
-# Packages vendored into the SDK distribution surface their entry points there,
-# with module paths rewritten, so the SDK's tables count as exposed too.
-SDK_PYPROJECT = REPO_ROOT / "sdk" / "python" / "nemo-helix" / "pyproject.toml"
 
 # Pre-existing gaps in the shipped wheel that predate this check, as
 # (bundle, entry-point group, entry-point key). Remove an entry once the
@@ -49,11 +46,7 @@ def _nemo_entry_points(project: dict) -> dict[str, set[str]]:
 
 
 def _exposed_entry_points() -> dict[str, set[str]]:
-    exposed: dict[str, set[str]] = {}
-    for pyproject in (WRAPPER_PYPROJECT, SDK_PYPROJECT):
-        for group, keys in _nemo_entry_points(_load(pyproject)["project"]).items():
-            exposed.setdefault(group, set()).update(keys)
-    return exposed
+    return _nemo_entry_points(_load(WRAPPER_PYPROJECT)["project"])
 
 
 def _bundled_packages() -> list[tuple[str, Path]]:

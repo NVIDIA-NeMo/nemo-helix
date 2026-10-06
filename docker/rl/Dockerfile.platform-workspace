@@ -9,8 +9,7 @@
 FROM scratch AS platform-workspace
 # Reduced workspace file for this partial source tree.
 COPY docker/rl/pyproject.workspace.toml pyproject.toml
-# nemo-helix-sdk's hatch build force-includes docs/ from the repo root; the
-# openapi symlink must resolve at build time, so copy both trees.
+# The openapi symlink must resolve at build time, so copy both trees.
 COPY docs docs
 COPY openapi openapi
 COPY packages/nhx_build_tools packages/nhx_build_tools
@@ -19,5 +18,4 @@ COPY packages/nhx_common packages/nhx_common
 COPY packages/nhx_customization_common packages/nhx_customization_common
 COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY packages/sandboxed_gym packages/sandboxed_gym
-COPY sdk/python/nemo-helix sdk/python/nemo-helix
 COPY services/rl services/rl

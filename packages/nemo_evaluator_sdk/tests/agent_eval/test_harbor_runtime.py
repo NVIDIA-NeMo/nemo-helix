@@ -2946,28 +2946,6 @@ def test_a_trial_with_no_trace_artifact_has_no_standard_trace(tmp_path: Path) ->
     assert trial.get_evidence("trace:otlp") is None
 
 
-@pytest.mark.parametrize(
-    ("source_name", "legacy_name"),
-    [
-        (
-            "nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter",
-            "nemo_helix.beta.evaluator.agent_eval.runtimes.harbor.trial_adapter",
-        ),
-        (
-            "nemo_evaluator_sdk.agent_eval.trials",
-            "nemo_helix.beta.evaluator.agent_eval.trials",
-        ),
-    ],
-)
-def test_legacy_harbor_trial_contract_import_resolves_to_source_module(source_name: str, legacy_name: str) -> None:
-    source = importlib.import_module(source_name)
-    legacy = importlib.import_module(legacy_name)
-    assert source.__file__ is not None
-    assert legacy.__file__ is not None
-
-    assert Path(legacy.__file__).resolve() == Path(source.__file__).resolve()
-
-
 def test_atif_trajectory_supplies_the_final_answer(tmp_path: Path) -> None:
     trial = _trial_with_trajectory(tmp_path, _atif_trajectory_payload())
 

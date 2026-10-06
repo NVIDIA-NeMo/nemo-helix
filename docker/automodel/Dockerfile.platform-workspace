@@ -13,7 +13,6 @@ COPY docker/automodel/pyproject.workspace.toml pyproject.toml
 # (The docker/ tree moved out of services/automodel/, so it no longer rides in
 # via `COPY services/automodel`; copy it explicitly into the workspace slice.)
 COPY docker/automodel/no_override_requirements.txt docker/automodel/no_override_requirements.txt
-# nemo-helix-sdk hatch build force-includes docs/ from repo root.
 # docs/fern/openapi/openapi.yaml is a symlink to ../../../openapi/openapi.yaml.
 COPY docs docs
 COPY openapi openapi
@@ -23,6 +22,5 @@ COPY packages/nhx_common packages/nhx_common
 COPY packages/nhx_customization_common packages/nhx_customization_common
 COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY plugins/nemo-deployments plugins/nemo-deployments
-COPY sdk/python/nemo-helix sdk/python/nemo-helix
 COPY services/automodel services/automodel
 COPY services/core/models services/core/models
