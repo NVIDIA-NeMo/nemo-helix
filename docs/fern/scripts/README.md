@@ -48,7 +48,7 @@ Keeps notebook actions consistent across Fern docs:
   running in Colab and downloading the source notebook from generated Fern assets.
 - `NotebookViewer` wrapper pages with an adjacent `.ipynb` get generated
   `colabUrl` and `downloadUrl` props so the viewer renders the same actions.
-- Pages without an adjacent `.ipynb` do not get generated notebook actions.
+- Pages without an adjacent `.ipynb` do not get generated notebook actions or notebook assets.
 
 `npm run prepare` runs this hook automatically. For `Latest`, generated URLs point at
 `main` by default, or at the current `release/*` ref when preparing docs from a
