@@ -289,14 +289,16 @@ class SshRemote:
     host: str
     port: int | None
     path: str
+    scp: bool = True
 
     @property
     def url(self) -> str:
-        """The remote in canonical form: lowercase host, no trailing dot, ssh:// only when a port needs it."""
+        """The remote in the form it was given, with a lowercase host and no trailing dot."""
         user = f"{self.user}@" if self.user else ""
-        if self.port:
-            return f"ssh://{user}{self.host}:{self.port}/{self.path.removeprefix('/')}"
-        return f"{user}{self.host}:{self.path}"
+        if self.scp:
+            return f"{user}{self.host}:{self.path}"
+        port = f":{self.port}" if self.port else ""
+        return f"ssh://{user}{self.host}{port}/{self.path}"
 
     @property
     def host_url(self) -> str:
@@ -310,7 +312,8 @@ def parse_ssh_remote(url: str) -> SshRemote:
     if "%" in url:
         raise ValueError(f"url must not contain percent-encoding, got {url!r}")
     # A string with a scheme is a URL to git; reading a failed "ssh://" as SCP form would make "ssh" the host.
-    match = _SSH_REMOTE_URL.fullmatch(url) if "://" in url else _SCP_REMOTE.fullmatch(url)
+    scp = "://" not in url
+    match = _SCP_REMOTE.fullmatch(url) if scp else _SSH_REMOTE_URL.fullmatch(url)
     if match is None:
         raise ValueError(
             f"url must be an SSH remote like git@host:org/repo.git or ssh://host/org/repo.git, got {url!r}"
@@ -328,6 +331,7 @@ def parse_ssh_remote(url: str) -> SshRemote:
         host=parts["host"].lower().removesuffix("."),
         port=int(port) if port else None,
         path=parts["path"],
+        scp=scp,
     )
 
 
@@ -365,6 +369,9 @@ def _require_ref_name(field: str, value: str) -> str:
     return value
 
 
+_MAX_GIT_READ_CHUNK_SIZE = 16 * 1024 * 1024
+
+
 class GitStorageConfig(BaseStorageConfig):
     type: Literal[StorageConfigType.GIT] = StorageConfigType.GIT
     url: str = Field(
@@ -394,6 +401,13 @@ class GitStorageConfig(BaseStorageConfig):
     def require_ssh_remote(cls, v: str) -> str:
         # Rebuilt from its parts, so ssh, the host key scan and known_hosts all name the host the same way.
         return parse_ssh_remote(v.strip()).url
+
+    @field_validator("read_chunk_size")
+    @classmethod
+    def bound_read_chunk_size(cls, v: int) -> int:
+        if not 1 <= v <= _MAX_GIT_READ_CHUNK_SIZE:
+            raise ValueError(f"read_chunk_size must be between 1 and {_MAX_GIT_READ_CHUNK_SIZE} bytes, got {v}")
+        return v
 
     @field_validator("path")
     @classmethod

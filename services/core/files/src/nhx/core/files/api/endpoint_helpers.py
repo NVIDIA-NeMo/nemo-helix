@@ -37,6 +37,7 @@ from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
     StorageBackendError,
+    StorageServerFault,
     StorageUnavailableError,
 )
 from starlette.status import (
@@ -201,6 +202,8 @@ async def stream_file_download(
         )
     except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
         raise runtime_storage_http_error(exc) from exc
+    except StorageServerFault:
+        raise
     except Exception:
         logger.exception("Error during download")
         raise HTTPException(
