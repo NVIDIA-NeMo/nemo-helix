@@ -120,7 +120,15 @@ export const parseDatasetRecords = (text: string, path = ''): Record<string, unk
     const parsed: unknown = JSON.parse(trimmed);
     records = Array.isArray(parsed) ? parsed : [parsed];
   } catch {
-    records = trimmed.split('\n').flatMap((line) => (line.trim() ? [JSON.parse(line)] : []));
+    records = text.split('\n').flatMap((line, index) => {
+      if (!line.trim()) return [];
+      try {
+        return [JSON.parse(line)];
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Could not parse ${path || 'the dataset'} line ${index + 1}: ${reason}`);
+      }
+    });
   }
   return records.map((value) => {
     const record = asRecord(value);

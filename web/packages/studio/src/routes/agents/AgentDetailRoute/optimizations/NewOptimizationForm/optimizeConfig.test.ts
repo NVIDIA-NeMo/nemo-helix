@@ -63,6 +63,15 @@ describe('buildOptimizeConfig', () => {
     });
   });
 
+  it('names every key the default-scoring parser reads, so an unenforced schema still parses', () => {
+    const { judge_llm_prompt: prompt, default_scoring: defaultScoring } =
+      config.eval.evaluators.accuracy;
+    expect(defaultScoring).toBe(true);
+    for (const key of ['coverage_score', 'correctness_score', 'relevance_score', 'reasoning']) {
+      expect(prompt).toContain(`"${key}"`);
+    }
+  });
+
   it('carries the experiment on the optimizer, which survives the merge onto the agent', () => {
     expect(config.optimizer.experiment_id).toBe('exp-1');
     expect(config.metadata).toBeUndefined();

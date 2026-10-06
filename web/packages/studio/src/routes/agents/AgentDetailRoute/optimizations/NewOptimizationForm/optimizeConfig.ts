@@ -131,7 +131,10 @@ export const buildOptimizeConfig = ({
           default_scoring: true,
           judge_llm_prompt:
             'Score whether the generated answer correctly addresses the question compared to the ' +
-            'expected answer. Return JSON only.',
+            'expected answer. Respond with exactly this JSON object and no other keys: ' +
+            '{"coverage_score": <number from 0.0 to 1.0>, "correctness_score": <number from 0.0 ' +
+            'to 1.0>, "relevance_score": <number from 0.0 to 1.0>, "reasoning": "<one or two ' +
+            'sentences>"}',
         },
       },
     },

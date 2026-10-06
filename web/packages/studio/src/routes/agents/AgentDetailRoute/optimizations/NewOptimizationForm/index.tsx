@@ -233,7 +233,11 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             searchSpace={searchSpace}
             rows={rowCount}
             blockingReason={blockingReason}
-            submitError={rowsError ?? submitError}
+            submitError={
+              rowsError && submitError && rowsError !== submitError
+                ? `${rowsError} ${submitError}`
+                : (rowsError ?? submitError)
+            }
             isSubmitting={isSubmitting}
             onRun={() => void submit()}
           />
