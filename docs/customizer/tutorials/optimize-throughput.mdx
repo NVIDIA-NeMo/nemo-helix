@@ -582,7 +582,7 @@ def wait_for_job(
             print("Job did not complete within the timeout period.")
             raise Exception(error_message)
 
-        status = client.jobs.get_status(name=job_name, workspace=workspace)
+        status = client.jobs.get_job_status(name=job_name, workspace=workspace).data()
 
         # -- Extract training progress from nested steps structure --
         step: int | None = None
@@ -794,17 +794,17 @@ def get_elapsed_time(step: HelixJobStepResponse) -> float:
         raise ValueError("Training step timestamps are unavailable")
     return (step.updated_at - step.created_at).total_seconds()
 
-step_with_sequence_packing = client.jobs.steps.retrieve(
-            name=STEP_NAME,
-            workspace="default",
-            job=job_with_sequence_packing.job.name,
-)
+step_with_sequence_packing = client.jobs.get_job_step(
+    name=STEP_NAME,
+    workspace="default",
+    job=job_with_sequence_packing.job.name,
+).data()
 
-step_without_sequence_packing = client.jobs.steps.retrieve(
-            name=STEP_NAME,
-            workspace="default",
-            job=job_without_sequence_packing.job.name,
-)
+step_without_sequence_packing = client.jobs.get_job_step(
+    name=STEP_NAME,
+    workspace="default",
+    job=job_without_sequence_packing.job.name,
+).data()
 
 time_to_complete_with_sequence_packing = get_elapsed_time(step_with_sequence_packing)
 time_to_complete_without_sequence_packing = get_elapsed_time(step_without_sequence_packing)

@@ -52,6 +52,7 @@ Default configurations live in the `system` workspace. Reference them in your Vi
 
 ```python
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest, MiddlewareCall
 
 client = NemoClient.from_config()
@@ -74,7 +75,7 @@ nemo inference virtual-models create guarded-with-defaults \
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.create_virtual_model(
+VirtualModelsClient.from_client(client).create_virtual_model(
     body=CreateVirtualModelRequest(
         name="guarded-with-defaults",
         default_model_entity="system/nvidia-nemotron-3.5-lightning-30b-a3b",
@@ -123,7 +124,7 @@ nemo inference virtual-models delete guarded-with-defaults
 <Tab title="Python SDK">
 
 ```python
-client.inference.virtual_models.delete_virtual_model(name="guarded-with-defaults")
+VirtualModelsClient.from_client(client).delete_virtual_model(name="guarded-with-defaults")
 ```
 
 </Tab>

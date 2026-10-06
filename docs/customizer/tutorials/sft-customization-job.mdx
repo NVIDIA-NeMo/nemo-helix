@@ -430,7 +430,7 @@ import time
 
 # Poll the job until it reaches a terminal state
 while True:
-    status = client.jobs.get_status(name=job.job.name, workspace="default")
+    status = client.jobs.get_job_status(name=job.job.name, workspace="default").data()
     print(f"Status: {status.status}")
     if status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
@@ -666,7 +666,7 @@ For detailed information on all available hyperparameters, recommended values, a
 - Confirm the model fileset uses `token_secret=hf_secret.name` for gated models
 - Check `AutomodelJobInput` references use the `workspace/name` format: `model=f"default/{MODEL_NAME}"` and `dataset={"training": f"default/{DATASET_NAME}"}` (for example, `default/qwen3-0.6b`, `default/sft-dataset`)
 - Verify the model entity points at the fileset: `fileset=f"default/{MODEL_NAME}"`
-- Check job status: `client.jobs.get_status(name=job.job.name)`
+- Check job status: `client.jobs.get_job_status(name=job.job.name).data()`
 
 **Job fails with OOM (Out of Memory) error:**
 1. **First try:** Reduce `global_batch_size` from 64 to 32 or 16 in `batch={...}`
@@ -694,7 +694,7 @@ For detailed information on all available hyperparameters, recommended values, a
 
 **Deployment fails:**
 - Verify output model exists: `client.models.get_model(name=OUTPUT_NAME)`
-- Check job logs: `client.jobs.get_logs(name=job.job.name)`
+- Check job logs: `client.jobs.list_job_logs(name=job.job.name).items()`
 - Check deployment status: `client.models.get_deployment(name=deployment.name)`
 - Ensure sufficient GPU resources for `executor_config={"gpu": 1, ...}`
 - Verify the deployment config matches this tutorial: `engine="vllm"` with `docker.io/vllm/vllm-openai:v0.22.1`

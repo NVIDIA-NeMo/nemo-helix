@@ -42,6 +42,10 @@ SKIP_DIRS = {
 }
 
 FENCE_RE = re.compile(r"^([ \t]*)(`{3,}|~{3,})(.*)$")
+# Fern `<Markdown src="/snippets/..." />` includes. Their Python fences become part of the
+# including page, so a page that gets its `client` from a shared setup snippet type-checks.
+MARKDOWN_INCLUDE_RE = re.compile(r"^\s*<Markdown\s+src=\"/snippets/([^\"]+)\"\s*/>\s*$")
+SNIPPETS_DIR_PARTS = ("fern", "snippets")
 TY_OUTPUT_RE = re.compile(r"^(?P<path>.+?):(?P<line>\d+):(?P<column>\d+): (?P<message>.+)$")
 
 # Both comment syntaxes are accepted. MDX v3 rejects HTML comments outright -- a page
@@ -163,7 +167,16 @@ def source_for_static_check(source: str) -> str:
     return "\n".join(transformed_lines)
 
 
-def extract_python_snippets(path: Path) -> list[PythonSnippet]:
+def resolve_markdown_include(page: Path, include: str) -> Path | None:
+    """Map a Fern ``/snippets/<rel>`` include to ``docs/fern/snippets/<rel>`` next to ``page``."""
+    for ancestor in page.resolve().parents:
+        if ancestor.name == "docs":
+            candidate = ancestor.joinpath(*SNIPPETS_DIR_PARTS, include)
+            return candidate if candidate.is_file() else None
+    return None
+
+
+def extract_python_snippets(path: Path, _seen: frozenset[Path] = frozenset()) -> list[PythonSnippet]:
     lines = path.read_text(encoding="utf-8").splitlines()
     snippets: list[PythonSnippet] = []
     skip_next_block = False
@@ -172,6 +185,22 @@ def extract_python_snippets(path: Path) -> list[PythonSnippet]:
 
     while index < len(lines):
         stripped = lines[index].strip()
+        include_match = MARKDOWN_INCLUDE_RE.match(lines[index])
+        if include_match:
+            included = resolve_markdown_include(path, include_match.group(1))
+            if included is not None and included.resolve() not in _seen:
+                for snippet in extract_python_snippets(included, _seen | {path.resolve()}):
+                    # Diagnostics inside an include point at the include line of the page.
+                    snippets.append(
+                        PythonSnippet(
+                            path=path,
+                            start_line=index + 1,
+                            source=snippet.source,
+                            type_check=snippet.type_check,
+                        )
+                    )
+            index += 1
+            continue
         if stripped in SKIP_NEXT_BLOCK_MARKERS:
             skip_next_block = True
             index += 1

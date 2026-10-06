@@ -386,7 +386,7 @@ import time
 
 teacher_status = None
 while True:
-    teacher_status = client.jobs.get_status(name=TEACHER_JOB_NAME, workspace="default")
+    teacher_status = client.jobs.get_job_status(name=TEACHER_JOB_NAME, workspace="default").data()
     print(f"Status: {teacher_status.status}")
     if teacher_status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
@@ -633,7 +633,7 @@ import time
 
 kd_status = None
 while True:
-    kd_status = client.jobs.get_status(name=KD_JOB_NAME, workspace="default")
+    kd_status = client.jobs.get_job_status(name=KD_JOB_NAME, workspace="default").data()
     print(f"Status: {kd_status.status}")
     if kd_status.status.lower() in ("completed", "failed", "cancelled", "error"):
         break
@@ -784,7 +784,7 @@ KD loads both models, so OOM is more likely than with SFT:
 
 **Deployment fails:**
 - Verify output model exists: `client.models.get_model(name=DISTILLED_STUDENT_NAME)`
-- Check job logs: `client.jobs.get_logs(name=kd_job.job.name)`
+- Check job logs: `client.jobs.list_job_logs(name=kd_job.job.name).items()`
 - Check student deployment status: `client.models.get_deployment(name=student_deployment.name)`
 - The distilled model has the same size as the student, so GPU requirements match the student model
 

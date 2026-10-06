@@ -51,7 +51,19 @@ flowchart LR
 
 ### Add External Providers
 
-Register external inference APIs like NVIDIA Build or OpenAI.
+Register external inference APIs like NVIDIA Build or OpenAI. Set up the CLI or Python SDK first:
+
+<Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+The Python SDK examples below also use these imports:
+
+```python
+from pydantic import SecretStr
+
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+```
 
 #### NVIDIA Build
 
@@ -84,21 +96,25 @@ nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
 
 ```python
 # Store API key
-client.secrets.create(name="nvidia-api-key", data=os.environ["NVIDIA_API_KEY"])
-
-# Create provider
-provider = client.inference.providers.create(
-    name="my-nvidia-build",
-    host_url="https://integrate.api.nvidia.com",
-    api_key_secret_name="nvidia-api-key",
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="nvidia-api-key", value=SecretStr(os.environ["NVIDIA_API_KEY"])),
 )
 
-client.models.wait_for_provider("my-nvidia-build")
+# Create provider
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="my-nvidia-build",
+        host_url="https://integrate.api.nvidia.com",
+        api_key_secret_name="nvidia-api-key",
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="my-nvidia-build")
 
 # Use provider routing
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-nvidia-build",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -138,21 +154,25 @@ nemo chat -m gpt-4 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-client.secrets.create(name="openai-api-key", data=os.environ["OPENAI_API_KEY"])
-
-provider = client.inference.providers.create(
-    name="openai",
-    host_url="https://api.openai.com/v1",
-    api_key_secret_name="openai-api-key",
-    enabled_models=["gpt-4", "gpt-3.5-turbo"],
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="openai-api-key", value=SecretStr(os.environ["OPENAI_API_KEY"])),
 )
 
-client.models.wait_for_provider("openai")
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="openai",
+        host_url="https://api.openai.com/v1",
+        api_key_secret_name="openai-api-key",
+        enabled_models=["gpt-4", "gpt-3.5-turbo"],
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="openai")
 
 # Use provider routing
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="openai",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "gpt-4",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -191,18 +211,22 @@ nemo wait inference provider anthropic
 
 ```python
 # Store API key
-client.secrets.create(name="anthropic-api-key", data=os.environ["ANTHROPIC_API_KEY"])
-
-# Create provider — override the default Bearer header and pin the API version
-provider = client.inference.providers.create(
-    name="anthropic",
-    host_url="https://api.anthropic.com",
-    api_key_secret_name="anthropic-api-key",
-    auth_header_format="X-Api-Key: {{ auth_secret }}",
-    default_extra_headers={"anthropic-version": "2023-06-01"},
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="anthropic-api-key", value=SecretStr(os.environ["ANTHROPIC_API_KEY"])),
 )
 
-client.models.wait_for_provider("anthropic")
+# Create provider — override the default Bearer header and pin the API version
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="anthropic",
+        host_url="https://api.anthropic.com",
+        api_key_secret_name="anthropic-api-key",
+        auth_header_format="X-Api-Key: {{ auth_secret }}",
+        default_extra_headers={"anthropic-version": "2023-06-01"},
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="anthropic")
 ```
 
 </Tab>
@@ -260,11 +284,11 @@ oai_client = client.models.get_openai_client()
 # Get base URLs for different routing patterns
 client.models.get_openai_route_base_url()
 
-entity = client.models.retrieve(model_name, workspace=workspace)
+entity = client.models.get_model(name=model_name, workspace=workspace).data()
 entity_url = client.models.get_model_entity_route_openai_url(entity)
 print(entity_url)
 
-provider = client.inference.providers.retrieve(provider_name, workspace=workspace)
+provider = client.models.get_provider(name=provider_name, workspace=workspace).data()
 provider_url = client.models.get_provider_route_openai_url(provider)
 print(provider_url)
 ```

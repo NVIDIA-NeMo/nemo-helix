@@ -28,8 +28,7 @@ Audit a NIM (or any OpenAI-compatible chat endpoint) routed through a NeMo Helix
 
 ```python
 # List providers registered in your deployment and pick one.
-providers = client.inference.providers.list(workspace="default")
-for provider in providers.data:
+for provider in client.models.list_providers(workspace="default").items():
     print(provider.name, provider.host_url)
 ```
 

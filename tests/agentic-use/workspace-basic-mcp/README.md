@@ -121,7 +121,7 @@ Clean up from previous test runs:
 from nhx.common.mcp import create_nemo_client
 client = create_nemo_client("http://localhost:8000")
 try:
-    client.workspaces.delete(name="harbor-test-workspace")
+    client.workspaces.delete_workspace(name="harbor-test-workspace")
 except:
     pass
 ```

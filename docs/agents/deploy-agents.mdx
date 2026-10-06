@@ -20,6 +20,17 @@ A-Z), digits (0-9), underscores, hyphens, and dots. For example:
 </Note>
 
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+The Python SDK examples on this page build the agents plugin resource from that client and use these imports:
+
+```python
+from pydantic import SecretStr
+
+from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+agents = AgentsResource(client)
+```
 ---
 
 ## Deployment Modes
@@ -164,7 +175,9 @@ nemo agents environments create research \
 <Tab title="Python SDK">
 
 ```python
-sdk.secrets.create(name="research-github-pat", value=os.environ["GITHUB_PAT"])
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="research-github-pat", value=SecretStr(os.environ["GITHUB_PAT"])),
+)
 
 agents.environment_specs.create(
     name="research",

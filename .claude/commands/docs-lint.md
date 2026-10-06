@@ -65,7 +65,7 @@ The script:
 
 2. **Add type ignore comments** for false positives from ty:
    ```python
-   response = client.inference.gateway.post_provider(...)
+   response = InferenceGatewayClient.from_client(client).provider_post(...)
    message = response["choices"][0]["message"]["content"]  # type: ignore[index]
    ```
 

@@ -18,6 +18,33 @@ Resource names for deployments, deployment configs, and providers must contain o
 </Note>
 
 <Markdown src="/snippets/_snippets/tutorials/cli-sdk-setup.mdx" />
+
+The Python SDK examples on this page also use these imports:
+
+```python
+from pathlib import Path
+
+from pydantic import SecretStr
+
+from nemo_helix_plugin.files.metadata import FilesetMetadata, ModelMetadataContent, ToolCallingMetadataContent
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetRequest
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelAdapterRequest,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    CreateModelEntityRequest,
+    CreateModelProviderRequest,
+    Engine,
+    FinetuningType,
+    ModelDeploymentConfigModelSpec,
+    ToolCallConfig,
+)
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+```
 ---
 
 <a id="add-external-providers"></a>
@@ -56,21 +83,28 @@ nemo chat -m nvidia/llama-3.3-nemotron-super-49b-v1 'Hello!' \
 
 ```python
 # Store API key
-client.secrets.create(name="nvidia-api-key", value=os.environ["NVIDIA_API_KEY"])
-
-# Create provider
-provider = client.inference.providers.create(
-    name="my-nvidia-build",
-    host_url="https://integrate.api.nvidia.com",
-    api_key_secret_name="nvidia-api-key",
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr(os.environ["NVIDIA_API_KEY"]),
+    ),
 )
 
-client.models.wait_for_provider("my-nvidia-build")
+# Create provider
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="my-nvidia-build",
+        host_url="https://integrate.api.nvidia.com",
+        api_key_secret_name="nvidia-api-key",
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="my-nvidia-build")
 
 # Use provider routing
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-nvidia-build",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -110,21 +144,28 @@ nemo chat -m gpt-4 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-client.secrets.create(name="openai-api-key", value=os.environ["OPENAI_API_KEY"])
-
-provider = client.inference.providers.create(
-    name="openai",
-    host_url="https://api.openai.com/v1",
-    api_key_secret_name="openai-api-key",
-    enabled_models=["gpt-4", "gpt-3.5-turbo"],
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="openai-api-key",
+        value=SecretStr(os.environ["OPENAI_API_KEY"]),
+    ),
 )
 
-client.models.wait_for_provider("openai")
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="openai",
+        host_url="https://api.openai.com/v1",
+        api_key_secret_name="openai-api-key",
+        enabled_models=["gpt-4", "gpt-3.5-turbo"],
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="openai")
 
 # Use provider routing
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="openai",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "gpt-4",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -163,18 +204,25 @@ nemo wait inference provider anthropic
 
 ```python
 # Store API key
-client.secrets.create(name="anthropic-api-key", value=os.environ["ANTHROPIC_API_KEY"])
-
-# Create provider — override the default Bearer header and pin the API version
-provider = client.inference.providers.create(
-    name="anthropic",
-    host_url="https://api.anthropic.com",
-    api_key_secret_name="anthropic-api-key",
-    auth_header_format="X-Api-Key: {{ auth_secret }}",
-    default_extra_headers={"anthropic-version": "2023-06-01"},
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="anthropic-api-key",
+        value=SecretStr(os.environ["ANTHROPIC_API_KEY"]),
+    ),
 )
 
-client.models.wait_for_provider("anthropic")
+# Create provider — override the default Bearer header and pin the API version
+provider = client.models.create_provider(
+    body=CreateModelProviderRequest(
+        name="anthropic",
+        host_url="https://api.anthropic.com",
+        api_key_secret_name="anthropic-api-key",
+        auth_header_format="X-Api-Key: {{ auth_secret }}",
+        default_extra_headers={"anthropic-version": "2023-06-01"},
+    ),
+).data()
+
+client.models.wait_for_provider_status(provider_name="anthropic")
 ```
 
 </Tab>
@@ -220,30 +268,34 @@ nemo chat -m meta/llama-3.2-1b-instruct 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-config = client.inference.deployment_configs.create(
-    name="llama-3-2-1b-config",
-    engine="nim",
-    model_spec={
-        "model_name": "meta/llama-3.2-1b-instruct",
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "nvcr.io/nim/meta/llama-3.2-1b-instruct",
-        "image_tag": "1.8.6",
-    },
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="llama-3-2-1b-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(model_name="meta/llama-3.2-1b-instruct"),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="nvcr.io/nim/meta/llama-3.2-1b-instruct",
+            image_tag="1.8.6",
+        ),
+    ),
+).data()
+
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="llama-3-2-1b-deployment",
+        config="llama-3-2-1b-config",
+    ),
+).data()
+
+client.models.wait_for_deployment_status(
+    deployment_name="llama-3-2-1b-deployment",
+    desired_status="READY",
 )
 
-deployment = client.inference.deployments.create(
-    name="llama-3-2-1b-deployment", config="llama-3-2-1b-config"
-)
-
-client.models.wait_for_status(
-    deployment_name="llama-3-2-1b-deployment", desired_status="READY"
-)
-
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="llama-3-2-1b-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "meta/llama-3.2-1b-instruct",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -286,28 +338,34 @@ nemo inference gateway provider post v1/classify "nemoguard-jailbreak-deployment
 <Tab title="Python SDK">
 
 ```python
-config = client.inference.deployment_configs.create(
-    name="nemoguard-jailbreak-config",
-    engine="nim",
-    model_spec={},
-    executor_config={
-        "gpu": 1,
-        "image_name": "nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
-        "image_tag": "1.10.1",
-    },
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="nemoguard-jailbreak-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="nvcr.io/nim/nvidia/nemoguard-jailbreak-detect",
+            image_tag="1.10.1",
+        ),
+    ),
+).data()
+
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="nemoguard-jailbreak-deployment",
+        config="nemoguard-jailbreak-config",
+    ),
+).data()
+
+client.models.wait_for_deployment_status(
+    deployment_name="nemoguard-jailbreak-deployment",
+    desired_status="READY",
 )
 
-deployment = client.inference.deployments.create(
-    name="nemoguard-jailbreak-deployment", config="nemoguard-jailbreak-config"
-)
-
-client.models.wait_for_status(
-    deployment_name="nemoguard-jailbreak-deployment", desired_status="READY"
-)
-
-response = client.inference.gateway.provider.post(
-    "v1/classify",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="nemoguard-jailbreak-deployment",
+    trailing_uri="v1/classify",
     body={"input": "Tell me about vacation spots in Hawaii."},
 )
 ```
@@ -375,55 +433,60 @@ nemo chat -m default/qwen-2-5-1-5b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # (Optional) Create a HuggingFace token secret for private models.
 # Public models like Qwen do not require a token.
-client.secrets.create(name="hf-token-secret", value=os.environ["HF_TOKEN"])
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="hf-token-secret",
+        value=SecretStr(os.environ["HF_TOKEN"]),
+    ),
+)
 
 # Create a fileset pointing to the HuggingFace model.
 # "token_secret" is optional — only needed for private/gated models.
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="qwen-2-5-1-5b",
-        storage={
-            "type": "huggingface",
-            "repo_id": "Qwen/Qwen2.5-1.5B-Instruct",
-            "repo_type": "model",
-            "token_secret": "hf-token-secret",
-        },
+        storage=HuggingfaceStorageConfig(
+            repo_id="Qwen/Qwen2.5-1.5B-Instruct",
+            repo_type="model",
+            token_secret=SecretRef("hf-token-secret"),
+        ),
     ),
     exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
-client.models.create(name="qwen-2-5-1-5b", fileset="default/qwen-2-5-1-5b")
+client.models.create_model(
+    body=CreateModelEntityRequest(name="qwen-2-5-1-5b", fileset="default/qwen-2-5-1-5b"),
+)
 
 # Create deployment config pointing to the model entity
-config = client.inference.deployment_configs.create(
-    name="qwen-fs-config",
-    engine="nim",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": "qwen-2-5-1-5b",
-    },
-    executor_config={
-        "gpu": 1,
-    },
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="qwen-fs-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name="qwen-2-5-1-5b",
+        ),
+        executor_config=ContainerExecutorConfig(gpu=1),
+    ),
+).data()
 
 # Deploy — no hf_token_secret_name needed
-deployment = client.inference.deployments.create(
-    name="qwen-fs-deployment", config="qwen-fs-config"
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name="qwen-fs-deployment", config="qwen-fs-config"),
+).data()
+
+client.models.wait_for_deployment_status(
+    deployment_name="qwen-fs-deployment",
+    desired_status="READY",
 )
 
-client.models.wait_for_status(
-    deployment_name="qwen-fs-deployment", desired_status="READY"
-)
-
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen-fs-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default/qwen-2-5-1-5b",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -491,49 +554,49 @@ nemo chat -m default/qwen3-1-7b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # Create a fileset pointing to the HuggingFace model.
 # Qwen models are public — token_secret is optional.
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="qwen3-1-7b",
-        storage={
-            "type": "huggingface",
-            "repo_id": "Qwen/Qwen3-1.7B",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-1.7B", repo_type="model"),
     ),
     exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
-client.models.create(name="qwen3-1-7b", fileset="default/qwen3-1-7b")
+client.models.create_model(
+    body=CreateModelEntityRequest(name="qwen3-1-7b", fileset="default/qwen3-1-7b"),
+)
 
 # Create deployment config with engine "vllm"
-config = client.inference.deployment_configs.create(
-    name="qwen3-vllm-config",
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": "qwen3-1-7b",
-    },
-    executor_config={
-        "gpu": 1,
-    },
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="qwen3-vllm-config",
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name="qwen3-1-7b",
+        ),
+        executor_config=ContainerExecutorConfig(gpu=1),
+    ),
+).data()
+
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="qwen3-vllm-deployment",
+        config="qwen3-vllm-config",
+    ),
+).data()
+
+client.models.wait_for_deployment_status(
+    deployment_name="qwen3-vllm-deployment",
+    desired_status="READY",
 )
 
-deployment = client.inference.deployments.create(
-    name="qwen3-vllm-deployment", config="qwen3-vllm-config"
-)
-
-client.models.wait_for_status(
-    deployment_name="qwen3-vllm-deployment", desired_status="READY"
-)
-
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-vllm-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default/qwen3-1-7b",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -615,74 +678,74 @@ nemo inference gateway provider post v1/chat/completions qwen3-lora-deployment \
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # Base model fileset + entity (skip if already created above)
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="qwen3-1-7b",
-        storage={
-            "type": "huggingface",
-            "repo_id": "Qwen/Qwen3-1.7B",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen3-1.7B", repo_type="model"),
     ),
     exist_ok=True,
 )
 
-client.models.create(name="qwen3-1-7b", fileset="default/qwen3-1-7b")
+client.models.create_model(
+    body=CreateModelEntityRequest(name="qwen3-1-7b", fileset="default/qwen3-1-7b"),
+)
 
 # Fileset for the LoRA adapter weights
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="linear-algebra-lora",
-        storage={
-            "type": "huggingface",
-            "repo_id": "premjatin/qwen-linear-algebra-coder",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(
+            repo_id="premjatin/qwen-linear-algebra-coder",
+            repo_type="model",
+        ),
     ),
     exist_ok=True,
 )
 
 # Deployment config with LoRA enabled.
 # Set --max-lora-rank to the highest adapter rank you intend to serve.
-config = client.inference.deployment_configs.create(
-    name="qwen3-lora-config",
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": "qwen3-1-7b",
-        "lora_enabled": True,
-    },
-    executor_config={
-        "gpu": 1,
-        "additional_args": ["--max-lora-rank", "16"],
-    },
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="qwen3-lora-config",
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name="qwen3-1-7b",
+            lora_enabled=True,
+        ),
+        executor_config=ContainerExecutorConfig(gpu=1, additional_args=["--max-lora-rank", "16"]),
+    ),
+).data()
 
-deployment = client.inference.deployments.create(
-    name="qwen3-lora-deployment", config="qwen3-lora-config"
-)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="qwen3-lora-deployment",
+        config="qwen3-lora-config",
+    ),
+).data()
 
-client.models.wait_for_status(
-    deployment_name="qwen3-lora-deployment", desired_status="READY"
+client.models.wait_for_deployment_status(
+    deployment_name="qwen3-lora-deployment",
+    desired_status="READY",
 )
 
 # Register the adapter against the base model entity.
 # The adapter is served under the name "<workspace>--<adapter-name>".
-client.models.adapters.create(
-    "qwen3-1-7b",
-    name="linear-algebra",
-    fileset="default/linear-algebra-lora",
-    finetuning_type="lora",
-    enabled=True,
+client.models.create_model_adapter(
+    model_name="qwen3-1-7b",
+    body=CreateModelAdapterRequest(
+        name="linear-algebra",
+        fileset="default/linear-algebra-lora",
+        finetuning_type=FinetuningType.LORA,
+        enabled=True,
+    ),
 )
 
 # Target the adapter by its served name in the request body
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="qwen3-lora-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default--linear-algebra",
         "messages": [
@@ -728,15 +791,16 @@ nemo secrets delete <secret-name>
 
 ```python
 # Note: Deleting the deployment will free up its GPU(s) when complete
-client.inference.deployments.delete(name="<deployment-name>")
-client.models.wait_for_status(
-    deployment_name="<deployment-name>", desired_status="DELETED"
+client.models.delete_deployment(name="<deployment-name>")
+client.models.wait_for_deployment_status(
+    deployment_name="<deployment-name>",
+    desired_status="DELETED",
 )
-client.inference.deployment_configs.delete(name="<config-name>")
+client.models.delete_deployment_config(name="<config-name>")
 
 # For external providers
-client.inference.providers.delete(name="<provider-name>")
-client.secrets.delete(name="<secret-name>")
+client.models.delete_provider(name="<provider-name>")
+client.secrets.delete_secret(name="<secret-name>")
 ```
 
 </Tab>
@@ -806,45 +870,44 @@ nemo chat -m default/qwen-2-5-14b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # Create a fileset pointing to the HuggingFace model
 # Qwen models are public — token_secret is optional
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="qwen-2-5-14b",
-        storage={
-            "type": "huggingface",
-            "repo_id": "Qwen/Qwen2.5-14B-Instruct",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(repo_id="Qwen/Qwen2.5-14B-Instruct", repo_type="model"),
     ),
     exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
-client.models.create(name="qwen-2-5-14b", fileset="default/qwen-2-5-14b")
+client.models.create_model(
+    body=CreateModelEntityRequest(name="qwen-2-5-14b", fileset="default/qwen-2-5-14b"),
+)
 
 # Create deployment config with 2 GPUs (TP=2 by default)
-config = client.inference.deployment_configs.create(
-    name="qwen-14b-config",
-    engine="nim",
-    model_spec={"model_name": "default/qwen-2-5-14b"},
-    executor_config={"gpu": 2},
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="qwen-14b-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(model_name="default/qwen-2-5-14b"),
+        executor_config=ContainerExecutorConfig(gpu=2),
+    ),
+).data()
 
 # Deploy
-deployment = client.inference.deployments.create(
-    name="qwen-14b-deployment", config="qwen-14b-config"
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(name="qwen-14b-deployment", config="qwen-14b-config"),
+).data()
+
+client.models.wait_for_deployment_status(
+    deployment_name="qwen-14b-deployment",
+    desired_status="READY",
 )
 
-client.models.wait_for_status(
-    deployment_name="qwen-14b-deployment", desired_status="READY"
-)
-
-response = client.inference.gateway.model.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).model_post(
     name="qwen-2-5-14b",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default/qwen-2-5-14b",
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -884,20 +947,20 @@ nemo inference deployment-configs create "multi-gpu-custom-config" \
 <Tab title="Python SDK">
 
 ```python
-config = client.inference.deployment_configs.create(
-    name="multi-gpu-custom-config",
-    engine="nim",
-    model_spec={
-        "model_name": "default/qwen-2-5-14b",
-    },
-    executor_config={
-        "gpu": 4,
-        "additional_envs": {
-            "NIM_TENSOR_PARALLEL_SIZE": "2",
-            "NIM_PIPELINE_PARALLEL_SIZE": "2",
-        },
-    },
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="multi-gpu-custom-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(model_name="default/qwen-2-5-14b"),
+        executor_config=ContainerExecutorConfig(
+            gpu=4,
+            additional_envs={
+                "NIM_TENSOR_PARALLEL_SIZE": "2",
+                "NIM_PIPELINE_PARALLEL_SIZE": "2",
+            },
+        ),
+    ),
+).data()
 ```
 
 </Tab>
@@ -1004,14 +1067,12 @@ Set `chat_template` and tool calling configuration with fileset `metadata.model.
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 
 # Create fileset with chat template and tool calling config via metadata
-tool_metadata: dict[str, object] = {
-    "model": {
-        "tool_calling": {
-            "chat_template": (
+tool_metadata = FilesetMetadata(
+    model=ModelMetadataContent(
+        tool_calling=ToolCallingMetadataContent(
+            chat_template=(
                 "{%- for message in messages %}"
                 "{%- set content = '<{{ start_header_id }}>' + message['role'] + '<{{ end_header_id }}>\n\n'"
                 " + message['content'] | trim + '<{{ eot_id }}>' %}"
@@ -1019,51 +1080,52 @@ tool_metadata: dict[str, object] = {
                 "{{ content }}{%- endfor %}"
                 "{%- if add_generation_prompt %}{{ '<{{ start_header_id }}>assistant<{{ end_header_id }}>\n\n' }}{%- endif %}"
             ),
-            "tool_call_parser": "llama3_json",
-            "auto_tool_choice": True,
-        }
-    }
-}
+            tool_call_parser="llama3_json",
+            auto_tool_choice=True,
+        )
+    )
+)
 
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="llama-3-2-1b-tool",
-        storage={
-            "type": "huggingface",
-            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
-            "repo_type": "model"
-        },
+        storage=HuggingfaceStorageConfig(
+            repo_id="meta-llama/Llama-3.2-1B-Instruct",
+            repo_type="model",
+        ),
         metadata=tool_metadata,
     ),
     exist_ok=True,
 )
 
 # Register model entity referencing the fileset
-client.models.create(
-    name="llama-3-2-1b-tool",
-    fileset="default/llama-3-2-1b-tool",
+client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="llama-3-2-1b-tool",
+        fileset="default/llama-3-2-1b-tool",
+    ),
 )
 
 # Deploy — chat_template and tool_call_config are inherited from the fileset
-config = client.inference.deployment_configs.create(
-    name="llama-tool-config",
-    engine="nim",
-    model_spec={
-        "model_name": "default/llama-3-2-1b-tool"
-    },
-    executor_config={
-        "gpu": 1
-    }
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="llama-tool-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(model_name="default/llama-3-2-1b-tool"),
+        executor_config=ContainerExecutorConfig(gpu=1),
+    ),
+).data()
 
-deployment = client.inference.deployments.create(
-    name="llama-tool-deployment",
-    config="llama-tool-config"
-)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="llama-tool-deployment",
+        config="llama-tool-config",
+    ),
+).data()
 
-client.models.wait_for_status(
+client.models.wait_for_deployment_status(
     deployment_name="llama-tool-deployment",
-    desired_status="READY"
+    desired_status="READY",
 )
 
  ```
@@ -1102,21 +1164,18 @@ Set `chat_template` and `tool_call_config` directly on the deployment config. Th
 
 ```python
 
-config = client.inference.deployment_configs.create(
-    name="llama-tool-override-config",
-    engine="nim",
-    model_spec={
-        "model_name": "default/llama-3-2-1b-tool",
-        "chat_template": "{%- for message in messages %}{{ message['content'] }}{%- endfor %}",
-        "tool_call_config": {
-            "tool_call_parser": "hermes",
-            "auto_tool_choice": False,
-        }
-    },
-    executor_config={
-        "gpu": 1
-    }
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="llama-tool-override-config",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_name="default/llama-3-2-1b-tool",
+            chat_template="{%- for message in messages %}{{ message['content'] }}{%- endfor %}",
+            tool_call_config=ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=False),
+        ),
+        executor_config=ContainerExecutorConfig(gpu=1),
+    ),
+).data()
 
  ```
 
@@ -1172,51 +1231,56 @@ nemo wait inference deployment llama-tool-deployment-v2
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # Create a new fileset with the updated tool calling config via metadata
-tool_metadata_v2: dict[str, object] = {
-    "model": {
-        "tool_calling": {
-            "tool_call_parser": "mistral",
-            "auto_tool_choice": True,
-        }
-    }
-}
+tool_metadata_v2 = FilesetMetadata(
+    model=ModelMetadataContent(
+        tool_calling=ToolCallingMetadataContent(
+            tool_call_parser="mistral",
+            auto_tool_choice=True,
+        )
+    )
+)
 
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="llama-3-2-1b-tool-v2",
-        storage={
-            "type": "huggingface",
-            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(
+            repo_id="meta-llama/Llama-3.2-1B-Instruct",
+            repo_type="model",
+        ),
         metadata=tool_metadata_v2,
     ),
     exist_ok=True,
 )
 
 # Create a new model entity referencing the new fileset
-client.models.create(
-    name="llama-3-2-1b-tool-v2",
-    fileset="default/llama-3-2-1b-tool-v2",
+client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="llama-3-2-1b-tool-v2",
+        fileset="default/llama-3-2-1b-tool-v2",
+    ),
 )
 
 # Create a new deployment config and deployment
-config = client.inference.deployment_configs.create(
-    name="llama-tool-config-v2",
-    engine="nim",
-    model_spec={"model_name": "default/llama-3-2-1b-tool-v2"},
-    executor_config={"gpu": 1},
-)
+config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="llama-tool-config-v2",
+        engine=Engine.NIM,
+        model_spec=ModelDeploymentConfigModelSpec(model_name="default/llama-3-2-1b-tool-v2"),
+        executor_config=ContainerExecutorConfig(gpu=1),
+    ),
+).data()
 
-deployment = client.inference.deployments.create(
-    name="llama-tool-deployment-v2", config="llama-tool-config-v2"
-)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="llama-tool-deployment-v2",
+        config="llama-tool-config-v2",
+    ),
+).data()
 
-client.models.wait_for_status(
-    deployment_name="llama-tool-deployment-v2", desired_status="READY"
+client.models.wait_for_deployment_status(
+    deployment_name="llama-tool-deployment-v2",
+    desired_status="READY",
 )
 ```
 
@@ -1238,44 +1302,43 @@ To enable it, set `models.tool_call_plugin.enabled: true` in the platform config
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-
 # 1. Create a fileset for the plugin file
-client.files.client.create_fileset(body=CreateFilesetRequest(name="my-tool-plugin"), exist_ok=True)
-client.files.upload(
-    fileset="my-tool-plugin",
-    local_path="my_parser.py",
-    remote_path="my_parser.py",
+client.files.create_fileset(body=CreateFilesetRequest(name="my-tool-plugin"), exist_ok=True)
+client.files.upload_file(
+    name="my-tool-plugin",
+    path="my_parser.py",
+    content=Path("my_parser.py").read_bytes(),
 )
 
 # 2. Reference the plugin fileset when creating a new model fileset.
 # Updating metadata on a fileset that already backs an existing model entity
 # does not update that model entity's spec.
-plugin_tool_metadata: dict[str, object] = {
-    "model": {
-        "tool_calling": {
-            "tool_call_parser": "custom_parser",
-            "tool_call_plugin": "default/my-tool-plugin",
-            "auto_tool_choice": True,
-        }
-    }
-}
+plugin_tool_metadata = FilesetMetadata(
+    model=ModelMetadataContent(
+        tool_calling=ToolCallingMetadataContent(
+            tool_call_parser="custom_parser",
+            tool_call_plugin="default/my-tool-plugin",
+            auto_tool_choice=True,
+        )
+    )
+)
 
-client.files.client.create_fileset(
+client.files.create_fileset(
     body=CreateFilesetRequest(
         name="llama-3-2-1b-tool-plugin",
-        storage={
-            "type": "huggingface",
-            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
-            "repo_type": "model",
-        },
+        storage=HuggingfaceStorageConfig(
+            repo_id="meta-llama/Llama-3.2-1B-Instruct",
+            repo_type="model",
+        ),
         metadata=plugin_tool_metadata,
     ),
     exist_ok=True,
 )
-client.models.create(
-    name="llama-3-2-1b-tool-plugin",
-    fileset="default/llama-3-2-1b-tool-plugin",
+client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="llama-3-2-1b-tool-plugin",
+        fileset="default/llama-3-2-1b-tool-plugin",
+    ),
 )
 ```
 
@@ -1327,9 +1390,9 @@ nemo inference gateway provider post v1/chat/completions "my-deployment" \
 <Tab title="Python SDK">
 
 ```python
-response = client.inference.gateway.provider.post(
-    "v1/chat/completions",
+response = InferenceGatewayClient.from_client(client).provider_post(
     name="my-deployment",
+    trailing_uri="v1/chat/completions",
     body={
         "model": "default/my-model",
         "messages": [{"role": "user", "content": "Hello!"}],
