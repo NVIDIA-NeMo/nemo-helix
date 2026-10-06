@@ -48,12 +48,9 @@ import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
-# Base URL for the platform
-BASE_URL = os.getenv("NHX_BASE_URL", "http://localhost:8080")
-WORKSPACE = "default"
-
-# Initialize the client (does not trigger any action yet)
-client = NemoClient(base_url=BASE_URL, workspace=WORKSPACE)
+# Initialize the client from your current CLI context (does not trigger any action yet)
+client = NemoClient.from_config()
+WORKSPACE = client.workspace
 ```
 
 Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.

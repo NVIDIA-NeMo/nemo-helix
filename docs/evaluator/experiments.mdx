@@ -122,12 +122,17 @@ Two Experiment-level behaviors are worth knowing:
 
 ### Setup
 
-Experiments are part of the `intake` service, so any running NeMo Helix already serves them. Point
-at whatever you have, whether a deployed platform or a local one from `nemo setup` or
-`nemo quickstart up`:
+Experiments are part of the `intake` service, so any running NeMo Helix already serves them,
+whether a deployed platform or a local one from `nemo setup` or `nemo quickstart up`.
+
+The examples call the API with `curl`, which can't read your CLI context. The setup below falls
+back to a local deployment only when `NHX_BASE_URL` is unset. If your current context points at a
+remote deployment, export its URL first, for example `export NHX_BASE_URL=https://nhx.example.com`.
+The access token comes from your current context through `nemo auth token`. For details, see
+[When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080
+: "${NHX_BASE_URL:=http://localhost:8080}"
 export WORKSPACE=default
 export NHX_STUDIO_URL="$NHX_BASE_URL/studio"
 export NHX_ACCESS_TOKEN="$(nemo auth token)"
