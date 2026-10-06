@@ -152,11 +152,11 @@ class KnownProvider:
 
 KNOWN_PROVIDERS: tuple[KnownProvider, ...] = (
     KnownProvider(
-        name="nvidia-build",
-        label="NVIDIA Build",
-        description="NVIDIA-hosted models via build.nvidia.com",
-        host_url="https://integrate.api.nvidia.com",
-        env_var="NVIDIA_API_KEY",
+        name="openrouter",
+        label="OpenRouter",
+        description="OpenAI-compatible access to Nemotron and other models",
+        host_url="https://openrouter.ai/api/v1",
+        env_var="OPENROUTER_API_KEY",
     ),
     KnownProvider(
         name="openai",
@@ -187,6 +187,13 @@ KNOWN_PROVIDERS: tuple[KnownProvider, ...] = (
         description="Local models, no API key needed",
         host_url="http://localhost:11434/v1",
         requires_api_key=False,
+    ),
+    KnownProvider(
+        name="nvidia-build",
+        label="NVIDIA Build",
+        description="NVIDIA-hosted models via build.nvidia.com",
+        host_url="https://integrate.api.nvidia.com",
+        env_var="NVIDIA_API_KEY",
     ),
 )
 
@@ -219,6 +226,7 @@ class ProbeConfig:
 # alone is unauthenticated; chat is what rejects a bad key.
 _PROBE_CONFIGS: dict[str, ProbeConfig] = {
     "nvidia-build": ProbeConfig("GET", "v1/models"),
+    "openrouter": ProbeConfig("GET", "key"),
     "openai": ProbeConfig("GET", "models"),
     "anthropic": ProbeConfig("GET", "v1/models"),
     "google-gemini": ProbeConfig("GET", "models"),
@@ -278,7 +286,7 @@ class SetupClients:
 # Env vars probed during --auto mode, in priority order.
 _AUTO_ENV_VARS: tuple[tuple[str, str], ...] = (
     ("NEMO_DEFAULT_INFERENCE_KEY", "NEMO_DEFAULT_INFERENCE_BASE_URL"),
-    ("NVIDIA_API_KEY", ""),
+    ("OPENROUTER_API_KEY", ""),
     ("OPENAI_API_KEY", ""),
     ("ANTHROPIC_API_KEY", ""),
     ("GEMINI_API_KEY", ""),
@@ -2494,7 +2502,7 @@ def setup_command(
     (CI, piped input), pass --auto to use environment variables instead.
 
     Use --auto for non-interactive setup from environment variables
-    (NEMO_DEFAULT_INFERENCE_KEY, NVIDIA_API_KEY, OPENAI_API_KEY,
+    (NEMO_DEFAULT_INFERENCE_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY,
     ANTHROPIC_API_KEY, GEMINI_API_KEY).
     Override the selected pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 

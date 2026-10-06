@@ -47,7 +47,7 @@ Requires an interactive terminal (TTY). In non-interactive contexts
 (CI, piped input), pass --auto to use environment variables instead.
 
 Use --auto for non-interactive setup from environment variables
-(NEMO_DEFAULT_INFERENCE_KEY, NVIDIA_API_KEY, OPENAI_API_KEY,
+(NEMO_DEFAULT_INFERENCE_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY,
 ANTHROPIC_API_KEY, GEMINI_API_KEY).
 Override the selected pair with NEMO_DEFAULT_MODEL and NEMO_FAST_MODEL.
 
