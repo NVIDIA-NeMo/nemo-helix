@@ -67,33 +67,33 @@ import os
 import time
 from nemo_helix import NeMoHelix
 from nemo_helix._exceptions import ConflictError
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
-client = NeMoHelix(
+sdk = NeMoHelix(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
-# Step 1: Create FileSet from Hugging Face
-try:
-    fileset = client.files.filesets.create(
-        workspace="default",
+# Step 1: Create FileSet from Hugging Face (returns the existing FileSet if it already exists)
+fileset = sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name="qwen3-1.7b",
         description="Qwen3 1.7B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
+        storage=HuggingfaceStorageConfig(
             type="huggingface",
             repo_id="Qwen/Qwen3-1.7B",
             repo_type="model",
         ),
-    )
-    print(f"Created FileSet: {fileset.name}")
-except ConflictError:
-    print("FileSet already exists, retrieving...")
-    fileset = client.files.filesets.retrieve(workspace="default", name="qwen3-1.7b")
+    ),
+    exist_ok=True,
+).data()
+print(f"FileSet ready: {fileset.name}")
 
 # Step 2: Create Model Entity
 try:
-    model = client.models.create(
+    model = sdk.models.create(
         workspace="default",
         name="qwen3-1.7b",
         fileset="default/qwen3-1.7b",  # Reference to the FileSet
@@ -102,13 +102,13 @@ try:
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists, retrieving...")
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
 
 # Step 3: Wait for ModelSpec to be auto-populated
 print("Waiting for model spec to be populated...")
 while not model.spec:
     time.sleep(5)
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = sdk.models.retrieve(workspace="default", name="qwen3-1.7b")
 
 print(f"Model ready!")
 print(f" Architecture: {model.spec.family}")

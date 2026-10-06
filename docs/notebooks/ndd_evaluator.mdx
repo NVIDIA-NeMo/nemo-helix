@@ -440,8 +440,8 @@ We evaluate the model on filtered triage notes to see if it predicts the correct
 - **Metric**: String containment check against ground-truth ESI
 
 ```python
-from nemo_helix import ConflictError
 from nemo_helix.filesets import build_fileset_ref
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Split the filtered dataframe into different complexity levels
 df_complexities = {
@@ -455,12 +455,12 @@ files_url_dict = {}
 
 # Create one fileset and store each complexity split as a separate file inside it
 FILESET_NAME = "nurse-triage-notes-eval"
-try:
-    sdk.files.filesets.create(
+sdk.files.client.create_fileset(
+    body=CreateFilesetRequest(
         name=FILESET_NAME, description="Triage evaluator datasets by complexity"
-    )
-except ConflictError:
-    pass
+    ),
+    exist_ok=True,
+)
 
 # Loop over each complexity level, preparing, saving, and uploading evaluation datasets
 for level, df in df_complexities.items():

@@ -42,9 +42,10 @@ import uuid
 from pathlib import Path
 from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_customizer.sdk import Customization
 from nemo_helix.types.secrets import HelixSecretResponse
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_rl_plugin.schema import RlJobInput
 
 
@@ -131,11 +132,12 @@ print("overall_preference:", sample["overall_preference"])
 Upload both JSONL files to a single FileSet so the DPO job can read them.
 
 ```python
-try:
-    sdk.files.filesets.create(workspace="default", name=DATASET_NAME, description="DPO preference data")
-    print(f"Created fileset: {DATASET_NAME}")
-except ConflictError:
-    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(name=DATASET_NAME, description="DPO preference data"),
+    exist_ok=True,
+)
+print(f"Fileset ready: {DATASET_NAME}")
 
 sdk.files.upload(local_path=DATASET_PATH, remote_path="", fileset=DATASET_NAME, workspace="default")
 
@@ -173,21 +175,19 @@ DPO starts from an instruction-tuned base model. The model entity's spec is infe
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-instruct"
 
-storage = HuggingfaceStorageConfigParam(
+storage = HuggingfaceStorageConfig(
     type="huggingface",
     repo_id=HF_REPO_ID,
     repo_type="model",
     token_secret=hf_secret.name,
 )
 
-try:
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default", name=MODEL_NAME, description="Llama 3.2 1B Instruct base model", storage=storage
-    )
-    print(f"Created base model fileset: {MODEL_NAME}")
-except ConflictError:
-    base_model_fs = sdk.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
-    print("Base model fileset already exists.")
+base_model_fs = sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(name=MODEL_NAME, description="Llama 3.2 1B Instruct base model", storage=storage),
+    exist_ok=True,
+).data()
+print(f"Base model fileset ready: {MODEL_NAME}")
 
 try:
     base_model = sdk.models.create(workspace="default", name=MODEL_NAME, fileset=f"default/{MODEL_NAME}")

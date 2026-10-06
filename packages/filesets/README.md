@@ -41,7 +41,7 @@ sdk.files.fsspec.put("/local/file.txt", "my-workspace/my-fileset/file.txt")
 | HuggingFace Hub protocol (`/v1/hf`) | Files API (`/v2/workspaces/{ws}/filesets/{name}`) |
 | Repositories + Branches | Workspaces + Filesets |
 
-> **Note:** Use `sdk.files` as the entry point for all file operations. Use `sdk.files.filesets` for fileset entity management (create, delete, retrieve) and `sdk.files.upload/download/list/delete` for file content operations.
+> **Note:** Use `sdk.files` as the entry point for all file operations. Use the typed `sdk.files.client` (`FilesClient`) for fileset entity management (`create_fileset`, `delete_fileset`, `get_fileset`) and `sdk.files.upload/download/list/delete` for file content operations.
 
 ### Concept Mapping
 
@@ -86,12 +86,17 @@ api.create_repo(f"{namespace}/{repo_name}", repo_type="model", exist_ok=True)
 
 **After (SDK):**
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Workspaces are typically pre-created, but filesets can be created:
-sdk.files.filesets.create(
+sdk.files.client.create_fileset(
     workspace="my-workspace",
-    name="my-fileset",
-    description="Model checkpoint storage",
-    purpose="model",  # or "dataset", or empty/unset
+    body=CreateFilesetRequest(
+        name="my-fileset",
+        description="Model checkpoint storage",
+        purpose="model",  # or "dataset", or empty/unset
+    ),
+    exist_ok=True,
 )
 ```
 
@@ -262,7 +267,7 @@ sdk.files.fsspec.rm("my-workspace/my-fileset/path/to/file.txt")
 sdk.files.fsspec.rm(["my-workspace/my-fileset/file1.txt", "my-workspace/my-fileset/file2.txt"])
 
 # Delete entire fileset (use SDK for fileset management)
-sdk.files.filesets.delete("my-fileset", workspace="my-workspace")
+sdk.files.client.delete_fileset(name="my-fileset", workspace="my-workspace")
 ```
 
 ---

@@ -41,9 +41,10 @@ import uuid
 from pathlib import Path
 from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_customizer.sdk import Customization
 from nemo_helix.types.secrets import HelixSecretResponse
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 
 def sanitize_name(prefix: str, name: str):
@@ -149,16 +150,16 @@ print("Sample completion:", sample["completion"])
 Upload the training and validation JSONL files to a FileSet so the customization job can use them.
 
 ```python
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=DATASET_NAME,
         description="SFT training data",
         cache=True,
-    )
-    print(f"Created fileset: {DATASET_NAME}")
-except ConflictError:
-    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
+    ),
+    exist_ok=True,
+)
+print(f"Fileset ready: {DATASET_NAME}")
 
 sdk.files.fsspec.put(
     lpath=DATASET_PATH,
@@ -210,23 +211,22 @@ Create a fileset pointing to [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3
 HF_REPO_ID = "Qwen/Qwen3-0.6B"
 MODEL_NAME = "qwen3-0.6b"
 
-try:
-    storage = HuggingfaceStorageConfigParam(
-        type="huggingface",
-        repo_id=HF_REPO_ID,
-        repo_type="model",
-    )
-    if hf_secret:
-        storage["token_secret"] = hf_secret.name
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
+storage = HuggingfaceStorageConfig(
+    type="huggingface",
+    repo_id=HF_REPO_ID,
+    repo_type="model",
+    token_secret=hf_secret.name if hf_secret else None,
+)
+base_model_fs = sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=MODEL_NAME,
         description="Qwen3 0.6b base model from Hugging Face",
         storage=storage,
         cache=True,
-    )
-except ConflictError:
-    base_model_fs = sdk.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
+    ),
+    exist_ok=True,
+).data()
 
 try:
     base_model = sdk.models.create(

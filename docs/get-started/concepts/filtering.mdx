@@ -89,26 +89,36 @@ String values must be double-quoted.
 
 ### JSON
 
-Pass a dictionary to the `filter` parameter. Keys are field names; values are either a literal (for exact match) or an operator object. This form is most useful when building queries programmatically:
+Pass a JSON object to the `filter` parameter. Keys are field names; values are either a literal (for exact match) or an operator object. On endpoints whose `filter` is typed as `str`, such as the typed files client's `list_filesets`, serialize the object with `json.dumps`. This form is most useful when building queries programmatically:
 
 ```python
+import json
+
 # Exact match
-results = client.files.filesets.list(filter={"purpose": "dataset"})
+results = client.files.client.list_filesets(
+    query_params={"filter": json.dumps({"purpose": "dataset"})}
+)
 
 # Operator syntax
-results = client.files.filesets.list(filter={"name": {"$like": "training"}})
+results = client.files.client.list_filesets(
+    query_params={"filter": json.dumps({"name": {"$like": "training"}})}
+)
 
 # Multiple conditions
-results = client.files.filesets.list(
-    filter={
-        "$and": [{"purpose": "dataset"}, {"description": {"$like": "training"}}]
+results = client.files.client.list_filesets(
+    query_params={
+        "filter": json.dumps(
+            {"$and": [{"purpose": "dataset"}, {"description": {"$like": "training"}}]}
+        )
     }
 )
 
 # Date range
-results = client.files.filesets.list(
-    filter={
-        "created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}
+results = client.files.client.list_filesets(
+    query_params={
+        "filter": json.dumps(
+            {"created_at": {"$gte": "2025-01-01T00:00:00", "$lte": "2025-06-30T23:59:59"}}
+        )
     }
 )
 ```
@@ -117,8 +127,8 @@ When a bare value is provided (without an operator object), it defaults to `$eq`
 
 ```python
 # These are equivalent
-client.files.filesets.list(filter={"purpose": "dataset"})
-client.files.filesets.list(filter={"purpose": {"$eq": "dataset"}})
+client.files.client.list_filesets(query_params={"filter": json.dumps({"purpose": "dataset"})})
+client.files.client.list_filesets(query_params={"filter": json.dumps({"purpose": {"$eq": "dataset"}})})
 ```
 
 ## Operators reference

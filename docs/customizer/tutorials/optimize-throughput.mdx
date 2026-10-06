@@ -40,6 +40,7 @@ import json
 import os
 from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_customizer.sdk import Customization
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
@@ -142,15 +143,15 @@ print(f"Saved validation.jsonl with {len(validation_ds)} rows")
 ```python
 # Create fileset to store SFT training data
 
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=DATASET_NAME,
-        description="SFT training data"
-    )
-    print(f"Created fileset: {DATASET_NAME}")
-except ConflictError:
-    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
+        description="SFT training data",
+    ),
+    exist_ok=True,
+)
+print(f"Fileset ready: {DATASET_NAME}")
 
 # Upload training data files individually to ensure correct structure
 sdk.files.upload(
@@ -232,34 +233,31 @@ Note: for public models, you can omit the `token_secret` parameter when creating
 
 ```python
 import time
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 HF_REPO_ID = "meta-llama/Llama-3.2-1B-Instruct"
 MODEL_NAME = "llama-3-2-1b-base"
 
 # Ensure you have a Hugging Face token secret created
 # Create a fileset pointing to the desired Hugging Face model
-try:
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
+base_model_fs = sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=MODEL_NAME,
         description="Llama 3.2 1B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
+        storage=HuggingfaceStorageConfig(
             type="huggingface",
             # repo_id is the full model name from Hugging Face
             repo_id=HF_REPO_ID,
             repo_type="model",
             # we use the secret created in the previous step
-            token_secret=hf_secret.name
-        )
-    )
-    print(f"Created base model fileset: {MODEL_NAME}")
-except ConflictError:
-    print(f"Base model fileset already exists. Skipping creation.")
-    base_model_fs = sdk.files.filesets.retrieve(
-        workspace="default",
-        name=MODEL_NAME,
-    )
+            token_secret=hf_secret.name,
+        ),
+    ),
+    # Return the existing fileset instead of failing if it was already created
+    exist_ok=True,
+).data()
+print(f"Base model fileset ready: {MODEL_NAME}")
 
 # Create the Model Entity representation.
 try:

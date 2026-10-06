@@ -88,6 +88,7 @@ from pathlib import Path
 
 from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_customizer.sdk import Customization
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
@@ -175,15 +176,15 @@ with open(f"{DATASET_PATH}/training.jsonl", 'r') as f:
 ```python
 DATASET_NAME = "kd-dataset"
 
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=DATASET_NAME,
-        description="Knowledge distillation training data"
-    )
-    print(f"Created fileset: {DATASET_NAME}")
-except ConflictError:
-    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
+        description="Knowledge distillation training data",
+    ),
+    exist_ok=True,
+)
+print(f"Fileset ready: {DATASET_NAME}")
 
 sdk.files.upload(
     local_path=f"{DATASET_PATH}/",
@@ -245,28 +246,28 @@ Knowledge distillation requires **two** model entities:
 Using the Instruct variants ensures the output model includes a chat template, which is required for the `/chat/completions` inference endpoint.
 
 ```python
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 
 SPEC_TIMEOUT_SECONDS = 120
 
 
 def create_model(hf_repo: str, model_name: str, description: str):
     """Create a fileset + model entity and wait for ModelSpec."""
-    try:
-        sdk.files.filesets.create(
-            workspace="default",
+    sdk.files.client.create_fileset(
+        workspace="default",
+        body=CreateFilesetRequest(
             name=model_name,
             description=description,
-            storage=HuggingfaceStorageConfigParam(
+            storage=HuggingfaceStorageConfig(
                 type="huggingface",
                 repo_id=hf_repo,
                 repo_type="model",
-                token_secret=hf_secret.name
-            )
-        )
-        print(f"Created fileset: {model_name}")
-    except ConflictError:
-        print(f"Fileset '{model_name}' already exists.")
+                token_secret=hf_secret.name,
+            ),
+        ),
+        exist_ok=True,
+    )
+    print(f"Fileset ready: {model_name}")
 
     try:
         model = sdk.models.create(

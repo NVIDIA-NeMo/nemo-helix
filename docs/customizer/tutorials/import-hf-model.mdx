@@ -23,7 +23,7 @@ Use this tutorial to learn how to import a private Hugging Face model into NeMo 
 
 <Note>
 
-This tutorial uses the current NeMo Helix SDK resources: `sdk.files.filesets`, `sdk.models`, `sdk.inference.gateway`, and the `Customization` resource's `customization.automodel.jobs`.
+This tutorial uses the current NeMo Helix SDK resources: `sdk.files.client` (the typed `FilesClient`), `sdk.models`, `sdk.inference.gateway`, and the `Customization` resource's `customization.automodel.jobs`.
 
 </Note>
 
@@ -86,8 +86,10 @@ from nemo_automodel_plugin.schema import (
 )
 from nemo_helix import ConflictError, NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError as FilesConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_customizer.sdk import Customization
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
 from nemo_helix.types.secrets import HelixSecretResponse
 
 def max_wait_time_checker(seconds: int, job_name: str = ""):
@@ -135,32 +137,25 @@ Create a Hugging Face-backed fileset for the private model, then register a Mode
 ```python
 HF_REPO_ID = "google/gemma-2-2b-it"
 MODEL_NAME = "gemma-2-2b-it"
-model_storage = HuggingfaceStorageConfigParam(
-    type="huggingface",
-    repo_id=HF_REPO_ID,
-    repo_type="model",
-    token_secret=hf_secret.name,
+model_fileset = CreateFilesetRequest(
+    name=MODEL_NAME,
+    description=f"Private Hugging Face model {HF_REPO_ID}",
+    storage=HuggingfaceStorageConfig(
+        type="huggingface",
+        repo_id=HF_REPO_ID,
+        repo_type="model",
+        token_secret=hf_secret.name,
+    ),
+    cache=True,
 )
 
 try:
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description=f"Private Hugging Face model {HF_REPO_ID}",
-        storage=model_storage,
-        cache=True,
-    )
+    base_model_fs = sdk.files.client.create_fileset(workspace="default", body=model_fileset).data()
     print(f"Created model fileset: {base_model_fs.name}")
-except ConflictError:
+except FilesConflictError:
     print(f"Model fileset '{MODEL_NAME}' already exists, refreshing Hugging Face settings...")
-    sdk.files.filesets.delete(workspace="default", name=MODEL_NAME)
-    base_model_fs = sdk.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description=f"Private Hugging Face model {HF_REPO_ID}",
-        storage=model_storage,
-        cache=True,
-    )
+    sdk.files.client.delete_fileset(workspace="default", name=MODEL_NAME)
+    base_model_fs = sdk.files.client.create_fileset(workspace="default", body=model_fileset).data()
 
 try:
     base_model = sdk.models.create(
@@ -258,16 +253,16 @@ with open(DATASET_PATH / "validation.jsonl", "w", encoding="utf-8") as f:
     for item in validation_data:
         f.write(json.dumps(item) + "\n")
 
-try:
-    sdk.files.filesets.create(
-        workspace="default",
+sdk.files.client.create_fileset(
+    workspace="default",
+    body=CreateFilesetRequest(
         name=DATASET_NAME,
         description="Private Hugging Face model LoRA training data",
         cache=True,
-    )
-    print(f"Created dataset fileset: {DATASET_NAME}")
-except ConflictError:
-    print(f"Dataset fileset '{DATASET_NAME}' already exists, continuing...")
+    ),
+    exist_ok=True,
+)
+print(f"Dataset fileset ready: {DATASET_NAME}")
 
 sdk.files.fsspec.put(
     lpath=DATASET_PATH,
