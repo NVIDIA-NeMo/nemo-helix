@@ -3,6 +3,7 @@
 
 import {
   getErrorMessage,
+  isForbiddenError,
   isValidationErrorArray,
   swallowConflict,
 } from '@nemo/common/src/api/common/utils';
@@ -336,5 +337,26 @@ describe('swallowConflict', () => {
   it('rethrows non-Axios errors', async () => {
     const error = new Error('network down');
     await expect(swallowConflict(Promise.reject(error))).rejects.toBe(error);
+  });
+});
+
+describe('isForbiddenError', () => {
+  it('returns true for an axios-shaped 403', () => {
+    expect(isForbiddenError({ response: { status: 403 } })).toBe(true);
+  });
+
+  it('returns true for a bare 403 status', () => {
+    expect(isForbiddenError({ status: 403 })).toBe(true);
+  });
+
+  it('returns false for other statuses', () => {
+    expect(isForbiddenError({ response: { status: 401 } })).toBe(false);
+    expect(isForbiddenError({ response: { status: 500 } })).toBe(false);
+  });
+
+  it('returns false for non-HTTP errors', () => {
+    expect(isForbiddenError(new Error('network down'))).toBe(false);
+    expect(isForbiddenError(undefined)).toBe(false);
+    expect(isForbiddenError(null)).toBe(false);
   });
 });

@@ -55,6 +55,12 @@ export const isNotFoundError = (error: unknown): boolean => {
   return candidate?.response?.status === 404 || candidate?.status === 404;
 };
 
+/** A 403 from the platform API — the caller is authenticated but lacks permission. */
+export const isForbiddenError = (error: unknown): boolean => {
+  const candidate = error as { response?: { status?: number }; status?: number };
+  return candidate?.response?.status === 403 || candidate?.status === 403;
+};
+
 /**
  * Extracts a user-friendly error message from an error object.
  * Handles both ValidationError arrays and simple string errors from the backend.
