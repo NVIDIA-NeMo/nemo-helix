@@ -6,6 +6,7 @@ import {
   type DraftInputs,
   type DraftValidation,
   ERROR_NOT_JSON,
+  estimateTrainingRows,
   validateDraft,
 } from '@studio/components/CreateCustomizationStart/aiDraft';
 import {
@@ -204,6 +205,25 @@ describe('validateDraft', () => {
         { label: 'training.lora.alpha', value: '32' },
         { label: 'optimizer.learning_rate', value: '1e-4' },
       ]);
+    });
+  });
+});
+
+describe('estimateTrainingRows', () => {
+  const file = (rowCount: number, size: number) =>
+    ({ path: 'training.jsonl', file_ref: '', file_url: '', size, rowCount }) as const;
+
+  it('counts exactly when every file fit in the preview', () => {
+    expect(estimateTrainingRows([file(100, 1_000), file(50, 500)])).toEqual({
+      trainingRowCount: 150,
+      rowCountIsEstimate: false,
+    });
+  });
+
+  it('scales a file past the preview cap up by its size', () => {
+    expect(estimateTrainingRows([file(1_000, 512 * 1024 * 10)])).toEqual({
+      trainingRowCount: 10_000,
+      rowCountIsEstimate: true,
     });
   });
 });

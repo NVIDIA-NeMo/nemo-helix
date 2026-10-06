@@ -17,7 +17,7 @@ import {
 import { getWorkspaceAndModel } from '@studio/components/NewDataDesignerJobForm/utils';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import type { ChatCompletion } from 'openai/resources/index.mjs';
-import { type FormEvent, useCallback, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { type UseFormReturn, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
@@ -77,9 +77,17 @@ export const useDescribeWithAi = (
 
   const chatCompletion = useChatCompletion();
 
+  // Leaving the AI option unmounts the panel while a run may still be in flight. Aborting it
+  // keeps a late reply from publishing a draft the user can no longer see.
+  const runRef = useRef<AbortController | null>(null);
+  useEffect(() => () => runRef.current?.abort(), []);
+
   const runGeneration = useCallback(
     async ({ model, prompt }: DescribeWithAiFormValues) => {
       if (!inputs) return;
+      runRef.current?.abort();
+      const run = new AbortController();
+      runRef.current = run;
       setIsGenerating(true);
       setRetry(0);
       setRequestError(null);
@@ -96,7 +104,9 @@ export const useDescribeWithAi = (
             messages,
             tools: [draftCustomizationJobTool],
             tool_choice: 'required',
+            signal: run.signal,
           })) as ChatCompletion;
+          if (run.signal.aborted) return;
 
           const toolCall = response.choices[0]?.message?.tool_calls?.[0];
           if (!toolCall || toolCall.type !== 'function') {
@@ -113,6 +123,7 @@ export const useDescribeWithAi = (
           messages = buildRetryMessages(messages, toolCall.function.arguments, result.errors);
         }
       } catch (error) {
+        if (run.signal.aborted) return;
         setRequestError(getErrorMessage(error, 'Generation failed.'));
         setValidation(null);
       } finally {

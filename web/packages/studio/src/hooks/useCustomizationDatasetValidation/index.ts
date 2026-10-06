@@ -174,8 +174,9 @@ interface UseCustomizationDatasetValidationOptions {
    * Currently-selected training type from the form. Schema rules differ:
    * SFT accepts messages or prompt+completion; DPO accepts the four preference
    * shapes. Customizer applies the same training-type-aware discrimination.
+   * Omit to detect whichever format the data is in, before a type is chosen.
    */
-  trainingType: TrainingType;
+  trainingType?: TrainingType;
   /**
    * Cap on the number of lines parsed per file. 0 (default) means parse every
    * line of every file. Positive values truncate the sample, useful for
@@ -241,7 +242,7 @@ const validateOne = async (
   content: string,
   encoding: FileEncodingResult,
   sampleLimit: number,
-  trainingType: TrainingType
+  trainingType: TrainingType | undefined
 ): Promise<PerFileValidation> => {
   const rowCount = countRows(content);
   const sample = buildSampleFile(file.path, content, sampleLimit);
@@ -273,7 +274,13 @@ const validateOne = async (
   forEachParsedRow(sampledContent, (row, index) => {
     if (firstRow === null) {
       firstRow = row;
-      schema = detectCustomizerSchema(row, trainingType);
+      // Without a type, GRPO and DPO go first: their keys are distinctive, while SFT's
+      // `prompt` also appears in preference rows.
+      schema = trainingType
+        ? detectCustomizerSchema(row, trainingType)
+        : (detectCustomizerSchema(row, 'grpo') ??
+          detectCustomizerSchema(row, 'dpo') ??
+          detectCustomizerSchema(row, 'sft'));
     }
     // Skip completeness when the schema didn't match — we don't know what to
     // require. The Schema check already surfaces a warning.
@@ -464,7 +471,7 @@ export const useCustomizationDatasetValidation = ({
     discoveryError,
     format: { ok: formatOk, fileErrors },
     schema,
-    schemaExpectedCopy: expectedSchemaCopy(trainingType),
+    schemaExpectedCopy: trainingType ? expectedSchemaCopy(trainingType) : '',
     schemaMismatchedFiles,
     schemaShape: inferRowSchema(firstDetected?.firstRow ?? null),
     completeness,
