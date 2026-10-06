@@ -158,17 +158,22 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   const selectedAgent = watch('agent');
   const enteredImage = watch('image')?.trim();
 
-  const { data: selectedAgentDetails } = useAgentsGetAgent(workspace, selectedAgent, {
-    query: { enabled: open && Boolean(selectedAgent) },
-  });
+  const { data: selectedAgentDetails, isLoading: isSelectedAgentLoading } = useAgentsGetAgent(
+    workspace,
+    selectedAgent,
+    { query: { enabled: open && Boolean(selectedAgent) } }
+  );
   // Without an image or a configured default, the platform can only deploy what it builds first.
-  const buildImageFirst =
+  const needsImageBuild =
     !enteredImage &&
     deploymentMode !== 'subprocess' &&
     deploymentModes.status === 'ready' &&
     !deploymentModes.withoutImage.includes(deploymentMode) &&
-    !imageBuildsUnsupported &&
-    selectedAgentDetails?.config_format === FABRIC_CONFIG_FORMAT;
+    !imageBuildsUnsupported;
+  const buildImageFirst =
+    needsImageBuild && selectedAgentDetails?.config_format === FABRIC_CONFIG_FORMAT;
+  // Until the agent loads, a submit would skip the build and be rejected for having no image.
+  const awaitingAgentForImageBuild = needsImageBuild && isSelectedAgentLoading;
 
   // The modes can arrive after the dialog opens; a default they rule out would be rejected on submit.
   useEffect(() => {
@@ -242,7 +247,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
-      submitDisabled={awaitingModesForImage || noDeployableMode}
+      submitDisabled={awaitingModesForImage || noDeployableMode || awaitingAgentForImageBuild}
       errorText={errorMessage}
     >
       <Stack gap="density-xl">

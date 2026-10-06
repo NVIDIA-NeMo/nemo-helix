@@ -437,6 +437,36 @@ describe('CreateDeploymentModal', () => {
       expect(captured.body).toBeUndefined();
     });
 
+    it('holds the submit until the agent loads, so the build is not skipped', async () => {
+      let releaseAgent = () => {};
+      const agentReleased = new Promise<void>((resolve) => {
+        releaseAgent = resolve;
+      });
+      server.use(
+        http.get(agentUrl, async ({ params }) => {
+          await agentReleased;
+          return HttpResponse.json({
+            name: params['name'],
+            workspace,
+            config_format: FABRIC_CONFIG_FORMAT,
+          });
+        })
+      );
+      const user = userEvent.setup();
+      const captured = captureCreate();
+      renderOnRoutes();
+
+      const dialog = await getDeploymentDialog();
+      await chooseDocker(dialog, user);
+      expect(within(dialog).getByRole('button', { name: 'Deploy' })).toBeDisabled();
+
+      releaseAgent();
+      expect(
+        await within(dialog).findByRole('button', { name: 'Build image and deploy' })
+      ).toBeEnabled();
+      expect(captured.body).toBeUndefined();
+    });
+
     it('deploys a typed image directly', async () => {
       const user = userEvent.setup();
       const captured = captureCreate();
