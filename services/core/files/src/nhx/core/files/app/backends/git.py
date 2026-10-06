@@ -97,6 +97,7 @@ _SERVER_FAULTS = (
     "cannot run ssh",
     "ssh: not found",
     "ssh: command not found",
+    "No user exists for uid",
 )
 
 _MISSING_FROM_REMOTE = (
@@ -165,13 +166,13 @@ def normalize_private_key(key: str) -> str:
 
 
 def _pick_ref(refs: dict[str, str], revision: str) -> str | None:
-    # A peeled "^{}" line names an annotated tag's commit; the unpeeled line names the tag object.
+    # Tags before branches, as git resolves a name; a peeled "^{}" line names an annotated tag's commit.
     for name in (
         f"{revision}^{{}}",
         revision,
-        f"refs/heads/{revision}",
         f"refs/tags/{revision}^{{}}",
         f"refs/tags/{revision}",
+        f"refs/heads/{revision}",
     ):
         if name in refs:
             return refs[name]
@@ -251,14 +252,14 @@ async def _single_chunk(body: bytes) -> AsyncIterator[bytes]:
 
 
 # Listings are immutable once written, so parsed ones are shared across requests.
-_LISTING_MEMORY = 128
+_LISTED_FILES_IN_MEMORY = 1_000_000
 _listings: OrderedDict[str, Snapshot] = OrderedDict()
 
 
 def _remember_listing(key: str, snapshot: Snapshot) -> None:
     _listings[key] = snapshot
     _listings.move_to_end(key)
-    while len(_listings) > _LISTING_MEMORY:
+    while len(_listings) > 1 and sum(len(listing) for listing in _listings.values()) > _LISTED_FILES_IN_MEMORY:
         _listings.popitem(last=False)
 
 
@@ -462,12 +463,9 @@ class GitStorageImpl(StorageImpl):
 
     async def _ls_remote(self) -> str:
         revision = self.config.revision
-        pinned = is_commit_sha(revision)
         # A bare tag pattern does not match the peeled `^{}` line that names an annotated tag's commit.
-        patterns = ["HEAD"] if pinned else [revision, f"{revision}^{{}}"]
+        patterns = [revision, f"{revision}^{{}}"]
         output = await self._remote_git("ls-remote", "--", self.config.url, *patterns, subject=self.config.url)
-        if pinned:
-            return revision
 
         refs: dict[str, str] = {}
         for line in output.decode(errors="replace").splitlines():
@@ -539,6 +537,7 @@ class GitStorageImpl(StorageImpl):
     async def _prepare_repository(self) -> None:
         repo, sha = self._repo_dir, await self._commit()
         if sha in _fetched_commits.get(str(repo), ()) and await asyncio.to_thread((repo / "HEAD").exists):
+            await _touch(repo)
             return
 
         await _finish_even_if_cancelled(self._ensure_commit(repo, sha))
@@ -546,8 +545,7 @@ class GitStorageImpl(StorageImpl):
     async def resolve_config(self) -> GitStorageConfig:
         """Pin the revision to a commit SHA so the fileset cannot shift under a deployment."""
         sha = await self._commit()
-        # Recorded unconditionally, as for GitHub: a client-supplied original_revision would let a pinned fileset
-        # refresh onto an unrelated branch. Refresh points revision at the tracked ref before calling this.
+        # Unconditional, as for GitHub: a client-supplied original_revision could repoint a pin on refresh.
         return self.config.model_copy(update={"revision": sha, "original_revision": self.config.revision})
 
     async def _snapshot(self) -> Snapshot:
@@ -568,6 +566,9 @@ class GitStorageImpl(StorageImpl):
             stream = await self._store.download(key, None)
             raw = b"".join([chunk async for chunk in stream])
         except NotFoundError:
+            return None
+        except Exception:
+            logger.warning("Rebuilding a git listing that could not be read from %s", key, exc_info=True)
             return None
         try:
             listing = json.loads(raw)
@@ -711,10 +712,12 @@ class GitStorageImpl(StorageImpl):
 
     async def validate_storage(self):
         validate_external_host(self.config.remote.host_url)
-        self._resolved_sha = await self._ls_remote()
         if is_commit_sha(self.config.revision):
-            # ls-remote vouches for a branch or tag but not a commit, which another key may already have cached.
+            self._resolved_sha = self.config.revision
+            # The fetch proves the key, and the server decides whether it may have this commit even if it is cached.
             await _finish_even_if_cancelled(self._ensure_commit(self._repo_dir, self._resolved_sha, ask_remote=True))
+        else:
+            self._resolved_sha = await self._ls_remote()
         # An empty directory reads like a missing one.
         if is_commit_sha(self.config.revision) or self.config.path:
             await self._snapshot()
