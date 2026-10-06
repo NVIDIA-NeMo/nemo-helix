@@ -3,6 +3,53 @@ info:
   title: agents (plugin)
   version: 0.0.0
 paths:
+  /apis/agents/v2/sample-agent:
+    post:
+      tags:
+      - Sample Agent
+      summary: Create Sample Agent
+      description: Create or resume the caller's sample agent and resources; deployment
+        remains asynchronous.
+      operationId: create_sample_agent_apis_agents_v2_sample_agent_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSampleAgentRequest'
+        required: true
+      responses:
+        '201':
+          description: Sample agent and workspace created; deployment may still be
+            pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleAgentResponse'
+        '200':
+          description: Existing sample agent resumed or already provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleAgentResponse'
+        '409':
+          description: The existing sample agent deployment uses another model.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleAgentConflictResponse'
+        '502':
+          description: Provisioning failed; the workspace is retained so the request
+            can be retried.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SampleAgentRetryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents:
     post:
       tags:
@@ -4637,6 +4684,17 @@ components:
       - name
       title: CreateEnvironmentSpecRequest
       description: Request body for ``POST /v2/workspaces/{workspace}/environment-specs``.
+    CreateSampleAgentRequest:
+      properties:
+        model:
+          type: string
+          title: Model
+          description: Workspace-qualified model entity, for example default/my-model.
+      type: object
+      required:
+      - model
+      title: CreateSampleAgentRequest
+      description: Model to use when provisioning the packaged email security sample.
     CreateSessionRequest:
       properties:
         deployment_id:
@@ -6741,6 +6799,93 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
+    SampleAgentConflictResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+      type: object
+      required:
+      - detail
+      title: SampleAgentConflictResponse
+      description: Error response when the existing deployment locks a different model.
+    SampleAgentResponse:
+      properties:
+        status:
+          type: string
+          enum:
+          - created
+          - resumed
+          - already_exists
+          title: Status
+        workspace:
+          type: string
+          title: Workspace
+        studio_url:
+          type: string
+          title: Studio Url
+          description: Studio path relative to the platform origin.
+        agent:
+          type: string
+          title: Agent
+        deployment:
+          type: string
+          title: Deployment
+        deployment_status:
+          type: string
+          enum:
+          - pending
+          - starting
+          - running
+          - failed
+          - deleting
+          title: Deployment Status
+      type: object
+      required:
+      - status
+      - workspace
+      - studio_url
+      - agent
+      - deployment
+      - deployment_status
+      title: SampleAgentResponse
+      description: Provisioned sample agent and its workspace and deployment state.
+    SampleAgentRetryDetail:
+      properties:
+        workspace:
+          type: string
+          title: Workspace
+        studio_url:
+          type: string
+          title: Studio Url
+          description: Studio path relative to the platform origin.
+        failed_step:
+          type: string
+          enum:
+          - agent deployment
+          - sample files
+          title: Failed Step
+        retryable:
+          type: boolean
+          const: true
+          title: Retryable
+      type: object
+      required:
+      - workspace
+      - studio_url
+      - failed_step
+      - retryable
+      title: SampleAgentRetryDetail
+      description: Workspace retained when sample provisioning fails and can be retried.
+    SampleAgentRetryResponse:
+      properties:
+        detail:
+          $ref: '#/components/schemas/SampleAgentRetryDetail'
+      type: object
+      required:
+      - detail
+      title: SampleAgentRetryResponse
+      description: Error response for a retryable sample provisioning failure.
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.

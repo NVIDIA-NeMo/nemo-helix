@@ -20,7 +20,9 @@ from nemo_helix_plugin.agents.types import (
     CreateAgentRequest,
     CreateDeploymentRequest,
     CreateSampleAgentRequest,
+    SampleAgentConflictResponse,
     SampleAgentResponse,
+    SampleAgentRetryResponse,
 )
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -182,7 +184,24 @@ async def _sample_files(files: AsyncFilesClient, workspace: str, dataset: bytes,
     return changed
 
 
-@router.post("/sample-agent", response_model=SampleAgentResponse, status_code=201, tags=["Sample Agent"])
+@router.post(
+    "/sample-agent",
+    response_model=SampleAgentResponse,
+    status_code=201,
+    response_description="Sample agent and workspace created; deployment may still be pending.",
+    responses={
+        200: {"model": SampleAgentResponse, "description": "Existing sample agent resumed or already provisioned."},
+        409: {
+            "model": SampleAgentConflictResponse,
+            "description": "The existing sample agent deployment uses another model.",
+        },
+        502: {
+            "model": SampleAgentRetryResponse,
+            "description": "Provisioning failed; the workspace is retained so the request can be retried.",
+        },
+    },
+    tags=["Sample Agent"],
+)
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
 async def create_sample_agent(

@@ -324,6 +324,27 @@ class SampleAgentResponse(BaseModel):
     deployment_status: DeploymentStatus
 
 
+class SampleAgentRetryDetail(BaseModel):
+    """Workspace retained when sample provisioning fails and can be retried."""
+
+    workspace: str
+    studio_url: str = Field(description="Studio path relative to the platform origin.")
+    failed_step: Literal["agent deployment", "sample files"]
+    retryable: Literal[True]
+
+
+class SampleAgentConflictResponse(BaseModel):
+    """Error response when the existing deployment locks a different model."""
+
+    detail: str
+
+
+class SampleAgentRetryResponse(BaseModel):
+    """Error response for a retryable sample provisioning failure."""
+
+    detail: SampleAgentRetryDetail
+
+
 class CreateDeploymentRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/deployments``."""
 

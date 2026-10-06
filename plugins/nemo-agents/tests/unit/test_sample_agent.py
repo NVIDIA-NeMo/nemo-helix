@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response
 from nemo_agents_plugin.api.v2 import sample_agent as sample
 from nemo_helix_plugin.agents.types import Agent, AgentDeployment, CreateSampleAgentRequest
 from nemo_helix_plugin.models.refs import ResolvedModelReference
@@ -197,3 +197,15 @@ def test_packaged_sample_assets_load() -> None:
     assert config_format == "nemo-agents-spec-v1"
     assert config["models"]["default"]["model"] == "my-model"
     assert dataset and eval_config
+
+
+def test_sample_agent_openapi_responses() -> None:
+    app = FastAPI()
+    app.include_router(sample.router, prefix="/apis/agents/v2")
+
+    responses = app.openapi()["paths"]["/apis/agents/v2/sample-agent"]["post"]["responses"]
+
+    assert {"200", "201", "409", "502"} <= responses.keys()
+    assert responses["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/SampleAgentResponse")
+    assert responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith("/SampleAgentConflictResponse")
+    assert responses["502"]["content"]["application/json"]["schema"]["$ref"].endswith("/SampleAgentRetryResponse")
