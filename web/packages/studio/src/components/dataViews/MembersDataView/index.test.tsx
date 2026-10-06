@@ -17,7 +17,9 @@ const renderComponent = () =>
   render(
     <MemoryRouter>
       {/* Retry without the exponential backoff, so the retry assertions below stay fast. */}
-      <TestProviders options={{ queryClientConfig: { defaultOptions: { queries: { retryDelay: 0 } } } }}>
+      <TestProviders
+        options={{ queryClientConfig: { defaultOptions: { queries: { retryDelay: 0 } } } }}
+      >
         <MembersDataView
           workspace={workspace}
           onAddMember={vi.fn()}
@@ -98,7 +100,9 @@ describe('MembersDataView', () => {
       await waitFor(() => expect(requestCount).toBeGreaterThan(1), {
         timeout: XL_SELECTOR_TIMEOUT,
       });
-      expect(screen.queryByText("You don't have permission to view members")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("You don't have permission to view members")
+      ).not.toBeInTheDocument();
     });
   });
 });
