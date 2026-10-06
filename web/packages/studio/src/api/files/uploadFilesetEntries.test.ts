@@ -54,6 +54,28 @@ describe('uploadFilesetEntries', () => {
 
     expect(vi.mocked(filesUploadFile).mock.calls.length).toBeLessThanOrEqual(6);
   });
+
+  it('waits for in-flight uploads to settle before rejecting', async () => {
+    let finishSlowUpload!: () => void;
+    vi.mocked(filesUploadFile)
+      .mockImplementationOnce(
+        () => new Promise((resolve) => (finishSlowUpload = () => resolve({} as never)))
+      )
+      .mockRejectedValueOnce(new Error('quota exceeded'))
+      .mockResolvedValue({} as never);
+
+    let settled = false;
+    const upload = uploadFilesetEntries('ws', 'bundle', entries(2)).catch((error: unknown) => {
+      settled = true;
+      throw error;
+    });
+    await vi.waitFor(() => expect(filesUploadFile).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    finishSlowUpload();
+    await expect(upload).rejects.toThrow('quota exceeded');
+  });
 });
 
 describe('copyFilesetFiles', () => {

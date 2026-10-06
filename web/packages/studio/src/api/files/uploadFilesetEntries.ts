@@ -39,9 +39,11 @@ const forEachBounded = async <T>(
     }
   };
 
-  await Promise.all(
+  const results = await Promise.allSettled(
     Array.from({ length: Math.min(UPLOAD_CONCURRENCY, items.length) }, () => worker())
   );
+  const failure = results.find((result) => result.status === 'rejected');
+  if (failure) throw failure.reason;
 };
 
 const asOctetStream = async (data: Blob): Promise<Blob> =>

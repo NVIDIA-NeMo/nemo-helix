@@ -26,7 +26,7 @@ import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/route
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
 import { ScrollText } from 'lucide-react';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set<HelixJobStatus>(['completed', 'error', 'cancelled']);
@@ -36,7 +36,10 @@ const QUEUED_STATUSES = new Set<HelixJobStatus>(['created', 'pending']);
 export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { optimizeJobName: jobName } = useRequiredPathParams([ROUTE_PARAMS.optimizeJobName]);
-  const [deployTrial, setDeployTrial] = useState<Trial | null>(null);
+  const jobKey = `${workspace}/${jobName}`;
+  const [deployTarget, setDeployTarget] = useState<{ jobKey: string; trial: Trial } | null>(null);
+  const deployTrial = deployTarget?.jobKey === jobKey ? deployTarget.trial : null;
+  const onDeploy = useCallback((trial: Trial) => setDeployTarget({ jobKey, trial }), [jobKey]);
 
   const {
     data: job,
@@ -192,12 +195,12 @@ export const AgentOptimizationDetailRoute: FC = () => {
         ) : (
           <>
             <StudyStatTiles results={results} />
-            <TrialsDataView results={results} onDeploy={setDeployTrial} />
+            <TrialsDataView results={results} onDeploy={onDeploy} />
             <DeployTrialModal
               workspace={workspace}
               job={job}
               trial={deployTrial}
-              onClose={() => setDeployTrial(null)}
+              onClose={() => setDeployTarget(null)}
             />
           </>
         )}
