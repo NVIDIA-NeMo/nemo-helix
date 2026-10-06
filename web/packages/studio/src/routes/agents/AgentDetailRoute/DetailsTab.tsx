@@ -9,7 +9,6 @@ import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
-import { AnalysisConfigPanel } from '@studio/routes/agents/AgentDetailRoute/analysis/AnalysisConfigPanel';
 import { ConfigValue } from '@studio/routes/agents/AgentDetailRoute/ConfigValue';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { SourcePanel } from '@studio/routes/agents/AgentDetailRoute/SourcePanel';
@@ -72,11 +71,6 @@ export const DetailsTab: FC<DetailsTabProps> = ({ workspace, agentName, agent })
       </DetailPanel>
 
       <SourcePanel workspace={workspace} agentName={agent?.name ?? agentName} />
-
-      <AnalysisConfigPanel
-        workspace={agent?.workspace ?? workspace}
-        agent={agent?.name ?? agentName}
-      />
 
       {workflow && (
         <DetailPanel title="Workflow">
