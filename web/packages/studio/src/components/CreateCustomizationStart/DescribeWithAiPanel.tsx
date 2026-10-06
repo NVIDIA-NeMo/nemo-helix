@@ -59,7 +59,10 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   // The full form's dataset check, without a training type so it detects any format.
   const dataset = useCustomizationDatasetValidation({ fileset: datasetRef ?? undefined });
   const isGymDataset = dataset.schema?.variant === 'grpo-gym';
-  const { trainingRowCount, rowCountIsEstimate } = estimateTrainingRows(dataset.training);
+  const { trainingRowCount, rowCountIsEstimate } = estimateTrainingRows(
+    dataset.training,
+    dataset.encoding.ok
+  );
 
   // Same requests as the form's dataset and environment pickers.
   const datasets = useFilesListFilesets(workspace, {
