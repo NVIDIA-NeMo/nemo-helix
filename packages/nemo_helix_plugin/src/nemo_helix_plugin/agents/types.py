@@ -324,6 +324,24 @@ class SampleAgentResponse(BaseModel):
     deployment_status: DeploymentStatus
 
 
+SampleAgentComponent: TypeAlias = Literal["workspace", "agent", "deployment", "dataset", "evaluation_config"]
+SampleAgentComponentStatus: TypeAlias = Literal["created", "existing", "submitted", "uploaded", "updated"]
+
+
+class SampleAgentStreamEvent(BaseModel):
+    """One NDJSON frame from sample-agent provisioning."""
+
+    kind: Literal["progress", "done", "error"]
+    component: SampleAgentComponent | None = None
+    status: SampleAgentComponentStatus | None = None
+    workspace: str | None = None
+    result: SampleAgentResponse | None = None
+    message: str | None = None
+    status_code: int | None = None
+    failed_step: str | None = None
+    retryable: bool | None = None
+
+
 class SampleAgentRetryDetail(BaseModel):
     """Workspace retained when sample provisioning fails and can be retried."""
 

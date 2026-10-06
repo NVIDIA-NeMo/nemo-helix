@@ -42,7 +42,7 @@ from nemo_helix_plugin.agents.types import (
     ListEnvironmentResourcesQueryParams,
     ListSessionsQueryParams,
     LogLine,
-    SampleAgentResponse,
+    SampleAgentStreamEvent,
 )
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest, Stream
@@ -61,7 +61,7 @@ _SAMPLE_AGENT = "/apis/agents/v2/sample-agent"
 
 @post(_SAMPLE_AGENT)
 @abstractmethod
-def create_sample_agent(*, body: CreateSampleAgentRequest) -> SampleAgentResponse: ...
+def create_sample_agent(*, body: CreateSampleAgentRequest) -> Stream[SampleAgentStreamEvent]: ...
 
 
 # ---------------------------------------------------------------------------

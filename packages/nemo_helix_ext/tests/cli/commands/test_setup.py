@@ -107,7 +107,12 @@ from nemo_helix_ext.config.models import (
 from nemo_helix_ext.local.process import PortConflict
 from nemo_helix_ext.ui.prompts import UserCancelled
 from nemo_helix_plugin.agents.client import AgentsClient
-from nemo_helix_plugin.agents.types import AgentDeployment, CreateSampleAgentRequest, SampleAgentResponse
+from nemo_helix_plugin.agents.types import (
+    AgentDeployment,
+    CreateSampleAgentRequest,
+    SampleAgentResponse,
+    SampleAgentStreamEvent,
+)
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import FilesClient
@@ -2344,7 +2349,25 @@ class TestInteractiveModelPairSelection:
             deployment_status="pending",
         )
         agents_client = cli_context.typed_client.return_value
-        agents_client.create_sample_agent.return_value.data.side_effect = lambda: event_order.append("api") or sample
+        agents_client.create_sample_agent.side_effect = lambda **_kwargs: event_order.append("api") or stream
+        stream = MagicMock()
+        stream.stream.return_value.__enter__.return_value = iter(
+            [
+                SampleAgentStreamEvent(
+                    kind="progress", component="workspace", status="created", workspace=sample.workspace
+                ),
+                SampleAgentStreamEvent(
+                    kind="progress", component="agent", status="created", workspace=sample.workspace
+                ),
+                SampleAgentStreamEvent(
+                    kind="progress", component="deployment", status="submitted", workspace=sample.workspace
+                ),
+                SampleAgentStreamEvent(
+                    kind="progress", component="dataset", status="uploaded", workspace=sample.workspace
+                ),
+                SampleAgentStreamEvent(kind="done", result=sample),
+            ]
+        )
 
         with (
             patch(
@@ -2396,7 +2419,7 @@ class TestInteractiveModelPairSelection:
         agents_client.create_sample_agent.assert_called_once_with(
             body=CreateSampleAgentRequest(model=model_pair.default)
         )
-        wait_for_deployment.assert_called_once_with(agents_client, sample)
+        wait_for_deployment.assert_called_once_with(agents_client, sample, submitted=True)
         print_sample_setup_complete.assert_called_once_with("http://localhost:8080", sample.workspace, complete=True)
         assert event_order == [
             "skills",
@@ -2412,12 +2435,20 @@ class TestInteractiveModelPairSelection:
         cli_context = MagicMock()
         model_pair = ModelPair(default="default/model", fast="default/fast-model")
         agents_client = cli_context.typed_client.return_value
-        agents_client.create_sample_agent.side_effect = NemoHTTPError(
-            httpx.Response(
-                502,
-                json={"detail": {"workspace": "sample-uuid123", "failed_step": "sample files", "retryable": True}},
-                request=httpx.Request("POST", "http://localhost:8080/apis/agents/v2/sample-agent"),
-            )
+        stream = agents_client.create_sample_agent.return_value
+        stream.stream.return_value.__enter__.return_value = iter(
+            [
+                SampleAgentStreamEvent(
+                    kind="progress", component="workspace", status="created", workspace="sample-uuid123"
+                ),
+                SampleAgentStreamEvent(
+                    kind="error",
+                    workspace="sample-uuid123",
+                    message="Sample agent setup failed at sample files",
+                    failed_step="sample files",
+                    retryable=True,
+                ),
+            ]
         )
 
         with (
@@ -2446,6 +2477,45 @@ class TestInteractiveModelPairSelection:
         agents_client.create_sample_agent.assert_called_once_with(
             body=CreateSampleAgentRequest(model=model_pair.default)
         )
+        print_sample_setup_complete.assert_called_once_with("http://localhost:8080", "sample-uuid123", complete=False)
+
+    def test_marks_sample_setup_incomplete_when_stream_ends_without_result(self):
+        client = MagicMock()
+        cli_context = MagicMock()
+        model_pair = ModelPair(default="default/model", fast="default/fast-model")
+        agents_client = cli_context.typed_client.return_value
+        stream = agents_client.create_sample_agent.return_value
+        stream.stream.return_value.__enter__.return_value = iter(
+            [
+                SampleAgentStreamEvent(
+                    kind="progress", component="workspace", status="created", workspace="sample-uuid123"
+                )
+            ]
+        )
+
+        with (
+            patch(
+                f"{self._MOD}._interactive_collect_provider",
+                return_value=("provider", "https://provider.example.com", None, None, None),
+            ),
+            patch(f"{self._MOD}._register_provider_interactive"),
+            patch(f"{self._MOD}._wait_for_models", return_value=[model_pair.default]),
+            patch(f"{self._MOD}._select_model_pair", return_value=model_pair),
+            patch(f"{self._MOD}._save_model_pair"),
+            patch(f"{self._MOD}._maybe_install_skills"),
+            patch(f"{self._MOD}._print_setup_complete"),
+            patch(f"{self._MOD}._prompt_post_setup_path", return_value="sample"),
+            patch(f"{self._MOD}._print_sample_setup_complete") as print_sample_setup_complete,
+        ):
+            selected_path = _run_interactive_mode(
+                cli_context,
+                client,
+                "default",
+                "http://localhost:8080",
+                install_skills=False,
+            )
+
+        assert selected_path == "sample"
         print_sample_setup_complete.assert_called_once_with("http://localhost:8080", "sample-uuid123", complete=False)
 
     def test_api_permission_failure_warns_without_completion_card(self):
@@ -4939,12 +5009,29 @@ class TestWaitForSampleDeployment:
         )
 
         with patch(f"{SETUP_MOD}.console") as mock_console:
-            assert _wait_for_sample_deployment(agents_client, sample)
+            assert _wait_for_sample_deployment(agents_client, sample, submitted=True)
 
         agents_client.get_deployment.assert_called_once_with(
             workspace="sample-uuid123", name="email-security-triage-123"
         )
         assert "Deployed agent" in mock_console.print.call_args.args[0]
+
+    def test_existing_running_deployment_is_not_reported_as_new(self):
+        agents_client = MagicMock()
+        sample = SampleAgentResponse(
+            status="already_exists",
+            workspace="sample-uuid123",
+            studio_url="/studio/workspaces/sample-uuid123/dashboard",
+            agent="email-security-triage",
+            deployment="email-security-triage-123",
+            deployment_status="running",
+        )
+
+        with patch(f"{SETUP_MOD}.console") as mock_console:
+            assert _wait_for_sample_deployment(agents_client, sample, submitted=False)
+
+        agents_client.get_deployment.assert_not_called()
+        assert "Agent 'email-security-triage' is running" in mock_console.print.call_args.args[0]
 
     def test_failed_deployment_is_not_reported_ready(self):
         agents_client = MagicMock()
@@ -4958,7 +5045,7 @@ class TestWaitForSampleDeployment:
         )
 
         with patch(f"{SETUP_MOD}.console"):
-            assert not _wait_for_sample_deployment(agents_client, sample)
+            assert not _wait_for_sample_deployment(agents_client, sample, submitted=False)
 
         agents_client.get_deployment.assert_not_called()
 

@@ -28,7 +28,7 @@ import httpx
 import typer
 import yaml as _yaml
 from nemo_helix_plugin.agents.client import AgentsClient
-from nemo_helix_plugin.agents.types import CreateSampleAgentRequest, SampleAgentResponse
+from nemo_helix_plugin.agents.types import CreateSampleAgentRequest, SampleAgentResponse, SampleAgentStreamEvent
 from nemo_helix_plugin.capabilities import probe_docker
 from nemo_helix_plugin.cli_options import WORKSPACE_HELP
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
@@ -2133,11 +2133,12 @@ def _maybe_deploy_sample_agent(
         return False
 
 
-def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse) -> bool:
+def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgentResponse, *, submitted: bool) -> bool:
     """Wait for the deployment returned by the sample-agent API to reach running."""
     status = sample.deployment_status
     deadline = time.monotonic() + _AGENT_DEPLOY_TIMEOUT_SECONDS
-    with console.status(f"[bold cyan]Deploying agent '{sample.agent}'..."):
+    activity = "Deploying" if submitted else "Waiting for"
+    with console.status(f"[bold cyan]{activity} agent '{sample.agent}'..."):
         while status not in {"running", "failed"} and time.monotonic() < deadline:
             try:
                 status = agents_client.get_deployment(workspace=sample.workspace, name=sample.deployment).data().status
@@ -2147,13 +2148,42 @@ def _wait_for_sample_deployment(agents_client: AgentsClient, sample: SampleAgent
                 _pause(_AGENT_DEPLOY_POLL_INTERVAL)
 
     if status == "running":
-        console.print(f"  {CHECK} Deployed agent '{sample.agent}'")
+        if submitted:
+            console.print(f"  {CHECK} Deployed agent '{sample.agent}'")
+        else:
+            console.print(f"  {CHECK} Agent '{sample.agent}' is running")
         return True
     if status == "failed":
         console.print(f"  {CROSS} Agent deployment failed")
     else:
         console.print(f"  {WARN} Agent deployment did not reach running state within {_AGENT_DEPLOY_TIMEOUT_SECONDS}s")
     return False
+
+
+def _print_sample_progress(event: SampleAgentStreamEvent) -> None:
+    """Render a provisioning frame without claiming an existing resource was created."""
+    if event.component == "workspace":
+        if event.status in {"created", "existing"}:
+            action = "Created" if event.status == "created" else "Found existing"
+            console.print(f"  {CHECK} {action} sample workspace '{event.workspace}'")
+    elif event.component == "agent":
+        if event.status in {"created", "existing"}:
+            action = "Created" if event.status == "created" else "Found existing"
+            console.print(f"  {CHECK} {action} agent '{_SAMPLE_AGENT_NAME}'")
+    elif event.component == "deployment":
+        if event.status in {"submitted", "existing"}:
+            action = "Submitted" if event.status == "submitted" else "Found existing"
+            console.print(f"  {CHECK} {action} agent deployment")
+    elif event.component == "dataset":
+        action = {"uploaded": "Uploaded", "updated": "Updated", "existing": "Found existing"}.get(event.status)
+        if action:
+            console.print(f"  {CHECK} {action} dataset '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_DATASET_FILENAME}'")
+    elif event.component == "evaluation_config":
+        if event.status in {"uploaded", "existing"}:
+            action = "Uploaded" if event.status == "uploaded" else "Found existing"
+            console.print(
+                f"  {CHECK} {action} evaluation config '{_SAMPLE_DATASET_FILESET}#{_SAMPLE_EVAL_CONFIG_FILENAME}'"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -3002,8 +3032,25 @@ def _run_interactive_mode(
                 return selected_path
 
             agents_client = cli_context.typed_client(AgentsClient)
+            progress_workspace = None
+            deployment_submitted = False
             try:
-                sample = agents_client.create_sample_agent(body=CreateSampleAgentRequest(model=default_model)).data()
+                sample = None
+                with agents_client.create_sample_agent(
+                    body=CreateSampleAgentRequest(model=default_model)
+                ).stream() as events:
+                    for event in events:
+                        if event.kind == "progress":
+                            _print_sample_progress(event)
+                            progress_workspace = event.workspace or progress_workspace
+                            deployment_submitted |= event.component == "deployment" and event.status == "submitted"
+                        elif event.kind == "error":
+                            console.print(f"  {WARN} {event.message or 'Sample agent setup failed'}")
+                            if event.workspace:
+                                _print_sample_setup_complete(base_url, event.workspace, complete=False)
+                            return selected_path
+                        elif event.kind == "done":
+                            sample = event.result
             except NemoHTTPError as exc:
                 detail = exc.body.get("detail") if isinstance(exc.body, dict) else None
                 if isinstance(detail, dict):
@@ -3018,15 +3065,16 @@ def _run_interactive_mode(
                 return selected_path
             except Exception as exc:
                 console.print(f"  {WARN} Could not create sample agent: {exc}")
+                if progress_workspace:
+                    _print_sample_setup_complete(base_url, progress_workspace, complete=False)
                 return selected_path
 
-            if sample.status == "already_exists":
-                console.print(f"  {CHECK} Sample workspace '{sample.workspace}' already exists")
-            elif sample.status == "resumed":
-                console.print(f"  {CHECK} Resumed sample workspace '{sample.workspace}'")
-            elif sample.status == "created":
-                console.print(f"  {CHECK} Created sample workspace '{sample.workspace}'")
-            agent_ready = _wait_for_sample_deployment(agents_client, sample)
+            if sample is None:
+                console.print(f"  {WARN} Sample agent setup ended without a completion event")
+                if progress_workspace:
+                    _print_sample_setup_complete(base_url, progress_workspace, complete=False)
+                return selected_path
+            agent_ready = _wait_for_sample_deployment(agents_client, sample, submitted=deployment_submitted)
             emit.emit_event(
                 OnboardingStepEvent(
                     step="agent_deployed",

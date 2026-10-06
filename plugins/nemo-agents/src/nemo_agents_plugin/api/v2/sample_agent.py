@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import yaml
 from email_security_triage.resources import sample_file
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.utils import expand_env_vars
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
@@ -20,9 +22,8 @@ from nemo_helix_plugin.agents.types import (
     CreateAgentRequest,
     CreateDeploymentRequest,
     CreateSampleAgentRequest,
-    SampleAgentConflictResponse,
     SampleAgentResponse,
-    SampleAgentRetryResponse,
+    SampleAgentStreamEvent,
 )
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -37,6 +38,7 @@ from nemo_helix_plugin.dependencies import (
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose, UpdateFilesetRequest
+from nemo_helix_plugin.functions.frames import NDJSON_MEDIA_TYPE
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.refs import ResolvedModelReference, parse_workspace_name_ref
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
@@ -52,6 +54,14 @@ _FILESET = "esec-eval-data"
 _DATASET = "dataset.jsonl"
 _EVAL_SOURCE = "eval-config.dataset-driven.yml"
 _EVAL_CONFIG = "eval-config.yaml"
+
+
+class _SampleAgentStreamResponse(StreamingResponse):
+    media_type = NDJSON_MEDIA_TYPE
+
+
+def _frame(event: SampleAgentStreamEvent) -> str:
+    return event.model_dump_json(exclude_none=True) + "\n"
 
 
 def _studio_url(workspace: str) -> str:
@@ -101,7 +111,7 @@ async def _agent_and_deployment(
     model: ResolvedModelReference,
     config: dict,
     config_format: str,
-) -> tuple[AgentDeployment, bool]:
+) -> tuple[AgentDeployment, bool, bool]:
     deployments = [
         deployment
         async for deployment in (await agents.list_deployments(workspace=workspace)).items()
@@ -110,7 +120,7 @@ async def _agent_and_deployment(
     if any(not _model_matches(deployment.config, model) for deployment in deployments):
         raise HTTPException(status_code=409, detail="The sample agent has already been deployed with another model")
 
-    changed = False
+    agent_created = False
     try:
         agent = (await agents.get_agent(workspace=workspace, name=_AGENT_NAME)).data()
     except NotFoundError:
@@ -120,7 +130,7 @@ async def _agent_and_deployment(
             raise HTTPException(status_code=409, detail="The sample agent has already been deployed with another model")
         await agents.delete_agent(workspace=workspace, name=_AGENT_NAME)
         agent = None
-        changed = True
+        agent_created = True
     if agent is None:
         await agents.create_agent(
             workspace=workspace,
@@ -131,20 +141,22 @@ async def _agent_and_deployment(
                 config_format=config_format,
             ),
         )
-        changed = True
+        agent_created = True
 
     active = next(
         (deployment for deployment in deployments if deployment.status in {"pending", "starting", "running"}), None
     )
     if active is not None:
-        return active, changed
+        return active, agent_created, False
     deployment = (
         await agents.create_deployment(workspace=workspace, body=CreateDeploymentRequest(agent=_AGENT_NAME))
     ).data()
-    return deployment, True
+    return deployment, agent_created, True
 
 
-async def _sample_files(files: AsyncFilesClient, workspace: str, dataset: bytes, eval_source: bytes) -> bool:
+async def _sample_files(
+    files: AsyncFilesClient, workspace: str, dataset: bytes, eval_source: bytes
+) -> AsyncIterator[SampleAgentStreamEvent]:
     fileset = (
         await files.create_fileset(
             workspace=workspace,
@@ -156,19 +168,24 @@ async def _sample_files(files: AsyncFilesClient, workspace: str, dataset: bytes,
             exist_ok=True,
         )
     ).data()
-    changed = False
+    purpose_updated = False
     if fileset.purpose != FilesetPurpose.DATASET:
         await files.update_fileset(
             workspace=workspace,
             name=_FILESET,
             body=UpdateFilesetRequest(purpose=FilesetPurpose.DATASET),
         )
-        changed = True
+        purpose_updated = True
 
     present = {item.path for item in (await files.list_files(workspace=workspace, name=_FILESET)).data().data}
     if _DATASET not in present:
         await files.upload_file(workspace=workspace, name=_FILESET, path=_DATASET, content=dataset)
-        changed = True
+    yield SampleAgentStreamEvent(
+        kind="progress",
+        component="dataset",
+        status="uploaded" if _DATASET not in present else "updated" if purpose_updated else "existing",
+        workspace=workspace,
+    )
     if _EVAL_CONFIG not in present:
         eval_config = yaml.safe_load(eval_source)
         if not isinstance(eval_config, dict):
@@ -180,24 +197,28 @@ async def _sample_files(files: AsyncFilesClient, workspace: str, dataset: bytes,
             path=_EVAL_CONFIG,
             content=yaml.safe_dump(eval_config, sort_keys=False).encode(),
         )
-        changed = True
-    return changed
+    yield SampleAgentStreamEvent(
+        kind="progress",
+        component="evaluation_config",
+        status="uploaded" if _EVAL_CONFIG not in present else "existing",
+        workspace=workspace,
+    )
 
 
 @router.post(
     "/sample-agent",
-    response_model=SampleAgentResponse,
+    response_model=SampleAgentStreamEvent,
+    response_class=StreamingResponse,
     status_code=201,
-    response_description="Sample agent and workspace created; deployment may still be pending.",
+    response_description="NDJSON progress frames followed by exactly one done or error frame.",
     responses={
-        200: {"model": SampleAgentResponse, "description": "Existing sample agent resumed or already provisioned."},
-        409: {
-            "model": SampleAgentConflictResponse,
-            "description": "The existing sample agent deployment uses another model.",
+        201: {
+            "description": "New sample agent provisioning stream.",
+            "content": {NDJSON_MEDIA_TYPE: {"schema": {"$ref": "#/components/schemas/SampleAgentStreamEvent"}}},
         },
-        502: {
-            "model": SampleAgentRetryResponse,
-            "description": "Provisioning failed; the workspace is retained so the request can be retried.",
+        200: {
+            "description": "Existing sample agent resumed or already provisioned.",
+            "content": {NDJSON_MEDIA_TYPE: {"schema": {"$ref": "#/components/schemas/SampleAgentStreamEvent"}}},
         },
     },
     tags=["Sample Agent"],
@@ -206,12 +227,11 @@ async def _sample_files(files: AsyncFilesClient, workspace: str, dataset: bytes,
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
 async def create_sample_agent(
     body: CreateSampleAgentRequest,
-    response: Response,
     client: AsyncNemoClient = Depends(get_nemo_client),
     principal_id: str = Depends(get_effective_principal_id),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
-) -> SampleAgentResponse:
-    """Create or resume the caller's sample agent and resources; deployment remains asynchronous."""
+) -> StreamingResponse:
+    """Stream provisioning progress; deployment readiness is checked separately."""
     try:
         parse_workspace_name_ref(body.model, label="Model reference")
     except ValueError as exc:
@@ -234,7 +254,7 @@ async def create_sample_agent(
 
     if created:
         await authorize("POST", "/apis/entities/v2/workspaces")
-        name = f"{SAMPLE_WORKSPACE_PREFIX}{uuid4().hex}"
+        name = f"{SAMPLE_WORKSPACE_PREFIX}{uuid4().hex[:8]}"
         async with get_async_nemo_client(
             as_service="agents",
             internal=True,
@@ -246,35 +266,87 @@ async def create_sample_agent(
                 )
             ).data()
 
-    step = "agent deployment"
-    try:
-        deployment, agent_changed = await _agent_and_deployment(
-            AsyncAgentsClient.from_client(client), workspace.name, model, config, config_format
+    async def events() -> AsyncIterator[str]:
+        yield _frame(
+            SampleAgentStreamEvent(
+                kind="progress",
+                component="workspace",
+                status="created" if created else "existing",
+                workspace=workspace.name,
+            )
         )
-        step = "sample files"
-        files_changed = await _sample_files(AsyncFilesClient.from_client(client), workspace.name, dataset, eval_source)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("Sample agent provisioning failed at %s", step)
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "workspace": workspace.name,
-                "studio_url": _studio_url(workspace.name),
-                "failed_step": step,
-                "retryable": True,
-            },
-        ) from exc
+        step = "agent deployment"
+        try:
+            deployment, agent_created, deployment_submitted = await _agent_and_deployment(
+                AsyncAgentsClient.from_client(client), workspace.name, model, config, config_format
+            )
+            yield _frame(
+                SampleAgentStreamEvent(
+                    kind="progress",
+                    component="agent",
+                    status="created" if agent_created else "existing",
+                    workspace=workspace.name,
+                )
+            )
+            yield _frame(
+                SampleAgentStreamEvent(
+                    kind="progress",
+                    component="deployment",
+                    status="submitted" if deployment_submitted else "existing",
+                    workspace=workspace.name,
+                )
+            )
+            step = "sample files"
+            files_changed = False
+            async for event in _sample_files(
+                AsyncFilesClient.from_client(client), workspace.name, dataset, eval_source
+            ):
+                files_changed |= event.status != "existing"
+                yield _frame(event)
+        except HTTPException as exc:
+            yield _frame(
+                SampleAgentStreamEvent(
+                    kind="error", workspace=workspace.name, message=str(exc.detail), status_code=exc.status_code
+                )
+            )
+            return
+        except Exception:
+            logger.exception("Sample agent provisioning failed at %s", step)
+            yield _frame(
+                SampleAgentStreamEvent(
+                    kind="error",
+                    workspace=workspace.name,
+                    message=f"Sample agent setup failed at {step}",
+                    status_code=502,
+                    failed_step=step,
+                    retryable=True,
+                )
+            )
+            return
 
-    status = "created" if created else "resumed" if agent_changed or files_changed else "already_exists"
-    if not created:
-        response.status_code = 200
-    return SampleAgentResponse(
-        status=status,
-        workspace=workspace.name,
-        studio_url=_studio_url(workspace.name),
-        agent=_AGENT_NAME,
-        deployment=deployment.name,
-        deployment_status=deployment.status,
+        status = (
+            "created"
+            if created
+            else "resumed"
+            if agent_created or deployment_submitted or files_changed
+            else "already_exists"
+        )
+        yield _frame(
+            SampleAgentStreamEvent(
+                kind="done",
+                result=SampleAgentResponse(
+                    status=status,
+                    workspace=workspace.name,
+                    studio_url=_studio_url(workspace.name),
+                    agent=_AGENT_NAME,
+                    deployment=deployment.name,
+                    deployment_status=deployment.status,
+                ),
+            )
+        )
+
+    return _SampleAgentStreamResponse(
+        events(),
+        status_code=201 if created else 200,
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

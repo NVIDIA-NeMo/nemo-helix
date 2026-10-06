@@ -8,8 +8,7 @@ paths:
       tags:
       - Sample Agent
       summary: Create Sample Agent
-      description: Create or resume the caller's sample agent and resources; deployment
-        remains asynchronous.
+      description: Stream provisioning progress; deployment readiness is checked separately.
       operationId: create_sample_agent_apis_agents_v2_sample_agent_post
       requestBody:
         content:
@@ -19,31 +18,17 @@ paths:
         required: true
       responses:
         '201':
-          description: Sample agent and workspace created; deployment may still be
-            pending.
+          description: New sample agent provisioning stream.
           content:
-            application/json:
+            application/x-ndjson:
               schema:
-                $ref: '#/components/schemas/SampleAgentResponse'
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
         '200':
           description: Existing sample agent resumed or already provisioned.
           content:
-            application/json:
+            application/x-ndjson:
               schema:
-                $ref: '#/components/schemas/SampleAgentResponse'
-        '409':
-          description: The existing sample agent deployment uses another model.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SampleAgentConflictResponse'
-        '502':
-          description: Provisioning failed; the workspace is retained so the request
-            can be retried.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SampleAgentRetryResponse'
+                $ref: '#/components/schemas/SampleAgentStreamEvent'
         '422':
           description: Validation Error
           content:
@@ -6799,16 +6784,6 @@ components:
       - config
       - config_format
       title: ResolvedAgentConfig
-    SampleAgentConflictResponse:
-      properties:
-        detail:
-          type: string
-          title: Detail
-      type: object
-      required:
-      - detail
-      title: SampleAgentConflictResponse
-      description: Error response when the existing deployment locks a different model.
     SampleAgentResponse:
       properties:
         status:
@@ -6850,42 +6825,55 @@ components:
       - deployment_status
       title: SampleAgentResponse
       description: Provisioned sample agent and its workspace and deployment state.
-    SampleAgentRetryDetail:
+    SampleAgentStreamEvent:
       properties:
-        workspace:
-          type: string
-          title: Workspace
-        studio_url:
-          type: string
-          title: Studio Url
-          description: Studio path relative to the platform origin.
-        failed_step:
+        kind:
           type: string
           enum:
-          - agent deployment
-          - sample files
+          - progress
+          - done
+          - error
+          title: Kind
+        component:
+          title: Component
+          type: string
+          enum:
+          - workspace
+          - agent
+          - deployment
+          - dataset
+          - evaluation_config
+        status:
+          title: Status
+          type: string
+          enum:
+          - created
+          - existing
+          - submitted
+          - uploaded
+          - updated
+        workspace:
+          title: Workspace
+          type: string
+        result:
+          $ref: '#/components/schemas/SampleAgentResponse'
+        message:
+          title: Message
+          type: string
+        status_code:
+          title: Status Code
+          type: integer
+        failed_step:
           title: Failed Step
+          type: string
         retryable:
-          type: boolean
-          const: true
           title: Retryable
+          type: boolean
       type: object
       required:
-      - workspace
-      - studio_url
-      - failed_step
-      - retryable
-      title: SampleAgentRetryDetail
-      description: Workspace retained when sample provisioning fails and can be retried.
-    SampleAgentRetryResponse:
-      properties:
-        detail:
-          $ref: '#/components/schemas/SampleAgentRetryDetail'
-      type: object
-      required:
-      - detail
-      title: SampleAgentRetryResponse
-      description: Error response for a retryable sample provisioning failure.
+      - kind
+      title: SampleAgentStreamEvent
+      description: One NDJSON frame from sample-agent provisioning.
     SessionFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/sessions``.
