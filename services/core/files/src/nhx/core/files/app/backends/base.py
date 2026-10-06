@@ -13,9 +13,6 @@ from nhx.common.files.storage_config import BaseStorageConfig as BaseStorageConf
 from nhx.common.files.storage_config import StorageConfigType as StorageConfigType
 from nhx.core.files.exceptions import NotFoundError
 
-# Git's regular-file blob modes; directories, submodules and symlinks are not served as files.
-REGULAR_FILE_MODES = frozenset({"100644", "100755"})
-
 
 @dataclass
 class ByteRange:
