@@ -70,7 +70,7 @@ The build pulls the NGC PyTorch base, then:
 1d. Flash Attention 2 — **not currently installed** (commented TODO in the
     Dockerfile). Unsloth does not depend on it; without it you may see
     `FA2 = False` / `Xformers = None` on newer CUDA stacks.
-2. Editable install of the platform glue: `nemo-helix-sdk`,
+2. Editable install of the platform glue:
    `nemo-helix-plugin`, `nhx-common`, `nhx-unsloth`.
 
 We considered using the official `unsloth/unsloth` image as a base. We

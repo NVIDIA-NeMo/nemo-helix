@@ -44,7 +44,6 @@ SKILL_GLOBS = [
     ".agents/skills/**/SKILL.md",
     "plugins/*/skills/**/SKILL.md",
     "plugins/*/src/*/skills/**/SKILL.md",
-    "sdk/python/nemo-helix/src/nemo_helix/cli/commands/skills/content/**/SKILL.md",
     "packages/*/src/*/.agents/skills/**/SKILL.md",
 ]
 

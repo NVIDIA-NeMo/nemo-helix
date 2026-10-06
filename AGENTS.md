@@ -145,7 +145,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 
 ### SDK
 
-The published `nemo-helix` wheel is defined by `packages/nemo_helix/pyproject.toml`, which bundles the `nemo` CLI (`packages/nemo_helix_ext`), the typed clients (`packages/nemo_helix_plugin`), runtime packages, plugins, and services from source at build time (see `packages/nemo_helix/BUNDLING.md`). The generated `nemo_helix` module under `sdk/python/nemo-helix` is legacy and scheduled for deletion; it is bundled only while runtime packages still import it.
+The published `nemo-helix` wheel is defined by `packages/nemo_helix/pyproject.toml`, which bundles the `nemo` CLI (`packages/nemo_helix_ext`), the typed clients (`packages/nemo_helix_plugin`), runtime packages, plugins, and services from source at build time (see `packages/nemo_helix/BUNDLING.md`). The legacy generated `nemo_helix` module was deleted; all platform code uses the typed `NemoClient`/`AsyncNemoClient` stack in `nemo_helix_plugin`.
 
 The OpenAPI spec at `openapi/openapi.yaml` is the source of truth for the platform's HTTP API routes. It is regenerated locally from the FastAPI service code (no cloud credentials required).
 
@@ -168,7 +168,7 @@ Run it whenever you modify:
 
 #### Changing SDK types
 
-The generated `nemo_helix` package is not regenerated or extended. If a previously generated type or client needs to change, do not edit it in `sdk/python/nemo-helix`: use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
+The generated `nemo_helix` package is no longer present. If a previously generated type or client changes, use the corresponding typed client from `nemo_helix_plugin` instead and migrate consumers to it.
 
 #### Testing Python Code
 
