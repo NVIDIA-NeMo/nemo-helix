@@ -29,6 +29,7 @@ judge = LLMJudgeMetric(
             description="How well the response addresses the request.",
             minimum=0,
             maximum=4,
+            is_integer=True,
             parser=JSONScoreParser(json_path="helpfulness"),
         )
     ],
