@@ -5,75 +5,58 @@
 title: "Client APIs"
 description: ""
 ---
-The following reference provides detailed documentation for the synchronous and asynchronous clients of NeMo Helix Python SDK.
+The following reference provides detailed documentation for the synchronous and asynchronous clients of the NeMo Helix Python SDK.
 
 ## Synchronous Client
 
-Use `nemo_helix.NeMoHelix` from regular Python code when you want blocking API calls.
-The client reads the active CLI context by default, including the base URL,
-workspace, and authentication settings configured by `nemo auth login`.
+Use `NemoClient` from regular Python code when you want blocking API calls.
+The typed client talks directly to the NeMo Helix HTTP API. You construct it
+with a base URL (and typically the active CLI context, workspace, and
+authentication settings from `nemo auth login` via `from_config`).
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient(
+    base_url="http://localhost:8080",
+    workspace="default",
+)
 
-for workspace in client.workspaces.list().data:
+for workspace in client.workspaces.list_workspaces().items():
     print(workspace.name)
 ```
 
 ### Constructor
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
-import pathlib
-from collections.abc import Mapping
+from nemo_helix_plugin.client.client import NemoClient
 
-import httpx
-
-from nemo_helix import DEFAULT_MAX_RETRIES, not_given
-
-class NeMoHelix:
-    def __init__(
-        self,
-        *,
-        workspace: str | None = None,
-        base_url: str | httpx.URL | None = None,
-        inference_base_url: str | httpx.URL | None = None,
-        config_path: pathlib.Path | None = None,
-        context_name: str | None = None,
-        access_token: str | None = None,
-        timeout: float | httpx.Timeout | None = not_given,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str] | None = None,
-        default_query: Mapping[str, object] | None = None,
-        http_client: httpx.Client | None = None,
-    ) -> None:
-        ...
+client = NemoClient(
+    base_url="http://localhost:8080",
+    workspace="default",
+)
 ```
 
+The `NemoClient` constructor accepts the following options.
 | Parameter | Description |
 | --- | --- |
+| `base_url` | Base URL of the NeMo Helix API (required). For example `http://localhost:8080`. |
 | `workspace` | Workspace name used by workspace-scoped routes. You can set it on the client or pass it to individual methods that accept a workspace argument. |
-| `base_url` | Base URL for NeMo Helix API. If omitted, the client reads it from the active CLI context. |
-| `inference_base_url` | Optional override for inference gateway requests. Defaults to `base_url`. |
-| `config_path` | Path to the CLI config file. Defaults to `~/.config/nhx/config.yaml`. |
-| `context_name` | Named CLI context to read from the config file. |
-| `access_token` | Explicit bearer token for automation. Token refresh is not performed for explicit tokens. |
-| `timeout` | Request timeout for API calls. Pass a float in seconds, an `httpx.Timeout`, or `None`. |
-| `max_retries` | Number of automatic retries for transient failures. |
+| `auth` | A token provider, or a static bearer token string, used to authenticate requests. |
 | `default_headers` | Headers sent with every request. |
-| `default_query` | Query parameters appended to every request. |
-| `http_client` | Custom `httpx.Client`. When provided, config and auth bootstrap are skipped. |
+| `timeout` | Request timeout for API calls. Pass a float in seconds, an `httpx.Timeout`, or `None`. |
+| `retry` | A `RetryPolicy` describing when and how many times to retry transient failures. |
+| `http_client` | Custom `httpx.Client`. When provided, the client shares that transport instead of building its own. |
+| `owns_http_client` | Whether the client owns (and closes) `http_client`. Defaults to `True` when `http_client` is not provided. |
 
 ### Connection Modes
 
 | Mode | Example | Behavior |
 | --- | --- | --- |
-| CLI context | `NeMoHelix()` | Reads the active CLI context and uses configured authentication with token refresh. |
-| Named context | `NeMoHelix(context_name="dev")` | Reads a specific CLI context instead of the active one. |
-| Direct API | `NeMoHelix(base_url="http://localhost:8080")` | Uses the given URL without reading config or injecting auth headers. |
-| Explicit token | `NeMoHelix(base_url=url, access_token=token)` | Uses the provided bearer token for API calls. |
+| CLI context | `NemoClient.from_config()` | Reads the active CLI context (base URL, workspace, auth) configured by `nemo setup` / `nemo auth login`. |
+| Named context | `NemoClient.from_config(context="dev")` | Reads a specific CLI context instead of the active one. |
+| Explicit config path | `NemoClient.from_config(config_path="/path/to/config.yaml")` | Reads a specific CLI config file. |
+| Direct API | `NemoClient(base_url="http://localhost:8080")` | Uses the given URL, workspace, and any explicit auth without reading a config file. |
 
 Use `with_options(...)` to clone a client with request defaults changed:
 
@@ -83,18 +66,17 @@ short_timeout_client = client.with_options(timeout=10.0)
 
 ## Asynchronous Client
 
-Use `nemo_helix.AsyncNeMoHelix` from `asyncio` applications. It exposes the same
-resource tree as `NeMoHelix`, but API methods are awaited.
+Use `AsyncNemoClient` from `asyncio` applications. It exposes the same
+resource tree as `NemoClient`, but API methods are awaited.
 
 ```python
 import asyncio
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def main() -> None:
-    client = AsyncNeMoHelix()
-    page = await client.workspaces.list()
-    for workspace in page.data:
+    client = AsyncNemoClient(base_url="http://localhost:8080", workspace="default")
+    async for workspace in client.workspaces.list_workspaces().items():
         print(workspace.name)
 
 asyncio.run(main())
@@ -102,57 +84,34 @@ asyncio.run(main())
 
 ### Async client constructor
 
-{/* @nemo-docs: skip-python-type-check */}
 ```python
-import pathlib
-from collections.abc import Mapping
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
-import httpx
-
-from nemo_helix import DEFAULT_MAX_RETRIES, not_given
-
-class AsyncNeMoHelix:
-    def __init__(
-        self,
-        *,
-        workspace: str | None = None,
-        base_url: str | httpx.URL | None = None,
-        inference_base_url: str | httpx.URL | None = None,
-        config_path: pathlib.Path | None = None,
-        context_name: str | None = None,
-        access_token: str | None = None,
-        timeout: float | httpx.Timeout | None = not_given,
-        max_retries: int = DEFAULT_MAX_RETRIES,
-        default_headers: Mapping[str, str] | None = None,
-        default_query: Mapping[str, object] | None = None,
-        http_client: httpx.AsyncClient | None = None,
-    ) -> None:
-        ...
+client = AsyncNemoClient(
+    base_url="http://localhost:8080",
+    workspace="default",
+)
 ```
 
-`AsyncNeMoHelix` accepts the same connection and authentication parameters as
-`NeMoHelix`. Pass a custom `httpx.AsyncClient` through `http_client` only when
-you need to control the underlying transport directly.
+`AsyncNemoClient` accepts the same connection and authentication parameters as
+`NemoClient`, and also provides `AsyncNemoClient.from_config()`. Pass a custom
+`httpx.AsyncClient` through `http_client` only when you need to control the
+underlying transport directly.
 
 ```python
 import os
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
-client = AsyncNeMoHelix(
+client = AsyncNemoClient(
     base_url=os.environ["NHX_BASE_URL"],
-    access_token=os.environ["NHX_ACCESS_TOKEN"],
     workspace="default",
 )
 ```
 
 ### Errors
 
-Client construction raises `RuntimeError` if configuration or authentication bootstrap fails.
-Workspace-scoped methods raise `ValueError` when no workspace is provided on the client or
-method call.
-
-API calls raise typed exceptions from `nemo_helix`, including:
+API calls raise typed exceptions from `nemo_helix_plugin.client.errors`:
 
 | Exception | Typical HTTP status |
 | --- | --- |
@@ -165,45 +124,59 @@ API calls raise typed exceptions from `nemo_helix`, including:
 | `RateLimitError` | `429` |
 | `InternalServerError` | `5xx` |
 
-Catch `APIStatusError` for all non-success HTTP responses, or `NeMoHelixError`
-for SDK-level errors.
+Catch `NemoHTTPError` for all non-success HTTP responses, or `NemoClientError`
+for SDK-level errors. Transport failures raise `NemoTransportError`.
 
 ## Client Attributes
 
-The NeMo Helix clients provide access to API resources through the following attributes.
-For endpoint details, see the [REST API Reference](/documentation/reference/api-reference).
+The NeMo Helix clients provide access to API resources through the following
+properties. Each returns a typed per-service client that shares the main
+client's transport. For endpoint details, see the [REST API Reference](/documentation/reference/api-reference).
 
 ### Organization
 
-- **workspaces**: Manage workspaces
+- **workspaces**: Manage workspaces (via the entity store)
 - **projects**: Manage projects within a workspace
+- **iam**: Identity and access management
+- **auth**: Authentication
+- **access_keys**: Access keys
 
 ### Model Management
 
 - **models**: Model entity CRUD
-- **evaluation**: Benchmarks, benchmark jobs, metrics, and metric jobs
-- **inference**: Deployments, deployment configs, providers, and OpenAI-compatible gateway
+- **inference**: Providers, deployments, deployment configs, and virtual models (`client.inference.providers`, `client.inference.deployments`, `client.inference.deployment_configs`, `client.inference.virtual_models`)
+- **evaluator**: Evaluations
 
 ### Data & Synthesis
 
+- **files**: Filesets and file upload/download
 - **data_designer**: Synthetic data generation jobs
-- **safe_synthesizer**: PII replacement and safe data synthesis jobs
-- **files**: File upload and download
+- **intake**: Telemetry intake
 
 ### Safety & Compliance
 
 - **guardrail**: Guardrail configurations and checks
-- **audit**: Model safety audit jobs and configs
+- **auditor**: Model safety audit jobs and configs
+- **agent_hardener**: Agent hardening
 
 ### Platform
 
 - **jobs**: Cross-service job management
-- **entities**: Generic entity CRUD
+- **agents**: Deployed agents
 - **secrets**: Secret management
-- **iam**: Identity and access management
-- **workspaces.members**: Workspace member and RBAC management
+
+### Plugin resources
+
+Plugin-owned resources are resolved from the `nemo.sdk` entry point and exposed
+as client attributes (for example `client.customization` for the Customizer
+plugin, or `client.agents` for the Agents plugin when provided by a plugin).
+Use them the same way as core resources.
 
 ### Response Handling
 
-- **with_raw_response**: Access raw HTTP response data
-- **with_streaming_response**: Handle streaming responses
+Each method returns a typed response:
+
+- `NemoResponse` (`.data()` for the parsed entity, `.http_response` for the raw `httpx.Response`)
+- `NemoPaginatedResponse` (`.items()` and `.pages()` for paginated lists)
+- `NemoBinaryResponse` (`.read()` or `.stream()` for binary downloads)
+- `NemoStreamResponse` (`.stream()` for streaming responses)
