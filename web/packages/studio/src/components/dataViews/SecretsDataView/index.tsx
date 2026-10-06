@@ -217,7 +217,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
       {modalOpen === 'edit' && modalSecret && (
         <EditSecretModal
           workspace={workspace}
-          secret={modalSecret}
+          name={modalSecret.name}
           open
           onClose={handleModalClose}
         />
