@@ -22,7 +22,7 @@ import {
   parseOptimizeConfig,
 } from '@studio/api/agents/optimizeBundle';
 import { useLaunchOptimizeStudy } from '@studio/api/agents/useLaunchOptimizeStudy';
-import type { FilesetEntry } from '@studio/api/files/uploadFilesetEntries';
+import type { FilesetEntry } from '@studio/api/files/types';
 import { MAX_PICKED_FILES } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import type { PickedFile } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import {
