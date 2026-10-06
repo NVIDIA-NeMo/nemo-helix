@@ -64,16 +64,12 @@ if TYPE_CHECKING:
         projects,
         inference,
         workspaces,
-        evaluations,
-        experiments,
     )
     from .lib.files import FilesResource, AsyncFilesResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
     from .resources.inference.inference import InferenceResource, AsyncInferenceResource
     from .resources.workspaces.workspaces import WorkspacesResource, AsyncWorkspacesResource
-    from .resources.evaluations.evaluations import EvaluationsResource, AsyncEvaluationsResource
-    from .resources.experiments.experiments import ExperimentsResource, AsyncExperimentsResource
 
 __all__ = [
     "Timeout",
@@ -306,18 +302,6 @@ class NeMoHelix(NemoClientRuntimeSource, SyncAPIClient):
         from .resources.adapters import AdaptersResource
 
         return AdaptersResource(self)
-
-    @cached_property
-    def evaluations(self) -> EvaluationsResource:
-        from .resources.evaluations import EvaluationsResource
-
-        return EvaluationsResource(self)
-
-    @cached_property
-    def experiments(self) -> ExperimentsResource:
-        from .resources.experiments import ExperimentsResource
-
-        return ExperimentsResource(self)
 
     @cached_property
     def with_raw_response(self) -> NeMoHelixWithRawResponse:
@@ -684,18 +668,6 @@ class AsyncNeMoHelix(NemoClientRuntimeSource, AsyncAPIClient):
         return AsyncAdaptersResource(self)
 
     @cached_property
-    def evaluations(self) -> AsyncEvaluationsResource:
-        from .resources.evaluations import AsyncEvaluationsResource
-
-        return AsyncEvaluationsResource(self)
-
-    @cached_property
-    def experiments(self) -> AsyncExperimentsResource:
-        from .resources.experiments import AsyncExperimentsResource
-
-        return AsyncExperimentsResource(self)
-
-    @cached_property
     def with_raw_response(self) -> AsyncNeMoHelixWithRawResponse:
         return AsyncNeMoHelixWithRawResponse(self)
 
@@ -895,19 +867,6 @@ class NeMoHelixWithRawResponse:
 
         return AdaptersResourceWithRawResponse(self._client.adapters)
 
-    @cached_property
-    def evaluations(self) -> evaluations.EvaluationsResourceWithRawResponse:
-        from .resources.evaluations import EvaluationsResourceWithRawResponse
-
-        return EvaluationsResourceWithRawResponse(self._client.evaluations)
-
-    @cached_property
-    def experiments(self) -> experiments.ExperimentsResourceWithRawResponse:
-        from .resources.experiments import ExperimentsResourceWithRawResponse
-
-        return ExperimentsResourceWithRawResponse(self._client.experiments)
-
-
 class AsyncNeMoHelixWithRawResponse:
     _client: AsyncNeMoHelix
 
@@ -949,19 +908,6 @@ class AsyncNeMoHelixWithRawResponse:
         from .resources.adapters import AsyncAdaptersResourceWithRawResponse
 
         return AsyncAdaptersResourceWithRawResponse(self._client.adapters)
-
-    @cached_property
-    def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithRawResponse:
-        from .resources.evaluations import AsyncEvaluationsResourceWithRawResponse
-
-        return AsyncEvaluationsResourceWithRawResponse(self._client.evaluations)
-
-    @cached_property
-    def experiments(self) -> experiments.AsyncExperimentsResourceWithRawResponse:
-        from .resources.experiments import AsyncExperimentsResourceWithRawResponse
-
-        return AsyncExperimentsResourceWithRawResponse(self._client.experiments)
-
 
 class NeMoHelixWithStreamedResponse:
     _client: NeMoHelix
@@ -1005,19 +951,6 @@ class NeMoHelixWithStreamedResponse:
 
         return AdaptersResourceWithStreamingResponse(self._client.adapters)
 
-    @cached_property
-    def evaluations(self) -> evaluations.EvaluationsResourceWithStreamingResponse:
-        from .resources.evaluations import EvaluationsResourceWithStreamingResponse
-
-        return EvaluationsResourceWithStreamingResponse(self._client.evaluations)
-
-    @cached_property
-    def experiments(self) -> experiments.ExperimentsResourceWithStreamingResponse:
-        from .resources.experiments import ExperimentsResourceWithStreamingResponse
-
-        return ExperimentsResourceWithStreamingResponse(self._client.experiments)
-
-
 class AsyncNeMoHelixWithStreamedResponse:
     _client: AsyncNeMoHelix
 
@@ -1059,19 +992,6 @@ class AsyncNeMoHelixWithStreamedResponse:
         from .resources.adapters import AsyncAdaptersResourceWithStreamingResponse
 
         return AsyncAdaptersResourceWithStreamingResponse(self._client.adapters)
-
-    @cached_property
-    def evaluations(self) -> evaluations.AsyncEvaluationsResourceWithStreamingResponse:
-        from .resources.evaluations import AsyncEvaluationsResourceWithStreamingResponse
-
-        return AsyncEvaluationsResourceWithStreamingResponse(self._client.evaluations)
-
-    @cached_property
-    def experiments(self) -> experiments.AsyncExperimentsResourceWithStreamingResponse:
-        from .resources.experiments import AsyncExperimentsResourceWithStreamingResponse
-
-        return AsyncExperimentsResourceWithStreamingResponse(self._client.experiments)
-
 
 Client = NeMoHelix
 
