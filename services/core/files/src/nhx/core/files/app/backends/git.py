@@ -24,6 +24,7 @@ import shutil
 import signal
 import tempfile
 import time
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
@@ -63,6 +64,11 @@ class GitBackendError(StorageBackendError):
     """Raised when git fails for a reason not covered below."""
 
 
+# Not a storage error on purpose, so every endpoint reports it as a 500 instead of blaming the request.
+class GitServerFault(RuntimeError):
+    """Raised when git cannot run on this server, such as a missing binary or an unwritable cache."""
+
+
 class GitAccessError(StorageAccessError):
     """Raised when the remote rejects the SSH key or its host key does not match."""
 
@@ -83,6 +89,32 @@ _GIT_BOILERPLATE = (
 )
 
 
+_NETWORK_FAILURES = (
+    "Could not resolve hostname",
+    "Connection refused",
+    "Connection timed out",
+    "Connection reset",
+    "Connection closed",
+    "kex_exchange_identification",
+    "No route to host",
+    "Network is unreachable",
+    "Operation timed out",
+    "Broken pipe",
+    "early EOF",
+)
+
+# Local repository damage, which starting the fetch repository over repairs; anything else is left alone.
+_CORRUPTION_SIGNS = (
+    "Unable to create",
+    "not a git repository",
+    "bad object",
+    "corrupt",
+    "missing object",
+    "unable to read",
+    "shallow file has changed",
+)
+
+
 def _failure_detail(stderr: str) -> str:
     """The first stderr line that names the cause, skipping git's generic closing advice."""
     for line in stderr.splitlines():
@@ -98,7 +130,7 @@ def _classify_failure(stderr: str, subject: str) -> StorageBackendError:
         return GitAccessError(f"The host key for {subject} does not match known_hosts")
     if "Permission denied (publickey" in stderr or "Load key" in stderr:
         return GitAccessError(f"The SSH key was rejected for {subject}: {detail}")
-    if any(marker in stderr for marker in ("Could not resolve hostname", "Connection refused", "Connection timed out")):
+    if any(marker in stderr for marker in _NETWORK_FAILURES):
         return GitUnavailableError(f"Could not reach {subject}: {detail}")
     if any(
         marker in stderr
@@ -206,7 +238,7 @@ async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[S
             start_new_session=True,
         )
     except FileNotFoundError as exc:
-        raise GitBackendError("ssh-keyscan is not installed in the files service") from exc
+        raise GitServerFault("ssh-keyscan is not installed in the files service") from exc
     try:
         stdout, _ = await communicate_within(proc, timeout_seconds + 5)
     except TimeoutError:
@@ -271,13 +303,35 @@ async def _read_exactly(stream: asyncio.StreamReader, size: int, chunk_size: int
     while remaining:
         chunk = await stream.read(min(chunk_size, remaining))
         if not chunk:
-            raise GitBackendError("git ended a blob early while copying it to durable storage")
+            raise GitServerFault("git ended a blob early while copying it to durable storage")
         remaining -= len(chunk)
         yield chunk
 
 
 async def _single_chunk(body: bytes) -> AsyncIterator[bytes]:
     yield body
+
+
+# Listings are immutable once written, so parsed ones are shared across requests.
+_LISTING_MEMORY = 128
+_listings: OrderedDict[str, Snapshot] = OrderedDict()
+
+_ACCESS_RECHECK_SECONDS = 5 * 60
+_access_checks: dict[tuple[str, str], float] = {}
+
+
+def _remember_listing(key: str, snapshot: Snapshot) -> None:
+    _listings[key] = snapshot
+    _listings.move_to_end(key)
+    while len(_listings) > _LISTING_MEMORY:
+        _listings.popitem(last=False)
+
+
+def _record_access_check(access: tuple[str, str]) -> None:
+    now = time.monotonic()
+    for stale in [key for key, checked_at in _access_checks.items() if now - checked_at >= _ACCESS_RECHECK_SECONDS]:
+        del _access_checks[stale]
+    _access_checks[access] = now
 
 
 async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
@@ -400,7 +454,7 @@ class GitStorageImpl(StorageImpl):
                 start_new_session=True,
             )
         except FileNotFoundError as exc:
-            raise GitBackendError("git is not installed in the files service") from exc
+            raise GitServerFault("git is not installed in the files service") from exc
         try:
             stdout, stderr = await communicate_within(proc, self.timeout_seconds)
         except TimeoutError:
@@ -487,18 +541,36 @@ class GitStorageImpl(StorageImpl):
         return self.config.model_copy(update={"revision": sha, "original_revision": self.config.revision})
 
     async def _snapshot(self) -> Snapshot:
-        """The pinned commit's listing, materializing the commit into durable storage on first use."""
+        """The pinned commit's listing, materializing it on first use and rechecking the key's access."""
         if self._snapshot_memo is None:
             sha = await self._commit()
             key = self._listing_key(sha)
             snapshot = await self._read_listing(key)
             if snapshot is None:
                 snapshot = await self._materialize(sha, key)
+            else:
+                await self._check_access()
             self._snapshot_memo = snapshot
         return self._snapshot_memo
 
+    async def _check_access(self) -> None:
+        """Re-run ls-remote with this key at most every few minutes, so a revoked key stops reading cached commits."""
+        access = self._access_key()
+        checked_at = _access_checks.get(access)
+        if checked_at is not None and time.monotonic() - checked_at < _ACCESS_RECHECK_SECONDS:
+            return
+        with self._ssh_env() as env:
+            await self._git("ls-remote", "--", self.config.url, "HEAD", env=env, subject=self.config.url)
+        _record_access_check(access)
+
+    def _access_key(self) -> tuple[str, str]:
+        return (self.config.url, hashlib.sha256(self.secrets.get("ssh_key", "").encode()).hexdigest())
+
     async def _read_listing(self, key: str) -> Snapshot | None:
-        """The stored listing at *key*, or None when it is missing or unreadable and must be rebuilt."""
+        """The listing at *key*, or None when it is missing or unreadable and must be rebuilt."""
+        if key in _listings:
+            _listings.move_to_end(key)
+            return _listings[key]
         try:
             stream = await self._store.download(key, None)
             raw = b"".join([chunk async for chunk in stream])
@@ -508,12 +580,15 @@ class GitStorageImpl(StorageImpl):
             listing = json.loads(raw)
             if listing.get("version") != _LISTING_VERSION:
                 return None
-            return {path: (blob, int(size)) for path, blob, size in listing["files"]}
+            snapshot = {path: (blob, int(size)) for path, blob, size in listing["files"]}
         except (ValueError, TypeError, KeyError, AttributeError):
             logger.warning("Rebuilding an unreadable git listing at %s", key)
             return None
+        _remember_listing(key, snapshot)
+        return snapshot
 
     async def _materialize(self, sha: str, key: str) -> Snapshot:
+        """Fetch the commit and store its listing; file contents are stored when each is first read."""
         repo = self._repo_dir
         async with _repo_locks.setdefault(str(repo), asyncio.Lock()):
             # Another request may have materialized this commit while this one waited for the lock.
@@ -525,31 +600,28 @@ class GitStorageImpl(StorageImpl):
             output = await self._git(
                 "-C", str(repo), "ls-tree", "-r", "-l", "-z", tree, env=self._base_env(), subject=self._subject()
             )
-            entries = list(_tree_entries(output))
-            await self._store_blobs(repo, entries)
-            snapshot = {entry.path: (entry.blob, entry.size) for entry in entries}
+            snapshot = {entry.path: (entry.blob, entry.size) for entry in _tree_entries(output)}
             listing = {
                 "version": _LISTING_VERSION,
                 "commit": sha,
                 "files": [[path, blob, size] for path, (blob, size) in sorted(snapshot.items())],
             }
             body = json.dumps(listing).encode()
-            # Written last, so a listing only ever names blobs that are already stored.
             await self._store.upload(key, _single_chunk(body), content_length=len(body))
-            with suppress(OSError):
-                await asyncio.to_thread(os.utime, repo)
+            _remember_listing(key, snapshot)
+            _record_access_check(self._access_key())
         await _prune_fetch_repositories(repo.parent, repo)
         return snapshot
 
     async def _fetch_into(self, repo: Path, sha: str) -> None:
-        """Make *sha* available in the fetch repository, starting it over once if it is broken."""
+        """Make *sha* available in the fetch repository, starting it over once if it is damaged."""
         for attempt in (1, 2):
             try:
                 if not await asyncio.to_thread((repo / "HEAD").exists):
                     try:
                         await asyncio.to_thread(repo.parent.mkdir, parents=True, exist_ok=True)
                     except OSError as exc:
-                        raise GitBackendError(f"The git cache at {repo.parent} is not writable: {exc}") from exc
+                        raise GitServerFault(f"The git cache at {repo.parent} is not writable: {exc}") from exc
                     await self._git("init", "--bare", "--quiet", str(repo), env=self._base_env(), subject=str(repo))
                 if not await self._has_commit(repo, sha):
                     await self._fetch_with_fallback(repo, sha)
@@ -559,63 +631,52 @@ class GitStorageImpl(StorageImpl):
                 await self._git(
                     "-C", str(repo), "update-ref", _LATEST_REF, sha, env=self._base_env(), subject=str(repo)
                 )
+                with suppress(OSError):
+                    await asyncio.to_thread(os.utime, repo)
                 return
-            except GitBackendError:
-                # A lock left by a killed git or a half-deleted directory: the repository is only an accelerator.
-                if attempt == 2:
+            except GitBackendError as exc:
+                if attempt == 2 or not any(sign in str(exc) for sign in _CORRUPTION_SIGNS):
                     raise
-                logger.warning("Starting the git fetch repository for %s over", self.config.url)
+                logger.warning("Starting the damaged git fetch repository for %s over: %s", self.config.url, exc)
                 await asyncio.to_thread(shutil.rmtree, repo, True)
 
-    async def _store_blobs(self, repo: Path, entries: list[_TreeEntry]) -> None:
-        """Copy the blobs durable storage lacks, so an update writes only the files that changed."""
-        missing: dict[str, int] = {}
-        for entry in entries:
-            if entry.blob in missing:
-                continue
-            try:
-                await self._store.get_file(_blob_key(entry.blob))
-            except NotFoundError:
-                missing[entry.blob] = entry.size
-        if not missing:
-            return
-
-        async with _GIT_SLOTS:
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "-C",
-                str(repo),
-                "cat-file",
-                "--batch",
-                env=self._base_env(),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            assert proc.stdin is not None and proc.stdout is not None
-            try:
-                async with asyncio.timeout(self.timeout_seconds):
-                    for blob in missing:
-                        proc.stdin.write(f"{blob}\n".encode())
-                        await proc.stdin.drain()
-                        header = (await proc.stdout.readline()).split()
-                        if len(header) != 3 or header[1] != b"blob":
-                            raise GitBackendError(f"git could not read blob {blob} of {self._subject()}")
-                        size = int(header[2])
+    async def _store_blob(self, sha: str, blob: str, size: int) -> None:
+        """Copy one file's bytes into durable storage, fetching the commit again if it is not at hand."""
+        repo = self._repo_dir
+        async with _repo_locks.setdefault(str(repo), asyncio.Lock()):
+            with suppress(NotFoundError):
+                await self._store.get_file(_blob_key(blob))
+                return
+            await self._fetch_into(repo, sha)
+            async with _GIT_SLOTS:
+                proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "-C",
+                    str(repo),
+                    "cat-file",
+                    "blob",
+                    blob,
+                    env=self._base_env(),
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                assert proc.stdout is not None
+                try:
+                    async with asyncio.timeout(self.timeout_seconds):
                         await self._store.upload(
                             _blob_key(blob),
                             _read_exactly(proc.stdout, size, self.config.read_chunk_size),
                             content_length=size,
                         )
-                        await proc.stdout.readexactly(1)
-            except TimeoutError:
-                raise GitUnavailableError(
-                    f"Copying {self._subject()} to durable storage took over {self.timeout_seconds:.0f}s"
-                ) from None
-            finally:
-                if proc.returncode is None:
-                    await asyncio.shield(stop_process_group(proc))
+                except TimeoutError:
+                    raise GitUnavailableError(
+                        f"Copying {blob} of {self._subject()} to durable storage took over {self.timeout_seconds:.0f}s"
+                    ) from None
+                finally:
+                    if proc.returncode is None:
+                        await asyncio.shield(stop_process_group(proc))
 
     async def list_files(self, path: str | None = None) -> list[FileInfo]:
         snapshot = await self._snapshot()
@@ -640,12 +701,18 @@ class GitStorageImpl(StorageImpl):
 
     async def download(self, path: str, byte_range: ByteRange | None) -> AsyncIterator[bytes]:
         await self.get_file(path)
-        blob, _size = (await self._snapshot())[path.strip("/")]
+        blob, size = (await self._snapshot())[path.strip("/")]
+        try:
+            await self._store.get_file(_blob_key(blob))
+        except NotFoundError:
+            # Not read before, or removed from durable storage since: store it from the commit.
+            await self._store_blob(await self._commit(), blob, size)
         return await self._store.download(_blob_key(blob), byte_range)
 
     async def validate_storage(self):
         validate_external_host(self.config.remote.host_url)
         self._resolved_sha = await self._ls_remote()
+        _record_access_check(self._access_key())
         # ls-remote vouches for a branch or tag but not a commit SHA, and an empty directory reads like a missing one.
         if is_commit_sha(self.config.revision) or self.config.path:
             await self._snapshot()

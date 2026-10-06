@@ -291,6 +291,14 @@ class SshRemote:
     path: str
 
     @property
+    def url(self) -> str:
+        """The remote in canonical form: lowercase host, no trailing dot, ssh:// only when a port needs it."""
+        user = f"{self.user}@" if self.user else ""
+        if self.port:
+            return f"ssh://{user}{self.host}:{self.port}/{self.path.removeprefix('/')}"
+        return f"{user}{self.host}:{self.path}"
+
+    @property
     def host_url(self) -> str:
         """The ``ssh://host[:port]`` authority checked against the external-host allowlist."""
         return f"ssh://{self.host}:{self.port}" if self.port else f"ssh://{self.host}"
@@ -384,8 +392,8 @@ class GitStorageConfig(BaseStorageConfig):
     @field_validator("url")
     @classmethod
     def require_ssh_remote(cls, v: str) -> str:
-        parse_ssh_remote(v.strip())
-        return v.strip()
+        # Rebuilt from its parts, so ssh, the host key scan and known_hosts all name the host the same way.
+        return parse_ssh_remote(v.strip()).url
 
     @field_validator("path")
     @classmethod
