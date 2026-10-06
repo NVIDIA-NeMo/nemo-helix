@@ -396,7 +396,7 @@ def _harbor_evidence_path(runtime: HarborAgentTaskRunner, task: AgentEvalTask, c
     ("runtime_cls", "target", "evidence_path"),
     [
         (FabricAgentRuntime, _runner_target("openai/gpt-5.4"), _fabric_evidence_path),
-        (HarborAgentTaskRunner, HarborRunnerTarget(agent_name="oracle"), _harbor_evidence_path),
+        (HarborAgentTaskRunner, HarborRunnerTarget(), _harbor_evidence_path),
     ],
     ids=["fabric", "harbor"],
 )
