@@ -7,6 +7,7 @@ import { ControlledTextInput } from '@nemo/common/src/components/form/Controlled
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
+import { Refresh } from '@nemo/icons/icons';
 import {
   getAgentsListAgentsQueryKey,
   useAgentsRegisterAgent,
@@ -15,6 +16,7 @@ import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
   Button,
   Flex,
+  FormField,
   Label,
   Select,
   Stack,
@@ -28,9 +30,13 @@ import {
   UploadTrigger,
 } from '@nvidia/foundations-react-core';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
-import { useCreateAgentFromGitHub } from '@studio/api/agents/useCreateAgentFromGitHub';
+import {
+  AgentConfigNotFoundError,
+  useCreateAgentFromRepository,
+} from '@studio/api/agents/useCreateAgentFromRepository';
 import { useCreateAgentFromUpload } from '@studio/api/agents/useCreateAgentFromUpload';
 import { type DeployOnCreatePlan, useDeployOnCreate } from '@studio/api/agents/useDeployOnCreate';
+import { useGitAgentDirectories } from '@studio/api/files/useGitAgentDirectories';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -41,10 +47,23 @@ import {
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
-  type GitHubAgentSource,
-  agentNameFromSource,
-  parseGitHubSource,
+  type GitAgentSource,
+  formatGitSource,
+  gitStorageConfig,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/git';
+import {
+  formatGitHubSource,
+  githubStorageConfig,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
+import { HostKeyConfirmation } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/HostKeyConfirmation';
+import {
+  type RepositorySource,
+  agentNameFromRepository,
+  formatRepositorySource,
+  parseRepositorySource,
+  withRepositoryPath,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/repository';
+import { RepositoryFormatHelp } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/RepositoryFormatHelp';
 import type {
   NewAgentModalProps,
   NewAgentTab,
@@ -52,6 +71,7 @@ import type {
   UploadAgentEntry,
   UploadAgentFormData,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
+import { useSshHostTrust } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/useSshHostTrust';
 import { useTraceAgentNames } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/useTraceAgentNames';
 import {
   agentNameFromConfig,
@@ -79,6 +99,9 @@ import {
 } from 'react';
 import { type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 
+// Select values cannot be empty, so the repository root needs a stand-in.
+const ROOT_AGENT_PATH = '.';
+
 export const NewAgentModal: FC<NewAgentModalProps> = ({
   open,
   onClose,
@@ -100,6 +123,12 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [tab, setTab] = useState<NewAgentTab>('upload');
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
+  const [committedSsh, setCommittedSsh] = useState<GitAgentSource | undefined>(undefined);
+  // Agent directories found after a submit missed agent.yaml, offered for the same repository and ref.
+  const [discoveredAgents, setDiscoveredAgents] = useState<{
+    repository: string;
+    paths: readonly string[];
+  } | null>(null);
   const [tracedAgent, setTracedAgent] = useState('');
   // Set on submit, so an agent created from traces, which has no config to run, is never deployed.
   const deployAfterCreate = useRef<DeployOnCreatePlan | null>(null);
@@ -127,13 +156,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     error: repoError,
     isPending: isImporting,
     reset: resetRepoMutation,
-  } = useCreateAgentFromGitHub({ onSuccess: onAgentCreated });
+  } = useCreateAgentFromRepository({ onSuccess: onAgentCreated });
 
   const isPending = isUploading || isImporting;
   const onUploadTab = tab === 'upload';
-  const onGitHubTab = tab === 'github';
+  const onGitTab = tab === 'git';
   const onTracesTab = tab === 'imported-traces';
-  const onCreateTab = onUploadTab || onGitHubTab || onTracesTab;
+  const onCreateTab = onUploadTab || onGitTab || onTracesTab;
 
   const {
     control,
@@ -169,13 +198,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const agentNameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
   const watchedRepoUrl = useWatch({ control, name: 'repoUrl' });
   const watchedSecretKey = useWatch({ control, name: 'secretKey' });
+  const watchedSshKeySecret = useWatch({ control, name: 'sshKeySecret' });
   const watchedDeploy = useWatch({ control, name: 'deploy' });
 
   // A repository is only a source once it parses; a half-typed URL must not enable submit.
-  const parsedRepo = useMemo((): { source?: GitHubAgentSource; problem?: string } => {
+  const parsedRepo = useMemo((): { source?: RepositorySource; problem?: string } => {
     if (!watchedRepoUrl?.trim()) return {};
     try {
-      return { source: parseGitHubSource(watchedRepoUrl) };
+      return { source: parseRepositorySource(watchedRepoUrl) };
     } catch (error) {
       return { problem: getErrorMessage(error as Error) };
     }
@@ -183,6 +213,54 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const repoSource = parsedRepo.source;
   // Held back until the field is left, so the message is not a running commentary on typing.
   const repoFieldError = errors.repoUrl?.message ?? (repoBlurred ? parsedRepo.problem : undefined);
+  const isSsh = repoSource?.kind === 'ssh';
+  const secretField = isSsh ? 'sshKeySecret' : 'secretKey';
+  // Lookups follow the SSH source as of the last time the field was left, not every keystroke.
+  const liveSsh = repoSource?.kind === 'ssh' ? repoSource.source : undefined;
+  const sshCommitted = Boolean(
+    committedSsh && liveSsh && committedSsh.url === liveSsh.url && committedSsh.ref === liveSsh.ref
+  );
+  const hostTrust = useSshHostTrust(workspace, open ? committedSsh?.url : undefined);
+  // While the field holds an uncommitted URL or branch, nothing looked up for the old one counts.
+  const knownHosts = sshCommitted ? hostTrust.knownHosts : '';
+
+  // Once an SSH remote can be read, its agent directories are found before submit.
+  const { search: agentSearch, settled: agentSearchSettled } = useGitAgentDirectories(
+    workspace,
+    open && committedSsh && watchedSshKeySecret && knownHosts
+      ? {
+          url: committedSsh.url,
+          ref: committedSsh.ref,
+          sshKeySecret: watchedSshKeySecret,
+          knownHosts,
+        }
+      : undefined
+  );
+  const searchingAgents =
+    isSsh && Boolean(watchedSshKeySecret && knownHosts) && !agentSearchSettled;
+  const foundAgentPaths =
+    isSsh && agentSearchSettled && agentSearch.isSuccess ? agentSearch.data : undefined;
+  const repositoryWithoutPath = repoSource
+    ? formatRepositorySource(withRepositoryPath(repoSource, ''))
+    : undefined;
+  const agentPaths =
+    foundAgentPaths ??
+    (discoveredAgents && discoveredAgents.repository === repositoryWithoutPath
+      ? discoveredAgents.paths
+      : []);
+  const currentPath = repoSource?.source.path ?? '';
+  // Shown read-only: the one agent in the repository is already the one in the URL.
+  const onlyAgentChosen = agentPaths.length === 1 && agentPaths[0] === currentPath;
+  // Submitting a directory the search already showed has no agent.yaml can only fail.
+  const pathHasNoAgent = foundAgentPaths !== undefined && !foundAgentPaths.includes(currentPath);
+
+  // Until an SSH host is trusted, nothing past the repository can be filled in.
+  const hostUntrusted = isSsh && !knownHosts;
+  // An SSH remote cannot be read anonymously, and its host key has to be pinned up front.
+  const repoReady = Boolean(
+    repoSource &&
+    (!isSsh || (watchedSshKeySecret && knownHosts && !searchingAgents && !pathHasNoAgent))
+  );
   // Derived, not stored: an armed replace targets one fileset, so editing the name
   // disarms it in the same render rather than one render later.
   const replaceOrphan = replaceArmedFor !== null && replaceArmedFor === agentPreview;
@@ -198,6 +276,9 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
+    hostTrust.reset();
+    setCommittedSsh(undefined);
+    setDiscoveredAgents(null);
     setTab('upload');
     setTracedAgent('');
     onClose();
@@ -265,8 +346,21 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
 
   const onRepoUrlBlur = () => {
     setRepoBlurred(true);
+    setCommittedSsh(repoSource?.kind === 'ssh' ? repoSource.source : undefined);
     if (!repoSource || watchedName?.trim()) return;
-    setValue('name', agentNameFromSource(repoSource), { shouldValidate: true });
+    setValue('name', agentNameFromRepository(repoSource), { shouldValidate: true });
+  };
+
+  const chooseAgentPath = (value: string) => {
+    if (!repoSource) return;
+    const chosen = withRepositoryPath(repoSource, value === ROOT_AGENT_PATH ? '' : value);
+    const name = watchedName?.trim();
+    // Only a name this modal suggested follows the directory; one the user typed stays.
+    if (!name || name === agentNameFromRepository(repoSource)) {
+      setValue('name', agentNameFromRepository(chosen), { shouldValidate: true });
+    }
+    setValue('repoUrl', formatRepositorySource(chosen), { shouldValidate: true });
+    resetRepoMutation();
   };
 
   const rejectOversized = (count: number): boolean => {
@@ -320,13 +414,27 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     const name = formData.name.trim();
     deployAfterCreate.current = deployOnCreate.plan(formData);
     try {
-      if (onGitHubTab) {
-        if (!repoSource) return;
+      if (onGitTab) {
+        if (!repoSource || !repoReady) return;
+        // Each backend reads its own secret field, so an SSH key is never sent as a GitHub token.
+        const { storage, sourceLabel } =
+          repoSource.kind === 'ssh'
+            ? {
+                storage: gitStorageConfig(repoSource.source, formData.sshKeySecret, knownHosts),
+                sourceLabel: formatGitSource(repoSource.source),
+              }
+            : {
+                storage: githubStorageConfig(
+                  repoSource.source,
+                  formData.secretKey?.trim() || undefined
+                ),
+                sourceLabel: formatGitHubSource(repoSource.source),
+              };
         await createAgentFromRepo({
           workspace,
           name,
-          source: repoSource,
-          secretName: formData.secretKey?.trim() || undefined,
+          storage,
+          sourceLabel,
           replaceOrphanedFileset: replaceOrphan,
         });
         return;
@@ -335,6 +443,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     } catch (error) {
       // An orphaned fileset is recoverable, so the next submit replaces it.
       setReplaceArmedFor(error instanceof AgentSpecFilesetOrphanError ? name : null);
+      if (error instanceof AgentConfigNotFoundError && repoSource) {
+        const root = repoSource.source.path;
+        setDiscoveredAgents({
+          repository: formatRepositorySource(withRepositoryPath(repoSource, '')),
+          paths: error.directories.map((directory) => (root ? `${root}/${directory}` : directory)),
+        });
+      }
     }
   };
 
@@ -350,7 +465,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   };
 
   // No fallback argument: getErrorMessage prefers one over a plain Error's own message.
-  const failure = onGitHubTab
+  const failure = onGitTab
     ? repoError
     : onTracesTab
       ? tracedCreateError
@@ -394,8 +509,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         disabled={busy}
         loading={busy}
         submitDisabled={
-          onGitHubTab
-            ? !repoSource || awaitingDeployModes
+          onGitTab
+            ? !repoReady || awaitingDeployModes
             : onTracesTab
               ? !tracedAgent
               : entries.length === 0 || awaitingDeployModes
@@ -412,7 +527,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
           <TabsList aria-label="Ways to register an agent">
             <TabsTrigger value="upload">Register with code upload</TabsTrigger>
-            <TabsTrigger value="github">Register from GitHub</TabsTrigger>
+            <TabsTrigger value="git">Register from Git</TabsTrigger>
             <TabsTrigger value="imported-traces">Register from traces</TabsTrigger>
             <TabsTrigger value="coding-agent-prompt">Coding agent prompt</TabsTrigger>
           </TabsList>
@@ -475,38 +590,95 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
             </Stack>
           </TabsContent>
 
-          <TabsContent value="github" className="items-stretch p-0 pt-density-lg">
+          <TabsContent value="git" className="items-stretch p-0 pt-density-lg">
             <Stack gap="density-md">
               <ControlledTextInput
-                label="Repository"
+                label="Git Repository"
                 disabled={isPending}
                 useControllerProps={{ control, name: 'repoUrl' }}
                 formFieldProps={{
-                  slotInfo:
-                    'github.com/owner/repo, optionally with @branch and #sub/directory. The files are read from GitHub on demand, not copied.',
+                  slotInfo: <RepositoryFormatHelp />,
                   slotError: repoFieldError,
                   // FormField drops slotError unless the field is also marked failed.
                   status: repoFieldError ? 'error' : undefined,
                 }}
                 attributes={{ Input: { onBlur: onRepoUrlBlur } }}
               />
+              {isSsh ? (
+                <HostKeyConfirmation
+                  hostKeys={hostTrust.hostKeys}
+                  settled={hostTrust.settled && sshCommitted}
+                  trusted={hostTrust.trusted}
+                  onTrustedChange={hostTrust.setTrusted}
+                  host={hostTrust.host}
+                  disabled={isPending}
+                />
+              ) : null}
               <SecretSearchableSelect
+                key={secretField}
                 workspace={workspace}
-                queryEnabled={open && onGitHubTab && Boolean(workspace)}
-                ensureOptionValue={watchedSecretKey || undefined}
-                useControllerProps={{ control, name: 'secretKey' }}
+                queryEnabled={open && onGitTab && Boolean(workspace)}
+                ensureOptionValue={(isSsh ? watchedSshKeySecret : watchedSecretKey) || undefined}
+                useControllerProps={{ control, name: secretField }}
                 onRequestNewSecret={() => setSecretModalOpen(true)}
                 triggerPlaceholder=""
+                disabled={isPending || hostUntrusted}
                 formFieldProps={{
-                  slotLabel: 'Access token secret',
-                  slotInfo:
-                    'Required for a private repository. The token stays in the platform and is never sent to your browser.',
-                  slotError: errors.secretKey?.message,
+                  slotLabel: isSsh ? 'SSH Private Key' : 'Access token secret',
+                  slotInfo: isSsh
+                    ? 'An unencrypted private key with read access, such as a deploy key. It stays in the platform and is never sent to your browser.'
+                    : 'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                  slotError: errors[secretField]?.message,
                 }}
               />
+              {searchingAgents ? (
+                <Text kind="body/regular/sm" color="subtle">
+                  Looking for agents in the repository…
+                </Text>
+              ) : null}
+              {isSsh && agentSearchSettled && agentSearch.isError ? (
+                <Flex align="center" gap="density-sm">
+                  <Text kind="body/regular/sm" color="subtle">
+                    Could not look for agents: {getErrorMessage(agentSearch.error as Error)}
+                  </Text>
+                  <Button
+                    kind="secondary"
+                    size="small"
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => void agentSearch.refetch()}
+                  >
+                    <Refresh size="14" aria-hidden />
+                    Retry
+                  </Button>
+                </Flex>
+              ) : null}
+              {foundAgentPaths?.length === 0 ? (
+                <Text kind="body/regular/sm" color="subtle">
+                  There is no {AGENT_CONFIG_FILENAME} anywhere on this branch.
+                </Text>
+              ) : null}
+              {isSsh || agentPaths.length > 0 ? (
+                <FormField slotLabel="Agent Directory">
+                  <Select
+                    aria-label="Agent Directory"
+                    value={agentPaths.includes(currentPath) ? currentPath || ROOT_AGENT_PATH : ''}
+                    onValueChange={chooseAgentPath}
+                    disabled={
+                      isPending || hostUntrusted || agentPaths.length === 0 || onlyAgentChosen
+                    }
+                    placeholder="Select an agent directory"
+                    items={agentPaths.map((path) => ({
+                      value: path || ROOT_AGENT_PATH,
+                      children: path || 'Repository root',
+                    }))}
+                  />
+                </FormField>
+              ) : null}
               <ControlledTextInput
                 useControllerProps={{ control, name: 'name' }}
                 label="Name"
+                disabled={isPending || hostUntrusted}
                 formFieldProps={{
                   slotHelp: agentNameError ? undefined : agentPreview ? (
                     <>
@@ -569,7 +741,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           open
           onClose={() => setSecretModalOpen(false)}
           onSecretCreated={(secretName) => {
-            setValue('secretKey', secretName, { shouldValidate: true });
+            setValue(secretField, secretName, { shouldValidate: true });
             setSecretModalOpen(false);
           }}
         />

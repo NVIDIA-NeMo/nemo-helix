@@ -49,17 +49,19 @@ export const isValidationErrorArray = (detail: unknown): detail is ValidationErr
 export const isVersionConflictError = (error: unknown): boolean =>
   error instanceof AxiosError && error.response?.status === 409;
 
-/** A 404 from the platform API. */
-export const isNotFoundError = (error: unknown): boolean => {
+const hasStatus = (error: unknown, status: number): boolean => {
   const candidate = error as { response?: { status?: number }; status?: number };
-  return candidate?.response?.status === 404 || candidate?.status === 404;
+  return candidate?.response?.status === status || candidate?.status === status;
 };
 
+/** A 404 from the platform API. */
+export const isNotFoundError = (error: unknown): boolean => hasStatus(error, 404);
+
+/** A 400 from the platform API: the request itself was refused, so retrying it as-is cannot help. */
+export const isBadRequestError = (error: unknown): boolean => hasStatus(error, 400);
+
 /** A 409 from the platform API, such as a create whose name is already taken. */
-export const isConflictError = (error: unknown): boolean => {
-  const candidate = error as { response?: { status?: number }; status?: number };
-  return candidate?.response?.status === 409 || candidate?.status === 409;
-};
+export const isConflictError = (error: unknown): boolean => hasStatus(error, 409);
 
 /** A 403 from the platform API — the caller is authenticated but lacks permission. */
 export const isForbiddenError = (error: unknown): boolean =>
