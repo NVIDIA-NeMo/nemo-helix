@@ -26,7 +26,7 @@ import tempfile
 import time
 import weakref
 from collections import OrderedDict
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Coroutine, Iterator
 from contextlib import aclosing, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,18 +66,6 @@ _GIT_SLOTS = asyncio.Semaphore(16)
 
 class GitBackendError(StorageBackendError):
     """Raised when git fails for a reason not covered below."""
-
-
-class GitRepositoryDamaged(GitBackendError):
-    """Raised when the local fetch repository is damaged and must be fetched again."""
-
-
-class GitRepositoryLocked(GitBackendError):
-    """Raised when a git lock file in the fetch repository blocks a command."""
-
-    def __init__(self, message: str, lock_path: Path):
-        super().__init__(message)
-        self.lock_path = lock_path
 
 
 class GitServerFault(StorageServerFault):
@@ -139,20 +127,6 @@ _NETWORK_FAILURES = (
     "early EOF",
 )
 
-_LOCK_HELD = re.compile(r"Unable to create '([^']+\.lock)': File exists")
-
-_DAMAGE_SIGNS = (
-    "cannot change to",
-    "not a git repository",
-    "bad object",
-    "corrupt",
-    "inflate:",
-    "unable to read",
-    "loose object",
-    "packfile",
-    "shallow file has changed",
-)
-
 
 def _failure_detail(stderr: str) -> str:
     for line in stderr.splitlines():
@@ -174,10 +148,6 @@ def _classify_failure(stderr: str, subject: str) -> Exception:
         return GitConfigError(f"{subject} does not exist, or the key cannot see it: {detail}")
     if any(marker in stderr for marker in _NETWORK_FAILURES):
         return GitUnavailableError(f"Could not reach {subject}: {detail}")
-    if lock := _LOCK_HELD.search(stderr):
-        return GitRepositoryLocked(f"A git lock blocks the fetch repository for {subject}: {detail}", Path(lock[1]))
-    if any(marker in stderr for marker in _DAMAGE_SIGNS):
-        return GitRepositoryDamaged(f"The fetch repository for {subject} is damaged: {detail}")
     return GitBackendError(f"git failed reading {subject}: {detail}")
 
 
@@ -310,12 +280,6 @@ def default_git_cache_root() -> Path:
     return nhx_user_data_dir() / "git-cache"
 
 
-def default_git_cache_max_bytes() -> int:
-    from nhx.core.files.config import files_config
-
-    return files_config().git_cache_max_bytes
-
-
 def default_durable_storage() -> StorageImpl:
     """The files service's default storage, which also holds every external backend's file cache."""
     from nhx.core.files.app.backends.factory import storage_impl_factory
@@ -369,81 +333,23 @@ def _finish_even_if_cancelled[T](work: Coroutine[Any, Any, T]) -> Awaitable[T]:
 
 # Commits known to be in each fetch repository, so a read prepares a repository once per process.
 _fetched_commits: dict[str, set[str]] = {}
-_last_touched: dict[str, float] = {}
-_TOUCH_INTERVAL_SECONDS = 60
-# Older than any git command this service runs, so the git that took it is gone.
-_STALE_LOCK_SECONDS = 10 * 60
 
 
-def _forget_repository(repo: Path) -> None:
-    _fetched_commits.pop(str(repo), None)
-    _last_touched.pop(str(repo), None)
-
-
-async def _remove_repository(repo: Path) -> None:
-    _forget_repository(repo)
-    await asyncio.to_thread(shutil.rmtree, repo, True)
-
-
-async def _touch(repo: Path) -> None:
-    now = time.monotonic()
-    if now - _last_touched.get(str(repo), -_TOUCH_INTERVAL_SECONDS) >= _TOUCH_INTERVAL_SECONDS:
-        _last_touched[str(repo)] = now
-        with suppress(OSError):
-            await asyncio.to_thread(os.utime, repo)
-
-
-def _remove_stale_lock(repo: Path, lock_path: Path) -> bool:
-    try:
-        if not lock_path.resolve().is_relative_to(repo.resolve()):
-            return False
-        if time.time() - lock_path.stat().st_mtime < _STALE_LOCK_SECONDS:
-            return False
-        lock_path.unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        return False
-    return True
-
-
-def _identity(repo: Path) -> int | None:
-    try:
-        return repo.stat().st_ino
-    except OSError:
-        return None
-
-
-def _repository_usage(root: Path) -> list[tuple[Path, float, int]]:
-    usage = []
-    for repo in root.iterdir():
-        if not repo.is_dir():
-            continue
-        size = 0
-        for directory, _, names in os.walk(repo):
-            for name in names:
-                with suppress(OSError):
-                    size += os.lstat(os.path.join(directory, name)).st_size
-        usage.append((repo, repo.stat().st_mtime, size))
-    return sorted(usage, key=lambda entry: entry[1])
-
-
-async def _prune_fetch_repositories(root: Path, keep: Path, max_bytes: int) -> None:
+async def _prune_fetch_repositories(root: Path, keep: Path) -> None:
     cutoff = time.time() - _FETCH_REPOSITORY_IDLE_SECONDS
     try:
-        usage = await asyncio.to_thread(_repository_usage, root)
+        repos = await asyncio.to_thread(lambda: [entry for entry in root.iterdir() if entry.is_dir()])
     except OSError:
         return
-    total = sum(size for _, _, size in usage)
-    for repo, used_at, size in usage:
-        if used_at >= cutoff and total <= max_bytes:
-            break
+    for repo in repos:
         lock = _repo_lock(repo)
         if repo == keep or lock.locked():
             continue
         async with lock:
-            await _remove_repository(repo)
-        total -= size
+            with suppress(OSError):
+                if repo.stat().st_mtime < cutoff:
+                    _fetched_commits.pop(str(repo), None)
+                    await asyncio.to_thread(shutil.rmtree, repo, True)
 
 
 def _repo_lock(repo: Path) -> asyncio.Lock:
@@ -473,7 +379,6 @@ class GitStorageImpl(StorageImpl):
     config: GitStorageConfig
     secrets: dict[str, str] = field(repr=False)
     cache_root: Path = field(default_factory=default_git_cache_root)
-    cache_max_bytes: int = field(default_factory=default_git_cache_max_bytes)
     durable: StorageImpl | None = None
     allowed_protocols: str = "ssh"
     timeout_seconds: float = 120.0
@@ -658,12 +563,9 @@ class GitStorageImpl(StorageImpl):
                 # The ref has moved past the pinned commit, so only its history still holds it.
                 await self._fetch(repo, fallback, depth=_FULL_HISTORY)
 
-    async def _ensure_commit(self, repo: Path, sha: str, damaged: int | None) -> None:
+    async def _ensure_commit(self, repo: Path, sha: str) -> None:
         fetched = False
         async with _repo_lock(repo):
-            # Another request may already have rebuilt the damaged repository; that one is kept.
-            if damaged is not None and await asyncio.to_thread(_identity, repo) == damaged:
-                await _remove_repository(repo)
             if not await asyncio.to_thread((repo / "HEAD").exists):
                 try:
                     await asyncio.to_thread(repo.parent.mkdir, parents=True, exist_ok=True)
@@ -680,42 +582,17 @@ class GitStorageImpl(StorageImpl):
                 )
                 fetched = True
             _fetched_commits.setdefault(str(repo), set()).add(sha)
-            _last_touched.pop(str(repo), None)
-            await _touch(repo)
+            with suppress(OSError):
+                await asyncio.to_thread(os.utime, repo)
         if fetched:
-            await _prune_fetch_repositories(self.cache_root, repo, self.cache_max_bytes)
-
-    async def _in_repository[T](self, operation: Callable[[Path], Awaitable[T]], *, optimistic: bool = False) -> T:
-        repo, sha = self._repo_dir, await self._commit()
-        # Most reads find the commit already fetched, so they skip the lock and the fetch check.
-        if optimistic:
-            with suppress(GitRepositoryDamaged):
-                return await operation(repo)
-        damaged: int | None = None
-        for attempt in (1, 2, 3):
-            try:
-                await _finish_even_if_cancelled(self._ensure_commit(repo, sha, damaged))
-                return await operation(repo)
-            except GitRepositoryLocked as exc:
-                if attempt == 3 or not await asyncio.to_thread(_remove_stale_lock, repo, exc.lock_path):
-                    raise GitUnavailableError(f"The fetch repository for {self.config.url} is busy: {exc}") from exc
-                logger.warning("Removed a stale git lock at %s", exc.lock_path)
-            except GitRepositoryDamaged as exc:
-                if attempt == 3 or damaged is not None:
-                    raise
-                logger.warning("Starting the damaged git fetch repository for %s over: %s", self.config.url, exc)
-                damaged = await asyncio.to_thread(_identity, repo)
-        raise AssertionError("unreachable")
+            await _prune_fetch_repositories(self.cache_root, repo)
 
     async def _prepare_repository(self) -> None:
         repo, sha = self._repo_dir, await self._commit()
         if sha in _fetched_commits.get(str(repo), ()) and await asyncio.to_thread((repo / "HEAD").exists):
             return
 
-        async def nothing(_repo: Path) -> None:
-            return None
-
-        await self._in_repository(nothing)
+        await _finish_even_if_cancelled(self._ensure_commit(repo, sha))
 
     async def resolve_config(self) -> GitStorageConfig:
         """Pin the revision to a commit SHA so the fileset cannot shift under a deployment."""
@@ -757,13 +634,12 @@ class GitStorageImpl(StorageImpl):
     async def _materialize(self, sha: str, key: str) -> Snapshot:
         tree = f"{sha}:{self.config.path}" if self.config.path else sha
 
-        async def list_tree(repo: Path) -> bytes:
-            return await self._git(
-                "-C", str(repo), "ls-tree", "-r", "-l", "-z", tree, env=self._base_env(), subject=self._subject()
-            )
-
+        await _finish_even_if_cancelled(self._ensure_commit(self._repo_dir, sha))
+        output = await self._git(
+            "-C", str(self._repo_dir), "ls-tree", "-r", "-l", "-z", tree, env=self._base_env(), subject=self._subject()
+        )
         snapshot: Snapshot = {}
-        for entry in _tree_entries(await self._in_repository(list_tree)):
+        for entry in _tree_entries(output):
             if len(snapshot) == _MAX_LISTED_FILES:
                 raise GitConfigError(
                     f"{self._subject()} has more than {_MAX_LISTED_FILES} files; point the fileset at a directory"
@@ -810,7 +686,7 @@ class GitStorageImpl(StorageImpl):
         assert proc.stdout is not None and proc.stderr is not None
         chunk_size = self.config.read_chunk_size
         try:
-            # Read before returning, so a missing object fails while the request can still be retried.
+            # Read before returning, so a missing object fails before the response starts.
             first = (
                 await asyncio.wait_for(proc.stdout.read(min(chunk_size, size)), self.timeout_seconds) if size else b""
             )
@@ -819,8 +695,7 @@ class GitStorageImpl(StorageImpl):
                 failure = _classify_failure(stderr, f"{blob} of {self._subject()}")
                 if isinstance(failure, GitServerFault):
                     raise failure
-                raise GitRepositoryDamaged(f"The fetch repository for {self.config.url} lacks {blob}: {failure}")
-            await _touch(repo)
+                raise GitBackendError(f"The fetch repository for {self.config.url} could not read {blob}: {failure}")
         except BaseException as exc:
             await asyncio.shield(stop_process_group(proc))
             if isinstance(exc, TimeoutError):
@@ -880,8 +755,8 @@ class GitStorageImpl(StorageImpl):
         if entry is None:
             raise NotFoundError(f"File not found for path: {path}")
         blob, size = entry
-        stream = await self._in_repository(lambda repo: self._open_blob(repo, blob, size), optimistic=True)
-        return _slice(stream, byte_range)
+        await self._prepare_repository()
+        return _slice(await self._open_blob(self._repo_dir, blob, size), byte_range)
 
     async def validate_storage(self):
         validate_external_host(self.config.remote.host_url)
