@@ -912,6 +912,25 @@ def test_nemo_api_maps_fileset_params_onto_file_endpoints(monkeypatch: pytest.Mo
     assert download == "text"
 
 
+def test_nemo_api_routes_workspaces_to_source_owned_typed_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix(
+        "GET",
+        _WORKSPACES,
+        {
+            "data": [_workspace("default")],
+            "pagination": {**_PAGINATION, "page_size": 20, "current_page_size": 1, "total_results": 1},
+        },
+    )
+    _install_client(monkeypatch, platform.client())
+
+    response = json.loads(
+        register.nemo_api("workspaces", "list", params={"page": 1, "page_size": 20}, workspace="default")
+    )
+
+    assert [item["name"] for item in response["data"]] == ["default"]
+    assert dict(platform.requests[0].url.params) == {"page": "1", "page_size": "20"}
+
+
 def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
