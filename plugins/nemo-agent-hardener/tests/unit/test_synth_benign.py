@@ -234,6 +234,44 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     assert seen["interview"] == "auto"
 
 
+def test_synth_generated_victim_env_cannot_reload_platform_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_agent_hardener_plugin.config import AgentHardenerConfig
+    from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
+
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text(
+        "agent:\n  name: a\n  port: 1\n  secrets:\n    - OPENAI_API_KEY\n    - NHX_ACCESS_TOKEN\n",
+        encoding="utf-8",
+    )
+    cfg = AgentHardenerConfig(
+        venv_path=tmp_path / "venv",
+        garak_venv_path=tmp_path / "garak-venv",
+        operator_env_file=tmp_path / "operator.env",
+    )
+    cfg.agent_hardener_bin.parent.mkdir(parents=True, exist_ok=True)
+    cfg.agent_hardener_bin.touch()
+    cfg.garak_python.parent.mkdir(parents=True, exist_ok=True)
+    cfg.garak_python.touch()
+    monkeypatch.setattr(job_mod.AgentHardenerConfig, "get", classmethod(lambda _cls: cfg))
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda *_a, **_k: str(manifest))
+    monkeypatch.setenv("OPENAI_API_KEY", "victim-model-key")
+    monkeypatch.setenv("NHX_ACCESS_TOKEN", "platform-access-token")
+    job = job_mod.AgentHardenerSynthBenignJob()
+
+    result = job.run({"manifest_id": "m1"}, ctx=_ctx(tmp_path), sdk=object())
+
+    assert result["status"] == "failed"
+    assert result["error"]["category"] == "manifest"
+    assert "reserved Platform environment variables: NHX_ACCESS_TOKEN" in result["error"]["message"]
+    dotenv = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY" in dotenv
+    assert "victim-model-key" in dotenv
+    assert "NHX_ACCESS_TOKEN" not in dotenv
+    assert "platform-access-token" not in dotenv
+
+
 def test_synth_benign_job_classifies_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agent_hardener_plugin.jobs import synth_benign as job_mod
     from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError

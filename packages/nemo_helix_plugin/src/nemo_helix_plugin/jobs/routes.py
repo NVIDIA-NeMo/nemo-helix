@@ -72,6 +72,7 @@ def add_job_routes(
     generate_job_name: "Callable[..., str] | None" = None,
     default_profile: str = "default",
     authz: AuthzScope | None = None,
+    job_discriminator: str | None = None,
 ) -> APIRouter:
     """Mount submit/list/get/delete routes for *job_cls* on a fresh router.
 
@@ -105,6 +106,9 @@ def add_job_routes(
             When set, every generated route is stamped with a ``@path_rule``
             (callers :data:`~nemo_helix_plugin.authz.GENERATED_ROUTE_CALLERS`)
             and the matching read/write scope.
+        job_discriminator: Stable identifier used to isolate this collection
+            from other job schemas that intentionally share ``service_name``.
+            Passed through to :func:`job_route_factory`.
 
     Returns:
         An :class:`APIRouter` with the standard job endpoints mounted.
@@ -141,6 +145,7 @@ def add_job_routes(
         job_result_routes=job_result_routes,
         generate_job_name=generate_job_name,
         authz=authz,
+        job_discriminator=job_discriminator,
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 

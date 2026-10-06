@@ -153,11 +153,11 @@ class AgentHardenerConfig(NemoConfig):
         ),
     )
     spec: str = Field(
-        default="nvidia-agent-hardener>=0.0.11",
+        default="nvidia-agent-hardener>=0.0.12",
         description=(
             "Package spec `nemo agent-hardener setup` installs into the venv (e.g. 'agent-hardener', "
             "'agent-hardener==0.0.1', or a local path/VCS URL for development). The floor is the release "
-            "that added `init --dockerfile/--binary`, which the BYO launch mode depends on."
+            "that exports OpenShell policies and derives OpenShell-safe sandbox names."
         ),
     )
     index_url: str | None = Field(

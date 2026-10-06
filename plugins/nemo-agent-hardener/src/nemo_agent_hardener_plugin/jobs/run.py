@@ -37,7 +37,11 @@ from nemo_agent_hardener_plugin.jobs.errors import (
     RunFailure,
     classify_exception,
 )
-from nemo_agent_hardener_plugin.jobs.execution import _run_one_shot, _run_service_driven
+from nemo_agent_hardener_plugin.jobs.execution import (
+    _build_native_subprocess_env,
+    _run_one_shot,
+    _run_service_driven,
+)
 from nemo_agent_hardener_plugin.jobs.manifest import _manifest_facts, _materialize_manifest, _seed_validation_manifest
 from nemo_agent_hardener_plugin.jobs.records import (
     _cached_benign_suite,
@@ -169,6 +173,7 @@ class AgentHardenerRunJob(NemoJob):
     """Run the attack/defend/validate war-game against the configured agent."""
 
     name = "war-game"  # CLI: `nemo agent-hardener war-game ...`; keeps `run` free for the wrapper command
+    job_collection_path = "/jobs"
     description = "Run the Agent Hardener war-game against a deployed NAT agent."
     container = "cpu-tasks"
     spec_schema: ClassVar[type[BaseModel] | None] = WarGameSpec
@@ -283,6 +288,9 @@ class AgentHardenerRunJob(NemoJob):
         self.report_progress(ctx, work_done=0, work_total=1, status="failed", details=failure.as_error_details())
 
     def _execute(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
+        if bool(config.get("config")) == bool(config.get("manifest_id")):
+            raise ValueError("agent-hardener run requires exactly one of 'config' or 'manifest_id'.")
+
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
 
@@ -340,7 +348,7 @@ class AgentHardenerRunJob(NemoJob):
         env_file = config.get("env_file")
         if not env_file:
             env_file = _common.materialize_victim_env_file(
-                manifest, _common.build_subprocess_env(plugin_config), Path(manifest).parent
+                manifest, _build_native_subprocess_env(plugin_config), Path(manifest).parent
             )
         agent_name, port = _manifest_facts(manifest)
 

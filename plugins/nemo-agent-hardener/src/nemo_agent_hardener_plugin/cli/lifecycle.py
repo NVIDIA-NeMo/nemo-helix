@@ -53,9 +53,7 @@ def _project_init_body(
     typer.echo(f"  uploaded  {root.name} -> {fileset}")
 
     try:
-        derived = ctx.sdk.agent_hardener.manifests.inspect_project(
-            fileset, dockerfile=dockerfile, workspace=ctx.workspace
-        )
+        derived = ctx.agent_hardener.manifests.inspect_project(fileset, dockerfile=dockerfile, workspace=ctx.workspace)
     except Exception as exc:
         typer.secho(f"Error: could not read the project — {exc}", fg="red")
         raise typer.Exit(code=1) from exc

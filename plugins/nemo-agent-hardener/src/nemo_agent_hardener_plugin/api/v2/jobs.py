@@ -45,6 +45,7 @@ router = job_route_factory(
     job_input=WarGameSpec,
     platform_job_config_compiler=_compile_war_game,
     authz=scope.child("jobs"),
+    job_discriminator="war-game",
 )
 
 
@@ -75,4 +76,5 @@ synth_router = job_route_factory(
     job_input=SynthBenignSpec,
     platform_job_config_compiler=_compile_synth_benign,
     authz=scope.child("jobs"),
+    job_discriminator="synth-benign",
 )

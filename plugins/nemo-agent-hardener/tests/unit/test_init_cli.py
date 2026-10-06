@@ -34,13 +34,15 @@ def _patch_cli(
 
         return inspect_project(project, dockerfile=dockerfile)
 
-    fake_sdk = SimpleNamespace(
-        agent_hardener=SimpleNamespace(
-            manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project)
-        )
-    )
+    # ``NemoClient.agent_hardener`` is the typed HTTP client: its endpoint methods are direct and it
+    # deliberately has no nested ``.manifests`` resource. The richer plugin resource is held separately
+    # on ``CommandContext.agent_hardener``. Keeping those shapes distinct prevents this test from masking
+    # a production-only AttributeError by giving both objects the legacy nested shape.
+    fake_sdk = SimpleNamespace(agent_hardener=SimpleNamespace(inspect_project=fake_inspect_project))
+    fake_resource = SimpleNamespace(manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project))
     monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
+    monkeypatch.setattr(_shared, "AgentHardenerPluginResource", lambda _sdk: fake_resource)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
         _shared.AgentHardenerConfig,

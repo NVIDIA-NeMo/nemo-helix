@@ -71,6 +71,22 @@ def test_sdk_run_without_benign_suite_omits_fileset(monkeypatch: pytest.MonkeyPa
     assert "benign_suite_fileset" not in captured["spec"]
 
 
+def test_sdk_run_rejects_config_and_manifest_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sync SDK must reject an ambiguous source before launching the job."""
+    from nemo_agent_hardener_plugin import sdk as sdk_module
+
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:  # pragma: no cover - must not run
+            raise AssertionError("launch should have been rejected before running")
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
+
+    with pytest.raises(ValueError, match="exactly one of 'config' or 'manifest_id'"):
+        sdk_module.AgentHardenerPluginResource(make_sdk()).run(config="agent-hardener.yaml", manifest_id="saved-target")
+
+
 def test_async_sdk_run_builds_sync_client_and_uploads_benign_suite(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -108,6 +124,24 @@ def test_async_sdk_run_builds_sync_client_and_uploads_benign_suite(
     assert captured["spec"]["benign_suite_fileset"] == "ws1/uploaded-suite.csv"
     assert captured["kwargs"]["ctx"].workspace == "ws1"
     assert captured["kwargs"]["sdk"] is sync_client  # job runs against the sync client, not async_sdk
+
+
+def test_async_sdk_run_rejects_config_and_manifest_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The async SDK shares the same exact-one source boundary as the sync SDK."""
+    from nemo_agent_hardener_plugin import sdk as sdk_module
+
+    class _Job:
+        name = "war-game"
+
+        def run(self, spec: dict, **kwargs: Any) -> dict:  # pragma: no cover - must not run
+            raise AssertionError("launch should have been rejected before running")
+
+    monkeypatch.setattr(sdk_module, "AgentHardenerRunJob", _Job)
+    monkeypatch.setattr(sdk_module, "make_sdk", lambda _base: make_sdk())
+    resource = sdk_module.AsyncAgentHardenerPluginResource(make_async_sdk(base_url="http://localhost:8080/"))
+
+    with pytest.raises(ValueError, match="exactly one of 'config' or 'manifest_id'"):
+        asyncio.run(resource.run(config="agent-hardener.yaml", manifest_id="saved-target"))
 
 
 def _patch_cli(cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> Any:
