@@ -25,6 +25,7 @@ import {
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
   AGENT_OVERVIEW_ENABLED,
+  OPTIMIZER_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -37,6 +38,7 @@ import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/Deploymen
 import { DetailsTab } from '@studio/routes/agents/AgentDetailRoute/DetailsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { InsightsTab } from '@studio/routes/agents/AgentDetailRoute/InsightsTab';
 import { LaunchOptimizeModal } from '@studio/routes/agents/AgentDetailRoute/optimizations/LaunchOptimizeModal';
 import { OptimizationsTab } from '@studio/routes/agents/AgentDetailRoute/optimizations/OptimizationsTab';
 import { OverviewTab } from '@studio/routes/agents/AgentDetailRoute/OverviewTab';
@@ -274,6 +276,7 @@ export const AgentDetailRoute: FC = () => {
             {AGENT_OPTIMIZATIONS_ENABLED && (
               <TabsTrigger value="optimizations">Optimizations</TabsTrigger>
             )}
+            {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
             <TabsTrigger value="details">Details</TabsTrigger>
           </TabsList>
 
@@ -310,6 +313,12 @@ export const AgentDetailRoute: FC = () => {
                 onOptimize={openOptimize}
                 onCloseForm={() => setOptimizationView(false)}
               />
+            </TabsContent>
+          )}
+
+          {OPTIMIZER_ENABLED && (
+            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="insights">
+              <InsightsTab workspace={workspace} agentName={agentName} agent={agent} />
             </TabsContent>
           )}
 

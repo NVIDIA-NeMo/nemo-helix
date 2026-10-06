@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # OpenTelemetry overrides for the platform-glue install in Dockerfile.nhx-rl-training.
 #
 # nhx-common asks for opentelemetry-instrumentation-*>=0.64b0 and opentelemetry-sdk>=1.38.0. Left

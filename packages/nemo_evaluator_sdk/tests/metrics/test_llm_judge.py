@@ -23,6 +23,7 @@ from nemo_evaluator_sdk.inference import (
 from nemo_evaluator_sdk.metrics.llm_judge import (
     LLMJudgeMetric,
     ScoreParserRegex,
+    _selected_rubric_label,
     default_judge_prompt_template_chat,
     default_judge_prompt_template_completions,
     generate_structured_output,
@@ -138,6 +139,26 @@ def test_regex_score_parser_nan():
     parser = ScoreParserRegex(score=_new_range_score(RegexScoreParser(pattern="SIMILARITY: (\\d+)")))
     score = parser.parse("no match")
     assert math.isnan(score.value)
+
+
+def test_regex_score_parser_unfilled_optional_group_is_nan():
+    """An optional group the judge reply leaves empty is an unparseable reply, not a metric error."""
+    parser = ScoreParserRegex(score=_new_range_score(RegexScoreParser(pattern=r"SCORE:\s*(\d+)?")))
+    assert math.isnan(parser.parse("SCORE: n/a").value)
+
+
+def test_regex_score_parser_rubric_unfilled_optional_group_is_nan_with_no_label():
+    metric_score = RubricScore(
+        name="quality",
+        rubric=[
+            Rubric(label="good", value=1),
+            Rubric(label="bad", value=0),
+        ],
+        parser=RegexScoreParser(pattern=r"QUALITY:\s*(good|bad)?"),
+    )
+    score = ScoreParserRegex(score=metric_score).parse("QUALITY: unsure")
+    assert math.isnan(score.value)
+    assert _selected_rubric_label(score) == ""
 
 
 @pytest.mark.parametrize(

@@ -11,4 +11,4 @@ accelerate; sys_platform == 'never'
 safetensors; sys_platform == 'never'
 
 # Keep W&B's bundled wandb-core binary on a build with patched Go stdlib/modules.
-wandb>=0.29.0
+wandb>=0.30.0

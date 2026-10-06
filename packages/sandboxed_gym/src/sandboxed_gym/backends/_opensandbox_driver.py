@@ -33,6 +33,7 @@ from sandboxed_gym.sandbox_types import (
 
 if TYPE_CHECKING:
     from opensandbox import Sandbox
+    from opensandbox.models.execd import OutputMessage
 
 LOGGER = logging.getLogger(__name__)
 
@@ -133,13 +134,14 @@ def _volumes(spec: SandboxSpec) -> list[Any]:
     return [volume if isinstance(volume, Volume) else Volume.model_validate(volume) for volume in volumes]
 
 
-def _joined_output(messages: Any) -> str | None:
-    """Concatenate the SDK's per-line output messages into one stream, or ``None`` if empty."""
-    if not messages:
+def _joined_output(messages: list[OutputMessage] | None) -> str | None:
+    """Rejoin the SDK's per-line output messages into one stream, or ``None`` if there was none.
+
+    execd strips line terminators, so whether the output ended in a newline is not recoverable.
+    """
+    if not messages or not any(message.text for message in messages):
         return None
-    parts = [str(getattr(message, "content", message) or "") for message in messages]
-    joined = "".join(parts)
-    return joined or None
+    return "\n".join(message.text.rstrip("\n") for message in messages)
 
 
 #: Added to ``ready_timeout_s`` for the create request. The server answers only once the pod is
@@ -336,7 +338,7 @@ class OpenSandboxDriver:
             # A sandbox the control plane no longer knows about is gone, which the contract models
             # as a status rather than an error.
             return SandboxStatus.UNKNOWN
-        reported = str(getattr(info.status, "value", info.status)).lower()
+        reported = info.status.state.lower()
         if reported in _STATUS_ALIASES:
             return _STATUS_ALIASES[reported]
         try:

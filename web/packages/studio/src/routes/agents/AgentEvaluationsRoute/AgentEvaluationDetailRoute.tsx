@@ -36,9 +36,12 @@ import {
   joinBundleByTask,
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
+import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import { AgentEvalTaskResultsPanel } from '@studio/components/evaluation/AgentEvalTaskResultsPanel';
 import { EvalAggregateScoresTable } from '@studio/components/evaluation/EvalAggregateScoresTable';
+import { EvalMetricCoverageTable } from '@studio/components/evaluation/EvalMetricCoverageTable';
+import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { StatusLogsContent } from '@studio/components/evaluation/Jobs/StatusLogsContent';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -177,6 +180,11 @@ export const AgentEvaluationDetailRoute: FC = () => {
     typeof job.status_details?.message === 'string' ? job.status_details.message : null;
   const errorMessage =
     typeof job.error_details?.message === 'string' ? job.error_details.message : null;
+  // The outcome banner already explains a failed run, so the backend's exit-code message would only
+  // repeat it with less information.
+  const responseMessage = evalRunOutcomeOf(job.status_details)?.failed
+    ? null
+    : (errorMessage ?? statusMessage);
   const allScores = aggregateScoresOf(result ?? null);
   const nativeScores = allScores.filter((s) => !s.name.startsWith('runner.'));
   const runnerScores = allScores.filter((s) => s.name.startsWith('runner.'));
@@ -224,6 +232,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
             }
           >
             <Stack gap="density-xl">
+              <EvalRunOutcomeBanner statusDetails={job.status_details} />
               <KVPair label="Name" value={job.name} loading={isLoadingJob} />
               <KVPair
                 label="Status"
@@ -277,12 +286,12 @@ export const AgentEvaluationDetailRoute: FC = () => {
                   }
                 />
               )}
-              {(errorMessage ?? statusMessage) && (
+              {responseMessage && (
                 <KVPair
                   label="Response"
                   value={
                     <Text kind="body/regular/sm" color={errorMessage ? 'danger' : 'default'}>
-                      {errorMessage ?? statusMessage}
+                      {responseMessage}
                     </Text>
                   }
                 />
@@ -325,6 +334,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
                     <EvalAggregateScoresTable scores={runnerScores} disableScoreColoring />
                   </Stack>
                 )}
+                {result?.summary && <EvalMetricCoverageTable summary={result.summary} />}
               </Stack>
             )}
           </Panel>

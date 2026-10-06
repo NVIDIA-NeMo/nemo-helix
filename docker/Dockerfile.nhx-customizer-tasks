@@ -93,7 +93,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "tornado>=6.5.7,<7" \
     "urllib3>=2.7.0,<3" \
     "GitPython>=3.1.60,<4" \
-    "wandb>=0.29.0"
+    "wandb>=0.30.0"
 
 # CVE cleanup for unused/stale packages from the NGC base image. The task entry
 # points import from /opt/venv; scanners still report the shadowed system copies.
