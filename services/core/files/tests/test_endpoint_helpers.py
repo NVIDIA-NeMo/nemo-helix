@@ -520,6 +520,19 @@ async def test_stream_file_download_setup_storage_access_error_returns_generic_5
     assert "referenced credentials are valid" in exc_info.value.detail
 
 
+async def test_get_download_file_info_maps_storage_errors_from_the_cache_key_lookup(mock_storage):
+    from fastapi import HTTPException
+    from starlette.status import HTTP_502_BAD_GATEWAY
+
+    mock_storage.get_cache_path_key = AsyncMock(side_effect=StorageAccessError("The SSH key was rejected"))
+    cache_ctx = CacheContext(storage=AsyncMock(), lock_manager=AsyncMock())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_download_file_info(mock_storage, "file.txt", cache_ctx=cache_ctx)
+
+    assert exc_info.value.status_code == HTTP_502_BAD_GATEWAY
+
+
 async def test_stream_file_download_leaves_a_server_fault_to_the_server_error_handler(
     mock_storage, mock_request, mock_background_tasks
 ):
