@@ -15,7 +15,7 @@ from typing import Any, NotRequired, TypedDict
 
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.metadata import FilesetMetadata
-from nemo_helix_plugin.files.storage_config import GitStorageConfig, StorageConfig
+from nemo_helix_plugin.files.storage_config import StorageConfig
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -184,42 +184,3 @@ class OtlpExportLogsPartialSuccess(BaseModel):
 
 class OtlpExportLogsResponse(BaseModel):
     partial_success: OtlpExportLogsPartialSuccess | None = Field(default=None, alias="partialSuccess")
-
-
-# ---------------------------------------------------------------------------
-# SSH host key types
-# ---------------------------------------------------------------------------
-
-
-class ScanSshHostKeysRequest(BaseModel):
-    url: str = Field(description="SSH remote whose host is scanned, e.g. 'git@gitlab.example.com:org/repo.git'")
-
-
-class SshHostKey(BaseModel):
-    key_type: str = Field(description="Key algorithm, e.g. 'ssh-ed25519'")
-    fingerprint: str = Field(description="SHA256 fingerprint, in the form ssh prints it")
-    known_hosts_line: str = Field(description="The key as a known_hosts line, ready for `known_hosts`")
-
-
-class ScanSshHostKeysResponse(BaseModel):
-    host: str = Field(description="The scanned host, with its port when it is not 22")
-    keys: list[SshHostKey]
-
-
-# ---------------------------------------------------------------------------
-# Git repository preview types
-# ---------------------------------------------------------------------------
-
-
-class FindGitRepositoryFilesRequest(BaseModel):
-    storage: GitStorageConfig = Field(description="The storage a git fileset would be created with")
-    file_name: str = Field(
-        min_length=1,
-        pattern=r"^[^/]+$",
-        description="A file name, without a directory, to look for anywhere under the storage path",
-    )
-
-
-class FindGitRepositoryFilesResponse(BaseModel):
-    revision: str = Field(description="The commit SHA the storage's revision resolved to")
-    paths: list[str] = Field(description="Paths of every file with that name, relative to the storage path")

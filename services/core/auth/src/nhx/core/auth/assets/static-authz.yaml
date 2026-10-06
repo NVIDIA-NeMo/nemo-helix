@@ -737,22 +737,6 @@ authz:
         scopes:
         - files:read
         - platform:read
-    # Does everything creating a git fileset does except store it.
-    /apis/files/v2/workspaces/{workspace}/git-repositories/find-files:
-      post:
-        permissions:
-        - filesets.create
-        scopes:
-        - files:write
-        - platform:write
-    # Reaches out to a host on the caller's behalf, only to set up a git fileset.
-    /apis/files/v2/workspaces/{workspace}/ssh-host-keys/scan:
-      post:
-        permissions:
-        - filesets.create
-        scopes:
-        - files:write
-        - platform:write
     /apis/guardrails/v2/workspaces/{workspace}/checks:
       post:
         permissions:

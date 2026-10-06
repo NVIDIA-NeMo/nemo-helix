@@ -13,7 +13,6 @@ any time and only costs a fetch.
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import logging
@@ -33,8 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_helix_plugin.config import nhx_user_data_dir
-from nemo_helix_plugin.files.storage_config import SshRemote, is_commit_sha
-from nemo_helix_plugin.files.types import SshHostKey
+from nemo_helix_plugin.files.storage_config import is_commit_sha
 from nhx.common.files.storage_config import GitStorageConfig as GitStorageConfig
 from nhx.core.files.app.backends.base import (
     REGULAR_FILE_MODES,
@@ -178,28 +176,6 @@ def _pick_ref(refs: dict[str, str], revision: str) -> str | None:
     return None
 
 
-_KEY_TYPE_PREFERENCE = ("ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa")
-
-
-def ssh_fingerprint(key_base64: str) -> str:
-    digest = hashlib.sha256(base64.b64decode(key_base64)).digest()
-    return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
-
-
-def parse_keyscan_output(output: str) -> list[SshHostKey]:
-    keys: list[SshHostKey] = []
-    for line in output.splitlines():
-        fields = line.split()
-        if len(fields) < 3 or line.startswith("#"):
-            continue
-        _, key_type, key = fields[:3]
-        keys.append(
-            SshHostKey(key_type=key_type, fingerprint=ssh_fingerprint(key), known_hosts_line=" ".join(fields[:3]))
-        )
-    rank = {key_type: index for index, key_type in enumerate(_KEY_TYPE_PREFERENCE)}
-    return sorted(keys, key=lambda host_key: rank.get(host_key.key_type, len(rank)))
-
-
 _GRACE_SECONDS = 2.0
 
 
@@ -222,36 +198,6 @@ async def communicate_within(proc: asyncio.subprocess.Process, timeout: float) -
     except (TimeoutError, asyncio.CancelledError):
         await asyncio.shield(stop_process_group(proc))
         raise
-
-
-async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[SshHostKey]:
-    """Fetch the host's public keys for the user to confirm, as ssh does on a first connection."""
-    port = ["-p", str(remote.port)] if remote.port else []
-    subject = remote.host_url.removeprefix("ssh://")
-    async with _GIT_SLOTS:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "ssh-keyscan",
-                "-T",
-                str(timeout_seconds),
-                *port,
-                remote.host,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        except FileNotFoundError as exc:
-            raise GitServerFault("ssh-keyscan is not installed in the files service") from exc
-        try:
-            stdout, _ = await communicate_within(proc, timeout_seconds + 5)
-        except TimeoutError:
-            raise GitUnavailableError(f"Timed out scanning host keys of {subject}") from None
-
-    keys = parse_keyscan_output(stdout.decode(errors="replace"))
-    if not keys:
-        raise GitUnavailableError(f"{subject} returned no SSH host keys; check the host and port")
-    return keys
 
 
 @dataclass(frozen=True)
