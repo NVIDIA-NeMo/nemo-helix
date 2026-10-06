@@ -12,9 +12,9 @@ from http import HTTPStatus
 from logging import getLogger
 from typing import Callable, TypedDict
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoHTTPError, NotFoundError
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.inference_gateway.client import AsyncInferenceGatewayProviderClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import (
@@ -369,7 +369,7 @@ class ModelProviderReconciler:
 
     def __init__(
         self,
-        models_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         controller_config: ControllerConfig,
         entity_cache: ModelEntityCache,
         emit_heartbeat: Callable[[], None],
@@ -377,22 +377,19 @@ class ModelProviderReconciler:
         """Initialize the provider reconciler.
 
         Args:
-            models_sdk: SDK client for Models API interactions
+            client: Typed platform client for Models API interactions
             controller_config: Models controller configuration (discovery timeout/retry policy)
             entity_cache: Model Entity reads and staged writes for the current phase
             emit_heartbeat: Called as each unit of work finishes so a long pass is
                 distinguishable from a stalled one
         """
-        self._models_sdk = models_sdk
         self._controller_config = controller_config
         self._entity_cache = entity_cache
         self._emit_heartbeat = emit_heartbeat
-        self._models_client = client_from_platform(models_sdk, AsyncModelsClient)
-        self._virtual_models_client = client_from_platform(models_sdk, AsyncVirtualModelsClient)
-        discovery_sdk = models_sdk.with_options(
-            max_retries=controller_config.provider_discovery_max_retries,
-        )
-        self._gateway_provider_client = client_from_platform(discovery_sdk, AsyncInferenceGatewayProviderClient)
+        self._models_client = AsyncModelsClient.from_client(client)
+        self._virtual_models_client = AsyncVirtualModelsClient.from_client(client)
+        discovery_client = client.with_retry(RetryPolicy(max_retries=controller_config.provider_discovery_max_retries))
+        self._gateway_provider_client = AsyncInferenceGatewayProviderClient.from_client(discovery_client)
 
     # -------------------------------------------------------------------------
     # Public entry point
@@ -1178,7 +1175,7 @@ class ModelProviderReconciler:
                     # provider's. Legacy sidecars nested adapters under the model
                     # entity (so they shared the model's workspace), and the new sidecar's
                     # ``_resolve_adapter_workspace`` fallback also collapses onto the
-                    # base model's workspace when the SDK doesn't expose
+                    # base model's workspace when the client types don't expose
                     # ``Adapter.workspace``. Using ``provider.workspace`` here would
                     # silently mis-route whenever the provider lives in a different
                     # workspace than the base model.

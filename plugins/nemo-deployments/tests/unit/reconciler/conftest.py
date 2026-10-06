@@ -14,7 +14,7 @@ from nemo_deployments_plugin.backends.registry import ExecutorRegistry
 from nemo_deployments_plugin.config import ControllerConfig
 from nemo_deployments_plugin.reconciler.deployment_reconciler import DeploymentReconciler
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 class MockDeploymentBackend(DeploymentBackend):
@@ -22,7 +22,7 @@ class MockDeploymentBackend(DeploymentBackend):
 
     def __init__(
         self,
-        sdk: AsyncNeMoHelix | None = None,
+        client: AsyncNemoClient | None = None,
         config: dict[str, Any] | None = None,
         *,
         create_status: BackendStatusUpdate | None = None,
@@ -42,7 +42,7 @@ class MockDeploymentBackend(DeploymentBackend):
         self.read_calls: list[tuple[str, str]] = []
         self.deployment_delete_calls: list[tuple[str, str]] = []
         self.volume_delete_calls: list[tuple[str, str]] = []
-        super().__init__(sdk or AsyncMock(), config or {})
+        super().__init__(client or AsyncMock(), config or {})
 
     def shutdown(self) -> None:
         pass

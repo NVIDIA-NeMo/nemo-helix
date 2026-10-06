@@ -34,7 +34,6 @@ from nemo_agents_plugin.runner.backend import DeploymentInfo
 from nemo_agents_plugin.runner.controller import AgentDeploymentController
 from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
 
 EXPIRATION_NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
@@ -45,8 +44,8 @@ def test_agent_deployment_controller_declares_entities_dependency() -> None:
 
 
 @pytest.mark.asyncio
-async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
-    sdk = MagicMock()
+async def test_controller_startup_builds_typed_entities_client() -> None:
+    client = MagicMock()
     typed_client = MagicMock()
     entity_client = MagicMock()
     empty_page = MagicMock(data=[], pagination=None)
@@ -54,9 +53,9 @@ async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
 
     with (
         patch("nemo_agents_plugin.config.AgentsConfig.get", return_value=AgentsConfig()),
-        patch("nemo_helix_plugin.sdk_provider.get_async_platform_sdk", return_value=sdk),
+        patch("nemo_helix_plugin.client_provider.get_async_nemo_client", return_value=client),
         patch(
-            "nemo_helix_plugin.client.adapter.client_from_platform",
+            "nemo_helix_plugin.entities.client.AsyncEntitiesClient.from_client",
             return_value=typed_client,
         ) as mock_adapter,
         patch("nemo_helix_plugin.entities.EntityClient", return_value=entity_client) as mock_entity_client,
@@ -64,7 +63,7 @@ async def test_controller_startup_adapts_sdk_to_typed_entities_client() -> None:
         controller = AgentDeploymentController()
         await controller.on_startup()
 
-    mock_adapter.assert_called_once_with(sdk, AsyncEntitiesClient)
+    mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert controller._entities is entity_client
     assert controller._startup_sessions_reconciled is True

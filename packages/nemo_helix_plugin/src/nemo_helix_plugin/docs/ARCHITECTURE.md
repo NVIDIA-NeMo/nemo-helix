@@ -140,7 +140,7 @@ def clear_discovery_cache():
 
 ## Inter-service auth headers
 
-Every inter-service call carries principal headers. The NeMo Helix SDK factory handles this automatically. Four headers used in NeMo Helix:
+Every inter-service call carries principal headers. The typed-client factories (`nemo_helix_plugin.client_provider` and the request-scoped `get_nemo_client` dependency) set them automatically. Four headers used in NeMo Helix:
 
 | Header | Value |
 |---|---|

@@ -18,8 +18,8 @@ without exposing long-lived credentials to the colocated workload.
 When workload token exchange is not configured, the proxy falls back to
 trusted-header mode and stamps a service-principal identity header
 (``X-NHX-Principal-Id: service:<name>``) on forwarded requests. This is the same
-static service-identity the platform's own SDK clients use
-(``get_platform_sdk(as_service=...)``).
+static service-identity the platform's own typed clients use
+(``get_nemo_client(as_service=...)`` in :mod:`nhx.common.client_factory`).
 
 In trusted-header mode, when ``NHX_AUTH_PROXY_ON_BEHALF_OF`` is set, the proxy
 additionally stamps ``X-NHX-Principal-On-Behalf-Of`` so the platform authorizes

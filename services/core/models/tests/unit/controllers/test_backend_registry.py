@@ -11,8 +11,8 @@ from nhx.core.models.controllers.backends.registry import BackendRegistry
 
 
 @pytest.fixture
-def mock_nhx_sdk():
-    """Create a mock AsyncNeMoHelix SDK."""
+def mock_client():
+    """Create a mock AsyncNemoClient."""
     return AsyncMock()
 
 
@@ -24,10 +24,10 @@ def sample_backend_configs():
     }
 
 
-def test_backend_registry_from_config(mock_nhx_sdk, sample_backend_configs):
+def test_backend_registry_from_config(mock_client, sample_backend_configs):
     """Test creating BackendRegistry from configuration."""
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=sample_backend_configs,
         huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
     )
@@ -36,10 +36,10 @@ def test_backend_registry_from_config(mock_nhx_sdk, sample_backend_configs):
     assert registry.get_backend("deployments_plugin") is not None
 
 
-def test_backend_registry_get_default_backend(mock_nhx_sdk, sample_backend_configs):
+def test_backend_registry_get_default_backend(mock_client, sample_backend_configs):
     """Test getting default backend (the single enabled one)."""
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=sample_backend_configs,
         huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
     )
@@ -47,10 +47,10 @@ def test_backend_registry_get_default_backend(mock_nhx_sdk, sample_backend_confi
     assert registry.get_backend() is not None
 
 
-def test_backend_registry_get_backend_not_found(mock_nhx_sdk, sample_backend_configs):
+def test_backend_registry_get_backend_not_found(mock_client, sample_backend_configs):
     """Test that KeyError is raised for unknown backend."""
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=sample_backend_configs,
         huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
     )
@@ -59,10 +59,10 @@ def test_backend_registry_get_backend_not_found(mock_nhx_sdk, sample_backend_con
         registry.get_backend("unknown")
 
 
-def test_backend_registry_list_backends(mock_nhx_sdk, sample_backend_configs):
+def test_backend_registry_list_backends(mock_client, sample_backend_configs):
     """Test listing all registered backends."""
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=sample_backend_configs,
         huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
     )
@@ -71,11 +71,11 @@ def test_backend_registry_list_backends(mock_nhx_sdk, sample_backend_configs):
     assert backends == ["deployments_plugin"]
 
 
-def test_backend_registry_empty_config_raises_error(mock_nhx_sdk):
+def test_backend_registry_empty_config_raises_error(mock_client):
     """Test that empty backend config raises ValueError."""
     with pytest.raises(ValueError, match="At least one backend must be configured"):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_sdk,
+            client=mock_client,
             backend_configs={},
             huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
         )
@@ -87,20 +87,20 @@ def test_backend_registry_init_with_empty_dict_raises_error():
         BackendRegistry(registry={})
 
 
-def test_backend_registry_unknown_backend_type(mock_nhx_sdk):
+def test_backend_registry_unknown_backend_type(mock_client):
     """Test that unknown backend type raises KeyError when backend class not in registry."""
     bad_config = {"legacy-docker": DeploymentsPluginBackendConfigModel(enabled=True)}
 
     with pytest.raises(KeyError, match="Unknown backend 'legacy-docker'"):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_sdk,
+            client=mock_client,
             backend_configs=bad_config,
             huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
             available_backends={},
         )
 
 
-def test_backend_config_from_yaml_to_registry(mock_nhx_sdk):
+def test_backend_config_from_yaml_to_registry(mock_client):
     """Test end-to-end: parse backend configs from dicts (like YAML) and use them with registry."""
     from nhx.core.models.config import ControllerConfig
 
@@ -115,7 +115,7 @@ def test_backend_config_from_yaml_to_registry(mock_nhx_sdk):
     assert parsed_configs["deployments_plugin"].default_pvc_size == "100Gi"
 
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=parsed_configs,
         huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
     )
@@ -123,7 +123,7 @@ def test_backend_config_from_yaml_to_registry(mock_nhx_sdk):
     assert registry.list_backends() == ["deployments_plugin"]
 
 
-def test_backend_registry_no_enabled_backends_raises_error(mock_nhx_sdk):
+def test_backend_registry_no_enabled_backends_raises_error(mock_client):
     """Test that having no enabled backends raises ValueError."""
     config_with_no_enabled = {
         "deployments_plugin": DeploymentsPluginBackendConfigModel(enabled=False),
@@ -131,13 +131,13 @@ def test_backend_registry_no_enabled_backends_raises_error(mock_nhx_sdk):
 
     with pytest.raises(ValueError, match="No backends are enabled"):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_sdk,
+            client=mock_client,
             backend_configs=config_with_no_enabled,
             huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
         )
 
 
-def test_backend_registry_multiple_enabled_backends_raises_error(mock_nhx_sdk):
+def test_backend_registry_multiple_enabled_backends_raises_error(mock_client):
     """Test that having multiple enabled backends raises ValueError."""
     config_with_multiple_enabled = {
         "deployments_plugin": DeploymentsPluginBackendConfigModel(enabled=True),
@@ -146,13 +146,13 @@ def test_backend_registry_multiple_enabled_backends_raises_error(mock_nhx_sdk):
 
     with pytest.raises(ValueError, match="Multiple backends are enabled"):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_sdk,
+            client=mock_client,
             backend_configs=config_with_multiple_enabled,
             huggingface_model_puller="nvcr.io/nvidia/nemo-microservices/nds-v2-huggingface-cli:25.10",
         )
 
 
-def test_deployments_plugin_missing_package_raises_guidance(mock_nhx_sdk):
+def test_deployments_plugin_missing_package_raises_guidance(mock_client):
     """Missing nemo-deployments-plugin should surface install guidance."""
     import builtins
 
@@ -176,16 +176,16 @@ def test_deployments_plugin_missing_package_raises_guidance(mock_nhx_sdk):
         pytest.raises(ImportError, match=r'pip install "nemo-helix\[all\]"'),
     ):
         BackendRegistry.from_config(
-            nhx_sdk=mock_nhx_sdk,
+            client=mock_client,
             backend_configs={"deployments_plugin": DeploymentsPluginBackendConfigModel(enabled=True)},
             huggingface_model_puller="puller:latest",
         )
 
 
-def test_backend_registry_shutdown_calls_backend_shutdown(mock_nhx_sdk, sample_backend_configs):
+def test_backend_registry_shutdown_calls_backend_shutdown(mock_client, sample_backend_configs):
     """Test that shutdown_all_backends calls shutdown on each backend."""
     registry = BackendRegistry.from_config(
-        nhx_sdk=mock_nhx_sdk,
+        client=mock_client,
         backend_configs=sample_backend_configs,
         huggingface_model_puller="puller:latest",
     )

@@ -19,8 +19,7 @@ from dataclasses import dataclass, field
 from logging import getLogger
 from typing import Callable
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import CreateModelEntityRequest, ModelEntity, UpdateModelEntityRequest
@@ -62,16 +61,16 @@ class ModelEntityCache:
     reads the same entity within a phase observes its own write.
     """
 
-    def __init__(self, models_sdk: AsyncNeMoHelix, emit_heartbeat: Callable[[], None]) -> None:
+    def __init__(self, client: AsyncNemoClient, emit_heartbeat: Callable[[], None]) -> None:
         """Initialize the cache.
 
         Args:
-            models_sdk: SDK client for Models API interactions
+            client: Typed platform client for Models API interactions
             emit_heartbeat: Called as each entity is read or written. Reading and
                 writing are both proportional to the number of entities, so they
                 have to report progress or a large batch looks like a stall.
         """
-        self._models_sdk = models_sdk
+        self._models_client = AsyncModelsClient.from_client(client)
         self._emit_heartbeat = emit_heartbeat
         self._entities: dict[tuple[str, str], ModelEntity] = {}
         self._pending: dict[tuple[str, str], _PendingEntity] = {}
@@ -96,7 +95,7 @@ class ModelEntityCache:
             )
 
         entities: dict[tuple[str, str], ModelEntity] = {}
-        models = client_from_platform(self._models_sdk, AsyncModelsClient)
+        models = self._models_client
         async for entity in (await models.list_models(workspace="-", query_params={"page_size": _PAGE_SIZE})).items():
             entities[(entity.workspace, entity.name)] = entity
             self._emit_heartbeat()
@@ -223,7 +222,7 @@ class ModelEntityCache:
             create_kwargs["model_providers"] = list(staged.link_providers)
 
         try:
-            models = client_from_platform(self._models_sdk, AsyncModelsClient)
+            models = self._models_client
             created = (
                 await models.create_model(
                     workspace=workspace, body=CreateModelEntityRequest(name=name, **create_kwargs)
@@ -259,7 +258,7 @@ class ModelEntityCache:
             logger.debug("Model Entity %s/%s already matches desired state", workspace, name)
             return
 
-        models = client_from_platform(self._models_sdk, AsyncModelsClient)
+        models = self._models_client
         updated = (
             await models.update_model(workspace=workspace, name=name, body=UpdateModelEntityRequest(**update_params))
         ).data()

@@ -103,7 +103,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         self._batch_v1 = client.BatchV1Api()
         self._core_v1 = client.CoreV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
-        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nhx_sdk)
+        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
@@ -289,7 +289,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             ):
                 return result
             if k8s_job is not None and self.check_step_is_stale(step):
-                update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+                update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
                 self.terminate_job(k8s_job)
                 message = staleness_error_message(require_staleness_timeout_seconds(step))
                 return JobUpdate(
@@ -378,7 +378,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         if status == HelixJobStatus.ERROR:
             error_message = _status_details_message(status_details, "Job encountered an error")
         status_details["events"] = self.get_kube_job_events(job)
-        task_has_error = update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        task_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         teardown_lifecycle_statuses = {
             HelixJobStatus.PAUSING,
             HelixJobStatus.PAUSED,
@@ -438,7 +438,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
             return None
 
         self.terminate_job(k8s_job)
-        update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         return JobUpdate(
             status=HelixJobStatus.ERROR,
             status_details={"message": message, "events": self.get_kube_job_events(k8s_job)},
@@ -465,7 +465,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
         status_details = {"message": f"Job timed out after reaching max TTL of {ttl_seconds} seconds"}
         error_details = {"message": f"Job timed out after reaching max TTL of {ttl_seconds} seconds"}
         status_details["events"] = self.get_kube_job_events(k8s_job)
-        update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         return JobUpdate(status=status, status_details=status_details, error_details=error_details)
 
     def sync_active(self, step: HelixJobStepWithContext, job: V1Job | None) -> JobUpdate:
@@ -635,7 +635,7 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
                 if job_type is not None and job_type != JOB_TYPE_JOB:
                     continue
 
-                # Skip jobs missing required labels (e.g. old or manually created); avoid calling SDK with None.
+                # Skip jobs missing required labels (e.g. old or manually created); avoid calling the Jobs API with None.
                 if not job_id or not step_name or not workspace_id:
                     logger.warning(
                         "Skipping cleanup for Kubernetes job with missing labels (job_id, step_name, or workspace_id)",

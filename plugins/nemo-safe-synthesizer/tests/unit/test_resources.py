@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pandas as pd
 import pytest
-from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NemoTransportError
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NemoTransportError, UnprocessableEntityError
 from nemo_helix_plugin.discovery import discover, discover_entry_points
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
@@ -51,7 +51,7 @@ def _paginated_resp(items, *, total: int, next_page: str | None, prev_page: str 
     return response
 
 
-def _mock_platform(requests: list[httpx.Request]) -> NemoClient:
+def _mock_client(requests: list[httpx.Request]) -> NemoClient:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         return httpx.Response(
@@ -63,10 +63,18 @@ def _mock_platform(requests: list[httpx.Request]) -> NemoClient:
     return NemoClient(base_url="http://nhx.test", http_client=http_client, workspace="default")
 
 
+def _async_client() -> AsyncNemoClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, request=request, json={})
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return AsyncNemoClient(base_url="http://nhx.test", http_client=http_client, workspace="default")
+
+
 def test_safe_synthesizer_resource_creates_job_through_plugin_route() -> None:
     requests: list[httpx.Request] = []
-    platform = _mock_platform(requests)
-    resource = SafeSynthesizerResource(platform)
+    client = _mock_client(requests)
+    resource = SafeSynthesizerResource(client)
 
     response = resource.jobs.create(
         workspace="default",
@@ -83,13 +91,13 @@ def test_safe_synthesizer_resource_creates_job_through_plugin_route() -> None:
     }
 
 
-def test_safe_synthesizer_resource_mounts_on_platform_client() -> None:
+def test_safe_synthesizer_resource_mounts_on_typed_client() -> None:
     discover.cache_clear()
     discover_entry_points.cache_clear()
     requests: list[httpx.Request] = []
-    platform = _mock_platform(requests)
+    client = _mock_client(requests)
 
-    response = platform.safe_synthesizer.jobs.create(
+    response = client.safe_synthesizer.jobs.create(
         workspace="default",
         name="safe-synth-job",
         spec={"data_source": "default/data#input.csv", "config": {}},
@@ -104,32 +112,28 @@ def test_safe_synthesizer_resource_includes_response_detail_in_errors() -> None:
         return httpx.Response(422, json={"detail": "Failed to compile safe-synthesizer job spec"})
 
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
-    platform = NemoClient(base_url="http://nhx.test", http_client=http_client, workspace="default")
-    resource = SafeSynthesizerResource(platform)
+    client = NemoClient(base_url="http://nhx.test", http_client=http_client, workspace="default")
+    resource = SafeSynthesizerResource(client)
 
-    try:
+    with pytest.raises(UnprocessableEntityError) as exc_info:
         resource.jobs.create(workspace="default", spec={"data_source": "default/data#input.csv", "config": {}})
-    except httpx.HTTPStatusError as e:
-        assert "Response detail: Failed to compile safe-synthesizer job spec" in str(e)
-    else:
-        raise AssertionError("Expected HTTPStatusError")
+
+    assert "Failed to compile safe-synthesizer job spec" in exc_info.value.detail
 
 
 @pytest.mark.asyncio
 async def test_async_safe_synthesizer_resource_get_logs_forwards_query_params() -> None:
-    platform = MagicMock()
-    resource = AsyncSafeSynthesizerJobsResource(platform)
-
     mock_jobs = MagicMock()
     mock_jobs.list_job_logs = AsyncMock(return_value=_paginated_resp([], total=0, next_page=None))
-    with patch("nemo_safe_synthesizer_plugin.sdk.resources.AsyncJobsClient.from_client", return_value=mock_jobs):
-        response = await resource.get_logs(
-            "safe-synth-job",
-            workspace="default",
-            limit=10,
-            page_cursor="next-page",
-            step_id=None,
-        )
+    resource = AsyncSafeSynthesizerJobsResource(_async_client())
+    resource._jobs = mock_jobs
+    response = await resource.get_logs(
+        "safe-synth-job",
+        workspace="default",
+        limit=10,
+        page_cursor="next-page",
+        step_id=None,
+    )
 
     assert response.data == []
     mock_jobs.list_job_logs.assert_awaited_once_with(
@@ -140,19 +144,17 @@ async def test_async_safe_synthesizer_resource_get_logs_forwards_query_params() 
 
 
 def test_safe_synthesizer_resource_get_logs_forwards_query_params() -> None:
-    platform = MagicMock()
-    resource = SafeSynthesizerJobsResource(platform)
     mock_jobs = MagicMock()
     mock_jobs.list_job_logs.return_value = _paginated_resp([], total=0, next_page=None)
-
-    with patch("nemo_safe_synthesizer_plugin.sdk.resources.JobsClient.from_client", return_value=mock_jobs):
-        response = resource.get_logs(
-            "safe-synth-job",
-            workspace="default",
-            attempt_id=2,
-            step_id="step-1",
-            task_id=None,
-        )
+    resource = SafeSynthesizerJobsResource(_mock_client([]))
+    resource._jobs = mock_jobs
+    response = resource.get_logs(
+        "safe-synth-job",
+        workspace="default",
+        attempt_id=2,
+        step_id="step-1",
+        task_id=None,
+    )
 
     assert response.data == []
     mock_jobs.list_job_logs.assert_called_once_with(
@@ -163,29 +165,31 @@ def test_safe_synthesizer_resource_get_logs_forwards_query_params() -> None:
 
 
 def test_job_builder_uploads_dataframe_and_creates_job() -> None:
-    client = MagicMock()
-    client.safe_synthesizer.jobs.create.return_value = SimpleNamespace(name="safe-synth-job")
+    client = _mock_client([])
+    files = MagicMock()
+    jobs_resource = MagicMock()
+    jobs_resource.create.return_value = SimpleNamespace(name="safe-synth-job")
+
+    builder = (
+        SafeSynthesizerJobBuilder(client, workspace="default")
+        .with_data_source(pd.DataFrame({"value": [1]}))
+        .with_classify_model_provider("nvidia-build")
+        .with_replace_pii()
+        .synthesize()
+        .with_generate(num_records=10)
+        .with_hf_token_secret("hf-token")
+    )
 
     with (
-        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.FilesClient.from_client"),
-        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.transfer.upload") as upload,
-        patch("nemo_safe_synthesizer_plugin.sdk.job.JobsClient.from_client"),
+        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.FilesClient.from_client", return_value=files),
+        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.SafeSynthesizerJobsResource", return_value=jobs_resource),
     ):
-        builder = (
-            SafeSynthesizerJobBuilder(client, workspace="default")
-            .with_data_source(pd.DataFrame({"value": [1]}))
-            .with_classify_model_provider("nvidia-build")
-            .with_replace_pii()
-            .synthesize()
-            .with_generate(num_records=10)
-            .with_hf_token_secret("hf-token")
-        )
-
         job = builder.create_job(name="safe-synth-job")
 
     assert job.job_name == "safe-synth-job"
-    upload.assert_called_once()
-    create_kwargs = client.safe_synthesizer.jobs.create.call_args.kwargs
+    files.create_fileset.assert_called_once()
+    files.upload_file.assert_called_once()
+    create_kwargs = jobs_resource.create.call_args.kwargs
     assert create_kwargs["workspace"] == "default"
     assert create_kwargs["name"] == "safe-synth-job"
     assert create_kwargs["spec"]["data_source"].startswith("default/safe-synthesizer-inputs#dataset")
@@ -198,25 +202,26 @@ def test_job_builder_uploads_dataframe_and_creates_job() -> None:
 
 
 def test_job_builder_creates_pretrained_model_job_for_adapter_reuse() -> None:
-    client = MagicMock()
-    client.safe_synthesizer.jobs.create.return_value = SimpleNamespace(name="adapter-reuse-job")
+    client = _mock_client([])
+    files = MagicMock()
+    jobs_resource = MagicMock()
+    jobs_resource.create.return_value = SimpleNamespace(name="adapter-reuse-job")
+
+    builder = (
+        SafeSynthesizerJobBuilder(client, workspace="default")
+        .with_data_source(pd.DataFrame({"value": [1]}))
+        .with_pretrained_model_job("first-synth-job")
+        .with_generate(num_records=25)
+    )
 
     with (
-        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.FilesClient.from_client"),
-        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.transfer.upload"),
-        patch("nemo_safe_synthesizer_plugin.sdk.job.JobsClient.from_client"),
+        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.FilesClient.from_client", return_value=files),
+        patch("nemo_safe_synthesizer_plugin.sdk.job_builder.SafeSynthesizerJobsResource", return_value=jobs_resource),
     ):
-        builder = (
-            SafeSynthesizerJobBuilder(client, workspace="default")
-            .with_data_source(pd.DataFrame({"value": [1]}))
-            .with_pretrained_model_job("first-synth-job")
-            .with_generate(num_records=25)
-        )
-
         job = builder.create_job(name="adapter-reuse-job")
 
     assert job.job_name == "adapter-reuse-job"
-    create_kwargs = client.safe_synthesizer.jobs.create.call_args.kwargs
+    create_kwargs = jobs_resource.create.call_args.kwargs
     assert create_kwargs["spec"]["pretrained_model_job"] == "first-synth-job"
     assert create_kwargs["spec"]["config"]["generation"] == {"num_records": 25}
     assert "pretrained_model" not in create_kwargs["spec"]["config"]["training"]
@@ -226,10 +231,10 @@ def _make_job(mock_jobs: MagicMock, name: str = "safe-synth-job", workspace: str
     """Build a SafeSynthesizerJob whose typed jobs client is *mock_jobs*.
 
     ``SafeSynthesizerJob.__init__`` resolves ``self._jobs = JobsClient.from_client(client)``,
-    so we patch that constructor in the job module during construction.
+    so we patch that lookup in the job module during construction.
     """
     with patch("nemo_safe_synthesizer_plugin.sdk.job.JobsClient.from_client", return_value=mock_jobs):
-        return SafeSynthesizerJob(name, MagicMock(), workspace=workspace)
+        return SafeSynthesizerJob(name, _mock_client([]), workspace=workspace)
 
 
 @pytest.mark.parametrize("status", ["error", "cancelled"])

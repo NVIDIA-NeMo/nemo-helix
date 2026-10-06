@@ -58,7 +58,7 @@ async def _poll_until_ready(backend, *, attempts: int = 60, delay: float = 2.0):
 def _make_backend():
     mock_entities = AsyncMock()
     with (
-        patch("nemo_deployments_plugin.backends.openshell.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.openshell.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.openshell.backend.NemoEntitiesClient", return_value=mock_entities),
     ):
         from nemo_deployments_plugin.backends.openshell.backend import OpenShellDeploymentBackend

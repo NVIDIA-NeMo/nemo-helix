@@ -304,11 +304,12 @@ class QuickstartConfig(BaseModel):
         )
 
     def resolve_best_image(self) -> str:
-        """Return the best available image for the installed SDK build.
+        """Return the best available image for the ``NHX_IMAGE_TAG`` release tag.
 
-        If no image is explicitly configured, this method looks up the image
-        tag for the installed SDK build and selects the right registry based
-        on whether the tag is an internal or public release:
+        If no image is explicitly configured, this method reads the image tag
+        from the ``NHX_IMAGE_TAG`` environment variable (for example
+        ``NHX_IMAGE_TAG=26.03``) and selects the right registry based on
+        whether the tag is an internal or public release:
 
         - **Internal tags** (``nightly-YYYYMMDD``, ``YY.MM-kN``) live in the
           private NGC registry.  An NGC API key is required and a registry
@@ -317,8 +318,8 @@ class QuickstartConfig(BaseModel):
         - **Public GA tags** (e.g. ``26.03``) live in the public NGC registry.
           No key is required; the image is returned directly if it exists.
 
-        The image tag comes from the ``NHX_IMAGE_TAG`` environment variable
-        (e.g. ``NHX_IMAGE_TAG=26.03``).
+        Without ``NHX_IMAGE_TAG`` there is no tag to resolve and ``self.image``
+        is returned unchanged.
 
         The access check is performed via the Docker daemon's distribution
         endpoint (a lightweight manifest HEAD — no image data is transferred).

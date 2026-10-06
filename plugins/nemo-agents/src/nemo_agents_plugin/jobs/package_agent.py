@@ -34,7 +34,6 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
@@ -249,7 +248,7 @@ class PackageAgentJob(NemoJob):
         if entity_client is not None:
             return cast(NemoEntitiesClient, entity_client)
         if async_sdk is not None:
-            return NemoEntitiesClient(client_from_platform(cast(AsyncNemoClient, async_sdk), AsyncEntitiesClient))
+            return NemoEntitiesClient(AsyncEntitiesClient.from_client(cast(AsyncNemoClient, async_sdk)))
         raise HelixJobCompilationError(
             "Packaging requires a platform client to resolve the agent entity, but none was injected."
         )
@@ -317,7 +316,7 @@ class PackageAgentJob(NemoJob):
             )
         try:
             profiles = (
-                await client_from_platform(cast(AsyncNemoClient, async_sdk), AsyncJobsClient).get_execution_profiles()
+                await AsyncJobsClient.from_client(cast(AsyncNemoClient, async_sdk)).get_execution_profiles()
             ).data()
         except Exception as exc:
             raise HelixJobDependencyUnavailableError(
@@ -439,5 +438,5 @@ class PackageAgentJob(NemoJob):
             agent_name=cfg.agent,
             agent_config=cfg.agent_config,
             base_dir=build_dir,
-            files_client=client_from_platform(async_sdk, AsyncFilesClient) if async_sdk is not None else None,
+            files_client=AsyncFilesClient.from_client(async_sdk) if async_sdk is not None else None,
         )

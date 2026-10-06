@@ -11,7 +11,7 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nhx.common.secrets.encryption import get_base64_encoded_random_bytes
 from nhx.core.secrets.config import SecretsServiceConfig
 from nhx.core.secrets.service import SecretsService
-from nhx.testing import ClientContext, SDKTestClientAdapter, create_test_client
+from nhx.testing import ClientContext, create_test_client, nemo_client_for_test_client
 from nhx.testing.blockbuster import blockbuster_fixture
 
 # Enable BlockBuster to detect blocking calls in async code
@@ -60,13 +60,9 @@ def test_client(service_config) -> Generator[TestClient, None, None]:
 
 
 @pytest.fixture
-def sdk(test_client: TestClient) -> SecretsClient:
+def secrets_client(test_client: TestClient) -> SecretsClient:
     """Typed Secrets client backed by the test client."""
-    return SecretsClient(
-        base_url="http://testserver",
-        workspace="default",
-        http_client=SDKTestClientAdapter(test_client),
-    )
+    return nemo_client_for_test_client(test_client, SecretsClient, workspace="default")
 
 
 @pytest.fixture

@@ -227,10 +227,10 @@ class FilesArtifactBackend:
 
     def _files(self) -> FilesResource:
         if self._resource is None:
-            from nemo_helix_plugin.sdk_provider import get_platform_sdk
+            from nemo_helix_plugin.client_provider import get_nemo_client
 
-            sdk = get_platform_sdk(as_service="scaled-evals", internal=True)
-            self._resource = _resource_for(sdk)
+            client = get_nemo_client(as_service="scaled-evals", internal=True)
+            self._resource = _resource_for(client)
         return self._resource
 
     def workspace(self, object_key: str | None = None) -> str:  # noqa: ARG002 - key reserved for the entity-owned-workspace seam

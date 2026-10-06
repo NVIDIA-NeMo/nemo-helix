@@ -10,9 +10,8 @@ routing is handled by IGW.
 
 import logging
 
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.models.client import ModelsClient
-from nhx.common.sdk_factory import get_platform_sdk
+from nhx.common.client_factory import get_nemo_client
 from nhx.guardrails.entities.values._private import ModelParameters, RailsConfig
 
 logger = logging.getLogger(__name__)
@@ -58,11 +57,9 @@ def build_openai_gateway_url(model_entity_ref: str) -> str:
 
     workspace, _ = parsed
 
-    # Use SDK helper to build IGW OpenAI-compatible URL
-    # IGW handles routing the request to the correct Model Provider
-    sdk = get_platform_sdk()
-    models = client_from_platform(sdk, ModelsClient)
-    url = models.get_openai_route_base_url(workspace=workspace)
+    # Build the IGW OpenAI-compatible URL; IGW routes the request to the correct Model Provider
+    models_client = ModelsClient.from_client(get_nemo_client())
+    url = models_client.get_openai_route_base_url(workspace=workspace)
 
     return url
 

@@ -4,6 +4,7 @@
 """Integration tests for the hello-world task."""
 
 import pytest
+from filesets.resources import FilesResource
 from nhx.core.files.service import FilesService
 from nhx.hello_world.tasks import hello_world
 from nhx.testing import task_harness
@@ -31,7 +32,7 @@ class TestHelloWorldTask:
             assert result.exception is None
 
             # Verify the file was uploaded to the auto-created fileset
-            content = ctx.sdk.files.download_content(
+            content = FilesResource(ctx.client).download_content(
                 workspace="test-workspace",
                 fileset="hello-world-test-job-123",
                 remote_path="message.txt",
@@ -59,7 +60,7 @@ class TestHelloWorldTask:
             assert result.exception is None
 
             # Verify the file was uploaded
-            content = ctx.sdk.files.download_content(
+            content = FilesResource(ctx.client).download_content(
                 workspace="test-workspace",
                 fileset="hello-world-custom-msg-job",
                 remote_path="message.txt",

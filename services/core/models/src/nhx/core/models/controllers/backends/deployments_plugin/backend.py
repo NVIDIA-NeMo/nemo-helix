@@ -6,9 +6,8 @@
 import logging
 from typing import Any
 
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext as DeploymentAuthContext
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployments.client import AsyncDeploymentsClient
 from nemo_helix_plugin.deployments.types import (
@@ -30,7 +29,7 @@ from nemo_helix_plugin.deployments.types import (
     Volume as VolumeDTO,
 )
 from nemo_helix_plugin.models.types import ModelDeployment, ModelDeploymentStatus
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import Runtime
 from nhx.core.models.app.constants import MODEL_MANAGED_BY_LABEL, MODEL_MANAGED_BY_MODELS_CONTROLLER
 from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate, ServiceBackend
@@ -104,11 +103,11 @@ def _on_behalf_of_headers(auth_context: DeploymentAuthContext | None) -> dict[st
 class DeploymentsPluginServiceBackend(ServiceBackend):
     """Compile model deployments into Volume and Deployment plugin entities."""
 
-    def __init__(self, nhx_sdk: AsyncNeMoHelix, config: dict[str, Any], huggingface_model_puller: str) -> None:
+    def __init__(self, client: AsyncNemoClient, config: dict[str, Any], huggingface_model_puller: str) -> None:
         self._backend_config: DeploymentsPluginConfig | None = None
         self._deployments: AsyncDeploymentsClient | None = None
         self._huggingface_model_puller = huggingface_model_puller
-        super().__init__(nhx_sdk, config)
+        super().__init__(client, config)
 
     def init(self) -> None:
         self._backend_config = DeploymentsPluginConfig(**self._config)
@@ -121,8 +120,8 @@ class DeploymentsPluginServiceBackend(ServiceBackend):
         # API (as the "models" service principal); it never touches the entity store
         # or backend substrate directly.
         if self._deployments is None:
-            sdk = get_async_platform_sdk(as_service="models", internal=True)
-            self._deployments = client_from_platform(sdk, AsyncDeploymentsClient)
+            client = get_async_nemo_client(as_service="models", internal=True)
+            self._deployments = AsyncDeploymentsClient.from_client(client)
         return self._deployments
 
     @property

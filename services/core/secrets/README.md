@@ -38,45 +38,39 @@ If you are using VSCode, you can use this launch configuration to start the Secr
 
 A secret name must start with a lowercase letter, end with a lowercase letter or digit, and contain only lowercase letters, digits, and hyphens.
 
-With the SDK, you can test secrets functionality by running:
+With the typed Secrets client, you can test secrets functionality by running:
 
 ```python
-from nemo_helix import NeMoHelix
-sdk = NeMoHelix(base_url="http://localhost:8080")
+from nemo_helix_plugin.secrets.client import SecretsClient
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+secrets_client = SecretsClient(base_url="http://localhost:8080", workspace="default")
 
 # Create a secret
-secret = sdk.secrets.create(
-    name="hf-token",
-    workspace="default",
-    data="hf_..."
-)
+secret = secrets_client.create_secret(
+    body=HelixSecretCreateRequest(name="hf-token", value="hf_..."),
+).data()
 
 # Get a secret's metadata
-retrieved_secret = sdk.secrets.retrieve(
-    name="hf-token",
-    workspace="default",
-)
-
+retrieved_secret = secrets_client.get_secret(name="hf-token").data()
 
 # Access a secret's value
-secret_value = sdk.secrets.access(
-    name="hf-token",
-    workspace="default",
-)
-hf_token = secret_value.data
+secret_value = secrets_client.access_secret(name="hf-token").data()
+hf_token = secret_value.value
 ```
 
 # Updating Secrets
 
-To update a secret's value, you can update it's data attribute:
+To update a secret's value or description, send an update request:
 
 ```python
+from nemo_helix_plugin.secrets.types import HelixSecretUpdateRequest
+
 # Update the value of the secret
-updated_secret = sdk.secrets.update(
+updated_secret = secrets_client.update_secret(
     name="hf-token",
-    workspace="default",
-    data="hf_new_token_..."
-)
+    body=HelixSecretUpdateRequest(value="hf_new_token_..."),
+).data()
 ```
 
 # Deleting Secrets
@@ -85,10 +79,7 @@ Deleting a secret will remove it from the platform:
 
 ```python
 # Delete a secret
-sdk.secrets.delete(
-    name="hf-token",
-    workspace="default"
-)
+secrets_client.delete_secret(name="hf-token")
 ```
 
 # Using Secrets in Jobs
@@ -98,7 +89,6 @@ To use secrets in the Jobs API factory, you can define them in the Job compiler 
 For example:
 
 ```python
-from nemo_helix import AsyncNeMoHelix
 from pydantic import BaseModel
 # Import the job compiling building blocks
 from nemo_helix_plugin.jobs.api_factory import (
@@ -109,8 +99,6 @@ from nemo_helix_plugin.jobs.api_factory import (
     EnvironmentVariable,
     EnvironmentVariableFromSecret,
 )
-
-sdk = AsyncNeMoHelix(base_url="http://localhost:8080")
 
 class JobConfig(BaseModel):
     # Define your job configuration here

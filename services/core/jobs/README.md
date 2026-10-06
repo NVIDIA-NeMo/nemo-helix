@@ -20,7 +20,7 @@ After this is done, you should be able to schedule jobs against the Jobs microse
 
 ### Create a Jobs configuration compiler
 
-Each functional microservice will be responsible for translating their specific job's request object into a `HelixJobSpec` that can be submitted to the Jobs API. As defined in the [Jobs RFC API Interfaces](https://docs.google.com/document/d/1KhF0ED9OGhFIHu8-wittuhMHWOBvNvBQuqz3ahk63vY/edit?tab=t.0#heading=h.ccl0b5irew8u), every request into a functional microservice will satisfy a base JobRequest schema that includes a `spec` field that is customizable. This field is then used to compile a platform Job specification. The compiler is provided by the functional microservice, leveraging SDK-provided objects to build a platform job.
+Each functional microservice will be responsible for translating their specific job's request object into a `HelixJobSpec` that can be submitted to the Jobs API. As defined in the [Jobs RFC API Interfaces](https://docs.google.com/document/d/1KhF0ED9OGhFIHu8-wittuhMHWOBvNvBQuqz3ahk63vY/edit?tab=t.0#heading=h.ccl0b5irew8u), every request into a functional microservice will satisfy a base JobRequest schema that includes a `spec` field that is customizable. This field is then used to compile a platform Job specification. The compiler is provided by the functional microservice, leveraging the job types from `nemo_helix_plugin.jobs` to build a platform job.
 
 Suppose you have your functional microservice's job specification as below:
 

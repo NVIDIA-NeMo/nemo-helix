@@ -7,7 +7,8 @@ This module provides the test_task_harness async context manager for testing
 task modules in isolation with mocked Helix services via ASGI transport.
 
 Example:
-    from nhx.hello_world.service import HelloWorldService
+    from nemo_helix_plugin.files.client import FilesClient
+    from nhx.core.files.service import FilesService
     from nhx.hello_world.tasks import hello_world
     from nhx.testing import task_harness
 
@@ -15,23 +16,16 @@ Example:
     async def test_hello_world_task():
         async with task_harness(
             hello_world,
-            HelloWorldService,
-            config={"config_name": "my-config"},
-            env={"NEMO_JOB_WORKSPACE": "test-ws"},
+            FilesService,
+            config={"message": "Hello from test!"},
+            env={"NEMO_JOB_ID": "job-1", "NEMO_JOB_WORKSPACE": "test-ws"},
         ) as ctx:
-            # Setup: create test data via SDK
-            await ctx.sdk.hello_world.configs.create(
-                workspace="test-ws",
-                name="my-config",
-                message="Hello from test!",
-            )
-
-            # Run the task
             result = ctx.run_task()
 
-            # Assertions
             assert result.exit_code == 0
-            assert "Hello from test!" in result.stdout
+            files = FilesClient.from_client(ctx.client)
+            content = files.download_file(workspace="test-ws", name="hello-world-job-1", path="message.txt").read()
+            assert content == b"Hello from test!"
 """
 
 from __future__ import annotations
@@ -47,8 +41,6 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, AsyncGenerator
 
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix._client import NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.auth import NHX_PRINCIPAL_ENVVAR, Principal
 from nhx.common.service import Service
@@ -68,10 +60,13 @@ class TaskResult:
 
 @dataclass
 class TaskContext:
-    """Context for running a task with access to the test SDK."""
+    """Context for running a task against the in-process test platform.
 
-    sdk: NeMoHelix
-    async_sdk: AsyncNeMoHelix
+    ``client`` / ``async_client`` are typed clients routed to the test app; when
+    ``NHX_PRINCIPAL`` is set and auth is enabled they carry that principal's
+    headers.
+    """
+
     client: NemoClient
     async_client: AsyncNemoClient
     _module: ModuleType
@@ -180,14 +175,14 @@ async def task_harness(
         env: Additional environment variables to set during task execution.
              If NEMO_JOB_WORKSPACE is set, that workspace will be auto-created.
              If NHX_PRINCIPAL is set (JSON with id, email, groups matching the
-             Principal model) and auth_enabled=True, the SDK will include auth
-             headers for that principal.
+             Principal model) and auth_enabled=True, the context clients include
+             auth headers for that principal.
         auth_enabled: Enable authorization middleware with embedded PDP.
         access_log: Enable request capture for test verification. When True,
                    ctx.access_log will be available to inspect all HTTP requests.
 
     Yields:
-        TaskContext with sdk, async_sdk, run_task(), and optionally access_log
+        TaskContext with client, async_client, run_task(), and optionally access_log
     """
     from nhx.common.jobs.constants import TASK_CONFIG_ENVVAR
 
@@ -213,24 +208,18 @@ async def task_harness(
             access_log=access_log,
             workspace=workspace,
         ) as ctx:
-            # Configure SDK with auth headers from NHX_PRINCIPAL env var if set.
+            # Configure clients with auth headers from NHX_PRINCIPAL env var if set.
             # This simulates how production tasks get auth context propagated.
-            sdk = ctx.sdk
-            async_sdk = ctx.async_sdk
             client = ctx.client
             async_client = ctx.async_client
             principal_json = os.environ.get(NHX_PRINCIPAL_ENVVAR)
             if principal_json and auth_enabled:
                 principal = Principal.model_validate_json(principal_json)
                 auth_headers = principal.get_headers()
-                sdk = sdk.with_options(set_default_headers=auth_headers)
-                async_sdk = async_sdk.with_options(set_default_headers=auth_headers)
                 client = client.with_options(headers=auth_headers)
                 async_client = async_client.with_options(headers=auth_headers)
 
             yield TaskContext(
-                sdk=sdk,
-                async_sdk=async_sdk,
                 client=client,
                 async_client=async_client,
                 _module=module,

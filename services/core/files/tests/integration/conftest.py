@@ -29,7 +29,7 @@ from nhx.core.files.config import FilesConfig
 from nhx.core.files.service import FilesService
 from nhx.core.files.testing.utils import create_fileset
 from nhx.core.secrets.service import SecretsService
-from nhx.testing import ClientContext, SDKTestClientAdapter, create_test_client
+from nhx.testing import ClientContext, TestClientHttpAdapter, create_test_client
 from packaging import version
 
 # Mock auth client for fileset endpoints that depend on get_auth_client
@@ -82,8 +82,8 @@ def client_user_and_service() -> Iterator[tuple[NemoClient, NemoClient]]:
             headers={"x-nhx-principal-id": "service:customizer"},
         )
         try:
-            client_user = NemoClient(base_url=base_url, http_client=SDKTestClientAdapter(test_client_user))
-            client_service = NemoClient(base_url=base_url, http_client=SDKTestClientAdapter(test_client_service))
+            client_user = NemoClient(base_url=base_url, http_client=TestClientHttpAdapter(test_client_user))
+            client_service = NemoClient(base_url=base_url, http_client=TestClientHttpAdapter(test_client_service))
             yield (client_user, client_service)
         finally:
             test_client_user.close()
@@ -318,7 +318,7 @@ def hf_asgi_client(test_client: TestClient) -> Iterator[None]:
     For huggingface_hub v0.x (requests-based): We inject a custom requests
     Session with an adapter that forwards to the httpx test client.
     """
-    forwarder = SDKTestClientAdapter(test_client)
+    forwarder = TestClientHttpAdapter(test_client)
     if IS_HF_HUB_V1:
         # v1.0+: Use httpx client factory
 

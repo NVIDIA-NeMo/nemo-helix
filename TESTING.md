@@ -121,7 +121,7 @@ def test_create_and_fetch_entity(client, db_session):
 **Characteristics**:
 
 - Start the platform via `nemo services run` (real process, real ports)
-- Hit services with an external HTTP client (the NeMoHelix SDK)
+- Hit services with an external HTTP client (the typed `NemoClient`)
 - Test startup machinery, port binding, config resolution, and cross-service workflows
 - Slower than integration tests (tens of seconds for startup) but faster than Docker/K8s e2e
 
@@ -310,23 +310,25 @@ def test_file_upload_api(client):
 
 **E2E Test** (focuses on complete user workflow):
 ```python
-def test_data_pipeline(sdk: NeMoHelix):
+def test_data_pipeline(client: NemoClient):
     """Test complete data pipeline from upload to results."""
     # User uploads training data
-    file = sdk.files.upload(workspace="default", file=training_data)
+    files = FilesClient.from_client(client)
+    files.create_fileset(workspace="default", body=CreateFilesetRequest(name="training-data"))
+    files.upload_file(workspace="default", name="training-data", path="train.jsonl", content=training_data)
 
     # User creates and runs training job
-    job = sdk.jobs.create(
+    job = JobsClient.from_client(client).create_job(
         workspace="default",
-        spec={"input_file": file.id, "model": "gpt"}
-    )
+        body=CreateHelixJobRequest(spec={"input_fileset": "default/training-data", "model": "gpt"}),
+    ).data()
 
     # Wait for job completion
-    wait_for_completion(sdk, job.id)
+    wait_for_completion(client, job.name)
 
     # User retrieves trained model
-    model = sdk.models.retrieve(job.spec.output.name)
-    assert model.status == "ready"
+    model = ModelsClient.from_client(client).get_model(workspace="default", name=job.spec["output"]["name"]).data()
+    assert model.name is not None
     # Tests the complete user journey
 ```
 

@@ -3,10 +3,8 @@
 
 """Common test fixtures and configuration for Models service tests."""
 
-from collections.abc import Callable
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from nhx.common.entities.client import EntityClient
@@ -117,20 +115,3 @@ def test_client() -> TestClient:
 def models_app() -> ModelsService:
     """Get the Models FastAPI app instance for testing."""
     return ModelsService().app
-
-
-# ============================================================================
-# SDK Error Factory Fixture
-# ============================================================================
-
-
-@pytest.fixture
-def make_sdk_error() -> Callable:
-    """Factory fixture for creating SDK API errors with mock request/response."""
-
-    def _make(cls: type, status_code: int = 400):
-        request = httpx.Request("GET", "http://test")
-        response = httpx.Response(status_code=status_code, request=request)
-        return cls("error", response=response, body=None)
-
-    return _make

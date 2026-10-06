@@ -67,7 +67,7 @@ if TYPE_CHECKING:
         evaluations,
         experiments,
     )
-    from .filesets.resources import FilesResource, AsyncFilesResource
+    from .lib.files import FilesResource, AsyncFilesResource
     from .resources.adapters.adapters import AdaptersResource, AsyncAdaptersResource
     from .resources.projects.projects import ProjectsResource, AsyncProjectsResource
     from .resources.inference.inference import InferenceResource, AsyncInferenceResource
@@ -273,7 +273,7 @@ class NeMoHelix(NemoClientRuntimeSource, SyncAPIClient):
 
     @cached_property
     def files(self) -> FilesResource:
-        from .filesets.resources import FilesResource
+        from .lib.files import FilesResource
 
         return FilesResource(self)
 
@@ -649,7 +649,7 @@ class AsyncNeMoHelix(NemoClientRuntimeSource, AsyncAPIClient):
 
     @cached_property
     def files(self) -> AsyncFilesResource:
-        from .filesets.resources import AsyncFilesResource
+        from .lib.files import AsyncFilesResource
 
         return AsyncFilesResource(self)
 

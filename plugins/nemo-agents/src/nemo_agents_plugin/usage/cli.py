@@ -145,8 +145,8 @@ def _resolve_and_score(
 
     # Only fileset refs contact the platform, so resolve/announce the target
     # (and attach auth) here rather than for purely-local reads above.
-    sdk = _build_sdk(base_url=resolve_base_url())
-    with fileset_path(FilesetRef(ref), sdk=sdk, workspace=workspace) as path:
+    client = _build_sdk(base_url=resolve_base_url())
+    with fileset_path(FilesetRef(ref), client=client, workspace=workspace) as path:
         report = parser_module.parse_path(path)
         report = _rewrite_source_dirs(report, original_ref=ref, staged_root=path)
     return _score_report(report, total_params=total_params)

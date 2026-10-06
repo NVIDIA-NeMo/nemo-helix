@@ -37,7 +37,6 @@ from nemo_agents_plugin.utils import (
     preflight_validate_llm_models,
     temp_injected_config,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import FilesClient
@@ -366,7 +365,7 @@ class EvaluateAgentJob(NemoJob):
         ) as tmp:
             tmp_path = Path(tmp)
             logger.info("Downloading fileset %s/%s into %s for eval config.", ws, name, tmp_path)
-            files_client = client_from_platform(sdk, FilesClient)
+            files_client = FilesClient.from_client(sdk)
             manager = FilesetFileManager(
                 workspace=ws,
                 fileset_name=name,
@@ -493,7 +492,7 @@ class EvaluateAgentJob(NemoJob):
         DI). The upload goes through the typed Files client that shares the
         SDK's transport.
         """
-        files_client = client_from_platform(sdk, FilesClient)
+        files_client = FilesClient.from_client(sdk)
         manager = FilesetFileManager(
             workspace=workspace,
             fileset_name=fileset,

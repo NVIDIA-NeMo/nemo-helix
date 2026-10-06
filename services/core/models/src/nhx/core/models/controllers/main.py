@@ -5,9 +5,9 @@ import logging
 import signal
 import threading
 
+from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
-from nhx.common.sdk_factory import get_async_platform_sdk
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.models.config import backends
 from nhx.core.models.config import config as models_config
@@ -53,14 +53,14 @@ def run(parent_stop_signal: threading.Event | None = None):
     else:
         local_stop_signal = parent_stop_signal
 
-    # Initialize NeMo Helix SDK (used for all API interactions including secrets)
-    nhx_sdk = get_async_platform_sdk(as_service="models", internal=True)
+    # Typed platform client (used for all API interactions including secrets)
+    client = get_async_nemo_client(as_service="models", internal=True)
 
     # Initialize backend registry from configuration
     logger.info("Initializing backend registry...")
     logger.debug(f"Models backend configs: {backends}")
     backend_registry = BackendRegistry.from_config(
-        nhx_sdk=nhx_sdk,
+        client=client,
         backend_configs=backends,
         huggingface_model_puller=models_config.huggingface_model_puller,
     )

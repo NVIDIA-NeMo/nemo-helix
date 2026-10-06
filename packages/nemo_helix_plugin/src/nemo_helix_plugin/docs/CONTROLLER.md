@@ -78,14 +78,12 @@ Without `internal=True`, controller polling floods the entity store's access log
 
 ```python
 async def on_startup(self) -> None:
-    from nhx.common.sdk_factory import get_async_platform_sdk
-    from nemo_helix_plugin.client.adapter import client_from_platform
+    from nemo_helix_plugin.client_provider import get_async_nemo_client
     from nemo_helix_plugin.entities.client import AsyncEntitiesClient
     from nemo_helix_plugin.entity_client import NemoEntitiesClient
 
-    sdk = get_async_platform_sdk(as_service="my-controller", internal=True)
-    typed_client = client_from_platform(sdk, AsyncEntitiesClient)
-    self._entities = NemoEntitiesClient(typed_client)
+    client = get_async_nemo_client(as_service="my-controller", internal=True)
+    self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 ```
 
 `as_service="my-controller"` sets `X-NHX-Principal-Id: service:my-controller`, granting the service principal access needed to list entities across all workspaces.
@@ -202,7 +200,7 @@ class ExampleController(NemoController):
 
 ## Production example
 
-See the **Production State Machine Example** in [`plugin-controller` skill](../.agents/skills/plugin-controller/SKILL.md) for the full `DeploymentController` pattern with state dispatch, `__init__` sentinels, and `on_startup` SDK factory.
+See the **Production State Machine Example** in [`plugin-controller` skill](../.agents/skills/plugin-controller/SKILL.md) for the full `DeploymentController` pattern with state dispatch, `__init__` sentinels, and `on_startup` client factory.
 
 ## Service / controller decoupling
 

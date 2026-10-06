@@ -11,9 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint, VolumeStatus
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from pydantic import BaseModel, Field
 
 
@@ -55,8 +55,8 @@ class LogResult:
 class DeploymentBackend(abc.ABC):
     """Abstract substrate backend for deployment and volume lifecycle."""
 
-    def __init__(self, sdk: AsyncNeMoHelix, config: dict[str, Any]) -> None:
-        self._sdk = sdk
+    def __init__(self, client: AsyncNemoClient, config: dict[str, Any]) -> None:
+        self._nemo_client = client
         self._config = config
         self.init()
 

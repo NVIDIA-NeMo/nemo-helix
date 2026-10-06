@@ -9,7 +9,6 @@ from enum import Enum
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from nemo_helix import AsyncNeMoHelix
 from nhx.core.models.config import ControllerConfig
 from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate
 from nhx.core.models.controllers.backends.registry import BackendRegistry
@@ -21,8 +20,9 @@ from nhx.core.models.schemas import ModelDeployment
 from .conftest import (
     _ModelResponse,
     _status_error,
-    make_async_models_client,
     make_entity,
+    make_mock_platform_client,
+    patch_typed_clients,
     seed_entity_cache,
 )
 
@@ -62,28 +62,12 @@ def _request_body_call(method: AsyncMock, index: int = -1) -> dict[str, object]:
 
 
 @pytest.fixture
-def mock_models_sdk():
-    """Create a mock AsyncNeMoHelix SDK."""
-    sdk = MagicMock(spec=AsyncNeMoHelix)
-    sdk.models_client = make_async_models_client()
-    return sdk
-
-
-@pytest.fixture(autouse=True)
-def _patch_entity_cache_client_from_platform(mock_models_sdk):
-    """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the entity cache
-    back to the mock typed client on ``mock_models_sdk.models_client``."""
-    with (
-        patch(
-            "nhx.core.models.controllers.entity_cache.client_from_platform",
-            side_effect=lambda sdk, cls: sdk.models_client,
-        ),
-        patch(
-            "nhx.core.models.controllers.deployment_reconciler.client_from_platform",
-            side_effect=lambda sdk, cls: sdk.models_client,
-        ),
-    ):
-        yield
+def mock_client():
+    """Create a mock AsyncNemoClient whose ``AsyncModelsClient.from_client`` resolves
+    to ``mock_client.models_client``."""
+    client = make_mock_platform_client()
+    with patch_typed_clients():
+        yield client
 
 
 @pytest.fixture
@@ -99,9 +83,9 @@ def controller_config():
 
 
 @pytest.fixture
-def entity_cache(mock_models_sdk):
-    """Model Entity cache backed by the mock SDK."""
-    return ModelEntityCache(models_sdk=mock_models_sdk, emit_heartbeat=lambda: None)
+def entity_cache(mock_client):
+    """Model Entity cache backed by the mock client."""
+    return ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None)
 
 
 @pytest.fixture
@@ -111,10 +95,10 @@ def heartbeat_calls():
 
 
 @pytest.fixture
-def reconciler(mock_models_sdk, mock_backend_registry, controller_config, entity_cache, heartbeat_calls):
+def reconciler(mock_client, mock_backend_registry, controller_config, entity_cache, heartbeat_calls):
     """Create a ModelDeploymentReconciler instance."""
     return ModelDeploymentReconciler(
-        models_sdk=mock_models_sdk,
+        client=mock_client,
         backend_registry=mock_backend_registry,
         controller_config=controller_config,
         entity_cache=entity_cache,
@@ -165,7 +149,7 @@ async def test_handle_created_deployment_success(reconciler, mock_backend_regist
     mock_backend.create_model_deployment = AsyncMock(return_value=mock_status_update)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK update_status method
+    # Mock client update_status method
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Call the handler with the backend function
@@ -194,7 +178,7 @@ async def test_handle_created_deployment_backend_failure(reconciler, mock_backen
     mock_backend.create_model_deployment = AsyncMock(side_effect=Exception("Backend error"))
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK update_status method
+    # Mock client update_status method
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Call the handler - should not raise exception
@@ -203,7 +187,7 @@ async def test_handle_created_deployment_backend_failure(reconciler, mock_backen
     # Verify backend was called
     mock_backend.create_model_deployment.assert_called_once_with(deployment)
 
-    # Verify SDK update was called with ERROR status
+    # Verify client update was called with ERROR status
     reconciler._models_client.update_deployment_status.assert_called_once()
     call_kwargs = _deployment_status_call(reconciler._models_client.update_deployment_status)
     assert call_kwargs["name"] == "test-deployment"
@@ -358,7 +342,7 @@ async def test_reconcile_deployments_with_created_status(reconciler, mock_backen
     mock_backend.get_model_deployment_status = AsyncMock(return_value=mock_status_update)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployments (now passing contexts with pre-fetched data)
@@ -372,7 +356,7 @@ async def test_reconcile_deployments_with_created_status(reconciler, mock_backen
     # Verify backend.get_status was called for PENDING deployment with the context.
     mock_backend.get_model_deployment_status.assert_called_once_with(pending_context)
 
-    # Verify SDK update was called twice (once for each deployment)
+    # Verify client update was called twice (once for each deployment)
     assert reconciler._models_client.update_deployment_status.call_count == 2
 
 
@@ -855,7 +839,7 @@ async def test_handle_deleted_deployment_cleanup_after_grace_period(reconciler, 
         updated_at=past_time,
     )
 
-    # Mock the SDK versions.delete method
+    # Mock the client's delete_deployment_version method
     reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment
@@ -881,7 +865,7 @@ async def test_handle_deleted_deployment_no_cleanup_within_grace_period(reconcil
         updated_at=past_time,
     )
 
-    # Mock the SDK versions.delete method
+    # Mock the client's delete_deployment_version method
     reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment
@@ -906,7 +890,7 @@ async def test_handle_deleted_deployment_with_naive_datetime(reconciler, make_de
         updated_at=past_time_naive,
     )
 
-    # Mock the SDK versions.delete method
+    # Mock the client's delete_deployment_version method
     reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call handle_deleted_deployment - should NOT raise TypeError
@@ -941,7 +925,7 @@ async def test_reconcile_deployments_calls_handle_deleted(reconciler, make_deplo
         model_entity=None,
     )
 
-    # Mock the SDK versions.delete method
+    # Mock the client's delete_deployment_version method
     reconciler._models_client.delete_deployment_version = AsyncMock()
 
     # Call reconcile_deployments with a list containing the DELETED deployment context
@@ -961,7 +945,7 @@ async def test_reconcile_deployments_calls_handle_deleted(reconciler, make_deplo
 
 
 @pytest.mark.asyncio
-async def test_cleanup_model_entities_removes_provider_from_entities(reconciler):
+async def test_cleanup_model_entities_removes_provider_from_entities(reconciler, mock_client):
     """Test that cleanup removes provider from Model Entity model_providers list."""
     # Mock provider with served_models
     mock_provider = MagicMock()
@@ -972,7 +956,7 @@ async def test_cleanup_model_entities_removes_provider_from_entities(reconciler)
 
     reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
-        reconciler._models_sdk,
+        mock_client,
         reconciler._entity_cache,
         [
             _entity("test-ns", "model-1", ["test-ns/provider-1", "other-ns/other-provider"]),
@@ -991,7 +975,7 @@ async def test_cleanup_model_entities_removes_provider_from_entities(reconciler)
     )
 
     # Verify model entities were updated with provider removed
-    update = reconciler._models_sdk.models_client.update_model
+    update = reconciler._models_client.update_model
     assert update.await_count == 2
     calls = {call.kwargs["name"]: call.kwargs["body"].model_providers for call in update.await_args_list}
     assert calls["model-1"] == ["other-ns/other-provider"]
@@ -1015,7 +999,7 @@ async def test_cleanup_model_entities_no_served_models(reconciler):
     reconciler._models_client.get_provider.assert_called_once()
 
     # Verify no model entity operations were performed
-    reconciler._models_sdk.models_client.update_model.assert_not_awaited()
+    reconciler._models_client.update_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1028,11 +1012,11 @@ async def test_cleanup_model_entities_provider_not_found(reconciler):
     await reconciler._entity_cache.flush()
 
     # Verify no model entity operations were performed
-    reconciler._models_sdk.models_client.update_model.assert_not_awaited()
+    reconciler._models_client.update_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_cleanup_model_entities_provider_not_in_list(reconciler):
+async def test_cleanup_model_entities_provider_not_in_list(reconciler, mock_client):
     """Test that cleanup skips update when provider not in Model Entity's model_providers list."""
     # Mock provider with served_models
     mock_provider = MagicMock()
@@ -1042,7 +1026,7 @@ async def test_cleanup_model_entities_provider_not_in_list(reconciler):
 
     reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
-        reconciler._models_sdk,
+        mock_client,
         reconciler._entity_cache,
         [_entity("test-ns", "model-1", ["other-ns/other-provider"])],
     )
@@ -1052,11 +1036,11 @@ async def test_cleanup_model_entities_provider_not_in_list(reconciler):
     await reconciler._entity_cache.flush()
 
     # Verify model entity was NOT updated (provider wasn't in the list)
-    reconciler._models_sdk.models_client.update_model.assert_not_awaited()
+    reconciler._models_client.update_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconciler):
+async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconciler, mock_client):
     """A served model with no Model Entity is skipped without affecting the others."""
     # Mock provider with multiple served_models
     mock_provider = MagicMock()
@@ -1068,7 +1052,7 @@ async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconci
     reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     # Only model-2 exists.
     await seed_entity_cache(
-        reconciler._models_sdk,
+        mock_client,
         reconciler._entity_cache,
         [_entity("test-ns", "model-2", ["test-ns/provider-1"])],
     )
@@ -1078,7 +1062,7 @@ async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconci
     await reconciler._entity_cache.flush()
 
     # Verify only the existing model was updated
-    update = reconciler._models_sdk.models_client.update_model
+    update = reconciler._models_client.update_model
     update.assert_awaited_once()
     call = update.await_args
     assert call is not None
@@ -1088,7 +1072,7 @@ async def test_cleanup_model_entities_skips_missing_entity_and_continues(reconci
 
 
 @pytest.mark.asyncio
-async def test_cleanup_model_entities_handles_model_update_failure(reconciler):
+async def test_cleanup_model_entities_handles_model_update_failure(reconciler, mock_client):
     """Test that cleanup continues processing other models when one update fails."""
     # Mock provider with multiple served_models
     mock_provider = MagicMock()
@@ -1099,7 +1083,7 @@ async def test_cleanup_model_entities_handles_model_update_failure(reconciler):
 
     reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
-        reconciler._models_sdk,
+        mock_client,
         reconciler._entity_cache,
         [
             _entity("test-ns", "model-1", ["test-ns/provider-1"]),
@@ -1107,20 +1091,18 @@ async def test_cleanup_model_entities_handles_model_update_failure(reconciler):
         ],
     )
     # First update fails, second succeeds
-    reconciler._models_sdk.models_client.update_model = AsyncMock(
-        side_effect=[Exception("Update failed"), _ModelResponse()]
-    )
+    reconciler._models_client.update_model = AsyncMock(side_effect=[Exception("Update failed"), _ModelResponse()])
 
     # Call cleanup - should not raise
     await reconciler._cleanup_model_entities_for_provider("test-ns", "provider-1", "test-ns/provider-1")
     await reconciler._entity_cache.flush()
 
     # Verify both models were attempted to be updated
-    assert reconciler._models_sdk.models_client.update_model.await_count == 2
+    assert reconciler._models_client.update_model.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_cleanup_model_entities_with_null_model_providers(reconciler):
+async def test_cleanup_model_entities_with_null_model_providers(reconciler, mock_client):
     """Test that cleanup handles Model Entity with null/None model_providers list."""
     # Mock provider with served_models
     mock_provider = MagicMock()
@@ -1130,7 +1112,7 @@ async def test_cleanup_model_entities_with_null_model_providers(reconciler):
 
     reconciler._models_client.get_provider = AsyncMock(return_value=_ModelResponse(mock_provider))
     await seed_entity_cache(
-        reconciler._models_sdk,
+        mock_client,
         reconciler._entity_cache,
         [_entity("test-ns", "model-1", None)],
     )
@@ -1140,7 +1122,7 @@ async def test_cleanup_model_entities_with_null_model_providers(reconciler):
     await reconciler._entity_cache.flush()
 
     # Verify model entity was NOT updated (provider wasn't in the empty/null list)
-    reconciler._models_sdk.models_client.update_model.assert_not_awaited()
+    reconciler._models_client.update_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1175,7 +1157,7 @@ async def test_lost_status_triggers_drift_recovery(reconciler, mock_backend_regi
     mock_backend.create_model_deployment = AsyncMock(return_value=pending_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1219,7 +1201,7 @@ async def test_successful_status_clears_drift_state(reconciler, mock_backend_reg
     mock_backend.get_model_deployment_status = AsyncMock(return_value=ready_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
     reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
     reconciler._models_client.create_provider = AsyncMock()
@@ -1262,7 +1244,7 @@ async def test_pending_status_preserves_drift_state(reconciler, mock_backend_reg
     mock_backend.get_model_deployment_status = AsyncMock(return_value=pending_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1307,7 +1289,7 @@ async def test_drift_recovery_max_retries_exceeded(reconciler, mock_backend_regi
     mock_backend.create_model_deployment = AsyncMock()  # Should not be called
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1362,7 +1344,7 @@ async def test_drift_recovery_respects_backoff(reconciler, mock_backend_registry
     mock_backend.create_model_deployment = AsyncMock()
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1419,7 +1401,7 @@ async def test_drift_recovery_proceeds_after_backoff(reconciler, mock_backend_re
     mock_backend.create_model_deployment = AsyncMock(return_value=pending_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1462,7 +1444,7 @@ async def test_drift_recovery_ready_deployment(reconciler, mock_backend_registry
     mock_backend.create_model_deployment = AsyncMock(return_value=pending_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1498,7 +1480,7 @@ async def test_unknown_status_triggers_handler_and_updates_status(reconciler, mo
     mock_backend.get_model_deployment_status = AsyncMock(return_value=unknown_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1546,7 +1528,7 @@ async def test_unknown_status_max_retries_sets_error(reconciler, mock_backend_re
     mock_backend.get_model_deployment_status = AsyncMock(return_value=unknown_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1593,7 +1575,7 @@ async def test_unknown_status_respects_backoff(reconciler, mock_backend_registry
     mock_backend.get_model_deployment_status = AsyncMock(return_value=unknown_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
 
     # Process deployment
@@ -1633,7 +1615,7 @@ async def test_unknown_status_clears_on_recovery(reconciler, mock_backend_regist
     mock_backend.get_model_deployment_status = AsyncMock(return_value=ready_status)
     mock_backend_registry.get_backend.return_value = mock_backend
 
-    # Mock SDK
+    # Mock client
     reconciler._models_client.update_deployment_status = AsyncMock(return_value=_ModelResponse())
     reconciler._models_client.get_provider = AsyncMock(side_effect=_status_error(404, "Not found"))
     reconciler._models_client.create_provider = AsyncMock()
@@ -1737,14 +1719,14 @@ ERROR_GC_TTL = 10800  # 3 hours — default from ControllerConfig
 
 
 @pytest.fixture
-def gc_reconciler(mock_models_sdk, mock_backend_registry):
+def gc_reconciler(mock_client, mock_backend_registry):
     """Create a reconciler with default ERROR GC TTL for GC tests."""
     config = ControllerConfig()
     reconciler = ModelDeploymentReconciler(
-        models_sdk=mock_models_sdk,
+        client=mock_client,
         backend_registry=mock_backend_registry,
         controller_config=config,
-        entity_cache=ModelEntityCache(models_sdk=mock_models_sdk, emit_heartbeat=lambda: None),
+        entity_cache=ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None),
         emit_heartbeat=lambda: None,
     )
     mock_backend = MagicMock()
@@ -1904,7 +1886,7 @@ async def test_gc_provider_cleanup_failure_is_non_fatal(gc_reconciler, mock_back
 
 @pytest.mark.asyncio
 async def test_gc_empty_list_no_ops(gc_reconciler, mock_backend_registry):
-    """Empty deployment list results in no backend or SDK calls."""
+    """Empty deployment list results in no backend or client calls."""
     await gc_reconciler.gc_error_deployments([])
 
     mock_backend = mock_backend_registry.get_backend()
@@ -1913,15 +1895,15 @@ async def test_gc_empty_list_no_ops(gc_reconciler, mock_backend_registry):
 
 
 @pytest.mark.asyncio
-async def test_gc_custom_ttl_respected(mock_models_sdk, mock_backend_registry):
+async def test_gc_custom_ttl_respected(mock_client, mock_backend_registry):
     """Non-default TTL value from config is respected."""
     custom_ttl = 3600  # 1 hour
     config = ControllerConfig(error_deployment_ttl_seconds=custom_ttl)
     reconciler = ModelDeploymentReconciler(
-        models_sdk=mock_models_sdk,
+        client=mock_client,
         backend_registry=mock_backend_registry,
         controller_config=config,
-        entity_cache=ModelEntityCache(models_sdk=mock_models_sdk, emit_heartbeat=lambda: None),
+        entity_cache=ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None),
         emit_heartbeat=lambda: None,
     )
 
@@ -2000,15 +1982,15 @@ async def test_gc_not_found_on_status_update_handled(gc_reconciler, mock_backend
         "zero-ttl-immediate-gc",
     ],
 )
-async def test_gc_ttl_boundary_parametrized(mock_models_sdk, mock_backend_registry, ttl, age_seconds, should_gc):
+async def test_gc_ttl_boundary_parametrized(mock_client, mock_backend_registry, ttl, age_seconds, should_gc):
     """Parametrized boundary tests for various TTL values and ages."""
     now = datetime.now(timezone.utc)
     config = ControllerConfig(error_deployment_ttl_seconds=ttl)
     reconciler = ModelDeploymentReconciler(
-        models_sdk=mock_models_sdk,
+        client=mock_client,
         backend_registry=mock_backend_registry,
         controller_config=config,
-        entity_cache=ModelEntityCache(models_sdk=mock_models_sdk, emit_heartbeat=lambda: None),
+        entity_cache=ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None),
         emit_heartbeat=lambda: None,
     )
 

@@ -7,7 +7,7 @@ description: NeMo Helix model and dataset CRUD lifecycle through the platform SD
 ---
 Entity tasks
 
-- Use `nemo_api` with the `models` or `datasets` resource as appropriate, passing
+- Use `nemo_api` with the `models` resource for models and `files.filesets` for datasets, passing
   `workspace="<active request workspace>"` on every call.
 - Use the exact entity type and name from the instruction.
 - For model/dataset CRUD, create the temporary entity, verify/list/update/delete it, then create the final verification entity.

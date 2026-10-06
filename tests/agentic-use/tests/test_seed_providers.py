@@ -91,14 +91,14 @@ class TestLoadManifest:
 
 
 class TestCreateSecret:
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    def test_creates_secret(self, mock_client_from_platform: MagicMock) -> None:
-        sdk = MagicMock()
-        mock_secrets = MagicMock()
-        mock_client_from_platform.return_value = mock_secrets
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    def test_creates_secret(self, mock_from_client: MagicMock) -> None:
+        client = MagicMock()
+        mock_secrets = mock_from_client.return_value
 
-        _create_secret(sdk, "ws", "my-secret", "val")
+        _create_secret(client, "ws", "my-secret", "val")
 
+        mock_from_client.assert_called_once_with(client)
         mock_secrets.create_secret.assert_called_once()
         kwargs = mock_secrets.create_secret.call_args.kwargs
         body = kwargs["body"]
@@ -107,48 +107,47 @@ class TestCreateSecret:
         assert body.value.get_secret_value() == "val"
         assert kwargs["workspace"] == "ws"
 
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    def test_ignores_conflict(self, mock_client_from_platform: MagicMock) -> None:
-        sdk = MagicMock()
-        mock_secrets = MagicMock()
-        mock_secrets.create_secret.side_effect = Exception("409 Conflict: already exists")
-        mock_client_from_platform.return_value = mock_secrets
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    def test_ignores_conflict(self, mock_from_client: MagicMock) -> None:
+        mock_from_client.return_value.create_secret.side_effect = Exception("409 Conflict: already exists")
 
-        _create_secret(sdk, "ws", "my-secret", "val")
+        _create_secret(MagicMock(), "ws", "my-secret", "val")
 
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    def test_raises_on_other_error(self, mock_client_from_platform: MagicMock) -> None:
-        sdk = MagicMock()
-        mock_secrets = MagicMock()
-        mock_secrets.create_secret.side_effect = RuntimeError("network error")
-        mock_client_from_platform.return_value = mock_secrets
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    def test_raises_on_other_error(self, mock_from_client: MagicMock) -> None:
+        mock_from_client.return_value.create_secret.side_effect = RuntimeError("network error")
 
         with pytest.raises(RuntimeError, match="network error"):
-            _create_secret(sdk, "ws", "my-secret", "val")
+            _create_secret(MagicMock(), "ws", "my-secret", "val")
 
 
 class TestCreateProvider:
-    def test_creates_provider(self) -> None:
-        sdk = MagicMock()
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    def test_creates_provider(self, mock_from_client: MagicMock) -> None:
         spec = ProviderSpec(name="p", host_url="https://x.com", secret_name="s", from_env="E")
-        _create_provider(sdk, "ws", spec)
-        sdk.inference.providers.create.assert_called_once_with(
-            name="p", host_url="https://x.com", api_key_secret_name="s", workspace="ws"
-        )
 
-    def test_ignores_conflict(self) -> None:
-        sdk = MagicMock()
-        sdk.inference.providers.create.side_effect = Exception("409 conflict")
+        _create_provider(MagicMock(), "ws", spec)
+
+        kwargs = mock_from_client.return_value.create_provider.call_args.kwargs
+        assert kwargs["workspace"] == "ws"
+        assert kwargs["body"].name == "p"
+        assert kwargs["body"].host_url == "https://x.com"
+        assert kwargs["body"].api_key_secret_name == "s"
+
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    def test_ignores_conflict(self, mock_from_client: MagicMock) -> None:
+        mock_from_client.return_value.create_provider.side_effect = Exception("409 conflict")
         spec = ProviderSpec(name="p", host_url="https://x.com", secret_name="s", from_env="E")
-        _create_provider(sdk, "ws", spec)
+
+        _create_provider(MagicMock(), "ws", spec)
 
 
 class TestWaitForDiscovery:
-    def test_returns_true_when_models_discovered(self) -> None:
-        sdk = MagicMock()
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    def test_returns_true_when_models_discovered(self, mock_from_client: MagicMock) -> None:
         provider_obj = MagicMock()
         provider_obj.served_models = [MagicMock(model_entity_id="ns/my-model")]
-        sdk.inference.providers.retrieve.return_value = provider_obj
+        mock_from_client.return_value.get_provider.return_value.data.return_value = provider_obj
 
         spec = ProviderSpec(
             name="p",
@@ -158,13 +157,13 @@ class TestWaitForDiscovery:
             wait_for_discovery=True,
             discovery_timeout_sec=1,
         )
-        assert _wait_for_provider_discovery(sdk, "ws", spec) is True
+        assert _wait_for_provider_discovery(MagicMock(), "ws", spec) is True
 
-    def test_returns_false_on_timeout(self) -> None:
-        sdk = MagicMock()
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    def test_returns_false_on_timeout(self, mock_from_client: MagicMock) -> None:
         provider_obj = MagicMock()
         provider_obj.served_models = []
-        sdk.inference.providers.retrieve.return_value = provider_obj
+        mock_from_client.return_value.get_provider.return_value.data.return_value = provider_obj
 
         spec = ProviderSpec(
             name="p",
@@ -174,7 +173,7 @@ class TestWaitForDiscovery:
             wait_for_discovery=True,
             discovery_timeout_sec=0,
         )
-        assert _wait_for_provider_discovery(sdk, "ws", spec) is False
+        assert _wait_for_provider_discovery(MagicMock(), "ws", spec) is False
 
 
 class TestCreateVirtualModel:
@@ -248,12 +247,14 @@ class TestCreateVirtualModel:
 
 
 class TestSeedAll:
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    @patch("nemo_helix.NeMoHelix")
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    @patch("nemo_helix_plugin.client.client.NemoClient")
     def test_skips_unset_env_vars(
         self,
-        mock_sdk_cls: MagicMock,
-        mock_client_from_platform: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_secrets_from_client: MagicMock,
+        mock_models_from_client: MagicMock,
         manifest_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -263,40 +264,44 @@ class TestSeedAll:
         result = seed_all(manifest_path, base_url="http://localhost:8080")
         assert result.ok
         assert all(p.status == "skipped" for p in result.providers)
-        mock_client_from_platform.return_value.create_secret.assert_not_called()
+        mock_secrets_from_client.return_value.create_secret.assert_not_called()
+        mock_models_from_client.return_value.create_provider.assert_not_called()
 
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    @patch("nemo_helix.NeMoHelix")
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    @patch("nemo_helix_plugin.client.client.NemoClient")
     def test_seeds_providers(
         self,
-        mock_sdk_cls: MagicMock,
-        mock_client_from_platform: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_secrets_from_client: MagicMock,
+        mock_models_from_client: MagicMock,
         manifest_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("BUILD_KEY", "nvapi-xxx")
         monkeypatch.setenv("INF_KEY", "sk-yyy")
 
-        sdk = mock_sdk_cls.return_value
-        mock_secrets = mock_client_from_platform.return_value
         provider_obj = MagicMock()
         provider_obj.served_models = [MagicMock(model_entity_id="ns/m")]
-        sdk.inference.providers.retrieve.return_value = provider_obj
+        mock_models = mock_models_from_client.return_value
+        mock_models.get_provider.return_value.data.return_value = provider_obj
 
         result = seed_all(manifest_path, base_url="http://localhost:8080")
         assert result.ok
         assert len(result.providers) == 2
         assert result.providers[0].status == "ok"
         assert result.providers[1].status == "ok"
-        assert mock_secrets.create_secret.call_count == 2
-        assert sdk.inference.providers.create.call_count == 2
+        assert mock_secrets_from_client.return_value.create_secret.call_count == 2
+        assert mock_models.create_provider.call_count == 2
 
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    @patch("nemo_helix.NeMoHelix")
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    @patch("nemo_helix_plugin.client.client.NemoClient")
     def test_partial_env_skips_missing(
         self,
-        mock_sdk_cls: MagicMock,
-        mock_client_from_platform: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_secrets_from_client: MagicMock,
+        mock_models_from_client: MagicMock,
         manifest_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -308,29 +313,31 @@ class TestSeedAll:
         assert result.providers[0].status == "ok"
         assert result.providers[1].status == "skipped"
 
-    @patch("nemo_helix_plugin.client.adapter.client_from_platform")
-    @patch("nemo_helix.NeMoHelix")
+    @patch("nemo_helix_plugin.models.client.ModelsClient.from_client")
+    @patch("nemo_helix_plugin.secrets.client.SecretsClient.from_client")
+    @patch("nemo_helix_plugin.client.client.NemoClient")
     def test_error_on_create_marks_status(
         self,
-        mock_sdk_cls: MagicMock,
-        mock_client_from_platform: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_secrets_from_client: MagicMock,
+        mock_models_from_client: MagicMock,
         manifest_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("BUILD_KEY", "nvapi-xxx")
         monkeypatch.delenv("INF_KEY", raising=False)
 
-        mock_client_from_platform.return_value.create_secret.side_effect = RuntimeError("kaboom")
+        mock_secrets_from_client.return_value.create_secret.side_effect = RuntimeError("kaboom")
 
         result = seed_all(manifest_path, base_url="http://localhost:8080")
         assert not result.ok
         assert result.providers[0].status == "error"
 
     @patch("urllib.request.urlopen")
-    @patch("nemo_helix.NeMoHelix")
+    @patch("nemo_helix_plugin.client.client.NemoClient")
     def test_skips_vm_when_dep_provider_failed(
         self,
-        mock_sdk_cls: MagicMock,
+        mock_client_cls: MagicMock,
         mock_urlopen: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,

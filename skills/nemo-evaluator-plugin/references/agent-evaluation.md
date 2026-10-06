@@ -282,23 +282,27 @@ without invoking the original model, agent, or runner. Keep stable `task_id`
 values so trials match task definitions.
 
 Individual trials are stored in the run bundle, not as queryable result entities.
-Retrieve the run index, download its bundle, and hydrate `trials.jsonl`:
+Retrieve the run index, download its bundle, and hydrate `trials.jsonl`. The index record names the
+bundle in `stored.bundle_ref`:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.persistence import read_trials
 
 stored = evaluator.agent_eval_results.retrieve("<result-name>")
-sdk.files.download(remote_path=stored.bundle_ref, local_path="previous-run")
-trials = read_trials("previous-run")
+print(stored.bundle_ref)
 ```
 
-CLI equivalent for downloading the bundle:
+Download the bundle with the CLI, then read the trials from the extracted directory:
 
 ```bash
 nemo jobs results download agent-eval-results \
   --job <job-name> --output-file agent-eval-results.tar.gz
 mkdir -p previous-run
 tar -xzf agent-eval-results.tar.gz -C previous-run --strip-components=1
+```
+
+```python
+trials = read_trials("previous-run")
 ```
 
 Pass the hydrated `trials` with the same task definitions and omit `target`.

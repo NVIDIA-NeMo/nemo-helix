@@ -938,3 +938,49 @@ class TestAsyncRetryPolicy:
             assert await response.read() == b"artifact"
 
         assert attempts == 2
+
+
+class TestWithoutHeaders:
+    def test_drops_named_default_headers_case_insensitively(self) -> None:
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(204)
+
+        base = NemoClient(
+            base_url=BASE,
+            default_headers={"X-Keep": "1", "X-Drop-Me": "2", "x-also-drop": "3"},
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+
+        trimmed = base.without_headers(["x-drop-me", "X-Also-Drop"])
+        trimmed.send(
+            PreparedRequest(
+                path_template="/ping",
+                path_params={},
+                method="GET",
+                content=None,
+                content_type=None,
+                response_type=None,
+            )
+        )
+
+        assert trimmed.default_headers == {"X-Keep": "1"}
+        assert base.default_headers == {"X-Keep": "1", "X-Drop-Me": "2", "x-also-drop": "3"}
+        assert trimmed._http is base._http
+        assert "x-drop-me" not in seen[0].headers
+        assert seen[0].headers["x-keep"] == "1"
+
+    @pytest.mark.asyncio
+    async def test_async_client_keeps_type_and_transport(self) -> None:
+        from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+
+        base = AsyncSecretsClient(base_url=BASE, default_headers={"X-A": "1", "X-B": "2"})
+
+        trimmed = base.without_headers(["X-B"])
+
+        assert isinstance(trimmed, AsyncSecretsClient)
+        assert trimmed._http is base._http
+        assert trimmed.default_headers == {"X-A": "1"}
+        await base.close()

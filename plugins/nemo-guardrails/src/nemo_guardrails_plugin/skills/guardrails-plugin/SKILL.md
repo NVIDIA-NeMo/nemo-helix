@@ -228,18 +228,18 @@ See [Rails Config Reference](resources/rails-config.md) for full input/output ex
 - A task LLM or main LLM that is not reachable through IGW makes the workflow invalid. Stop and surface that dependency instead of substituting an arbitrary model.
 - When a rail blocks on the inference path, the expected response content is exactly `I'm sorry, I can't respond to that.`
 
-## Python SDK
+## Python client
 
-When the assistant has the Python platform SDK rather than a generic HTTP tool, use the same API resources:
+When the assistant has the typed Python client rather than a generic HTTP tool, use the same API resources:
 
 ```python
-from nemo_helix import NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.guardrail.client import GuardrailClient
+from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
-guardrails = client_from_platform(client, GuardrailClient)
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+guardrails = GuardrailClient.from_client(client)
 configs = guardrails.list_guardrail_configs().data()
 ```
 
-Create configs through `GuardrailClient` and VirtualModels through `client.inference.virtual_models`. Preserve the same validation gates and read-back verification described above.
+Create configs through `GuardrailClient` and VirtualModels through `VirtualModelsClient`. Preserve the same validation gates and read-back verification described above.

@@ -35,7 +35,7 @@ from nemo_helix_plugin.client.auth import TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
-from nemo_helix_plugin.sdk_provider import get_forwarding_headers, get_platform_sdk
+from nemo_helix_plugin.client_provider import get_forwarding_headers, get_nemo_client
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +109,8 @@ def platform_auth_proxy() -> Iterator[str | None]:
         provider.get_access_token()
         app = build_auth_proxy_app(base_url=base_url, auth=TokenProviderAuth(provider))
     else:
-        with get_platform_sdk() as sdk:
-            headers = get_forwarding_headers(sdk)
+        with get_nemo_client() as client:
+            headers = get_forwarding_headers(client)
         if not any(name.lower() == "x-nhx-principal-id" and value.strip() for name, value in headers.items()):
             # Auth-disabled platforms serialize an anonymous Principal into
             # jobs too. Preserve that existing unauthenticated execution mode.

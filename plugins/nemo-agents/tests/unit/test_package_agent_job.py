@@ -75,7 +75,7 @@ def _patch_profiles(profiles: list[Any] | Exception):
             return response
 
         client.get_execution_profiles = _get
-    return patch("nemo_agents_plugin.jobs.package_agent.client_from_platform", return_value=client)
+    return patch("nemo_agents_plugin.jobs.package_agent.AsyncJobsClient.from_client", return_value=client)
 
 
 class TestToSpec:

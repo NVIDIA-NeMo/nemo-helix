@@ -11,11 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from nemo_deployments_plugin.config import ControllerConfig, DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.controller import DeploymentsController
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.config import Runtime
 from nhx.core.inference_gateway.api.dependencies import global_model_cache
-from nhx.core.inference_gateway.api.model_cache import ModelCache, model_provider_getter_from_sdk, refresh_model_cache
+from nhx.core.inference_gateway.api.model_cache import (
+    ModelCache,
+    model_provider_getter_from_client,
+    refresh_model_cache,
+)
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
 from nhx.core.inference_gateway.service import InferenceGatewayService
 from nhx.core.models.controllers.backends.backends import DeploymentStatusUpdate, ServiceBackend
@@ -56,11 +59,11 @@ class MockServiceBackend(ServiceBackend):
 
     def __init__(
         self,
-        nhx_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         config: dict[str, Any],
     ) -> None:
         """Initialize mock backend without calling parent init."""
-        self._nhx_sdk = nhx_sdk
+        self._client = client
         self._config = config
 
         # Track method calls for assertions
@@ -144,16 +147,16 @@ def sync_client(test_clients: ClientContext) -> NemoClient:
 @pytest.fixture
 def controller_with_mock_backend(
     test_clients: ClientContext,
-) -> Generator[tuple[ModelsController, MockServiceBackend, NemoClient, ModelCache, AsyncNeMoHelix], None, None]:
+) -> Generator[tuple[ModelsController, MockServiceBackend, NemoClient, ModelCache, AsyncNemoClient], None, None]:
     """Create ModelsController with mock backend and access to IGW cache.
 
     Note: The ProviderReconciler's autodiscovery is mocked to avoid event loop
     conflicts when calling through the IGW proxy.
 
     Yields:
-        Tuple of (controller, mock_backend, client, model_cache, async_sdk)
+        Tuple of (controller, mock_backend, client, model_cache, async_client)
     """
-    mock_backend = MockServiceBackend(nhx_sdk=test_clients.async_sdk, config={})
+    mock_backend = MockServiceBackend(client=test_clients.async_client, config={})
     backend_registry = BackendRegistry(registry={"mock": mock_backend})
 
     mock_platform_config = MagicMock()
@@ -162,9 +165,9 @@ def controller_with_mock_backend(
     with (
         patch("nhx.core.models.config.get_platform_config", return_value=mock_platform_config),
         patch("nhx.core.models.controllers.main.get_platform_config", return_value=mock_platform_config),
-        patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk") as mock_sdk_factory,
+        patch("nhx.core.models.controllers.models_controller.get_async_nemo_client") as mock_client_factory,
     ):
-        mock_sdk_factory.return_value = test_clients.async_sdk
+        mock_client_factory.return_value = test_clients.async_client
 
         controller = ModelsController(
             backend_registry=backend_registry,
@@ -178,7 +181,7 @@ def controller_with_mock_backend(
         # Access the global model cache
         model_cache = global_model_cache()
 
-        yield controller, mock_backend, sync_client(test_clients), model_cache, test_clients.async_sdk
+        yield controller, mock_backend, sync_client(test_clients), model_cache, test_clients.async_client
 
         # Clean up controller resources (event loop, backend registry, etc.)
         controller.shutdown()
@@ -293,7 +296,7 @@ def controller_with_docker_and_igw(
     models_controller_container_cleanup,
     deployments_plugin_backend_config,
     worker_id: str,
-) -> Generator[tuple[ModelsController, ModelCache, NemoClient, str, DockerTestContext, AsyncNeMoHelix], None, None]:
+) -> Generator[tuple[ModelsController, ModelCache, NemoClient, str, DockerTestContext, AsyncNemoClient], None, None]:
     """Create ModelsController with Docker backend and IGW sharing one in-process app.
 
     Creates:
@@ -306,7 +309,7 @@ def controller_with_docker_and_igw(
     conflicts when calling through the IGW proxy.
 
     Yields:
-        Tuple of (controller, model_cache, client, mock_nim_image, docker_test_context, async_sdk)
+        Tuple of (controller, model_cache, client, mock_nim_image, docker_test_context, async_client)
     """
     from nemo_helix_plugin.jobs.image import get_qualified_image as real_get_qualified_image
 
@@ -333,7 +336,7 @@ def controller_with_docker_and_igw(
     )
 
     plugin_backend = DeploymentsPluginServiceBackend(
-        nhx_sdk=test_clients.async_sdk,
+        client=test_clients.async_client,
         config=deployments_plugin_backend_config,
         huggingface_model_puller="alpine:3.20",
     )
@@ -355,22 +358,22 @@ def controller_with_docker_and_igw(
             "nhx.core.models.controllers.backends.deployments_plugin.resolve.get_platform_config",
             return_value=mock_platform_config,
         ),
-        patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk") as mock_sdk_factory,
-        patch("nemo_deployments_plugin.controller.get_async_platform_sdk") as mock_deployments_controller_sdk,
-        patch("nemo_helix_plugin.sdk_provider.get_async_platform_sdk") as mock_sdk,
+        patch("nhx.core.models.controllers.models_controller.get_async_nemo_client") as mock_client_factory,
+        patch("nemo_deployments_plugin.controller.get_async_nemo_client") as mock_deployments_controller_client,
+        patch("nemo_helix_plugin.client_provider.get_async_nemo_client") as mock_provider_client,
         patch(
-            "nhx.core.models.controllers.backends.deployments_plugin.backend.get_async_platform_sdk"
-        ) as mock_deployments_backend_sdk,
+            "nhx.core.models.controllers.backends.deployments_plugin.backend.get_async_nemo_client"
+        ) as mock_deployments_backend_client,
         patch("nemo_deployments_plugin.config.DeploymentsConfig.get", return_value=deployments_config),
         patch(
             "nemo_helix_plugin.jobs.image.get_qualified_image",
             side_effect=patched_get_qualified_image,
         ),
     ):
-        mock_sdk_factory.return_value = test_clients.async_sdk
-        mock_deployments_controller_sdk.return_value = test_clients.async_sdk
-        mock_sdk.return_value = test_clients.async_sdk
-        mock_deployments_backend_sdk.return_value = test_clients.async_sdk
+        mock_client_factory.return_value = test_clients.async_client
+        mock_deployments_controller_client.return_value = test_clients.async_client
+        mock_provider_client.return_value = test_clients.async_client
+        mock_deployments_backend_client.return_value = test_clients.async_client
 
         controller = ModelsController(
             backend_registry=backend_registry,
@@ -395,7 +398,7 @@ def controller_with_docker_and_igw(
             sync_client(test_clients),
             mock_nim_image,
             docker_test_context,
-            test_clients.async_sdk,
+            test_clients.async_client,
         )
 
         try:
@@ -411,19 +414,19 @@ def controller_with_docker_and_igw(
 
 async def trigger_cache_refresh(
     model_cache: ModelCache,
-    sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
 ) -> None:
     """Trigger a manual cache refresh from the Models Service.
 
     Args:
         model_cache: The IGW model cache to refresh
-        sdk: Async SDK for fetching providers
+        client: Async platform client for fetching providers
     """
-    model_provider_getter = model_provider_getter_from_sdk(sdk)
+    model_provider_getter = model_provider_getter_from_client(client)
     await refresh_model_cache(
         model_cache=model_cache,
         model_provider_getter=model_provider_getter,
-        secrets_sdk=sdk,
+        client=client,
     )
 
 

@@ -6,9 +6,10 @@ import signal
 import threading
 import time
 
+from nemo_helix_plugin.client.types import RetryPolicy
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, TrackLastExecutionTime
-from nhx.common.sdk_factory import get_platform_sdk
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.config import profiles
@@ -39,12 +40,22 @@ def run(parent_stop_signal: threading.Event | None = None):
 
     # Initialize components
     # Use service principal for controller - runs in background thread without user context
-    nhx_sdk = get_platform_sdk(as_service="jobs", internal=True)
-    logger.debug("Platform SDK initialized successfully.")
+    nemo_client = get_nemo_client(
+        as_service="jobs",
+        internal=True,
+        retry=RetryPolicy(
+            max_retries=2,
+            retryable_status_codes=(408, 409, 429),
+            retry_all_server_errors=True,
+            respect_retry_decision_headers=True,
+            respect_retry_after_headers=True,
+        ),
+    )
+    logger.debug("Platform client initialized successfully.")
 
     # from_config also prunes the shared ``profiles`` list so advertised executors
     # match backends that actually registered (e.g. Docker skipped when unavailable).
-    backend_registry = BackendRegistry.from_config(nhx_sdk=nhx_sdk, profiles=profiles)
+    backend_registry = BackendRegistry.from_config(nemo_client=nemo_client, profiles=profiles)
     logger.info("Executor backends registry initialized successfully.")
 
     # Wait for the jobs service to be ready before starting control loops (polls /status so we can start once jobs is ready)
@@ -56,7 +67,7 @@ def run(parent_stop_signal: threading.Event | None = None):
         logger.warning("Server did not become ready in time, starting loops anyway")
 
     # Job scheduling loop
-    job_scheduler = JobScheduler(backend_registry, nhx_sdk, stop_signal=local_stop_signal)
+    job_scheduler = JobScheduler(backend_registry, nemo_client, stop_signal=local_stop_signal)
     job_scheduler_monitored = TrackLastExecutionTime(job_scheduler)
     job_scheduler_loop = Loop(
         TimedLoopWaiter(jobs_config.schedule_interval_seconds, stop_signal=local_stop_signal),
@@ -65,7 +76,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     )
 
     # Job reconciler loop
-    job_reconciler = JobReconciler(backend_registry, nhx_sdk, stop_signal=local_stop_signal)
+    job_reconciler = JobReconciler(backend_registry, nemo_client, stop_signal=local_stop_signal)
     job_reconciler_monitored = TrackLastExecutionTime(job_reconciler)
     job_reconciler_loop = Loop(
         TimedLoopWaiter(jobs_config.reconcile_interval_seconds, stop_signal=local_stop_signal),

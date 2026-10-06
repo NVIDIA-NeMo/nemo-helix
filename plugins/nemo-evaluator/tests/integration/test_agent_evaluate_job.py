@@ -63,8 +63,7 @@ from nemo_evaluator_sdk.execution.metric_execution import run_sync
 from nemo_evaluator_sdk.metrics.exact_match import ExactMatchMetric
 from nemo_evaluator_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
 from nemo_evaluator_sdk.values import GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -223,7 +222,7 @@ def test_sync_job_model_target_scores_a_real_trial(subprocess_platform: str, tmp
             input_spec,
             workspace="default",
             entity_client=None,
-            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            async_sdk=AsyncNemoClient(base_url="http://platform.test"),
             is_local=True,
         )
     )
@@ -276,7 +275,7 @@ def test_sync_job_agent_target_scores_a_real_trial(subprocess_platform: str, tmp
             input_spec,
             workspace="default",
             entity_client=None,
-            async_sdk=AsyncNeMoHelix(base_url="http://platform.test"),
+            async_sdk=AsyncNemoClient(base_url="http://platform.test"),
             is_local=True,
         )
     )
