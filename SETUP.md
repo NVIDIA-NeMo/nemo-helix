@@ -138,7 +138,7 @@ That covers the `make` targets only. To run `uv` or `pnpm` directly, activate Fl
 flox -q activate
 ```
 
-Without Flox, install the versions printed by `make toolchain-versions` and a C compiler, then run `make TOOLCHAIN=system bootstrap`. Docker is required for Helix's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because the deployments service defaults to the Docker executor; it is not required for dependency bootstrap, remote/CLI-only use, or configs that omit or reconfigure deployments. See [docs/get-started/local-docker-and-executors.mdx](docs/get-started/local-docker-and-executors.mdx) for when jobs and agents use subprocess instead.
+Without Flox, install the versions printed by `make toolchain-versions` and a C compiler, then run `make TOOLCHAIN=system bootstrap`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because the deployments service defaults to the Docker executor; it is not required for dependency bootstrap, remote/CLI-only use, or configs that omit or reconfigure deployments. See [docs/get-started/local-docker-and-executors.mdx](docs/get-started/local-docker-and-executors.mdx) for when jobs and agents use subprocess instead.
 
 If `nemo setup` is too high-level for the task (e.g. debugging startup, custom service set, custom plugin install after bootstrap), use the manual sections below.
 

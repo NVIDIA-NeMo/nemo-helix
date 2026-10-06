@@ -258,7 +258,7 @@ Ensure all pre-commit hooks pass by running `uv run pre-commit run -a`. A clean 
 - **Native build deps:** `make bootstrap-python` builds `annoy` (via `nemoguardrails`). Install system headers once per VM image: `sudo apt-get install -y python3-dev build-essential`.
 - **Python bootstrap:** Run `make bootstrap-python` from repo root (creates `.venv`, runs `uv sync --frozen --all-packages`). See [SETUP.md](SETUP.md) for the full playbook.
 - **Studio (optional):** `make bootstrap-studio` uses the Node.js/pnpm versions pinned in the Flox environment, so a VM shipping an older Node does not need upgrading. API services still run without Studio assets. For a preinstalled host toolchain, install the versions printed by `make toolchain-versions` and use `TOOLCHAIN=system`.
-- **Docker:** Not needed for dependency bootstrap. It is required for Helix's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote/CLI-only and configs that omit or reconfigure deployments do not require it. See [docs/get-started/local-docker-and-executors.mdx](docs/get-started/local-docker-and-executors.mdx).
+- **Docker:** Not needed for dependency bootstrap. It is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote/CLI-only and configs that omit or reconfigure deployments do not require it. See [docs/get-started/local-docker-and-executors.mdx](docs/get-started/local-docker-and-executors.mdx).
 
 ### Running the platform
 
