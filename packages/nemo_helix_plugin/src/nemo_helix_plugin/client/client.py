@@ -492,9 +492,8 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
     def _client(self) -> HttpClientT:
         """Underlying httpx transport.
 
-        Legacy plugin SDK resources access ``NeMoHelix._client`` to make raw
-        HTTP calls. Exposing the same transport property here lets those
-        resources work with ``NemoClient`` while they migrate.
+        Plugin SDK resources that make raw HTTP calls read the transport
+        through this property.
         """
         return self._http
 
@@ -650,6 +649,19 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
     def with_headers(self, headers: Mapping[str, str]) -> Self:
         """Shorthand for ``with_options(headers=...)``."""
         return self.with_options(headers=headers)
+
+    def without_headers(self, names: Iterable[str]) -> Self:
+        """Return a copy of this client whose default headers omit *names*.
+
+        Matching is case-insensitive. The copy shares the underlying HTTP
+        transport. Headers the transport itself carries are unaffected.
+        """
+        dropped = {name.lower() for name in names}
+        clone = self.with_options()
+        clone._default_headers = {
+            name: value for name, value in self._default_headers.items() if name.lower() not in dropped
+        }
+        return clone
 
     def with_workspace(self, workspace: str) -> Self:
         """Return a copy of this client with *workspace* as the default workspace."""

@@ -19,7 +19,7 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.refs import FilesetRef
 
@@ -38,13 +38,12 @@ class FilesetDownloadError(RuntimeError):
 def fileset_path(
     ref: FilesetRef,
     *,
-    sdk: SyncHelixClient,
+    client: NemoClient,
     workspace: str,
 ) -> Iterator[Path]:
     """Download *ref* to a tempdir and yield the path.
 
-    *sdk* is a platform handle (``NeMoHelix`` or
-    :class:`~nemo_helix_plugin.client.client.NemoClient`).  Cleanup happens
+    *client* is the platform :class:`~nemo_helix_plugin.client.client.NemoClient`.  Cleanup happens
     when the context exits.
 
     The accepted shapes are ``name`` (uses *workspace* as the workspace) or
@@ -84,7 +83,7 @@ def fileset_path(
         tmp_path = Path(tmp)
         logger.debug("downloading fileset %s/%s to %s", ws, name, tmp_path)
         try:
-            files = client_from_platform(sdk, FilesClient)
+            files = FilesClient.from_client(client)
             listing = files.list_files(name=name, workspace=ws).data().data
             for entry in listing:
                 dest = tmp_path / entry.path

@@ -5,16 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import ConflictError as ClientConflictError
 from nemo_helix_plugin.client.errors import NemoTransportError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
+from nemo_helix_plugin.jobs import result_manager as rm
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
-from nemo_helix_plugin.jobs.constants import NEMO_JOB_WORKSPACE_ENVVAR
 from nemo_helix_plugin.jobs.result_manager import CreateJobResultError
-from nhx.common.jobs import result_manager as rm
-from nhx.common.jobs.file_manager import TmpDirPath
 
 
 def _resp(data):
@@ -38,82 +35,6 @@ def _sync_client() -> NemoClient:
 def _async_client() -> AsyncNemoClient:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
     return AsyncNemoClient(base_url="http://test", workspace="test-ws", http_client=http_client)
-
-
-def _generated_sync_sdk(workspace: str | None = "test-ws") -> NeMoHelix:
-    http_client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    return NeMoHelix(base_url="http://localhost:8080", workspace=workspace, http_client=http_client)
-
-
-def _generated_async_sdk(workspace: str | None = "test-ws") -> AsyncNeMoHelix:
-    http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, request=request)))
-    return AsyncNeMoHelix(base_url="http://localhost:8080", workspace=workspace, http_client=http_client)
-
-
-# =============================================================================
-# FilesetFileManager Factory Tests
-# =============================================================================
-
-
-def test_result_manager_factory_fileset():
-    """Test factory creates ResultManager with FilesetFileManager class."""
-    sdk = _generated_sync_sdk()
-
-    mgr = rm.result_manager_factory(
-        job_name="test-job",
-        sdk=sdk,
-    )
-
-    assert isinstance(mgr, rm.ResultManager)
-    assert mgr.workspace == "test-ws"
-    assert isinstance(mgr.files_client, FilesClient)
-    assert mgr.files_client._http is sdk._client
-    assert isinstance(mgr.jobs_client, JobsClient)
-    assert mgr.jobs_client._http is sdk._client
-
-
-def test_result_manager_factory_fileset_async():
-    """Test factory creates AsyncResultManager with AsyncFilesetFileManager class."""
-    sdk = _generated_async_sdk()
-
-    mgr = rm.async_result_manager_factory(
-        job_name="test-job",
-        sdk=sdk,
-    )
-
-    assert isinstance(mgr, rm.AsyncResultManager)
-    assert mgr.workspace == "test-ws"
-    assert isinstance(mgr.files_client, AsyncFilesClient)
-    assert mgr.files_client._http is sdk._client
-    assert isinstance(mgr.jobs_client, AsyncJobsClient)
-    assert mgr.jobs_client._http is sdk._client
-
-
-@pytest.mark.asyncio
-@patch("nhx.common.jobs.result_manager.async_result_manager_factory")
-async def test_download_from_result_info(mock_factory, tmp_path):
-    """Test download_from_result_info creates manager and downloads artifact."""
-    test_file = tmp_path / "artifact.bin"
-    test_file.write_bytes(b"test content")
-    sdk = _generated_async_sdk()
-
-    mock_result_manager = MagicMock()
-    mock_result_manager.download_artifact = AsyncMock(return_value=TmpDirPath(tmp_dir=tmp_path, path=test_file))
-    mock_factory.return_value = mock_result_manager
-
-    await rm.download_from_result_info(
-        result_name="my-result",
-        job_name="test-job",
-        artifact_url="my-workspace/url-fileset-name#path/to/artifact",
-        workspace="my-workspace",
-        sdk=sdk,
-    )
-
-    # Verify factory was called with correct parameters
-    call_kwargs = mock_factory.call_args.kwargs
-    assert call_kwargs["job_name"] == "test-job"
-    assert call_kwargs["workspace"] == "my-workspace"
-    assert call_kwargs["sdk"] is sdk
 
 
 def test_result_remote_path_nests_under_base():
@@ -271,50 +192,3 @@ async def test_create_result_wraps_transport_errors_async(tmp_path, mock_async_f
         pytest.raises(CreateJobResultError, match="Error creating job result"),
     ):
         await mgr.create_result("my-result", test_file)
-
-
-def test_result_manager_factory_defaults_unscoped_sdk_workspace(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "env-ws")
-    sdk = _generated_sync_sdk(workspace=None)
-
-    mgr = rm.result_manager_factory(job_name="test-job", sdk=sdk)
-
-    assert mgr.workspace == "default"
-
-
-@pytest.mark.asyncio
-async def test_async_result_manager_factory_defaults_unscoped_sdk_workspace(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv(NEMO_JOB_WORKSPACE_ENVVAR, "env-ws")
-    sdk = _generated_async_sdk(workspace=None)
-
-    mgr = rm.async_result_manager_factory(job_name="test-job", sdk=sdk)
-
-    assert mgr.workspace == "default"
-
-
-@pytest.mark.asyncio
-@patch("nhx.common.jobs.result_manager.async_result_manager_factory")
-@patch("nhx.common.jobs.result_manager.get_async_platform_sdk")
-async def test_download_from_result_info_defaults_sdk(mock_get_sdk, mock_factory, tmp_path, mock_async_nhx_sdk):
-    """Test that download_from_result_info auto-creates SDK when sdk is None."""
-    mock_get_sdk.return_value = mock_async_nhx_sdk
-
-    test_file = tmp_path / "artifact.bin"
-    test_file.write_bytes(b"test content")
-    mock_mgr = MagicMock()
-    mock_mgr.download_artifact = AsyncMock(return_value=TmpDirPath(tmp_dir=tmp_path, path=test_file))
-    mock_factory.return_value = mock_mgr
-
-    await rm.download_from_result_info(
-        result_name="my-result",
-        job_name="test-job",
-        artifact_url="workspace/fileset#path",
-        workspace="workspace",
-    )
-
-    mock_get_sdk.assert_called_once_with()
-    mock_factory.assert_called_once_with(
-        job_name="test-job",
-        workspace="workspace",
-        sdk=mock_async_nhx_sdk,
-    )

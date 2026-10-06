@@ -74,7 +74,7 @@ def _upload_ethos_snapshot(agent_root: Path, *, existing_paths: Sequence[str] = 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(
@@ -404,7 +404,7 @@ def test_create_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest
         _install_mock_transport(handler),
         patch("nemo_agents_plugin.fabric.validation.validate_platform_agent_config", _validate_platform_agent_config),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", fake_upload),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.cli._platform_sdk") as mock_sdk,
     ):
         mock_sdk.return_value = SimpleNamespace(base_url="http://test", files=files)
@@ -512,7 +512,7 @@ def test_upload_ethos_fileset_preserves_remote_ethos_over_local(tmp_path: Path) 
 
     with (
         patch("nemo_agents_plugin.cli._platform_sdk", return_value=sdk),
-        patch("nemo_agents_plugin.cli.client_from_platform", return_value=files),
+        patch("nemo_agents_plugin.cli.FilesClient.from_client", return_value=files),
         patch("nemo_agents_plugin.jobs.fileset_io.upload_to_fileset", _capture_upload),
     ):
         _upload_ethos_fileset(

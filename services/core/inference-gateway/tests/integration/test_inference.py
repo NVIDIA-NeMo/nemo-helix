@@ -19,10 +19,10 @@ import pytest
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
     CreateModelDeploymentConfigRequest,
@@ -233,7 +233,6 @@ def _manually_add_provider_to_cache(
     # LoRA composites are skipped to match the production reconciler.
     virtual_model_cache = global_virtual_model_cache()
     virtual_models = VirtualModelsClient.from_client(models)
-    now_iso = "2026-01-01T00:00:00Z"
     for served_model in provider.served_models or []:
         ws, _, entity_name = served_model.model_entity_id.partition("/")
         if not entity_name or "&adapters/" in entity_name:
@@ -252,17 +251,11 @@ def _manually_add_provider_to_cache(
         key = (ws, entity_name)
         if key in virtual_model_cache.virtual_model_map:
             continue
-        virtual_model_cache.virtual_model_map[key] = SDKVirtualModel(
-            id=f"{ws}/{entity_name}",
-            entity_id=f"{ws}/{entity_name}",
+        virtual_model_cache.virtual_model_map[key] = VirtualModel(
             workspace=ws,
             name=entity_name,
-            parent=ws,
-            db_version=1,
             default_model_entity=f"{ws}/{entity_name}",
             autoprovisioned=True,
-            created_at=now_iso,
-            updated_at=now_iso,
         )
 
     return True

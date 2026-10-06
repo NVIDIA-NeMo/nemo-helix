@@ -114,8 +114,8 @@ def mock_files_client():
 @pytest.fixture
 def log_client(mock_files_client):
     """Create a JobLogsClient with a mock files client."""
-    with patch("nhx.common.jobs.log_client.client_from_platform", return_value=mock_files_client):
-        client = JobLogsClient(sdk=MagicMock())
+    with patch("nhx.common.jobs.log_client.AsyncFilesClient.from_client", return_value=mock_files_client):
+        client = JobLogsClient(client=MagicMock())
     return client, mock_files_client
 
 
@@ -279,10 +279,10 @@ async def test_query_logs_empty_filters(log_client):
     assert call_kwargs["body"].filters == {}
 
 
-def test_sdk_created_in_constructor():
-    """Test that SDK is set in constructor."""
-    sdk = MagicMock()
-    with patch("nhx.common.jobs.log_client.client_from_platform") as mock_adapter:
-        client = JobLogsClient(sdk=sdk)
-    assert client._sdk is sdk
-    mock_adapter.assert_called_once()
+def test_files_client_built_from_given_client():
+    """The files client is derived from the platform client passed in."""
+    platform_client = MagicMock()
+    with patch("nhx.common.jobs.log_client.AsyncFilesClient.from_client") as mock_from_client:
+        client = JobLogsClient(client=platform_client)
+    mock_from_client.assert_called_once_with(platform_client)
+    assert client._files_client is mock_from_client.return_value

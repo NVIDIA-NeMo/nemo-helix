@@ -32,9 +32,9 @@ dependencies = [
     "pydantic-settings>=2.8.1",
     "fastapi[standard]>=0.137.2",
     "lark>=1.1.0",
+    "nemo-helix-ext",
     "nemo-helix-plugin",
     "pyyaml>=6.0.2",
-    "nemo-helix-sdk",
     "sqlalchemy>=2.0.0",
     "huggingface-hub>=1.0.1,<2.0.0",
     "hvac>=2.3.0",
@@ -68,9 +68,6 @@ dev = [
 dev-dependencies = [
   "pytest>=8.3.3",
 ]
-
-[project.entry-points."nemo.sdk_provider"]
-platform = "nhx.common.sdk_factory:HelixSDKProvider"
 
 [project.entry-points."nemo.client_provider"]
 platform = "nhx.common.client_factory:HelixNemoClientProvider"

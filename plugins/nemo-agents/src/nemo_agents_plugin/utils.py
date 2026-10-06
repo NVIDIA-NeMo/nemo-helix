@@ -16,7 +16,6 @@ from typing import Any, Iterator
 from urllib.parse import urlsplit
 
 import yaml
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.entities import parse_qualified_name
@@ -432,7 +431,7 @@ def validate_llm_models(
     if not to_check:
         return
 
-    virtual_models_client = client_from_platform(sdk, VirtualModelsClient)
+    virtual_models_client = VirtualModelsClient.from_client(sdk)
     missing: list[tuple[str, str]] = []  # (qualified_name, llm_key)
     for (target_ws, target_name), llm_key in to_check.items():
         try:

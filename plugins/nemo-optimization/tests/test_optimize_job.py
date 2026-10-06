@@ -419,7 +419,7 @@ def bundle_sdk(
         return _StubManager()
 
     with (
-        patch("nemo_agents_plugin.jobs.fileset_io.client_from_platform", return_value=files_client),
+        patch("nemo_agents_plugin.jobs.fileset_io.FilesClient.from_client", return_value=files_client),
         patch("nemo_agents_plugin.jobs.fileset_io._fileset_manager", side_effect=_manager),
     ):
         yield cast(NemoClient, sdk)

@@ -110,12 +110,12 @@ async def _run_platform_seed_async(client: TestClient) -> None:
         raise RuntimeError("guardrails_service not on app.state")
     provider = guardrails_svc.dependency_provider
     entity_client = provider.get_service_entity_client("platform-seed")
-    sdk = provider.get_service_sdk_client("platform-seed")
+    client = provider.get_service_nemo_client("platform-seed")
     # Use the test config store while preserving the same enabled seed steps as startup.
     config = HelixSeedConfig(
         guardrails_config_store_path=_CONFIG_STORE_PATH,
     )
-    await run_platform_seed(entity_client, sdk, config)
+    await run_platform_seed(entity_client, client, config)
 
 
 def _run_platform_seed_for_test_client(client: TestClient) -> None:

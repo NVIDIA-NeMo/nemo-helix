@@ -21,7 +21,6 @@ from nemo_deployments_plugin.entities import Deployment, DeploymentConfig
 from nemo_deployments_plugin.secrets import SecretResolutionError, resolve_deployment_secret_env
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.auth.workload_delegations import WorkloadDelegationStore
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 
@@ -69,7 +68,7 @@ class K8sDeploymentBackend(DeploymentBackend):
             kubeconfig_path=self._executor_config.kubeconfig_path,
             request_timeout=self._executor_config.request_timeout,
         )
-        self._entities = NemoEntitiesClient(client_from_platform(self._sdk, AsyncEntitiesClient))
+        self._entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self._nemo_client))
         self._workload_delegations = WorkloadDelegationStore(self._entities)
         logger.debug(
             "K8sDeploymentBackend initialized (default_namespace=%s)",
@@ -116,7 +115,7 @@ class K8sDeploymentBackend(DeploymentBackend):
             # k8s keeps secret_ref env vars intact and mounts their resolved
             # values through a single per-deployment Secret via envFrom, so the
             # plaintext never lands in the pod manifest.
-            secret_env = await resolve_deployment_secret_env(self._sdk, config)
+            secret_env = await resolve_deployment_secret_env(self._nemo_client, config)
         except NemoEntityNotFoundError:
             return BackendStatusUpdate(
                 status="FAILED",

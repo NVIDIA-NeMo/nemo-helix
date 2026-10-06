@@ -24,7 +24,6 @@ from pathlib import Path
 from typing import Iterator
 
 from filesets import FilesetFileSystem
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.errors import LocalRunError
 from nemo_helix_plugin.files.client import FilesClient
@@ -96,7 +95,7 @@ def resolve_staged_config(
     with tempfile.TemporaryDirectory(prefix=f".{kind}-{name}-", dir=str(ctx.storage.ephemeral)) as tmp:
         tmp_path = Path(tmp)
         logger.info("Downloading fileset %s/%s into %s for %s.", ws, name, tmp_path, kind)
-        files_client = client_from_platform(sdk, FilesClient)
+        files_client = FilesClient.from_client(sdk)
         manager = _fileset_manager(files_client, workspace=ws, fileset=name, ensure_fileset_exists=False)
         manager.download_from_url(f"{ws}/{name}", local_dir=tmp_path)
         # ``config_rel_path`` is caller-controlled — confirm it stays inside the
@@ -173,7 +172,7 @@ def resolve_output(
 
 def upload_to_fileset(local_dir: Path, *, fileset: str, workspace: str, sdk: NemoClient) -> None:
     """Upload *local_dir*'s contents recursively to the named fileset (auto-created)."""
-    files_client = client_from_platform(sdk, FilesClient)
+    files_client = FilesClient.from_client(sdk)
     manager = _fileset_manager(files_client, workspace=workspace, fileset=fileset, ensure_fileset_exists=True)
     manager.validate_storage()
     manager.upload(local_path=local_dir, remote_path="")

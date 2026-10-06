@@ -108,7 +108,7 @@ class VolcanoJobBackend(
         self._custom_v1 = client.CustomObjectsApi()
         self._batch_v1 = client.BatchV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
-        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nhx_sdk)
+        self._workload_delegation_store = create_authenticated_workload_delegation_store(self._nemo_client)
         self._workload_delegations = KubernetesPodBoundWorkloadDelegationManager(
             core_v1=self._core_v1,
             namespace=self.namespace,
@@ -427,7 +427,7 @@ class VolcanoJobBackend(
             if job_type is not None and job_type != JOB_TYPE_JOB:
                 continue
 
-            # Skip jobs missing required labels (e.g. old or manually created); avoid calling SDK with None.
+            # Skip jobs missing required labels (e.g. old or manually created); avoid calling the Jobs API with None.
             if not job_id or not step_name or not workspace_id:
                 logger.warning(
                     "Skipping cleanup for Volcano job with missing labels (job_id, step_name, or workspace_id)",
@@ -608,7 +608,7 @@ class VolcanoJobBackend(
         status, status_details = map_volcano_job_status_to_platform_status(job["status"])
         status_details["events"] = self.get_volcano_job_events(job)
         status_details["events"].extend(self.get_volcano_pod_group_events(job))
-        tasks_has_error = update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+        tasks_has_error = update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
         if tasks_has_error:
             status = HelixJobStatus.ERROR
             if "message" not in status_details:
@@ -700,7 +700,7 @@ class VolcanoJobBackend(
     ) -> JobUpdate:
         if job is not None:
             # job has not yet been terminated
-            update_all_tasks(self._nhx_sdk, self._core_v1, self.namespace, step)
+            update_all_tasks(self._nemo_client, self._core_v1, self.namespace, step)
             if status_details is None:
                 status_details = {}
             events = self.get_volcano_job_events(job)

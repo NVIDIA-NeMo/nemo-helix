@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for job creation with secret references and user-scoped SDK.
+"""Integration tests for job creation with secret references and user-scoped client.
 
 Validates that when creating a job that references platform secrets:
 - If the user has access to the secret (same workspace or other workspace they can access),
@@ -9,7 +9,7 @@ Validates that when creating a job that references platform secrets:
 - If the user does not have access to the secret (e.g. secret in another workspace they
   are not a member of), job creation fails with a clear error.
 
-The jobs API uses the request-scoped (user) SDK for secret validation so that only
+The jobs API uses the request-scoped (user) client for secret validation so that only
 secrets the user can access are allowed in the job spec.
 """
 

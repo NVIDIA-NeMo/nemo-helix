@@ -124,7 +124,6 @@ from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_page
 from nemo_helix_plugin.cli_progress import request_progress
 from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
 from nemo_helix_plugin.cli_warnings import collect_warnings
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
     NemoClientError,
@@ -2965,14 +2964,14 @@ def _collect_text_agent_artifacts(
 
 def _clear_existing_ethos_artifacts(
     *,
-    sdk: SyncHelixClient,
+    client: NemoClient,
     fileset: str,
     workspace: str,
 ) -> None:
     """Remove the previous executable snapshot while preserving durable Ethos."""
 
     preserved = {ETHOS_FILENAME}
-    files_client = client_from_platform(sdk, FilesClient)
+    files_client = FilesClient.from_client(client)
 
     try:
         existing = files_client.list_files(name=fileset, workspace=workspace).data().data
@@ -3173,7 +3172,7 @@ def _upload_ethos_fileset(
         # fileset. The durable Ethos contract survives even when it is absent
         # from this executable snapshot.
         _clear_existing_ethos_artifacts(
-            sdk=sdk,
+            client=sdk,
             fileset=fileset,
             workspace=workspace,
         )

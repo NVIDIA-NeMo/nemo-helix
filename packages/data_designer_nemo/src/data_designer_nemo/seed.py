@@ -10,7 +10,7 @@ from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.secret_resolver import validate_secret
 from filesets import FilesetPathError, build_fileset_ref, parse_fileset_ref
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import ListFilesQueryParams
@@ -34,7 +34,7 @@ LOCAL_DATAFRAME_SEED_ERROR_MESSAGE = (
 async def validate_seed(
     dd_config: dd.DataDesignerConfig,
     workspace: str,
-    client: AsyncHelixClient,
+    client: AsyncNemoClient,
 ) -> str | None:
     if (seed_source := _get_seed_source(dd_config)) is None:
         return None
@@ -57,7 +57,7 @@ async def validate_seed(
 async def _validate_seed_from_files_service(
     seed_source: FilesetFileSeedSource | dd.DirectorySeedSource | dd.FileContentsSeedSource,
     workspace: str,
-    client: AsyncHelixClient,
+    client: AsyncNemoClient,
 ) -> str | None:
     try:
         workspace, fileset_name, fragment = parse_fileset_ref(seed_source.path, workspace_fallback=workspace)
@@ -66,7 +66,7 @@ async def _validate_seed_from_files_service(
             f"The fileset reference in seed source path {seed_source.path!r} is formatted incorrectly"
         ) from e
 
-    files = client_from_platform(client, AsyncFilesClient)
+    files = AsyncFilesClient.from_client(client)
     try:
         await files.get_fileset(name=fileset_name, workspace=workspace)
     except NotFoundError as e:

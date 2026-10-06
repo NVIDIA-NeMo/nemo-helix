@@ -320,32 +320,33 @@ def platform_server(clickhouse: None) -> Iterator[str]:  # noqa: ARG001 - orderi
 
 
 # --------------------------------------------------------------------------- #
-# SDK helpers (reuse the Insights plugin's own client/preflight code)         #
+# Client helpers (reuse the Insights plugin's own client/preflight code)      #
 # --------------------------------------------------------------------------- #
 def _count_traces() -> int:
-    from nemo_helix_plugin.client.adapter import client_from_platform
-    from nemo_helix_plugin.client.client import AsyncNemoClient
     from nemo_insights_plugin.analyst.analyst_backend import make_analyst_backend
     from nemo_insights_plugin.platform_client import make_client
 
     async def _run() -> int:
-        sdk = make_client(BASE_URL)
-        backend = make_analyst_backend(client=client_from_platform(sdk, AsyncNemoClient), insights_output=None)
+        client = make_client(BASE_URL)
+        backend = make_analyst_backend(client=client, insights_output=None)
         try:
             return await backend.count_agent_sessions(agent=TEST_AGENT, workspace=WORKSPACE)
         finally:
-            await sdk.close()
+            await client.close()
 
     return asyncio.run(_run())
 
 
 def _list_insight_ids() -> list[str]:
     from nemo_insights_plugin.platform_client import make_client
+    from nemo_insights_plugin.sdk import AsyncInsightsPluginResource
 
     async def _run() -> list[str]:
         client = make_client(BASE_URL)
         try:
-            page = await client.insights.insights.list_insights(workspace=WORKSPACE, agent=TEST_AGENT, page_size=100)
+            page = await AsyncInsightsPluginResource(client).insights.list_insights(
+                workspace=WORKSPACE, agent=TEST_AGENT, page_size=100
+            )
         finally:
             await client.close()
         return [insight.id for insight in page.data]
@@ -355,12 +356,14 @@ def _list_insight_ids() -> list[str]:
 
 def _delete_insights(insight_ids: list[str]) -> None:
     from nemo_insights_plugin.platform_client import make_client
+    from nemo_insights_plugin.sdk import AsyncInsightsPluginResource
 
     async def _run() -> None:
         client = make_client(BASE_URL)
         try:
+            insights = AsyncInsightsPluginResource(client).insights
             for insight_id in insight_ids:
-                await client.insights.insights.delete(workspace=WORKSPACE, insight_id=insight_id)
+                await insights.delete(workspace=WORKSPACE, insight_id=insight_id)
         finally:
             await client.close()
 

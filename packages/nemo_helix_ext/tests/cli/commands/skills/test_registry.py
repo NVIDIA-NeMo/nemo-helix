@@ -3,9 +3,6 @@
 
 """Tests for the skill / agent registry."""
 
-# ruff: noqa: I001 - vendoring rewrites nemo_helix_ext imports to nemo_helix,
-# which changes the SDK package's preferred import ordering.
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable

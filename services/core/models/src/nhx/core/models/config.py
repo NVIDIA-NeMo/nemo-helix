@@ -338,15 +338,15 @@ class ControllerConfig(BaseModel):
         ge=1,
         description=(
             "Per-request timeout in seconds for GET /v1/models provider autodiscovery via the inference gateway. "
-            "External providers (e.g. NVIDIA Build) can return large model lists and need longer than the SDK default."
+            "External providers (e.g. NVIDIA Build) can return large model lists and need longer than the client default."
         ),
     )
     provider_discovery_max_retries: int = Field(
         default=0,
         ge=0,
         description=(
-            "SDK retry count for provider autodiscovery requests. The controller loop already retries on "
-            "each cycle; disabling SDK retries avoids multi-minute retry storms on slow upstreams."
+            "Client retry count for provider autodiscovery requests. The controller loop already retries on "
+            "each cycle; disabling client retries avoids multi-minute retry storms on slow upstreams."
         ),
     )
 

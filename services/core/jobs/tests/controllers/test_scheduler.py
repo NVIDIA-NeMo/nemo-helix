@@ -26,8 +26,8 @@ def _conflict_error(detail: str) -> ConflictError:
 
 
 @fixture
-def job_scheduler(backend_registry: BackendRegistry, mock_nhx_client) -> JobScheduler:
-    return JobScheduler(backend_registry, mock_nhx_client)
+def job_scheduler(backend_registry: BackendRegistry, mock_nemo_client) -> JobScheduler:
+    return JobScheduler(backend_registry, mock_nemo_client)
 
 
 @fixture
@@ -38,7 +38,7 @@ def test_step_created(test_step_pending: HelixJobStepWithContext) -> HelixJobSte
 def test_does_schedule_job(
     job_scheduler: JobScheduler,
     backend_registry: BackendRegistry,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -72,7 +72,7 @@ def test_does_schedule_job(
 
 def test_scheduling_deferred_keeps_step_created_with_visible_status_details(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -93,7 +93,7 @@ def test_scheduling_deferred_keeps_step_created_with_visible_status_details(
 
 def test_scheduling_deferred_preserves_step_resuming_with_visible_status_details(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_resuming: HelixJobStepWithContext,
 ):
@@ -114,7 +114,7 @@ def test_scheduling_deferred_preserves_step_resuming_with_visible_status_details
 
 def test_scheduling_deferred_status_write_failure_does_not_skip_later_steps(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -136,7 +136,7 @@ def test_scheduling_deferred_status_write_failure_does_not_skip_later_steps(
 
 def test_resource_allocation_error_marks_step_as_error(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -160,7 +160,7 @@ def test_resource_allocation_error_marks_step_as_error(
 
 def test_scheduler_logs_diagnostics_for_unexpected_schedule_error_in_debug_mode(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -174,7 +174,7 @@ def test_scheduler_logs_diagnostics_for_unexpected_schedule_error_in_debug_mode(
         job_scheduler.step()
 
     log_diagnostics.assert_called_once_with(
-        mock_nhx_client,
+        mock_nemo_client,
         test_step_created,
         logger=job_scheduler._logger,
         context="unexpected scheduling error",
@@ -183,7 +183,7 @@ def test_scheduler_logs_diagnostics_for_unexpected_schedule_error_in_debug_mode(
 
 def test_scheduler_does_not_mark_step_error_when_pending_update_conflicts_with_concurrent_advance(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_created: HelixJobStepWithContext,
 ):
@@ -215,7 +215,7 @@ def test_scheduler_does_not_mark_step_error_when_pending_update_conflicts_with_c
 
 def test_scheduler_does_not_ignore_pending_update_conflict_when_step_remains_resuming(
     job_scheduler: JobScheduler,
-    mock_nhx_client,
+    mock_nemo_client,
     mock_jobs_client,
     test_step_pending: HelixJobStepWithContext,
 ):

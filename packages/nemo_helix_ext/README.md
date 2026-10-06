@@ -238,7 +238,7 @@ See [docs/overview.md](docs/overview.md) for architecture details.
 
 `nemo <group> *` commands are hand-written on the typed clients in `nemo_helix_plugin`
 (`src/nemo_helix_ext/cli/commands/`); the CLI has no dependency on the generated
-`nemo_helix` SDK. Functional groups (`guardrail`, `intake`, `experiments`, ...) are
+`nemo_helix` SDK, and neither does the rest of `nemo_helix_ext`. Functional groups (`guardrail`, `intake`, `experiments`, ...) are
 `nemo.cli` entry points shipped by the owning package.
 
 To regenerate the CLI reference docs (from repo root):

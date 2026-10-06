@@ -133,7 +133,7 @@ class FakeFiles:
 
 
 class FakeSDK:
-    """Stand-in for ``NeMoHelix``; ``build_files_client`` hands out FakeFiles."""
+    """Stand-in for a platform client; ``build_files_client`` hands out FakeFiles."""
 
     def __init__(self, staged_dir: Path) -> None:
         self.files = FakeFiles(staged_dir)
@@ -146,15 +146,15 @@ class FakeSDK:
 def fake_sdk_factory(monkeypatch) -> Iterator[Callable[[Path], FakeSDK]]:
     """Yield a factory for :class:`FakeSDK` bound to the typed ``FilesClient``.
 
-    Each produced instance is wired as the ``client_from_platform`` result
+    Each produced instance is wired as the ``FilesClient.from_client`` result
     inside ``fileset`` so ``fileset_path`` consumes the fake client.
     """
 
     def make(staged_dir: Path) -> FakeSDK:
         sdk = FakeSDK(staged_dir)
         monkeypatch.setattr(
-            "nemo_agents_plugin.usage.sources.fileset.client_from_platform",
-            lambda _platform, _client_cls: sdk.build_files_client(),
+            "nemo_agents_plugin.usage.sources.fileset.FilesClient.from_client",
+            lambda _platform: sdk.build_files_client(),
         )
         return sdk
 

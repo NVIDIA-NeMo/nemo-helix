@@ -3,8 +3,9 @@
 
 """In-memory cache for VirtualModel entities.
 
-VirtualModels are fetched from the IGW's own VirtualModel API via the platform SDK
-(``sdk.inference.virtual_models.list(workspace="-")``), following the same pattern used by
+VirtualModels are fetched from the IGW's own VirtualModel API via the typed
+:class:`~nemo_helix_plugin.virtual_models.client.AsyncVirtualModelsClient`
+(``list_virtual_models(workspace="-")``), following the same pattern used by
 :mod:`model_cache` for ``ModelProvider``\\ s.
 
 The cache is refreshed by :func:`refresh_virtual_model_cache`, which is called from
@@ -19,8 +20,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from nemo_helix import APIConnectionError, APIStatusError, AsyncNeMoHelix
-from nemo_helix.types.inference.virtual_model import VirtualModel
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareConfigRef,
     PrefetchResult,
@@ -56,7 +59,7 @@ def sync_config_ref_versions(
 
     Refs in :attr:`PrefetchResult.transient` leave their *known_versions* entry untouched
     and are **not** added to the returned set: this is the "don't flap on transient
-    failures" invariant — a brief SDK / network glitch must not invalidate a previously
+    failures" invariant — a brief client / network glitch must not invalidate a previously
     healthy resolution.
 
     Refs no longer present in *current_refs* (no VM references them anymore) are pruned
@@ -117,12 +120,12 @@ class VirtualModelCache:
 
 async def refresh_virtual_model_cache(
     cache: VirtualModelCache,
-    sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     registry: MiddlewareRegistry | None = None,
 ) -> None:
     """Fetch all VirtualModels from the IGW's own API, rebuild *cache*, and notify *registry*.
 
-    Calls ``sdk.inference.virtual_models.list(workspace="-")`` (cross-workspace) and iterates
+    Calls ``list_virtual_models(workspace="-")`` (cross-workspace) and iterates
     all pages.  On any error a :class:`VirtualModelCacheRefreshError` is raised;
     callers are responsible for logging and deciding whether to retry.
 
@@ -141,18 +144,20 @@ async def refresh_virtual_model_cache(
 
     Args:
         cache: The cache instance to rebuild.
-        sdk: Platform SDK authenticated as the ``inference-gateway`` service principal.
+        client: Platform client authenticated as the ``inference-gateway`` service principal.
         registry: Optional :class:`~nhx.core.inference_gateway.api.middleware_registry.MiddlewareRegistry`
             to notify of VirtualModel lifecycle events.
     """
     try:
         virtual_models: list[VirtualModel] = []
-        paginator = sdk.inference.virtual_models.list(workspace="-", page_size=200)
-        async for vm in paginator:
+        page = await AsyncVirtualModelsClient.from_client(client).list_virtual_models(
+            workspace="-", query_params={"page_size": 200}
+        )
+        async for vm in page.items():
             # Skip VMs with missing workspace/name — they cannot be keyed in the map
             if vm.workspace and vm.name:
                 virtual_models.append(vm)
-    except (APIConnectionError, APIStatusError) as exc:
+    except (NemoTransportError, NemoHTTPError) as exc:
         raise VirtualModelCacheRefreshError(f"Error refreshing VirtualModel cache from API: {exc}") from exc
     except Exception as exc:
         raise VirtualModelCacheRefreshError(f"Unexpected error refreshing VirtualModel cache: {exc}") from exc

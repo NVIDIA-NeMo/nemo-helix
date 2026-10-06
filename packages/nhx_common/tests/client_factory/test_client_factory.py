@@ -177,6 +177,73 @@ class TestAsyncConstruction:
 
 
 # ---------------------------------------------------------------------------
+# Transport tuning and retry
+# ---------------------------------------------------------------------------
+
+
+class TestTransportOptions:
+    def test_sync_timeout_and_retry_are_client_options(self):
+        retry = RetryPolicy(max_retries=5)
+        client = cf.get_nemo_client(timeout=12.5, retry=retry)
+        assert client._timeout == 12.5
+        assert client.retry is retry
+
+    async def test_async_timeout_retry_and_follow_redirects(self):
+        retry = RetryPolicy(max_retries=2)
+        client = cf.get_async_nemo_client(
+            as_service="models",
+            internal=True,
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_connections=7),
+            follow_redirects=True,
+            retry=retry,
+        )
+        assert client._timeout == httpx.Timeout(30.0)
+        assert client.retry is retry
+        assert client._http.follow_redirects is True
+        await client.close()
+
+    def test_defaults_use_default_retry_policy(self):
+        client = cf.get_nemo_client()
+        assert client.retry is cf.DEFAULT_RETRY_POLICY
+        assert client._timeout is None
+
+    def test_retry_none_disables_retries(self):
+        client = cf.get_nemo_client(retry=None)
+        assert client.retry is None
+
+    def test_explicit_http_client_ignores_transport_tuning(self):
+        with httpx.Client(follow_redirects=False) as explicit:
+            client = cf.get_nemo_client(http_client=explicit, follow_redirects=True, timeout=3.0)
+            assert client._http is explicit
+            assert client._timeout == 3.0
+
+
+# ---------------------------------------------------------------------------
+# On-behalf-of delegation of an existing client
+# ---------------------------------------------------------------------------
+
+
+class TestOnBehalfOf:
+    def test_delegates_service_client_and_shares_transport(self):
+        base = cf.get_async_nemo_client(as_service="agents", internal=True)
+        delegated = cf.get_nemo_client_on_behalf_of(base, Principal(id="owner@example.com", groups=["team"]))
+
+        assert delegated._http is base._http
+        assert delegated.default_headers["X-NHX-Principal-Id"] == "service:agents"
+        assert delegated.default_headers["X-NHX-Internal"] == "true"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of"] == "owner@example.com"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team"
+        assert "X-NHX-Principal-On-Behalf-Of" not in base.default_headers
+
+    def test_matches_factory_on_behalf_of(self):
+        principal = Principal(id="owner@example.com", email="owner@example.com", groups=["a", "b"])
+        built = cf.get_nemo_client(as_service="agents", internal=True, on_behalf_of=principal)
+        derived = cf.get_nemo_client_on_behalf_of(cf.get_nemo_client(as_service="agents", internal=True), principal)
+        assert derived.default_headers == built.default_headers
+
+
+# ---------------------------------------------------------------------------
 # URL routing
 # ---------------------------------------------------------------------------
 
@@ -505,7 +572,7 @@ class TestTaskClientWorkloadIdentity:
         assert client.base_url == "http://other-platform:7000"
 
     def test_uds_does_not_bootstrap_workload_identity(self, monkeypatch, tmp_path, _stub_exchange):
-        # Matches get_task_sdk exactly: with the WI token file set the task path
+        # With the WI token file set the task path
         # delegates to get_nemo_client(internal=True); on UDS transport that skips
         # bearer exchange and propagates the env principal as its own identity
         # (no service principal, no bearer auth).

@@ -13,10 +13,13 @@ import threading
 import urllib.error
 import urllib.request
 
-from nemo_helix import NeMoHelix, NotFoundError
-from nemo_helix_plugin.client.adapter import client_from_platform
+from filesets import transfer
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import Adapter, ModelEntity
+from nhx.common.client_factory import get_nemo_client
 from nhx.common.config import get_platform_config
 from nhx.common.controller import (
     Controller,
@@ -26,7 +29,6 @@ from nhx.common.controller import (
     TimedLoopWaiter,
     TrackLastExecutionTime,
 )
-from nhx.common.sdk_factory import get_platform_sdk
 
 stop_signal = threading.Event()
 
@@ -89,18 +91,16 @@ class AdaptersController(HeartbeatMixin, Controller):
 
         self.platform_config = get_platform_config()
 
-        self._sdk: NeMoHelix = get_platform_sdk(
+        self._client: NemoClient = get_nemo_client(
             as_service="models",
             internal=True,
         )
-        self._models = client_from_platform(self._sdk, ModelsClient)
+        self._models = ModelsClient.from_client(self._client)
+        self._files = FilesClient.from_client(self._client)
 
     def download_fileset(self, dest_dir: str, workspace: str, name: str) -> bool:
         try:
-            response = self._sdk.files.list(
-                workspace=workspace,
-                fileset=name,
-            )
+            response = transfer.list_files(self._files, workspace=workspace, fileset=name)
             logger.info(f"Found {len(response.data)} files in FileSet {workspace}/{name}")
             if not response.data:
                 logger.warning(f"FileSet {workspace}/{name} contains no files")
@@ -108,7 +108,8 @@ class AdaptersController(HeartbeatMixin, Controller):
 
             # TODO: Add reporting on download progress and store it with the Adapter on ModelEntity
 
-            self._sdk.files.download(
+            transfer.download(
+                self._files,
                 fileset=name,
                 workspace=workspace,
                 local_path=dest_dir,
@@ -486,7 +487,7 @@ def run(parent_stop_signal: threading.Event | None = None):
     else:
         local_stop_signal = parent_stop_signal
 
-    logger.debug(f"Initialized NeMo Helix SDK with base_url: {platform_config.base_url}")
+    logger.debug(f"Initialized NeMo Helix client with base_url: {platform_config.base_url}")
 
     adapters_controller = AdaptersController(stop_signal=local_stop_signal)
     adapters_controller_monitored = TrackLastExecutionTime(adapters_controller)

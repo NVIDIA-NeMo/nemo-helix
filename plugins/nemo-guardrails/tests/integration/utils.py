@@ -13,7 +13,6 @@ from typing import Any, TypedDict
 
 import httpx
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.guardrail.client import GuardrailClient
 from nemo_helix_plugin.guardrail.types import (
@@ -143,7 +142,7 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
     """
     config_ref = f"{harness.workspace}/{config_name}"
     phases = ("request_middleware", "response_middleware", "post_response_middleware")
-    virtual_models_client = client_from_platform(harness.sdk, VirtualModelsClient)
+    virtual_models_client = VirtualModelsClient.from_client(harness.client)
 
     for workspace, name in harness.virtual_models:
         try:
@@ -176,7 +175,7 @@ def detach_guardrail_config(harness: Any, config_name: str) -> None:
 
 
 def guardrail_client(harness: Any) -> GuardrailClient:
-    return client_from_platform(harness.sdk, GuardrailClient)
+    return GuardrailClient.from_client(harness.client)
 
 
 def create_guardrail_config(

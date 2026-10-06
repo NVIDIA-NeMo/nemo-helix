@@ -15,13 +15,19 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 from uuid import UUID
 
 from nemo_helix_ext.client.bootstrap import build_nemo_client
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.intake.client import IntakeClient
-from nemo_helix_plugin.intake.types import DirectSpansIngestRequest
+from nemo_helix_plugin.intake.types import (
+    ANNOTATION_INPUT_ADAPTER,
+    DirectSpansIngestRequest,
+    EvaluatorResultCreateRequest,
+    ListAnnotationsQueryParams,
+    ListSpansQueryParams,
+)
 
 JsonObject = dict[str, Any]
 SPAN_BATCH_LIMIT = 1000
@@ -408,6 +414,13 @@ def validate_common_arguments(parser: argparse.ArgumentParser, args: argparse.Na
 
 
 class IntakeWriter:
+    """Write an :class:`ImportBundle` to Intake through the typed :class:`IntakeClient`.
+
+    Without an injected *client*, one is built from the active CLI context, so
+    OAuth token refresh and the ``--nhx-base-url``, ``--workspace`` and
+    ``NHX_ACCESS_TOKEN`` overrides all apply.
+    """
+
     def __init__(
         self,
         *,
@@ -415,34 +428,21 @@ class IntakeWriter:
         workspace: str | None,
         access_token: str | None = None,
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
-        session: Any | None = None,
+        client: IntakeClient | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
-        self._client: NemoClient | None = None
-        self._intake_client: IntakeClient | None = None
-        self.session: Any
-        if session is None:
-            self._client = build_nemo_client(
+        self._nemo_client: NemoClient | None = None
+        if client is None:
+            self._nemo_client = build_nemo_client(
                 base_url=base_url,
                 access_token=access_token,
                 timeout=float(timeout_seconds),
                 retry=None,
             )
-            self._intake_client = IntakeClient.from_client(self._client)
-            # The bootstrap's httpx client already carries the context's auth and headers.
-            self.session = self._client._client
-            self.base_url = _validated_base_url(self._client.base_url)
-            self.workspace = workspace or self._client.workspace or "default"
-            self.headers: dict[str, str] = {}
-        else:
-            if base_url is None:
-                raise ValueError("base_url is required when injecting an HTTP session")
-            self.session = session
-            self.base_url = _validated_base_url(base_url)
-            self.workspace = workspace or "default"
-            token = access_token or os.environ.get("NHX_ACCESS_TOKEN")
-            self.headers = {"Authorization": f"Bearer {token}"} if token else {}
-        self.prefix = f"/apis/intake/v2/workspaces/{quote(self.workspace, safe='')}"
+            client = IntakeClient.from_client(self._nemo_client)
+        self.base_url = _validated_base_url(client.base_url)
+        self._client: IntakeClient = client
+        self.workspace = workspace or client.workspace or "default"
 
     def __enter__(self) -> IntakeWriter:
         return self
@@ -451,33 +451,22 @@ class IntakeWriter:
         self.close()
 
     def close(self) -> None:
-        if self._client is not None:
-            self._client.close()
-            self._client = None
-            self._intake_client = None
+        if self._nemo_client is not None:
+            self._nemo_client.close()
+            self._nemo_client = None
 
     def write(self, bundle: ImportBundle, *, batch_size: int) -> JsonObject:
         bundle.validate()
         for start in range(0, len(bundle.spans), batch_size):
             spans = bundle.spans[start : start + batch_size]
-            if self._intake_client is not None:
-                self._intake_client.create_spans(
-                    workspace=self.workspace,
-                    body=DirectSpansIngestRequest.model_validate({"source": bundle.source, "spans": spans}),
-                )
-            else:
-                self._request(
-                    "POST",
-                    f"{self.prefix}/ingest/spans",
-                    json_body={"source": bundle.source, "spans": spans},
-                    expected={201},
-                )
+            self._client.create_spans(
+                workspace=self.workspace,
+                body=DirectSpansIngestRequest.model_validate({"source": bundle.source, "spans": spans}),
+            )
         for result in bundle.evaluator_results:
-            self._request(
-                "POST",
-                f"{self.prefix}/evaluator-results",
-                json_body=result,
-                expected={201},
+            self._client.create_evaluator_result(
+                workspace=self.workspace,
+                body=EvaluatorResultCreateRequest.model_validate(result),
             )
         existing_signatures: set[str] = set()
         fetched_annotation_keys: set[tuple[str, str, str]] = set()
@@ -496,11 +485,9 @@ class IntakeWriter:
                 existing_signatures.update(self._existing_annotation_signatures(annotation))
             if signature in existing_signatures:
                 continue
-            self._request(
-                "POST",
-                f"{self.prefix}/annotations",
-                json_body=annotation,
-                expected={201},
+            self._client.create_annotation(
+                workspace=self.workspace,
+                body=ANNOTATION_INPUT_ADAPTER.validate_python(annotation),
             )
             existing_signatures.add(signature)
             written_annotations += 1
@@ -513,14 +500,14 @@ class IntakeWriter:
         }
 
     def _existing_annotation_signatures(self, annotation: JsonObject) -> set[str]:
-        filters: list[tuple[str, str | int]] = [
-            ("filter[session_id]", str(annotation["session_id"])),
-            ("filter[kind]", str(annotation["kind"])),
-        ]
+        filters: JsonObject = {"session_id": str(annotation["session_id"]), "kind": str(annotation["kind"])}
         if annotation.get("span_id"):
-            filters.append(("filter[span_id]", str(annotation["span_id"])))
+            filters["span_id"] = str(annotation["span_id"])
+        query_params: ListAnnotationsQueryParams = {"filter": filters, "page_size": 1000}
+        response = self._client.list_annotations(workspace=self.workspace, query_params=query_params)
         return {
-            _annotation_signature(item) for item in self._paginated_data(f"{self.prefix}/annotations", filters=filters)
+            _annotation_signature(item.model_dump(mode="json"))
+            for item in _bounded_items(response.pages(), "annotations")
         }
 
     def _verify_spans(self, spans: list[JsonObject], *, source: str) -> None:
@@ -528,62 +515,24 @@ class IntakeWriter:
         for item in spans:
             expected_by_trace.setdefault(str(item["trace_id"]), set()).add(str(item["span_id"]))
         for trace_id, expected_ids in expected_by_trace.items():
-            filters: list[tuple[str, str | int]] = [
-                ("filter[trace_id]", trace_id),
-                ("filter[source]", source),
-            ]
-            found_ids = {str(item["span_id"]) for item in self._paginated_data(f"{self.prefix}/spans", filters=filters)}
+            query_params: ListSpansQueryParams = {
+                "filter": {"trace_id": trace_id, "source": source},
+                "page_size": 1000,
+            }
+            response = self._client.list_spans(workspace=self.workspace, query_params=query_params)
+            found_ids = {span.span_id for span in _bounded_items(response.pages(), "spans")}
             missing = expected_ids - found_ids
             if missing:
                 raise RuntimeError(f"Intake verification did not find imported spans: {sorted(missing)}")
 
-    def _paginated_data(
-        self,
-        path: str,
-        *,
-        filters: list[tuple[str, str | int]],
-    ) -> Iterator[JsonObject]:
-        for page in range(1, MAX_INTAKE_PAGES + 1):
-            params = [*filters, ("page", page), ("page_size", 1000)]
-            payload = self._request("GET", path, params=params, expected={200})
-            if not isinstance(payload, dict):
-                raise RuntimeError(f"Intake {path} response must be an object")
-            data = payload.get("data", [])
-            if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
-                raise RuntimeError(f"Intake {path} response `data` must be an array of objects")
-            yield from data
-            pagination = payload.get("pagination") or {}
-            if not isinstance(pagination, dict):
-                raise RuntimeError(f"Intake {path} response `pagination` must be an object")
-            response_page = int(pagination.get("page", page))
-            if response_page >= int(pagination.get("total_pages", response_page)):
-                return
-        raise RuntimeError(f"Intake {path} pagination exceeded {MAX_INTAKE_PAGES} pages")
 
-    def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: list[tuple[str, str | int]] | None = None,
-        json_body: JsonObject | None = None,
-        expected: set[int],
-    ) -> Any:
-        response = self.session.request(
-            method,
-            f"{self.base_url}{path}",
-            params=params,
-            json=json_body,
-            headers=self.headers,
-            timeout=self.timeout_seconds,
-            follow_redirects=False,
-        )
-        if response.status_code not in expected:
-            body = response.text[:2000]
-            raise RuntimeError(f"{method} {path} returned {response.status_code}: {body}")
-        if not response.content:
-            return None
-        return response.json()
+def _bounded_items(pages: Iterator[Any], resource: str) -> Iterator[Any]:
+    """Yield every item from *pages*, failing once more than ``MAX_INTAKE_PAGES`` pages are read."""
+
+    for count, page in enumerate(pages, start=1):
+        if count > MAX_INTAKE_PAGES:
+            raise RuntimeError(f"Intake {resource} pagination exceeded {MAX_INTAKE_PAGES} pages")
+        yield from page.items
 
 
 def run_import(bundle: ImportBundle, args: argparse.Namespace) -> int:

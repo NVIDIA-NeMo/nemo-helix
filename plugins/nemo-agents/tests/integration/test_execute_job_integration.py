@@ -14,8 +14,9 @@ import pytest
 from nemo_agents_plugin.fabric.runtime import FabricRuntimeResult
 from nemo_agents_plugin.jobs.execute import ExecuteAgentJob
 from nemo_agents_plugin.service import AgentsService
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import HelixJobResults
 from nhx.core.files.service import FilesService
@@ -41,6 +42,13 @@ def _extract_tar_members(content: bytes, target_dir: Path) -> dict[str, str]:
             relative = path.relative_to(target_dir)
             files[relative.as_posix()] = path.read_text()
     return files
+
+
+def _upload(client: NemoClient, *, fileset: str, path: str, content: str, create: bool = False) -> None:
+    files_client = FilesClient.from_client(client)
+    if create:
+        files_client.create_fileset(body=CreateFilesetRequest(name=fileset), workspace="default")
+    files_client.upload_file(name=fileset, path=path, content=content.encode(), workspace="default")
 
 
 def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> None:
@@ -69,33 +77,10 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
         )
         assert agent_response.status_code == 201, agent_response.text
 
-        ctx.sdk.files.upload_content(
-            workspace="default",
-            fileset="base-workdir",
-            remote_path="README.md",
-            content="base readme\n",
-            fileset_auto_create=True,
-        )
-        ctx.sdk.files.upload_content(
-            workspace="default",
-            fileset="base-workdir",
-            remote_path="app/config.yaml",
-            content="source: base\n",
-        )
-        ctx.sdk.files.upload_content(
-            workspace="default",
-            fileset="config-artifact",
-            remote_path="config.yaml",
-            content="source: artifact\n",
-            fileset_auto_create=True,
-        )
-        ctx.sdk.files.upload_content(
-            workspace="default",
-            fileset="notes-artifact",
-            remote_path="notes.txt",
-            content="mounted notes\n",
-            fileset_auto_create=True,
-        )
+        _upload(ctx.client, fileset="base-workdir", path="README.md", content="base readme\n", create=True)
+        _upload(ctx.client, fileset="base-workdir", path="app/config.yaml", content="source: base\n")
+        _upload(ctx.client, fileset="config-artifact", path="config.yaml", content="source: artifact\n", create=True)
+        _upload(ctx.client, fileset="notes-artifact", path="notes.txt", content="mounted notes\n", create=True)
 
         job_name = "invoke-layered-workdir"
         create_response = ctx.test_client.post(
@@ -135,7 +120,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
             results=HelixJobResults(
                 job_name=job_name,
                 workspace="default",
-                client=client_from_platform(ctx.sdk, NemoClient),
+                client=ctx.client,
             ),
             job_id=job["id"],
         )
@@ -146,7 +131,7 @@ def test_execute_job_materializes_layered_input_workspace(tmp_path: Path) -> Non
             return FabricRuntimeResult(status="succeeded", response="done")
 
         with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke):
-            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
+            result = ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.client)
         assert result["status"] == "completed"
         assert result["input_workdir"]["name"] == "input_workdir"
 
@@ -214,13 +199,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
         )
         assert agent_response.status_code == 201, agent_response.text
 
-        ctx.sdk.files.upload_content(
-            workspace="default",
-            fileset="base-workdir",
-            remote_path="README.md",
-            content="base readme\n",
-            fileset_auto_create=True,
-        )
+        _upload(ctx.client, fileset="base-workdir", path="README.md", content="base readme\n", create=True)
 
         job_name = "invoke-fabric-raises"
         create_response = ctx.test_client.post(
@@ -248,7 +227,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
             results=HelixJobResults(
                 job_name=job_name,
                 workspace="default",
-                client=client_from_platform(ctx.sdk, NemoClient),
+                client=ctx.client,
             ),
             job_id=job["id"],
         )
@@ -262,7 +241,7 @@ def test_execute_job_saves_error_results_when_fabric_raises(tmp_path: Path) -> N
             patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
             pytest.raises(RuntimeError, match="fabric exploded"),
         ):
-            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=client_from_platform(ctx.sdk, NemoClient))
+            ExecuteAgentJob().run(job["spec"], ctx=job_ctx, sdk=ctx.client)
 
         results_response = ctx.test_client.get(f"/apis/agents/v2/workspaces/default/jobs/execute/{job_name}/results")
         assert results_response.status_code == 200, results_response.text

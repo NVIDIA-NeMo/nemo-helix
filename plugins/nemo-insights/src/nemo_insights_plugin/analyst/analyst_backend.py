@@ -3,7 +3,7 @@
 
 """Platform data access and persistence for analysis runs.
 
-The caller supplies an authenticated SDK client. The backend exposes:
+The caller supplies an authenticated typed client. The backend exposes:
 
 - read-only Intake queries (spans, span groups, feedback annotations, and a
   span-rollup session count),

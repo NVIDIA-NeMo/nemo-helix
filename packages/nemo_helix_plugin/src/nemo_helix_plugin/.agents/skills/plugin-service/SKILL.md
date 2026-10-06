@@ -138,8 +138,8 @@ result = await entity_client.list(Widget, workspace=workspace, filter_obj=filter
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 from nhx.common.auth.dependencies import get_auth_client
 from nhx.common.auth.client import AuthClient
-from nhx.common.service.dependencies import get_sdk_client  # transitive dep via nhx-common; not re-exported by nemo_helix_plugin
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
 from fastapi import Depends
 
@@ -155,13 +155,13 @@ async def list_widgets(
     workspace: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
     auth_client: AuthClient = Depends(get_auth_client),
-    sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> WidgetPage:
     principal_id = auth_client.principal.id
     ...
 ```
 
-`get_entity_client` is a placeholder — the platform injects the real implementation at startup via `app.dependency_overrides`.
+`get_entity_client` and `get_nemo_client` are placeholders — the platform injects the real implementations at startup via `app.dependency_overrides`. The injected `AsyncNemoClient` carries the caller's principal; derive service clients from it, e.g. `AsyncFilesClient.from_client(client)`.
 
 ## CRUD Quick Reference
 

@@ -36,10 +36,8 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareUnavailableError,
     VirtualModel,
 )
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
-from nhx.common.sdk_factory import get_async_platform_sdk
 from pydantic import BaseModel
 from typing import Any
 
@@ -55,11 +53,11 @@ class MyMiddleware(NemoInferenceMiddleware):
 
     # ── Lifecycle ──────────────────────────────────────────────────────
     async def on_startup(self) -> None:
-        # Build an entity client from the platform SDK so get_middleware_config
-        # can fetch stored config entities.
-        sdk = get_async_platform_sdk(as_service="nemo-my-plugin", internal=True)
-        typed_client = client_from_platform(sdk, AsyncEntitiesClient)
-        self._entity_client = NemoEntitiesClient(typed_client)
+        # IGW injects a typed client authenticated as service:<entry-point name>
+        # before on_startup(). Derive an entity client from it so
+        # get_middleware_config can fetch stored config entities.
+        client = self._get_platform_client("on_startup")
+        self._entity_client = NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
         entities = self.list_model_entities_for_workspace()  # cache available here
         ...

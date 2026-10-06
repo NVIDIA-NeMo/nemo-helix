@@ -31,12 +31,12 @@ def test_dataset_uri_no_workspace() -> None:
     assert reader.get_dataset_uri() == f"fileset://{request_workspace}/{path}"
 
 
-def test_create_duckdb_connection_requires_injected_sdk() -> None:
-    with pytest.raises(RuntimeError, match="requires an injected NeMo Helix SDK"):
+def test_create_duckdb_connection_requires_injected_client() -> None:
+    with pytest.raises(RuntimeError, match="requires an injected NeMo Helix client"):
         FilesetFileSeedReader().create_duckdb_connection()
 
 
-def test_create_duckdb_connection_uses_injected_sdk() -> None:
+def test_create_duckdb_connection_uses_injected_client() -> None:
     client = Mock()
     conn = Mock()
     filesystem = Mock()

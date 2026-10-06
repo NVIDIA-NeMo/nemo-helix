@@ -39,21 +39,15 @@ def test_upload_results_uploads_and_registers_adapter(tmp_path, monkeypatch):
     adapter_path.mkdir()
     (adapter_path / "adapter_config.json").write_text("{}", encoding="utf-8")
 
-    sdk = MagicMock()
-    monkeypatch.setattr(task_main, "get_nemo_client", lambda: sdk)
+    client = MagicMock()
+    monkeypatch.setattr(task_main, "get_nemo_client", lambda: client)
 
     jobs_client = MagicMock()
     jobs_client.get_job.return_value = _resp(SimpleNamespace(attempt_id="attempt-123"))
     files_client = MagicMock()
 
-    def client_from_platform(_sdk, client_cls):
-        if client_cls is task_main.JobsClient:
-            return jobs_client
-        if client_cls is task_main.FilesClient:
-            return files_client
-        raise AssertionError(f"Unexpected client class: {client_cls!r}")
-
-    monkeypatch.setattr(task_main, "client_from_platform", client_from_platform)
+    monkeypatch.setattr(task_main.JobsClient, "from_client", classmethod(lambda _cls, _client: jobs_client))
+    monkeypatch.setattr(task_main.FilesClient, "from_client", classmethod(lambda _cls, _client: files_client))
 
     file_manager = MagicMock()
     file_manager.upload.side_effect = lambda _local_path, remote_path: (

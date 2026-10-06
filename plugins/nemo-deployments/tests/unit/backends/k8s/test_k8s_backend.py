@@ -136,7 +136,7 @@ def test_effective_namespace_ignores_blank_pod_namespace(monkeypatch: pytest.Mon
 async def test_create_passes_secret_env_and_unmodified_config(
     k8s_backend: K8sDeploymentBackend,
     mock_entities: AsyncMock,
-    mock_sdk: MagicMock,
+    mock_client: MagicMock,
 ) -> None:
     # k8s keeps the stored config's secret_ref env vars intact and passes the
     # resolved secret values separately as secret_env (mounted via a managed
@@ -168,7 +168,7 @@ async def test_create_passes_secret_env_and_unmodified_config(
             backend_config={},
         )
 
-    resolve_mock.assert_awaited_once_with(mock_sdk, stored)
+    resolve_mock.assert_awaited_once_with(mock_client, stored)
     assert create_mock.await_args is not None
     assert create_mock.await_args.kwargs["config"] is stored
     assert create_mock.await_args.kwargs["secret_env"] == secret_env

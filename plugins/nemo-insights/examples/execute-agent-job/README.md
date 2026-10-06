@@ -131,25 +131,28 @@ Platform process cannot read, so the request has to carry it. The CLI fills
 it in from that config. Pass `--default-model` and `--fast-model` to override
 either one.
 
-The same run through the SDK. Unlike the CLI, the SDK does not read your CLI
-config, so both models are passed explicitly:
+The same run through the typed Python client. Unlike the CLI, the client does
+not read your CLI config for model defaults, so both models are passed
+explicitly:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_insights_plugin.sdk import InsightsPluginResource
 
-sdk = NeMoHelix()
-response = sdk.insights.analysis_runs.create(
+client = NemoClient.from_config()
+insights = InsightsPluginResource(client)
+response = insights.analysis_runs.create(
     workspace="default",
     agent="demo-agent",
     default_model="default/<default-model>",
     fast_model="default/<fast-model>",
 )
-final = sdk.insights.analysis_runs.wait(workspace="default", name=response.run.name)
+final = insights.analysis_runs.wait(workspace="default", name=response.run.name)
 print(final.job_status)
 ```
 
-`NeMoHelix()` connects to your active CLI context's base URL with its
-credentials. Pass `base_url=` to target another instance.
+`NemoClient.from_config()` connects to your active CLI context's base URL with
+its credentials. Pass `context=` to use another CLI context.
 
 ### 3. Inspect the run
 
@@ -190,14 +193,16 @@ insights carry no per-run provenance.
 
 ### 5. List the agent's insights
 
-There is no CLI command for listing insights yet, so use the SDK. From the repo
+There is no CLI command for listing insights yet, so use the Python client. From the repo
 root, save this as a file and run it with `uv run python <file>`:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_insights_plugin.sdk import InsightsPluginResource
 
-sdk = NeMoHelix()
-page = sdk.insights.insights.list_insights(workspace="default", agent="demo-agent")
+client = NemoClient.from_config()
+insights = InsightsPluginResource(client)
+page = insights.insights.list_insights(workspace="default", agent="demo-agent")
 for insight in page.data:
     print(f"[{insight.status}] {insight.title} ({len(insight.trace_refs)} traces)")
 ```

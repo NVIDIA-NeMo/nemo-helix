@@ -121,7 +121,7 @@ A plugin can ship a web UI that Studio loads at runtime and renders **inside its
 ### Python Style notes
 
 - Always prefer concrete type hints over string based ones. DO NOT import these types under TYPE_CHECKING. Instead prefer to import the types a regular import when possible.
-- Keep NeMo Helix SDK and typed client naming distinct. Variables holding generated `NeMoHelix` or `AsyncNeMoHelix` instances should be named `sdk` or `async_sdk`. Variables holding `nemo_helix_plugin` typed clients should be named `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`. Do not name typed clients `sdk`, and do not merge generated SDKs and typed clients into one public type; adapt at the boundary with `client_from_platform`.
+- Use `nemo_helix_plugin` typed clients (`NemoClient`, `AsyncNemoClient`, and service clients built with `XClient.from_client(client)`) in service, plugin, package, and test code. Do not import the generated `nemo_helix` SDK outside `sdk/` and its bridge modules (`nemo_helix_plugin/client/adapter.py`, `nemo_helix_plugin/secrets/compat.py`, `nemo_helix_plugin/discovery*`, `nemo_helix_plugin/sdk.py`). Name variables holding typed clients `client`, `async_client`, or service-specific names such as `files_client`, `jobs_client`, or `models_client`, never `sdk`.
 
 ### Python Package Management
 

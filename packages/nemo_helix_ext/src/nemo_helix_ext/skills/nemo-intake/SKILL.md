@@ -116,7 +116,7 @@ Read its reference for timestamp handling and evidence coverage.
 
 Every live provider fetch requires an explicit `--project`, `--since`, and `--until`. The scripts write
 spans first, then provider evaluations and human annotations, verify the imported span IDs, and are
-safe to replay. They use the existing SDK client factory, including the active CLI context and OAuth
+safe to replay. They use the typed Intake client built from the active CLI context, including OAuth
 token refresh; explicit `--nhx-base-url`, `--workspace`, and `NHX_ACCESS_TOKEN` overrides still
 work. Use `--dry-run` to inspect the direct JSON projection without writing Intake.
 

@@ -13,12 +13,13 @@ from typing import Generic, Literal, Optional, TypeVar
 from urllib.parse import SplitResult, quote, urlsplit
 
 import nhx.common.auth.workload_identity as _workload_identity
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.jobs import execution_profiles as _execution_profiles
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobStepResponse, HelixJobStepWithContext
+from nemo_helix_plugin.refs import parse_entity_ref
 from nhx.common.auth import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.config.base import (
@@ -43,7 +44,6 @@ from nhx.common.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nhx.common.platform_endpoint import parse_platform_endpoint
-from nhx.common.sdk_factory import get_entity_parts
 from nhx.core.jobs.app.providers import ComputeResources
 from nhx.core.jobs.entities import get_step_spec_name, is_final_platform_step
 from pydantic import BaseModel, model_validator
@@ -326,15 +326,15 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
 
     def __init__(
         self,
-        nhx_sdk: SyncHelixClient,
+        nemo_client: NemoClient,
         execution_profile_config: ExecutionProfileConfigT,
         profile_name: str,
     ):
-        self._nhx_sdk = nhx_sdk
-        # Typed Jobs client sharing the SDK's transport/headers. Built once; every
+        self._nemo_client = nemo_client
+        # Typed Jobs client sharing the platform client's transport/headers. Built once; every
         # call passes ``workspace=`` explicitly (including the cross-workspace "-"),
         # so the client's default workspace is never relied upon.
-        self._jobs = client_from_platform(nhx_sdk, JobsClient)
+        self._jobs = JobsClient.from_client(nemo_client)
         self._execution_profile_config = execution_profile_config
         self._profile_name = profile_name
         self.init()
@@ -374,8 +374,8 @@ class JobBackend(Generic[ExecutionProviderConfigT, ExecutionProfileConfigT], ABC
             if envvar.from_secret is not None:
                 if env_var_str != "":
                     env_var_str += ","
-                workspace, secret_name = get_entity_parts(envvar.from_secret.name, default_workspace=step.workspace)
-                env_var_str += f"{envvar.name}={workspace}/{secret_name}"
+                secret_ref = parse_entity_ref(envvar.from_secret.name, default_workspace=step.workspace)
+                env_var_str += f"{envvar.name}={secret_ref.workspace}/{secret_ref.name}"
         return env_var_str
 
     def get_step(self, job: str, step_name: str, workspace: str) -> HelixJobStepResponse:

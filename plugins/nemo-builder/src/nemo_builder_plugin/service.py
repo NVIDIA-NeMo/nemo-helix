@@ -17,11 +17,10 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.schema import BuildSet
 from nemo_builder_plugin.submit import BuildConflict, InvalidBuildRequest, MissingSecrets, submit_build_set
-from nemo_helix import AsyncNeMoHelix
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
-from nemo_helix_plugin.dependencies import get_sdk_client
+from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
@@ -70,13 +69,13 @@ def _build_router() -> APIRouter:
         workspace: str,
         body: BuildSet,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
-        sdk: AsyncNeMoHelix = Depends(get_sdk_client),
+        client: AsyncNemoClient = Depends(get_nemo_client),
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them.
         """
-        jobs_client = client_from_platform(sdk, AsyncJobsClient)
+        jobs_client = AsyncJobsClient.from_client(client)
 
         async def create_job(request):
             return await jobs_client.create_job(workspace=workspace, body=request)
@@ -84,7 +83,7 @@ def _build_router() -> APIRouter:
         async def get_job_fields(name: str):
             return (await jobs_client.retrieve(name, workspace=workspace)).custom_fields or {}
 
-        secrets_client = client_from_platform(sdk, AsyncSecretsClient)
+        secrets_client = AsyncSecretsClient.from_client(client)
 
         async def secret_readable(secret_workspace: str, name: str) -> bool:
             try:

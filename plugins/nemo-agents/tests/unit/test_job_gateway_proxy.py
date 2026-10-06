@@ -98,7 +98,7 @@ def test_a_job_with_no_identity_runs_without_a_proxy(
     if principal is not None:
         monkeypatch.setenv("NHX_PRINCIPAL", principal)
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
-    monkeypatch.setattr(gateway_proxy, "get_platform_sdk", principal_client)
+    monkeypatch.setattr(gateway_proxy, "get_nemo_client", principal_client)
 
     with gateway_proxy.platform_auth_proxy() as origin:
         assert origin is None
@@ -153,7 +153,7 @@ def test_workload_identity_takes_precedence_without_fallback(
 ) -> None:
     monkeypatch.setenv("NHX_PRINCIPAL", '{"id":"job-user"}')
     principal_client = Mock(side_effect=AssertionError("Must not resolve principal headers"))
-    monkeypatch.setattr(gateway_proxy, "get_platform_sdk", principal_client)
+    monkeypatch.setattr(gateway_proxy, "get_nemo_client", principal_client)
     if exchange_fails:
         workload.return_value = Mock(get_access_token=Mock(side_effect=RuntimeError("exchange unavailable")))
         with pytest.raises(RuntimeError, match="exchange unavailable"):

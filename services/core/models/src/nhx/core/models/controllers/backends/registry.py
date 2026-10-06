@@ -6,7 +6,7 @@
 from logging import getLogger
 from typing import Dict, Self
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.core.models.controllers.backends.backends import ServiceBackend
 
 # NOTE: import the config model from the plugin-free `config` module (not the
@@ -82,7 +82,7 @@ class BackendRegistry:
     @classmethod
     def from_config(
         cls,
-        nhx_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         backend_configs: Dict[BackendName, BackendConfig],
         huggingface_model_puller: str,
         available_backends: Dict[BackendName, type[ServiceBackend]] | None = None,
@@ -90,7 +90,7 @@ class BackendRegistry:
         """Create a BackendRegistry from backend configurations.
 
         Args:
-            nhx_sdk: NeMo Helix SDK client (for all API interactions including secrets)
+            client: Typed platform client (for all API interactions including secrets)
             backend_configs: Dict of backend configurations from service config
             huggingface_model_puller: HuggingFace model puller image for NIMCache
             available_backends: Registry of available backend classes
@@ -126,7 +126,7 @@ class BackendRegistry:
 
             logger.info(f"Initializing backend: {backend_name}")
             config_dict = backend_config.model_dump(exclude={"enabled"})
-            registry[backend_name] = backend_class(nhx_sdk, config_dict, huggingface_model_puller)
+            registry[backend_name] = backend_class(client, config_dict, huggingface_model_puller)
 
         logger.info(f"Backend registry initialized with {len(registry)} backend(s)")
         return cls(registry)

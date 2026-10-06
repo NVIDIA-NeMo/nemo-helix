@@ -11,6 +11,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.api.in_memory_filter import InMemoryFilterRepository
@@ -24,7 +25,6 @@ from nhx.common.jobs.schemas import (
     HelixJobTaskStatusResponse,
 )
 from nhx.common.observability import create_counter
-from nhx.common.sdk_factory import get_entity_parts
 from nhx.core.jobs.api.v2.jobs.schemas import (
     CreateHelixJobRequest,
     HelixJobListSortField,
@@ -286,7 +286,8 @@ class JobDispatcher:
                 continue
             for env_var in step.environment:
                 if env_var.from_secret:
-                    workspace, secret_name = get_entity_parts(env_var.from_secret.name, default_workspace=job_workspace)
+                    secret_ref = parse_entity_ref(env_var.from_secret.name, default_workspace=job_workspace)
+                    workspace, secret_name = secret_ref.workspace, secret_ref.name
                     try:
                         await self.secrets.get_secret(name=secret_name, workspace=workspace)
                     except ClientNotFoundError as exc:
@@ -1456,7 +1457,7 @@ class JobDispatcher:
 
         # Propagate task status_details to parent job for progress tracking.
         # Training callbacks report progress (percentage_done, epoch, step, loss) at the task level,
-        # but users query job status via sdk.customization.jobs.retrieve(). Without this propagation,
+        # but users query job status via the jobs API. Without this propagation,
         # job.status_details would be empty and users couldn't see training progress.
         if task_update.status_details:
             try:

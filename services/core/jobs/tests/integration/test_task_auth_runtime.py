@@ -24,7 +24,7 @@ from nhx.core.secrets.service import SecretsService
 from nhx.testing import (
     TEST_ADMIN_EMAIL,
     ClientContext,
-    SDKTestClientAdapter,
+    TestClientHttpAdapter,
     as_user,
     create_test_client,
     grant_workspace_role,
@@ -58,7 +58,7 @@ def _secret_access_task_module() -> _SecretAccessTask:
 
 
 class TestTaskRuntimeAuthPropagation:
-    def test_task_sdk_accesses_secret_on_behalf_of_creator(self):
+    def test_task_client_accesses_secret_on_behalf_of_creator(self):
         workspace = short_unique_name("task-obo")
         secret_name = short_unique_name("secret")
         secret_value = "task-visible-secret"
@@ -99,7 +99,7 @@ class TestTaskRuntimeAuthPropagation:
                         }
                     ),
                 )
-                secret = _secret_access_task_module().run(http_client=SDKTestClientAdapter(ctx.test_client))
+                secret = _secret_access_task_module().run(http_client=TestClientHttpAdapter(ctx.test_client))
 
             assert secret == secret_value
 
@@ -110,7 +110,7 @@ class TestTaskRuntimeAuthPropagation:
             )
             assert request.on_behalf_of == creator_email
 
-    def test_task_sdk_denies_secret_access_when_creator_lacks_permission(self):
+    def test_task_client_denies_secret_access_when_creator_lacks_permission(self):
         workspace = short_unique_name("task-deny")
         secret_name = short_unique_name("secret")
         creator_email = unique_email("creator")
@@ -145,7 +145,7 @@ class TestTaskRuntimeAuthPropagation:
                         }
                     ),
                 )
-                _secret_access_task_module().run(http_client=SDKTestClientAdapter(ctx.test_client))
+                _secret_access_task_module().run(http_client=TestClientHttpAdapter(ctx.test_client))
 
             request = ctx.access_log.assert_has_request(
                 method="GET",

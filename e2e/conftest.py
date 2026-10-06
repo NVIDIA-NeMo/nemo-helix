@@ -73,7 +73,6 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.secrets.client import SecretsClient
@@ -92,7 +91,6 @@ from e2e.services_pool_fixtures import (  # noqa: F401
     configure_services_pool,
     register_services_pool_items,
     services_pool_client,
-    services_pool_sdk,
 )
 
 
@@ -197,12 +195,6 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):  # noqa
     outcome = yield
     report = outcome.get_result()
     append_services_pool_report_sections(item, report, metadata_section_name="E2E Services Binding")
-
-
-@pytest.fixture(scope="module", name="sdk")
-def e2e_sdk(request: pytest.FixtureRequest) -> NeMoHelix:
-    """Generated SDK handle for the Data Designer engine probes that still take one."""
-    return request.getfixturevalue("services_pool_sdk")
 
 
 @pytest.fixture(scope="module", name="client")

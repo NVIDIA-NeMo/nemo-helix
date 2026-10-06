@@ -46,12 +46,12 @@ def mock_entities() -> AsyncMock:
 
 @pytest.fixture
 def k8s_backend(mock_entities: AsyncMock) -> Iterator[K8sDeploymentBackend]:
-    mock_sdk = MagicMock()
+    mock_client = MagicMock()
     with (
-        patch("nemo_deployments_plugin.backends.k8s.backend.client_from_platform"),
+        patch("nemo_deployments_plugin.backends.k8s.backend.AsyncEntitiesClient"),
         patch("nemo_deployments_plugin.backends.k8s.backend.NemoEntitiesClient", return_value=mock_entities),
     ):
-        backend = K8sDeploymentBackend(mock_sdk, {"default_namespace": NAMESPACE, "request_timeout": 30})
+        backend = K8sDeploymentBackend(mock_client, {"default_namespace": NAMESPACE, "request_timeout": 30})
     backend._entities = mock_entities
     try:
         yield backend
