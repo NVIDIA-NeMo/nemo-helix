@@ -29,7 +29,10 @@ const coverageRows = (summary: AgentEvalResultSummary): CoverageRow[] =>
     }))
   );
 
-const countColor = (count: number, kind: 'scored' | 'failed' | 'missing'): 'green' | 'red' | 'yellow' | 'gray' => {
+const countColor = (
+  count: number,
+  kind: 'scored' | 'failed' | 'missing'
+): 'green' | 'red' | 'yellow' | 'gray' => {
   if (count === 0) return 'gray';
   if (kind === 'scored') return 'green';
   return kind === 'failed' ? 'red' : 'yellow';
@@ -46,7 +49,7 @@ export const EvalMetricCoverageTable: FC<EvalMetricCoverageTableProps> = ({ summ
       <Text kind="body/regular/sm" className="text-secondary">
         {summary.trial_count} {summary.trial_count === 1 ? 'trial' : 'trials'} across{' '}
         {summary.task_count} {summary.task_count === 1 ? 'task' : 'tasks'}; {summary.error_count}{' '}
-        reported {summary.error_count === 1 ? 'an error' : 'errors'}.
+        {summary.error_count === 1 ? 'trial reported an error' : 'trials reported errors'}.
       </Text>
       <Stack gap="density-xs">
         {rows.map((row) => (

@@ -107,7 +107,7 @@ describe('AgentEvaluationDetailRoute', () => {
       expect(screen.queryByText('Job exited with code 1')).not.toBeInTheDocument();
       expect(await screen.findByText('0/3 scored')).toBeInTheDocument();
       expect(screen.getByText('3 failed')).toBeInTheDocument();
-      expect(screen.getByText('3 trials across 3 tasks; 3 reported errors.')).toBeInTheDocument();
+      expect(screen.getByText('3 trials across 3 tasks; 3 trials reported errors.')).toBeInTheDocument();
     });
   });
 
