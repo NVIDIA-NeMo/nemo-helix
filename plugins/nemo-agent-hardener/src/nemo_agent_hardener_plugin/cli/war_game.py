@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import typer
 from nemo_agent_hardener_plugin.cli._shared import (
@@ -227,7 +228,7 @@ def register(app: typer.Typer) -> None:
         if not path.exists():
             typer.secho(f"Mitigations file {mitigations_file} not found.", fg="red")
             raise typer.Exit(code=1)
-        mitigations = json.loads(path.read_text(encoding="utf-8"))
+        mitigations = _load_mitigations(path)
         selected = select_defense_ids(defense_ids(mitigations), keep=keep or None, exclude=exclude or None)
         typer.echo(f"Sanity-checking {len(selected)} defense(s): {', '.join(selected) or '(none)'}")
 
@@ -240,3 +241,19 @@ def register(app: typer.Typer) -> None:
             workspace=ctx.workspace,
         )
         typer.echo(json.dumps(result, indent=2, default=str))
+
+
+def _load_mitigations(path: Path) -> dict[str, Any]:
+    """Parse a mitigations file, turning unreadable or malformed input into a CLI error instead of a traceback."""
+    try:
+        mitigations = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        typer.secho(f"Mitigations file {path} is not valid JSON (line {exc.lineno}, column {exc.colno}).", fg="red")
+        raise typer.Exit(code=1) from exc
+    except (OSError, UnicodeDecodeError) as exc:
+        typer.secho(f"Could not read mitigations file {path}: {exc}", fg="red")
+        raise typer.Exit(code=1) from exc
+    if not isinstance(mitigations, dict):
+        typer.secho(f"Mitigations file {path} must contain a JSON object.", fg="red")
+        raise typer.Exit(code=1)
+    return mitigations

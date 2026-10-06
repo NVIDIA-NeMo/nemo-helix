@@ -156,3 +156,46 @@ def test_cli_sanity_check_rejects_keep_and_exclude_together(tmp_path: Path, monk
 
     assert result.exit_code == 1
     assert "either --keep or --exclude" in result.output
+
+
+def _invoke_sanity_check(mitigations_file: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    submitted: list[dict] = []
+    fake_sdk = SimpleNamespace(agent_hardener=SimpleNamespace(sanity_check=lambda **kwargs: submitted.append(kwargs)))
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
+    monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
+    monkeypatch.setattr(
+        _shared.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(default_workspace="default"))
+    )
+    app = cli_main.AgentHardenerCLI().get_cli()
+    args = ["sanity-check", "--manifest-id", "m1", "--mitigations", str(mitigations_file), "--replay-hitlog", "d/h"]
+    result = CliRunner().invoke(app, args)
+    return result, submitted
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ('{"defenses": [', "is not valid JSON (line 1, column 15)"),
+        ('["custom_guardrail_1"]', "must contain a JSON object"),
+        (b"\xff\xfe", "Could not read mitigations file"),
+    ],
+)
+def test_cli_sanity_check_rejects_bad_mitigations_without_a_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str | bytes, message: str
+) -> None:
+    mitigations_file = tmp_path / "mitigations.json"
+    if isinstance(content, bytes):
+        mitigations_file.write_bytes(content)
+    else:
+        mitigations_file.write_text(content, encoding="utf-8")
+
+    result, submitted = _invoke_sanity_check(mitigations_file, monkeypatch)
+
+    assert result.exit_code == 1
+    assert message in result.output
+    assert "Traceback" not in result.output
+    assert not isinstance(result.exception, (ValueError, AttributeError))
+    assert submitted == []
