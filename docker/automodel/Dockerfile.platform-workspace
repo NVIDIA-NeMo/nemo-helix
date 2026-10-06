@@ -22,7 +22,6 @@ COPY packages/nhx_common packages/nhx_common
 COPY packages/nhx_customization_common packages/nhx_customization_common
 COPY packages/nemo_helix_plugin packages/nemo_helix_plugin
 COPY packages/nemo_helix_ext packages/nemo_helix_ext
-COPY packages/nhx_testing packages/nhx_testing
 COPY plugins/nemo-deployments plugins/nemo-deployments
 COPY services/automodel services/automodel
 COPY services/core/models services/core/models

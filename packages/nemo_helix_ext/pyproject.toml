@@ -63,9 +63,6 @@ _nhx = "nemo_helix_ext.cli.app:cli"
 [project.entry-points."nemo.skills"]
 platform = "nemo_helix_ext.skills:skills_dir"
 
-[tool.uv.sources]
-nhx-testing = { workspace = true }
-
 [build-system]
 requires = ["hatchling==1.26.3"]
 build-backend = "hatchling.build"
