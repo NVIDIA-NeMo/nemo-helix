@@ -1055,7 +1055,11 @@ def job_route_factory(
             ),
             parsed: ParsedFilter = Depends(make_filter_dep(TypedJobsListFilter)),
         ) -> Page[TypedJobResponse]:
-            f"""List all jobs for the {service_name} microservice."""
+            f"""List all jobs for the {service_name} microservice.
+
+            Returns jobs whose spec stores ``backend``. Jobs submitted before that field
+            existed are listed by ``GET /apis/jobs/v2/workspaces/{{workspace}}/jobs``.
+            """
 
             # Enforce schema-level value validation (status enum, datetime
             # operators) on the parsed tree. ``make_filter_dep`` only checks
