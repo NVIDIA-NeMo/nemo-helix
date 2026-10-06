@@ -342,6 +342,51 @@ def test_failed_score_becomes_one_failed_row_per_declared_output() -> None:
     assert all("value" not in row for row in rows)
 
 
+def test_failed_rows_keep_each_outputs_own_diagnostic() -> None:
+    """A metric that failed per output (Harbor rewards) explains each FAILED row with its own cause."""
+    rows, _ = score_to_evaluator_results(
+        _score(
+            outputs=[],
+            status=AgentEvalScoreStatus.FAILED,
+            diagnostics=[
+                AgentEvalDiagnostic(
+                    severity=AgentEvalDiagnosticSeverity.ERROR,
+                    message="reward 'passed' was not measured",
+                    details={"output": "passed"},
+                ),
+                AgentEvalDiagnostic(
+                    severity=AgentEvalDiagnosticSeverity.ERROR,
+                    message="reward 'score' was not measured",
+                    details={"output": "score"},
+                ),
+            ],
+        ),
+        session_id="s",
+        span_id="sp",
+        output_names=["score", "passed", "unexplained"],
+    )
+    assert [(row["name"], row.get("comment")) for row in rows] == [
+        ("accuracy.score", "reward 'score' was not measured"),
+        ("accuracy.passed", "reward 'passed' was not measured"),
+        ("accuracy.unexplained", None),
+    ]
+
+
+def test_diagnostic_tagged_with_no_output_counts_as_score_level() -> None:
+    """``details["output"] = None`` is how the rewards metric marks a score-wide finding."""
+    score = _score(
+        outputs=[MetricOutput(name="score", value=1.0)],
+        diagnostics=[
+            AgentEvalDiagnostic(
+                severity=AgentEvalDiagnosticSeverity.WARNING,
+                message="reward entry was rejected",
+                details={"output": None},
+            )
+        ],
+    )
+    assert _rows(score)[0]["comment"] == "reward entry was rejected"
+
+
 def test_failed_score_without_declared_outputs_names_the_metric_itself() -> None:
     rows, _ = score_to_evaluator_results(
         _score(outputs=[], status=AgentEvalScoreStatus.FAILED), session_id="s", span_id="sp"

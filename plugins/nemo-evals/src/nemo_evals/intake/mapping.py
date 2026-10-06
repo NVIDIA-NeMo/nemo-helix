@@ -313,11 +313,22 @@ def score_to_evaluator_results(
     """
     if score.status == AgentEvalScoreStatus.FAILED:
         names = [output.name for output in score.outputs] or list(output_names)
-        comment = _comment_for_output(score, None)
         rows = [
-            _failed_row(session_id=session_id, span_id=span_id, name=f"{score.metric_type}.{name}", comment=comment)
+            _failed_row(
+                session_id=session_id,
+                span_id=span_id,
+                name=f"{score.metric_type}.{name}",
+                comment=_comment_for_output(score, name),
+            )
             for name in names
-        ] or [_failed_row(session_id=session_id, span_id=span_id, name=score.metric_type, comment=comment)]
+        ] or [
+            _failed_row(
+                session_id=session_id,
+                span_id=span_id,
+                name=score.metric_type,
+                comment=_comment_for_output(score, None),
+            )
+        ]
         return rows, []
 
     rows: list[EvaluatorResultCreateParams] = []
@@ -369,14 +380,14 @@ def _failed_row(*, session_id: str, span_id: str, name: str, comment: str | None
 def _comment_for_output(score: AgentEvalTaskScore, output_name: str | None) -> str | None:
     """Select the diagnostic comment that describes one emitted output.
 
-    A diagnostic naming this output wins; otherwise the first that names no output at all, which
-    is the one describing the score as a whole.
+    A diagnostic naming this output wins; otherwise the first that names no output (the key absent
+    or ``None``), which is the one describing the score as a whole.
     """
     for diagnostic in score.diagnostics:
         if output_name is not None and diagnostic.details.get(OUTPUT_DETAIL) == output_name:
             return diagnostic.message
     for diagnostic in score.diagnostics:
-        if OUTPUT_DETAIL not in diagnostic.details:
+        if diagnostic.details.get(OUTPUT_DETAIL) is None:
             return diagnostic.message
     return None
 
