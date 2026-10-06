@@ -19,9 +19,10 @@ nemo config set --base-url "$NHX_BASE_URL" --workspace default
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )

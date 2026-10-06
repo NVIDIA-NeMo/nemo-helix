@@ -45,7 +45,6 @@ First, create a client for interacting with NeMo Helix.
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
@@ -53,8 +52,7 @@ from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 BASE_URL = os.getenv("NHX_BASE_URL", "http://localhost:8080")
 WORKSPACE = "default"
 
-# Initialize the clients (does not trigger any action yet)
-sdk = NeMoHelix(base_url=BASE_URL, workspace=WORKSPACE)
+# Initialize the client (does not trigger any action yet)
 client = NemoClient(base_url=BASE_URL, workspace=WORKSPACE)
 ```
 
@@ -62,27 +60,37 @@ Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.
 Note: these resources may already exist if you are running NeMo Helix Quickstart.
 
 ```python
+from pydantic import SecretStr
+from nemo_helix_plugin.models.types import CreateModelProviderRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
 SECRET_NAME = "nvidia-build-api-key"
 PROVIDER_NAME = "build"
 PROVIDER_API_KEY = os.getenv("NVIDIA_API_KEY")
 
-existing_secrets = sdk.secrets.list()
-if SECRET_NAME not in [secret.name for secret in existing_secrets.data]:
+existing_secrets = client.secrets.list_secrets().items()
+if SECRET_NAME not in [secret.name for secret in existing_secrets]:
     if PROVIDER_API_KEY is None:
         raise ValueError(
             "Set NVIDIA_API_KEY to a key with access to NVIDIA Build models"
         )
-        sdk.secrets.create(
-            name=SECRET_NAME, value=PROVIDER_API_KEY, description="NVIDIA Build API key"
+        client.secrets.create_secret(
+            body=HelixSecretCreateRequest(
+                name=SECRET_NAME,
+                value=SecretStr(PROVIDER_API_KEY),
+                description="NVIDIA Build API key",
+            )
         )
 
-existing_providers = sdk.inference.providers.list()
-if PROVIDER_NAME not in [provider.name for provider in existing_providers.data]:
-    provider = sdk.inference.providers.create(
-        name=PROVIDER_NAME,
-        host_url="https://integrate.api.nvidia.com",
-        api_key_secret_name=SECRET_NAME,
-        description="External provider for build.nvidia.com",
+existing_providers = client.models.list_providers().items()
+if PROVIDER_NAME not in [provider.name for provider in existing_providers]:
+    client.models.create_provider(
+        body=CreateModelProviderRequest(
+            name=PROVIDER_NAME,
+            host_url="https://integrate.api.nvidia.com",
+            api_key_secret_name=SECRET_NAME,
+            description="External provider for build.nvidia.com",
+        )
     )
 ```
 
@@ -440,8 +448,9 @@ We evaluate the model on filtered triage notes to see if it predicts the correct
 - **Metric**: String containment check against ground-truth ESI
 
 ```python
-from nemo_helix import ConflictError
-from nemo_helix.filesets import build_fileset_ref
+from nemo_evaluator.sdk import FilesetRef
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Split the filtered dataframe into different complexity levels
 df_complexities = {
@@ -456,8 +465,10 @@ files_url_dict = {}
 # Create one fileset and store each complexity split as a separate file inside it
 FILESET_NAME = "nurse-triage-notes-eval"
 try:
-    sdk.files.filesets.create(
-        name=FILESET_NAME, description="Triage evaluator datasets by complexity"
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=FILESET_NAME, description="Triage evaluator datasets by complexity"
+        )
     )
 except ConflictError:
     pass
@@ -471,16 +482,17 @@ for level, df in df_complexities.items():
     )
 
     # Upload the dataset file to the shared fileset
-    result = sdk.files.upload(
-        fileset=FILESET_NAME,
-        local_path=file_name,
-        remote_path=file_name,
-    )
+    with open(file_name, "rb") as fh:
+        result = client.files.upload_file(
+            name=FILESET_NAME,
+            path=file_name,
+            content=fh.read(),
+        )
 
     print(f"Dataset uploaded: {result}")  # Print result with the uploaded file URL/info
 
     # Construct files_url for this complexity file within the shared fileset
-    files_url = build_fileset_ref(file_name, workspace=WORKSPACE, fileset=FILESET_NAME)
+    files_url = FilesetRef(root=f"{WORKSPACE}/{FILESET_NAME}").with_fragment(file_name)
     files_url_dict[level] = files_url
 ```
 
@@ -527,15 +539,11 @@ For *each* complexity level, the accuracy score for each model is printed, allow
 
 ```python
 
-import time
 import pandas as pd
 from typing import Any
-from nemo_helix.types.evaluation import (
- FilesetRef,
- MetricOnlineJobParam,
- ModelParam,
- StringCheckMetricParam,
-)
+
+from nemo_evaluator.sdk import Evaluator, FilesetRef
+from nemo_evaluator_sdk import Model, RunConfigOnlineModel, SecretRef, StringCheckMetric
 
 # This code assumes EVALUATOR_CONFIG is available in the notebook scope
 
@@ -555,7 +563,7 @@ MODEL_SPECS = [
 COMPLEXITIES = ["simple", "moderate", "complex"]
 
 def run_evaluation(
-    sdk: Any,
+    evaluator: Evaluator,
     evaluator_config: dict[str, Any],
     model_spec: dict[str, str],
     complexity: str,
@@ -563,59 +571,47 @@ def run_evaluation(
     secret_key_name: str | None = None,
 ) -> float:
     """
-    Populates the evaluator_config, filling in the files_url and endpoint, then runs evaluation.
+    Builds the metric and target, then runs evaluation for the given model+complexity.
     Returns accuracy for the given model+complexity.
     """
     fileset_ref: FilesetRef = files_url_dict[complexity]
-    model_kwargs = {
-        "url": model_spec["url"],
-        "name": model_spec["model_id"],
-    }
-    if secret_key_name:
-        model_kwargs["api_key_secret"] = secret_key_name
+    model = Model(
+        url=model_spec["url"],
+        name=model_spec["model_id"],
+        api_key_secret=SecretRef(root=secret_key_name) if secret_key_name else None,
+    )
 
-    job_spec = MetricOnlineJobParam(
-        metric=StringCheckMetricParam(
-            type="string-check",
-            operation="contains",
-            left_template="{{sample.output_text}}",
-            right_template="{{item.esi_level_description}}",
-        ),
+    metric = StringCheckMetric(
+        operation="contains",
+        left_template="{{sample.output_text}}",
+        right_template="{{item.esi_level_description}}",
+    )
+
+    job = evaluator.submit(
+        metric=metric,
         dataset=fileset_ref,
-        model=ModelParam(**model_kwargs),
+        config=RunConfigOnlineModel(parallelism=1),
+        target=model,
         prompt_template=evaluator_config["prompt_template"],
     )
-    job = sdk.evaluation.metric_jobs.create(
-        spec=job_spec,
-    )
     print(f"Submitted evaluation job for model '{model_spec['name']}' on complexity '{complexity.capitalize()}' (job name: {job.name})")
-    max_wait_seconds = 7200
-    elapsed = 0
-    while True:
-        time.sleep(5)
-        elapsed += 5
-        status = sdk.evaluation.metric_jobs.retrieve(job.name)
-        if status.status in ("completed", "success", "error", "failed", "cancelled"):
-            break
-        if elapsed >= max_wait_seconds:
-            raise TimeoutError(f"Job {job.name} did not complete within {max_wait_seconds}s")
-    if status.status in ("error", "failed", "cancelled"):
-        raise RuntimeError(
-            f"Job {job.name} for model '{model_spec['name']}' on complexity '{complexity}' ended with status: {status.status}"
-        )
+    job.wait_until_done()
+    result = job.get_result()
     print(f" ✔️ Job done for model '{model_spec['name']}' on complexity '{complexity.capitalize()}'")
 
     # Fetch results and extract accuracy
-    aggregate_scores = sdk.evaluation.metric_jobs.results.aggregate_scores.download(
-        job=job.name,
-    )
+    aggregate_scores = result.aggregate_scores
     if not aggregate_scores.scores:
         raise ValueError(f"No scores returned for job {job.name}")
     accuracy_value = next(
         (s.mean for s in aggregate_scores.scores if s.name in ("string-check", "accuracy")),
         aggregate_scores.scores[0].mean,
     )
+    if accuracy_value is None:
+        raise ValueError(f"No numeric score returned for job {job.name}")
     return accuracy_value
+
+evaluator = Evaluator.from_client(client)
 
 results_dict = {model_spec['name']: {} for model_spec in MODEL_SPECS}
 
@@ -623,7 +619,7 @@ print("Starting evaluation jobs (per model, per complexity)...")
 for complexity in COMPLEXITIES:
     for spec in MODEL_SPECS:
         accuracy = run_evaluation(
-            sdk,
+            evaluator,
             EVALUATOR_CONFIG,
             spec,
             complexity,

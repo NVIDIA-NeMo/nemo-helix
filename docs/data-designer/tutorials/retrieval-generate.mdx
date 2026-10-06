@@ -24,13 +24,11 @@ Aim for documents of 200–2,000 tokens that are representative of the domain. G
 
 ```python
 import os
-from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
 client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
 data_designer = DataDesignerResource(client)
 print(NHX_BASE_URL)
@@ -113,13 +111,15 @@ if gen_status != "completed":
 ```
 
 ```python
-results_page = sdk.jobs.results.list(job.name, workspace="default")
-data = getattr(results_page, "data", results_page)
-rows = list(data() if callable(data) else data or [])
+from nemo_helix_plugin.jobs.client import JobsClient
+
+jobs_client = JobsClient.from_client(client)
+results_page = jobs_client.list_job_results(job.name, workspace="default").data()
+rows = results_page.data
 sdg_ref = None
 for row in rows:
-    url = getattr(row, "artifact_url", None) or (row.get("artifact_url") if isinstance(row, dict) else None)
-    name = getattr(row, "name", None) or (row.get("name") if isinstance(row, dict) else None)
+    url = getattr(row, "artifact_url", None)
+    name = getattr(row, "name", None)
     print(name, url)
     if name == "artifacts" and url:
         sdg_ref = str(url).removeprefix("fileset://")

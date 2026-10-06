@@ -65,50 +65,53 @@ Complete example of setting up a model for customization:
 ```python
 import os
 import time
-from nemo_helix import NeMoHelix
-from nemo_helix._exceptions import ConflictError
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 
 # Step 1: Create FileSet from Hugging Face
 try:
-    fileset = client.files.filesets.create(
-        workspace="default",
-        name="qwen3-1.7b",
-        description="Qwen3 1.7B base model from Hugging Face",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            repo_id="Qwen/Qwen3-1.7B",
-            repo_type="model",
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name="qwen3-1.7b",
+            description="Qwen3 1.7B base model from Hugging Face",
+            storage=HuggingfaceStorageConfig(
+                repo_id="Qwen/Qwen3-1.7B",
+                repo_type="model",
+            ),
         ),
-    )
+    ).data()
     print(f"Created FileSet: {fileset.name}")
 except ConflictError:
     print("FileSet already exists, retrieving...")
-    fileset = client.files.filesets.retrieve(workspace="default", name="qwen3-1.7b")
+    fileset = client.files.get_fileset(name="qwen3-1.7b").data()
 
 # Step 2: Create Model Entity
 try:
-    model = client.models.create(
-        workspace="default",
-        name="qwen3-1.7b",
-        fileset="default/qwen3-1.7b",  # Reference to the FileSet
-        description="Qwen3 1.7B base model for customization",
-    )
+    model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name="qwen3-1.7b",
+            fileset="default/qwen3-1.7b",  # Reference to the FileSet
+            description="Qwen3 1.7B base model for customization",
+        ),
+    ).data()
     print(f"Created Model Entity: {model.name}")
 except ConflictError:
     print("Model Entity already exists, retrieving...")
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = client.models.get_model(name="qwen3-1.7b").data()
 
 # Step 3: Wait for ModelSpec to be auto-populated
 print("Waiting for model spec to be populated...")
 while not model.spec:
     time.sleep(5)
-    model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+    model = client.models.get_model(name="qwen3-1.7b").data()
 
 print(f"Model ready!")
 print(f" Architecture: {model.spec.family}")

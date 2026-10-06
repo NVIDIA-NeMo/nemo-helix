@@ -27,9 +27,11 @@ For the examples below, create a guardrail configuration and VirtualModel:
 ```python
 
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -99,11 +101,13 @@ config_data = {
 }
 
 try:
-    config = client.guardrail.configs.create(
-        name="content-safety-config",
-        description="Content safety input rail",
-        data=config_data,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="content-safety-config",
+            description="Content safety input rail",
+            data=config_data,
+        ),
+    ).data()
 except ConflictError:
     print("Config content-safety-config already exists, continuing...")
 

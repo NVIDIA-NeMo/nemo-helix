@@ -73,7 +73,7 @@ The Files service supports multiple storage backends and can be used to store da
 
 ## Managing Filesets
 
-Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK (`client.files.filesets`).
+Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK (`client.files`, for example `create_fileset`, `list_filesets`, `get_fileset`, `delete_fileset`).
 
 <Tip>
 
@@ -89,9 +89,9 @@ All Python SDK examples that follow assume this client initialization:
 ```python
 import os
 
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL") or "http://localhost:8080",
     workspace="default",
 )
@@ -137,20 +137,15 @@ nemo files filesets create my-files \
 <Tab title="Python SDK">
 
 ```python
-import os
-
-from nemo_helix import NeMoHelix
-
-client = NeMoHelix(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create a fileset
-fileset = client.files.filesets.create(
-    name="my-files",
-    description="Training data for model fine-tuning",
-)
+fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-files",
+        description="Training data for model fine-tuning",
+    ),
+).data()
 
 print(fileset.model_dump_json(indent=2))
 ```
@@ -205,9 +200,9 @@ nemo files filesets list
 <Tab title="Python SDK">
 
 ```python
-filesets = client.files.filesets.list()
+filesets = client.files.list_filesets()
 
-for fileset in filesets:
+for fileset in filesets.items():
     print(f"{fileset.name}: {fileset.description}")
 ```
 
@@ -232,11 +227,17 @@ nemo files filesets list --filter.storage-type local
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import ListFilesetsQueryParams
+
 # List only dataset filesets
-datasets = client.files.filesets.list(filter={"purpose": "dataset"})
+datasets = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(filter='{"purpose": "dataset"}')
+)
 
 # List filesets using local storage
-local_filesets = client.files.filesets.list(filter={"storage_type": "local"})
+local_filesets = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(filter='{"storage_type": "local"}')
+)
 ```
 
 </Tab>
@@ -257,10 +258,14 @@ nemo files filesets list --page 1 --page-size 10 --sort "-created_at"
 <Tab title="Python SDK">
 
 ```python
-filesets = client.files.filesets.list(
-    page=1,
-    page_size=10,
-    sort="-created_at",  # The "-" prefix sorts descending (newest first)
+from nemo_helix_plugin.files.types import ListFilesetsQueryParams
+
+filesets = client.files.list_filesets(
+    query_params=ListFilesetsQueryParams(
+        page=1,
+        page_size=10,
+        sort="-created_at",  # The "-" prefix sorts descending (newest first)
+    )
 )
 ```
 
@@ -287,7 +292,7 @@ nemo files filesets delete my-files
 <Tab title="Python SDK">
 
 ```python
-deleted_fileset = client.files.filesets.delete(name="my-files")
+deleted_fileset = client.files.delete_fileset(name="my-files").data()
 
 print(f"Deleted fileset: {deleted_fileset.name}")
 ```
@@ -304,9 +309,9 @@ Deleting a fileset is permanent and cannot be undone. For `local` and `s3` stora
 
 ## Managing Files Within Filesets
 
-High-level file operations are available through the CLI (`nemo files`) or the SDK (`client.files`), which provide convenient methods for uploading, downloading, and listing files.
+File operations are available through the CLI (`nemo files`) or the SDK (`client.files`), which provide methods for uploading, downloading, and listing files.
 
-For advanced use cases, a [fsspec](https://filesystem-spec.readthedocs.io/en/latest/)-compatible filesystem is available at `client.files.fsspec`. Refer to the [fsspec documentation](https://filesystem-spec.readthedocs.io/en/latest/usage.html#use-a-file-system) for additional methods.
+For advanced use cases, an [fsspec](https://filesystem-spec.readthedocs.io/en/latest/)-compatible filesystem is available through the `filesets` package (`FilesetFileSystem`). Refer to the [fsspec documentation](https://filesystem-spec.readthedocs.io/en/latest/usage.html#use-a-file-system) for additional methods.
 
 ### Uploading Files
 
@@ -346,25 +351,11 @@ Completed upload to fileset-a1b2c3d4
 
 ```python
 # Upload a single file
-client.files.upload(
-    fileset="my-files",
-    local_path="./data.jsonl",
-    remote_path="training/data.jsonl",
+client.files.upload_file(
+    name="my-files",
+    path="training/data.jsonl",
+    content=open("./data.jsonl", "rb").read(),
 )
-
-# Upload an entire directory
-client.files.upload(
-    fileset="my-files",
-    local_path="./training_data/",
-    remote_path="training/",
-)
-
-# Auto-create a new fileset (generates name like "fileset-a1b2c3d4")
-result = client.files.upload(
-    local_path="./data.jsonl",
-    fileset_auto_create=True,
-)
-print(f"Uploaded to fileset: {result.name}")
 ```
 
 </Tab>
@@ -372,7 +363,7 @@ print(f"Uploaded to fileset: {result.name}")
 </Tabs>
 <Tip>
 
-If `fileset` is omitted, a new fileset is automatically created with a unique name following the pattern `fileset-<8-hex>` (e.g., `fileset-a1b2c3d4`). The generated name is returned so you can reference it in subsequent operations.
+The CLI `nemo files upload` supports uploading an entire directory and auto-creating a fileset when you omit the fileset name (generating a name like `fileset-a1b2c3d4`). The SDK `upload_file` uploads one file to an existing fileset.
 
 </Tip>
 ### Listing Files
@@ -400,7 +391,7 @@ nemo files list my-files
 <Tab title="Python SDK">
 
 ```python
-response = client.files.list(fileset="my-files")
+response = client.files.list_files(name="my-files").data()
 
 for file in response.data:
     print(f"{file.path}: {file.size} bytes")
@@ -423,7 +414,12 @@ nemo files list my-files --remote-path training/
 <Tab title="Python SDK">
 
 ```python
-training_files = client.files.list(fileset="my-files", remote_path="training/")
+from nemo_helix_plugin.files.types import ListFilesQueryParams
+
+training_files = client.files.list_files(
+    name="my-files",
+    query_params=ListFilesQueryParams(path="training/"),
+)
 ```
 
 </Tab>
@@ -455,18 +451,12 @@ Downloaded my-files#training/ to './training_data/'
 
 ```python
 # Download a single file
-client.files.download(
-    fileset="my-files",
-    remote_path="training/data.jsonl",
-    local_path="./data.jsonl",
-)
-
-# Download an entire directory
-client.files.download(
-    fileset="my-files",
-    remote_path="training/",
-    local_path="./training_data/",
-)
+content = client.files.download_file(
+    name="my-files",
+    path="training/data.jsonl",
+).read()
+with open("./data.jsonl", "wb") as f:
+    f.write(content)
 ```
 
 </Tab>
@@ -475,10 +465,10 @@ client.files.download(
 Read file content into memory (SDK only):
 
 ```python
-content = client.files.download_content(
-    fileset="my-files",
-    remote_path="config.json",
-)
+content = client.files.download_file(
+    name="my-files",
+    path="config.json",
+).read()
 print(content.decode("utf-8"))
 ```
 
@@ -502,10 +492,10 @@ Deleted my-files#training/old-data.jsonl
 <Tab title="Python SDK">
 
 ```python
-client.files.delete(
-    fileset="my-files",
-    remote_path="training/old-data.jsonl",
-)
+client.files.delete_file(
+    name="my-files",
+    path="training/old-data.jsonl",
+).data()
 ```
 
 </Tab>
@@ -515,29 +505,33 @@ client.files.delete(
 
 <Note>
 
-The CLI displays progress bars automatically during uploads and downloads. This section covers custom progress handling in the SDK.
+The CLI displays progress bars automatically during uploads and downloads. This section covers custom progress handling with the fsspec-compatible `FilesetFileSystem` from the `filesets` package, which accepts a progress callback.
 
 </Note>
 Track progress during large file transfers using the `RichProgressCallback` context manager:
 
 ```python
-from nemo_helix.filesets import RichProgressCallback
+from filesets import FilesetFileSystem, RichProgressCallback
+from nemo_helix_plugin.files.client import FilesClient
+
+files = client.files
+assert isinstance(files, FilesClient)
+fs = FilesetFileSystem(client=files)
 
 # Upload a directory with progress bar
 with RichProgressCallback(description="Uploading dataset") as callback:
-    client.files.upload(
-        fileset="my-files",
-        local_path="./large_dataset/",
-        remote_path="",
+    fs.put(
+        "./large_dataset/",
+        "fileset://default/my-files",
+        recursive=True,
         callback=callback,
     )
 
 # Download all files from a fileset with progress bar
 with RichProgressCallback(description="Downloading dataset") as callback:
-    client.files.download(
-        fileset="my-files",
-        remote_path="",
-        local_path="./downloaded_data/",
+    fs.get(
+        "fileset://default/my-files",
+        "./downloaded_data/",
         callback=callback,
     )
 ```
@@ -576,23 +570,40 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 
 ```python
 import os
+from pydantic import SecretStr
+
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.storage_config import NGCStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
 
 # Create a secret to store your NGC API key
-secret = client.secrets.create(name="my-ngc-api-key", value="<your-ngc-api-key>")
+secret = client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="my-ngc-api-key",
+        value=SecretStr("<your-ngc-api-key>"),
+    ),
+).data()
 
 # Create a fileset pointing to NGC storage
-ngc_fileset = client.files.filesets.create(
-    name="my-nemotron-personas-dataset-en_us",
-    description="Nemotron Personas USA",
-    storage={
-        "type": "ngc",
-        "org": "nvidia",
-        "team": "nemotron-personas",
-        "resource": "nemotron-personas-dataset-en_us",
-        "version": "0.0.2",
-        "api_key_secret": secret.name,
-    },
-)
+ngc_fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="my-nemotron-personas-dataset-en_us",
+        description="Nemotron Personas USA",
+        storage=NGCStorageConfig(
+            org="nvidia",
+            team="nemotron-personas",
+            target="nemotron-personas-dataset-en_us",
+            version="0.0.2",
+            api_key_secret=secret.name,
+        ),
+    ),
+).data()
 ```
 
 </Tab>
@@ -624,21 +635,38 @@ nemo files filesets create hf-dataset \
 
 ```python
 import os
+from pydantic import SecretStr
+
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client = NemoClient(
+    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    workspace="default",
+)
 
 # Create a secret to store your HuggingFace token (needed for gated and private repos)
-secret = client.secrets.create(name="hf_token", value=os.getenv("HF_TOKEN"))
+secret = client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="hf_token",
+        value=SecretStr(os.getenv("HF_TOKEN") or ""),
+    ),
+).data()
 
 # Create a fileset pointing to a HuggingFace repo
-hf_fileset = client.files.filesets.create(
-    name="hf-dataset",
-    description="Dataset from HuggingFace",
-    storage={
-        "type": "huggingface",
-        "repo_id": "nvidia/Nemotron-Personas-Japan",
-        "repo_type": "dataset",
-        "token_secret": secret.name,  # Optional, needed for gated and private repos
-    },
-)
+hf_fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="hf-dataset",
+        description="Dataset from HuggingFace",
+        storage=HuggingfaceStorageConfig(
+            repo_id="nvidia/Nemotron-Personas-Japan",
+            repo_type="dataset",
+            token_secret=secret.name,  # Optional, needed for gated and private repos
+        ),
+    ),
+).data()
 ```
 
 </Tab>
@@ -675,33 +703,23 @@ nemo files download s3-training-data -o ./downloaded_data/
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.storage_config import S3StorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a fileset backed by S3 storage using SDK credential chain
 # (uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY env vars, IRSA, instance profiles, etc.)
-s3_fileset = client.files.filesets.create(
-    name="s3-training-data",
-    description="Training data stored in S3",
-    storage={
-        "type": "s3",
-        "bucket": "my-ml-bucket",
-        "prefix": "datasets/training",  # Optional: scope to a folder within the bucket
-        "region": "us-east-1",
-        "use_sdk_auth": True,  # Use AWS SDK credential chain (default)
-    },
-)
-
-# Upload data to S3
-client.files.upload(
-    fileset="s3-training-data",
-    local_path="./training_data/",
-    remote_path="",
-)
-
-# Download data from S3
-client.files.download(
-    fileset="s3-training-data",
-    remote_path="",
-    local_path="./downloaded_data/",
-)
+s3_fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="s3-training-data",
+        description="Training data stored in S3",
+        storage=S3StorageConfig(
+            bucket="my-ml-bucket",
+            prefix="datasets/training",  # Optional: scope to a folder within the bucket
+            region="us-east-1",
+            use_sdk_auth=True,  # Use AWS SDK credential chain
+        ),
+    ),
+).data()
 ```
 
 </Tab>
@@ -736,28 +754,40 @@ nemo files filesets create minio-fileset \
 
 ```python
 import os
+from pydantic import SecretStr
+
+from nemo_helix_plugin.files.storage_config import S3StorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 
 # Create secrets to store your S3 credentials
-access_key = client.secrets.create(
-    name="s3_access_key", value=os.getenv("S3_ACCESS_KEY")
-)
-secret_key = client.secrets.create(
-    name="s3_secret_key", value=os.getenv("S3_SECRET_KEY")
-)
+access_key = client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="s3_access_key",
+        value=SecretStr(os.getenv("S3_ACCESS_KEY") or ""),
+    ),
+).data()
+secret_key = client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="s3_secret_key",
+        value=SecretStr(os.getenv("S3_SECRET_KEY") or ""),
+    ),
+).data()
 
-s3_fileset = client.files.filesets.create(
-    name="minio-fileset",
-    description="Data stored in MinIO",
-    storage={
-        "type": "s3",
-        "bucket": "my-bucket",
-        "endpoint_url": "http://minio.example.com:9000",  # Custom S3 endpoint
-        "region": "us-east-1",
-        "use_sdk_auth": False,  # Use explicit credentials instead of SDK auth
-        "access_key_id_secret": access_key.name,
-        "secret_access_key_secret": secret_key.name,
-    },
-)
+s3_fileset = client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="minio-fileset",
+        description="Data stored in MinIO",
+        storage=S3StorageConfig(
+            bucket="my-bucket",
+            endpoint_url="http://minio.example.com:9000",  # Custom S3 endpoint
+            region="us-east-1",
+            use_sdk_auth=False,  # Use explicit credentials instead of SDK auth
+            access_key_id_secret=access_key.name,
+            secret_access_key_secret=secret_key.name,
+        ),
+    ),
+).data()
 ```
 
 </Tab>

@@ -37,7 +37,7 @@ from anonymizer.config.replace_strategies import Redact
 from data_designer.config import ModelConfig
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
@@ -52,11 +52,11 @@ model_configs = [
     ModelConfig(alias="nemotron-30b-thinking", provider=MODEL_PROVIDER, model="nvidia/nemotron-3.5-lightning-30b-a3b"),
 ]
 
-sdk = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
-anonymizer = sdk.anonymizer
+anonymizer = client.anonymizer
 
 preview = anonymizer.preview(
     PreviewRequest(
@@ -79,7 +79,7 @@ When using Anonymizer as a NeMo Helix service:
 | Feature        | Difference                                              | Details                                                                                |
 |----------------|---------------------------------------------------------|----------------------------------------------------------------------------------------|
 | **Inference**  | Routes through the Inference Gateway                    | Configure providers once and reference them by name from `model_configs`.              |
-| **Input data** | Filesets and HTTP(S) URLs                               | Use `sdk.files.filesets.create` / `sdk.files.upload`, then reference with `#<path>`. |
+| **Input data** | Filesets and HTTP(S) URLs                               | Use `client.files.create_fileset` / `client.files.upload_file`, then reference with `#<path>`. |
 | **Artifacts**  | Platform-managed                                        | `run` stores artifacts in NeMo Helix job storage. |
 
 ## Prerequisites
@@ -100,21 +100,21 @@ These tutorials route inference through an [Inference Gateway](/documentation/mo
 
 ### Upload an Input Fileset
 
-`sdk.anonymizer.preview`, `nemo anonymizer preview`, and `nemo anonymizer run` reject local file paths, so the tutorials read from a fileset. Create a small CSV containing PII and upload it to a fileset named `anonymizer-inputs`:
+`client.anonymizer.preview`, `nemo anonymizer preview`, and `nemo anonymizer run` reject local file paths, so the tutorials read from a fileset. Create a small CSV containing PII and upload it to a fileset named `anonymizer-inputs`:
 
 ```python
 import os
 import tempfile
 from pathlib import Path
 
-from nemo_helix import NeMoHelix
-from nemo_helix._exceptions import ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 WORKSPACE = os.environ.get("NHX_WORKSPACE", "default")
 FILESET = "anonymizer-inputs"
 INPUT_FILENAME = "anonymizer-input.csv"
 
-sdk = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace=WORKSPACE,
 )
@@ -127,20 +127,17 @@ with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
     )
     input_path = Path(f.name)
 
-try:
-    sdk.files.filesets.create(
-        name=FILESET,
-        workspace=WORKSPACE,
-        description="Anonymizer input files",
-    )
-except ConflictError:
-    pass  # already exists
-
-sdk.files.upload(
-    local_path=str(input_path),
-    fileset=FILESET,
+client.files.create_fileset(
     workspace=WORKSPACE,
-    remote_path=INPUT_FILENAME,
+    body=CreateFilesetRequest(name=FILESET, description="Anonymizer input files"),
+    exist_ok=True,
+)
+
+client.files.upload_file(
+    workspace=WORKSPACE,
+    name=FILESET,
+    path=INPUT_FILENAME,
+    content=input_path.read_bytes(),
 )
 ```
 

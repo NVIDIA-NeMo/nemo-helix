@@ -45,9 +45,11 @@ Instantiate the platform client.
 
 ```python
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -100,11 +102,13 @@ guardrails_config = {
 }
 
 try:
-    config = client.guardrail.configs.create(
-        name="content-safety-config",
-        description="Content safety guardrails with NemoGuard NIM",
-        data=guardrails_config,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="content-safety-config",
+            description="Content safety guardrails with NemoGuard NIM",
+            data=guardrails_config,
+        ),
+    ).data()
 except ConflictError:
     print("Config content-safety-config already exists, continuing...")
 
@@ -315,7 +319,7 @@ print(response.model_dump_json(indent=2))
 
 ```python
 client.inference.virtual_models.delete(name="guarded-content-safety")
-client.guardrail.configs.delete(name="content-safety-config")
+client.guardrail.delete_guardrail_config(name="content-safety-config")
 print("Cleanup complete")
 ```
 

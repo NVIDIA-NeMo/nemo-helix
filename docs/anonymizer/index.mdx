@@ -43,12 +43,13 @@ config = AnonymizerConfig(
 
 Submit the config to the Anonymizer service with NeMo Helix SDK:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_anonymizer_plugin.app.task_config import PreviewRequest
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(base_url="...", workspace="default")
-anonymizer = sdk.anonymizer
+client = NemoClient(base_url="...", workspace="default")
+anonymizer = client.anonymizer
 
 preview_result = anonymizer.preview(PreviewRequest(
     config=config,
@@ -74,7 +75,7 @@ For a full anonymization run, submit the job to the Jobs worker:
 nemo anonymizer run --spec-file /path/to/run-spec.yaml
 ```
 
-The SDK equivalent is `sdk.anonymizer.run(request)`, which returns an `AnonymizerJobResource` you can poll with `wait_until_done()` and pull artifacts from with `download_artifacts()`.
+The SDK equivalent is `client.anonymizer.run(request)`, which returns an `AnonymizerJobResource` you can poll with `wait_until_done()` and pull artifacts from with `download_artifacts()`.
 
 **The platform handles:** Inference routing through the Inference Gateway, fileset-backed inputs, and authentication.
 
@@ -109,9 +110,9 @@ See the [library documentation](https://github.com/NVIDIA-NeMo/Anonymizer/tree/m
 This package is a thin wrapper around the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer). It does **not** re-document detection, replacement, or rewrite semantics. It adds:
 
 - A `nemo anonymizer` CLI with `validate`, `preview`, and `run` commands.
-- An `sdk.anonymizer` SDK accessor (`AnonymizerResource`, `AsyncAnonymizerResource`).
+- An `client.anonymizer` SDK accessor (`AnonymizerResource`, `AsyncAnonymizerResource`).
 - A streaming `anonymizer.preview` function that emits `preview_dataset`, `trace_dataset`, and `failed_records` frames from the plugin service.
-- An `anonymizer.run` job that writes `dataset.parquet`, `trace.parquet`, `metadata.json`, and optional `failed_records.json`. The job executes on NeMo Helix Jobs worker (`nemo anonymizer run` / `sdk.anonymizer.run`).
+- An `anonymizer.run` job that writes `dataset.parquet`, `trace.parquet`, `metadata.json`, and optional `failed_records.json`. The job executes on NeMo Helix Jobs worker (`nemo anonymizer run` / `client.anonymizer.run`).
 - Fileset input handling (`fileset://<workspace>/<fileset>#<path>`).
 - Inference Gateway routing for model providers referenced from `model_configs`.
 

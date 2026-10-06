@@ -23,13 +23,15 @@ You also need a VirtualModel configured with guardrails middleware. See [Archite
 
 By default, guardrail configurations do not generate traces. To export traces for interactions using a specific guardrail configuration, set `tracing.enabled` to `true` and specify the `OpenTelemetry` adapter in the configuration.
 
-Instantiate the NeMoHelix SDK.
+Instantiate the NeMo Helix typed client.
 
 ```python
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -69,10 +71,12 @@ config_data = {
 }
 
 try:
-    client.guardrail.configs.create(
-        name="tracing-config",
-        data=config_data,
-    )
+    client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name="tracing-config",
+            data=config_data,
+        ),
+    ).data()
 except ConflictError:
     print("Config tracing-config already exists, continuing...")
 
@@ -221,6 +225,6 @@ The `service.name` for all spans is determined by the platform's `OTEL_SERVICE_N
 
 ```python
 client.inference.virtual_models.delete(name="guarded-tracing")
-client.guardrail.configs.delete(name="tracing-config")
+client.guardrail.delete_guardrail_config(name="tracing-config")
 print("Cleanup complete")
 ```

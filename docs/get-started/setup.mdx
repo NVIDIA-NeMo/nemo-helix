@@ -246,27 +246,28 @@ nemo setup --no-install-skills
 
 ## Python SDK
 
-The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization uses your CLI context:
+The `nemo-helix` package includes a Python SDK. After running `nemo setup`, the simplest initialization reads your CLI context with `NemoClient.from_config()`:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 ```
 
 For scripts or CI where you want explicit control:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
 
-client = NeMoHelix(
+from nemo_helix_plugin.client.client import NemoClient
+
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
 ```
 
-An asynchronous client is also available. See the [SDK reference](/documentation/reference/python-sdk) for details.
+An asynchronous client, `AsyncNemoClient`, is also available (construct it the same way, or with `AsyncNemoClient.from_config()`). See the [SDK reference](/documentation/reference/python-sdk) for details.
 
 ## Troubleshooting
 

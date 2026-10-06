@@ -52,9 +52,11 @@ Instantiate the platform client.
 
 ```python
 import os
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.guardrail.types import CreateGuardrailConfigRequest
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -81,11 +83,13 @@ guardrails_config = {
 
 config_name = "injection-detection-config"
 try:
-    config = client.guardrail.configs.create(
-        name=config_name,
-        description="Injection detection guardrails",
-        data=guardrails_config,
-    )
+    config = client.guardrail.create_guardrail_config(
+        body=CreateGuardrailConfigRequest(
+            name=config_name,
+            description="Injection detection guardrails",
+            data=guardrails_config,
+        ),
+    ).data()
 except ConflictError:
     print(f"Config {config_name} already exists, continuing...")
 ```
@@ -227,24 +231,26 @@ print(response.model_dump_json(indent=2))
 Provide custom YARA rules inline. The example below performs a case-insensitive check for the word "Ethernet" and rejects the response if it appears.
 
 ```python
-inline_rules_config = client.guardrail.configs.create(
-    name="injection-detection-inline-config",
-    description="Injection detection with inline YARA rules",
-    data={
-        "rails": {
-            "config": {
-                "injection_detection": {
-                    "injections": ["reject_ethernet"],
-                    "yara_rules": {
-                        "reject_ethernet": 'rule reject_ethernet {\n strings:\n $string = "ethernet" nocase\n condition:\n $string\n}'
-                    },
-                    "action": "reject",
-                }
+inline_rules_config = client.guardrail.create_guardrail_config(
+    body=CreateGuardrailConfigRequest(
+        name="injection-detection-inline-config",
+        description="Injection detection with inline YARA rules",
+        data={
+            "rails": {
+                "config": {
+                    "injection_detection": {
+                        "injections": ["reject_ethernet"],
+                        "yara_rules": {
+                            "reject_ethernet": 'rule reject_ethernet {\n strings:\n $string = "ethernet" nocase\n condition:\n $string\n}'
+                        },
+                        "action": "reject",
+                    }
+                },
+                "output": {"flows": ["injection detection"]},
             },
-            "output": {"flows": ["injection detection"]},
         },
-    },
-)
+    ),
+).data()
 ```
 
 Create a VirtualModel for the inline config:
@@ -302,10 +308,10 @@ print(response.model_dump_json(indent=2))
 
 ```python
 client.inference.virtual_models.delete(name="guarded-injection-detect")
-client.guardrail.configs.delete(name=config_name)
+client.guardrail.delete_guardrail_config(name=config_name)
 # Uncomment if Optional section was run:
 # client.inference.virtual_models.delete(name="guarded-injection-inline")
-# client.guardrail.configs.delete(name="injection-detection-inline-config")
+# client.guardrail.delete_guardrail_config(name="injection-detection-inline-config")
 print("Cleanup complete")
 ```
 

@@ -87,26 +87,27 @@ Password grant sends credentials directly to the IdP and **bypasses MFA**. Many 
 The SDK reads credentials from the CLI config automatically — no manual token handling needed:
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
 # After `nemo auth login` (OIDC) or `nemo auth login --unsigned-token --email <email>` (quickstart),
-# the SDK reads base_url, workspace, and the stored token from the CLI config.
+# from_config reads base_url, workspace, and the stored token from the CLI config.
 # This is the recommended pattern for interactive / OIDC-authenticated usage.
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-workspaces = client.workspaces.list()
+for workspace in client.workspaces.list_workspaces().items():
+    print(workspace.name)
 ```
 
-If you need explicit token control (for example, a token from a CI system or environment variable), pass it via `access_token`:
+If you need explicit token control (for example, a token from a CI system or environment variable), pass it via `auth`:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
-    access_token=os.environ.get("NHX_ACCESS_TOKEN"),
+    auth=os.environ.get("NHX_ACCESS_TOKEN"),
 )
 ```
 
@@ -234,7 +235,7 @@ Key claims to check:
 
 You never need to refresh tokens manually — the CLI and SDK handle it transparently:
 
-- **SDK**: Refreshes lazily before each API call when the token is within 60 seconds of expiry. No background threads or timers — the cost is paid only when a refresh is actually needed (typically once per hour). Multiple `NeMoHelix()` clients in the same Python process share a single token, so only one refresh happens even with many clients.
+- **SDK**: Refreshes lazily before each API call when the token is within 60 seconds of expiry. No background threads or timers — the cost is paid only when a refresh is actually needed (typically once per hour). Multiple `NemoClient.from_config()` clients in the same Python process share a single token, so only one refresh happens even with many clients.
 - **CLI**: Checks the token before every command and refreshes if it expires within 5 minutes. To disable for a specific command: `nemo --no-auto-refresh workspaces list`.
 
 Running multiple scripts or CLI commands simultaneously is safe — file-level locking prevents conflicts when refreshing tokens across processes.

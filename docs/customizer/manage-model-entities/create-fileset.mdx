@@ -26,10 +26,13 @@ The most common method is downloading directly from Hugging Face. The example be
 
 ```python
 import os
-from nemo_helix import ConflictError, NeMoHelix
-from nemo_helix.types.files import HuggingfaceStorageConfigParam
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.schema import SecretRef
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -39,21 +42,21 @@ MODEL_NAME = "qwen3-1.7b"
 
 # Create FileSet from Hugging Face
 try:
-    fileset = client.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description="Qwen3 1.7B from Hugging Face",
-        purpose="model",
-        storage=HuggingfaceStorageConfigParam(
-            type="huggingface",
-            repo_id=HF_REPO_ID,
-            repo_type="model",
-        ),
-    )
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Qwen3 1.7B from Hugging Face",
+            purpose=FilesetPurpose.MODEL,
+            storage=HuggingfaceStorageConfig(
+                repo_id=HF_REPO_ID,
+                repo_type="model",
+            ),
+        )
+    ).data()
     print(f"Created FileSet: {fileset.name}")
 except ConflictError:
     print(f"FileSet '{MODEL_NAME}' already exists, retrieving...")
-    fileset = client.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
+    fileset = client.files.get_fileset(name=MODEL_NAME).data()
 
 print(f"FileSet ready: {fileset.name}")
 ```
@@ -67,11 +70,10 @@ Gated models (such as Llama) require a Hugging Face token. To use one:
 3. Store the token as a secret in the platform (see [Manage Secrets](/documentation/get-started/core-concepts/manage-secrets)), then pass it as `token_secret` in the storage config:
 
 ```python
-storage=HuggingfaceStorageConfigParam(
-    type="huggingface",
+storage=HuggingfaceStorageConfig(
     repo_id="meta-llama/Llama-3.2-1B-Instruct",
     repo_type="model",
-    token_secret="my-hf-token",
+    token_secret=SecretRef("my-hf-token"),
 )
 ```
 
@@ -84,10 +86,15 @@ For models from NVIDIA NGC:
 
 ```python
 import os
-from nemo_helix import ConflictError, NeMoHelix
-from nemo_helix.types.files import NGCStorageConfigParam
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
+from nemo_helix_plugin.files.storage_config import NGCStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
+from nemo_helix_plugin.schema import SecretRef
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+from pydantic import SecretStr
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
@@ -104,37 +111,35 @@ if not NGC_API_KEY:
 
 # First, create a secret for your NGC API key (if not already created)
 try:
-    ngc_secret = client.secrets.create(
-        name=NGC_API_KEY_SECRET,
-        workspace="default",
-        value=NGC_API_KEY,
-    )
+    ngc_secret = client.secrets.create_secret(
+        body=HelixSecretCreateRequest(name=NGC_API_KEY_SECRET, value=SecretStr(NGC_API_KEY)),
+    ).data()
     print(f"Created secret: {NGC_API_KEY_SECRET}")
 except ConflictError:
     print(f"Secret '{NGC_API_KEY_SECRET}' already exists, continuing...")
-    ngc_secret = client.secrets.retrieve(name=NGC_API_KEY_SECRET, workspace="default")
+    ngc_secret = client.secrets.get_secret(name=NGC_API_KEY_SECRET).data()
 
 # Create FileSet from NGC
 try:
-    fileset = client.files.filesets.create(
-        workspace="default",
-        name=MODEL_NAME,
-        description="Nemotron Mini 4B from NGC",
-        purpose="model",
-        storage=NGCStorageConfigParam(
-            type="ngc",
-            org=NGC_ORG,
-            team=NGC_TEAM,
-            target=NGC_TARGET,  # NGC asset name
-            target_type="resource",
-            version=NGC_VERSION,
-            api_key_secret=ngc_secret.name,
-        ),
-    )
+    fileset = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Nemotron Mini 4B from NGC",
+            purpose=FilesetPurpose.MODEL,
+            storage=NGCStorageConfig(
+                org=NGC_ORG,
+                team=NGC_TEAM,
+                target=NGC_TARGET,  # NGC asset name
+                target_type="resource",
+                version=NGC_VERSION,
+                api_key_secret=SecretRef(ngc_secret.name),
+            ),
+        )
+    ).data()
     print(f"Created FileSet: {fileset.name}")
 except ConflictError:
     print("FileSet already exists, retrieving...")
-    fileset = client.files.filesets.retrieve(workspace="default", name=MODEL_NAME)
+    fileset = client.files.get_fileset(name=MODEL_NAME).data()
 ```
 
 ---
@@ -145,11 +150,11 @@ Files are downloaded in the background after you create a FileSet. Check the sta
 
 ```python
 # List files in the FileSet
-response = client.files.list(
+response = client.files.list_files(
     workspace="default",
-    fileset="qwen3-1.7b",
+    name="qwen3-1.7b",
 )
-files = response.data
+files = response.data().data
 
 print(f"Files in FileSet ({len(files)} total):")
 for f in files[:10]:  # Show first 10
