@@ -341,7 +341,7 @@ constraint-dependencies = [
   "sqlfluff>=4.2.2",
   "sqlparse>=0.6.0,<0.7",
   "starlette>=1.3.1",
-  "urllib3>=2.7.0",
+  "urllib3>=2.8.0",
   "uv>=0.10.10",
   "wandb>=0.29.0",
 ]
@@ -365,7 +365,7 @@ override-dependencies = [
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-auditor-tasks + customizer
   "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
-  "urllib3>=2.7.0",           # High OOS – nhx-auditor-tasks + customizer
+  "urllib3>=2.8.0",           # High OOS – nhx-auditor-tasks + customizer
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks

@@ -107,7 +107,7 @@ tenacity==9.1.4
 typer==0.25.1
 types-aioboto3==15.5.0
 typing-extensions==4.16.0
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.52.3
 wasmtime==47.0.1
 xdg-base-dirs==6.0.2

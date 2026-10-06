@@ -4166,9 +4166,9 @@ unsloth-zoo==2026.8.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin
     --hash=sha256:bf6abe0a22a71e815d9e3051fe08813f5f0597a29c97de194a9091b64a05aea1 \
     --hash=sha256:e1c679e957b2afbde5e8d3efc0b172e0506c9f9a52c8c9075ec50cac5e377796
     # via unsloth
-urllib3==2.7.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c \
-    --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897
+urllib3==2.8.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
+    --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
     # via
     #   botocore
     #   clickhouse-connect
