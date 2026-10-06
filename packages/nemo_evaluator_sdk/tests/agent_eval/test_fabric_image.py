@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -62,7 +63,60 @@ def test_ensure_builds_when_image_absent(monkeypatch: pytest.MonkeyPatch) -> Non
     tag = ensure_fabric_image()
     (build,) = recorder.build_calls
     assert build[:4] == ["docker", "build", "-t", tag]
-    assert sorted(recorder.build_context) == ["Dockerfile", "requirements.txt"]
+    assert sorted(recorder.build_context) == ["Dockerfile", "pi-package.json", "requirements.txt"]
+
+
+def test_pi_package_json_pins_everything_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The npm install pins the adapter to Fabric's version and the Pi SDK peers exactly.
+
+    The tag is a digest of these pins, so a range that could move would let the same tag name
+    drifted contents and be reused from cache.
+    """
+    recorder = _DockerRecorder(image_present=False)
+    monkeypatch.setattr(image_mod.subprocess, "run", recorder)
+    ensure_fabric_image()
+
+    version = image_mod.fabric_version()
+    package = json.loads(recorder.build_context["pi-package.json"])
+    dependencies = package["dependencies"]
+    assert dependencies["nemo-fabric-adapters-pi"] == version
+    for pin in image_mod._pi_sdk_pins(version):
+        name, _, pinned = pin.partition("==")
+        assert dependencies[name] == pinned
+    assert all("^" not in pinned and "~" not in pinned for pinned in dependencies.values())
+
+
+def test_tag_changes_when_a_pi_pin_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Pi SDK bump must not reuse the cached image built against the previous pin."""
+    before = fabric_image_tag()
+    monkeypatch.setattr(
+        image_mod,
+        "_PI_SDK_PINS_BY_FABRIC_VERSION",
+        {image_mod.fabric_version(): ("@earendil-works/pi-ai==9.9.9", "@earendil-works/pi-coding-agent==9.9.9")},
+    )
+    assert fabric_image_tag() != before
+
+
+def test_pi_sdk_pins_follow_the_fabric_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each Fabric version pairs with the Pi SDK floor its adapter's peerDependencies declare."""
+    assert image_mod._pi_sdk_pins("0.3.0") == (
+        "@earendil-works/pi-ai==0.84.2",
+        "@earendil-works/pi-coding-agent==0.84.2",
+    )
+    assert image_mod._pi_sdk_pins("0.4.0") == (
+        "@earendil-works/pi-ai==0.86.0",
+        "@earendil-works/pi-coding-agent==0.86.0",
+    )
+
+
+def test_pi_sdk_pins_raise_for_unknown_fabric_version() -> None:
+    """A Fabric version with no known pin fails loudly instead of guessing a pin.
+
+    A guessed pin could satisfy the adapter at build time yet break the harness at runtime, and the
+    tag is a digest of these pins.
+    """
+    with pytest.raises(FabricImageError, match="no known Pi SDK pins for nemo-fabric 9.9.9"):
+        image_mod.fabric_image_tag(version="9.9.9")
 
 
 def test_image_pins_every_requirement_to_the_installed_fabric(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,8 +142,7 @@ def test_image_pins_every_requirement_to_the_installed_fabric(monkeypatch: pytes
 
 def test_tag_changes_with_the_fabric_version(monkeypatch: pytest.MonkeyPatch) -> None:
     """A Fabric bump must not reuse the cached image built against the previous one."""
-    monkeypatch.setattr(image_mod, "fabric_version", lambda: "9.9.9")
-    assert fabric_image_tag() != fabric_image_tag(version="0.0.1")
+    assert fabric_image_tag(version="0.3.0") != fabric_image_tag(version="0.4.0")
 
 
 def test_image_exists_raises_when_daemon_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:

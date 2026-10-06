@@ -12,6 +12,9 @@ pattern (``docker image inspect`` → ``docker build``).
 The image installs published wheels, so the build needs no source checkout and no build context
 beyond its own pins. It is pinned to the ``nemo-fabric`` version installed alongside this SDK,
 so the sandbox cannot run a Fabric that disagrees with the config the host composes for it.
+The Pi harness adapter is an npm package (not a wheel), so the image also bakes Node and the
+adapter's pinned npm dependencies; its descriptor is rewritten into the well-known
+``share/nemo-fabric/adapters`` tree, so Fabric discovers it exactly like the wheel adapters.
 
 The tag is content-addressed on the recipe + version + adapters, so any of those changing produces a
 new tag (cache-bust) and an unchanged recipe reuses the cached image.
@@ -25,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import json
 import logging
 import os
 import shutil
@@ -48,6 +52,18 @@ _BUILD_TIMEOUT_S = 900
 #: version as ``nemo-fabric``. Codex and claude are absent: they need their own CLIs, which this image
 #: does not provision.
 _ADAPTER_DISTRIBUTIONS: tuple[str, ...] = ("nemo-fabric-adapters-hermes",)
+
+#: The Pi harness adapter is an npm package, versioned with ``nemo-fabric`` like the wheel adapters.
+_PI_ADAPTER_NPM_PACKAGE = "nemo-fabric-adapters-pi"
+
+#: Exact pins for the Pi SDK peers, keyed by the ``nemo-fabric`` version they pair with. Each adapter
+#: release declares the Pi SDK range it supports (``^0.84.2`` for the 0.3.0 adapter, ``^0.86.0`` for
+#: 0.4.0); we pin the range floor exactly, because the tag is a digest of these pins. Keep this table
+#: in sync with the adapter's peerDependencies when bumping the Fabric version.
+_PI_SDK_PINS_BY_FABRIC_VERSION: dict[str, tuple[str, ...]] = {
+    "0.3.0": ("@earendil-works/pi-ai==0.84.2", "@earendil-works/pi-coding-agent==0.84.2"),
+    "0.4.0": ("@earendil-works/pi-ai==0.86.0", "@earendil-works/pi-coding-agent==0.86.0"),
+}
 
 #: Requirements the harness needs that are not versioned with Fabric. ``hermes-agent`` is the harness
 #: itself, which no Fabric extra pulls in; ``tomli-w`` is what the adapter writes Relay's plugin config
@@ -80,6 +96,35 @@ def _requirements(version: str) -> list[str]:
     ]
 
 
+def _pi_sdk_pins(version: str) -> tuple[str, ...]:
+    """The Pi SDK peer pins for the given ``nemo-fabric`` version.
+
+    Raises :class:`FabricImageError` for a version with no known pins: a guessed pin could satisfy the
+    adapter at build time yet break the harness at runtime, and the tag is a digest of these pins.
+    """
+    try:
+        return _PI_SDK_PINS_BY_FABRIC_VERSION[version]
+    except KeyError:
+        raise FabricImageError(
+            f"no known Pi SDK pins for nemo-fabric {version}; add a mapping to "
+            "_PI_SDK_PINS_BY_FABRIC_VERSION (check nemo-fabric-adapters-pi's peerDependencies)"
+        ) from None
+
+
+def _pi_package_json(version: str) -> str:
+    """The npm package.json for the image's Pi adapter install, every dependency pinned exactly."""
+    dependencies = {_PI_ADAPTER_NPM_PACKAGE: version}
+    for pin in _pi_sdk_pins(version):
+        name, _, pinned = pin.partition("==")
+        dependencies[name] = pinned
+    return (
+        json.dumps(
+            {"name": "nemo-evaluator-fabric-pi-adapter", "private": True, "dependencies": dependencies}, indent=2
+        )
+        + "\n"
+    )
+
+
 def fabric_image_tag(*, repo: str = DEFAULT_FABRIC_IMAGE_REPO, version: str | None = None) -> str:
     """Content-addressed tag for the harness-agnostic Fabric image: ``<repo>:<digest>``.
 
@@ -87,7 +132,11 @@ def fabric_image_tag(*, repo: str = DEFAULT_FABRIC_IMAGE_REPO, version: str | No
     is the same regardless of which harness a task's config selects.
     """
     resolved = version or fabric_version()
-    recipe = _DOCKERFILE.read_bytes() + "\n".join(_requirements(resolved)).encode("utf-8")
+    recipe = (
+        _DOCKERFILE.read_bytes()
+        + "\n".join(_requirements(resolved)).encode("utf-8")
+        + _pi_package_json(resolved).encode("utf-8")
+    )
     return f"{repo}:{hashlib.sha256(recipe).hexdigest()[:12]}"
 
 
@@ -132,6 +181,7 @@ def ensure_fabric_image(*, docker_bin: str = "docker", force_build: bool = False
         ctx = Path(ctx_dir)
         shutil.copy2(_DOCKERFILE, ctx / "Dockerfile")
         (ctx / "requirements.txt").write_text("\n".join(_requirements(version)) + "\n", encoding="utf-8")
+        (ctx / "pi-package.json").write_text(_pi_package_json(version), encoding="utf-8")
         try:
             subprocess.run(
                 [docker_bin, "build", "-t", tag, str(ctx)],
