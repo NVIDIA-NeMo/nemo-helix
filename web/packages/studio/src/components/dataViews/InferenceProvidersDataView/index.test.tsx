@@ -4,8 +4,9 @@
 import { InferenceProvidersDataView } from '@studio/components/dataViews/InferenceProvidersDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
-import { renderRoute } from '@studio/tests/util/render';
+import { renderRoute, screen } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
 vi.mock('use-debounce', () => ({
@@ -22,6 +23,25 @@ const emptyProvidersPage = {
     current_page_size: 0,
     total_pages: 0,
     total_results: 0,
+  },
+};
+
+const provider = {
+  name: 'test-provider',
+  workspace: 'default',
+  host_url: 'https://api.example.com',
+  created_at: '2026-10-01T00:00:00Z',
+  updated_at: '2026-10-01T00:00:00Z',
+};
+
+const providersPage = {
+  data: [provider],
+  pagination: {
+    page: 1,
+    page_size: 50,
+    current_page_size: 1,
+    total_pages: 1,
+    total_results: 1,
   },
 };
 
@@ -89,5 +109,21 @@ describe('InferenceProvidersDataView', () => {
       expect(params.has('search')).toBe(false);
       expect(Array.from(params.keys()).some((k) => k.startsWith('search['))).toBe(false);
     }
+  });
+
+  it('explains which associated models are deleted with a provider', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(PROVIDERS_URL, () => HttpResponse.json(providersPage)));
+    renderDataView('/workspaces/default/inference-providers');
+
+    await screen.findByText(provider.name);
+    await user.click(screen.getByRole('button', { name: 'Row Actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+
+    expect(
+      await screen.findByText(
+        'Deleting this inference provider will also delete its auto-discovered model entities unless another provider serves them. Are you sure you want to proceed?'
+      )
+    ).toBeInTheDocument();
   });
 });

@@ -290,7 +290,7 @@ class ModelProviderService:
             return _entity_to_schema(created)
 
     async def delete_model_provider(self, request: DeleteModelProviderRequest) -> bool:
-        """Delete a model provider and clean up references from linked model entities."""
+        """Delete a provider and its exclusively served, auto-discovered models."""
         logger.debug("Deleting model provider", extra={"workspace": request.workspace, "provider_name": request.name})
 
         try:
@@ -314,12 +314,12 @@ class ModelProviderService:
             expected_db_version=provider.db_version,
         )
 
-        await self._cleanup_model_entity_references(provider, provider_id)
+        await self._cleanup_model_entities(provider, provider_id)
         logger.info("Model provider deleted", extra={"workspace": request.workspace, "provider_name": request.name})
         return True
 
-    async def _cleanup_model_entity_references(self, provider: ModelProviderEntity, provider_id: str) -> None:
-        """Remove this provider from the model_providers list of all linked model entities."""
+    async def _cleanup_model_entities(self, provider: ModelProviderEntity, provider_id: str) -> None:
+        """Delete exclusive auto-discovered models and unlink models that must remain."""
         if not provider.served_models:
             logger.debug("No served_models, skipping model entity cleanup", extra={"provider_id": provider_id})
             return
@@ -338,12 +338,25 @@ class ModelProviderService:
                 model = await self.entity_client.get(Model, workspace=model_workspace, name=model_name)
 
                 if provider_id in model.model_providers:
-                    model.model_providers = [p for p in model.model_providers if p != provider_id]
-                    await self.entity_client.update(model)
-                    logger.info(
-                        "Removed provider from model entity",
-                        extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
-                    )
+                    remaining_providers = [p for p in model.model_providers if p != provider_id]
+                    if remaining_providers or provider.model_deployment_id is not None:
+                        model.model_providers = remaining_providers
+                        await self.entity_client.update(model)
+                        logger.info(
+                            "Removed provider from retained model entity",
+                            extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
+                        )
+                    else:
+                        await self.entity_client.delete(
+                            Model,
+                            model.name,
+                            workspace=model_workspace,
+                            expected_db_version=model.db_version,
+                        )
+                        logger.info(
+                            "Deleted model entity served exclusively by provider",
+                            extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
+                        )
                 else:
                     logger.debug(
                         "Provider not in model entity model_providers",
