@@ -210,18 +210,25 @@ describe('validateDraft', () => {
 });
 
 describe('estimateTrainingRows', () => {
-  const file = (rowCount: number, size: number) =>
-    ({ path: 'training.jsonl', file_ref: '', file_url: '', size, rowCount }) as const;
+  const file = (rowCount: number, size: number, bytesRead: number) =>
+    ({ path: 'training.jsonl', file_ref: '', file_url: '', size, rowCount, bytesRead }) as const;
 
-  it('counts exactly when every file fit in the preview', () => {
-    expect(estimateTrainingRows([file(100, 1_000), file(50, 500)])).toEqual({
+  it('counts exactly when every file was read whole', () => {
+    expect(estimateTrainingRows([file(100, 1_000, 1_000), file(50, 500, 500)])).toEqual({
       trainingRowCount: 150,
       rowCountIsEstimate: false,
     });
   });
 
-  it('scales a file past the preview cap up by its size', () => {
-    expect(estimateTrainingRows([file(1_000, 512 * 1024 * 10)])).toEqual({
+  it('keeps a whole-file count as is, however large the file', () => {
+    expect(estimateTrainingRows([file(80_000, 10_000_000, 10_000_000)])).toEqual({
+      trainingRowCount: 80_000,
+      rowCountIsEstimate: false,
+    });
+  });
+
+  it('scales a capped preview by the bytes actually read', () => {
+    expect(estimateTrainingRows([file(1_000, 5_000_000, 500_000)])).toEqual({
       trainingRowCount: 10_000,
       rowCountIsEstimate: true,
     });
