@@ -19,13 +19,13 @@ import base64
 import json
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
-from nemo_helix_plugin.jobs.api_factory import job_route_factory
+from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, job_route_factory
 from pydantic import BaseModel, ConfigDict
 from starlette.testclient import TestClient
 
@@ -128,6 +128,35 @@ class TestPluginJobsFilter:
         assert _forwarded_filter(sdk) == {"$and": [{"name": {"$like": "foo"}}, {"source": {"$eq": "widgets"}}]}
         # Typed ``filter`` kwarg is intentionally not used — see comment above.
         assert "filter" not in sdk.list_kwargs
+
+    def test_backend_literal_default_is_anded_onto_the_spec(self):
+        """A backend filter's Literal default is applied as ``spec.backend``."""
+
+        class _RlJobsListFilter(BaseJobsListFilter):
+            backend: Literal["rl"] = "rl"
+
+        app = FastAPI()
+        router = job_route_factory(
+            service_name="customization",
+            job_type="Rl",
+            job_input=_Spec,
+            platform_job_config_compiler=_fake_compiler,
+            jobs_list_filter=_RlJobsListFilter,
+        )
+        app.include_router(router, prefix="/apis/customization/v2/workspaces/{workspace}")
+        sdk = _CapturingSdk()
+        app.dependency_overrides[get_nemo_client] = lambda: sdk
+        app.dependency_overrides[get_entity_client] = lambda: SimpleNamespace()
+
+        resp = TestClient(app).get("/apis/customization/v2/workspaces/default/jobs")
+
+        assert resp.status_code == 200, resp.text
+        assert _forwarded_filter(sdk) == {
+            "$and": [
+                {"source": {"$eq": "customization"}},
+                {"spec.backend": {"$eq": "rl"}},
+            ]
+        }
 
     def test_bare_eq_value(self):
         app, sdk = _build_app()

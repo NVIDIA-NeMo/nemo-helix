@@ -99,7 +99,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/AutomodelJobsJobsListFilter'
+          $ref: '#/components/schemas/AutomodelJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -667,7 +667,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/RlJobsJobsListFilter'
+          $ref: '#/components/schemas/RlJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -1053,7 +1053,7 @@ paths:
         required: false
         explode: true
         schema:
-          $ref: '#/components/schemas/UnslothJobsJobsListFilter'
+          $ref: '#/components/schemas/UnslothJobsListFilter'
         description: Filter jobs on various criteria.
       responses:
         '200':
@@ -1613,6 +1613,11 @@ components:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: automodel
+          title: Backend
+          default: automodel
         model:
           type: string
           title: Model
@@ -1741,42 +1746,6 @@ components:
       required:
       - spec
       title: AutomodelJobsJobRequest
-    AutomodelJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/HelixJobStatus'
-          description: The current status.
-        spec:
-          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
-          title: Spec
-          additionalProperties: true
-          type: object
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: AutomodelJobsJobsListFilter
-      type: object
     AutomodelJobsJobsPage:
       properties:
         data:
@@ -1809,6 +1778,49 @@ components:
       - updated_at
       - -updated_at
       title: AutomodelJobsJobsSortField
+    AutomodelJobsListFilter:
+      additionalProperties: false
+      description: Automodel jobs only. ``backend`` is the literal stored on the job
+        spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: automodel
+          default: automodel
+          title: Backend
+          type: string
+      title: AutomodelJobsListFilter
+      type: object
     AutomodelLoRAParams:
       properties:
         rank:
@@ -3648,6 +3660,11 @@ components:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: rl
+          title: Backend
+          default: rl
         model:
           type: string
           title: Model
@@ -3781,42 +3798,6 @@ components:
       required:
       - spec
       title: RlJobsJobRequest
-    RlJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/HelixJobStatus'
-          description: The current status.
-        spec:
-          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
-          title: Spec
-          additionalProperties: true
-          type: object
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: RlJobsJobsListFilter
-      type: object
     RlJobsJobsPage:
       properties:
         data:
@@ -3849,6 +3830,48 @@ components:
       - updated_at
       - -updated_at
       title: RlJobsJobsSortField
+    RlJobsListFilter:
+      additionalProperties: false
+      description: RL jobs only. ``backend`` is the literal stored on the job spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: rl
+          default: rl
+          title: Backend
+          type: string
+      title: RlJobsListFilter
+      type: object
     RlLoRAParams:
       properties:
         rank:
@@ -4231,6 +4254,11 @@ components:
         name:
           title: Name
           type: string
+        backend:
+          type: string
+          const: unsloth
+          title: Backend
+          default: unsloth
         model:
           $ref: '#/components/schemas/UnslothModelLoadSpec'
         dataset:
@@ -4363,42 +4391,6 @@ components:
       required:
       - spec
       title: UnslothJobsJobRequest
-    UnslothJobsJobsListFilter:
-      additionalProperties: false
-      properties:
-        created_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs created at 'gte' datetime or 'lte' datetime.
-        name:
-          anyOf:
-          - $ref: '#/components/schemas/StringFilter'
-          - type: string
-          description: Name of the job.
-          title: Name
-        workspace:
-          description: Workspace of the job.
-          title: Workspace
-          type: string
-        project:
-          description: Project containing the job.
-          title: Project
-          type: string
-        status:
-          allOf:
-          - $ref: '#/components/schemas/HelixJobStatus'
-          description: The current status.
-        spec:
-          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
-          title: Spec
-          additionalProperties: true
-          type: object
-        updated_at:
-          allOf:
-          - $ref: '#/components/schemas/DatetimeFilter'
-          description: Jobs updated at 'gte' datetime or 'lte' datetime.
-      title: UnslothJobsJobsListFilter
-      type: object
     UnslothJobsJobsPage:
       properties:
         data:
@@ -4431,6 +4423,49 @@ components:
       - updated_at
       - -updated_at
       title: UnslothJobsJobsSortField
+    UnslothJobsListFilter:
+      additionalProperties: false
+      description: Unsloth jobs only. ``backend`` is the literal stored on the job
+        spec.
+      properties:
+        created_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs created at 'gte' datetime or 'lte' datetime.
+        name:
+          anyOf:
+          - $ref: '#/components/schemas/StringFilter'
+          - type: string
+          description: Name of the job.
+          title: Name
+        workspace:
+          description: Workspace of the job.
+          title: Workspace
+          type: string
+        project:
+          description: Project containing the job.
+          title: Project
+          type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The current status.
+        spec:
+          description: Filter on a path within the job's spec, e.g. `spec.target.format`.
+          title: Spec
+          additionalProperties: true
+          type: object
+        updated_at:
+          allOf:
+          - $ref: '#/components/schemas/DatetimeFilter'
+          description: Jobs updated at 'gte' datetime or 'lte' datetime.
+        backend:
+          const: unsloth
+          default: unsloth
+          title: Backend
+          type: string
+      title: UnslothJobsListFilter
+      type: object
     UnslothLoRAParams:
       properties:
         rank:

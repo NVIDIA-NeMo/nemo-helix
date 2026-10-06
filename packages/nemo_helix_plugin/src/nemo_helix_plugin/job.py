@@ -191,6 +191,10 @@ class NemoJob(_NamedPlugin):
 
     job_collection_path: ClassVar[str | None] = None
 
+    # Plugin-defined list filter passed to ``job_route_factory``. When set,
+    # replaces the generated ``{job_type}JobsListFilter``.
+    jobs_list_filter: ClassVar[type | None] = None
+
     # ------------------------------------------------------------------ #
     # Temporary CLI compatibility                                        #
     # ------------------------------------------------------------------ #

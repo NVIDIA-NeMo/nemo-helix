@@ -20,6 +20,7 @@ members = [
   "packages/filesets",
 
   "packages/nemo_helix_plugin",
+  "packages/nemo_helix_ext",
   "packages/nhx_common",
   "packages/nhx_customization_common",
   "plugins/nemo-deployments",
@@ -32,6 +33,7 @@ nhx-build-tools = { workspace = true }
 filesets = { workspace = true }
 
 nemo-helix-plugin = { workspace = true }
+nemo-helix-ext = { workspace = true }
 nemo-deployments-plugin = { workspace = true }
 nhx-common = { workspace = true }
 nhx-customization-common = { workspace = true }
