@@ -18,9 +18,9 @@ const failedBlock = {
 
 describe('evalRunOutcomeOf', () => {
   it('reads the evaluator rollup from status_details.evaluation', () => {
-    expect(evalRunOutcomeOf({ message: 'Job exited with code 1', evaluation: failedBlock })).toEqual(
-      failedBlock
-    );
+    expect(
+      evalRunOutcomeOf({ message: 'Job exited with code 1', evaluation: failedBlock })
+    ).toEqual(failedBlock);
   });
 
   it('returns null for jobs without the block, including non-evaluator jobs', () => {

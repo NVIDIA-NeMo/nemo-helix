@@ -90,7 +90,10 @@ describe('DetailsPanel', () => {
     renderRoute(<DetailsPanel evaluationJob={failedRun} />, {
       history: testPath,
       routes: [
-        { path: ROUTES.workspace.evaluationMetricDetails!, element: <DetailsPanel evaluationJob={failedRun} /> },
+        {
+          path: ROUTES.workspace.evaluationMetricDetails!,
+          element: <DetailsPanel evaluationJob={failedRun} />,
+        },
       ],
     });
 
@@ -119,7 +122,10 @@ describe('DetailsPanel', () => {
     renderRoute(<DetailsPanel evaluationJob={partialRun} />, {
       history: testPath,
       routes: [
-        { path: ROUTES.workspace.evaluationMetricDetails!, element: <DetailsPanel evaluationJob={partialRun} /> },
+        {
+          path: ROUTES.workspace.evaluationMetricDetails!,
+          element: <DetailsPanel evaluationJob={partialRun} />,
+        },
       ],
     });
 
