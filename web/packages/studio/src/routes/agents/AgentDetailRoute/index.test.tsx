@@ -153,7 +153,7 @@ describe('AgentDetailRoute', () => {
 
     await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
 
-    expect(await screen.findByText(/runs outside Platform/)).toBeInTheDocument();
+    expect(await screen.findByText(/does not have a configuration/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deploy this Agent' })).not.toBeInTheDocument();
 
