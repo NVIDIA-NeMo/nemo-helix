@@ -4,7 +4,8 @@
 """Live Docker smoke test for the sandbox provider + facade.
 
 Exercises the real ``docker run/exec/cp/rm`` plumbing (no fabric image needed — plain
-``busybox``), so it validates the boundary-crossing inject/exec/retrieve loop end to end.
+busybox from NVIDIA's Docker Hub mirror), so it validates the boundary-crossing
+inject/exec/retrieve loop end to end.
 Skipped automatically where Docker is unavailable, mirroring how NeMo Gym guards its
 real-Apptainer tests.
 """
@@ -20,7 +21,9 @@ from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.api import AsyncSandbox
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxSpec
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.providers.docker import DockerSandboxProvider
 
-_IMAGE = "busybox:latest"
+# NVIDIA Docker Hub mirror (see Platform-Deploy setup_docker_e2e.sh). Unqualified
+# ``busybox:latest`` resolves to docker.io and fails when Hub auth is unavailable.
+_IMAGE = "dockerhub.nvidia.com/busybox:latest"
 
 
 def _docker_ready() -> bool:
@@ -60,7 +63,8 @@ async def test_inject_exec_retrieve_roundtrip(tmp_path: Path) -> None:
         (tmp_path / "extra").mkdir()
         (tmp_path / "extra" / "note.md").write_text("uploaded", encoding="utf-8")
         await sandbox.upload_dir(tmp_path / "extra", "/work/extra")
-        assert (await sandbox.exec("cat /work/extra/note.md")).stdout.strip() == "uploaded"  # type: ignore[union-attr]
+        extra = await sandbox.exec("cat /work/extra/note.md")
+        assert extra.stdout is not None and extra.stdout.strip() == "uploaded"
 
         out_dir = tmp_path / "out"
         await sandbox.download_dir("/out", out_dir)
