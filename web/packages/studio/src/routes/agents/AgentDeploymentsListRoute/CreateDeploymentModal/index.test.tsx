@@ -427,7 +427,9 @@ describe('CreateDeploymentModal', () => {
         name: 'Build image and deploy',
       });
       expect(
-        within(dialog).getByText(/Docker runs a container image, and none is set/)
+        within(dialog).getByText(
+          /Docker runs a container image, and none is set\. Deploying will build an image/
+        )
       ).toBeInTheDocument();
       await user.click(buildAndDeploy);
 

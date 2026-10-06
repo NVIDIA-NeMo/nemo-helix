@@ -8,8 +8,8 @@ import type { FC } from 'react';
 
 export const ImageBuildFirstNotice: FC<{ mode: DeploymentMode }> = ({ mode }) => (
   <Banner kind="inline" status="info">
-    {deploymentModeLabel(mode)} runs a container image, and none is set. Studio builds one for this
-    agent, then deploys it when the build finishes, usually in a few minutes. Keep the agent&apos;s
-    page open until then.
+    {deploymentModeLabel(mode)} runs a container image, and none is set. Deploying will build an
+    image for this agent and deploy the image when finished. This usually takes a few minutes; keep
+    the agent&apos;s page open until then.
   </Banner>
 );
