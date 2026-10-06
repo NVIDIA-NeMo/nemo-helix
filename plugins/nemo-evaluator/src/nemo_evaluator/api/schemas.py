@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, TypeAlias
+from typing import Annotated, Self, TypeAlias
 
 from nemo_evaluator.api.fields import (
     LATEST_TAG as LATEST_TAG,
@@ -68,6 +68,7 @@ from nemo_evaluator.api.task_definitions.harbor import HarborTaskDefinition as H
 from nemo_evaluator.shared.metric_bundles.bundles import (
     BundledMetricOutputSpec,
 )
+from nemo_evaluator_sdk.agent_eval.results import AgentEvalMetricOutputCoverage, AgentEvalSummary
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.results import AggregatedMetricResult
 from nemo_helix_plugin.api.filter import ComparisonOperation, FilterOperation, LogicalOperation
@@ -192,8 +193,40 @@ class _ResultBase(BaseModel):
     updated_at: datetime = Field(description="Timestamp the result was last updated.")
 
 
+class AgentEvalResultSummary(BaseModel):
+    """The queryable part of an agent-eval bundle's ``summary.json``, under the same field names.
+
+    The per-trial tables (``task_metric_values``, ``error_trial_ids``) stay in the bundle because
+    they scale with trial count; ``scores`` lives on the result record itself.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_count: int = Field(ge=0, description="Tasks represented in the run.")
+    trial_count: int = Field(ge=0, description="Trial records in the run.")
+    score_count: int = Field(ge=0, description="Metric scores computed for the run.")
+    error_count: int = Field(ge=0, description="Trials that reported a producer error.")
+    metric_coverage: dict[str, dict[str, AgentEvalMetricOutputCoverage]] = Field(
+        default_factory=dict, description="Per-metric, per-output coverage counts (total/scored/failed/missing)."
+    )
+
+    @classmethod
+    def from_summary(cls, summary: AgentEvalSummary) -> Self:
+        return cls(
+            task_count=summary.task_count,
+            trial_count=summary.trial_count,
+            score_count=summary.score_count,
+            error_count=summary.error_count,
+            metric_coverage=summary.metric_coverage,
+        )
+
+
 class AgentEvalResult(_ResultBase):
     """API representation of a persisted agent-evaluation result record."""
+
+    summary: AgentEvalResultSummary | None = Field(
+        default=None, description="Run rollup from the bundle summary; None for records stored before it existed."
+    )
 
 
 class EvaluateResult(_ResultBase):
@@ -203,6 +236,11 @@ class EvaluateResult(_ResultBase):
         default=None, description="Reference to the dataset evaluated; None for an inline dataset."
     )
     metric_types: list[str] = Field(description="Runtime metric type names applied in the run.")
+    row_count: int | None = Field(default=None, description="Dataset rows the run evaluated; None for older records.")
+    error_row_count: int | None = Field(
+        default=None,
+        description="Rows where inference or a metric recorded an error; None for older records.",
+    )
 
 
 class Task(BaseModel):

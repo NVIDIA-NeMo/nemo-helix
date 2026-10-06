@@ -568,7 +568,18 @@ class _FakeEvaluator:
                 )
                 for task in tasks
             ],
-            scores=[],
+            scores=[
+                AgentEvalTaskScore(
+                    id=f"{task.id}:score",
+                    run_id="run-1",
+                    task_id=task.id,
+                    trial_id=f"{task.id}:trial",
+                    metric_type="accuracy",
+                    status=AgentEvalScoreStatus.COMPLETED,
+                    outputs=[MetricOutput(name="score", value=1.0)],
+                )
+                for task in tasks
+            ],
             summary=AgentEvalSummary(),
             metadata=RunMetadata(started_at=self._started_at),
         )
@@ -633,7 +644,7 @@ def test_job_publishes_through_the_real_sync_bridge(tmp_path: Path, mocker: Mock
         "status": HelixJobStatus.COMPLETED,
         "evaluation_id": "eval-1",
         "trial_count": 1,
-        "evaluator_result_count": 0,
+        "evaluator_result_count": 1,
         "skipped": [],
     }
     assert len(client.atif_calls) == 1
