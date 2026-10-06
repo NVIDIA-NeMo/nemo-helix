@@ -335,6 +335,7 @@ class TestTranslateAgentConfig:
             ("codex", "nvidia.fabric.codex"),
             ("deepagents", "nvidia.fabric.langchain.deepagents"),
             ("hermes", "nvidia.fabric.hermes"),
+            ("pi", "nvidia.fabric.pi"),
         ],
     )
     def test_supported_harness_kinds_translate_to_adapter_ids(

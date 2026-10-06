@@ -22,6 +22,7 @@ HARNESS_ADAPTER_IDS = {
     "deepagents": "nvidia.fabric.langchain.deepagents",
     "hermes": "nvidia.fabric.hermes",
     "remote-agent": "nvidia.fabric.remote-agent",
+    "pi": "nvidia.fabric.pi",
 }
 
 # A harness kind carrying this prefix is already a fully-qualified Fabric
