@@ -24,10 +24,10 @@ import textwrap
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
+from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth.models import Principal
-from nhx.common.entities.constants import SAMPLE_WORKSPACE_PREFIX
 from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, WorkspaceRepository
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
@@ -69,16 +69,17 @@ def _exclude_deleting_workspaces(filter_op: FilterOperation | None) -> FilterOpe
 
 
 def _principal_for_role_binding(principal: Principal) -> str | None:
-    """Return the identifier to store on role bindings (email preferred for human-readable membership).
+    """Use the acting principal for role bindings, including on-behalf-of requests.
 
-    Falls back to principal ID when email is absent (e.g. some service accounts).
+    Effective identity matches the principal for direct requests. Prefer email for
+    human-readable membership, falling back to ID when email is absent.
     """
-    if principal.email:
-        email = principal.email.strip()
+    if principal.effective_email:
+        email = principal.effective_email.strip()
         if email:
             return email
-    if principal.id:
-        return principal.id.strip() or None
+    if principal.effective_id:
+        return principal.effective_id.strip() or None
     return None
 
 
