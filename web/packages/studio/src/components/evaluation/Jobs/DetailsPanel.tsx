@@ -18,8 +18,10 @@ import {
 import type { EvaluateJob } from '@nemo/sdk/generated/evaluator/schema';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { Banner, Button, Flex, Modal, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { evalDurationMs } from '@studio/api/evaluation/utils';
 import { ButtonLaunchEvaluation } from '@studio/components/evaluation/ButtonLaunchEvaluation';
+import { EvalRunOutcomeBanner } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
@@ -106,6 +108,16 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
     | { message?: string; stage?: string; progress?: number }
     | undefined;
 
+  const runOutcome = evalRunOutcomeOf(evaluationJob.status_details);
+  const downloadLogs = (
+    <DownloadEvaluationLogsButton
+      workspace={workspace}
+      jobName={jobName ?? ''}
+      size="small"
+      kind="secondary"
+    />
+  );
+
   const model = evaluationJob.spec.target?.name;
   const targetIsAgent = evaluationJob.spec.target?.format !== undefined;
   const datasetRef =
@@ -136,19 +148,12 @@ export const DetailsPanel = ({ evaluationJob, error }: DetailsPanelProps) => {
         }
       >
         <Stack gap="4">
-          {status === 'error' && (
-            <Banner
-              kind="inline"
-              status="error"
-              slotActions={
-                <DownloadEvaluationLogsButton
-                  workspace={workspace}
-                  jobName={jobName ?? ''}
-                  size="small"
-                  kind="secondary"
-                />
-              }
-            >
+          <EvalRunOutcomeBanner
+            statusDetails={evaluationJob.status_details}
+            slotActions={downloadLogs}
+          />
+          {status === 'error' && !runOutcome?.failed && (
+            <Banner kind="inline" status="error" slotActions={downloadLogs}>
               {typeof error_details?.message === 'string'
                 ? error_details.message
                 : error_details?.message != null
