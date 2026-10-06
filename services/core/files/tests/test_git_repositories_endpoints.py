@@ -13,8 +13,8 @@ from nhx.core.files.api.v2.git_repositories.endpoints import find_git_repository
 from nhx.core.files.app.backends.base import FileInfo
 from nhx.core.files.app.backends.git import (
     GitAccessError,
-    GitBackendError,
     GitConfigError,
+    GitServerFault,
     GitStorageConfig,
     GitUnavailableError,
 )
@@ -145,18 +145,16 @@ def test_find_files_takes_a_bare_file_name(file_name):
         FindGitRepositoryFilesRequest(storage=STORAGE, file_name=file_name)
 
 
-async def test_find_files_reports_git_failing_on_the_server_as_a_server_error():
-    with pytest.raises(HTTPException) as raised:
-        await _find(error=GitBackendError("git is not installed in the files service"))
-    assert raised.value.status_code == 500
+async def test_find_files_leaves_a_server_fault_to_the_server_error_handler():
+    with pytest.raises(GitServerFault):
+        await _find(error=GitServerFault("git is not installed in the files service"))
 
 
-async def test_scan_reports_git_failing_on_the_server_as_a_server_error(config):
+async def test_scan_leaves_a_server_fault_to_the_server_error_handler(config):
     with (
-        patch(SCAN, AsyncMock(side_effect=GitBackendError("ssh-keyscan is not installed in the files service"))),
-        pytest.raises(HTTPException) as raised,
+        patch(SCAN, AsyncMock(side_effect=GitServerFault("ssh-keyscan is not installed in the files service"))),
+        pytest.raises(GitServerFault),
     ):
         await scan_ssh_host_keys(
             "default", ScanSshHostKeysRequest(url="ssh://gitlab.example.com:2222/org/repo.git"), config
         )
-    assert raised.value.status_code == 500

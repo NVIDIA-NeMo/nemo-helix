@@ -21,10 +21,13 @@ from nhx.core.files.app.backends.git import (
     GitAccessError,
     GitBackendError,
     GitConfigError,
+    GitServerFault,
     GitStorageConfig,
     GitStorageImpl,
     GitUnavailableError,
+    _access_checks,
     _classify_failure,
+    _listings,
     _pick_ref,
     _prune_fetch_repositories,
     _repo_locks,
@@ -115,6 +118,13 @@ async def _read(impl: GitStorageImpl, path: str, byte_range: ByteRange | None = 
     return b"".join([chunk async for chunk in await impl.download(path, byte_range)])
 
 
+@pytest.fixture(autouse=True)
+def _forget_listings_and_access_checks():
+    yield
+    _listings.clear()
+    _access_checks.clear()
+
+
 def _stored_blobs(durable_root: Path) -> set[str]:
     blobs = durable_root / "cache" / "git" / "blobs"
     return {path.name for path in blobs.rglob("*") if path.is_file()} if blobs.exists() else set()
@@ -194,6 +204,23 @@ class TestGitStorageConfig:
         config = GitStorageConfig(url="git@host:org/repo.git", ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS)
         assert isinstance(storage_impl_factory(config, SECRETS), GitStorageImpl)
 
+    @pytest.mark.parametrize(
+        ("url", "canonical"),
+        [
+            ("git@GitLab.Example.com.:org/repo.git", "git@gitlab.example.com:org/repo.git"),
+            ("ssh://git@host.example/org/repo.git", "git@host.example:org/repo.git"),
+            ("ssh://host.example:022/org/repo.git", "ssh://host.example:22/org/repo.git"),
+            ("ssh://git@host.example:12051/org/repo.git", "ssh://git@host.example:12051/org/repo.git"),
+            ("  git@host.example:/srv/git/repo.git ", "git@host.example:/srv/git/repo.git"),
+        ],
+    )
+    def test_url_is_stored_in_the_form_ssh_and_known_hosts_agree_on(self, url, canonical):
+        config = GitStorageConfig(url=url, ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS)
+        assert config.url == canonical
+        assert (
+            GitStorageConfig(url=canonical, ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS).url == canonical
+        )
+
     def test_default_ssh_port_matches_the_allowlist(self):
         validate_external_host("ssh://gitlab.example.com:22", allowed_hosts=["ssh://gitlab.example.com"])
 
@@ -245,7 +272,8 @@ class TestClassifyFailure:
             ("ERROR: Repository not found.", GitConfigError),
             ("fatal: Server does not allow request for unadvertised object abc123", GitConfigError),
             ("error: unable to create file objects/ab: Permission denied", GitBackendError),
-            ("Connection closed by 10.0.0.1 port 22", GitBackendError),
+            ("Connection closed by 10.0.0.1 port 22", GitUnavailableError),
+            ("fetch-pack: unexpected disconnect while reading sideband packet\nfatal: early EOF", GitUnavailableError),
         ],
     )
     def test_maps_stderr_to_storage_errors(self, stderr, error):
@@ -278,7 +306,7 @@ class TestHostKeyScan:
 
     async def test_missing_ssh_keyscan_is_reported(self, monkeypatch):
         monkeypatch.setenv("PATH", str(Path(__file__).parent / "no-such-bin"))
-        with pytest.raises(GitBackendError, match="ssh-keyscan is not installed"):
+        with pytest.raises(GitServerFault, match="ssh-keyscan is not installed"):
             await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
 
 
@@ -411,9 +439,10 @@ class TestReads:
 class TestMaterialization:
     async def test_a_materialized_commit_is_read_without_git_or_the_remote(self, remote, tmp_path, monkeypatch):
         config = _config(remote["url"], revision=remote["first"])
-        await _impl(config, tmp_path / "cache").list_files()
+        await _read(_impl(config, tmp_path / "cache"), "README.md")
         shutil.rmtree(remote["dir"])
         shutil.rmtree(tmp_path / "cache")
+        _listings.clear()
 
         async def no_git(*_args, **_kwargs):
             raise AssertionError("a read of a materialized commit ran git")
@@ -421,12 +450,54 @@ class TestMaterialization:
         monkeypatch.setattr(GitStorageImpl, "_run", no_git)
         assert await _read(_impl(config, tmp_path / "cache"), "README.md") == b"readme\n"
 
-    async def test_an_update_stores_only_the_files_that_changed(self, remote, tmp_path):
+    async def test_listing_a_commit_stores_no_file_contents(self, remote, tmp_path):
+        await _impl(_config(remote["url"]), tmp_path / "cache").list_files()
+        assert _stored_blobs(tmp_path / "durable") == set()
+
+    async def test_reading_an_update_stores_only_the_files_that_changed(self, remote, tmp_path):
         durable = tmp_path / "durable"
-        await _impl(_config(remote["url"], revision=remote["first"]), tmp_path / "cache").list_files()
-        after_first = _stored_blobs(durable)
-        await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").list_files()
+        paths = ["README.md", "agents/support/agent.yaml", "agents/support/prompt.md"]
+        for revision in (remote["first"], remote["main"]):
+            impl = _impl(_config(remote["url"], revision=revision), tmp_path / "cache")
+            for path in paths:
+                await _read(impl, path)
+            if revision == remote["first"]:
+                after_first = _stored_blobs(durable)
         assert len(_stored_blobs(durable) - after_first) == 1
+
+    async def test_a_file_removed_from_durable_storage_is_stored_again(self, remote, tmp_path):
+        config = _config(remote["url"], revision=remote["main"])
+        await _read(_impl(config, tmp_path / "cache"), "README.md")
+        shutil.rmtree(tmp_path / "durable" / "cache" / "git" / "blobs")
+        shutil.rmtree(tmp_path / "cache")
+        assert await _read(_impl(config, tmp_path / "cache"), "README.md") == b"changed\n"
+
+    async def test_a_listing_is_read_from_memory_after_the_first_request(self, remote, tmp_path, monkeypatch):
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        downloads = 0
+        download = LocalStorageImpl.download
+
+        async def counting(self, path, byte_range):
+            nonlocal downloads
+            downloads += 1
+            return await download(self, path, byte_range)
+
+        monkeypatch.setattr(LocalStorageImpl, "download", counting)
+        for _ in range(3):
+            assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
+        assert downloads == 0
+
+    async def test_a_cached_commit_rechecks_the_keys_access_once_the_last_check_is_stale(self, remote, tmp_path):
+        config = _config(remote["url"], revision=remote["main"])
+        await _impl(config, tmp_path / "cache").list_files()
+        shutil.rmtree(remote["dir"])
+        assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
+
+        for access in _access_checks:
+            _access_checks[access] -= 10 * 60
+        with pytest.raises(GitConfigError):
+            await _impl(config, tmp_path / "cache").list_files()
 
     async def test_concurrent_reads_of_a_new_commit_materialize_it_once(self, remote, tmp_path, monkeypatch):
         fetches = 0
@@ -462,6 +533,20 @@ class TestMaterialization:
 
         files = await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
         assert len(files) == 3
+
+    async def test_a_network_failure_keeps_the_fetch_repository(self, remote, tmp_path, monkeypatch):
+        cache = tmp_path / "cache"
+        await _impl(_config(remote["url"], revision=remote["first"]), cache).list_files()
+        (repository,) = [entry for entry in cache.iterdir() if entry.is_dir()]
+        objects = sorted(path.name for path in (repository / "objects").rglob("*"))
+
+        async def unreachable(self, repo, want, *, depth=1):
+            raise GitUnavailableError("Could not reach the remote: Connection reset by peer")
+
+        monkeypatch.setattr(GitStorageImpl, "_fetch", unreachable)
+        with pytest.raises(GitUnavailableError):
+            await _impl(_config(remote["url"], revision=remote["main"]), cache).list_files()
+        assert sorted(path.name for path in (repository / "objects").rglob("*")) == objects
 
     async def test_validate_storage_refuses_a_pinned_commit_the_remote_lacks(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
@@ -507,7 +592,7 @@ class TestMaterialization:
         locked.mkdir()
         locked.chmod(0o500)
         try:
-            with pytest.raises(GitBackendError, match="not writable"):
+            with pytest.raises(GitServerFault, match="not writable"):
                 await _impl(_config(remote["url"]), locked / "cache").list_files()
         finally:
             locked.chmod(0o700)
