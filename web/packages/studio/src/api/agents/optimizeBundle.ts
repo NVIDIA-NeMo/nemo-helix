@@ -58,9 +58,6 @@ export const parseOptimizeConfig = (text: string): ConfigMapping | undefined => 
   }
 };
 
-export const looksLikeOptimizeConfig = (config: ConfigMapping | undefined): boolean =>
-  isMapping(config?.optimizer);
-
 const agentProblems = (config: ConfigMapping, agent: string | undefined): string[] => {
   if (config.schema_version === FABRIC_AGENT_SCHEMA_VERSION || agent) return [];
   if (NAT_TOP_LEVEL_KEYS.some((key) => key in config)) {

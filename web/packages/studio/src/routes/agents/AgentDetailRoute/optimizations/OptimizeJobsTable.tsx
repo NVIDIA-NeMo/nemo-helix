@@ -22,7 +22,7 @@ import type {
 import { Banner, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
 import { deleteStudioBundleFileset } from '@studio/api/agents/useLaunchOptimizeStudy';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
+import { getOptimizeJobRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useCallback, useState } from 'react';
 
@@ -54,7 +54,8 @@ interface OptimizeJobsTableProps {
 }
 
 /**
- * Optimization studies (`agent-optimization.run-strategy`) for one agent.
+ * Optimization studies (`agent-optimization.run-strategy`) for one agent, whatever strategy
+ * each ran.
  *
  * Filtering, search and paging all run on the server: `RunStrategyJobsListFilter` accepts a path into
  * the job's spec, so `spec.agent` scopes the list to this agent (see {@link agentJobsFilter}).
@@ -117,12 +118,13 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
         header: 'Name',
         cell: ({ row }) => <Text title={row.original.name}>{row.original.name}</Text>,
       }),
-      accessor((row) => row.spec?.optimize_config, {
-        id: 'optimize_config',
-        header: 'Config',
+      accessor((row) => row.spec?.strategy, {
+        id: 'strategy',
+        header: 'Strategy',
+        size: 180,
         cell: ({ row }) => (
-          <Text className="text-secondary max-w-[280px] truncate" kind="body/regular/sm">
-            {row.original.spec?.optimize_config ?? '—'}
+          <Text className="text-secondary truncate" kind="body/regular/sm">
+            {row.original.spec?.strategy?.toUpperCase() ?? '—'}
           </Text>
         ),
       }),
@@ -169,7 +171,7 @@ export const OptimizeJobsTable: FC<OptimizeJobsTableProps> = ({ agentName, onOpt
         searchField="name"
         makeColumns={makeColumns}
         onRowClick={(row, _index, event) =>
-          openRow(event, getAgentOptimizationDetailRoute(workspace, row.name))
+          openRow(event, getOptimizeJobRoute(workspace, row.name, row.spec?.strategy))
         }
         attributes={{
           DataViewSearchBar: { placeholder: 'Search by name...' },

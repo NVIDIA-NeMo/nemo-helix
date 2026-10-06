@@ -48,6 +48,20 @@ const mockHelix = () => {
   const uploaded: string[] = [];
   const submitted: SubmittedStudy[] = [];
   server.use(
+    http.get(FILESETS_URL, () =>
+      HttpResponse.json({
+        data: [{ id: 'fs-1', name: 'overrides', workspace }],
+        pagination: { total_results: 1 },
+      })
+    ),
+    http.get(`${FILESETS_URL}/:name/files`, () =>
+      HttpResponse.json({
+        data: [
+          { path: 'agent.yaml', size: 10 },
+          { path: 'notes.md', size: 10 },
+        ],
+      })
+    ),
     http.post(FILESETS_URL, async ({ request }) => HttpResponse.json(await request.json())),
     http.put(UPLOAD_URL, ({ request }) => {
       uploaded.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1] ?? ''));
@@ -73,24 +87,60 @@ const renderModal = () =>
         ),
       },
       { path: ROUTES.workspace.agentOptimizationDetail, element: <div>Study detail page</div> },
+      { path: ROUTES.workspace.jobDetail, element: <div>Job detail page</div> },
     ],
   });
 
-const pickBundle = async (files: File[]) => {
+const pickStrategy = async (name: string) => {
   const dialog = await screen.findByRole('dialog');
-  fireEvent.change(within(dialog).getByTestId('optimize-bundle-input'), { target: { files } });
+  fireEvent.click(await within(dialog).findByText(name));
   return dialog;
 };
 
+const pickSource = async (user: ReturnType<typeof userEvent.setup>, option: string) => {
+  await user.click(screen.getByRole('combobox', { name: 'Configuration source' }));
+  await user.click(screen.getByRole('option', { name: option }));
+};
+
+const pickBundle = async (dialog: HTMLElement, files: File[]) =>
+  fireEvent.change(within(dialog).getByTestId('optimize-bundle-input'), { target: { files } });
+
 const startButton = (dialog: HTMLElement) =>
-  within(dialog).getByRole('button', { name: 'Start study' });
+  within(dialog).getByRole('button', { name: 'Run strategy' });
 
 describe('LaunchOptimizeModal', () => {
-  it('stages the bundle and submits a study for the agent', async () => {
+  it('lists every installed strategy and blocks submit until one is chosen', async () => {
+    mockHelix();
+    renderModal();
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('LEGACY')).toBeInTheDocument();
+    expect(within(dialog).getByText('PROMPT-MASTER')).toBeInTheDocument();
+    expect(within(dialog).getByText('Hyperparameter and GA prompt optimization.')).toBeVisible();
+    expect(startButton(dialog)).toBeDisabled();
+  });
+
+  it('submits a strategy with only the agent', async () => {
+    const { submitted, uploaded } = mockHelix();
+    renderModal();
+
+    const dialog = await pickStrategy('PROMPT-MASTER');
+    await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+    fireEvent.click(startButton(dialog));
+
+    expect(await screen.findByText('Job detail page')).toBeInTheDocument();
+    expect(uploaded).toEqual([]);
+    expect(submitted[0]?.spec).toEqual({ strategy: 'prompt-master', agent: agentName });
+  });
+
+  it('stages an uploaded bundle and submits it for the chosen strategy', async () => {
+    const user = userEvent.setup();
     const { uploaded, submitted } = mockHelix();
     renderModal();
 
-    const dialog = await pickBundle([
+    const dialog = await pickStrategy('LEGACY');
+    await pickSource(user, 'Upload files');
+    await pickBundle(dialog, [
       makeFile('bundle/optimize.yaml', OVERLAY),
       makeFile('bundle/dataset.json', '[]'),
       makeFile('bundle/.DS_Store', ''),
@@ -100,7 +150,6 @@ describe('LaunchOptimizeModal', () => {
 
     expect(await screen.findByText('Study detail page')).toBeInTheDocument();
     expect(uploaded.sort()).toEqual(['dataset.json', 'optimize.yaml']);
-    expect(submitted).toHaveLength(1);
     expect(submitted[0]?.spec).toMatchObject({
       strategy: 'legacy',
       optimize_config: 'optimize.yaml',
@@ -109,30 +158,59 @@ describe('LaunchOptimizeModal', () => {
     });
   });
 
-  it('blocks submit and lists preflight problems', async () => {
+  it('submits a config from an existing fileset', async () => {
+    const user = userEvent.setup();
+    const { submitted, uploaded } = mockHelix();
+    renderModal();
+
+    const dialog = await pickStrategy('PROMPT-MASTER');
+    await pickSource(user, 'overrides');
+    await user.click(await screen.findByRole('combobox', { name: 'Config file' }));
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'agent.yaml',
+    ]);
+    await user.click(screen.getByRole('option', { name: 'agent.yaml' }));
+    await waitFor(() => expect(startButton(dialog)).toBeEnabled());
+    fireEvent.click(startButton(dialog));
+
+    expect(await screen.findByText('Job detail page')).toBeInTheDocument();
+    expect(uploaded).toEqual([]);
+    expect(submitted[0]?.spec).toEqual({
+      strategy: 'prompt-master',
+      agent: agentName,
+      optimize_config: 'agent.yaml',
+      optimize_config_fileset: `${workspace}/overrides`,
+    });
+  });
+
+  it('blocks submit and lists preflight problems for a legacy bundle', async () => {
+    const user = userEvent.setup();
     mockHelix();
     renderModal();
 
-    const dialog = await pickBundle([makeFile('bundle/optimize.yaml', OVERLAY)]);
+    const dialog = await pickStrategy('LEGACY');
+    await pickSource(user, 'Upload files');
+    await pickBundle(dialog, [makeFile('bundle/optimize.yaml', OVERLAY)]);
 
     const problems = await within(dialog).findByTestId('optimize-bundle-problems');
     expect(problems).toHaveTextContent('eval.general.dataset points at "dataset.json"');
     expect(startButton(dialog)).toBeDisabled();
   });
 
-  it('asks which config to run when the bundle holds several', async () => {
+  it('asks which config to run when the bundle holds several YAML files', async () => {
     const user = userEvent.setup();
     const { submitted } = mockHelix();
     renderModal();
 
-    const dialog = await pickBundle([
+    const dialog = await pickStrategy('LEGACY');
+    await pickSource(user, 'Upload files');
+    await pickBundle(dialog, [
       makeFile('bundle/optimize-a.yaml', OVERLAY),
       makeFile('bundle/optimize-b.yml', OVERLAY),
-      makeFile('bundle/agent.yaml', 'name: not-an-optimize-config\n'),
       makeFile('bundle/dataset.json', '[]'),
     ]);
 
-    await user.click(await within(dialog).findByRole('combobox', { name: 'Optimize config' }));
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Config file' }));
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
       'optimize-a.yaml',
       'optimize-b.yml',
@@ -146,39 +224,38 @@ describe('LaunchOptimizeModal', () => {
     await waitFor(() => expect(submitted[0]?.spec?.optimize_config).toBe('optimize-b.yml'));
   });
 
-  it('rejects a selection with no optimize config', async () => {
+  it('rejects an upload with no YAML', async () => {
+    const user = userEvent.setup();
     mockHelix();
     renderModal();
 
-    const dialog = await pickBundle([makeFile('bundle/agent.yaml', 'name: calc\n')]);
+    const dialog = await pickStrategy('LEGACY');
+    await pickSource(user, 'Upload files');
+    await pickBundle(dialog, [makeFile('bundle/dataset.json', '[]')]);
 
-    expect(
-      await within(dialog).findByText(/No optimize config in that selection/)
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).queryByRole('combobox', { name: 'Optimize config' })
-    ).not.toBeInTheDocument();
+    expect(await within(dialog).findByText(/No config in that selection/)).toBeInTheDocument();
+    expect(startButton(dialog)).toBeDisabled();
   });
 
-  it('shows the submit error and stays open', async () => {
+  it('shows the strategy validation error and stays open', async () => {
     mockHelix();
     server.use(
       http.post(OPTIMIZE_JOBS_URL, () =>
-        HttpResponse.json({ detail: 'Profile default is not configured' }, { status: 422 })
+        HttpResponse.json(
+          { detail: "Spec is not valid for optimization strategy 'strands-harness-optimizer'" },
+          { status: 422 }
+        )
       )
     );
     renderModal();
 
-    const dialog = await pickBundle([
-      makeFile('bundle/optimize.yaml', OVERLAY),
-      makeFile('bundle/dataset.json', '[]'),
-    ]);
+    const dialog = await pickStrategy('STRANDS-HARNESS-OPTIMIZER');
     await waitFor(() => expect(startButton(dialog)).toBeEnabled());
     fireEvent.click(startButton(dialog));
 
     expect(
-      await within(dialog).findByText(/Profile default is not configured/)
+      await within(dialog).findByText(/Spec is not valid for optimization strategy/)
     ).toBeInTheDocument();
-    expect(screen.queryByText('Study detail page')).not.toBeInTheDocument();
+    expect(screen.queryByText('Job detail page')).not.toBeInTheDocument();
   });
 });

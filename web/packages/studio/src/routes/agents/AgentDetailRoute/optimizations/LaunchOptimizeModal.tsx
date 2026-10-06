@@ -3,11 +3,20 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
+import { RadioCard } from '@nemo/common/src/components/RadioCard';
+import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { getAgentOptimizationListRunStrategyJobsQueryKey } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
+import {
+  getAgentOptimizationListRunStrategyJobsQueryKey,
+  useAgentOptimizationListStrategies,
+} from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
+import { useFilesListFilesetFiles, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
 import {
   Banner,
+  Button,
+  Flex,
+  RadioGroupRoot,
   Select,
   Stack,
   Text,
@@ -17,7 +26,6 @@ import {
 } from '@nvidia/foundations-react-core';
 import {
   isYamlPath,
-  looksLikeOptimizeConfig,
   optimizeBundleProblems,
   parseOptimizeConfig,
 } from '@studio/api/agents/optimizeBundle';
@@ -32,7 +40,7 @@ import {
   selectionRootName,
   totalEntryBytes,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
-import { getAgentOptimizationDetailRoute } from '@studio/routes/utils';
+import { getOptimizeJobRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   type ChangeEventHandler,
@@ -55,8 +63,15 @@ interface LaunchOptimizeModalProps {
 interface Bundle {
   label: string;
   entries: FilesetEntry[];
-  configs: Record<string, Record<string, unknown>>;
+  /** Every YAML in the bundle, parsed where it is a mapping. */
+  configs: Record<string, Record<string, unknown> | undefined>;
 }
+
+/** Only the `legacy` strategy's config has a shape Studio can preflight in the browser. */
+const PREFLIGHT_STRATEGY = 'legacy';
+
+const NO_BUNDLE = '__none__';
+const UPLOAD_BUNDLE = '__upload__';
 
 const readBundle = async (picked: PickedFile[]): Promise<Bundle> => {
   const entries = collectAgentEntries(picked);
@@ -67,16 +82,11 @@ const readBundle = async (picked: PickedFile[]): Promise<Bundle> => {
       .filter((entry) => isYamlPath(entry.path))
       .map(async (entry) => [entry.path, parseOptimizeConfig(await entry.file.text())] as const)
   );
-  const configs = Object.fromEntries(
-    parsed.filter(([, config]) => looksLikeOptimizeConfig(config))
-  ) as Bundle['configs'];
-  if (Object.keys(configs).length === 0) {
-    throw new Error(
-      'No optimize config in that selection: expected a YAML file with an optimizer section.'
-    );
+  if (parsed.length === 0) {
+    throw new Error('No config in that selection: expected at least one YAML file.');
   }
 
-  return { label: selectionRootName(picked), entries, configs };
+  return { label: selectionRootName(picked), entries, configs: Object.fromEntries(parsed) };
 };
 
 export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
@@ -89,10 +99,25 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [strategy, setStrategy] = useState('');
+  const [source, setSource] = useState(NO_BUNDLE);
   const [bundle, setBundle] = useState<Bundle | undefined>();
   const [configPath, setConfigPath] = useState('');
   const [selectionError, setSelectionError] = useState<string | undefined>();
 
+  const strategies = useAgentOptimizationListStrategies();
+  const filesets = useFilesListFilesets(workspace, { page_size: 100, sort: '-created_at' });
+
+  const selectedFileset =
+    source === NO_BUNDLE || source === UPLOAD_BUNDLE ? undefined : getPartsFromReference(source);
+  const filesetFiles = useFilesListFilesetFiles(
+    selectedFileset?.workspace ?? '',
+    selectedFileset?.name ?? '',
+    undefined,
+    { query: { enabled: !!selectedFileset } }
+  );
+
+  const filesInput = useRef<HTMLInputElement>(null);
   const setFolderInput = useCallback((node: HTMLInputElement | null) => {
     // webkitdirectory is absent from React's input attribute types.
     node?.setAttribute('webkitdirectory', '');
@@ -110,21 +135,29 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
         queryKey: getAgentOptimizationListRunStrategyJobsQueryKey(workspace),
       });
       onClose();
-      if (job.name) navigate(getAgentOptimizationDetailRoute(workspace, job.name));
+      if (job.name) navigate(getOptimizeJobRoute(workspace, job.name, job.spec?.strategy));
     },
   });
 
-  const configPaths = useMemo(() => Object.keys(bundle?.configs ?? {}).sort(), [bundle]);
+  const configPaths = useMemo(() => {
+    if (source === UPLOAD_BUNDLE) return Object.keys(bundle?.configs ?? {}).sort();
+    return (filesetFiles.data?.data ?? [])
+      .map((file) => file.path)
+      .filter(isYamlPath)
+      .sort();
+  }, [source, bundle, filesetFiles.data]);
 
   const problems = useMemo(() => {
     const config = bundle?.configs[configPath];
-    if (!bundle || !config) return [];
+    if (strategy !== PREFLIGHT_STRATEGY || source !== UPLOAD_BUNDLE || !bundle || !config) {
+      return [];
+    }
     return optimizeBundleProblems({
       config,
       bundlePaths: new Set(bundle.entries.map((entry) => entry.path)),
       agent: agentName,
     });
-  }, [bundle, configPath, agentName]);
+  }, [strategy, source, bundle, configPath, agentName]);
 
   const summary = useMemo(() => {
     if (!bundle) return undefined;
@@ -133,14 +166,18 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
     return bundle.label ? `${bundle.label} — ${size}` : size;
   }, [bundle]);
 
-  // Selection reads finish out of order, so the newest selection has to win.
-  const selectionSeq = useRef(0);
-  const acceptPicked = async (loadPicked: () => Promise<PickedFile[]> | PickedFile[]) => {
-    const selection = ++selectionSeq.current;
+  const resetBundle = () => {
     resetLaunch();
     setBundle(undefined);
     setConfigPath('');
     setSelectionError(undefined);
+  };
+
+  // Selection reads finish out of order, so the newest selection has to win.
+  const selectionSeq = useRef(0);
+  const acceptPicked = async (loadPicked: () => Promise<PickedFile[]> | PickedFile[]) => {
+    const selection = ++selectionSeq.current;
+    resetBundle();
 
     try {
       const picked = await loadPicked();
@@ -176,12 +213,17 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
     void acceptPicked(() => pickedFromDataTransfer(items));
   };
 
+  const onSourceChange = (next: string) => {
+    selectionSeq.current += 1;
+    resetBundle();
+    setSource(next);
+  };
+
   const close = () => {
     selectionSeq.current += 1;
-    resetLaunch();
-    setBundle(undefined);
-    setConfigPath('');
-    setSelectionError(undefined);
+    resetBundle();
+    setStrategy('');
+    setSource(NO_BUNDLE);
     onClose();
   };
 
@@ -189,53 +231,150 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
     selectionError ??
     (launchError ? getErrorMessage(launchError) || 'Failed to submit the study' : undefined);
 
+  const filesetItems = (filesets.data?.data ?? []).map((fileset) => ({
+    value: getEntityReference(fileset),
+    children: fileset.name,
+  }));
+
+  const needsConfig = source !== NO_BUNDLE;
+
   return (
     <FormModal
       open={open}
       onClose={close}
       className="w-[720px] max-w-[90vw]"
       title="Optimize agent"
-      instruction="Upload an optimize bundle: the optimize config plus the dataset and any other files it references. Each trial runs this agent with one set of parameters from the config's search space."
-      submitButtonText="Start study"
+      instruction="Choose how to optimize this agent. Some strategies take a bundle of files or a single config YAML; the strategy reports what it is missing when the study is submitted."
+      submitButtonText="Run strategy"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!bundle || !configPath) return;
-        launch({ workspace, agentName, entries: bundle.entries, optimizeConfig: configPath });
+        if (!strategy) return;
+        if (source === NO_BUNDLE) {
+          launch({ workspace, agentName, strategy });
+        } else if (source === UPLOAD_BUNDLE) {
+          if (!bundle) return;
+          launch({
+            workspace,
+            agentName,
+            strategy,
+            bundle: { kind: 'upload', entries: bundle.entries, optimizeConfig: configPath },
+          });
+        } else {
+          launch({
+            workspace,
+            agentName,
+            strategy,
+            bundle: { kind: 'fileset', fileset: source, optimizeConfig: configPath },
+          });
+        }
       }}
       disabled={isPending}
       loading={isPending}
-      submitDisabled={!bundle || !configPath || problems.length > 0}
+      submitDisabled={!strategy || (needsConfig && !configPath) || problems.length > 0}
       errorText={errorText}
     >
       <Stack gap="density-md">
-        <Text kind="label/semibold/md">Optimize bundle</Text>
-        <UploadRoot multiple disabled={isPending}>
-          <UploadTrigger
+        <Text kind="label/semibold/md">Strategy</Text>
+        {strategies.error ? (
+          <Banner kind="inline" status="error">
+            {getErrorMessage(strategies.error) || 'Could not load optimization strategies.'}
+          </Banner>
+        ) : strategies.isPending ? (
+          <Text kind="body/regular/sm">Loading strategies…</Text>
+        ) : (
+          <RadioGroupRoot
+            name="strategy"
+            aria-label="Strategy"
+            value={strategy}
+            onValueChange={setStrategy}
+            disabled={isPending}
             className="w-full"
-            data-testid="optimize-bundle-dropzone"
-            onDrop={onFilesDropped}
-            slotAnchor={bundle ? 'Choose a different folder' : 'Choose a folder'}
-            slotHeaderText=" containing the optimize config, or drop it here."
           >
-            <UploadInputElement
-              ref={setFolderInput}
-              data-testid="optimize-bundle-input"
-              multiple
-              onChange={onFilesPicked}
-            />
-          </UploadTrigger>
-        </UploadRoot>
-        {summary ? <Text kind="body/regular/sm">{summary}</Text> : null}
-        {bundle ? (
+            <Stack gap="density-sm">
+              {(strategies.data?.data ?? []).map((item) => (
+                <RadioCard
+                  key={item.name}
+                  value={item.name}
+                  compact
+                  labelKind="body/bold/md"
+                  descriptionKind="body/regular/sm"
+                  label={item.name.toUpperCase()}
+                  description={item.description || undefined}
+                />
+              ))}
+            </Stack>
+          </RadioGroupRoot>
+        )}
+
+        <Text kind="label/semibold/md">Configuration (optional)</Text>
+        <Select
+          aria-label="Configuration source"
+          value={source}
+          onValueChange={onSourceChange}
+          disabled={isPending}
+          items={[
+            { value: NO_BUNDLE, children: 'None — the agent only' },
+            { value: UPLOAD_BUNDLE, children: 'Upload files' },
+            ...filesetItems,
+          ]}
+        />
+
+        {source === UPLOAD_BUNDLE ? (
+          <>
+            <UploadRoot multiple disabled={isPending}>
+              <UploadTrigger
+                className="w-full"
+                data-testid="optimize-bundle-dropzone"
+                onDrop={onFilesDropped}
+                slotAnchor={bundle ? 'Choose a different folder' : 'Choose a folder'}
+                slotHeaderText=" holding the config and the files it references, or drop files here."
+              >
+                <UploadInputElement
+                  ref={setFolderInput}
+                  data-testid="optimize-bundle-input"
+                  multiple
+                  onChange={onFilesPicked}
+                />
+              </UploadTrigger>
+            </UploadRoot>
+            <Flex align="center" gap="density-xs">
+              <Text kind="body/regular/sm">
+                Or pick individual files, such as a single agent.yaml:
+              </Text>
+              <Button
+                kind="tertiary"
+                size="small"
+                disabled={isPending}
+                onClick={() => filesInput.current?.click()}
+              >
+                Choose files
+              </Button>
+              <input
+                ref={filesInput}
+                type="file"
+                multiple
+                className="hidden"
+                data-testid="optimize-files-input"
+                onChange={onFilesPicked}
+              />
+            </Flex>
+            {summary ? <Text kind="body/regular/sm">{summary}</Text> : null}
+          </>
+        ) : null}
+
+        {needsConfig && (bundle || selectedFileset) ? (
           <Select
-            aria-label="Optimize config"
+            aria-label="Config file"
             value={configPath}
             onValueChange={setConfigPath}
-            disabled={isPending}
-            placeholder="Select the optimize config"
+            disabled={isPending || filesetFiles.isFetching}
+            placeholder={
+              configPaths.length === 0 ? 'No YAML files in this fileset' : 'Select the config YAML'
+            }
             items={configPaths.map((path) => ({ value: path, children: path }))}
           />
         ) : null}
+
         {problems.length > 0 ? (
           <Banner status="error" kind="inline" data-testid="optimize-bundle-problems">
             <Stack gap="density-xs">
