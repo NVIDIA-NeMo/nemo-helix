@@ -89,8 +89,7 @@ from pydantic import BaseModel, Field, TypeAdapter, field_validator
 logger = logging.getLogger(__name__)
 
 # Public compatibility aliases for services that build Jobs specs through the
-# route factory. These now point at plugin-owned Pydantic models, not Stainless
-# generated SDK TypedDicts.
+# route factory, pointing at plugin-owned Pydantic models.
 HelixJobStep = HelixJobStepSpec
 ExecutorSpec = Provider
 ContainerSpec = ProviderContainerSpec

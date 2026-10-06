@@ -404,52 +404,6 @@ def _should_resolve_conflict(response: httpx.Response, request: PreparedRequest)
     return True
 
 
-class _InferenceNamespace:
-    """Compat shim for the legacy ``sdk.inference.*`` resource tree.
-
-    The old Stainless SDK exposed ``sdk.inference.providers``, ``.deployments``,
-    ``.deployment_configs``, and ``.virtual_models`` as sub-resources.  In the
-    typed-client world providers/deployments/deployment_configs live on
-    :class:`ModelsClient` and virtual_models on :class:`VirtualModelsClient`.
-    This namespace dispatches accordingly so existing ``sdk.inference.<x>``
-    call sites keep working while callers migrate to ``sdk.models.<method>``.
-
-    Each accessor picks the sync or async resource client to match the owning
-    client, so an :class:`AsyncNemoClient` never routes its ``httpx.AsyncClient``
-    through a synchronous ``send()``.
-    """
-
-    def __init__(self, client: NemoClient | AsyncNemoClient) -> None:
-        self._client = client
-
-    def _models_client(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
-
-        if isinstance(self._client, AsyncNemoClient):
-            return AsyncModelsClient.from_client(self._client)
-        return ModelsClient.from_client(self._client)
-
-    @property
-    def providers(self) -> NemoClient | AsyncNemoClient:
-        return self._models_client()
-
-    @property
-    def deployments(self) -> NemoClient | AsyncNemoClient:
-        return self._models_client()
-
-    @property
-    def deployment_configs(self) -> NemoClient | AsyncNemoClient:
-        return self._models_client()
-
-    @property
-    def virtual_models(self) -> NemoClient | AsyncNemoClient:
-        from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient, VirtualModelsClient
-
-        if isinstance(self._client, AsyncNemoClient):
-            return AsyncVirtualModelsClient.from_client(self._client)
-        return VirtualModelsClient.from_client(self._client)
-
-
 class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
     """Shared logic for sync and async NeMo clients.
 
@@ -786,10 +740,6 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient, AsyncAgentHardenerClient
 
         return self._resource_client(AgentHardenerClient, AsyncAgentHardenerClient)
-
-    @property
-    def inference(self: NemoClient | AsyncNemoClient) -> _InferenceNamespace:
-        return _InferenceNamespace(self)
 
     def __getattr__(self, name: str) -> Any:
         """Resolve ``nemo.sdk`` plugin resource namespaces as client attributes.

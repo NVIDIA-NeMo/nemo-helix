@@ -132,8 +132,7 @@ class EntityClient(_PluginEntityClient):
 
         # with_options merges headers into the client's defaults and shares the
         # underlying httpx transport (connection pool, auth), so this is cheap.
-        # It clones via copy.copy, so the platform URL resolver carries over and
-        # no request-router fixup is needed the way the Stainless path required.
+        # It clones via copy.copy, so the platform URL resolver carries over.
         service_client = self._client.with_options(headers=_service_principal_headers(service_name, internal=internal))
         return EntityClient(service_client)
 

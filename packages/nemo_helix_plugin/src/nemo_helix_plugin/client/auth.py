@@ -102,8 +102,8 @@ class TokenProviderAuth(httpx.Auth):
     """Applies a :class:`TokenProvider`'s bearer token at the transport layer.
 
     ``NemoClient.send()`` sets ``Authorization`` itself, but raw calls made
-    through the exposed ``_client`` transport (plugin SDK resources carried over
-    from the Stainless SDK) never reach ``send()``. Installing this on the httpx
+    through the exposed ``_client`` transport (plugin SDK resources) never
+    reach ``send()``. Installing this on the httpx
     client keeps those requests authenticated.
 
     Requests that already carry an ``Authorization`` header are left alone, so

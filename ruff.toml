@@ -35,8 +35,6 @@ exclude = [
     "services/safe-synthesizer-api/fixes/cve-2025-8194",
     "architecture/examples",
     "docs",
-    # auto-generated SDK
-    "sdk/python",
     # files borrowed verbatim from garak
     "packages/garak_api/garakapi/_config.py",
     "packages/garak_api/garakapi/_plugins.py",

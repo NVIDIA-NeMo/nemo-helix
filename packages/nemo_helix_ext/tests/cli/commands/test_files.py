@@ -501,7 +501,6 @@ def test_filesets_create_code_output_renders_typed_client_call() -> None:
     assert "client.create_fileset(" in result.stdout
     assert 'CreateFilesetRequest(name="my-fileset", purpose=FilesetPurpose.DATASET)' in result.stdout
     assert "exist_ok=True" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_filesets_list_code_output() -> None:
@@ -514,7 +513,6 @@ def test_filesets_list_code_output() -> None:
     assert recorder.requests == []
     assert 'client.list_filesets(query_params={"page_size": 5})' in result.stdout
     assert "for item in response.page().items:" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -625,7 +623,6 @@ def test_files_list_code_output() -> None:
     assert result.exit_code == 0, result.output
     assert recorder.requests == []
     assert 'client.list_files(name="my-fileset", workspace="default", query_params={"path": "data/"})' in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_files_delete() -> None:
@@ -1047,7 +1044,6 @@ def test_otlp_logs_query_code_output() -> None:
     assert recorder.requests == []
     assert "from nemo_helix_plugin.files.types import OtlpLogQueryRequest" in result.stdout
     assert 'client.query_otlp_logs(name="my-fileset", body=OtlpLogQueryRequest(limit=3))' in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_otlp_logs_create_code_output() -> None:
@@ -1064,4 +1060,3 @@ def test_otlp_logs_create_code_output() -> None:
     assert recorder.requests == []
     assert "client.upload_otlp_logs(" in result.stdout
     assert 'query_params={"artifact_base_path": "runs/1"}' in result.stdout
-    assert "NeMoHelix" not in result.stdout

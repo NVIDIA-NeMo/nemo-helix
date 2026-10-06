@@ -244,7 +244,6 @@ def test_models_code_output_sends_nothing(runner, random_workspace: str) -> None
     assert_exit_code(result, 0)
     assert "from nemo_helix_plugin.models.client import ModelsClient" in result.stdout
     assert "client.create_model(" in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
     result = runner.invoke(app, ["models", "list", "--workspace", random_workspace])
     assert json.loads(result.stdout)["data"] == []

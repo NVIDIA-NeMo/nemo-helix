@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the Stainless-free transfer helpers in ``filesets.transfer``.
+"""Tests for the transfer helpers in ``filesets.transfer``.
 
 A small in-memory fileset server answers both the sync client and the async
 client the filesystem builds from it, so the tests pin the request sequence,

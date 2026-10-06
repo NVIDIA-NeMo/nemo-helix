@@ -38,7 +38,6 @@ from .openapi_helper.openapi_tools import (
     hoist_nested_defs,
     include_examples,
     load_openapi_spec,
-    mark_direct_span_json_value_for_stainless,
     merge_specs,
     order_endpoints_by_tags,
     remove_endpoint,
@@ -639,7 +638,6 @@ def apply_standard_schema_fixes(spec: dict, apply_reorder: bool = True) -> dict:
     spec = remove_invalid_components(spec)
     spec = fix_recursive_schemas(spec)
     spec = update_object_type(spec)
-    spec = mark_direct_span_json_value_for_stainless(spec)
     spec["openapi"] = "3.1.0"
     spec["info"]["version"] = platform_api_version
 
@@ -884,9 +882,8 @@ def fix_ref_not_allowed_errors(spec_files: List[str]) -> None:
 def validate_final_specs(spec_files: List[str]) -> None:
     """Fail loudly if any of the given specs contains a dangling `$ref`.
 
-    Must run before SDK generation — Stainless and Orval produce broken imports
-    when they encounter refs that don't resolve, so we gate spec publishing on
-    this check.
+    Must run before SDK generation: Orval produces broken imports when it
+    encounters refs that don't resolve, so we gate spec publishing on this check.
     """
     print_green("=== Validating specs for dangling $refs ===")
 

@@ -8,13 +8,12 @@ platform HTTP clients.  When the active user is an OAuthUser, the bootstrap
 wires up **transparent token refresh** so that every HTTP request made through a
 client automatically carries a valid Bearer token — no manual token management
 needed.  :func:`build_nemo_client` / :func:`build_async_nemo_client` build typed
-``NemoClient`` instances directly, and ``factory.py`` exposes the same resolution
-as constructor arguments for clients that take an httpx client and headers.
+``NemoClient`` instances directly.
 
 High-level flow
 ===============
 
-    build_nemo_client() / build_client_init_kwargs()
+    build_nemo_client()
            │
            ├─ resolve_bootstrap()
            │      ├─ _resolve_client_context()   → reads nhx config, resolves context

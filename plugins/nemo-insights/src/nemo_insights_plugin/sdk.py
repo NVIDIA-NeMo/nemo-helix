@@ -20,7 +20,7 @@ the ``nemo.sdk`` entry-point in :file:`pyproject.toml`. Exposes:
   routes mounted under ``/apis/insights/v2/workspaces/{workspace}/``.
 
 Modeled on ``nemo_auditor.sdk`` — same shape, same hand-written CRUD-only
-resource pattern. No Stainless codegen.
+resource pattern.
 """
 
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient

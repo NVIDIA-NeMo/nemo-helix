@@ -3,7 +3,7 @@
 
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -176,11 +176,11 @@ class _Jobs:
         self._error = error
         self.calls: list[dict[str, Any]] = []
 
-    def list(self, **kwargs: Any) -> AsyncIterator[SimpleNamespace]:
+    async def list(self, **kwargs: Any) -> Self:
         self.calls.append(kwargs)
-        return self._iterate()
+        return self
 
-    async def _iterate(self) -> AsyncIterator[SimpleNamespace]:
+    async def items(self) -> AsyncIterator[SimpleNamespace]:
         if self._error is not None:
             raise self._error
         for job in self._jobs:

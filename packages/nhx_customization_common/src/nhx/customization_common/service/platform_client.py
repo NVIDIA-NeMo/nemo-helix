@@ -235,7 +235,7 @@ async def validate_output_name_not_in_flight(
     try:
         conflicting = [
             job
-            async for job in platform.jobs.list(workspace=workspace, filter=in_flight, page_size=100)
+            async for job in (await platform.jobs.list(workspace=workspace, filter=in_flight, page_size=100)).items()
             if _output_name(job.spec) == output_name
         ]
     except NemoClientError as exc:

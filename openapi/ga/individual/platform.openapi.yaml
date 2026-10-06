@@ -15364,7 +15364,6 @@ components:
       title: JobExecutionProfileConfig
     JsonValue:
       title: JsonValue
-      x-stainless-any: true
     JsonWebKey:
       properties: {}
       additionalProperties: true

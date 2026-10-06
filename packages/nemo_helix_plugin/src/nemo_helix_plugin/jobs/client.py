@@ -26,11 +26,10 @@ Usage::
 from __future__ import annotations
 
 import builtins
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Iterator
 from functools import cached_property
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Protocol
 
-import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.method import method
 from nemo_helix_plugin.client.response import (
@@ -67,184 +66,8 @@ from nemo_helix_plugin.jobs.types import (
     ListStepsQueryParams,
 )
 from nemo_helix_plugin.jobs.watch_types import JobWatchEvent
-from pydantic import BaseModel
 
-LegacyItemT = TypeVar("LegacyItemT", bound=BaseModel)
 FilterQueryParam = str | dict[str, Any]
-
-
-class LegacyPageInfo:
-    """Small page-info object compatible with Stainless pagination examples."""
-
-    def __init__(self, *, params: dict[str, Any]) -> None:
-        self.params = params
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(params={self.params!r})"
-
-
-class SyncLegacyPage(Generic[LegacyItemT]):
-    """Small Stainless-style page adapter for the sync Jobs compatibility surface."""
-
-    def __init__(
-        self,
-        *,
-        data: list[LegacyItemT],
-        metadata: object | None = None,
-        next_page_params: dict[str, Any] | None = None,
-        get_next_page: Callable[[], "SyncLegacyPage[LegacyItemT]"] | None = None,
-    ) -> None:
-        self.data = data
-        self.metadata = metadata
-        self._next_page_params = next_page_params
-        self._get_next_page = get_next_page
-
-    def __iter__(self) -> Iterator[LegacyItemT]:
-        return iter(self.data)
-
-    def has_next_page(self) -> bool:
-        return self._next_page_params is not None
-
-    def next_page_info(self) -> LegacyPageInfo | None:
-        if self._next_page_params is None:
-            return None
-        return LegacyPageInfo(params=self._next_page_params)
-
-    def get_next_page(self) -> "SyncLegacyPage[LegacyItemT]":
-        if self._get_next_page is not None:
-            return self._get_next_page()
-        raise RuntimeError("No next page expected; please check `.has_next_page()` before calling `.get_next_page()`.")
-
-
-class AsyncLegacyPage(Generic[LegacyItemT]):
-    """Small Stainless-style page adapter for the async Jobs compatibility surface."""
-
-    def __init__(
-        self,
-        *,
-        data: list[LegacyItemT],
-        metadata: object | None = None,
-        next_page_params: dict[str, Any] | None = None,
-        get_next_page: Callable[[], Awaitable["AsyncLegacyPage[LegacyItemT]"]] | None = None,
-    ) -> None:
-        self.data = data
-        self.metadata = metadata
-        self._next_page_params = next_page_params
-        self._get_next_page = get_next_page
-
-    def __iter__(self) -> Iterator[LegacyItemT]:
-        return iter(self.data)
-
-    def has_next_page(self) -> bool:
-        return self._next_page_params is not None
-
-    def next_page_info(self) -> LegacyPageInfo | None:
-        if self._next_page_params is None:
-            return None
-        return LegacyPageInfo(params=self._next_page_params)
-
-    async def get_next_page(self) -> "AsyncLegacyPage[LegacyItemT]":
-        if self._get_next_page is not None:
-            return await self._get_next_page()
-        raise RuntimeError("No next page expected; please check `.has_next_page()` before calling `.get_next_page()`.")
-
-
-class LegacyPaginatedResponse(Generic[LegacyItemT]):
-    """Compatibility adapter exposing ``.data`` and item iteration."""
-
-    def __init__(self, response: NemoPaginatedResponse[LegacyItemT, Any]) -> None:
-        self._response = response
-        self._first_page: SyncLegacyPage[LegacyItemT] | None = None
-
-    def _legacy_page(self, raw: httpx.Response) -> SyncLegacyPage[LegacyItemT]:
-        items, body, metadata = self._response._parse_page(raw)
-        next_page = self._response._strategy.next_page(body)
-        if next_page is None:
-            return SyncLegacyPage(data=items, metadata=metadata)
-        return SyncLegacyPage(
-            data=items,
-            metadata=metadata,
-            next_page_params=self._response._strategy.page_query_params(next_page),
-            get_next_page=lambda: self._legacy_page(self._response._fetch_page(self._response.request, next_page)),
-        )
-
-    def _page(self) -> SyncLegacyPage[LegacyItemT]:
-        if self._first_page is None:
-            self._first_page = self._legacy_page(self._response.http_response)
-        return self._first_page
-
-    @property
-    def data(self) -> list[LegacyItemT]:
-        return self._page().data
-
-    def __iter__(self) -> Iterator[LegacyItemT]:
-        return self._response.items()
-
-    def iter_pages(self) -> Iterator[SyncLegacyPage[LegacyItemT]]:
-        page = self._page()
-        while True:
-            yield page
-            if not page.has_next_page():
-                return
-            page = page.get_next_page()
-
-
-class AsyncLegacyPaginatedResponse(Generic[LegacyItemT]):
-    """Async compatibility adapter matching Stainless async paginator basics."""
-
-    def __init__(self, response: Awaitable[AsyncNemoPaginatedResponse[LegacyItemT, Any]]) -> None:
-        self._response_awaitable = response
-        self._response: AsyncNemoPaginatedResponse[LegacyItemT, Any] | None = None
-        self._first_page: AsyncLegacyPage[LegacyItemT] | None = None
-
-    async def _get_response(self) -> AsyncNemoPaginatedResponse[LegacyItemT, Any]:
-        if self._response is None:
-            self._response = await self._response_awaitable
-        return self._response
-
-    async def _legacy_page(
-        self,
-        response: AsyncNemoPaginatedResponse[LegacyItemT, Any],
-        raw: httpx.Response,
-    ) -> AsyncLegacyPage[LegacyItemT]:
-        items, body, metadata = response._parse_page(raw)
-        next_page = response._strategy.next_page(body)
-        if next_page is None:
-            return AsyncLegacyPage(data=items, metadata=metadata)
-
-        async def get_next_page() -> AsyncLegacyPage[LegacyItemT]:
-            raw = await response._fetch_page(response.request, next_page)
-            return await self._legacy_page(response, raw)
-
-        return AsyncLegacyPage(
-            data=items,
-            metadata=metadata,
-            next_page_params=response._strategy.page_query_params(next_page),
-            get_next_page=get_next_page,
-        )
-
-    async def _page(self) -> AsyncLegacyPage[LegacyItemT]:
-        if self._first_page is not None:
-            return self._first_page
-        response = await self._get_response()
-        self._first_page = await self._legacy_page(response, response.http_response)
-        return self._first_page
-
-    def __await__(self) -> Any:
-        return self._page().__await__()
-
-    async def __aiter__(self) -> AsyncIterator[LegacyItemT]:
-        response = await self._get_response()
-        async for item in response.items():
-            yield item
-
-    async def iter_pages(self) -> AsyncIterator[AsyncLegacyPage[LegacyItemT]]:
-        page = await self._page()
-        while True:
-            yield page
-            if not page.has_next_page():
-                return
-            page = await page.get_next_page()
 
 
 def _list_jobs_query_params(
@@ -458,9 +281,9 @@ class JobsClient(_JobsMethods, NemoClient):
         page: int | None = None,
         page_size: int | None = None,
         sort: str | None = None,
-    ) -> LegacyPaginatedResponse[HelixJobResponse]:
+    ) -> NemoPaginatedResponse[HelixJobResponse]:
         query_params = _list_jobs_query_params(filter=filter, page=page, page_size=page_size, sort=sort)
-        return LegacyPaginatedResponse(self.list_jobs(workspace=workspace, query_params=query_params))
+        return self.list_jobs(workspace=workspace, query_params=query_params)
 
     def delete(self, name: str, *, workspace: str | None = None) -> None:
         return self.delete_job(name=name, workspace=workspace).data()
@@ -488,7 +311,7 @@ class JobsClient(_JobsMethods, NemoClient):
         step_id: str | None = None,
         tail: int | None = None,
         task_id: str | None = None,
-    ) -> LegacyPaginatedResponse[HelixJobLog]:
+    ) -> NemoPaginatedResponse[HelixJobLog, CursorPagination]:
         query_params = _job_logs_query_params(
             attempt_id=attempt_id,
             limit=limit,
@@ -497,7 +320,7 @@ class JobsClient(_JobsMethods, NemoClient):
             tail=tail,
             task_id=task_id,
         )
-        return LegacyPaginatedResponse(self.list_job_logs(workspace=workspace, name=name, query_params=query_params))
+        return self.list_job_logs(workspace=workspace, name=name, query_params=query_params)
 
     def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return self.get_execution_profiles().data()
@@ -613,11 +436,9 @@ class _JobsStepsCompat:
         page: int | None = None,
         page_size: int | None = None,
         sort: str | None = None,
-    ) -> LegacyPaginatedResponse[HelixJobStepWithContext]:
+    ) -> NemoPaginatedResponse[HelixJobStepWithContext]:
         query_params = _list_steps_query_params(filter=filter, page=page, page_size=page_size, sort=sort)
-        return LegacyPaginatedResponse(
-            self._client.list_steps(name=name, workspace=workspace, query_params=query_params)
-        )
+        return self._client.list_steps(name=name, workspace=workspace, query_params=query_params)
 
     def update_status(
         self,
@@ -743,7 +564,7 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
     async def retrieve(self, name: str, *, workspace: str | None = None) -> HelixJobResponse:
         return (await self.get_job(name=name, workspace=workspace)).data()
 
-    def list(
+    async def list(
         self,
         *,
         workspace: str | None = None,
@@ -751,9 +572,9 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
         page: int | None = None,
         page_size: int | None = None,
         sort: str | None = None,
-    ) -> AsyncLegacyPaginatedResponse[HelixJobResponse]:
+    ) -> AsyncNemoPaginatedResponse[HelixJobResponse]:
         query_params = _list_jobs_query_params(filter=filter, page=page, page_size=page_size, sort=sort)
-        return AsyncLegacyPaginatedResponse(self.list_jobs(workspace=workspace, query_params=query_params))
+        return await self.list_jobs(workspace=workspace, query_params=query_params)
 
     async def delete(self, name: str, *, workspace: str | None = None) -> None:
         return (await self.delete_job(name=name, workspace=workspace)).data()
@@ -770,7 +591,7 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
     async def get_status(self, name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
         return (await self.get_job_status(name=name, workspace=workspace)).data()
 
-    def get_logs(
+    async def get_logs(
         self,
         name: str,
         *,
@@ -781,7 +602,7 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
         step_id: str | None = None,
         tail: int | None = None,
         task_id: str | None = None,
-    ) -> AsyncLegacyPaginatedResponse[HelixJobLog]:
+    ) -> AsyncNemoPaginatedResponse[HelixJobLog, CursorPagination]:
         query_params = _job_logs_query_params(
             attempt_id=attempt_id,
             limit=limit,
@@ -790,9 +611,7 @@ class AsyncJobsClient(_JobsMethods, AsyncNemoClient):
             tail=tail,
             task_id=task_id,
         )
-        return AsyncLegacyPaginatedResponse(
-            self.list_job_logs(workspace=workspace, name=name, query_params=query_params)
-        )
+        return await self.list_job_logs(workspace=workspace, name=name, query_params=query_params)
 
     async def list_execution_profiles(self) -> builtins.list[endpoints.ExecutionProfile]:
         return (await self.get_execution_profiles()).data()
@@ -905,7 +724,7 @@ class _AsyncJobsStepsCompat:
     async def retrieve(self, name: str, *, workspace: str | None = None, job: str) -> HelixJobStepResponse:
         return (await self._client.get_job_step(name=name, workspace=workspace, job=job)).data()
 
-    def list(
+    async def list(
         self,
         name: str,
         *,
@@ -914,11 +733,9 @@ class _AsyncJobsStepsCompat:
         page: int | None = None,
         page_size: int | None = None,
         sort: str | None = None,
-    ) -> AsyncLegacyPaginatedResponse[HelixJobStepWithContext]:
+    ) -> AsyncNemoPaginatedResponse[HelixJobStepWithContext]:
         query_params = _list_steps_query_params(filter=filter, page=page, page_size=page_size, sort=sort)
-        return AsyncLegacyPaginatedResponse(
-            self._client.list_steps(name=name, workspace=workspace, query_params=query_params)
-        )
+        return await self._client.list_steps(name=name, workspace=workspace, query_params=query_params)
 
     async def update_status(
         self,

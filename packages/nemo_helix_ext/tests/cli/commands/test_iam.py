@@ -509,7 +509,6 @@ def test_code_output_does_not_send_request() -> None:
     assert 'client = IAMClient(base_url="http://test/")' in result.stdout
     assert 'RoleBindingInput(principal="user@example.com", workspace="ml-team", role="Viewer")' in result.stdout
     assert 'query_params={"wait_role_propagation": True}' in result.stdout
-    assert "NeMoHelix" not in result.stdout
 
 
 def test_code_output_for_list_renders_filter_query() -> None:
@@ -526,4 +525,3 @@ def test_code_output_for_list_renders_filter_query() -> None:
     assert '"page": 2' in result.stdout
     assert "Viewer" in result.stdout
     assert "for item in response.page().items:" in result.stdout
-    assert "NeMoHelix" not in result.stdout

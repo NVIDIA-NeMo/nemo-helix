@@ -3,8 +3,7 @@
 
 """Typed endpoint definitions for the Auditor service.
 
-Single source of truth for the HTTP contract. Replaces the Stainless-generated
-auditor resource from ``nemo_auditor.sdk``.
+Single source of truth for the HTTP contract.
 """
 
 from __future__ import annotations

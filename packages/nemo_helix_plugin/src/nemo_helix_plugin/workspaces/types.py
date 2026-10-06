@@ -4,8 +4,7 @@
 """Shared request/response types for the Workspaces API (Entity Store).
 
 One source of truth for the HTTP contract, used by both the server routes and
-the typed NemoClient endpoints. Replaces the Stainless-generated
-``nemo_helix.types.workspaces`` module.
+the typed NemoClient endpoints.
 """
 
 from __future__ import annotations
