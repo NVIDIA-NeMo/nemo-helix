@@ -68,6 +68,26 @@ class TestTheSandbox:
         sandbox = BuilderConfig().sandbox
         assert (sandbox.image, sandbox.dns_nameservers) == ("kaniko:1", ["10.0.0.53"])
 
+    def test_sandboxes_are_plain_pods_by_default(self) -> None:
+        assert (BuilderConfig().sandbox.provider, BuilderConfig().sandbox.opensandbox) == ("kubernetes_pod", None)
+
+    def test_the_opensandbox_server_defaults_to_plain_http_and_its_key_secret(self) -> None:
+        sandbox = BuilderConfig.model_validate(
+            {"sandbox": {"provider": "opensandbox", "opensandbox": {"domain": "opensandbox-server.ns.svc"}}}
+        ).sandbox
+        assert sandbox.opensandbox is not None
+        assert (sandbox.opensandbox.protocol, sandbox.opensandbox.api_key_secret) == (
+            "http",
+            "opensandbox-builder-api-key",
+        )
+
+    @pytest.mark.parametrize(
+        "server", [{"domain": ""}, {"domain": "x", "protocol": "ftp"}, {"domain": "x", "key": "k"}]
+    )
+    def test_a_malformed_opensandbox_server_is_refused(self, server: dict[str, str]) -> None:
+        with pytest.raises(ValidationError):
+            BuilderConfig.model_validate({"sandbox": {"provider": "opensandbox", "opensandbox": server}})
+
     def test_a_misspelt_setting_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="imgae"):
             BuilderConfig.model_validate({"sandbox": {"imgae": "kaniko:1"}})

@@ -46,6 +46,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  # The OpenSandbox tenant's key, read only when the sandbox provider is opensandbox: the one pod that reads it is
+  # this step's.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["opensandbox-builder-api-key"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

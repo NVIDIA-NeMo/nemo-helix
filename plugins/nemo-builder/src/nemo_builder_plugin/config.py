@@ -8,9 +8,10 @@ How a build runs is set here, never in the request.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
+from nemo_builder_plugin.steps import OpenSandboxServer
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import (
     BaseModel,
@@ -24,7 +25,7 @@ from pydantic import (
 
 
 class SandboxConfig(BaseModel):
-    """The pods a build's Dockerfiles run in.
+    """The sandboxes a build's Dockerfiles run in.
 
     Where they run isn't set here: they run in the build step's namespace, on the work volume and nodes of
     the fetch step's Jobs execution profile. From the environment, the section is one JSON value,
@@ -37,15 +38,33 @@ class SandboxConfig(BaseModel):
         default=None,
         description=(
             "The kaniko image the sandbox runs, built from `docker/Dockerfile.kaniko`, or any with `/kaniko/executor` "
-            "and a shell at `/busybox/sh`. Unset refuses every submit."
+            "and a shell at `/busybox/sh`. OpenSandbox also needs `/bin/sh`. Unset refuses every submit."
         ),
     )
-    cpu: str = Field(default="2", description="CPU request for the sandbox.")
-    memory: str = Field(default="8Gi", description="Memory request for the sandbox.")
+    provider: Literal["kubernetes_pod", "opensandbox"] = Field(
+        default="kubernetes_pod",
+        description=(
+            "What runs each sandbox: a plain pod the build step creates, hardened by the builder, or an OpenSandbox "
+            "sandbox, hardened by the server's template."
+        ),
+    )
+    opensandbox: OpenSandboxServer | None = Field(
+        default=None,
+        description="The OpenSandbox server, for `provider: opensandbox`. Unset with that provider refuses every submit.",
+    )
+    cpu: str = Field(
+        default="2",
+        description="CPU request for a plain pod sandbox, or limit for an OpenSandbox one, whose requests match.",
+    )
+    memory: str = Field(
+        default="8Gi",
+        description="Memory request for a plain pod sandbox, or limit for an OpenSandbox one, whose requests match.",
+    )
     dns_nameservers: list[str] = Field(
         default_factory=lambda: ["8.8.8.8", "1.1.1.1"],
         description=(
-            "Resolvers the sandbox uses instead of cluster DNS, so a network policy can block every cluster address."
+            "Resolvers a plain pod sandbox uses instead of cluster DNS, so a network policy can block every cluster "
+            "address. OpenSandbox's come from the server's template."
         ),
     )
 

@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ContextSource(BaseModel):
@@ -93,10 +94,32 @@ class FetchStepConfig(BaseModel):
     )
 
 
+class OpenSandboxServer(BaseModel):
+    """An OpenSandbox server whose tenant for the build namespace the build step creates sandboxes as."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    domain: str = Field(
+        min_length=1,
+        description="The server's host, optionally with a port, as the build step reaches it: its Service's DNS name.",
+    )
+    protocol: Literal["http", "https"] = Field(default="http", description="How the build step reaches the server.")
+    api_key_secret: str = Field(
+        default="opensandbox-builder-api-key",
+        min_length=1,
+        description=(
+            "Kubernetes Secret in the build namespace holding the tenant's API key under `api-key`. The build step "
+            "reads it with its ServiceAccount, so the key reaches no other pod."
+        ),
+    )
+
+
 class SandboxSpec(BaseModel):
-    """How ``supervise`` builds the sandbox pod. All of it comes from operator config."""
+    """How ``supervise`` runs the sandboxes. All of it comes from operator config."""
 
     image: str = Field(description="The kaniko image.")
+    provider: Literal["kubernetes_pod", "opensandbox"] = "kubernetes_pod"
+    opensandbox: OpenSandboxServer | None = None
     work_pvc: str
     node_selector: dict[str, str]
     dns_nameservers: list[str]

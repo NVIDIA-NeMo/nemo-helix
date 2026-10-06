@@ -75,6 +75,10 @@ class ExecutionBackend:
         """Refuse every request while a setting with no default is unset, or the build's profiles disagree."""
         self._registry()
         self._sandbox_image()
+        if self._config.sandbox.provider == "opensandbox" and self._config.sandbox.opensandbox is None:
+            raise BackendRejectedError(
+                "builder.sandbox.opensandbox is not configured; the opensandbox provider has no server to build on"
+            )
         self._work_profile()
 
     def destination(self, image: PlannedImage) -> Destination:

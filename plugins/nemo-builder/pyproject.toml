@@ -17,6 +17,8 @@ dependencies = [
 [project.optional-dependencies]
 # Only the API process needs the SDK, for a FastAPI dependency in service.py. No step imports it.
 service = ["nemo-helix"]
+# Only the build step needs it, when the sandbox provider is opensandbox. The version uv.lock has.
+opensandbox = ["opensandbox==0.1.16"]
 
 [tool.uv.sources]
 nemo-helix = { path = "../../packages/nemo_helix", editable = true }

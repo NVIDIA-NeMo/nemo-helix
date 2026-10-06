@@ -22,11 +22,11 @@ COPY packages ./packages
 COPY plugins/nemo-builder ./plugins/nemo-builder
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system --no-cache ./plugins/nemo-builder
+    uv pip install --system --no-cache "./plugins/nemo-builder[opensandbox]"
 
 # A missing dependency fails the build rather than a job.
 RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push' \
- && python -c "import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push" \
+ && python -c "import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push, nemo_builder_plugin.run.opensandbox_sdk" \
  && crane version && cosign version 2>&1 | head -3
 
 WORKDIR /
