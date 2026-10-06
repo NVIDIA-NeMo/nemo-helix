@@ -7,6 +7,7 @@ import {
   TEMPLATE_GROUP_TITLE,
 } from '@studio/components/CreateCustomizationStart/constants';
 import { DeleteSavedTemplate } from '@studio/components/CreateCustomizationStart/DeleteSavedTemplate';
+import { DescribeWithAiPanel } from '@studio/components/CreateCustomizationStart/DescribeWithAiPanel';
 import type {
   CreateCustomizationStartProps,
   StartOptionId,
@@ -18,7 +19,10 @@ import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
 import type { StartTemplateGroup } from '@studio/components/StartOptions/types';
 import { CUSTOMIZATION_TEMPLATES } from '@studio/constants/customizationTemplates';
 import { toCustomizationBackend } from '@studio/util/customizationBackend';
-import { templateToFormFields } from '@studio/util/forms/customization';
+import {
+  templateToFormFields,
+  type CustomizationFormFields,
+} from '@studio/util/forms/customization';
 import { Box, Bookmark } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 
@@ -27,6 +31,12 @@ const SAVED_PREFIX = 'saved:';
 
 const savedTemplateKey = (template: { name?: string; id: string }) =>
   `${SAVED_PREFIX}${template.name ?? template.id}`;
+
+/** Why Continue is unavailable, shown next to the disabled button. */
+const BLOCKED_HINT: Partial<Record<StartOptionId, string>> = {
+  template: 'Pick a recipe to continue.',
+  ai: 'Draft settings that pass the checks to continue.',
+};
 
 /** Templates are the middle rung, and the likeliest way in, so the page opens on them. */
 const DEFAULT_OPTION: StartOptionId = 'template';
@@ -37,6 +47,8 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
 }) => {
   const [selectedId, setSelectedId] = useState<StartOptionId>(DEFAULT_OPTION);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  // Set only once a generated draft validates, so Continue can never load a broken config.
+  const [draftValues, setDraftValues] = useState<CustomizationFormFields | null>(null);
 
   const { run: runTemplateSetup, statusLabel, error: templateError } = useTemplateSetup(workspace);
   const isSettingUp = statusLabel !== '';
@@ -107,6 +119,10 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
       onContinue({ optionId: 'scratch' });
       return;
     }
+    if (selectedId === 'ai') {
+      if (draftValues) onContinue({ optionId: 'ai', initialValues: draftValues });
+      return;
+    }
     // Names a model and dataset the workspace already has, so nothing to provision.
     if (selectedSaved) {
       const initialValues = templateToFormFields(selectedSaved);
@@ -129,22 +145,27 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
   return (
     <StartPage
       heading="Fine-tune a Model"
-      headingDescription="Train a model on your own data. Pick a ready-made recipe, or set everything up yourself."
+      headingDescription="Train a model on your own data. Describe what you need and let AI draft the settings, pick a ready-made recipe, or set everything up yourself."
       options={START_OPTIONS}
       value={selectedId}
       onChange={(id) => {
         setSelectedId(id as StartOptionId);
         setSelectedTemplateId(null);
+        setDraftValues(null);
       }}
       // Provisioning registers models and uploads a dataset, which takes long enough that
       // the cards would stay clickable behind the disabled Continue. Moving the selection
       // then would leave a finished setup pointing at something else.
       disabled={isSettingUp}
-      canContinue={!isSettingUp && (selectedId === 'scratch' || selectedTemplateId !== null)}
+      canContinue={
+        !isSettingUp &&
+        (selectedId === 'scratch' ||
+          (selectedId === 'ai' ? draftValues !== null : selectedTemplateId !== null))
+      }
       continueLabel={isSettingUp ? statusLabel : 'Continue'}
       continueLoading={isSettingUp}
       onContinue={() => void handleContinue()}
-      blockedHint={selectedId === 'template' ? 'Pick a recipe to continue.' : undefined}
+      blockedHint={BLOCKED_HINT[selectedId]}
       slotFooterStart={
         selectedSaved ? (
           <DeleteSavedTemplate
@@ -158,7 +179,9 @@ export const CreateCustomizationStart: FC<CreateCustomizationStartProps> = ({
         ) : null
       }
       slotDetail={
-        selectedId === 'template' ? (
+        selectedId === 'ai' ? (
+          <DescribeWithAiPanel workspace={workspace} onDraft={setDraftValues} />
+        ) : selectedId === 'template' ? (
           <Stack gap="density-2xl" className="w-full">
             <TemplateGroups
               groups={templateGroups}

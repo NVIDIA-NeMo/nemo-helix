@@ -575,7 +575,8 @@ export const formToUnslothCreate = (
   };
 };
 
-const stripNulls = <T>(value: T): T => {
+/** Null means "unset" in API responses and skill templates; the generated schemas want absent. */
+export const stripNulls = <T>(value: T): T => {
   if (value === null) return undefined as unknown as T;
   if (Array.isArray(value)) return value.map(stripNulls) as unknown as T;
   if (typeof value === 'object') {
