@@ -32,7 +32,9 @@ class HelixSeedConfig(BaseSettings):
         description="Seed auth role bindings",
     )
     guardrails_enabled: bool = Field(default=True, description="Seed guardrail configs from config store")
-    model_provider_enabled: bool = Field(default=True, description="Seed the default nvidia-build model provider")
+    model_provider_enabled: bool = Field(
+        default=False, description="Opt-in seed for the legacy nvidia-build model provider"
+    )
 
     guardrails_config_store_path: Path = Field(
         default_factory=lambda: Path(os.getenv("CONFIG_STORE_PATH", "/dev/null")),
