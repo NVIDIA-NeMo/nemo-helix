@@ -337,7 +337,8 @@ COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/n
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
+    /tmp/patches/nemo-rl-transformers-5.17-tokenizer.patch
 
 # Editable root only. Dependencies were installed by the syncs above.
 RUN <<"EOF" bash -eu
