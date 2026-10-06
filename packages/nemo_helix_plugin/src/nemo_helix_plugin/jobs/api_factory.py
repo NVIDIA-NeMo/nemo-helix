@@ -808,6 +808,7 @@ def job_route_factory(
     input_to_output: InputToOutputTransformer | InputToOutputTransformerAsync | None = None,
     generate_job_name: JobNameGenerator | None = None,
     authz: AuthzScope | None = None,
+    jobs_list_filter: type[BaseJobsListFilter] | None = None,
 ) -> APIRouter:
     """Create a job router with standard CRUD operations.
 
@@ -840,6 +841,11 @@ def job_route_factory(
             :data:`~nemo_helix_plugin.authz.GENERATED_ROUTE_CALLERS` — plus the
             matching read / write scope. When omitted the routes are left unruled —
             denied fail-closed at bundle time.
+        jobs_list_filter: List-filter model for this backend. When omitted, a
+            ``{job_type}JobsListFilter`` subclass of :class:`BaseJobsListFilter`
+            is generated. A field this model adds with a string default, such as
+            ``backend: Literal["rl"] = "rl"``, is AND-ed into every list as
+            ``spec.<field>``.
 
     Example with separate input/output types:
         ```python
@@ -929,7 +935,11 @@ def job_route_factory(
         (BaseJob[BaseModel],),
         {"__annotations__": {"spec": job_output}},
     )
-    TypedJobsListFilter = type(f"{job_type}JobsListFilter", (BaseJobsListFilter,), {})
+    TypedJobsListFilter = jobs_list_filter or type(
+        f"{job_type}JobsListFilter",
+        (BaseJobsListFilter,),
+        {},
+    )
     # Keep the OpenAPI schema names stable for generated SDK consumers.  The
     # values are shared across job factories, but Studio imports the generated
     # per-job symbols (for example ``EvaluateJobsSortField``), so the route
@@ -1069,6 +1079,15 @@ def job_route_factory(
             # when the user filter has a logical root ($or/$and/$not), since the
             # downstream parser short-circuits on the first logical operator.
             parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="source", value=service_name))
+            # Fields a backend adds on top of BaseJobsListFilter, with a default,
+            # are the spec values that identify that backend. ``backend: Literal["rl"] = "rl"``
+            # becomes ``spec.backend == "rl"``.
+            for name, info in TypedJobsListFilter.model_fields.items():
+                if name in BaseJobsListFilter.model_fields or not isinstance(info.default, str):
+                    continue
+                parsed.and_with(
+                    ComparisonOperation(operator=FilterOperator.EQ, field=f"spec.{name}", value=info.default)
+                )
             # Serialize as JSON and forward as a single query param. A typed
             # ``filter`` param would flow through a deep-object querystring serializer
             # whose ``comma`` array_format mangles list-of-dict values that
