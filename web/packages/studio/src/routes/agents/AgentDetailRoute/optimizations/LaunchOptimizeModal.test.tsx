@@ -120,6 +120,14 @@ describe('LaunchOptimizeModal', () => {
     expect(startButton(dialog)).toBeDisabled();
   });
 
+  it('blocks a legacy run until a configuration source is chosen', async () => {
+    mockHelix();
+    renderModal();
+
+    const dialog = await pickStrategy('LEGACY');
+    expect(startButton(dialog)).toBeDisabled();
+  });
+
   it('submits a strategy with only the agent', async () => {
     const { submitted, uploaded } = mockHelix();
     renderModal();

@@ -67,7 +67,10 @@ interface Bundle {
   configs: Record<string, Record<string, unknown> | undefined>;
 }
 
-/** Only the `legacy` strategy's config has a shape Studio can preflight in the browser. */
+/**
+ * The `legacy` strategy's spec requires a config, and it is the only config whose shape Studio can
+ * preflight in the browser.
+ */
 const PREFLIGHT_STRATEGY = 'legacy';
 
 const NO_BUNDLE = '__none__';
@@ -237,6 +240,7 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
   }));
 
   const needsConfig = source !== NO_BUNDLE;
+  const missingConfig = strategy === PREFLIGHT_STRATEGY && source === NO_BUNDLE;
 
   return (
     <FormModal
@@ -270,7 +274,9 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
       }}
       disabled={isPending}
       loading={isPending}
-      submitDisabled={!strategy || (needsConfig && !configPath) || problems.length > 0}
+      submitDisabled={
+        !strategy || missingConfig || (needsConfig && !configPath) || problems.length > 0
+      }
       errorText={errorText}
     >
       <Stack gap="density-md">
@@ -369,7 +375,9 @@ export const LaunchOptimizeModal: FC<LaunchOptimizeModalProps> = ({
             onValueChange={setConfigPath}
             disabled={isPending || filesetFiles.isFetching}
             placeholder={
-              configPaths.length === 0 ? 'No YAML files in this fileset' : 'Select the config YAML'
+              !filesetFiles.isFetching && configPaths.length === 0
+                ? 'No YAML files in this fileset'
+                : 'Select the config YAML'
             }
             items={configPaths.map((path) => ({ value: path, children: path }))}
           />
