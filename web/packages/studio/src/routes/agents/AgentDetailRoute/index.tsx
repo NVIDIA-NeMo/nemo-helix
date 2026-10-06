@@ -269,6 +269,7 @@ export const AgentDetailRoute: FC = () => {
               tab={selectedTab}
               agentName={agentName}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
               canRunEvaluation={canRunEvaluation}
               isDeploying={isDeploying}
               canOptimize={!isCreatingOptimization}
@@ -354,6 +355,7 @@ export const AgentDetailRoute: FC = () => {
               onDelete={setDeleteDeploymentTarget}
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
               specSource={specSource}
               workspace={workspace}
               canPackage={canPackage}
@@ -389,6 +391,7 @@ export const AgentDetailRoute: FC = () => {
                 onSelectDeployment={setSelectedDeploymentName}
                 onDeploy={onDeploy}
                 canDeploy={canDeploy}
+                isAgentPending={isAgentPending}
               />
             </div>
           </TabsContent>

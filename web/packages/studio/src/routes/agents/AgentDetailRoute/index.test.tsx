@@ -18,7 +18,7 @@ import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { useNavigate } from 'react-router';
 
 const agentName = 'react-agent';
@@ -160,6 +160,16 @@ describe('AgentDetailRoute', () => {
     await user.click(screen.getAllByRole('button', { name: 'Upload' })[0]!);
 
     expect(await screen.findByDisplayValue(`${agentName}-v2`)).toBeInTheDocument();
+  });
+
+  it('does not offer Upload while the agent is still loading', async () => {
+    server.use(http.get(`${agentsUrl}/:name`, () => delay('infinite')));
+    renderDetail();
+
+    const deploy = await screen.findByRole('button', { name: 'Deploy' });
+
+    expect(deploy).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
 
   it('switches to the chat tab', async () => {

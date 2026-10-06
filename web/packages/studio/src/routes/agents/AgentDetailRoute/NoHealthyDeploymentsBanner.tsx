@@ -12,6 +12,8 @@ interface NoHealthyDeploymentsBannerProps {
   onDeploy: () => void;
   message?: string;
   canDeploy: boolean;
+  /** Until the agent loads, `canDeploy` is false for every agent, so it cannot be trusted yet. */
+  isAgentPending?: boolean;
 }
 
 export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = ({
@@ -19,6 +21,7 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
   isDeploying,
   onDeploy,
   canDeploy,
+  isAgentPending,
   message = 'No healthy deployments available to chat with.',
 }) => (
   <Banner
@@ -31,12 +34,17 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
           <Text kind="label/regular/sm">Deploying…</Text>
         </Flex>
       ) : (
-        <Button kind="secondary" size="small" disabled={!agentName} onClick={onDeploy}>
-          {canDeploy ? 'Deploy this Agent' : 'Upload'}
+        <Button
+          kind="secondary"
+          size="small"
+          disabled={!agentName || isAgentPending}
+          onClick={onDeploy}
+        >
+          {canDeploy || isAgentPending ? 'Deploy this Agent' : 'Upload'}
         </Button>
       )
     }
   >
-    {canDeploy ? message : `${message} ${NO_CONFIG_DEPLOY_MESSAGE}`}
+    {canDeploy || isAgentPending ? message : `${message} ${NO_CONFIG_DEPLOY_MESSAGE}`}
   </Banner>
 );
