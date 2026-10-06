@@ -210,7 +210,8 @@ UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extr
 
 # Any Gym server -> an environment package
 .venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
-  --gym-root ~/workspace/Gym --server resources_servers/math_with_judge \
+  --gym-root ~/workspace/Gym --nemo-rl-root ~/workspace/RL \
+  --server resources_servers/math_with_judge \
   --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
 # math_with_judge rollout rows (adds agent_ref and expected_answer).

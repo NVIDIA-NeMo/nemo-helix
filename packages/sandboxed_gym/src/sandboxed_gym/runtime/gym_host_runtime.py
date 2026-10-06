@@ -958,6 +958,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             body = self._await_results(future, started)
+        except OSError:
+            raise
         except BaseException as exc:  # noqa: BLE001
             # Headers are already sent. An exception here must still become an error body,
             # or the proxy forwards a 200 with no payload. Stdout is what the job can see.

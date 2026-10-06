@@ -23,7 +23,8 @@ def test_server_closure_uses_the_selected_server_only(tmp_path: Path) -> None:
     server = tmp_path / "resources_servers" / "math_with_judge"
     server.mkdir(parents=True)
     (server / "requirements.txt").write_text(
-        "-e nemo-gym[dev] @ ../../\nmath-verify==0.8.0\n# comment\n\ndatasets\n",
+        "-e nemo-gym[dev] @ ../../\nmath-verify==0.8.0\n# comment\n\ndatasets\n"
+        "nemo-gym==0.7.0rc0\nnemo-gym-extras==1.0\n",
         encoding="utf-8",
     )
 
@@ -32,7 +33,8 @@ def test_server_closure_uses_the_selected_server_only(tmp_path: Path) -> None:
     assert lines[:2] == ["ray[default]==2.56.1", "openai==2.44.0"]
     assert "math-verify==0.8.0" in lines
     assert "datasets" in lines
-    assert not any("nemo-gym" in line for line in lines)
+    assert "nemo-gym-extras==1.0" in lines
+    assert "nemo-gym==0.7.0rc0" not in lines
 
 
 def _zip_wheel(path: Path, *names: str) -> None:

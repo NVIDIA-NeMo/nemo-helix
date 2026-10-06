@@ -239,7 +239,10 @@ def server_requirement_lines(pkg_server_dir: Path) -> list[str]:
     lines = []
     for raw in reqs.read_text(encoding="utf-8").splitlines():
         stripped = raw.strip()
-        if not stripped or stripped.startswith("#") or "../.." in stripped or "nemo-gym" in stripped:
+        if not stripped or stripped.startswith("#") or "../.." in stripped:
+            continue
+        name = re.split(r"[\s\[<>=!~;@]", stripped.removeprefix("-e").strip(), maxsplit=1)[0]
+        if canonicalize_name(name) == "nemo-gym":
             continue
         lines.append(stripped)
     return lines
