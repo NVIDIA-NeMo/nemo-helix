@@ -211,6 +211,13 @@ class WarGameSpec(BaseModel):
     models: WarGameModels | None = None
     source_run: str | None = None
 
+    @model_validator(mode="after")
+    def _validate_only_requires_replay(self) -> WarGameSpec:
+        # A sanity check replays recorded attacks; without a hitlog the run would fall through to a live attack.
+        if self.validate_only and not (self.replay_hitlog_fileset or "").strip():
+            raise ValueError("validate_only requires 'replay_hitlog_fileset' (the recorded attacks to replay)")
+        return self
+
 
 class SynthBenignSpec(BaseModel):
     """Inputs for the benign-suite synthesis phase (the shape ``run()``/``compile()`` see)."""
