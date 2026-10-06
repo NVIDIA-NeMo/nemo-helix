@@ -328,7 +328,8 @@ class TestClassifyFailure:
 
 
 class TestProcessGroups:
-    async def test_stopping_a_group_lets_it_clean_up_first(self, tmp_path):
+    async def test_stopping_a_group_lets_it_clean_up_first(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(git_backend, "_GRACE_SECONDS", 30.0)
         marker = tmp_path / "cleaned"
         ready = tmp_path / "ready"
         proc = await asyncio.create_subprocess_exec(
