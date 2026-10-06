@@ -12,13 +12,14 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "../../..");
 const DOCS_ROOT = join(REPO_ROOT, "docs");
+const NOTEBOOK_ASSETS_ROOT = join(SCRIPT_DIR, "../assets/notebooks");
 const COLAB_PREFIX = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob";
 const argv = process.argv.slice(2);
 const CHECK = argv.includes("--check");
@@ -91,26 +92,35 @@ function colabUrlFor(notebookPath) {
   return `${COLAB_PREFIX}/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
 }
 
+function safeAssetSegment(value) {
+  return value.replace(/[^A-Za-z0-9._-]/g, "-");
+}
+
+function notebookAssetRelativePath(notebookPath) {
+  return `${safeAssetSegment(COLAB_REF)}/${notebookSourcePath(notebookPath).replace(/^docs\//, "")}`;
+}
+
 function downloadUrlFor(notebookPath) {
-  return `https://raw.githubusercontent.com/NVIDIA-NeMo/nemo-helix/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
+  return `/assets/notebooks/${notebookAssetRelativePath(notebookPath)}`;
+}
+
+async function copyNotebookAsset(notebookPath) {
+  const assetPath = join(NOTEBOOK_ASSETS_ROOT, notebookAssetRelativePath(notebookPath));
+  await mkdir(dirname(assetPath), { recursive: true });
+  await copyFile(notebookPath, assetPath);
 }
 
 function notebookFilename(notebookPath) {
   return notebookPath.split(sep).pop() ?? "notebook.ipynb";
 }
 
-async function inlineDownloadUrlFor(notebookPath) {
-  const notebook = await readFile(notebookPath, "utf8");
-  return `data:application/x-ipynb+json;charset=utf-8,${encodeURIComponent(notebook)}`;
-}
-
-async function notebookActionsFor(notebookPath) {
+function notebookActionsFor(notebookPath) {
   return [
     '<div className="notebook-actions">',
     `  <a href="${colabUrlFor(notebookPath)}" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">`,
     '    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>',
     '  </a>',
-    `  <a href="${await inlineDownloadUrlFor(notebookPath)}" className="notebook-actions__button notebook-actions__button--secondary" download="${notebookFilename(notebookPath)}">`,
+    `  <a href="${downloadUrlFor(notebookPath)}" className="notebook-actions__button notebook-actions__button--secondary" download="${notebookFilename(notebookPath)}">`,
     '    <span>Download notebook</span>',
     '  </a>',
     '</div>',
@@ -141,7 +151,7 @@ async function syncMarkdownColabLink(source, notebookPath) {
   if (!notebookPath) {
     return `${frontmatter}${bodyWithoutActions}`;
   }
-  return `${frontmatter}\n${await notebookActionsFor(notebookPath)}\n\n${bodyWithoutActions.replace(/^\n+/, "")}`;
+  return `${frontmatter}\n${notebookActionsFor(notebookPath)}\n\n${bodyWithoutActions.replace(/^\n+/, "")}`;
 }
 
 function syncNotebookViewerColabUrl(source, notebookPath) {
@@ -191,6 +201,10 @@ async function main() {
     const notebookPath = (await pathExists(adjacentNotebook)) ? adjacentNotebook : null;
     const hasNotebookViewer = NOTEBOOK_VIEWER_RE.test(source);
     NOTEBOOK_VIEWER_RE.lastIndex = 0;
+
+    if (notebookPath) {
+      await copyNotebookAsset(notebookPath);
+    }
 
     const updated = hasNotebookViewer
       ? syncNotebookViewerColabUrl(source, notebookPath)
