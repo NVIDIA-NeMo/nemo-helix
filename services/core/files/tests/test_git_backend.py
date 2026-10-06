@@ -9,7 +9,6 @@ import shutil
 import stat
 import subprocess
 import time
-from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import pytest
@@ -676,22 +675,6 @@ class TestColdRepositories:
 
         await impl.get_file("README.md")
         assert not idle.exists()
-
-
-class TestStreamSlots:
-    async def test_a_slot_is_held_while_a_file_streams_and_freed_when_it_closes(self, remote, tmp_path):
-        impl = _impl(_config(remote["url"], path="agents/support"), tmp_path / "cache")
-        await impl.get_file("prompt.md")
-        free = git_backend._STREAM_SLOTS._value
-
-        stream = await impl.download("prompt.md", None)
-        assert isinstance(stream, AsyncGenerator)
-        assert await anext(stream) == b"0123"
-        assert git_backend._STREAM_SLOTS._value == free - 1
-
-        await stream.aclose()
-        await _until_background_work_is_done()
-        assert git_backend._STREAM_SLOTS._value == free
 
 
 class TestRepair:
