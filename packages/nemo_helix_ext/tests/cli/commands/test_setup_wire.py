@@ -220,17 +220,17 @@ class TestAutoSetupWire:
         recorder = Recorder(
             [
                 httpx.Response(404, json={"detail": "not found"}),
-                httpx.Response(201, json={**SECRET, "name": "nvidia-build-api-key"}),
+                httpx.Response(201, json={**SECRET, "name": "openrouter-api-key"}),
                 httpx.Response(404, json={"detail": "not found"}),
-                httpx.Response(201, json=provider_json("nvidia-build", "https://integrate.api.nvidia.com")),
+                httpx.Response(201, json=provider_json("openrouter", "https://openrouter.ai/api/v1")),
             ]
         )
         clients = make_clients(recorder)
 
-        with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-secret"}, clear=True):
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-or-secret"}, clear=True):
             _auto_setup(clients, "default")
 
-        assert b"nvapi-secret" not in recorder.requests[3].content
+        assert b"sk-or-secret" not in recorder.requests[3].content
 
 
 class TestSampleSetupWire:

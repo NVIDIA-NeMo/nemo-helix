@@ -114,7 +114,7 @@ nemo setup               # interactive: configures models, then offers a sample 
 === "Non-interactive (CI)"
 
 ```bash
-export NVIDIA_API_KEY=nvapi...
+export OPENROUTER_API_KEY=sk-or-...
 nemo setup --auto --start-services --install-skills
 ```
 
@@ -163,7 +163,7 @@ The fast model uses `$NEMO_FAST_MODEL` when set and otherwise reuses the effecti
 
 If the user is surprised by which model got picked, check `NEMO_DEFAULT_MODEL` and `NEMO_FAST_MODEL` first — that's the most common cause.
 
-The first-discovered fallback is intentionally simple — providers like NVIDIA Build expose dozens of models and "first one" rarely matches the user's intent. If the user wants specific models (or wants to compare options before committing), don't rely on the `--auto` fallback. After setup finishes, the `inference` skill's "Step 2 — Discover available models" enumerates entity IDs and shows the jq filters for picking one out by vendor or family. The user can then pin the pair via `NEMO_DEFAULT_MODEL` and `NEMO_FAST_MODEL`, or override `body["model"]` per request.
+The first-discovered fallback is intentionally simple — providers like OpenRouter and NVIDIA Build expose many models and "first one" rarely matches the user's intent. If the user wants specific models (or wants to compare options before committing), don't rely on the `--auto` fallback. After setup finishes, the `inference` skill's "Step 2 — Discover available models" enumerates entity IDs and shows the jq filters for picking one out by vendor or family. The user can then pin the pair via `NEMO_DEFAULT_MODEL` and `NEMO_FAST_MODEL`, or override `body["model"]` per request.
 
 If `nemo agents invoke …` fails with HTTP 422 in under a second on the first call, the cause is almost always a slash-with-dots model name reaching the gateway (e.g. via a stale `NEMO_DEFAULT_MODEL` or an agent config that hardcoded the upstream catalog form). The `inference` skill's "Common failure: HTTP 422 from chat completion" subsection has the diagnose-and-recover steps — don't conclude the platform is broken.
 

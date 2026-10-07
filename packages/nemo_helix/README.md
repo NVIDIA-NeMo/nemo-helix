@@ -22,7 +22,7 @@ NeMo Helix brings NVIDIA NeMo libraries together under one CLI, Python SDK, and 
 
 ## Install
 
-**Prerequisites:** Python 3.12–3.14 and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance).
+**Prerequisites:** Python 3.12–3.14 and an API key for an inference provider (OpenRouter, OpenAI, Anthropic, Google Gemini, NVIDIA Build, or a local Ollama instance).
 
 The `nemo-helix` distribution is a convenience wrapper that bundles the SDK, shared runtime packages, default first-party plugins, and Helix services into a single wheel. The `all` extra adds the Helix services; drop it for the SDK and CLI alone.
 

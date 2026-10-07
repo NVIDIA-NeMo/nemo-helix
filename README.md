@@ -18,7 +18,7 @@ NeMo Helix uses modular plugins for the infrastructure agents need to run at sca
 
 ## Get started
 
-**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (NVIDIA Build, OpenAI, Anthropic, Google Gemini, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
+**Prerequisites:** Python 3.12-3.14, uv, and an API key for an inference provider (OpenRouter, OpenAI, Anthropic, Google Gemini, NVIDIA Build, or a local Ollama instance). Source development needs Git, GNU Make, a C compiler, and either Flox (recommended) or a system toolchain matching `make toolchain-versions`. Docker is required for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`) because deployments default to the Docker executor; remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](docs/get-started/local-docker-and-executors.mdx) for the subprocess vs Docker matrix.
 
 Quick install from PyPI:
 
@@ -102,10 +102,10 @@ If `make bootstrap` reports that Studio asset bootstrap did not complete, the AP
 <summary>Non-interactive setup (for agents, CI, or scripts)</summary>
 
 ```bash
-export NVIDIA_API_KEY=nvapi...
-export NEMO_DEFAULT_MODEL=nvidia-nemotron-3-super-120b-a12b
+export OPENROUTER_API_KEY=sk-or-...
+export NEMO_DEFAULT_MODEL=default/nvidia-nemotron-3-super-120b-a12b
 export NEMO_FAST_MODEL="$NEMO_DEFAULT_MODEL"
-nemo setup --auto --start-services --install-skills
+nemo setup --auto --workspace default --start-services --install-skills
 ```
 
 </details>

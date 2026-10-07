@@ -171,6 +171,10 @@ class TestKnownProviderCatalog:
         assert openai.auth_header_format is None
         assert openai.requires_api_key
 
+    def test_openrouter_is_default_and_nvidia_build_is_last(self):
+        assert KNOWN_PROVIDERS[0].name == "openrouter"
+        assert KNOWN_PROVIDERS[-1].name == "nvidia-build"
+
     def test_frozen_dataclass(self):
         p = KNOWN_PROVIDERS[0]
         with pytest.raises(AttributeError):
@@ -571,12 +575,22 @@ class TestAutoSetup:
         assert body.host_url == "https://api.openai.com/v1"
         assert body.api_key_secret_name == "openai-api-key"
 
-    def test_nvidia_key_creates_build_provider(self):
+    def test_openrouter_key_creates_provider(self):
+        client = _make_mock_client()
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-or-test"}, clear=True):
+            result = _auto_setup(client, "default")
+        assert result == "openrouter"
+        body = _create_body(client)
+        assert body.name == "openrouter"
+        assert body.host_url == "https://openrouter.ai/api/v1"
+        assert body.api_key_secret_name == "openrouter-api-key"
+
+    def test_nvidia_key_is_not_auto_created(self):
         client = _make_mock_client()
         with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-test"}, clear=True):
             result = _auto_setup(client, "default")
-        assert result == "nvidia-build"
-        assert _create_body(client).name == "nvidia-build"
+        assert result is None
+        client.models.create_provider.assert_not_called()
 
     def test_nemo_default_key_with_url(self):
         client = _make_mock_client()
@@ -2139,15 +2153,15 @@ class TestProviderIdempotency:
     def test_auto_setup_updates_existing_secret_value(self):
         """In auto mode, existing secret should be updated with the new key value."""
         client = _make_mock_client(provider_exists=True, secret_exists=True)
-        with patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-new"}, clear=True):
+        with patch.dict("os.environ", {"OPENROUTER_API_KEY": "sk-or-new"}, clear=True):
             result = _auto_setup(client, "default")
-        assert result == "nvidia-build"
+        assert result == "openrouter"
         client.secrets.update_secret.assert_called_once()
         update_call = client.secrets.update_secret.call_args
-        assert update_call.kwargs["name"] == "nvidia-build-api-key"
+        assert update_call.kwargs["name"] == "openrouter-api-key"
         assert update_call.kwargs["workspace"] == "default"
         assert isinstance(update_call.kwargs["body"], HelixSecretUpdateRequest)
-        assert update_call.kwargs["body"].value.get_secret_value() == "nvapi-new"
+        assert update_call.kwargs["body"].value.get_secret_value() == "sk-or-new"
         client.secrets.create_secret.assert_not_called()
 
 
@@ -3250,6 +3264,8 @@ class TestValidateApiKey:
             ("openai", 200, KeyValidationStatus.VALID),
             ("openai", 401, KeyValidationStatus.REJECTED),
             ("openai", 403, KeyValidationStatus.REJECTED),
+            ("openrouter", 200, KeyValidationStatus.VALID),
+            ("openrouter", 401, KeyValidationStatus.REJECTED),
         ],
     )
     def test_http_responses(self, provider_name, status_code, expected_status):
@@ -3259,6 +3275,14 @@ class TestValidateApiKey:
             result = _validate_api_key(provider_name, host_url, "test-key")
         assert result.status is expected_status
         assert result.passed is (expected_status != KeyValidationStatus.REJECTED)
+
+    def test_openrouter_uses_key_probe_endpoint(self):
+        mock_resp = _http_response(200, {"data": {"label": "test-key"}})
+        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+            result = _validate_api_key("openrouter", "https://openrouter.ai/api/v1", "test-key")
+        assert result.passed is True
+        mock_req.assert_called_once()
+        assert mock_req.call_args.args[:2] == ("GET", "https://openrouter.ai/api/v1/key")
 
     def test_nvidia_build_lists_catalog_then_posts_preferred_nvidia_chat_model(self):
         catalog = _http_response(
@@ -3574,7 +3598,7 @@ class TestValidateApiKeyIntegration:
         """When key validation fails in auto mode, _auto_setup should raise typer.Exit(1)."""
         client = _make_mock_client()
         with (
-            patch.dict("os.environ", {"NVIDIA_API_KEY": "bad-key"}, clear=True),
+            patch.dict("os.environ", {"OPENROUTER_API_KEY": "bad-key"}, clear=True),
             patch(
                 f"{self._MOD}._validate_api_key",
                 return_value=KeyValidationResult(status=KeyValidationStatus.REJECTED, message="API key rejected"),
@@ -3602,7 +3626,14 @@ class TestValidateApiKeyIntegration:
             return catalog if method == "GET" else gone
 
         with (
-            patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-good"}, clear=True),
+            patch.dict(
+                "os.environ",
+                {
+                    "NEMO_DEFAULT_INFERENCE_KEY": "nvapi-good",
+                    "NEMO_DEFAULT_INFERENCE_BASE_URL": "https://integrate.api.nvidia.com",
+                },
+                clear=True,
+            ),
             patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
         ):
@@ -3610,7 +3641,7 @@ class TestValidateApiKeyIntegration:
         assert result == "nvidia-build"
         client.models.create_provider.assert_called_once()
         printed = " ".join(str(call) for call in print_message.call_args_list)
-        assert "Check the value of $NVIDIA_API_KEY" not in printed
+        assert "Check the value of $NEMO_DEFAULT_INFERENCE_KEY" not in printed
         assert "Could not validate API key" not in printed
         assert "Could not verify API key" in printed
         assert "neither accepted nor rejected" in printed
@@ -3625,7 +3656,14 @@ class TestValidateApiKeyIntegration:
             return catalog if method == "GET" else rejected
 
         with (
-            patch.dict("os.environ", {"NVIDIA_API_KEY": "bad-key"}, clear=True),
+            patch.dict(
+                "os.environ",
+                {
+                    "NEMO_DEFAULT_INFERENCE_KEY": "bad-key",
+                    "NEMO_DEFAULT_INFERENCE_BASE_URL": "https://integrate.api.nvidia.com",
+                },
+                clear=True,
+            ),
             patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
             pytest.raises(ClickExit) as exc_info,
@@ -3634,7 +3672,7 @@ class TestValidateApiKeyIntegration:
         assert exc_info.value.exit_code == 1
         client.models.create_provider.assert_not_called()
         printed = " ".join(str(call) for call in print_message.call_args_list)
-        assert "Check the value of $NVIDIA_API_KEY" in printed
+        assert "Check the value of $NEMO_DEFAULT_INFERENCE_KEY" in printed
 
     def test_auto_warning_escapes_rich_markup_in_upstream_detail(self):
         client = _make_mock_client()
@@ -3645,7 +3683,14 @@ class TestValidateApiKeyIntegration:
             return catalog if method == "GET" else gone
 
         with (
-            patch.dict("os.environ", {"NVIDIA_API_KEY": "nvapi-good"}, clear=True),
+            patch.dict(
+                "os.environ",
+                {
+                    "NEMO_DEFAULT_INFERENCE_KEY": "nvapi-good",
+                    "NEMO_DEFAULT_INFERENCE_BASE_URL": "https://integrate.api.nvidia.com",
+                },
+                clear=True,
+            ),
             patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
         ):
