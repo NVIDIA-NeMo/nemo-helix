@@ -224,6 +224,19 @@ def ensure_gliner_weights(sdk: SyncHelixClient, *, on_download_start: Callable[[
     prewarm_gliner_cache(str(sdk.base_url), on_download_start=on_download_start)
 
 
+def caller_supplied_entity_detector(selected_models: object | None) -> bool:
+    """True when the request explicitly names its own ``entity_detector``.
+
+    The in-process GLiNER detector is the default, but a caller that configures
+    its own detector model (e.g. a gateway-routed detector, as the e2e suite's
+    mock provider does) must be honored rather than silently overridden.
+    ``selected_models`` is the plugin's ``SelectedModelsOverrides`` (kept as a
+    loose ``object`` here to avoid a circular import).
+    """
+    detection = getattr(selected_models, "detection", None)
+    return bool(detection) and bool(detection.get("entity_detector"))
+
+
 def build_gliner_anonymizer(
     *,
     model_configs_yaml: str,

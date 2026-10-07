@@ -165,3 +165,22 @@ def test_prewarm_downloads_through_files_and_aligns_cache(monkeypatch: pytest.Mo
     )
     assert upstream_snapshot.is_symlink()
     assert (upstream_snapshot / "config.json").read_text() == "{}"
+
+
+class _Overrides:
+    def __init__(self, detection: dict[str, object] | None) -> None:
+        self.detection = detection
+
+
+@pytest.mark.parametrize(
+    ("selected_models", "expected"),
+    [
+        (None, False),
+        (_Overrides(None), False),
+        (_Overrides({}), False),
+        (_Overrides({"entity_validator": "gpt"}), False),
+        (_Overrides({"entity_detector": "gliner-pii-detector"}), True),
+    ],
+)
+def test_caller_supplied_entity_detector(selected_models: object | None, expected: bool) -> None:
+    assert gliner_detector.caller_supplied_entity_detector(selected_models) is expected

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 from anonymizer.engine.constants import COL_REPLACEMENT_APPLICATION
+from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
 from data_designer_nemo.model_provider import (
     get_nhx_provider,
@@ -20,6 +21,7 @@ from data_designer_nemo.model_provider import (
 from data_designer_nemo.token_usage import capture_data_designer_token_usage
 from nemo_anonymizer_plugin.app.gliner_detector import (
     build_gliner_anonymizer,
+    caller_supplied_entity_detector,
     ensure_gliner_weights,
     stop_gliner_runtime,
 )
@@ -97,20 +99,30 @@ def _run_with_step_config(
     def _log_download_start() -> None:
         logger.info("Downloading PII detector model (~1.7G, first run only); subsequent runs load from cache")
 
+    use_in_process_detector = not caller_supplied_entity_detector(request.selected_models)
     try:
-        ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
+        if use_in_process_detector:
+            ensure_gliner_weights(service_sdk, on_download_start=_log_download_start)
         with preserve_root_logging():
-            anonymizer = build_gliner_anonymizer(
-                model_configs_yaml=step_config.model_configs_yaml,
-                dd_providers=dd_providers,
-                artifact_path=storage_path / "anonymizer-artifacts",
-            )
+            if use_in_process_detector:
+                anonymizer = build_gliner_anonymizer(
+                    model_configs_yaml=step_config.model_configs_yaml,
+                    dd_providers=dd_providers,
+                    artifact_path=storage_path / "anonymizer-artifacts",
+                )
+            else:
+                anonymizer = Anonymizer(
+                    model_configs=step_config.model_configs_yaml,
+                    model_providers=dd_providers,
+                    artifact_path=storage_path / "anonymizer-artifacts",
+                )
         logger.info("Running anonymizer pipeline")
         with capture_data_designer_token_usage(ctx.usage):
             result = anonymizer.run(config=request.config, data=prepared_input.input)
     finally:
         prepared_input.cleanup()
-        stop_gliner_runtime()
+        if use_in_process_detector:
+            stop_gliner_runtime()
 
     artifacts_dir = storage_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)

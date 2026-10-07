@@ -21,6 +21,7 @@ from nemo_anonymizer_plugin.app.context import (
 )
 from nemo_anonymizer_plugin.app.errors import AnonymizerInternalError, AnonymizerInvalidConfigError
 from nemo_anonymizer_plugin.app.gliner_detector import (
+    caller_supplied_entity_detector,
     ensure_gliner_fileset_async,
     is_gliner_cached,
     prewarm_gliner_cache,
@@ -130,23 +131,25 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             selected_models=spec.selected_models,
         )
 
-        await ensure_gliner_fileset_async(async_sdk)
-        if not is_gliner_cached():
-            download_message = (
-                "Downloading PII detector model (~1.7G, first run only); subsequent runs load from cache."
-            )
-            yield ModelDownloadFrame(status="started", message=download_message)
-            yield LogFrame(level="info", message=download_message)
-            try:
-                await anyio.to_thread.run_sync(prewarm_gliner_cache, str(async_sdk.base_url))
-            except Exception as exc:
-                # The download runs after the first frame is sent, so the framework
-                # can no longer turn this into an HTTP error — surface it as an
-                # in-stream Error frame instead of letting the stream die silently.
-                yield LogFrame(level="error", message=f"Failed to download the PII detector model: {exc}")
-                yield Error(message=str(exc), details={"type": type(exc).__name__})
-                return
-            yield ModelDownloadFrame(status="complete", message="PII detector model ready.")
+        use_in_process_detector = not caller_supplied_entity_detector(spec.selected_models)
+        if use_in_process_detector:
+            await ensure_gliner_fileset_async(async_sdk)
+            if not is_gliner_cached():
+                download_message = (
+                    "Downloading PII detector model (~1.7G, first run only); subsequent runs load from cache."
+                )
+                yield ModelDownloadFrame(status="started", message=download_message)
+                yield LogFrame(level="info", message=download_message)
+                try:
+                    await anyio.to_thread.run_sync(prewarm_gliner_cache, str(async_sdk.base_url))
+                except Exception as exc:
+                    # The download runs after the first frame is sent, so the framework
+                    # can no longer turn this into an HTTP error — surface it as an
+                    # in-stream Error frame instead of letting the stream die silently.
+                    yield LogFrame(level="error", message=f"Failed to download the PII detector model: {exc}")
+                    yield Error(message=str(exc), details={"type": type(exc).__name__})
+                    return
+                yield ModelDownloadFrame(status="complete", message="PII detector model ready.")
 
         async with _prepare_input(anon_ctx, spec.data) as prepared_input:
             send_stream, receive_stream = anyio.create_memory_object_stream[BaseModel]()
