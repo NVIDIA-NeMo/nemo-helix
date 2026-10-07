@@ -100,8 +100,6 @@ export interface NotebookViewerProps {
   notebook?: NotebookData | null;
   /** Optional Colab URL for "Run in Colab" badge */
   colabUrl?: string;
-  /** Optional URL for downloading the source notebook */
-  downloadUrl?: string;
   /** Show code cell outputs (default: true) */
   showOutputs?: boolean;
 }
@@ -402,7 +400,6 @@ export const NotebookViewer = ({
   name,
   notebook,
   colabUrl,
-  downloadUrl,
   showOutputs = true,
 }: NotebookViewerProps) => {
   const resolved = (name != null ? (notebooks[name] as NotebookData | undefined) : notebook) ?? null;
@@ -437,7 +434,7 @@ export const NotebookViewer = ({
 
   return (
     <div className="notebook-viewer">
-      <NotebookActions colabUrl={colabUrl} downloadUrl={downloadUrl} />
+      <NotebookActions colabUrl={colabUrl} />
 
       <div className="notebook-viewer__cells">
         {cells.map((cell, index) => renderCell(cell, index, showOutputs))}

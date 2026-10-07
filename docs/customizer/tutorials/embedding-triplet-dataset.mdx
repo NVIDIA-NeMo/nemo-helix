@@ -4,6 +4,13 @@
 title: "Train on SPECTER or Triplet JSONL"
 description: ""
 ---
+
+<div className="notebook-actions">
+  <a href="https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob/main/docs/customizer/tutorials/embedding-triplet-dataset.ipynb" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">
+    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>
+  </a>
+</div>
+
 Register an existing embedding dataset as a platform fileset so Stage 2 Automodel can train on it. This replaces the NVDocs data, not the Nemotron 3 Embed model entity.
 
 The default recipe is [Embedding Model Customization](/documentation/customizer-reference/tutorials/embedding-customization-job), which mines hard negatives from NVDocs. SPECTER negatives are papers that the positive does not cite, not passages mined for proximity to the positive, so expect a smaller nDCG gain. SPECTER carries no retrieval evaluation split (`eval_beir`): keep a frozen NVDocs `eval_beir` fileset for Stage 4, or skip retrieval evaluation. The `validation.jsonl` created below is only for validation loss and checkpoint selection during training.

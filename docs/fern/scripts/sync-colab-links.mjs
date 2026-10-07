@@ -31,7 +31,6 @@ const TOP_COLAB_LINK_RE = /^\n*\[Run in Google Colab\]\(https:\/\/colab\.researc
 const NOTEBOOK_ACTIONS_RE = /^\n*(?:<NotebookActions\b[\s\S]*?\/>|<div className="notebook-actions">[\s\S]*?<\/div>)\n{1,2}/;
 const NOTEBOOK_VIEWER_RE = /<NotebookViewer\b[\s\S]*?\/>/g;
 const COLAB_URL_PROP_RE = /\n\s*colabUrl="[^"]*"/;
-const DOWNLOAD_URL_PROP_RE = /\n\s*downloadUrl="[^"]*"/;
 
 function valueForFlag(flag) {
   const index = argv.indexOf(flag);
@@ -91,22 +90,11 @@ function colabUrlFor(notebookPath) {
   return `${COLAB_PREFIX}/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
 }
 
-function downloadUrlFor(notebookPath) {
-  return `./${notebookFilename(notebookPath)}`;
-}
-
-function notebookFilename(notebookPath) {
-  return notebookPath.split(sep).pop() ?? "notebook.ipynb";
-}
-
 function notebookActionsFor(notebookPath) {
   return [
     '<div className="notebook-actions">',
     `  <a href="${colabUrlFor(notebookPath)}" target="_blank" rel="noopener noreferrer" className="notebook-actions__button notebook-actions__button--primary">`,
     '    <span aria-hidden="true">&#9654;</span><span>Run in Google Colab</span>',
-    '  </a>',
-    `  <a href="${downloadUrlFor(notebookPath)}" className="notebook-actions__button notebook-actions__button--secondary" download="${notebookFilename(notebookPath)}">`,
-    '    <span>Download notebook</span>',
     '  </a>',
     '</div>',
   ].join("\n");
@@ -141,7 +129,7 @@ async function syncMarkdownColabLink(source, notebookPath) {
 
 function syncNotebookViewerColabUrl(source, notebookPath) {
   return source.replace(NOTEBOOK_VIEWER_RE, (viewer) => {
-    const withoutColab = viewer.replace(COLAB_URL_PROP_RE, "").replace(DOWNLOAD_URL_PROP_RE, "");
+    const withoutColab = viewer.replace(COLAB_URL_PROP_RE, "");
     if (!notebookPath) {
       return withoutColab;
     }
@@ -149,7 +137,7 @@ function syncNotebookViewerColabUrl(source, notebookPath) {
     const indent = indentMatch?.[1] ?? "  ";
     return withoutColab.replace(
       /\s*\/>$/,
-      `\n${indent}colabUrl="${colabUrlFor(notebookPath)}"\n${indent}downloadUrl="${downloadUrlFor(notebookPath)}"\n/>`,
+      `\n${indent}colabUrl="${colabUrlFor(notebookPath)}"\n/>`,
     );
   });
 }

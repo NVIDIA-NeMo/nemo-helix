@@ -45,20 +45,6 @@
   color: white;
 }
 
-.notebook-actions__button--secondary,
-.notebook-actions__button--secondary:visited {
-  background: transparent;
-  border: 1px solid var(--border-default, #d1d5db);
-  color: var(--text-primary, inherit);
-}
-
-.notebook-actions__button--secondary:hover,
-.notebook-actions__button--secondary:focus-visible {
-  background: var(--grayscale-a3, rgba(0, 0, 0, 0.06));
-  border-color: var(--border-default, #9ca3af);
-  color: var(--text-primary, inherit);
-}
-
 .notebook-viewer__cells {
   display: flex;
   flex-direction: column;
