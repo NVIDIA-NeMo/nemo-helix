@@ -85,8 +85,8 @@ export const datasetFileContentQueryOptions = ({
       try {
         const headResponse = await axios.head(`${PLATFORM_BASE_URL}${fileUrl}`);
         fileSize = parseContentLength(headResponse.headers['content-length']);
-      } catch {
-        throw new Error('Unable to find base file.');
+      } catch (error) {
+        throw new Error('Unable to find base file.', { cause: error });
       }
 
       if (fullContent && range === undefined) {

@@ -2,9 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getInsightsGetAnalysisConfigQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-configs';
+import { getInsightsListAnalysisRunsQueryKey } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import { getInsightsListInsightsQueryKey } from '@nemo/sdk/generated/insights/insights-insights';
-import type { InsightListItem } from '@nemo/sdk/generated/insights/schema';
+import type {
+  AnalysisRunResponse,
+  CreateAnalysisRunRequest,
+  InsightListItem,
+} from '@nemo/sdk/generated/insights/schema';
+import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
+import {
+  AGENT_ETHOS_FILE,
+  agentSpecFilesetName,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { http, HttpResponse } from 'msw';
 
 const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');
@@ -13,6 +23,50 @@ const ANALYSIS_CONFIG_URL = mockApiUrl(
   ':workspace',
   ':agent'
 );
+const ANALYSIS_RUNS_URL = mockApiUrl(getInsightsListAnalysisRunsQueryKey, ':workspace');
+
+export const mockAnalysisRunResponse = (
+  workspace: string,
+  { agent, default_model, fast_model }: CreateAnalysisRunRequest
+): AnalysisRunResponse => ({
+  run: {
+    id: 'analysis-run-1',
+    entity_id: 'analysis-run-1',
+    name: 'analysis-run-1',
+    workspace,
+    agent,
+    default_model,
+    fast_model,
+    parent: `ws-${workspace}`,
+    db_version: 1,
+    created_at: '2026-08-14T09:00:00Z',
+    created_by: 'user@example.com',
+    updated_at: '2026-08-14T09:00:00Z',
+    updated_by: 'user@example.com',
+  },
+  job: { name: 'analysis-run-1', status: 'created' },
+});
+
+/** Serves `content` as the agent's ETHOS.md, or 404s the file when `content` is null. */
+export const agentEthosHandlers = (agent: string, content: string | null) => {
+  const url = mockApiUrl(
+    getFilesDownloadFileQueryKey,
+    ':workspace',
+    agentSpecFilesetName(agent),
+    AGENT_ETHOS_FILE
+  );
+  const notFound = () => HttpResponse.json({ detail: 'Not Found' }, { status: 404 });
+  return [
+    http.head(url, () =>
+      content === null
+        ? new HttpResponse(null, { status: 404 })
+        : new HttpResponse(null, {
+            headers: { 'Content-Length': String(new TextEncoder().encode(content).length) },
+          })
+    ),
+    http.get(url, () => (content === null ? notFound() : HttpResponse.text(content))),
+  ];
+};
 
 /** Stored per-agent analysis config, as the agent Insights tab's analysis panel reads it. */
 export const mockAnalysisConfig = {
@@ -69,6 +123,12 @@ export const mockInsights: InsightListItem[] = [
 ];
 
 export const insightsHandlers = [
+  http.post<{ workspace: string }, CreateAnalysisRunRequest>(
+    ANALYSIS_RUNS_URL,
+    async ({ params, request }) =>
+      HttpResponse.json(mockAnalysisRunResponse(params.workspace, await request.json()))
+  ),
+
   http.get(ANALYSIS_CONFIG_URL, ({ params }) =>
     HttpResponse.json({ ...mockAnalysisConfig, name: params.agent, agent: params.agent })
   ),
