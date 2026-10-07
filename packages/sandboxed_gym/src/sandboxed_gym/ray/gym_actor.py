@@ -12,6 +12,7 @@ import ray
 from sandboxed_gym.orchestrator import (
     SandboxedGymOrchestrator,
     SandboxedGymSession,
+    install_job_sandbox_reaper,
     install_termination_cleanup,
 )
 from sandboxed_gym.serve_config import SandboxedGymServeConfig
@@ -31,6 +32,13 @@ class SandboxedGymActor:
         self._session: SandboxedGymSession | None = None
 
     def spinup(self) -> dict[str, Any]:
+        # Before start(), so a cancel during create still reaps this job's sandboxes.
+        # start() arms the same hook; the second call is a no-op.
+        install_job_sandbox_reaper(
+            self._cfg.job_id,
+            host_provider=self._cfg.host_provider,
+            host_provider_options=self._cfg.sandbox.host_provider_options,
+        )
         self._session = SandboxedGymOrchestrator().start(self._cfg)
         # After start(), so a spinup that failed leaves nothing registered to destroy.
         install_termination_cleanup(self.shutdown)

@@ -12,13 +12,13 @@ schema (automodel-specific).
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from nemo_automodel_plugin.config import get_config
 from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, ValidationError
 from nemo_automodel_plugin.transform import transform_input_to_output
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx.automodel.compile import platform_job_config_compiler
@@ -30,6 +30,12 @@ from nhx.customization_common.service.platform_client import (
 from pydantic import BaseModel
 
 
+class AutomodelJobsListFilter(BaseJobsListFilter):
+    """Automodel jobs only. ``backend`` is the literal stored on the job spec."""
+
+    backend: Literal["automodel"] = "automodel"
+
+
 class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
     """GPU Automodel fine-tuning job under the customization router."""
 
@@ -38,6 +44,7 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
     job_collection_path: ClassVar[str | None] = "/automodel/jobs"
     input_spec_schema: ClassVar[type[AutomodelJobInput] | None] = AutomodelJobInput
     spec_schema: ClassVar[type[AutomodelJobOutput] | None] = AutomodelJobOutput
+    jobs_list_filter: ClassVar[type[AutomodelJobsListFilter]] = AutomodelJobsListFilter
     runtime_label: ClassVar[str] = "Automodel"
 
     @classmethod

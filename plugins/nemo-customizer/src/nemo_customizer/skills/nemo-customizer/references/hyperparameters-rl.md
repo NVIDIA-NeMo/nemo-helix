@@ -40,7 +40,9 @@ GRPO needs **two** FileSets: an environment package (code + config that runs a r
 The short version, for a Prime Intellect hub env, on an **internet-capable host** (training clusters have no hub egress):
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion \
+# Dedicated env, not the project .venv. See gym-environments.md.
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg --validation-fraction 0.1 --upload
 ```

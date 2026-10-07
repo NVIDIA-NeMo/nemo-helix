@@ -37,6 +37,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e /app/sdk/python/nemo-helix \
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
+    -e /app/packages/nemo_helix_ext \
     -e /app/packages/nhx_common \
     -e /app/packages/nhx_customization_common \
     -e "/app/services/automodel[training]"

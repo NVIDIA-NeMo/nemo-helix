@@ -30,6 +30,7 @@ from typing import Any
 
 from sandboxed_gym.environment_package import (
     ENVIRONMENT_MANIFEST_FILENAME,
+    AdapterWheelsV1Package,
     EnvironmentPackage,
     EnvironmentPackageError,
     WheelsV1Package,
@@ -67,6 +68,9 @@ MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
+#: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
+IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
+DEFAULT_IMAGE_GYM_SRC = "/tmp/gym-src/Gym"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
@@ -263,7 +267,13 @@ def _preflight_policy_credential(global_config: dict[str, Any]) -> None:
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(
-            {"model": model_name, "messages": [{"role": "user", "content": "ok"}], "max_tokens": 1}
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 1,
+                "temperature": 1.0,
+                "top_p": 1.0,
+            }
         ).encode(),
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
@@ -473,15 +483,15 @@ def _load_runtime_environment_package(
 def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_path: str) -> None:
     """Install a wheels-v1 environment's vendored dependencies, with no package-index access.
 
-    Other package formats are a no-op. When the validated package is ``wheels-v1``, every wheel
-    under its wheelhouse is installed into the writable work mount, so nothing is fetched from a
-    package index during this installation.
+    Other package formats are a no-op. When the validated package is ``wheels-v1`` or
+    ``adapter-wheels-v1``, every wheel under its wheelhouse is installed into the writable work
+    mount, so nothing is fetched from a package index during this installation.
 
     The wheels are installed into the writable work directory instead of an existing virtualenv.
     ``PYTHONPATH`` exposes them to Gym's child processes, while ``sys.path`` exposes them to the
     already-running host process.
     """
-    if not isinstance(package, WheelsV1Package):
+    if not isinstance(package, (WheelsV1Package, AdapterWheelsV1Package)):
         return
 
     wheels_dir = str(package.wheelhouse_path)
@@ -537,18 +547,28 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         sys.path.insert(0, wheels_install_dir)
 
 
-def _prepend_environment_search_root(environment_root: str) -> None:
-    """Search the mounted environment package before Gym's built-in paths.
+def _image_gym_search_root() -> str | None:
+    """Gym checkout the host script copied out of the training image, when that copy exists."""
+    root = os.environ.get(IMAGE_GYM_SRC_ENV_KEY, DEFAULT_IMAGE_GYM_SRC)
+    if os.path.isdir(root):
+        return os.path.realpath(root)
+    return None
 
-    Gym looks up config files in ``NEMO_GYM_EXTRA_ROOTS`` first. If the package is
-    not at the front of that list, Gym loads the image's agent or resources server
-    instead, and the job scores the wrong environment. Any extra roots already set
-    stay after the package so they still work as backups.
+
+def _prepend_environment_search_root(environment_root: str) -> None:
+    """Search the mounted package, then the image Gym checkout, then operator roots.
+
+    Gym resolves a server directory from ``NEMO_GYM_EXTRA_ROOTS`` before the install root.
+    The library wheel is first on ``PYTHONPATH``, so that install root has no server trees.
+    Servers the package does not ship, such as ``simple_agent`` and ``vllm_model``, resolve
+    from the image checkout. The package stays first so a server it does ship wins.
     """
-    # Preserve operator-provided roots as fallbacks; changing their relative order could
-    # select a different image-bundled component.
     existing = [root for root in os.environ.get(NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "").split(os.pathsep) if root]
-    roots = [environment_root, *existing]
+    image_root = _image_gym_search_root()
+    roots = [environment_root]
+    if image_root:
+        roots.append(image_root)
+    roots.extend(existing)
     deduplicated = list(dict.fromkeys(roots))
     os.environ[NEMO_GYM_EXTRA_ROOTS_ENV_KEY] = os.pathsep.join(deduplicated)
 
@@ -949,7 +969,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Transfer-Encoding", "chunked")
         self._announce_close()
         self.end_headers()
-        self._write_chunk(self._await_results(future, started))
+        try:
+            body = self._await_results(future, started)
+        except OSError:
+            raise
+        except BaseException as exc:  # noqa: BLE001
+            # Headers are already sent. An exception here must still become an error body,
+            # or the proxy forwards a 200 with no payload. Stdout is what the job can see.
+            detail = traceback.format_exc(limit=_TRACEBACK_FRAMES)
+            print(f"gym-host: rollouts/run crashed: {detail}", flush=True)
+            body = self._error_body(
+                "internal",
+                f"{type(exc).__name__}: {exc}\n{detail[-_MAX_TRACEBACK_CHARS:]}",
+            )
+        if not body:
+            # A zero-length chunk is the terminator, so an empty body cannot be sent as
+            # one: it would reach the caller as a successful batch of nothing.
+            body = self._error_body("internal", "rollout produced an empty response body")
+        self._write_chunk(body)
+        # Terminator. Only this ends the body.
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
 
@@ -1008,7 +1046,15 @@ class Handler(BaseHTTPRequestHandler):
             "environment_path": os.environ.get("NHX_ENVIRONMENT_PATH", ""),
             "work_path": os.environ.get("NHX_WORK_PATH", ""),
         }
-        body = json.dumps(envelope).encode("utf-8")
+        try:
+            body = json.dumps(envelope).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            # A Gym result is an arbitrary object, so encoding it is part of running the
+            # batch and not a detail of the framing: a single value the environment left
+            # unencodable would otherwise take down the whole response.
+            detail = f"rollout results are not JSON-serializable: {exc}"
+            print(f"gym-host: rollouts/run failed: {detail}", flush=True)
+            return self._error_body("internal", detail)
         if len(body) > self.max_response_bytes:
             return self._error_body(
                 "payload_too_large",
@@ -1051,6 +1097,20 @@ class Handler(BaseHTTPRequestHandler):
         return
 
 
+class _Server(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` that reports handler failures where they can be read.
+
+    The base class prints them to stderr, which is not surfaced to the job: a request
+    that died mid-response left no trace anywhere, on either side of the connection.
+    """
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        print(
+            f"gym-host: unhandled error serving {client_address}: {traceback.format_exc()}",
+            flush=True,
+        )
+
+
 def main() -> None:
     global _READY, _BOOTSTRAP_ERROR, _RUN_HELPER, _HEAD_SERVER_CONFIG, _ROLLOUT_HELPER
 
@@ -1079,7 +1139,7 @@ def main() -> None:
 
     port = _env_int("NHX_RUNTIME_HTTP_PORT", _DEFAULT_HTTP_PORT)
     # Threaded so chunked rollouts overlap and /health stays answerable mid-batch.
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    _Server(("0.0.0.0", port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

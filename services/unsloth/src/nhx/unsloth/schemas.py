@@ -319,6 +319,7 @@ class UnslothJobOutput(UnslothSchema):
     """
 
     name: str | None = None
+    backend: Literal["unsloth"] = "unsloth"
     model: ModelLoadSpec
     dataset: DatasetSpec
     training: TrainingSpec = Field(default_factory=TrainingSpec)

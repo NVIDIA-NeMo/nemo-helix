@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import logging
 import os
 import re
@@ -31,13 +33,14 @@ from nhx.rl.tasks.environment.package import (
 )
 from nhx.rl.tasks.environment.validate import SANDBOX_VENV_DISTRIBUTIONS, validate_dataset_rows
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
 
 PRIME_HUB_SIMPLE_INDEX = "https://hub.primeintellect.ai/primeintellect/simple/"
-DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.1.14"
+DEFAULT_VERIFIERS_SPEC = "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@v0.3.1"
 
 # Training image is linux/amd64; resolve and download for that, not this host.
 # pip matches --platform tags literally, so several glibc floors are listed.
@@ -48,7 +51,8 @@ TARGET_WHEEL_PLATFORMS = (
     "manylinux2014_x86_64",
 )
 TARGET_UV_PLATFORM = "x86_64-unknown-linux-gnu"
-TARGET_PYTHON_VERSION = "3.13"  # Gym venv Python in the training image
+# Gym 0.7 requires Python>=3.13.14.
+TARGET_PYTHON_VERSION = "3.13.14"
 _TARGET_PLATFORM_TAG_RE = re.compile(r"^(any|linux_x86_64|manylinux[0-9_.]*_x86_64)$")
 
 # Gym rebuilds each per-server venv from empty and installs the agent before the environment,
@@ -108,17 +112,151 @@ def _run_build_step(cmd: list[str]) -> None:
     subprocess.run(cmd, check=True, stdout=sys.stderr)
 
 
+def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
+    """Read the uv limits the Gym host applies when it installs the wheelhouse.
+
+    The host starts in the NeMo-RL tree, so ``uv pip install`` honors that checkout's
+    ``[tool.uv]`` override-dependencies and constraint-dependencies. A closure resolved
+    without them installs versions the host then rejects.
+    """
+    pyproject = nemo_rl_root / "pyproject.toml"
+    if not pyproject.is_file():
+        raise ValueError(
+            f"--nemo-rl-root has no pyproject.toml: {nemo_rl_root}. "
+            "Point it at the NeMo-RL checkout NEMO_RL_REF pins. The training image is built "
+            "from that commit, and the Gym host installs this wheelhouse under its uv policy."
+        )
+    uv_config = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {}).get("uv", {})
+    missing = [key for key in ("override-dependencies", "constraint-dependencies") if not uv_config.get(key)]
+    if missing:
+        raise ValueError(
+            f"{pyproject} has no [tool.uv] {', '.join(missing)}. Those tables are what the Gym "
+            "host applies during the offline install."
+        )
+    return (
+        _keep_pkg_resources_setuptools(list(uv_config["override-dependencies"])),
+        list(uv_config["constraint-dependencies"]),
+    )
+
+
+def _keep_pkg_resources_setuptools(overrides: list[str]) -> list[str]:
+    """Keep a setuptools override inside the range Gym's server venvs accept."""
+    ceiling = SpecifierSet(f"<{SETUPTOOLS_PKG_RESOURCES_CEILING}")
+    clamped: list[str] = []
+    for item in overrides:
+        requirement = Requirement(item)
+        if canonicalize_name(requirement.name) != "setuptools":
+            clamped.append(item)
+            continue
+        requirement.specifier &= ceiling
+        clamped.append(str(requirement))
+    return clamped
+
+
+def locked_package_versions(rl_root: Path) -> dict[str, str]:
+    """Every version ``uv.lock`` resolved for the image.
+
+    A library locked once is pinned to that version. A library locked more than once uses
+    the version recorded on the nemo-gym dependency edge. Packages the lock does not give
+    a single version for are left out, so the constraint file stays solvable.
+    """
+    lock = rl_root / "uv.lock"
+    if not lock.is_file():
+        raise ValueError(f"{rl_root} has no uv.lock; expected a NeMo-RL checkout")
+    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
+    nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
+    if nemo_gym is None:
+        raise ValueError(f"{lock} has no nemo-gym package")
+
+    by_name: dict[str, set[str]] = {}
+    for pkg in packages:
+        name = pkg.get("name")
+        version = pkg.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            by_name.setdefault(name, set()).add(version)
+
+    gym_edge: dict[str, set[str]] = {}
+    for dep in nemo_gym.get("dependencies", []):
+        name = dep.get("name")
+        version = dep.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            gym_edge.setdefault(name, set()).add(version)
+
+    pins: dict[str, str] = {}
+    for name, versions in by_name.items():
+        if len(versions) == 1:
+            pins[name] = next(iter(versions))
+            continue
+        chosen = gym_edge.get(name, set())
+        if len(chosen) == 1:
+            pins[name] = next(iter(chosen))
+    return pins
+
+
+def lock_requirement_lines(
+    pins: dict[str, str],
+    overrides: list[str],
+    dependencies: dict[str, set[str]] | None = None,
+    *,
+    expand_dependencies_of: list[str] | None = None,
+) -> list[str]:
+    """``name==version`` constraints for the lock.
+
+    A version override that excludes the locked release replaces it. A floor that still
+    contains the locked release keeps the pin. A URL override replaces the distribution.
+    ``expand_dependencies_of`` also drops direct dependencies of those overrides.
+    Other overrides do not unpin their dependencies.
+    """
+    by_canonical = {canonicalize_name(name): version for name, version in pins.items()}
+    skipped: set[str] = set()
+    for item in overrides:
+        requirement = Requirement(item)
+        name = canonicalize_name(requirement.name)
+        locked = by_canonical.get(name)
+        if locked is None:
+            continue
+        if requirement.url or (requirement.specifier and Version(locked) not in requirement.specifier):
+            skipped.add(name)
+    if dependencies and expand_dependencies_of:
+        for item in expand_dependencies_of:
+            requirement = Requirement(item)
+            name = canonicalize_name(requirement.name)
+            if name in skipped:
+                skipped.update(dependencies.get(name, ()))
+    return [f"{name}=={version}" for name, version in sorted(pins.items()) if canonicalize_name(name) not in skipped]
+
+
+def align_requirement_to_lock(requirement_line: str, pins: dict[str, str]) -> str:
+    """Use the locked version when a direct requirement excludes it."""
+    requirement = Requirement(requirement_line)
+    locked = next(
+        (version for name, version in pins.items() if canonicalize_name(name) == canonicalize_name(requirement.name)),
+        None,
+    )
+    if locked is None or not requirement.specifier or Version(locked) in requirement.specifier:
+        return requirement_line
+    extras = f"[{','.join(requirement.extras)}]" if requirement.extras else ""
+    return f"{requirement.name}{extras}=={locked}"
+
+
 def _compile_pinned_requirements(
     work_dir: Path,
     packages: list[str],
     *,
     extra_index_url: str | None = None,
+    nemo_rl_root: Path | None = None,
 ) -> Path:
     """Pin ``packages`` before download so ``pip download --no-deps`` cannot vendor duplicates."""
     work_dir.mkdir(parents=True, exist_ok=True)
+    requirement_lines = list(packages)
+    if nemo_rl_root is not None:
+        pins = locked_package_versions(nemo_rl_root)
+        requirement_lines = [align_requirement_to_lock(line, pins) for line in requirement_lines]
     requirements_in = work_dir / "requirements.in"
-    requirements_in.write_text("\n".join(packages) + "\n", encoding="utf-8")
+    requirements_in.write_text("\n".join(requirement_lines) + "\n", encoding="utf-8")
     pinned = work_dir / "requirements.txt"
+    # --no-config ignores this repo's [tool.uv]. The Gym host applies the NeMo-RL
+    # checkout's override-dependencies and constraint-dependencies, passed explicitly.
     cmd = [
         "uv",
         "pip",
@@ -127,12 +265,20 @@ def _compile_pinned_requirements(
         "--output-file",
         str(pinned),
         "--no-header",
-        "--no-config",  # ignore this repo's uv overrides; they are not applied on the cluster
+        "--no-config",
         "--python-platform",
         TARGET_UV_PLATFORM,
         "--python-version",
         TARGET_PYTHON_VERSION,
     ]
+    if nemo_rl_root is not None:
+        overrides, constraints = rl_dependency_policy(nemo_rl_root)
+        constraints.extend(lock_requirement_lines(locked_package_versions(nemo_rl_root), overrides))
+        override = work_dir / "override.txt"
+        constraint = work_dir / "constraint.txt"
+        override.write_text("\n".join(overrides) + "\n", encoding="utf-8")
+        constraint.write_text("\n".join(constraints) + "\n", encoding="utf-8")
+        cmd.extend(["--override", str(override), "--constraint", str(constraint)])
     if extra_index_url:
         cmd.extend(["--extra-index-url", extra_index_url, "--index-strategy", "unsafe-best-match"])
     logger.info("Running: %s", " ".join(cmd))
@@ -170,16 +316,28 @@ def _run_pip_download(
     _run_build_step(cmd)
 
 
+def _sdist_build_python() -> str:
+    """Major.minor interpreter for building pure-Python sdists on this host.
+
+    Marker resolution uses ``TARGET_PYTHON_VERSION`` so Gym's ``>=3.13.14``
+    floor is satisfied. uv 0.10.10 cannot download 3.13.14 or 3.13.15, and
+    these sdists are pure Python, so the installed 3.13 emits a compatible wheel.
+    """
+    major, minor, *_rest = TARGET_PYTHON_VERSION.split(".")
+    return f"{major}.{minor}"
+
+
 def _build_downloaded_sdists(wheels_dir: Path) -> None:
-    """Build source artifacts with the training image's Python while the host has egress."""
+    """Build source artifacts while the host has egress."""
     sdists = sorted(path for path in wheels_dir.iterdir() if path.is_file() and path.suffix != ".whl")
+    build_python = _sdist_build_python()
     for sdist in sdists:
         cmd = [
             "uv",
             "run",
             "--no-project",
             "--python",
-            TARGET_PYTHON_VERSION,
+            build_python,
             "--with",
             "pip",
             "python",
@@ -194,6 +352,17 @@ def _build_downloaded_sdists(wheels_dir: Path) -> None:
         logger.info("Building wheel from source artifact: %s", " ".join(cmd))
         _run_build_step(cmd)
         sdist.unlink()
+
+
+def _drop_image_gym_wheel(wheels_dir: Path) -> None:
+    """Remove the nemo-gym wheel after it has been used to resolve the closure.
+
+    The training image already has Gym, including the patched verifiers pin.
+    Installing this wheel puts that copy first on ``PYTHONPATH``, and Gym then
+    reads the unpatched ``requirements.txt`` shipped inside it.
+    """
+    for wheel in wheels_dir.glob("nemo_gym-*.whl"):
+        wheel.unlink()
 
 
 def _assert_complete_wheel_closure(wheels_dir: Path, requirements_file: Path) -> None:
@@ -217,7 +386,9 @@ def _tag_targets_training_image(interpreter: str, abi: str, platform: str) -> bo
     if not _TARGET_PLATFORM_TAG_RE.fullmatch(platform):
         return False
 
-    target_major, target_minor = (int(part) for part in TARGET_PYTHON_VERSION.split(".", 1))
+    # Wheel tags are cp313, not cp31314. The patch level is only for uv's marker check.
+    version_parts = TARGET_PYTHON_VERSION.split(".")
+    target_major, target_minor = int(version_parts[0]), int(version_parts[1])
     target = f"{target_major}{target_minor}"
     if abi == "none":
         return interpreter in {f"cp{target}", f"py{target}", f"py{target_major}"}
@@ -249,20 +420,8 @@ GYM_SUBMODULE_PATH = "3rdparty/Gym-workspace/Gym"
 
 
 def _lock_pin(nemo_rl_root: Path, distribution: str) -> str | None:
-    """Read a distribution's pinned version out of NeMo-RL's ``uv.lock``.
-
-    Gym stamps ``ray``/``openai`` into every sub-venv from what the training image has
-    installed, and the image resolves those from this lock -- not from Gym's own, which pins
-    different versions.
-    """
-    lock = nemo_rl_root / "uv.lock"
-    if not lock.is_file():
-        raise ValueError(f"{nemo_rl_root} has no uv.lock; expected a NeMo-RL checkout")
-    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
-    versions = {pkg["version"] for pkg in packages if pkg.get("name") == distribution and "version" in pkg}
-    if len(versions) != 1:
-        return None
-    return versions.pop()
+    """Version Gym stamps into every server venv, from the image lock."""
+    return locked_package_versions(nemo_rl_root).get(distribution)
 
 
 def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str | None, str | None]:
@@ -284,10 +443,76 @@ def _resolve_image_pins(spec: ConvertEnvironmentSpec) -> tuple[Path | None, str 
     return gym_root, ray_version, openai_version
 
 
+def _write_nemo_gym_metadata_project(gym_root: Path, dest: Path, version: str) -> None:
+    """A wheel that carries nemo-gym's dependency metadata and none of its server trees.
+
+    ``uv build`` of the checkout packs every built-in server. The wheel is only an input
+    to the resolver, and it is deleted before the package is written.
+    """
+    project = tomllib.loads((gym_root / "pyproject.toml").read_text(encoding="utf-8")).get("project", {})
+    dependencies = project.get("dependencies", [])
+    dev = project.get("optional-dependencies", {}).get("dev", [])
+
+    def array(items: list[str]) -> str:
+        return "[\n" + "".join(f"  {json.dumps(item)},\n" for item in items) + "]"
+
+    dest.mkdir(parents=True)
+    (dest / "pyproject.toml").write_text(
+        f"""\
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemo-gym"
+version = {json.dumps(version)}
+dependencies = {array(dependencies)}
+
+[project.optional-dependencies]
+dev = {array(dev)}
+
+[tool.setuptools]
+packages = []
+""",
+        encoding="utf-8",
+    )
+
+
+def _checkout_nemo_gym_version(gym_root: Path) -> str:
+    """Version this Gym checkout builds, from ``package_info.py``."""
+    info = gym_root / "nemo_gym" / "package_info.py"
+    if not info.is_file():
+        raise RuntimeError(f"{gym_root} has no nemo_gym/package_info.py")
+    text = info.read_text(encoding="utf-8")
+
+    def grab(name: str) -> str:
+        match = re.search(rf"^{name} = (.+)$", text, re.M)
+        if not match:
+            raise RuntimeError(f"{info} has no {name}")
+        value = ast.literal_eval(match.group(1))
+        return "" if value is None else str(value)
+
+    return f"{grab('MAJOR')}.{grab('MINOR')}.{grab('PATCH')}{grab('PRE_RELEASE')}"
+
+
 def _build_gym_fork_wheel(gym_root: Path, dest: Path, expect_version: str | None) -> Path:
-    """Build nemo-gym from ``gym_root`` so a fork is not replaced by the upstream release."""
+    """Build a metadata-only nemo-gym wheel so resolution uses this checkout's dependencies.
+
+    The file list of a real Gym wheel is every built-in server. Nothing in the uploaded
+    package installs that wheel; the image's Gym is the one the sandbox imports.
+    """
+    actual = _checkout_nemo_gym_version(gym_root)
+    if expect_version is not None and actual != expect_version:
+        raise RuntimeError(
+            f"--gym-root builds nemo-gym {actual} but the image reports {expect_version}. "
+            "Gym pins each per-server venv to the image's version, so this wheel would be "
+            "ignored and uv would resolve from an index instead."
+        )
     dest.mkdir(parents=True, exist_ok=True)
-    _run_build_step(["uv", "build", "--wheel", "--out-dir", str(dest), str(gym_root)])
+    with tempfile.TemporaryDirectory(prefix="nemo-gym-meta-") as tmp:
+        project = Path(tmp) / "nemo-gym"
+        _write_nemo_gym_metadata_project(gym_root, project, actual)
+        _run_build_step(["uv", "build", "--wheel", "--no-config", "--out-dir", str(dest), str(project)])
     built = sorted(dest.glob("nemo_gym-*.whl"))
     if len(built) != 1:
         raise RuntimeError(f"expected exactly one nemo_gym wheel, got {[p.name for p in built]}")
@@ -353,7 +578,7 @@ def _vendor_missing_agent_wheels(wheels_dir: Path, spec: ConvertEnvironmentSpec,
     # No extra index: these come from PyPI, and uv gives --extra-index-url priority for
     # every package it resolves.
     requirements = _agent_closure_requirements(spec, work_dir=work_dir)
-    pinned = _compile_pinned_requirements(work_dir / "agent", requirements)
+    pinned = _compile_pinned_requirements(work_dir / "agent", requirements, nemo_rl_root=spec.nemo_rl_root)
     _run_pip_download(wheels_dir, requirements_file=pinned)
     # omegaconf's antlr4-python3-runtime publishes no wheel, so the closure is incomplete
     # until the source artifacts are built -- same as the download path.
@@ -379,6 +604,7 @@ def download_hub_wheels(
             shutil.copy2(whl, wheels_dir / whl.name)
         _vendor_missing_agent_wheels(wheels_dir, spec, work_dir=work_dir)
         assert_wheels_target_platform(wheels_dir)
+        _drop_image_gym_wheel(wheels_dir)
         return wheels_dir
 
     package_name = hub_id_to_package_name(spec.hub_id)
@@ -392,7 +618,9 @@ def download_hub_wheels(
         *spec.extra_wheels,
         *_agent_closure_requirements(spec, work_dir=work_dir),
     ]
-    pinned = _compile_pinned_requirements(work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
+    pinned = _compile_pinned_requirements(
+        work_dir, packages, extra_index_url=PRIME_HUB_SIMPLE_INDEX, nemo_rl_root=spec.nemo_rl_root
+    )
     _run_pip_download(wheels_dir, requirements_file=pinned, extra_index_url=PRIME_HUB_SIMPLE_INDEX)
     _build_downloaded_sdists(wheels_dir)
     downloaded = sorted(wheels_dir.glob("*.whl"))
@@ -402,6 +630,7 @@ def download_hub_wheels(
         )
     _assert_complete_wheel_closure(wheels_dir, pinned)
     assert_wheels_target_platform(wheels_dir)
+    _drop_image_gym_wheel(wheels_dir)
     return wheels_dir
 
 
@@ -550,8 +779,10 @@ def _load_verifiers_environment(vf_env_id: str, vf_env_args: dict[str, Any]) -> 
             "verifiers is required for pi-to-gym-conversion dataset generation; it lives in "
             "the optional `conversion` extra. Sync it into a dedicated environment, not the "
             "repo .venv, which every `flox activate` prunes back to uv.lock: "
-            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl "
-            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`"
+            "`UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --frozen --package nhx-rl "
+            "--extra conversion`, then run `.venv-conversion/bin/pi-to-gym-conversion`. "
+            "Do not use the project .venv: this installs into sys.executable, and a mutated "
+            "project environment makes the next flox activate fail"
         ) from exc
 
     return vf.load_environment(vf_env_id, **vf_env_args)

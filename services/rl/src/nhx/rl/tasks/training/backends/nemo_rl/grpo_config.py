@@ -275,6 +275,21 @@ def _resolve_gym_paths(
     )
 
 
+def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """``create.resource`` must match ``sandbox.resources``."""
+    connection: dict[str, Any] = {}
+    if gym.sandbox_server_protocol:
+        connection["protocol"] = gym.sandbox_server_protocol
+    options: dict[str, Any] = {"connection": connection}
+    if gym.sandbox_resources:
+        resource = dict(gym.sandbox_resources)
+        memory_mib = resource.pop("memory_mib", None)
+        if memory_mib and not resource.get("memory"):
+            resource["memory"] = f"{memory_mib}Mi"
+        options["create"] = {"resource": resource}
+    return options
+
+
 def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
@@ -363,9 +378,8 @@ def _build_nemo_gym_env_config(
             ),
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
-            host_provider_options=(
-                {"connection": {"protocol": gym.sandbox_server_protocol}} if gym.sandbox_server_protocol else {}
-            ),
+            # create.resource must match resources.
+            host_provider_options=_sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,
@@ -541,13 +555,6 @@ def compile_grpo_config(
     model_path = customizer_config.model.path
     precision = _adapt_precision(customizer_config.model.precision)
     parallelism = customizer_config.parallelism
-    # Automodel: write a consolidated HF export. V1 forbids model_save_format.
-    if parallelism.policy_backend is PolicyBackend.AUTOMODEL:
-        cfg["checkpointing"]["save_consolidated"] = True
-        cfg["checkpointing"]["v4_compatible"] = customizer_config.model.v4_compatible
-        _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
-        if customizer_config.training.finetuning_type == FinetuningType.ALL_WEIGHTS:
-            cfg["checkpointing"]["model_save_format"] = "safetensors"
     lora_cfg = _build_lora_cfg(customizer_config)
     dynamic_batching_cfg, sequence_packing_cfg = _build_batching_config(customizer_config, grpo_hp)
     chat_template = resolve_chat_template(
@@ -587,6 +594,9 @@ def compile_grpo_config(
             # whole distribution.
             "top_p": 1.0,
             "top_k": grpo_hp.top_k,
+            "val_temperature": grpo_hp.temperature,
+            "val_top_p": 1.0,
+            "val_top_k": grpo_hp.top_k,
             "stop_token_ids": None,
             "stop_strings": None,
             "vllm_cfg": {
@@ -615,6 +625,17 @@ def compile_grpo_config(
         "dynamic_batching": dynamic_batching_cfg,
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
+
+    # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
+    # checkpointing config rejects them. "every" consolidates each save, which is
+    # what publication needs: the kept checkpoint is the best one, not always the last.
+    # Both policy backends use that worker, so both need the block.
+    cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
+        "model_save_format": "safetensors",
+        "save_consolidated": "every",
+        "v4_compatible": customizer_config.model.v4_compatible,
+    }
+    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than

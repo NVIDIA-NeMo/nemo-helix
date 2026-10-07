@@ -80,6 +80,10 @@ variable "FFMPEG_VLM_WHEEL_CONTEXT" {
   default = ""
 }
 
+variable "RL_CUDA_EXT_WHEEL_CONTEXT" {
+  default = ""
+}
+
 variable "DISTROLESS_BASE" {
   default = "nvcr.io/nvidia/distroless/python:3.11-v4.0.8"
 }
@@ -126,7 +130,7 @@ variable "NEMO_RL_REPO" {
 # RL pins Gym as a git submodule (-> soluwalana/Gym over https), so Gym rides in with the RL git ADD
 # - no separate Gym pin needed.
 variable "NEMO_RL_REF" {
-  default = "a5b789d7cc1551600bff82285afd5da13a55c35e" # soluwalana/RL nhx/customizer
+  default = "62d76953283a44021031025f7f545a808f492a1b" # soluwalana/RL default branch
 }
 variable "RL_BASE_CONTEXT" {
   default = ""
@@ -134,7 +138,7 @@ variable "RL_BASE_CONTEXT" {
 
 # The tag for base images if needed
 variable "WHEELS_TAG" {
-  default = "54ae40bf653127f1300399912e6c1083f0b96771"
+  default = "3c0a56ca13e155e72e1bc3f3808caf915c13ea28"
 }
 
 variable "BAKE_CACHE_SOURCE_BRANCH" {
@@ -197,6 +201,11 @@ function "get_ffmpeg_vlm_wheel_image" {
   result = "${WHEELS_REGISTRY}/ffmpeg-vlm-wheel:${WHEELS_TAG}"
 }
 
+function "get_rl_cuda_ext_wheel_image" {
+  params = []
+  result = "${WHEELS_REGISTRY}/rl-cuda-ext-wheel:${WHEELS_TAG}"
+}
+
 function "get_arch_tag" {
   params = []
   result = BUILD_ARCH == "linux/arm64" ? "linux-arm64" : "linux-amd64"
@@ -232,6 +241,11 @@ function "mamba_ssm_wheel_context" {
 function "ffmpeg_vlm_wheel_context" {
   params = []
   result = notequal(FFMPEG_VLM_WHEEL_CONTEXT, "") ? FFMPEG_VLM_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:ffmpeg-vlm-wheel" : "docker-image://${get_ffmpeg_vlm_wheel_image()}"
+}
+
+function "rl_cuda_ext_wheel_context" {
+  params = []
+  result = notequal(RL_CUDA_EXT_WHEEL_CONTEXT, "") ? RL_CUDA_EXT_WHEEL_CONTEXT : notequal(USE_LOCAL_WHEELS, "") ? "target:rl-cuda-ext-wheel" : "docker-image://${get_rl_cuda_ext_wheel_image()}"
 }
 
 function "wheel_tags" {
@@ -363,6 +377,7 @@ group "nhx-automodel-gpu-wheels" {
   targets = [
     "causal-conv1d-wheel",
     "mamba-ssm-wheel",
+    "rl-cuda-ext-wheel",
   ]
 }
 
@@ -461,6 +476,9 @@ target "nhx-rl-base-builder" {
   target     = "nhx-rl-base"
   context    = "."
   dockerfile = "docker/rl/Dockerfile.nhx-rl-base"
+  contexts = {
+    rl-cuda-ext-wheel = rl_cuda_ext_wheel_context()
+  }
   args = {
     NEMO_RL_REPO        = NEMO_RL_REPO
     NEMO_RL_REF         = NEMO_RL_REF
@@ -864,6 +882,20 @@ target "ffmpeg-vlm-wheel" {
   cache-to   = maybe_registry_cache_to("ffmpeg-vlm-wheel")
   cache-from = maybe_registry_cache_from("ffmpeg-vlm-wheel")
   tags       = wheel_tags("ffmpeg-vlm-wheel")
+  output     = image_output()
+  platforms  = get_platforms()
+}
+
+# CPython 3.13 / torch 2.13.0+cu130 wheels for the nine CUDA extensions nhx-rl-base
+# would otherwise compile. Automodel and Unsloth keep causal-conv1d-wheel and
+# mamba-ssm-wheel; those are cp312 and a different source revision.
+target "rl-cuda-ext-wheel" {
+  target     = "rl-cuda-ext-wheel"
+  context    = "."
+  dockerfile = "docker/base/Dockerfile.python-wheels"
+  cache-to   = maybe_registry_cache_to("rl-cuda-ext-wheel")
+  cache-from = maybe_registry_cache_from("rl-cuda-ext-wheel")
+  tags       = wheel_tags("rl-cuda-ext-wheel")
   output     = image_output()
   platforms  = get_platforms()
 }

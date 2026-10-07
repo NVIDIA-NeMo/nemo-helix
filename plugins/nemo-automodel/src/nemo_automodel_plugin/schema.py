@@ -483,6 +483,7 @@ class AutomodelJobOutput(AutomodelSchema):
     """Stored canonical spec after ``to_spec()``."""
 
     name: str | None = None
+    backend: Literal["automodel"] = "automodel"
     model: str
     dataset: DatasetSpec
     training: TrainingSpec

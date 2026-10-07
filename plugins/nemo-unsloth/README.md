@@ -21,6 +21,8 @@ Container image build / push instructions live in [`docker/unsloth/README.md`](.
 nemo customization unsloth submit /path/to/job.json -w default
 ```
 
+`GET /apis/customization/v2/workspaces/{workspace}/unsloth/jobs` returns jobs whose spec stores `backend`. To list jobs submitted before that field existed, use `nemo jobs list` (`GET /apis/jobs/v2/workspaces/{workspace}/jobs`).
+
 Job JSON uses the `UnslothJobInput` schema (see `nemo_unsloth_plugin/schema.py`). Minimal example:
 
 ```json

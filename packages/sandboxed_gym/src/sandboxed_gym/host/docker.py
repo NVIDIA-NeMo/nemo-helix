@@ -29,6 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from sandboxed_gym.config import JOB_ID_METADATA_KEY
 from sandboxed_gym.host.models import GymHostHandle, GymHostSpec, GymHostVolumeMount
 
 LOGGER = logging.getLogger(__name__)
@@ -100,7 +101,17 @@ class DockerGymHostProvider:
     async def create_host(self, spec: GymHostSpec) -> GymHostHandle:
         """Start the container and return its published health and rollout URLs."""
         name = _CONTAINER_PREFIX + uuid.uuid4().hex[:12]
-        argv = ["run", "-d", "--name", name, "-P", "--expose", str(spec.runtime_http_port)]
+        argv = [
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--label",
+            f"{JOB_ID_METADATA_KEY}={spec.job_id}",
+            "-P",
+            "--expose",
+            str(spec.runtime_http_port),
+        ]
         if self._network:
             argv += ["--network", self._network]
         argv += self._mount_args(spec)
@@ -202,13 +213,30 @@ class DockerGymHostProvider:
         """Egress a cluster provider would have enforced for this host. Not applied here."""
         return self._egress.get(handle.host_id, ())
 
-    async def _force_remove(self, name: str) -> None:
+    async def _force_remove(self, name: str) -> bool:
         try:
             await self._run("rm", "-f", name)
         except DockerHostError:
             LOGGER.warning("Could not remove Gym host container %s", name)
+            return False
+        return True
 
     async def destroy_host(self, handle: GymHostHandle) -> None:
         await self._force_remove(handle.host_id)
         self._containers.pop(handle.host_id, None)
         self._egress.pop(handle.host_id, None)
+
+    async def destroy_job_sandboxes(self, job_id: str) -> tuple[str, ...]:
+        """Remove every container labeled with this job id, including ones this process did not start."""
+        if not job_id:
+            raise ValueError("sandbox cleanup requires a job id")
+        listed = await self._run("ps", "-aq", "--filter", f"label={JOB_ID_METADATA_KEY}={job_id}")
+        names = [line.strip() for line in listed.splitlines() if line.strip()]
+        removed: list[str] = []
+        for name in names:
+            if not await self._force_remove(name):
+                continue
+            self._containers.pop(name, None)
+            self._egress.pop(name, None)
+            removed.append(name)
+        return tuple(removed)
