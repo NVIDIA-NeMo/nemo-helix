@@ -10,11 +10,7 @@ from nhx.common.api.filter import FilterOperation
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.entities.utils import parse_entity_ref
-from nhx.core.models.entities import (
-    AUTO_DISCOVERED_MODEL_CUSTOM_FIELD,
-    AUTO_DISCOVERED_MODEL_DESCRIPTION_PREFIX,
-    Model,
-)
+from nhx.core.models.entities import AUTO_DISCOVERED_MODEL_CUSTOM_FIELD, Model
 from nhx.core.models.entities import ModelProvider as ModelProviderEntity
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
@@ -30,18 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def _is_auto_discovered_model(model: Model) -> bool:
-    """Return whether a model was created by provider auto-discovery.
-
-    The description check recognizes entities created before the explicit marker
-    was introduced. Requiring the named creator to still be linked avoids treating
-    an unrelated user-created model with a similar description as provider-owned.
-    """
-    if model.custom_fields.get(AUTO_DISCOVERED_MODEL_CUSTOM_FIELD) is True:
-        return True
-    if not model.description or not model.description.startswith(AUTO_DISCOVERED_MODEL_DESCRIPTION_PREFIX):
-        return False
-    creator_provider = model.description.removeprefix(AUTO_DISCOVERED_MODEL_DESCRIPTION_PREFIX)
-    return creator_provider in model.model_providers
+    """Return whether provider auto-discovery explicitly marked a model as owned."""
+    return model.custom_fields.get(AUTO_DISCOVERED_MODEL_CUSTOM_FIELD) is True
 
 
 class ModelProviderValidationError(Exception):
@@ -361,11 +347,6 @@ class ModelProviderService:
                     auto_discovered = _is_auto_discovered_model(model)
                     if remaining_providers or provider.model_deployment_id is not None or not auto_discovered:
                         model.model_providers = remaining_providers
-                        if auto_discovered:
-                            model.custom_fields = {
-                                **model.custom_fields,
-                                AUTO_DISCOVERED_MODEL_CUSTOM_FIELD: True,
-                            }
                         await self.entity_client.update(model)
                         logger.info(
                             "Removed provider from retained model entity",

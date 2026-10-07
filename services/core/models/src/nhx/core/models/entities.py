@@ -33,7 +33,6 @@ from nhx.core.models.schemas import (
 from pydantic import Field, PrivateAttr, computed_field, field_validator, model_validator
 
 AUTO_DISCOVERED_MODEL_CUSTOM_FIELD = "nemo_helix_auto_discovered"
-AUTO_DISCOVERED_MODEL_DESCRIPTION_PREFIX = "Auto-discovered model from provider "
 
 
 class Adapter(EntityBase):

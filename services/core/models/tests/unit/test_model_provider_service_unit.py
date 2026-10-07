@@ -759,8 +759,10 @@ async def test_delete_provider_deletes_exclusively_served_model_entity(model_pro
 
 
 @pytest.mark.asyncio
-async def test_delete_provider_deletes_legacy_auto_discovered_model_entity(model_provider_service, mock_entity_client):
-    """Models created before provenance markers are recognized by their generated description."""
+async def test_delete_provider_preserves_unmarked_model_with_auto_discovered_description(
+    model_provider_service, mock_entity_client
+):
+    """Generated-looking descriptions do not authorize deletion without the provenance marker."""
     provider_id = "ws/provider-to-delete"
     model_entity = _create_model_entity(
         name="legacy-model",
@@ -786,12 +788,13 @@ async def test_delete_provider_deletes_legacy_auto_discovered_model_entity(model
     )
 
     assert result is True
-    mock_entity_client.update.assert_not_called()
-    assert mock_entity_client.delete.call_args_list[-1] == call(
-        Model,
-        "legacy-model",
+    mock_entity_client.update.assert_called_once_with(model_entity)
+    assert model_entity.model_providers == []
+    mock_entity_client.delete.assert_called_once_with(
+        ModelProviderEntity,
+        "provider-to-delete",
         workspace="ws",
-        expected_db_version=model_entity.db_version,
+        expected_db_version=provider_entity.db_version,
     )
 
 
