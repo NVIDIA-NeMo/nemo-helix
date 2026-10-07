@@ -34,6 +34,14 @@ export const WorkersProvider: FC<PropsWithChildren> = ({ children }) => {
       newWorkers.add(worker);
       setWorkers(newWorkers);
     },
+    terminateWorker: (worker: Worker) => {
+      worker.terminate();
+      setWorkers((current) => {
+        const newWorkers = new Set(current);
+        newWorkers.delete(worker);
+        return newWorkers;
+      });
+    },
   };
 
   return (

@@ -31,6 +31,7 @@ type Handlers = {
   onError?: (e: unknown) => void;
 };
 let handlers: Handlers | undefined;
+const terminateWorker = vi.fn();
 
 describe('useDownloadFileAsArrayBuffer', () => {
   beforeEach(() => {
@@ -41,6 +42,7 @@ describe('useDownloadFileAsArrayBuffer', () => {
       createWorker: ((_worker: unknown, opts: Handlers) => {
         handlers = opts;
       }) as unknown as ReturnType<typeof useWorkers>['createWorker'],
+      terminateWorker,
     } as unknown as ReturnType<typeof useWorkers>);
   });
 
@@ -125,14 +127,16 @@ describe('useFetchFileAsArrayBuffer', () => {
       createWorker: ((_worker: unknown, opts: Handlers) => {
         handlers = opts;
       }) as unknown as ReturnType<typeof useWorkers>['createWorker'],
+      terminateWorker,
     } as unknown as ReturnType<typeof useWorkers>);
   });
 
-  const fetchFile = () =>
+  const fetchFile = (signal?: AbortSignal) =>
     renderHook(() => useFetchFileAsArrayBuffer()).result.current({
       workspace: 'ws',
       datasetName: 'ds',
       path: 'data/a.txt',
+      signal,
     });
 
   it('resolves to the arrayBuffer when the worker reports done', async () => {
@@ -156,5 +160,33 @@ describe('useFetchFileAsArrayBuffer', () => {
     handlers?.onError?.(new ErrorEvent('error', { message: 'transport failure' }));
 
     await expect(promise).rejects.toThrow('transport failure');
+  });
+  it('terminates the worker and rejects when the signal aborts', async () => {
+    const controller = new AbortController();
+    const promise = fetchFile(controller.signal);
+
+    controller.abort();
+
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(terminateWorker).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects without starting a worker when the signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(fetchFile(controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(workerConstructor).not.toHaveBeenCalled();
+  });
+
+  it('ignores an abort after the download has finished', async () => {
+    const controller = new AbortController();
+    const promise = fetchFile(controller.signal);
+    handlers?.onMessage({ data: { done: true, arrayBuffer: new ArrayBuffer(1) } });
+    await promise;
+
+    controller.abort();
+
+    expect(terminateWorker).not.toHaveBeenCalled();
   });
 });

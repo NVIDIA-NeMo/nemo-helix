@@ -39,6 +39,7 @@ describe('useFilesetFile', () => {
       workspace: 'ws',
       datasetName: 'fs',
       path: 'output/part-0.parquet',
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -53,6 +54,21 @@ describe('useFilesetFile', () => {
 
     await waitFor(() => expect(result.current.data?.name).toBe('a.csv'));
     expect(await result.current.data?.text()).toBe('v2');
+  });
+
+  it('aborts the previous download when another path is selected', async () => {
+    const signals: AbortSignal[] = [];
+    fetchFile.mockImplementation(({ signal }: { signal: AbortSignal }) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    const { rerender } = renderFilesetFile('big.parquet');
+    await waitFor(() => expect(signals).toHaveLength(1));
+
+    rerender({ path: 'other.parquet' });
+
+    await waitFor(() => expect(signals[0]?.aborted).toBe(true));
+    expect(signals[1]?.aborted).toBe(false);
   });
 
   it('surfaces the download error', async () => {

@@ -25,8 +25,8 @@ export const useFilesetFile = ({
 
   return useQuery({
     queryKey: ['fileset-file', workspace, fileset, path],
-    queryFn: async () => {
-      const buffer = await fetchFile({ workspace, datasetName: fileset, path });
+    queryFn: async ({ signal }) => {
+      const buffer = await fetchFile({ workspace, datasetName: fileset, path, signal });
       return new File([buffer], path.split('/').pop() ?? path);
     },
     enabled: enabled && !!fileset && !!path,
