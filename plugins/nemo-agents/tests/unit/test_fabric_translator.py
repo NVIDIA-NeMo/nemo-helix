@@ -77,6 +77,24 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
+    @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
+    @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])
+    def test_remote_agent_keeps_endpoint_in_harness_settings(self, kind: str, api_type: str) -> None:
+        example_path = Path(__file__).parents[2] / "examples/nemo-agent-config/agent-remote.yaml"
+        config = load_agent_config(example_path)
+        config.harnesses["remote-agent"].kind = kind
+        config.harnesses["remote-agent"].settings["api_type"] = api_type
+
+        translated = translate_agent_config(config)
+
+        assert translated.harness is not None
+        assert translated.harness.adapter_id == "nvidia.fabric.remote-agent"
+        assert translated.harness.resolution == "preinstalled"
+        assert translated.harness.settings["base_url"] == "https://agent.example.com/v1"
+        assert translated.harness.settings["api_type"] == api_type
+        assert translated.models["default"].base_url is None
+        assert translated.models["default"].api_key_env == "REMOTE_AGENT_API_KEY"
+
     @pytest.mark.parametrize("harness_override", [False, True])
     def test_forwards_model_sampling_parameters(self, harness_override: bool) -> None:
         payload = _example_yaml_config()

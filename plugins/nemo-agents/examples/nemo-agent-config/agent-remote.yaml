@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+config_format: nemo-agents-spec-v1
+name: remote-agent-example
+default_harness: remote-agent
+harnesses:
+  remote-agent:
+    kind: remote-agent
+    settings:
+      # API root of an independently deployed agent, including /v1.
+      base_url: https://agent.example.com/v1
+      api_type: openai-responses
+models:
+  default:
+    provider: remote
+    model: remote-agent
+    api_key_env: REMOTE_AGENT_API_KEY
+runtime:
+  timeout_seconds: 600
+telemetry:
+  enabled: false

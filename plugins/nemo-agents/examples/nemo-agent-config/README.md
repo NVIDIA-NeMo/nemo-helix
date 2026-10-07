@@ -161,6 +161,46 @@ export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
 exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
 
+### Remote Agent
+
+Use [agent-remote.yaml](agent-remote.yaml) to connect to a running agent; no
+harness extra is needed. Set `harnesses.remote-agent.settings.base_url` to its
+API root (including `/v1`), `models.default.model` to its model name, and
+`REMOTE_AGENT_API_KEY` if authentication is required.
+
+The endpoint must support SSE. Set `api_type` to `openai-responses` (default),
+`openai-completions`, or `anthropic-messages`. Configure skills, MCP, and tool
+policy on the remote agent.
+
+For live streaming and sessions, use a Relay-instrumented OpenAI Responses or
+Chat Completions endpoint and a running collector reachable by both services.
+Update the example config:
+
+```yaml
+harnesses:
+  remote-agent:
+    kind: remote-agent
+    settings:
+      base_url: https://agent.example.com/v1
+      api_type: openai-responses
+      relay_streaming: true
+telemetry:
+  enabled: true
+  provider: relay
+  atof:
+    enabled: true
+    sinks:
+      - type: stream
+        name: nemo-fabric-stream
+        url: https://collector.example.com
+        transport: ndjson
+```
+
+Configure the remote agent to publish NDJSON ATOF events to the collector's
+`/v1/atof` endpoint and carry `metadata.nemo_fabric_request_id` into its Relay
+events. Use `header_env` on the sink if the collector requires authentication.
+Helix connects to the collector without starting or stopping it.
+
 ## Relay Local Files
 
 `agent-relay.yaml` enables Relay telemetry without Intake. It writes local ATIF

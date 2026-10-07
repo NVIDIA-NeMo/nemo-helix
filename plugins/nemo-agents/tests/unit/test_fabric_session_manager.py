@@ -29,6 +29,7 @@ class _FakeRuntime:
 
 class _FakeFabricConfig:
     def __init__(self, *, copied: bool = False) -> None:
+        self.harness = None
         self.copied = copied
         self.relay_enabled = False
 
