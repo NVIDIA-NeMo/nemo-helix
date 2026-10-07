@@ -33,9 +33,13 @@ def reap_job_sandboxes(
     process teardown. A sandbox that is already gone is not a failure of the exit.
     """
     options = dict(host_provider_options or {})
-    try:
+
+    async def _destroy() -> tuple[str, ...]:
         provider = get_host_provider(host_provider, options)
-        removed = asyncio.run(provider.destroy_job_sandboxes(job_id))
+        return await asyncio.wait_for(provider.destroy_job_sandboxes(job_id), timeout=30)
+
+    try:
+        removed = asyncio.run(_destroy())
     except Exception:
         LOGGER.exception("failed to reap sandboxes for job %s", job_id)
         return ()
