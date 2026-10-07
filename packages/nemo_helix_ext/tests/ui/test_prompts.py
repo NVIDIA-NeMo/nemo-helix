@@ -17,6 +17,7 @@ from nemo_helix_ext.ui.prompts import (
 )
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import to_formatted_text
+from prompt_toolkit.shortcuts import CompleteStyle
 from prompt_toolkit.validation import ValidationError
 
 
@@ -102,6 +103,7 @@ def test_search_select_empty_response_requires_default_in_choices(monkeypatch: p
 
 def test_search_select_escapes_default_label_and_replaces_full_input(monkeypatch: pytest.MonkeyPatch) -> None:
     sessions: list[Any] = []
+    prompt_kwargs: list[dict[str, Any]] = []
 
     class FakePromptSession:
         def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
@@ -110,6 +112,7 @@ def test_search_select_escapes_default_label_and_replaces_full_input(monkeypatch
 
         def prompt(self, message, **kwargs) -> str:  # type: ignore[no-untyped-def]
             to_formatted_text(message)
+            prompt_kwargs.append(kwargs)
             return ""
 
     monkeypatch.setattr("nemo_helix_ext.ui.prompts.PromptSession", FakePromptSession)
@@ -125,3 +128,5 @@ def test_search_select_escapes_default_label_and_replaces_full_input(monkeypatch
     completions = list(completer.get_completions(Document("Model A"), MagicMock()))
     assert completions
     assert completions[0].start_position == -len("Model A")
+    assert prompt_kwargs[0]["complete_style"] == CompleteStyle.COLUMN
+    assert callable(prompt_kwargs[0]["pre_run"])

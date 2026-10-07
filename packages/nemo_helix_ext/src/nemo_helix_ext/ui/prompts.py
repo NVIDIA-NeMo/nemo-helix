@@ -21,6 +21,7 @@ from typing import Literal, TypeVar, overload
 from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from prompt_toolkit import PromptSession, prompt
 from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import (
     CompleteEvent,
     Completer,
@@ -34,6 +35,7 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.shortcuts import CompleteStyle
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import ValidationError, Validator
 
@@ -380,12 +382,18 @@ def prompt_search_select(
         style=PROMPT_STYLE,
     )
 
+    def show_initial_choices() -> None:
+        """Open the completion menu immediately, like fzf's initial full list."""
+        get_app().current_buffer.start_completion(select_first=False)
+
     print(f"{prefix}{message}")
     while True:
         try:
             response = session.prompt(
                 HTML(f"{prefix}<prompt>Select ({prompt_suffix}): </prompt>"),
                 bottom_toolbar=_make_bottom_toolbar(bottom_hint),
+                complete_style=CompleteStyle.COLUMN,
+                pre_run=show_initial_choices,
             ).strip()
         except (KeyboardInterrupt, EOFError):
             raise UserCancelled from None
