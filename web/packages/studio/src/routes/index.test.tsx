@@ -83,13 +83,6 @@ const intakeRoutes = [
   ROUTES.workspace.intakeSession,
 ];
 
-const safeSynthesizerRoutes = [
-  ROUTES.workspace.safeSynthesizer,
-  ROUTES.workspace.safeSynthesizerNew,
-  ROUTES.workspace.safeSynthesizerJob,
-  ROUTES.workspace.safeSynthesizerJobReport,
-];
-
 const optimizerRoutes = [ROUTES.workspace.optimizer, ROUTES.workspace.optimizerInsight];
 
 describe('Routes', () => {
@@ -120,9 +113,38 @@ describe('Routes', () => {
       const defaultRoute = decodeURIComponent(
         getWorkspaceDetailsDefaultRoute(WORKSPACE_ROUTE_PLACEHOLDER)
       );
-      // Intentionally always-on (ungated) workspace routes. Keep this list tiny —
-      // new features should be flag-gated, not added here.
-      const alwaysOnWorkspaceRoutes = new Set<string>([ROUTES.workspace.virtualModels]);
+      // Intentionally always-on (ungated) workspace routes: the workspace index, plus
+      // the features that have graduated out of flag gating. A route only belongs here
+      // once its feature ships unconditionally — a new feature should arrive flag-gated.
+      const alwaysOnWorkspaceRoutes = new Set<string>([
+        ROUTES.workspace.virtualModels,
+        ROUTES.workspace.index,
+        ROUTES.workspace.agentDetail,
+        ROUTES.workspace.agentEvaluationDetail,
+        ROUTES.workspace.baseModels,
+        ROUTES.workspace.baseModelsModel,
+        ROUTES.workspace.dataDesignerJobList,
+        ROUTES.workspace.dataDesignerJobDetails,
+        ROUTES.workspace.dataDesignerJobNew,
+        ROUTES.workspace.dataDesignerJobBuild,
+        ROUTES.workspace.dataDesignerJobNewLegacy,
+        ROUTES.workspace.deployments,
+        ROUTES.workspace.deploymentsNew,
+        ROUTES.workspace.deploymentsDeployment,
+        ROUTES.workspace.filesets,
+        ROUTES.workspace.filesetNew,
+        ROUTES.workspace.filesetDetails,
+        ROUTES.workspace.filesetFile,
+        ROUTES.workspace.jobs,
+        ROUTES.workspace.jobDetail,
+        `${ROUTES.workspace.plugin}/*`,
+        ROUTES.workspace.safeSynthesizer,
+        ROUTES.workspace.safeSynthesizerNew,
+        ROUTES.workspace.safeSynthesizerJob,
+        ROUTES.workspace.safeSynthesizerJobReport,
+        ROUTES.workspace.secrets,
+        ROUTES.workspace.settings,
+      ]);
       const remainingWorkspacePaths = [
         ...new Set(
           collectAllPaths(routes)
@@ -200,21 +222,6 @@ describe('Routes', () => {
       vi.stubEnv('VITE_FF_DASHBOARD_SANDBOX_ENABLED', 'false');
       const { routes } = await import('./index');
       expect(findIfRouteExists(routes, ROUTES.workspace.dashboard)).toBe(false);
-    });
-
-    it('should exclude safe synthesizer routes if safe synthesizer is disabled', async () => {
-      vi.stubEnv('VITE_FF_SAFE_SYNTHESIZER_ENABLED', 'false');
-      const { routes } = await import('./index');
-      const { getWorkspaceDetailsDefaultRoute } = await import('./utils');
-      safeSynthesizerRoutes.forEach((route) => {
-        expect(findIfRouteExists(routes, route)).toBe(false);
-      });
-      expect(
-        findIfRouteExists(
-          routes,
-          decodeURIComponent(getWorkspaceDetailsDefaultRoute(WORKSPACE_ROUTE_PLACEHOLDER))
-        )
-      ).toBe(true);
     });
 
     it('includes Optimizer routes when Optimizer is enabled for preview', async () => {

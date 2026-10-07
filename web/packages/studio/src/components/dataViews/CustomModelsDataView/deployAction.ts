@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ModelDeploymentStatus, type ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import type { DeploymentIndicatorState } from '@studio/hooks/useModelDeploymentStatuses';
 import { getWorkspaceNewDeploymentRoute } from '@studio/routes/utils';
 
@@ -41,7 +40,6 @@ export function getDeployAction(
   state: DeploymentIndicatorState | undefined,
   model: ModelEntity
 ): DeployActionTarget | null {
-  if (!DEPLOYMENTS_ENABLED) return null;
   if (!state) return null;
 
   const offer =

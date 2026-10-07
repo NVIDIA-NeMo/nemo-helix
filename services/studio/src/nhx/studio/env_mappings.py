@@ -82,16 +82,8 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="true",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_AGENTS_ENABLED", config_path="studio.feature_flags.agents_enabled", default="true"
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_ANONYMIZER_ENABLED",
         config_path="studio.feature_flags.anonymizer_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_BASE_MODELS_ENABLED",
-        config_path="studio.feature_flags.base_models_enabled",
         default="true",
     ),
     EnvMapping(
@@ -107,21 +99,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_DASHBOARD_SANDBOX_ENABLED",
         config_path="studio.feature_flags.dashboard_sandbox_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_DATA_DESIGNER_ENABLED",
-        config_path="studio.feature_flags.data_designer_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_DATASETS_ENABLED",
-        config_path="studio.feature_flags.datasets_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_DEPLOYMENTS_ENABLED",
-        config_path="studio.feature_flags.deployments_enabled",
         default="true",
     ),
     EnvMapping(
@@ -158,9 +135,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         marker="STUDIO_UI_VITE_FF_INTAKE_ENABLED", config_path="studio.feature_flags.intake_enabled", default="true"
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_JOBS_ENABLED", config_path="studio.feature_flags.jobs_enabled", default="true"
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_MEMBERS_ENABLED", config_path="studio.feature_flags.members_enabled", default="true"
     ),
     EnvMapping(
@@ -182,25 +156,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
         marker="STUDIO_UI_VITE_FF_OPTIMIZER_ENABLED",
         config_path="studio.feature_flags.optimizer_enabled",
         default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_PLUGINS_ENABLED",
-        config_path="studio.feature_flags.plugins_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_SAFE_SYNTHESIZER_ENABLED",
-        config_path="studio.feature_flags.safe_synthesizer_enabled",
-        default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_SECRETS_ENABLED", config_path="studio.feature_flags.secrets_enabled", default="true"
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_SETTINGS_ENABLED", config_path="studio.feature_flags.settings_enabled", default="true"
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_TOUR_ENABLED", config_path="studio.feature_flags.tour_enabled", default="true"
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_TRACE_GRAPH_ENABLED",

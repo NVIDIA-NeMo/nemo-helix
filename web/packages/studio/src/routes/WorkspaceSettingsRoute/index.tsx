@@ -13,11 +13,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { FeatureFlagBadge } from '@studio/components/FeatureFlagBadge';
-import {
-  INFERENCE_PROVIDER_ENABLED,
-  MEMBERS_ENABLED,
-  SECRETS_ENABLED,
-} from '@studio/constants/environment';
+import { INFERENCE_PROVIDER_ENABLED, MEMBERS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import {
@@ -111,25 +107,23 @@ export const WorkspaceSettingsRoute: FC = () => {
               </>
             )}
 
-            {SECRETS_ENABLED && (
-              <>
-                <Divider />
-                <SettingsSection
-                  label="Secrets"
-                  body="Manage user-defined secrets to securely store API keys to integrate with other providers."
-                  action={
-                    <Button
-                      color="neutral"
-                      kind="secondary"
-                      onClick={() => navigate(getSecretsRoute(workspace))}
-                      className="shrink-0"
-                    >
-                      Manage Secrets
-                    </Button>
-                  }
-                />
-              </>
-            )}
+            <>
+              <Divider />
+              <SettingsSection
+                label="Secrets"
+                body="Manage user-defined secrets to securely store API keys to integrate with other providers."
+                action={
+                  <Button
+                    color="neutral"
+                    kind="secondary"
+                    onClick={() => navigate(getSecretsRoute(workspace))}
+                    className="shrink-0"
+                  >
+                    Manage Secrets
+                  </Button>
+                }
+              />
+            </>
 
             {INFERENCE_PROVIDER_ENABLED && (
               <>

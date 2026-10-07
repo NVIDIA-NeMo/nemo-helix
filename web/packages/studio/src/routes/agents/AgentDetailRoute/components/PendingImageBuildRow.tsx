@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getWorkspaceJobDetailRoute } from '@studio/routes/utils';
@@ -49,7 +48,7 @@ export const PendingImageBuildRow: FC<PendingImageBuildRowProps> = ({ workspace,
         <Badge kind="outline" color="gray" size="small">
           {deploymentModeLabel(build.mode)}
         </Badge>
-        {jobName && JOBS_ENABLED ? (
+        {jobName ? (
           <Button
             kind="tertiary"
             size="small"

@@ -13,16 +13,6 @@ vi.mock('@nemo/common/src/hooks/useChatCompletion', () => ({
   }),
 }));
 
-// Deployments are a preview flag, off by default (`previewFlag` defaults to
-// false), so the deploy CTA renders nothing unless the flag is on.
-vi.mock('@studio/constants/environment', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@studio/constants/environment')>();
-  return {
-    ...actual,
-    DEPLOYMENTS_ENABLED: true,
-  };
-});
-
 describe('ModelChat', () => {
   const modelName = getEntityReference(entityStoreBaseModel1);
 

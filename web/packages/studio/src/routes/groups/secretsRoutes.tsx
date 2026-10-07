@@ -3,7 +3,6 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ROUTES } from '@studio/constants/routes';
-import { gateSecretsRoutes } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -11,10 +10,10 @@ const SecretsListRoute = lazy(() =>
   import('@studio/routes/SecretsListRoute').then((module) => ({ default: module.SecretsListRoute }))
 );
 
-export const secretsRoutes: RouteObject[] = gateSecretsRoutes([
+export const secretsRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.secrets,
     element: <SecretsListRoute />,
     errorElement: <RouteErrorPanel title="Secrets" />,
   },
-]);
+];

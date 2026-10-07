@@ -3,87 +3,73 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { DATA_DESIGNER_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateDataDesignerRoutes, getDataDesignerJobListRoute } from '@studio/routes/utils';
+import { getDataDesignerJobListRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
-const DataDesignerJobListRoute =
-  DATA_DESIGNER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/DataDesignerJobListRoute').then((m) => ({
-      default: m.DataDesignerJobListRoute,
-    }))
-  );
-const DataDesignerJobDetailsRoute =
-  DATA_DESIGNER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/DataDesignerJobDetailsRoute').then((m) => ({
-      default: m.DataDesignerJobDetailsRoute,
-    }))
-  );
-const NewDataDesignerJobRoute =
-  DATA_DESIGNER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/NewDataDesignerJobRoute').then((m) => ({
-      default: m.NewDataDesignerJobRoute,
-    }))
-  );
-const DataDesignerJobBuildRoute =
-  DATA_DESIGNER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/DataDesignerJobBuildRoute').then((m) => ({
-      default: m.DataDesignerJobBuildRoute,
-    }))
-  );
-const LegacyNewDataDesignerJobRoute =
-  DATA_DESIGNER_ENABLED &&
-  lazy(() =>
-    import('@studio/routes/LegacyNewDataDesignerJobRoute').then((m) => ({
-      default: m.LegacyNewDataDesignerJobRoute,
-    }))
-  );
+const DataDesignerJobListRoute = lazy(() =>
+  import('@studio/routes/DataDesignerJobListRoute').then((m) => ({
+    default: m.DataDesignerJobListRoute,
+  }))
+);
+const DataDesignerJobDetailsRoute = lazy(() =>
+  import('@studio/routes/DataDesignerJobDetailsRoute').then((m) => ({
+    default: m.DataDesignerJobDetailsRoute,
+  }))
+);
+const NewDataDesignerJobRoute = lazy(() =>
+  import('@studio/routes/NewDataDesignerJobRoute').then((m) => ({
+    default: m.NewDataDesignerJobRoute,
+  }))
+);
+const DataDesignerJobBuildRoute = lazy(() =>
+  import('@studio/routes/DataDesignerJobBuildRoute').then((m) => ({
+    default: m.DataDesignerJobBuildRoute,
+  }))
+);
+const LegacyNewDataDesignerJobRoute = lazy(() =>
+  import('@studio/routes/LegacyNewDataDesignerJobRoute').then((m) => ({
+    default: m.LegacyNewDataDesignerJobRoute,
+  }))
+);
 
-export const dataDesignerRoutes: RouteObject[] = gateDataDesignerRoutes([
+export const dataDesignerRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.dataDesignerJobList,
-    element: DataDesignerJobListRoute ? <DataDesignerJobListRoute /> : null,
+    element: <DataDesignerJobListRoute />,
     errorElement: <RouteErrorPanel title="Data Designer" />,
   },
   {
     path: ROUTES.workspace.dataDesignerJobDetails,
-    element: DataDesignerJobDetailsRoute ? <DataDesignerJobDetailsRoute /> : null,
+    element: <DataDesignerJobDetailsRoute />,
     errorElement: <RouteErrorPanel title="Data Designer" />,
   },
   {
     path: ROUTES.workspace.dataDesignerJobNew,
-    element: NewDataDesignerJobRoute ? <NewDataDesignerJobRoute /> : null,
+    element: <NewDataDesignerJobRoute />,
     errorElement: <RouteErrorPanel title="Data Designer" />,
   },
   {
     path: ROUTES.workspace.dataDesignerJobBuild,
-    element: DataDesignerJobBuildRoute ? <DataDesignerJobBuildRoute /> : null,
+    element: <DataDesignerJobBuildRoute />,
     errorElement: <RouteErrorPanel title="Data Designer" />,
   },
   {
     path: ROUTES.workspace.dataDesignerJobNewLegacy,
-    element: LegacyNewDataDesignerJobRoute ? <LegacyNewDataDesignerJobRoute /> : null,
+    element: <LegacyNewDataDesignerJobRoute />,
     errorElement: <RouteErrorPanel title="Data Designer" />,
   },
-]);
+];
 
 const NavIcon = ENTITY_ICONS.dataDesignerJobs;
 
-export const getDataDesignerSideNavItems = (workspace: string) =>
-  DATA_DESIGNER_ENABLED
-    ? [
-        {
-          id: 'data-designer',
-          slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Data Designer',
-          href: getDataDesignerJobListRoute(workspace),
-        },
-      ]
-    : [];
+export const getDataDesignerSideNavItems = (workspace: string) => [
+  {
+    id: 'data-designer',
+    slotIcon: <NavIcon className={iconColorClass} />,
+    slotLabel: 'Data Designer',
+    href: getDataDesignerJobListRoute(workspace),
+  },
+];

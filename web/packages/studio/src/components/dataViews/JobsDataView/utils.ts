@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_SOURCE } from '@studio/components/dataViews/JobsDataView/constants';
-import {
-  CUSTOMIZER_ENABLED,
-  DATA_DESIGNER_ENABLED,
-  EVALUATOR_ENABLED,
-  SAFE_SYNTHESIZER_ENABLED,
-} from '@studio/constants/environment';
+import { CUSTOMIZER_ENABLED, EVALUATOR_ENABLED } from '@studio/constants/environment';
 import {
   getDataDesignerJobDetailsRoute,
   getEvaluationResultDetailsRoute,
@@ -30,11 +25,11 @@ const SOURCE_DETAIL_ROUTE: Record<
     getRoute: getWorkspaceCustomizationJobDetailsRoute,
   },
   [JOB_SOURCE.DATA_DESIGNER]: {
-    enabled: DATA_DESIGNER_ENABLED,
+    enabled: true,
     getRoute: getDataDesignerJobDetailsRoute,
   },
   [JOB_SOURCE.SAFE_SYNTHESIZER]: {
-    enabled: SAFE_SYNTHESIZER_ENABLED,
+    enabled: true,
     getRoute: getGenerateJobRoute,
   },
   [JOB_SOURCE.EVALUATOR_METRICS]: {

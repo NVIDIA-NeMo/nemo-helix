@@ -117,45 +117,8 @@ describe('SafeSynthesizerNewRoute', () => {
     vi.clearAllMocks();
   });
 
-  describe('Feature flag behavior', () => {
-    beforeEach(() => {
-      vi.resetModules();
-    });
-
-    it('should be defined and not null when SAFE_SYNTHESIZER_ENABLED is true', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-        OTEL_SERVICE_NAME: 'test-service',
-      }));
-      vi.doMock('@nemo/common/src/utils/logger', () => ({
-        logger: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
-      }));
-
-      const module = await import('./index');
-      expect(module.SafeSynthesizerNewRoute).toBeDefined();
-      expect(module.SafeSynthesizerNewRoute).not.toBeNull();
-    });
-
-    it('should return null when SAFE_SYNTHESIZER_ENABLED is false', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: false,
-        OTEL_SERVICE_NAME: 'test-service',
-      }));
-      vi.doMock('@nemo/common/src/utils/logger', () => ({
-        logger: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
-      }));
-
-      const module = await import('./index');
-      expect(module.SafeSynthesizerNewRoute).toBeNull();
-    });
-  });
-
   describe('Component rendering', () => {
-    beforeEach(async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-    });
+    beforeEach(async () => {});
 
     it('should render the form with all sections', async () => {
       const { SafeSynthesizerNewRoute } = await import('./index');
@@ -233,10 +196,6 @@ describe('SafeSynthesizerNewRoute', () => {
 
   describe('Cancel functionality', () => {
     it('should navigate to list page when cancel button is clicked', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       const { SafeSynthesizerNewRoute } = await import('./index');
       if (!SafeSynthesizerNewRoute) return;
 
@@ -255,10 +214,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should disable cancel button when mutation is pending', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: () => ({
           mutate: mockMutate,
@@ -288,10 +243,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should initialize form with correct default values from schema', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       vi.resetModules();
 
       // Import the schema to get default values
@@ -335,10 +286,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should call mutation with form data in correct structure when submitted', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       // Create a spy to capture mutation calls
       const mockMutateLocal = vi.fn((payload) => {
         // Verify the payload structure has the required 'workspace' and 'data' wrapper
@@ -393,10 +340,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should show validation error when form is submitted with missing required fields', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       const mockMutateLocal = vi.fn();
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: () => ({
@@ -431,10 +374,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should disable submit button when mutation is pending', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: () => ({
           mutate: mockMutate,
@@ -459,10 +398,6 @@ describe('SafeSynthesizerNewRoute', () => {
 
   describe('Success handling', () => {
     it('should navigate to job details page on successful submission with job name', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onSuccessCallback: ((data: { name?: string }) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -499,10 +434,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should navigate to list page on successful submission without job name', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onSuccessCallback: ((data: { name?: string }) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -537,10 +468,7 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should clear error message on successful submission', async () => {
-      suppressConsoleError('Form validation errors:', 'Failed to create job:');
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
+      suppressConsoleError('Form validation errors:', 'Failed to create job');
 
       let onErrorCallback: ((error: AxiosError) => void) | undefined;
       let onSuccessCallback: ((data: { name?: string }) => void) | undefined;
@@ -596,14 +524,10 @@ describe('SafeSynthesizerNewRoute', () => {
   describe('Error handling', () => {
     beforeEach(() => {
       // Suppress expected console.error from error handling code paths
-      suppressConsoleError('Failed to create job:');
+      suppressConsoleError('Failed to create job');
     });
 
     it('should display backend detail message from AxiosError', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onErrorCallback: ((error: AxiosError) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -643,10 +567,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should display validation error messages from AxiosError', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onErrorCallback: ((error: AxiosError) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -691,10 +611,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should display status text when no detail is provided', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onErrorCallback: ((error: AxiosError) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -728,10 +644,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should display error banner with error status', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       let onErrorCallback: ((error: AxiosError) => void) | undefined;
       vi.doMock('@nemo/sdk/generated/safe-synthesizer/safe-synthesizer', () => ({
         useSafeSynthesizerCreateJob: (options?: {
@@ -771,10 +683,6 @@ describe('SafeSynthesizerNewRoute', () => {
     });
 
     it('should not display error banner initially', async () => {
-      vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
-      }));
-
       vi.resetModules();
       const { SafeSynthesizerNewRoute } = await import('./index');
       if (!SafeSynthesizerNewRoute) return;
@@ -793,11 +701,7 @@ describe('SafeSynthesizerNewRoute', () => {
 
   describe('Form validation errors', () => {
     it('should have form validation error handling configured', async () => {
-      // Remove any lingering vi.doMock for the logger (left by Feature flag tests) so
-      // the component gets the real logger and we can assert via console.error.
-      vi.doUnmock('@nemo/common/src/utils/logger');
       vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
         OTEL_SERVICE_NAME: 'test-service',
       }));
 
@@ -842,7 +746,6 @@ describe('SafeSynthesizerNewRoute', () => {
 
     it('should clear error message when form is resubmitted', async () => {
       vi.doMock('@studio/constants/environment', () => ({
-        SAFE_SYNTHESIZER_ENABLED: true,
         OTEL_SERVICE_NAME: 'test-service',
         VERSION_SHA: 'test-sha',
       }));
