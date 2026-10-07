@@ -103,6 +103,25 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("map to", result.stderr)
         self.assertEqual(original.read_text(), "old_plugin")
 
+    def test_destination_ancestor_conflicts_prevent_all_edits(self) -> None:
+        for destinations in (("x", "x/y"), ("x/y", "x")):
+            data = json.loads(self.profile.read_text())
+            data["plugin"]["paths"] = dict(zip(("a", "b"), destinations, strict=True))
+            self.profile.write_text(json.dumps(data))
+            for mode in ("--dry-run", "--verify", "--allow-dirty"):
+                with self.subTest(destinations=destinations, mode=mode):
+                    self.repo = Path(self.temp.name) / f"repo-{destinations[0].replace('/', '-')}-{mode}"
+                    self.repo.mkdir()
+                    subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+                    originals = {name: self.write(name, "old_plugin") for name in ("a", "b", "c")}
+                    result = self.run_rename(mode)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("Destination path conflict", result.stderr)
+                    for original in originals.values():
+                        self.assertEqual(original.read_text(), "old_plugin")
+                    self.assertFalse((self.repo / "x").exists())
+                    self.assertEqual({path.name for path in self.repo.iterdir()}, {".git", "a", "b", "c"})
+
     def test_unsafe_profile_path_rejected(self) -> None:
         data = json.loads(self.profile.read_text())
         data["plugin"]["paths"]["plugins/old_plugin"] = "../escape"

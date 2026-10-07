@@ -120,6 +120,8 @@ def plan(profile: Profile, include: tuple[str, ...], exclude: tuple[str, ...]) -
                 raise ValueError(f"Cannot rename {path}: destination exists: {destination}")
             if destination in destinations:
                 raise ValueError(f"Both {path} and {destinations[destination]} map to {destination}")
+            if any(destination in other.parents or other in destination.parents for other in destinations):
+                raise ValueError(f"Destination path conflict: {destination}")
             destinations[destination] = path
             for parent in destination.parents:
                 if parent.exists() and not parent.is_dir():
