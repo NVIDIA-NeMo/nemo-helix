@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode
 import aiohttp
 from nhx.common.files.storage_config import GithubStorageConfig as GithubStorageConfig
 from nhx.core.files.app.backends.base import (
+    REGULAR_FILE_MODES,
     ByteRange,
     FileInfo,
     StorageImpl,
@@ -32,11 +33,6 @@ logger = logging.getLogger(__name__)
 
 JSON_MEDIA_TYPE = "application/vnd.github+json"
 RAW_MEDIA_TYPE = "application/vnd.github.raw"
-
-# Git's blob modes. Anything else a tree can hold is a directory (040000, type
-# "tree"), a submodule (160000, type "commit"), or a symlink (120000) — none of
-# which the contents API serves as the bytes the listing described.
-_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 
 class GithubBackendError(StorageBackendError):
@@ -173,7 +169,7 @@ class GithubStorageImpl(StorageImpl):
             # A symlink is also a blob, but one whose content is its target path
             # while the contents API serves the target itself — a different size, and
             # possibly a file outside the directory this fileset is scoped to.
-            if entry.get("mode") not in _REGULAR_FILE_MODES:
+            if entry.get("mode") not in REGULAR_FILE_MODES:
                 logger.debug(
                     "Skipping %s in %s: mode %s is not a regular file",
                     entry.get("path"),

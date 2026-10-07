@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  type GitStorageConfig,
   type GithubStorageConfig,
   type HuggingfaceStorageConfig,
   type LocalStorageConfig,
@@ -44,6 +45,10 @@ export function getStoragePath(storage: StorageConfig | undefined): string | nul
     return github.path
       ? `${github.owner}/${github.repo}/${github.path}`
       : `${github.owner}/${github.repo}`;
+  }
+  if (s.type === 'git' && 'url' in storage) {
+    const git = storage as GitStorageConfig;
+    return git.path ? `${git.url}#${git.path}` : git.url;
   }
   if (s.type === 's3' && 'bucket' in storage) {
     const s3 = storage as S3StorageConfig;
