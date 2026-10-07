@@ -80,11 +80,15 @@ agent has to be registered on the platform.
 uv run nemo agents create \
   --name calculator-agent \
   --agent-config plugins/nemo-agents/examples/nemo-agent-config/calculator-agent/agent.yaml
+```
 
+```bash
 # 2. (Optional) Stage optimizer overrides in a fileset.
 uv run nemo files filesets create prompt-master-bundle
 uv run nemo files upload plugins/prompt-master/examples/prompt-master.yaml prompt-master-bundle
+```
 
+```bash
 # 3. Submit. --optimize-config is relative to the fileset root and is omitted, together
 #    with --optimize-config-fileset, to run the bundled optimizer unchanged.
 uv run nemo agents optimize run-strategy \
@@ -93,7 +97,9 @@ uv run nemo agents optimize run-strategy \
   --optimize-config-fileset default/prompt-master-bundle \
   --optimize-config prompt-master.yaml \
   --workspace default
+```
 
+```bash
 # 4. Fetch the optimized agent config from the job's results and register it as a new agent.
 #    A directory result downloads as a tarball holding agent.yaml and prompt-master-result.json.
 uv run nemo jobs results download prompt_master --job <job-name> -o prompt_master.tar.gz
