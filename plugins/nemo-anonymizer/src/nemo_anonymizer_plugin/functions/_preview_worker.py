@@ -36,15 +36,22 @@ def _make_preview(
     model_configs_yaml: str,
     dd_providers: list[DDModelProvider] | None,
     num_records: int,
+    *,
+    use_in_process_detector: bool = True,
 ) -> None:
     """Run ``Anonymizer.preview(...)`` and stream the result frames."""
-    anonymizer = _make_anonymizer(model_configs_yaml=model_configs_yaml, dd_providers=dd_providers)
+    anonymizer = _make_anonymizer(
+        model_configs_yaml=model_configs_yaml,
+        dd_providers=dd_providers,
+        use_in_process_detector=use_in_process_detector,
+    )
     config: AnonymizerConfig = spec.config
 
     try:
         result = anonymizer.preview(config=config, data=data, num_records=num_records)
     finally:
-        stop_gliner_runtime()
+        if use_in_process_detector:
+            stop_gliner_runtime()
 
     send_frame(PreviewDatasetFrame(records=_to_jsonable_records(result.dataframe)))
     send_frame(
@@ -69,14 +76,17 @@ def _make_anonymizer(
     *,
     model_configs_yaml: str,
     dd_providers: list[DDModelProvider] | None,
+    use_in_process_detector: bool = True,
 ) -> Anonymizer:
     if not model_configs_yaml:
         raise RuntimeError("Anonymizer preview requires resolved model_configs.")
     with preserve_root_logging():
-        return build_gliner_anonymizer(
-            model_configs_yaml=model_configs_yaml,
-            dd_providers=dd_providers,
-        )
+        if use_in_process_detector:
+            return build_gliner_anonymizer(
+                model_configs_yaml=model_configs_yaml,
+                dd_providers=dd_providers,
+            )
+        return Anonymizer(model_configs=model_configs_yaml, model_providers=dd_providers)
 
 
 def _to_jsonable_records(df: pd.DataFrame) -> list[dict[str, Any]]:

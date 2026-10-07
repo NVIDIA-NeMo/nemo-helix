@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, ClassVar, Literal, TypeAlias
@@ -172,7 +173,7 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             async def _worker() -> None:
                 try:
                     await anyio.to_thread.run_sync(
-                        _make_preview,
+                        functools.partial(_make_preview, use_in_process_detector=use_in_process_detector),
                         send_from_thread,
                         spec,
                         prepared_input.input,
