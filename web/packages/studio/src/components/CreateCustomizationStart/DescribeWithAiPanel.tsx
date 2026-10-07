@@ -34,6 +34,12 @@ const DRAFTING_MODEL_HELP =
 const GOAL_HELP =
   'Mention constraints that matter — cheap to serve, one GPU, a quick test run. Press ⌘/Ctrl + Enter to draft.';
 
+const NO_TRAINING_FILES =
+  'No training files were found in this dataset. Customizer needs at least one training file to start fine-tuning.';
+
+const UNRECOGNIZED_FORMAT =
+  "This dataset isn't in a format Customizer accepts. Training rows need messages (chat), prompt and completion, chosen and rejected (preference), or responses_create_params and agent_ref (NeMo Gym).";
+
 const NO_ENVIRONMENT = '__none__';
 
 const NO_ENVIRONMENT_OPTION = [{ value: NO_ENVIRONMENT, label: 'None' }];
@@ -54,6 +60,16 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   // The full form's dataset check, without a training type so it detects any format.
   const dataset = useCustomizationDatasetValidation({ fileset: datasetRef ?? undefined });
   const isGymDataset = dataset.schema?.variant === 'grpo-gym';
+  const datasetError =
+    !datasetRef || dataset.isPending
+      ? null
+      : dataset.discoveryError
+        ? `Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`
+        : !dataset.hasTraining
+          ? NO_TRAINING_FILES
+          : !dataset.schema
+            ? UNRECOGNIZED_FORMAT
+            : null;
   const { trainingRowCount, rowCountIsEstimate } = estimateTrainingRows(
     dataset.training,
     dataset.encoding.ok
@@ -69,7 +85,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   const environmentError = pickedEnvironment ? environment.error : null;
 
   const inputs = useMemo<DraftInputs | null>(() => {
-    if (!baseModel || !datasetRef || dataset.isPending || dataset.discoveryError) return null;
+    if (!baseModel || !datasetRef || dataset.isPending || datasetError) return null;
     if (isEnvironmentLoading || environmentError) return null;
     return {
       model: baseModel,
@@ -89,7 +105,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     baseModel,
     datasetRef,
     dataset.isPending,
-    dataset.discoveryError,
+    datasetError,
     dataset.schema,
     dataset.hasValidation,
     dataset.schemaShape,
@@ -161,6 +177,16 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     );
   }
 
+  const status = isGenerating
+    ? retry > 0
+      ? `Fixing validation errors (retry ${retry} of ${MAX_RETRIES})…`
+      : 'Drafting settings…'
+    : dataset.isPending
+      ? 'Validating dataset files…'
+      : isEnvironmentLoading
+        ? 'Reading the reward environment…'
+        : null;
+
   const failure = requestError ?? (validation?.status === 'invalid' ? validation.errors : null);
 
   return (
@@ -212,9 +238,9 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
                 clearDraft();
               }}
             />
-            {dataset.discoveryError ? (
+            {datasetError ? (
               <Banner kind="inline" status="error">
-                {`Couldn't read the dataset: ${getErrorMessage(dataset.discoveryError)}`}
+                {datasetError}
               </Banner>
             ) : null}
           </Stack>
@@ -308,16 +334,14 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
           <LoadingButton
             type="submit"
             kind="secondary"
-            loading={isGenerating || isPreparing}
-            disabled={isGenerating || isPreparing || !!dataset.discoveryError || !!environmentError}
+            loading={isGenerating}
+            disabled={isGenerating || isPreparing || !!datasetError || !!environmentError}
           >
             {validation || requestError ? 'Draft again' : 'Draft settings'}
           </LoadingButton>
-          {isGenerating ? (
+          {status ? (
             <Text kind="body/regular/sm" className="text-secondary" role="status">
-              {retry > 0
-                ? `Fixing validation errors (retry ${retry} of ${MAX_RETRIES})…`
-                : 'Drafting settings…'}
+              {status}
             </Text>
           ) : null}
         </Flex>
