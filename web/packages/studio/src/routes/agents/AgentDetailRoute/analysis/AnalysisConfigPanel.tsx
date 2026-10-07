@@ -143,7 +143,9 @@ export const AnalysisConfigPanel: FC<AnalysisConfigPanelProps> = ({ workspace, a
           <Flex gap="density-sm">
             <LoadingButton
               kind="secondary"
+              color="neutral"
               size="small"
+              height={28}
               onClick={handleRunNow}
               loading={triggerRun.isPending}
               disabled={!config}
