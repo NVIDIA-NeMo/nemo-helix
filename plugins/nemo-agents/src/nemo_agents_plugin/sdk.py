@@ -3,61 +3,63 @@
 
 """SDK resource class for the Agents plugin.
 
-Registered under the ``nemo.sdk`` entry-point group. The platform lazily
-instantiates this plugin's sync or async SDK resource as ``client.agents``.
+Registered under the ``nemo.sdk`` entry-point group. ``client.agents`` is the
+typed ``AgentsClient`` property, so build this resource explicitly from a
+``NemoClient``.
 
-Usage (once the SDK hub is wired up)::
+Usage::
 
-    from nemohelix import NeMo
+    from nemo_agents_plugin.sdk import AgentsResource
+    from nemo_helix_plugin.client.client import NemoClient
 
-    nemo = NeMo(base_url="http://localhost:8000")
+    client = NemoClient(base_url="http://localhost:8000", workspace="default")
+    agents = AgentsResource(client)
 
     # Agent CRUD
-    agent = nemo.agents.create(name="calculator", config={...})
-    agents = nemo.agents.list()
-    agent = nemo.agents.get("calculator")
-    nemo.agents.delete("calculator")
+    agent = agents.create(name="calculator", config={...})
+    listing = agents.list()
+    agent = agents.get("calculator")
+    agents.delete("calculator")
 
     # Deployment lifecycle
-    dep = nemo.agents.deployments.create(agent="calculator")  # subprocess
-    dep = nemo.agents.deployments.create(
+    dep = agents.deployments.create(agent="calculator")  # subprocess
+    dep = agents.deployments.create(
         agent="calculator", deployment_mode="docker", image="calculator:local"
     )
-    deps = nemo.agents.deployments.list()
-    dep = nemo.agents.deployments.get("calculator-a1b2")
-    nemo.agents.deployments.delete("calculator-a1b2")
+    deps = agents.deployments.list()
+    dep = agents.deployments.get("calculator-a1b2")
+    agents.deployments.delete("calculator-a1b2")
 
     # Environments / specs (the request/fulfill split)
-    spec = nemo.agents.environment_specs.create(
+    spec = agents.environment_specs.create(
         name="ben",
         spec=EnvironmentSpecInline(
             env={"LOG_LEVEL": "debug"},
             secrets={"GITHUB_PERSONAL_ACCESS_TOKEN": "default/ben-pat"},
         ),
     )
-    env = nemo.agents.environments.create(name="repo-research-ben", environment_spec="default/ben")
-    cs = nemo.agents.compute_specs.create(
+    env = agents.environments.create(name="repo-research-ben", environment_spec="default/ben")
+    cs = agents.compute_specs.create(
         name="big", spec=ComputeSpecInline(resources=ComputeResources(limits={"cpu": "2"})),
     )
-    dep = nemo.agents.deployments.create(agent="calculator", environment="default/repo-research-ben")
+    dep = agents.deployments.create(agent="calculator", environment="default/repo-research-ben")
 
     # Invocation (routes through the agents gateway)
-    result = nemo.agents.invoke(agent="calculator", input="What is 2+2?")
-    result = nemo.agents.invoke(
+    result = agents.invoke(agent="calculator", input="What is 2+2?")
+    result = agents.invoke(
         deployment="calculator-a1b2",
         session_id="session-entity-id",
         input="Continue",
     )
 
     # agents.execute jobs
-    job = nemo.agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
-    job = nemo.agents.jobs.execute.get(job["name"])
-    results = nemo.agents.jobs.execute.list_results(job["name"])
-    run = nemo.agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
+    job = agents.jobs.execute.create(spec={"agent": "calculator", "input": "What is 2+2?"})
+    job = agents.jobs.execute.get(job["name"])
+    results = agents.jobs.execute.list_results(job["name"])
+    run = agents.jobs.execute.download_result("fabric_run_result", job=job["name"])
 
-An async namespace is mounted as ``client.agents`` on ``AsyncNemoClient``.
-It currently exposes ``jobs`` only — agent CRUD, deployments, and ``invoke``
-remain sync-only.
+``AsyncAgentsResource`` is the ``AsyncNemoClient`` counterpart. It currently
+exposes ``jobs`` only; agent CRUD, deployments, and ``invoke`` remain sync-only.
 """
 
 from __future__ import annotations
