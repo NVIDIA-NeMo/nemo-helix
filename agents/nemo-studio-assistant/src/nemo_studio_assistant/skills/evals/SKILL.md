@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: evaluator
+name: evals
 description: NeMo Helix evaluator playbook covering metrics, synchronous metric runs, and asynchronous metric jobs through the platform SDK.
 ---
 Evaluator tasks

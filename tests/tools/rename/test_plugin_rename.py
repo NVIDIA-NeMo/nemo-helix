@@ -152,6 +152,37 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("NeMo Evaluator to NeMo Helix Evals", result.stdout)
         self.assertEqual((self.repo / "README.md").read_text(), "NeMo Evaluator")
 
+    def test_evals_renames_skill_paths_and_service_identity_fixtures(self) -> None:
+        platform_skill = "packages/nemo_helix_ext/src/nemo_helix_ext/skills"
+        assistant_skills = (
+            "agents/nemo-studio-assistant/skills",
+            "agents/nemo-studio-assistant/src/nemo_studio_assistant/skills",
+        )
+        self.write(f"{platform_skill}/nemo-evaluator/SKILL.md", "---\nname: nemo-evaluator\n---\n")
+        for root in assistant_skills:
+            self.write(f"{root}/evaluator/SKILL.md", "---\nname: evaluator\n---\n")
+        identity_test = "packages/nhx_common/tests/client_factory/test_client_factory.py"
+        self.write(identity_test, 'client = get_task_nemo_client("evaluator")\nidentity = "service:evaluator"\n')
+        helm_test = "tests/unit/test_helm_clickhouse.py"
+        self.write(helm_test, '"api.services={evaluator,guardrails}"\n"api.services=evaluator"\n')
+
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.repo / f"{platform_skill}/nemo-evaluator").exists())
+        self.assertIn("name: nemo-evals", (self.repo / f"{platform_skill}/nemo-evals/SKILL.md").read_text())
+        for root in assistant_skills:
+            self.assertFalse((self.repo / f"{root}/evaluator").exists())
+            self.assertIn("name: evals", (self.repo / f"{root}/evals/SKILL.md").read_text())
+        self.assertEqual(
+            (self.repo / identity_test).read_text(),
+            'client = get_task_nemo_client("evals")\nidentity = "service:evals"\n',
+        )
+        self.assertEqual(
+            (self.repo / helm_test).read_text(), '"api.services={evals,guardrails}"\n"api.services=evals"\n'
+        )
+        verified = self.run_rename("--verify", profile=EVALS)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+
     def test_evals_renames_docs_and_web_sdk_contract(self) -> None:
         self.write("docs/evaluator/index.mdx", "Evaluator plugin SDK: `Evaluator.from_client(client)`\n")
         self.write("docs/troubleshooting/evaluator.mdx", "evaluator plugin\n")

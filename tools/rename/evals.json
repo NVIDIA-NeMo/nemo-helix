@@ -50,10 +50,23 @@
       "plugins/nemo-evaluator": "plugins/nemo-evals",
       "packages/nemo_helix_plugin/src/nemo_helix_plugin/evaluator": "packages/nemo_helix_plugin/src/nemo_helix_plugin/evals",
       "skills/nemo-evaluator-plugin": "skills/nemo-evals-plugin",
+      "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-evaluator": "packages/nemo_helix_ext/src/nemo_helix_ext/skills/nemo-evals",
+      "agents/nemo-studio-assistant/skills/evaluator": "agents/nemo-studio-assistant/skills/evals",
+      "agents/nemo-studio-assistant/src/nemo_studio_assistant/skills/evaluator": "agents/nemo-studio-assistant/src/nemo_studio_assistant/skills/evals",
       "docs/evaluator": "docs/evals",
       "docs/troubleshooting/evaluator.mdx": "docs/troubleshooting/evals.mdx"
     },
     "rules": [
+      {
+        "pattern": "^name: evaluator$",
+        "replacement": "name: evals",
+        "include": ["agents/nemo-studio-assistant/**/SKILL.md"]
+      },
+      {
+        "pattern": "(?<=api.services=)evaluator\\b|(?<=api.services=\\{)evaluator\\b",
+        "replacement": "evals",
+        "include": ["tests/unit/test_helm_clickhouse.py"]
+      },
       {
         "pattern": "^([ \\t]*)- page: Evaluator[ \\t]*\\n([ \\t]*)path: ([^\\n]*troubleshooting/evals\\.mdx)",
         "replacement": "\\1- page: Evals\\n\\2slug: evals\\n\\2path: \\3",
@@ -247,6 +260,7 @@
         "pattern": "service:evaluator\\b",
         "replacement": "service:evals",
         "include": [
+          "packages/nhx_common/tests/client_factory/test_client_factory.py",
           "packages/nemo_helix_plugin/tests/test_client_provider.py",
           "packages/nemo_helix_plugin/tests/test_nemo_client_task_auth.py"
         ]
@@ -255,6 +269,7 @@
         "pattern": "([\\\"\\'])evaluator\\1",
         "replacement": "\\1evals\\1",
         "include": [
+          "packages/nhx_common/tests/client_factory/test_client_factory.py",
           "packages/nemo_helix_plugin/tests/test_client_provider.py",
           "packages/nemo_helix_plugin/tests/test_nemo_client_task_auth.py",
           "packages/nemo_helix_plugin/tests/test_scheduler.py"
