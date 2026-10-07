@@ -72,6 +72,10 @@ Environment variables override configuration file settings. This is useful for C
 | `NHX_OUTPUT_FORMAT` | Output format (table, json, yaml, csv, markdown) |
 | `NHX_TIMESTAMP_FORMAT` | Timestamp format (relative, iso8601) |
 | `NHX_COLOR_OUTPUT` | Enable/disable colored output (true/false) |
+| `NEMO_DEFAULT_INFERENCE_KEY` | API key used by `nemo setup --auto` for a custom or default inference provider |
+| `NEMO_DEFAULT_INFERENCE_BASE_URL` | Inference provider base URL used with `NEMO_DEFAULT_INFERENCE_KEY` during `nemo setup --auto` |
+| `NEMO_DEFAULT_MODEL` | Default model selected by `nemo setup --auto` |
+| `NEMO_FAST_MODEL` | Fast model selected by `nemo setup --auto`; defaults to `NEMO_DEFAULT_MODEL` when omitted |
 | `NEMO_TELEMETRY_ENABLED` | Enable CLI telemetry only when set to `true`; any other explicit value disables it |
 
 Example:
@@ -82,6 +86,11 @@ NHX_CURRENT_CONTEXT=production nemo workspaces list
 
 # Override base URL
 NHX_BASE_URL=https://nhx.example.com nemo models list
+
+# Configure setup against a custom inference endpoint
+NEMO_DEFAULT_INFERENCE_KEY=nvapi-... \
+NEMO_DEFAULT_INFERENCE_BASE_URL=https://inference-api.nvidia.com/v1 \
+nemo setup --auto
 ```
 
 ## Configuration precedence
