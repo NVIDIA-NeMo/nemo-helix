@@ -15,6 +15,7 @@ models:
   default:
     provider: remote
     model: remote-agent
+    # Remove api_key_env for an unauthenticated endpoint to skip credential lookup.
     api_key_env: REMOTE_AGENT_API_KEY
 runtime:
   timeout_seconds: 600

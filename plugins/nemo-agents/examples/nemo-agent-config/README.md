@@ -166,7 +166,8 @@ exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 Use [agent-remote.yaml](agent-remote.yaml) to connect to a running agent; no
 harness extra is needed. Set `harnesses.remote-agent.settings.base_url` to its
 API root (including `/v1`), `models.default.model` to its model name, and
-`REMOTE_AGENT_API_KEY` if authentication is required.
+`REMOTE_AGENT_API_KEY` if authentication is required. For an unauthenticated
+endpoint, remove `models.default.api_key_env` to skip credential lookup.
 
 The endpoint must support SSE. Set `api_type` to `openai-responses` (default),
 `openai-completions`, or `anthropic-messages`. Configure skills, MCP, and tool
