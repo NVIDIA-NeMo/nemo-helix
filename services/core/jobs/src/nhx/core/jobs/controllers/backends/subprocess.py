@@ -496,6 +496,13 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 if os.access(venv_python, os.X_OK):
                     return [str(venv_python), *command[1:]]
             return [sys.executable, *command[1:]]
+        # A console script (e.g. the platform entry point) is installed into the
+        # virtual env's bin directory, not on the inherited PATH. Resolve it there
+        # before falling back to a bare PATH lookup.
+        if virtual_env:
+            venv_script = Path(virtual_env) / "bin" / command[0]
+            if os.access(venv_script, os.X_OK):
+                return [str(venv_script), *command[1:]]
         return command
 
     def _start_log_capture(

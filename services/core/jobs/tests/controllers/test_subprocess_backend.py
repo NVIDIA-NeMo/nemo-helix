@@ -362,6 +362,59 @@ def test_build_command_prefers_virtual_env_python(tmp_path) -> None:
     ]
 
 
+def test_build_command_resolves_console_script_against_virtual_env_bin(tmp_path) -> None:
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_virtual_env_bin(tmp_path) -> None:
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_without_virtual_env() -> None:
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, None) == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
 def test_schedule_python_command_does_not_depend_on_runtime_path(
     mock_nhx_client, tmp_path, mock_platform_config, test_step_pending
 ):
