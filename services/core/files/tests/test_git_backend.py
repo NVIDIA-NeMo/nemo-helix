@@ -10,6 +10,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -175,6 +176,17 @@ class TestGitStorageConfig:
             "ssh://host.example:٢٢/org/repo.git",
             "ssh://host.example:70000/org/repo.git",
             "ssh://host.example:0/org/repo.git",
+            "ssh://host.example:/org/repo.git",
+            "ssh://host.example",
+            "ssh://host.example/",
+            "ftp://host.example/org/repo.git",
+            "@host.example:org/repo.git",
+            "a@b@host.example:org/repo.git",
+            "host..example:org/repo.git",
+            "host-.example:org/repo.git",
+            "[::1]:org/repo.git",
+            "git@host.example:org/my repo.git",
+            "dir/host.example:org/repo.git",
         ],
     )
     def test_rejects_urls_that_are_not_plain_ssh_remotes(self, url):
@@ -209,6 +221,19 @@ class TestGitStorageConfig:
         assert GitStorageConfig.model_validate(payload | {"revision": upper}).revision == upper.lower()
         with pytest.raises(ValidationError, match="SHA-256"):
             GitStorageConfig.model_validate(payload | {"revision": "a" * 64})
+
+    @pytest.mark.parametrize(
+        ("url", "user", "path"),
+        [
+            ("git@host.example:org/a@b.git", "git", "org/a@b.git"),
+            ("ssh://deploy@host.example/org/a@b.git", "deploy", "org/a@b.git"),
+            ("host.example:org/repo.git", None, "org/repo.git"),
+            ("git@host.example:22:org/repo.git", "git", "22:org/repo.git"),
+        ],
+    )
+    def test_only_the_authority_is_split_on_at_and_colon(self, url, user, path):
+        remote = GitStorageConfig(url=url, ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS).remote
+        assert (remote.user, remote.path) == (user, path)
 
     def test_factory_builds_the_git_backend(self):
         config = GitStorageConfig(url="git@host:org/repo.git", ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS)
@@ -332,11 +357,14 @@ class TestProcessGroups:
         monkeypatch.setattr(git_backend, "_GRACE_SECONDS", 30.0)
         marker = tmp_path / "cleaned"
         ready = tmp_path / "ready"
+        cleanup = (
+            "import pathlib, signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, lambda *_: (pathlib.Path(sys.argv[1]).touch(), sys.exit(0)))\n"
+            "pathlib.Path(sys.argv[2]).touch()\n"
+            "time.sleep(30)\n"
+        )
         proc = await asyncio.create_subprocess_exec(
-            "sh",
-            "-c",
-            f"trap 'touch {marker}; exit 0' TERM; touch {ready}; sleep 30 & wait",
-            start_new_session=True,
+            sys.executable, "-c", cleanup, str(marker), str(ready), start_new_session=True
         )
         while not ready.exists():
             await asyncio.sleep(0.05)

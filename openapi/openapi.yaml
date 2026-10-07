@@ -13547,7 +13547,9 @@ components:
           type: string
           title: Known Hosts
           description: known_hosts lines for the remote host, e.g. the output of `ssh-keyscan
-            host`. The host key is verified against these and nothing else.
+            host` once its fingerprint has been checked against one obtained through
+            a trusted channel. The host key is verified against these and nothing
+            else.
       type: object
       required:
       - url

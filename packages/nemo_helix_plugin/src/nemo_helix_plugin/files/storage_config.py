@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import string
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -272,15 +273,8 @@ class GithubStorageConfig(BaseStorageConfig):
         return {"token": self.token_secret} if self.token_secret else {}
 
 
-# Strict host characters: the allowlist's urlparse stops a host at "?" or "#", but ssh does not.
-_SSH_USER = r"(?P<user>[A-Za-z0-9._-]+)"
-_SSH_HOST = r"(?P<host>[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?\.?)"
-_SSH_PATH_CHAR = r"[^\s\x00-\x1f\x7f]"
-_SSH_REMOTE_URL = re.compile(
-    rf"ssh://(?:{_SSH_USER}@)?{_SSH_HOST}(?::(?P<port>[0-9]{{1,5}}))?/(?P<path>{_SSH_PATH_CHAR}+)", re.ASCII
-)
-# An SCP path may be absolute ("git@host:/srv/git/repo.git"); the leading-dash check below still applies.
-_SCP_REMOTE = re.compile(rf"(?:{_SSH_USER}@)?{_SSH_HOST}:(?P<path>{_SSH_PATH_CHAR}+)", re.ASCII)
+_HOST_LABEL_CHARS = frozenset(string.ascii_letters + string.digits + "-_")
+_USER_CHARS = frozenset(string.ascii_letters + string.digits + "._-")
 
 
 @dataclass(frozen=True)
@@ -311,29 +305,77 @@ def parse_ssh_remote(url: str) -> SshRemote:
     # git percent-decodes ssh:// URLs before connecting, so "%2F" would move the host it reaches.
     if "%" in url:
         raise ValueError(f"url must not contain percent-encoding, got {url!r}")
-    # A string with a scheme is a URL to git; reading a failed "ssh://" as SCP form would make "ssh" the host.
-    scp = "://" not in url
-    match = _SCP_REMOTE.fullmatch(url) if scp else _SSH_REMOTE_URL.fullmatch(url)
-    if match is None:
-        raise ValueError(
-            f"url must be an SSH remote like git@host:org/repo.git or ssh://host/org/repo.git, got {url!r}"
-        )
-    parts = match.groupdict()
-    # Git hands these to ssh as arguments, where a leading dash is read as an option.
-    for name in ("user", "host", "path"):
-        if (parts.get(name) or "").startswith("-"):
-            raise ValueError(f"url {name} must not start with '-', got {url!r}")
-    port = parts.get("port")
-    if port and not 1 <= int(port) <= 65535:
-        raise ValueError(f"url port must be between 1 and 65535, got {url!r}")
+    if "://" in url:
+        if not url.startswith("ssh://"):
+            raise _not_an_ssh_remote(url)
+        authority, slash, path = url.removeprefix("ssh://").partition("/")
+        userinfo, at, hostport = authority.rpartition("@")
+        host, colon, port = hostport.partition(":")
+        if not slash or (colon and not port):
+            raise _not_an_ssh_remote(url)
+        scp = False
+    else:
+        # git reads a ":" before any "/" as the SCP form.
+        authority, colon, path = url.partition(":")
+        if not colon or "/" in authority:
+            raise _not_an_ssh_remote(url)
+        userinfo, at, host = authority.rpartition("@")
+        port, scp = "", True
+    if at and not userinfo:
+        raise _not_an_ssh_remote(url)
+    _check_user(userinfo, url)
+    _check_host(host, url)
+    _check_path(path, url)
+    port_number = _check_port(port, url)
     return SshRemote(
-        user=parts["user"],
-        host=parts["host"].lower().removesuffix("."),
+        user=userinfo or None,
+        host=host.lower().removesuffix("."),
         # ssh's default port, dropped so one repository has one URL, as the allowlist already assumes.
-        port=int(port) if port and int(port) != 22 else None,
-        path=parts["path"],
+        port=port_number if port_number != 22 else None,
+        path=path,
         scp=scp,
     )
+
+
+def _not_an_ssh_remote(url: str) -> ValueError:
+    return ValueError(f"url must be an SSH remote like git@host:org/repo.git or ssh://host/org/repo.git, got {url!r}")
+
+
+# Git hands the user, host and path to ssh as arguments, where a leading dash is read as an option.
+def _reject_leading_dash(name: str, value: str, url: str) -> None:
+    if value.startswith("-"):
+        raise ValueError(f"url {name} must not start with '-', got {url!r}")
+
+
+def _check_user(user: str, url: str) -> None:
+    _reject_leading_dash("user", user, url)
+    if not set(user) <= _USER_CHARS:
+        raise ValueError(f"url user may only contain letters, digits, '.', '_' and '-', got {url!r}")
+
+
+# Stricter than the allowlist's urlparse, which stops a host at "?" or "#" while ssh does not.
+def _check_host(host: str, url: str) -> None:
+    _reject_leading_dash("host", host, url)
+    labels = host.removesuffix(".").split(".")
+    if not all(
+        label and set(label) <= _HOST_LABEL_CHARS and not label.startswith("-") and not label.endswith("-")
+        for label in labels
+    ):
+        raise ValueError(f"url host must be a DNS name of letters, digits, '-' and '_', got {url!r}")
+
+
+def _check_path(path: str, url: str) -> None:
+    _reject_leading_dash("path", path, url)
+    if not path or any(ord(char) <= 0x20 or ord(char) == 0x7F for char in path):
+        raise ValueError(f"url path must be non-empty, without spaces or control characters, got {url!r}")
+
+
+def _check_port(port: str, url: str) -> int | None:
+    if not port:
+        return None
+    if not (port.isascii() and port.isdigit() and 1 <= int(port) <= 65535):
+        raise ValueError(f"url port must be a number between 1 and 65535, got {url!r}")
+    return int(port)
 
 
 _REF_NAME = re.compile(r"[^\s\x00-\x1f\x7f:^~?*\[\\]+")
@@ -393,7 +435,8 @@ class GitStorageConfig(BaseStorageConfig):
     )
     ssh_key_secret: SecretRef = Field(description="Secret holding an unencrypted SSH private key with read access")
     known_hosts: str = Field(
-        description="known_hosts lines for the remote host, e.g. the output of `ssh-keyscan host`. "
+        description="known_hosts lines for the remote host, e.g. the output of `ssh-keyscan host` once its "
+        "fingerprint has been checked against one obtained through a trusted channel. "
         "The host key is verified against these and nothing else.",
     )
 
