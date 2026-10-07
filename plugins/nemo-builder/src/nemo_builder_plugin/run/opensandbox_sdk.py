@@ -15,9 +15,11 @@ from datetime import timedelta
 from nemo_builder_plugin.run.opensandbox_sandbox import CommandResult
 from nemo_builder_plugin.run.sandbox import Mount
 from nemo_builder_plugin.steps import OpenSandboxServer
+from nhx_sandbox.egress import EgressPolicy
+from nhx_sandbox.opensandbox_policy import to_opensandbox_policy
 from opensandbox.config import ConnectionConfigSync
 from opensandbox.models.execd import RunCommandOpts
-from opensandbox.models.sandboxes import PVC, SandboxFilter, Volume
+from opensandbox.models.sandboxes import PVC, NetworkPolicy, SandboxFilter, Volume
 from opensandbox.sync import SandboxManagerSync, SandboxSync
 
 #: Set on each create, so a create that fails can find what it left by its own label.
@@ -38,6 +40,9 @@ class _Sandbox:
         execution = self._sandbox.commands.run(command, opts=RunCommandOpts(timeout=timedelta(seconds=timeout_seconds)))
         output = [message.text for message in [*execution.logs.stdout, *execution.logs.stderr]]
         return CommandResult(exit_code=execution.exit_code, output=output)
+
+    def applied_egress(self) -> NetworkPolicy:
+        return self._sandbox.get_egress_policy()
 
     def destroy(self) -> None:
         try:
@@ -74,6 +79,7 @@ class SdkApi:
         labels: Mapping[str, str],
         cpu: str,
         memory: str,
+        egress: EgressPolicy,
         ttl_seconds: int,
         ready_timeout_seconds: int,
     ) -> _Sandbox:
@@ -96,6 +102,8 @@ class SdkApi:
                 volumes=volumes,
                 metadata={**labels, ATTEMPT_LABEL: attempt},
                 resource={"cpu": cpu, "memory": memory},
+                # Set at create, the only time OpenSandbox lets a policy's default action be set.
+                network_policy=NetworkPolicy.model_validate(to_opensandbox_policy(egress)),
                 timeout=timedelta(seconds=ttl_seconds),
                 ready_timeout=timedelta(seconds=ready_timeout_seconds),
                 connection_config=self._connection,

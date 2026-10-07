@@ -114,6 +114,11 @@ class OpenSandboxServer(BaseModel):
     )
 
 
+#: What an OpenSandbox sandbox may reach unless the deployment says otherwise: public names under these, which
+#: cover the common registries and package indexes. Nothing in a private range is reachable whatever this says.
+DEFAULT_EGRESS_ALLOW = ["*.com", "*.org", "*.io", "*.dev"]
+
+
 class SandboxSpec(BaseModel):
     """How ``supervise`` runs the sandboxes. All of it comes from operator config."""
 
@@ -125,6 +130,8 @@ class SandboxSpec(BaseModel):
     dns_nameservers: list[str]
     cpu: str
     memory: str
+    #: A spec from before it existed gets the default, rather than an unrestricted sandbox.
+    egress_allow: list[str] = Field(default_factory=lambda: list(DEFAULT_EGRESS_ALLOW))
 
 
 class SandboxImage(BaseModel):

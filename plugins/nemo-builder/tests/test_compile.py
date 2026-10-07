@@ -181,6 +181,10 @@ class TestTheSandboxIsToldNothingAboutPublishing:
         sandbox = SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox
         assert (sandbox.cpu, sandbox.memory) == ("1", "2Gi")
 
+    def test_the_sandbox_reaches_what_the_deployment_allows(self) -> None:
+        spec = _compile(_set(), config=_config(egress_allow=["*.example.com"]))
+        assert SuperviseStepConfig.model_validate(spec.steps[1].config).sandbox.egress_allow == ["*.example.com"]
+
     def test_the_sandbox_mounts_the_fetch_steps_work_volume_on_its_nodes(self) -> None:
         profiles = _profiles(node_selector={"nhx.nvidia.com/build-node": "true"})
         sandbox = SuperviseStepConfig.model_validate(

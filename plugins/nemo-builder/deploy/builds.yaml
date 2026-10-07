@@ -11,7 +11,8 @@ kind: Namespace
 metadata:
   name: nhx-builds
   labels:
-    # Not `restricted`: the sandbox runs as root.
+    # Not `restricted`: the sandbox runs as root. With the opensandbox provider, `privileged`, for its egress
+    # sidecar (README, OpenSandbox).
     pod-security.kubernetes.io/enforce: baseline
 ---
 # One per step. None may read a Secret: the push step's credentials are platform secrets, which

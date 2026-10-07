@@ -4,11 +4,13 @@
 """The ``opensandbox`` provider: each sandbox is an OpenSandbox sandbox, and each image one command in it.
 
 The sandbox's pod comes from the OpenSandbox server's template, so hardening it is the operator's: see the README.
+Its network is the provider's: each sandbox is created with a deny-by-default egress policy, and checked for it.
 This module holds the provider's logic; the SDK calls are in ``opensandbox_sdk``, behind :class:`OpenSandboxApi`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
@@ -28,6 +30,8 @@ from nemo_builder_plugin.run.sandbox import (
 )
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
+from nhx_sandbox.opensandbox_policy import verify_applied_egress
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,10 @@ class RunningSandbox(Protocol):
 
     def run(self, command: str, *, timeout_seconds: int) -> CommandResult: ...
 
+    def applied_egress(self) -> object:
+        """The egress policy the sandbox reports, with ``default_action`` and its ``egress`` rules."""
+        ...
+
     def destroy(self) -> None: ...
 
 
@@ -73,6 +81,7 @@ class OpenSandboxApi(Protocol):
         labels: Mapping[str, str],
         cpu: str,
         memory: str,
+        egress: EgressPolicy,
         ttl_seconds: int,
         ready_timeout_seconds: int,
     ) -> RunningSandbox:
@@ -95,6 +104,9 @@ class OpenSandboxProvider:
         self._workspace = workspace
         self._job_id = job_id
         self._job_sub_path = job_sub_path
+        # Built here, on the trusted side, which shares the sandbox's resolver in a deployed cluster: its address is
+        # kept out of the denied ranges.
+        self._egress = build_egress_policy(EgressAllowlist(targets=tuple(sandbox.egress_allow)))
 
     def sweep(self) -> None:
         killed = self._api.kill_labelled({JOB_LABEL: job_key(self._workspace, self._job_id)})
@@ -112,11 +124,13 @@ class OpenSandboxProvider:
             labels=sandbox_labels(self._workspace, self._job_id),
             cpu=self._sandbox.cpu,
             memory=self._sandbox.memory,
+            egress=self._egress,
             ttl_seconds=SANDBOX_DEADLINE_SECONDS,
             ready_timeout_seconds=READY_TIMEOUT_SECONDS,
         )
         logger.info("sandbox %d is %s", index, sanitize_for_log(sandbox.id))
         try:
+            self._check_egress(sandbox)
             return self._build_images(sandbox, group)
         finally:
             try:
@@ -124,6 +138,23 @@ class OpenSandboxProvider:
             except Exception:
                 # Its TTL ends it anyway; raising here would cost the images it built.
                 logger.warning("sandbox %s could not be deleted", sanitize_for_log(sandbox.id), exc_info=True)
+
+    def _check_egress(self, sandbox: RunningSandbox) -> None:
+        """Raise, before anything runs in it, unless the sandbox reports a deny-by-default egress policy.
+
+        A server that ignored the policy, or whose egress sidecar isn't configured, would otherwise give the
+        sandbox an unrestricted network without a word. Missing rules are only logged: the sidecar reports a merged,
+        re-serialized policy.
+        """
+
+        class Readback:  # verify_applied_egress awaits the read; this SDK's is synchronous.
+            async def get_egress_policy(self) -> object:
+                return sandbox.applied_egress()
+
+        label = f"sandbox {sanitize_for_log(sandbox.id)}"
+        asyncio.run(
+            verify_applied_egress(Readback(), self._egress, mode="default_action", label=label, require_readback=True)
+        )
 
     def _build_images(self, sandbox: RunningSandbox, group: SandboxGroup) -> dict[str, int]:
         deadline = time.monotonic() + BUILD_TIMEOUT_SECONDS

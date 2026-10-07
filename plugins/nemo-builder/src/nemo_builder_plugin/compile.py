@@ -110,6 +110,7 @@ def _build_step(
                 work_pvc=work_profile.storage.pvc_name,
                 node_selector=work_profile.node_selector,
                 dns_nameservers=config.sandbox.dns_nameservers,
+                egress_allow=config.sandbox.egress_allow,
                 cpu=config.sandbox.cpu,
                 memory=config.sandbox.memory,
             ),

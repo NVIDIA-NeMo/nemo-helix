@@ -508,7 +508,7 @@ account, or an Artifactory permission on that path. Artifact Registry grants per
 repository, and a single `repository_prefix` puts every workspace in one repository, so there a
 workspace's credential can write every workspace's images. A credential that can write more lets
 that workspace's builds, and members, overwrite other workspaces' images. Until secrets are safe
-inside the cluster, these limits don't hold against a build's `RUN`.
+inside the cluster, these limits don't hold against a plain pod build's `RUN`.
 
 ### Registries
 
@@ -573,6 +573,16 @@ command's exit code as the image's result. The step image carries the SDK, the p
   With a ReadWriteOnce work volume on more than one node, pin sandboxes to its node in the template too.
 - **A kaniko image with `/bin/sh`,** which OpenSandbox's startup script runs; `docker/Dockerfile.kaniko`'s
   has it.
+- **The server's egress sidecar,** set server-wide by `[egress]` in its config: an `image`, such as
+  `docker.io/opensandbox/egress:v1.1.7`, and `mode = "dns+nft"`, so that rules can name domains.
+- **The build namespace at the `privileged` Pod Security standard.** The egress sidecar needs
+  `NET_ADMIN`, which `baseline` refuses, and the SDK then sees only a timeout. `deploy/builds.yaml`
+  sets `baseline`, for the plain pod. With this provider, raise it, and drop the `pods` and `pods/log`
+  rules from `build-control`'s Role, which only the plain pod uses:
+
+  ```bash
+  kubectl label namespace nhx-builds pod-security.kubernetes.io/enforce=privileged --overwrite
+  ```
 
 ```yaml
 builder:
@@ -581,11 +591,15 @@ builder:
     provider: opensandbox
     opensandbox:
       domain: opensandbox-server.opensandbox-system.svc.cluster.local   # the server's Service
+    egress_allow: ["*.com", "*.org", "*.io", "*.dev"]                  # the default
 ```
 
-Neither provider restricts the sandbox's network yet (see [Limitations](#limitations)). With this
-provider, that's to come from OpenSandbox's own egress policy, whose sidecar needs `NET_ADMIN`, which
-the build namespace's `baseline` standard refuses.
+Each sandbox is created with a deny-by-default egress policy. It may reach what `egress_allow` names,
+by default any name under `*.com`, `*.org`, `*.io` or `*.dev`, which covers the common registries
+and package indexes. It can reach nothing in a private range, the cluster's and the metadata
+server's included, unless an address in `egress_allow` is in it: not the platform, and not a
+registry inside the cluster. `build` reads back the policy each sandbox reports before running
+anything in it, and fails the sandbox's images unless its default is to deny.
 
 ## Limitations
 
@@ -628,23 +642,23 @@ the build namespace's `baseline` standard refuses.
 - **Anything inside the cluster can read every workspace's secrets.** With platform auth off, any
   request can. With it on, and workload token exchange off, a request that names a known service,
   such as `service:jobs`, in its `X-NHX-Principal-*` headers, and no user it acts for, gets any
-  secret in any workspace: the platform takes those headers on trust. A build's own `RUN` reaches
-  the platform, so a Dockerfile can read every workspace's signing key and registry credential,
-  sign as any workspace, and push to its repositories. With exchange on, the platform refuses those
-  headers, but the builder doesn't work with exchange on yet (below).
+  secret in any workspace: the platform takes those headers on trust. A plain pod sandbox's `RUN`
+  reaches the platform, so a Dockerfile built in one can read every workspace's signing key and
+  registry credential, sign as any workspace, and push to its repositories. With exchange on, the
+  platform refuses those headers, but the builder doesn't work with exchange on yet (below).
 - **A signature shows only that something holding the workspace's key signed the image.** Any
   member who can run a job that reads the key can sign any image with it, and so can anything that
   can read it (above). A signature doesn't show that the platform built the image.
 - **With platform auth off, anything can complete or rewrite an image.** Nothing then checks who
-  calls the platform, so anything that reaches it, a build's own `RUN` included, can mark a
+  calls the platform, so anything that reaches it, a plain pod build's `RUN` included, can mark a
   `pending` image `ready` at a digest of its choosing, or rewrite any image's row. The quickstart
   runs with auth off.
 - **With platform auth on, anything inside the cluster can still complete or rewrite an image.**
   `complete` takes any caller that says it acts for the image's submitter. Without workload token
   exchange, the platform takes a request's identity from its `X-NHX-Principal-*` headers whenever it
   has them, with no token behind them: a gateway is meant to strip them from outside traffic, but
-  nothing strips them inside the cluster. So anything that reaches the platform, a build's own `RUN`
-  included, can mark any of the submitter's `pending` images `ready` at a digest of its choosing.
+  nothing strips them inside the cluster. So anything that reaches the platform, a plain pod build's
+  `RUN` included, can mark any of the submitter's `pending` images `ready` at a digest of its choosing.
   One that names a service can also rewrite any image's row through the platform's generic Entities
   route, including a `ready` row's digest, which `complete` never changes. Even a real workload
   token says only whom a step acts for, not which job it belongs to.
@@ -662,11 +676,11 @@ the build namespace's `baseline` standard refuses.
   `nhx-builds`: it can mount the whole work volume, with every build's contexts and outputs, and
   rewrite a layout another job's push step is about to publish; read any build pod's log; and
   delete any build pod. Closing it needs Jobs to restrict these profiles to the builder.
-- **Nothing restricts the sandbox's network.** A Dockerfile's `RUN` can reach anything a pod can:
-  the platform, as any user or service it names, every other Service, and on a cloud cluster the
-  node's metadata server. With the `opensandbox` provider, OpenSandbox's own egress policy is to
-  close this, once the build namespace admits its `NET_ADMIN` sidecar. The `kubernetes_pod`
-  provider's network stays unrestricted: use it only with Dockerfiles you trust.
+- **Nothing restricts a plain pod sandbox's network.** A Dockerfile's `RUN` in one can reach anything
+  a pod can: the platform, as any user or service it names, every other Service, and on a cloud
+  cluster the node's metadata server. Use the `kubernetes_pod` provider only with Dockerfiles you
+  trust. An [OpenSandbox](#opensandbox) sandbox reaches only what `egress_allow` names, and nothing
+  in a private range.
 - **Nothing bounds a sandbox's resources.** It requests CPU and memory but has no limits, and
   `nhx-builds` has no LimitRange or quota, so one Dockerfile can take all of the build node's CPU,
   memory, processes and disk. In the quickstart, that node also runs the platform and the registry.

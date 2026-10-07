@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, Literal, Self
 
 from nemo_builder_plugin.identity import ImageIdentityError, validate_registry_host, validate_repository
-from nemo_builder_plugin.steps import OpenSandboxServer
+from nemo_builder_plugin.steps import DEFAULT_EGRESS_ALLOW, OpenSandboxServer
 from nemo_helix_plugin.config import NemoConfig
 from pydantic import (
     BaseModel,
@@ -65,6 +65,15 @@ class SandboxConfig(BaseModel):
         description=(
             "Resolvers a plain pod sandbox uses instead of cluster DNS, so a network policy can block every cluster "
             "address. OpenSandbox's come from the server's template."
+        ),
+    )
+    egress_allow: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EGRESS_ALLOW),
+        description=(
+            "What an OpenSandbox sandbox may reach: names, `*.`-prefixed wildcards, addresses or CIDRs. Everything "
+            "else is denied, and so is every private range, the cluster's and the metadata server's included, unless "
+            "an address here is in it. Base images and package indexes must be reachable through it. A plain pod "
+            "sandbox's network is unrestricted."
         ),
     )
 
