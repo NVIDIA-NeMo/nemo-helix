@@ -43,7 +43,8 @@ nemo evaluator agent-evaluate explain
 | FileSet-backed Gym reports a PVC mismatch | The Jobs execution profile stages onto a different claim from the OpenSandbox host | Set `sandbox_job_storage_pvc_claim` to the execution profile's job-storage PVC |
 | Sandboxed Gym rejects a credential-shaped `env_vars` entry | Plaintext credentials would be readable by environment code | Store the value in NeMo Helix Secrets and map it through `GymRunnerTarget.env_secrets` |
 | Gym environment FileSet is invalid | The FileSet has the wrong purpose, lacks a root `nemo-environment.yaml`, or violates the `native-v1` / `wheels-v1` layout | Use `purpose=environment`, upload the directory contents at the FileSet root, and fix the named manifest or package error |
-| Sandboxed Gym returns no rollout for the selected agent | The environment registers the agent under a different instance name | Set `GymRunnerTarget.agent_ref_name` to the registered instance |
+| A registered agent on a Gym target is refused with `wheels-v1` in the message | The `target.environment` FileSet is `native-v1`; the agent's harness can only be installed offline from a wheelhouse | Vendor the environment's dependencies as `wheels-v1`, or drop the FileSet |
+| Sandboxed Gym returns no rollout for the selected agent | The environment registers the agent under a different instance name | Set `GymRunnerTarget.source.instance` to the registered instance |
 
 ## Debug in the smallest scope
 

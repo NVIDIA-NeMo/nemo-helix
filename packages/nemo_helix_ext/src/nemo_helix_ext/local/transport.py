@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
+from asyncio import sleep as async_sleep
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any, TypeAlias
 
 import httpx
@@ -121,17 +121,17 @@ def wait_for_status(
     timeout: float = 60.0,
     poll_interval: float = 0.5,
 ) -> bool:
-    deadline = time.monotonic() + timeout
+    deadline = monotonic() + timeout
     while True:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
         if probe_status(base_url=base_url, socket_path=socket_path, timeout=remaining):
             return True
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
-        time.sleep(min(poll_interval, remaining))
+        sleep(min(poll_interval, remaining))
 
 
 async def wait_for_status_async(
@@ -141,14 +141,14 @@ async def wait_for_status_async(
     timeout: float = 60.0,
     poll_interval: float = 0.5,
 ) -> bool:
-    deadline = time.monotonic() + timeout
+    deadline = monotonic() + timeout
     while True:
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
         if await probe_status_async(base_url=base_url, socket_path=socket_path, timeout=remaining):
             return True
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
             return False
-        await asyncio.sleep(min(poll_interval, remaining))
+        await async_sleep(min(poll_interval, remaining))

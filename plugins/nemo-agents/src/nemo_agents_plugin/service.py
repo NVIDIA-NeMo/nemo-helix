@@ -95,7 +95,7 @@ class AgentsService(NemoService):
     """
 
     name: ClassVar[str] = "agents"
-    dependencies: ClassVar[list[str]] = ["entities", "auth", "secrets", "jobs", "files", "inference-gateway"]
+    dependencies: ClassVar[list[str]] = ["entities", "auth", "secrets", "jobs", "files", "models", "inference-gateway"]
 
     def get_routers(self) -> list[RouterSpec]:
         from nemo_agents_plugin.api.v2 import (
@@ -104,11 +104,18 @@ class AgentsService(NemoService):
             deployments,
             environments,
             gateway,
+            sample_agent,
             sessions,
         )
 
         _prefix = "/v2/workspaces/{workspace}"
         specs: list[RouterSpec] = [
+            RouterSpec(
+                sample_agent.router,
+                tag="Sample Agent",
+                description="Provision the packaged sample agent and resources",
+                prefix="/v2",
+            ),
             RouterSpec(agents.router, tag="Agents", description="Agent CRUD", prefix=_prefix),
             RouterSpec(deployments.router, tag="Agent Deployments", description="Deployment lifecycle", prefix=_prefix),
             RouterSpec(sessions.router, tag="Agent Sessions", description="Session lifecycle", prefix=_prefix),

@@ -29,6 +29,9 @@ MAX_BUILD_SPECS = 100
 # Jobs names a job's fileset `job-fileset-<job name>`: the longest name a set's name ends up in.
 _JOBS_FILESET_PREFIX = "job-fileset-"
 
+#: The archives a build context may come in: tar, compressed or not. `fetch` unpacks them.
+ARCHIVE_SUFFIXES = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+
 
 def _relative_path(value: str, *, field: str) -> str:
     path = PurePosixPath(value)
@@ -42,14 +45,24 @@ def _relative_path(value: str, *, field: str) -> str:
 
 
 class FileSetSource(BaseModel):
-    """A build context stored in a fileset."""
+    """A build context stored in a fileset: its files, or an archive among them."""
 
     model_config = _STRICT
 
     fileset: str = Field(description="The fileset: `<name>` in this workspace, or `<workspace>/<name>`.")
+    archive: str | None = Field(
+        default=None,
+        description=(
+            "A tar archive in the fileset, compressed or not, to unpack and build from. "
+            "`context_path` is then a directory inside it."
+        ),
+    )
     context_path: str | None = Field(
         default=None,
-        description="Directory within the fileset to use as the build context. Omit to use the whole fileset.",
+        description=(
+            "Directory to use as the build context: within the fileset, or within `archive` if set. "
+            "Omit to use the whole fileset or archive."
+        ),
     )
 
     @field_validator("fileset")
@@ -58,6 +71,16 @@ class FileSetSource(BaseModel):
         parts = value.split("/")
         if len(parts) > 2 or not all(_PLATFORM_NAME.fullmatch(part) for part in parts):
             raise ValueError(f"fileset must be `<name>` or `<workspace>/<name>`, got {value!r}")
+        return value
+
+    @field_validator("archive")
+    @classmethod
+    def _archive_is_a_tar_in_the_fileset(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        _relative_path(value, field="archive")
+        if not value.lower().endswith(ARCHIVE_SUFFIXES):
+            raise ValueError(f"archive must be a tar archive, one of {', '.join(ARCHIVE_SUFFIXES)}; got {value!r}")
         return value
 
     @field_validator("context_path")

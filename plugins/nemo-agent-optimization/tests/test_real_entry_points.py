@@ -38,6 +38,7 @@ from nemo_helix_plugin.scheduler import submit_path_for
 # whether that plugin is installed in this venv at all.
 _REQUIRED_STRATEGY_MODULES = {
     "legacy": "nemo_optimization",
+    "switchyard": "nemo_switchyard",
 }
 
 _MISSING_PLUGINS = sorted(
@@ -49,7 +50,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WRAPPER_PYPROJECT = _REPO_ROOT / "packages" / "nemo_helix" / "pyproject.toml"
 
 _ROUTER_JOB_KEY = "agent-optimization.run-strategy"
-_STRATEGY_JOB_KEYS = {"agent-optimization.optimize"}
+_STRATEGY_JOB_KEYS = {"agent-optimization.optimize", "agent-optimization.switchyard"}
 
 _STRATEGIES_INSTALLED = pytest.mark.skipif(
     bool(_MISSING_PLUGINS),

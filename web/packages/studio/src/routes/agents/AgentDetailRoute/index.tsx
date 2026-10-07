@@ -16,12 +16,14 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
 import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
 import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import {
+  AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
   AGENT_OVERVIEW_ENABLED,
@@ -32,6 +34,10 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
+import {
+  BuildThenDeploy,
+  type PendingImageBuild,
+} from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
@@ -57,6 +63,7 @@ import {
   clearAgentWalkthroughPending,
   isAgentWalkthroughPending,
 } from '@studio/routes/agents/AgentDetailRoute/walkthroughStorage';
+import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { GitCommitHorizontal } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
@@ -72,6 +79,7 @@ export const AgentDetailRoute: FC = () => {
   const [selectedDeploymentName, setSelectedDeploymentName] = useState<string | undefined>();
   const [logsDeploymentName, setLogsDeploymentName] = useState<string | undefined>();
   const [createDeploymentOpen, setCreateDeploymentOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [submitEvalOpen, setSubmitEvalOpen] = useState(false);
   const [importTracesOpen, setImportTracesOpen] = useState(false);
   const [launchOptimizeOpen, setLaunchOptimizeOpen] = useState(false);
@@ -158,7 +166,9 @@ export const AgentDetailRoute: FC = () => {
   };
 
   const modelNames = getAgentModelNames(agent?.config);
-  const canDeploy = !!agent?.config;
+  const canDeploy = hasAgentConfig(agent?.config);
+  // An agent with no config has nothing to deploy; the same buttons upload one instead.
+  const onDeploy = () => (canDeploy ? setCreateDeploymentOpen(true) : setUploadOpen(true));
   // Narrower than canDeploy: NAT workflows package from a source checkout.
   const canPackage = agent?.config_format === FABRIC_CONFIG_FORMAT;
   // Survives closing the deploy modal, but not a change of agent: the route is
@@ -177,6 +187,17 @@ export const AgentDetailRoute: FC = () => {
           : { agent: agentName ?? '', image }
       );
     },
+    [agentName]
+  );
+
+  // Scoped like builtImage: the route is reused across agents.
+  const [pendingBuild, setPendingBuild] = useState<
+    { agent: string; build: PendingImageBuild } | undefined
+  >();
+  const pendingBuildForAgent = pendingBuild?.agent === agentName ? pendingBuild?.build : undefined;
+  const reportPendingBuild = useCallback(
+    (build: PendingImageBuild | null) =>
+      setPendingBuild(build && agentName ? { agent: agentName, build } : undefined),
     [agentName]
   );
 
@@ -248,11 +269,12 @@ export const AgentDetailRoute: FC = () => {
               tab={selectedTab}
               agentName={agentName}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
               canRunEvaluation={canRunEvaluation}
               isDeploying={isDeploying}
               canOptimize={!isCreatingOptimization}
               deployButtonRef={deployButtonRef}
-              onDeploy={() => setCreateDeploymentOpen(true)}
+              onDeploy={onDeploy}
               onRunEvaluation={() => setSubmitEvalOpen(true)}
               onOptimize={openOptimize}
               onImportTraces={() => setImportTracesOpen(true)}
@@ -328,11 +350,12 @@ export const AgentDetailRoute: FC = () => {
               deployments={agentDeployments}
               isDeploymentsLoading={isDeploymentsLoading}
               isDeploying={isDeploying}
-              onDeploy={() => setCreateDeploymentOpen(true)}
+              onDeploy={onDeploy}
               onChat={switchToChat}
               onDelete={setDeleteDeploymentTarget}
               onViewLogs={viewLogs}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
               specSource={specSource}
               workspace={workspace}
               canPackage={canPackage}
@@ -342,6 +365,7 @@ export const AgentDetailRoute: FC = () => {
                 setCreateDeploymentOpen(true);
               }}
               onImageAvailable={rememberBuiltImage}
+              pendingBuild={pendingBuildForAgent}
             />
           </TabsContent>
 
@@ -365,8 +389,9 @@ export const AgentDetailRoute: FC = () => {
                 isDeploying={isDeploying}
                 chatAreaRef={chatAreaRef}
                 onSelectDeployment={setSelectedDeploymentName}
-                onDeploy={() => setCreateDeploymentOpen(true)}
+                onDeploy={onDeploy}
                 canDeploy={canDeploy}
+                isAgentPending={isAgentPending}
               />
             </div>
           </TabsContent>
@@ -398,6 +423,14 @@ export const AgentDetailRoute: FC = () => {
           agentName={agentName}
         />
       )}
+      {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+        <BuildThenDeploy
+          key={agentName}
+          workspace={workspace}
+          agentName={agentName}
+          onPendingChange={reportPendingBuild}
+        />
+      ) : null}
       {createDeploymentOpen && (
         <CreateDeploymentModal
           open
@@ -405,6 +438,15 @@ export const AgentDetailRoute: FC = () => {
           workspace={workspace}
           initialImage={builtImageForAgent}
           onClose={() => setCreateDeploymentOpen(false)}
+        />
+      )}
+      {uploadOpen && agentName && (
+        <NewAgentModal
+          open
+          workspace={workspace}
+          // Names are unique and an agent cannot be replaced, so the upload needs a fresh one.
+          initialName={`${agentName}-v2`}
+          onClose={() => setUploadOpen(false)}
         />
       )}
       <WalkthroughCoachmarks

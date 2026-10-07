@@ -31,7 +31,10 @@ from typing import Any
 
 import pytest
 from nemo_evaluator.config import EvaluatorConfig
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    GymAgentSource,
+    GymRunnerTarget,
+)
 from nemo_evaluator.jobs.gym_sandbox import CollectionTimeoutError, SessionBackedGymRunner, resolve_sandbox_plan
 from nemo_evaluator_sdk.agent_eval.runtimes.gym import discover_gym_tasks
 from nemo_evaluator_sdk.agent_eval.runtimes.gym.records import NG_ROLLOUT_INDEX, NG_TASK_INDEX
@@ -57,8 +60,9 @@ def _tasks(tmp_path: Path) -> list:
 
 def _target(**overrides: Any) -> GymRunnerTarget:
     return GymRunnerTarget(
-        agent="simple_agent",
-        agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        source=GymAgentSource(
+            component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+        ),
         resources_server="mcqa",
         **overrides,
     )

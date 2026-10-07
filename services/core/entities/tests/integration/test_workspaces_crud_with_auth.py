@@ -157,6 +157,17 @@ class TestWorkspaceCRUDWithAuth:
         assert workspace.created_by == TEST_USER_EMAIL
         assert workspace.updated_by == TEST_USER_EMAIL
 
+    def test_sample_workspace_name_is_reserved(self, client: WorkspacesClient):
+        """A regular user cannot create a workspace in the sample namespace."""
+        user_workspaces = as_user(client, TEST_USER_EMAIL)
+        name = short_unique_name("sample")
+
+        with pytest.raises(PermissionDeniedError):
+            user_workspaces.create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+
+        created = as_service(client, "agents").create_workspace(body=CreateWorkspaceRequest(name=name)).data()
+        assert created.name == name
+
     def test_workspace_create_remains_open_by_default(self, client: WorkspacesClient):
         """Default seeding keeps workspace creation open to authenticated users."""
         creator_email = f"creator-{uuid.uuid4().hex[:8]}@example.com"

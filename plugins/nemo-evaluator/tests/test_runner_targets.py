@@ -14,6 +14,7 @@ from nemo_evaluator.api.fields import TasksetRef
 from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
+    GymAgentSource,
     GymPlacement,
     GymRunnerTarget,
     HarborBuiltinAgentSource,
@@ -29,7 +30,8 @@ from pydantic import ValidationError
 
 #: Target fields a runtime config cannot supply, so a round-trip cannot check them here: ``kind``
 #: discriminates the target union, and the other two come from the ``GymPlacement``.
-WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name"}
+#: ``resolved_config`` is what submit-time resolution of a registered agent writes; a live runner never has one.
+WIRE_ONLY_TARGET_FIELDS = {"kind", "environment", "agent_ref_name", "resolved_config"}
 
 #: The runtime's three agent-selection fields become the target's one ``source``.
 HARBOR_AGENT_VALUES = {
@@ -205,7 +207,10 @@ def test_a_gym_runner_describes_itself_as_a_submittable_target() -> None:
     # Every runtime field arrives, unchanged. What is excluded is the set with no runtime
     # counterpart, listed in one place so a new wire-only field is a deliberate addition here
     # rather than a puzzling failure.
-    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS) == config.model_dump()
+    assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS | {"source"}) == config.model_dump(
+        exclude={"agent", "agent_config"}
+    )
+    assert target.source == GymAgentSource(component=config.agent, config=config.agent_config)
 
 
 def test_gym_runner_submission_carries_refs_but_not_custom_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -357,8 +362,7 @@ def test_a_hand_written_target_cannot_name_a_variable_both_ways_either() -> None
     # Same rule as GymRuntimeConfig, because a hand-written spec never passes through one.
     with pytest.raises(ValidationError, match="GYM_MODEL_KEY"):
         GymRunnerTarget(
-            agent="simple_agent",
-            agent_config="c",
+            source=GymAgentSource(component="simple_agent", config="c"),
             resources_server="mcqa",
             env_vars={"GYM_MODEL_KEY": "plaintext"},
             env_secrets={"GYM_MODEL_KEY": SecretRef("evals/nvidia-api-key")},

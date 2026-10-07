@@ -51,6 +51,25 @@ class TestSourcePaths:
             FileSetSource(fileset="fs-a", context_path=bad)
 
 
+class TestArchives:
+    @pytest.mark.parametrize(
+        "archive", ["task.tar", "tb/task.tar.gz", "task.tgz", "task.tar.bz2", "task.tbz2", "task.tar.xz", "TASK.TXZ"]
+    )
+    def test_a_tar_archive_compressed_or_not_is_a_source(self, archive: str) -> None:
+        source = FileSetSource(fileset="fs-a", archive=archive, context_path="environment")
+        assert (source.archive, source.context_path) == (archive, "environment")
+
+    @pytest.mark.parametrize("bad", ["task.zip", "task.gz", "task", "task.tar.zst"])
+    def test_anything_but_a_tar_is_refused(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="tar archive"):
+            FileSetSource(fileset="fs-a", archive=bad)
+
+    @pytest.mark.parametrize("bad", ["../task.tar", "/task.tar", "a/../../task.tar"])
+    def test_an_archive_stays_inside_the_fileset(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="archive"):
+            FileSetSource(fileset="fs-a", archive=bad)
+
+
 class TestUnknownFieldsAreRefused:
     def test_on_the_spec(self) -> None:
         body = _spec("x").model_dump() | {"dockerFile": "build/Dockerfile"}
