@@ -86,10 +86,12 @@ nemo jobs get-logs anonymizer-run-2026-05-12-abc123
 ```
 
 ```python
+from nemo_anonymizer_plugin.sdk.resources import AnonymizerResource
 from nemo_helix_plugin.client.client import NemoClient
 
 client = NemoClient.from_config()
-job = client.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
+anonymizer = AnonymizerResource(client)
+job = anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
 job.wait_until_done()
 results = job.download_artifacts()
 dataset = results.load_dataset()
