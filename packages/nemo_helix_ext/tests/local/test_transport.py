@@ -96,8 +96,8 @@ async def test_build_async_asgi_http_client_reaches_app() -> None:
 def test_wait_for_status_bounds_probe_and_sleep_by_remaining_deadline() -> None:
     with (
         patch("nemo_helix_ext.local.transport.probe_status", return_value=False) as probe_status,
-        patch("nemo_helix_ext.local.transport.time.monotonic", side_effect=[0.0, 4.0, 4.5, 5.0]),
-        patch("nemo_helix_ext.local.transport.time.sleep") as sleep,
+        patch("nemo_helix_ext.local.transport.monotonic", side_effect=[0.0, 4.0, 4.5, 5.0]),
+        patch("nemo_helix_ext.local.transport.sleep") as sleep,
     ):
         result = transport.wait_for_status(base_url="http://127.0.0.1:8080", timeout=5.0, poll_interval=10.0)
 
@@ -111,8 +111,8 @@ def test_wait_for_status_bounds_probe_and_sleep_by_remaining_deadline() -> None:
 async def test_wait_for_status_async_bounds_probe_and_sleep_by_remaining_deadline() -> None:
     with (
         patch("nemo_helix_ext.local.transport.probe_status_async", new=AsyncMock(return_value=False)) as probe_status,
-        patch("nemo_helix_ext.local.transport.time.monotonic", side_effect=[0.0, 4.0, 4.5, 5.0]),
-        patch("nemo_helix_ext.local.transport.asyncio.sleep", new=AsyncMock()) as sleep,
+        patch("nemo_helix_ext.local.transport.monotonic", side_effect=[0.0, 4.0, 4.5, 5.0]),
+        patch("nemo_helix_ext.local.transport.async_sleep", new=AsyncMock()) as sleep,
     ):
         result = await transport.wait_for_status_async(
             base_url="http://127.0.0.1:8080", timeout=5.0, poll_interval=10.0
@@ -157,7 +157,7 @@ async def test_probe_status_async_returns_false_for_request_error() -> None:
 def test_wait_for_status_returns_true_without_sleep_when_probe_succeeds() -> None:
     with (
         patch("nemo_helix_ext.local.transport.probe_status", return_value=True) as probe_mock,
-        patch("nemo_helix_ext.local.transport.time.sleep") as sleep,
+        patch("nemo_helix_ext.local.transport.sleep") as sleep,
     ):
         assert transport.wait_for_status(base_url="http://127.0.0.1:8080", timeout=5.0) is True
 
