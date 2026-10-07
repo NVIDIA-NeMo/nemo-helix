@@ -10,6 +10,11 @@ explicitly: ``AgentsResource(client)`` or ``AsyncAgentsResource(async_client)``.
 Usage::
 
     from nemo_agents_plugin.sdk import AgentsResource
+    from nemo_agents_plugin.entities import (
+        ComputeResources,
+        ComputeSpecInline,
+        EnvironmentSpecInline,
+    )
     from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
