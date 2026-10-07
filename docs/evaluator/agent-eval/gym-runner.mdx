@@ -420,6 +420,87 @@ On a sandbox-enabled deployment, the Evaluator step runs in `nhx-tasks` and call
 `nhx-gym-tasks`. A target with an `environment` FileSet is rejected on the compatibility path and
 adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment.
 
+## Run a registered agent
+
+An agent registered on the platform with `nemo agents create` can be the Gym target's `source`, in
+place of a Gym `component`:
+
+```json
+{
+  "tasks": "default/my-gym-taskset",
+  "target": {
+    "kind": "gym",
+    "source": {"agent": "calculator-agent"},
+    "resources_server": "mcqa",
+    "num_repeats": 2
+  }
+}
+```
+
+At submit time the service resolves the agent exactly as `nemo agents deploy` would (models bound to
+the workspace's Inference Gateway, the optional `source.environment` merged on top) and keeps the
+translated config on the target as `resolved_config`. Gym's `policy_*` settings default to the agent's
+default model, so the policy model server proxies to the same model the agent would call when deployed;
+set them in `hydra_params` to point it elsewhere.
+
+```json
+{
+  "tasks": "default/my-gym-taskset",
+  "target": {
+    "kind": "gym",
+    "source": {
+      "agent": "calculator-agent",
+      "environment": {
+        "mcp": {"calculator": {"url": "http://mock-calculator:8000/mcp"}},
+        "env": {"CALC_MODE": "strict"},
+        "secrets": {"CALC_TOKEN": "calc-token"}
+      }
+    },
+    "resources_server": "mcqa",
+    "hydra_params": {
+      "policy_base_url": "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    }
+  }
+}
+```
+
+`environment.mcp.calculator.url` replaces the URL of the `calculator` server the agent declares (a server it
+does not declare is rejected), `env` is plain process environment for the component, and `secrets` binds
+an environment variable to a Secrets entry by name. `hydra_params.policy_base_url` is the laptop case:
+the policy model server runs inside the sandbox, so it reaches the gateway through `host.docker.internal`.
+A value you set in `hydra_params` always wins over the default derived from the agent.
+
+The job's `stage-environment` step then assembles a `wheels-v1` environment package: the platform's
+Gym agent component, an agent-instance config carrying the resolved config, the agent's Ethos files
+(skills and prompts it refers to by relative path, from the snapshot submission took), and a wheelhouse with the Fabric harness the
+agent needs, downloaded for the Gym host's interpreter. The sandboxed Gym host installs that
+wheelhouse offline and runs the component like any package-supplied agent: the registered agent's
+identity, harness, instructions, tools, MCP servers and skills are what run; only its default model is
+rebound to Gym's policy model server. Secrets bound to the agent's environment travel as
+`env_secrets` and reach the component's process, where a stdio MCP server's `${NAME}` templates are
+filled.
+
+What this requires:
+
+- Sandboxed execution. Colocated Gym ignores the staged package, so a registered agent is refused
+  there.
+- If you also supply a `target.environment` FileSet, it must be `wheels-v1`; the agent's package is
+  added to it, and a `native-v1` package has no offline way to install the harness.
+- The sandbox must be allowed to reach the Inference Gateway URL the agent's model is bound to
+  (`sandbox_policy_base_urls`); on a laptop that means the gateway through `host.docker.internal`,
+  not `localhost`.
+- The wheelhouse is downloaded from a package index by the job container on every run, tens of
+  megabytes per harness. Image-side packaging is planned to replace this.
+- The wheelhouse is resolved under the Gym host image's own package pins, so the harness installs into
+  the host without moving anything the host already has. Nothing to configure: the pins ship with the
+  evaluator and follow the image's lock.
+- The agent's `runtime.timeout_seconds` is its per-rollout task budget, enforced by Fabric from the moment
+  the harness starts the task; an agent that declares none gets 600 seconds. Adapter start-up and
+  wheelhouse installation inside the host do not count against it.
+- A registered agent that binds several models keeps only its default through Gym's policy server;
+  named secondary models still call the gateway directly. Relay/ATIF trajectory capture from inside
+  the Gym host is not wired yet; the rollout record carries the agent's messages as Responses items.
+
 ## Caveats
 
 - **Per-environment dependencies are heterogeneous.** `mcqa` needs only `tiktoken`; other Gym
@@ -429,7 +510,8 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
   Rows that are already complete, like the bundled `example.jsonl`, are faithful; an environment
   whose rows need templating would need that step run first.
 - **Custom environments require platform support.** Package the environment as a FileSet and use
-  sandboxed execution; `environment` and `agent_ref_name` are `GymPlacement` fields supplied at
+  sandboxed execution; `environment` and `agent_ref_name` (the target's `source.instance`) are
+  `GymPlacement` fields supplied at
   submission, so a live `GymAgentTaskRunner` cannot carry them. `env_secrets` is *not* in that
   group — it lives on `GymRuntimeConfig`. Local runs look for the workspace-prefixed environment
   variable first, then the bare name. Pass `secret_resolver=` to `GymAgentTaskRunner` for a custom

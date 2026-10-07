@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_evaluator.api.schemas import MetadataItem, MetricInline, TaskInputs, TasksetRef
+from nemo_evaluator.api.schemas import AgentRef, MetadataItem, MetricInline, TaskInputs, TasksetRef
 from nemo_evaluator.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evaluator.cli import EvaluatorPluginCLI
 from nemo_evaluator.config import EvaluatorConfig
@@ -27,7 +27,6 @@ from nemo_evaluator.jobs.agent_evaluate import (
     SUMMARY_RESULT_NAME,
     AgentEvalJob,
     AsyncAgentEvalJob,
-    _resolve_gym_environment,
 )
 from nemo_evaluator.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -52,6 +51,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     SandboxUnavailableError,
     SessionBackedGymRunner,
 )
+from nemo_evaluator.jobs.gym_submission import resolve_gym_environment
 from nemo_evaluator.jobs.kinds.evaluator import _to_runtime_task
 from nemo_evaluator.jobs.publication import PublicationOutcome
 from nemo_evaluator.jobs.publication_spec import IntakePublicationSpec, PublicationSpec
@@ -1543,6 +1543,30 @@ async def test_compile_rejects_fileset_environment_when_sandboxing_is_disabled(m
         )
 
 
+async def test_compile_rejects_a_registered_gym_agent_when_sandboxing_is_disabled(mocker: MockerFixture) -> None:
+    """A registered agent stages an environment tree with no `target.environment`; compile must still check it."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        return_value="registry.example/nhx-gym-tasks:test",
+    )
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+        resources_server="mcqa",
+        resolved_config={"harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"}},
+    )
+
+    with pytest.raises(HelixJobCompilationError, match="registered agent's Gym package require sandboxed execution"):
+        await AgentEvalJob.compile(
+            workspace="dev",
+            spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
+            entity_client=object(),
+            job_name=None,
+            async_sdk=_async_sdk(),
+        )
+
+
 async def test_compile_rejects_mismatched_job_and_sandbox_storage_pvcs(mocker: MockerFixture) -> None:
     mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
@@ -1665,7 +1689,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="custom-gym"),
         source=GymAgentSource(
@@ -1674,7 +1698,7 @@ async def test_resolve_gym_environment_qualifies_and_validates_purpose(mocker: M
         resources_server="custom_resources",
     )
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         target,
         workspace="dev",
         async_client=_async_sdk(),
@@ -1715,9 +1739,9 @@ async def test_resolve_gym_environment_accepts_native_v1(mocker: MockerFixture) 
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
-    resolved = await _resolve_gym_environment(
+    resolved = await resolve_gym_environment(
         _gym_environment_target(),
         workspace="dev",
         async_client=_async_sdk(),
@@ -1732,7 +1756,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     response.data.return_value = SimpleNamespace(purpose=FilesetPurpose.DATASET)
     files = mocker.Mock()
     files.get_fileset = mocker.AsyncMock(return_value=response)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
     target = GymRunnerTarget(
         environment=FilesetRef(root="dev/not-an-environment"),
         source=GymAgentSource(
@@ -1742,7 +1766,7 @@ async def test_resolve_gym_environment_rejects_wrong_purpose(mocker: MockerFixtu
     )
 
     with pytest.raises(ValueError, match="expected 'environment'"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             target,
             workspace="dev",
             async_client=_async_sdk(),
@@ -1760,10 +1784,10 @@ async def test_resolve_gym_environment_rejects_missing_manifest(mocker: MockerFi
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock()
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="has no nemo-environment.yaml at its root"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -1783,10 +1807,10 @@ async def test_resolve_gym_environment_rejects_manifest_listing_mismatch(mocker:
     files.get_fileset = mocker.AsyncMock(return_value=response)
     files.list_files = mocker.AsyncMock(return_value=listing)
     files.download_file = mocker.AsyncMock(return_value=manifest)
-    mocker.patch("nemo_evaluator.jobs.agent_evaluate.client_from_platform", return_value=files)
+    mocker.patch("nemo_evaluator.jobs.gym_submission.client_from_platform", return_value=files)
 
     with pytest.raises(ValueError, match="config_paths reference files that are not in the package"):
-        await _resolve_gym_environment(
+        await resolve_gym_environment(
             _gym_environment_target(),
             workspace="dev",
             async_client=_async_sdk(),
@@ -2410,7 +2434,7 @@ async def test_gym_submission_validates_before_environment_resolution(monkeypatc
     from nemo_evaluator.api.schemas import MetadataItem
 
     resolver = AsyncMock(side_effect=lambda target, **kwargs: target)
-    monkeypatch.setattr("nemo_evaluator.jobs.agent_evaluate._resolve_gym_environment", resolver)
+    monkeypatch.setattr("nemo_evaluator.jobs.gym_submission.resolve_gym_environment", resolver)
     request = AgentEvalInputSpec(
         tasks=[
             AgentEvalTaskInput(
@@ -2475,3 +2499,42 @@ async def test_non_gym_submission_never_prepares_gym(monkeypatch, target: Target
     )
     assert isinstance(result, AgentEvalSpec)
     assert result.target == target
+
+
+async def test_compile_registered_gym_agent_stages_its_package_before_evaluation(mocker: MockerFixture) -> None:
+    """A registered agent stages even with no environment FileSet: the package it runs from is built by that step."""
+    _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evaluator.jobs.agent_compiler.config.gym_tasks_image", None)
+    mocker.patch(
+        "nemo_evaluator.jobs.agent_compiler.get_qualified_image",
+        side_effect=lambda name: f"registry.example/{name}:test",
+    )
+    _enable_fileset_sandbox(mocker)
+    target = GymRunnerTarget(
+        source=RegisteredAgentSource(
+            agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+        ),
+        resources_server="mcqa",
+        resolved_config={
+            "harness": {"adapter_id": "nvidia.fabric.langchain.deepagents"},
+            "skills": {"paths": ["skills/a"]},
+        },
+    )
+
+    compiled = await AgentEvalJob.compile(
+        workspace="dev",
+        spec=AgentEvalSpec(tasks=[_task_spec()], target=target),
+        entity_client=object(),
+        job_name=None,
+        async_sdk=_async_sdk(),
+    )
+
+    stage, evaluate = HelixJobSpec.model_validate(compiled).steps
+    assert (stage.name, evaluate.name) == ("stage-environment", "agent-evaluate")
+    config = cast(dict[str, Any], stage.config)
+    assert "environment" not in config and config["agent_files"] == "dev/agent-files-0123abcd4567"
+    package = config["gym_registered_agent"]
+    assert package["agent"] == "dev/calc" and package["resolved_config"] == target.resolved_config
+    assert package["requirements"][0].startswith("nemo-fabric[deepagents,relay]==")
+    assert "constraints" not in package  # the host image's pins ship with the plugin, not with the spec
+    assert package["requirements"] == [package["requirements"][0]]  # the extra alone; the host lock pins companions

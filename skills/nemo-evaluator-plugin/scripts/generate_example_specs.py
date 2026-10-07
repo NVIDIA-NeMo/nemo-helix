@@ -206,6 +206,23 @@ def build_registered_agent_eval_spec() -> dict[str, Any]:
     }
 
 
+def build_gym_registered_agent_eval_spec() -> dict[str, Any]:
+    """Return a Gym agent-evaluation spec that runs a registered platform agent on the sandboxed host."""
+    return {
+        "tasks": "default/my-gym-taskset",
+        "target": {
+            "kind": "gym",
+            "source": {"agent": "default/calculator-agent"},
+            "resources_server": "mcqa",
+            "num_repeats": 1,
+            "concurrency": 1,
+        },
+        "max_concurrent_tasks": 1,
+        "fail_fast": True,
+        "labels": {"benchmark": "registered-agent-gym"},
+    }
+
+
 def build_gym_agent_eval_spec() -> dict[str, Any]:
     """Return a durable custom-environment Gym agent-evaluation spec."""
     return {
@@ -242,6 +259,7 @@ AGENT_SPEC_BUILDERS: dict[str, SpecBuilder] = {
     "fabric_agent_eval.json": build_fabric_agent_eval_spec,
     "gym_agent_eval.json": build_gym_agent_eval_spec,
     "registered_agent_eval.json": build_registered_agent_eval_spec,
+    "gym_registered_agent_eval.json": build_gym_registered_agent_eval_spec,
 }
 
 

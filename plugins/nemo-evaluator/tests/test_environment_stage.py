@@ -5,7 +5,12 @@ from pathlib import Path
 
 import httpx
 import pytest
-from nemo_evaluator.jobs.environment_stage import EnvironmentStageJob
+from nemo_evaluator.jobs.environment_stage import (
+    AGENT_FILES_STAGING_DIR,
+    ENVIRONMENT_STAGING_DIR,
+    ENVIRONMENT_STORAGE_DIR,
+    EnvironmentStageJob,
+)
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.job_context import JobContext, StoragePaths
 from nemo_helix_plugin.job_results import LocalJobResults
@@ -153,3 +158,112 @@ def test_run_passes_the_declared_typed_client(tmp_path: Path, mocker: MockerFixt
 
     assert result["status"] == "completed"
     assert received["client"] is client
+
+
+def test_a_registered_gym_agent_stages_its_files_and_package_on_top_of_the_environment(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """One environment tree: the user's package first, the agent's Ethos files and generated package added to it."""
+    ctx = _context(tmp_path)
+    task_client = _task_client(mocker)
+
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        if fileset == "custom-gym":
+            Path(destination, "nemo-environment.yaml").write_text(
+                "format: wheels-v1\nconfig_paths: [resources_servers/g/configs/g.yaml]\nmetadata: {name: g}\n"
+            )
+            Path(destination, "resources_servers", "g", "configs").mkdir(parents=True)
+            Path(destination, "resources_servers", "g", "configs", "g.yaml").write_text("g: {}\n")
+            Path(destination, "wheels").mkdir()
+            Path(destination, "wheels", "g-1.0-py3-none-any.whl").write_bytes(b"")
+        else:
+            assert (workspace, fileset) == ("dev", "calc-ethos")
+            Path(destination, "skills", "a").mkdir(parents=True)
+            Path(destination, "skills", "a", "SKILL.md").write_text("# a")
+
+    mocker.patch("nemo_evaluator.jobs.environment_stage._download_fileset_contents", side_effect=download_contents)
+    downloaded: list = []
+    mocker.patch(
+        "nemo_evaluator.jobs.gym_registered_agent_package.download_wheels",
+        side_effect=lambda reqs, cons, dest, pv, plat: (
+            downloaded.append(list(reqs)) or (dest / "nemo_fabric-0.3.0-py3-none-any.whl").write_bytes(b"")
+        ),
+    )
+
+    result = EnvironmentStageJob().run(
+        {
+            "environment": "shared/custom-gym",
+            "agent_files": "dev/calc-ethos",
+            "gym_registered_agent": {
+                "agent": "dev/calc",
+                "resolved_config": {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
+                "requirements": ["nemo-fabric[deepagents,relay]==0.3.0"],
+            },
+        },
+        ctx=ctx,
+        client=task_client,
+    )
+
+    root = ctx.storage.persistent / "environment"
+    assert (root / "resources_servers" / "g" / "configs" / "g.yaml").is_file()
+    assert (root / "responses_api_agents" / "nemo_registered_agent" / "app.py").is_file()
+    assert (
+        root
+        / "responses_api_agents"
+        / "nemo_registered_agent"
+        / "agents"
+        / "registered_calc"
+        / "skills"
+        / "a"
+        / "SKILL.md"
+    ).is_file()
+    assert (root / "wheels" / "nemo_fabric-0.3.0-py3-none-any.whl").is_file()
+    assert downloaded == [["nemo-fabric[deepagents,relay]==0.3.0"]]
+    assert not (ctx.storage.persistent / ".agent-files-staging").exists()
+    assert result["agent_files"] == "dev/calc-ethos" and result["environment"] == "shared/custom-gym"
+
+
+def test_stage_spec_needs_something_to_stage() -> None:
+    from nemo_evaluator.jobs.environment_stage import EnvironmentStageSpec
+
+    with pytest.raises(ValueError, match="nothing to stage"):
+        EnvironmentStageSpec()
+    with pytest.raises(ValueError, match="agent_files"):
+        EnvironmentStageSpec(environment="ws/env", agent_files="ws/ethos")
+
+
+def test_a_failed_package_write_leaves_no_scratch_copy_of_the_agent_files(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """The Ethos files land in a scratch dir before they are copied into the package; a failure must not keep them."""
+    ctx = _context(tmp_path)
+    task_client = _task_client(mocker)
+
+    def download_contents(*, client: NemoClient, workspace: str, fileset: str, destination: Path) -> None:
+        Path(destination, "skills", "a").mkdir(parents=True)
+        Path(destination, "skills", "a", "SKILL.md").write_text("# a")
+
+    mocker.patch("nemo_evaluator.jobs.environment_stage._download_fileset_contents", side_effect=download_contents)
+    mocker.patch(
+        "nemo_evaluator.jobs.gym_registered_agent_package.download_wheels",
+        side_effect=RuntimeError("wheelhouse download failed for ['nemo-fabric[deepagents,relay]==0.3.0']"),
+    )
+
+    with pytest.raises(RuntimeError, match="wheelhouse download failed"):
+        EnvironmentStageJob().run(
+            {
+                "agent_files": "dev/calc-ethos",
+                "gym_registered_agent": {
+                    "agent": "dev/calc",
+                    "resolved_config": {"harness": {"adapter_id": "x"}, "skills": {"paths": ["skills/a"]}},
+                    "requirements": ["nemo-fabric[deepagents,relay]==0.3.0"],
+                },
+            },
+            ctx=ctx,
+            client=task_client,
+        )
+
+    persistent = ctx.storage.persistent
+    assert not (persistent / AGENT_FILES_STAGING_DIR).exists()
+    assert not (persistent / ENVIRONMENT_STAGING_DIR).exists()
+    assert not (persistent / ENVIRONMENT_STORAGE_DIR).exists()
