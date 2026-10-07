@@ -763,6 +763,8 @@ securityContext: {}
 # -- API configuration settings for the api deployment
 # @default -- This object has the following default values for the API configuration.
 api:
+  # -- Component label shared by API selectors and matching resources. Keep unchanged for existing Deployments.
+  componentLabel: nhx-api
   # -- Specifies whether to enable the api deployment.
   enabled: true
 
@@ -1010,6 +1012,8 @@ core:
 
   # @default -- This object has the following default values for the controller configuration.
   controller:
+    # -- Component label shared by controller selectors and matching resources. Keep unchanged for existing Deployments.
+    componentLabel: nhx-core-controller
     # -- Service account configuration for the controller service.
     # @default -- This object has the following default values for the service account configuration.
     serviceAccount:

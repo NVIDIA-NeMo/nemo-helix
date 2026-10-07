@@ -8,6 +8,26 @@
 Documentation can be found at: https://docs.nvidia.com/nemo-helix.
 For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
+## Upgrading existing installations
+
+Kubernetes Deployment selectors are immutable. If your existing component labels
+differ from the chart defaults, set `api.componentLabel` and
+`core.controller.componentLabel` to match the deployed selectors. For example,
+an installation using the legacy labels would use:
+
+```yaml
+api:
+  componentLabel: nmp-api
+core:
+  controller:
+    componentLabel: nmp-core-controller
+```
+
+Retain these overrides on subsequent upgrades for the lifetime of those
+Deployments. Also preserve your existing release name, resource names, storage
+configuration, and encryption key and its Secret reference. Fresh installations
+use the chart defaults.
+
 ## Platform Secrets Encryption Key
 
 The platform secrets service reads `NHX_SECRETS_DEFAULT_ENCRYPTION_KEY` from the
