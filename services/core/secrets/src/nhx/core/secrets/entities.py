@@ -8,6 +8,9 @@ from pydantic import Field, PrivateAttr
 class HelixSecret(EntityBase):
     """A platform secret, which represents a secret entity within the platform."""
 
+    # Persisted entity types must stay stable across Python class renames.
+    __entity_type__ = "platform_secret"
+
     description: str | None = Field(None, description="An optional description of the secret")
 
     # Secret data is stored as a private attribute and not exposed in API responses

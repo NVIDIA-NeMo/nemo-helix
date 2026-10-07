@@ -190,6 +190,18 @@ nemo setup --auto --start-services
 
 **Priority order:** `NEMO_DEFAULT_INFERENCE_KEY` > `NVIDIA_API_KEY` > `OPENAI_API_KEY` > `ANTHROPIC_API_KEY` > `GEMINI_API_KEY`
 
+If your key is valid only against a non-default endpoint, set `NEMO_DEFAULT_INFERENCE_BASE_URL` with `NEMO_DEFAULT_INFERENCE_KEY`, or pass `--inference-base-url`:
+
+```bash
+export NEMO_DEFAULT_INFERENCE_KEY=nvapi-...
+export NEMO_DEFAULT_INFERENCE_BASE_URL=https://inference-api.nvidia.com/v1
+nemo setup --auto --start-services
+
+# Equivalent flag form
+export NVIDIA_API_KEY=nvapi-...
+nemo setup --auto --start-services --inference-base-url https://inference-api.nvidia.com/v1
+```
+
 ### Flags
 
 | Flag | Default | Description |
@@ -198,6 +210,7 @@ nemo setup --auto --start-services
 | `--workspace`, `-w` | `default` | Target workspace |
 | `--start-services` / `--no-start-services` | prompt (interactive) or skip (auto) | Start local Helix services |
 | `--install-skills` / `--no-install-skills` | prompt (interactive) or skip (auto) | Install NeMo skills for detected coding agents |
+| `--inference-base-url` | provider default | Provider base URL to use in `--auto` mode; equivalent to `NEMO_DEFAULT_INFERENCE_BASE_URL` |
 
 Override the default and fast models with `NEMO_DEFAULT_MODEL` and
 `NEMO_FAST_MODEL`. If the fast override is omitted, it reuses the default.

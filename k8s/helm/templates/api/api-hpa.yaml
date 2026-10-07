@@ -17,7 +17,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nhx-api
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.api.autoscaling.annotations }}
   annotations:
