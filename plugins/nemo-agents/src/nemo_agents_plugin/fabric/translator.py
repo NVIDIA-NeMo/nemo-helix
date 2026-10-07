@@ -48,8 +48,23 @@ class FabricTranslationError(ValueError):
 
 def translate_agent_config(config: AgentConfig, harness_name: str | None = None) -> fabric.FabricConfig:
     """Translate Platform-owned agent config into a typed in-memory FabricConfig."""
-    selected_harness_name, harness = _select_harness(config, harness_name)
-    model = _resolve_model(config, selected_harness_name, harness)
+    harness_config = None
+    workflow_config = None
+    if config.workflow is not None:
+        if harness_name is not None:
+            raise FabricTranslationError("A harness override cannot be used with a workflow config.")
+        workflow_config = fabric.WorkflowConfig(**config.workflow.model_dump())
+        model = config.models.get("default")
+        if model is None:
+            raise FabricTranslationError("Workflow requires models.default to be configured.")
+    else:
+        selected_harness_name, harness = _select_harness(config, harness_name)
+        model = _resolve_model(config, selected_harness_name, harness)
+        harness_config = fabric.HarnessConfig(
+            adapter_id=_adapter_id_for_harness(harness),
+            resolution="preinstalled",
+            settings=harness.settings,
+        )
     model_payloads = _model_payloads(config, model)
     runtime_env = {
         **_platform_runtime_env(),
@@ -62,11 +77,8 @@ def translate_agent_config(config: AgentConfig, harness_name: str | None = None)
 
     fabric_config = fabric.FabricConfig(
         metadata=fabric.MetadataConfig(name=config.name, description=config.description or None),
-        harness=fabric.HarnessConfig(
-            adapter_id=_adapter_id_for_harness(harness),
-            resolution="preinstalled",
-            settings=harness.settings,
-        ),
+        harness=harness_config,
+        workflow=workflow_config,
         models={key: fabric.ModelConfig(**payload) for key, payload in model_payloads.items()},
         instructions=_instructions_config(config),
         runtime=fabric.RuntimeConfig(**runtime_payload),
@@ -117,6 +129,8 @@ def _environment_config(config: AgentConfig, runtime_env: dict[str, str]) -> Any
 
 def _select_harness(config: AgentConfig, harness_name: str | None) -> tuple[str, HarnessConfig]:
     selected_harness_name = harness_name or config.default_harness
+    if selected_harness_name is None:
+        raise FabricTranslationError("No default_harness is configured.")
     harness = config.harnesses.get(selected_harness_name)
     if harness is None:
         available = ", ".join(sorted(config.harnesses))
