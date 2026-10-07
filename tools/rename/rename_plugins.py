@@ -100,6 +100,7 @@ class Change:
     path: Path
     destination: Path
     content: bytes | None
+    symlink_target: str | None = None
 
 
 def plan(profile: Profile, include: tuple[str, ...], exclude: tuple[str, ...]) -> list[Change]:
@@ -111,10 +112,7 @@ def plan(profile: Profile, include: tuple[str, ...], exclude: tuple[str, ...]) -
     git_excludes = [f"--exclude={pattern[:-2] if pattern.endswith('/**') else pattern}" for pattern in excluded]
     candidates = git_paths("ls-files", "-z", "--cached", "--others", "--exclude-standard", *git_excludes)
     for path in sorted(set(git_file_set(include, excluded, paths=candidates))):
-        if path.is_symlink():
-            # Do not read or rewrite symlink targets, which may be outside the checkout.
-            continue
-        if not path.is_file():
+        if not path.is_symlink() and not path.is_file():
             continue
         destination = profile.destination(path)
         if destination != path:
@@ -128,14 +126,30 @@ def plan(profile: Profile, include: tuple[str, ...], exclude: tuple[str, ...]) -
                     raise ValueError(f"Destination parent is not a directory: {parent}")
                 if parent.is_symlink():
                     raise ValueError(f"Destination parent is a symlink: {parent}")
-        text = read_text(path)
         content = None
-        if text is not None:
-            updated = profile.transform(path, text)
-            if updated != text:
-                content = updated.encode("utf-8")
-        if destination != path or content is not None:
-            changes.append(Change(path, destination, content))
+        symlink_target = None
+        if path.is_symlink():
+            # Read the link itself, never its target's contents. Remap repo-local
+            # targets lexically, including dangling links left by a partial rename.
+            target = Path(os.readlink(path))
+            absolute = Path(os.path.abspath(path.parent / target))
+            try:
+                relative = absolute.relative_to(Path.cwd())
+            except ValueError:
+                mapped = absolute
+            else:
+                mapped = Path.cwd() / profile.destination(relative)
+            updated_target = str(mapped) if target.is_absolute() else os.path.relpath(mapped, destination.parent)
+            if updated_target != str(target):
+                symlink_target = updated_target
+        else:
+            text = read_text(path)
+            if text is not None:
+                updated = profile.transform(path, text)
+                if updated != text:
+                    content = updated.encode("utf-8")
+        if destination != path or content is not None or symlink_target is not None:
+            changes.append(Change(path, destination, content, symlink_target))
     return changes
 
 
@@ -158,7 +172,9 @@ def main() -> int:
         changes = plan(profile, tuple(args.include_glob), tuple(args.exclude_glob))
         print(profile.name)
         for change in changes:
-            actions = "content" if change.content is not None else "path"
+            actions = (
+                "content" if change.content is not None else "symlink" if change.symlink_target is not None else "path"
+            )
             if change.destination != change.path:
                 actions += f" -> {change.destination}"
             print(f"  {change.path}: {actions}")
@@ -171,7 +187,10 @@ def main() -> int:
             return 0
         # Preflight all paths and content before making the first edit.
         for change in changes:
-            if change.content is not None:
+            if change.symlink_target is not None:
+                change.path.unlink()
+                change.path.symlink_to(change.symlink_target)
+            elif change.content is not None:
                 change.path.write_bytes(change.content)
             if change.destination != change.path:
                 change.destination.parent.mkdir(parents=True, exist_ok=True)

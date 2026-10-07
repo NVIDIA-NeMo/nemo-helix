@@ -1,6 +1,12 @@
 {
   "name": "NeMo Evaluator to NeMo Helix Evals",
-  "exclude": ["tools/rename/**", "tests/tools/rename/**", ".codex/**", ".npm-cache/**", "**/*.swp"],
+  "exclude": [
+    "tools/rename/**",
+    "tests/tools/rename/**",
+    ".codex/**",
+    ".npm-cache/**",
+    "**/*.swp"
+  ],
   "notes": [
     "Permissions, entity type names, task-kind discriminators, and all three existing job sources are preserved.",
     "MR compatibility note: old cloudpickle metric bundles and compiled jobs may reference removed Python modules; this rename provides no compatibility aliases or data migration.",
@@ -27,23 +33,37 @@
     },
     "rules": [
       {
-        "pattern": "(?<![\\w-])evaluator\\.(evaluate|agent-evaluate|retrieve-eval)\\b",
+        "pattern": "(?<![\\w-])evaluator\\.(evaluate|agent-evaluate|retrieve-eval)\\b(?!\\s*\\()",
         "replacement": "evals.\\1"
       },
       {
         "pattern": "^(evaluator)(\\s*=\\s*[\"'])",
         "replacement": "evals\\2",
-        "include": ["plugins/nemo-evaluator/pyproject.toml", "packages/nemo_helix/pyproject.toml"]
+        "include": [
+          "plugins/nemo-evaluator/pyproject.toml",
+          "packages/nemo_helix/pyproject.toml",
+          "plugins/nemo-evals/pyproject.toml"
+        ]
       },
       {
         "pattern": "((?:plugin_name|name): ClassVar\\[str\\] = )[\"']evaluator[\"']",
         "replacement": "\\1\"evals\"",
-        "include": ["plugins/nemo-evaluator/src/nemo_evaluator/service.py", "plugins/nemo-evaluator/src/nemo_evaluator/cli.py", "plugins/nemo-evaluator/src/nemo_evaluator/config.py"]
+        "include": [
+          "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
+          "plugins/nemo-evaluator/src/nemo_evaluator/cli.py",
+          "plugins/nemo-evaluator/src/nemo_evaluator/config.py",
+          "plugins/nemo-evals/src/nemo_evals/service.py",
+          "plugins/nemo-evals/src/nemo_evals/cli.py",
+          "plugins/nemo-evals/src/nemo_evals/config.py"
+        ]
       },
       {
         "pattern": "add_job_routes\\(EvaluateJob, authz=scope\\)",
         "replacement": "add_job_routes(EvaluateJob, service_name=\"nemo-evaluator\", authz=scope)",
-        "include": ["plugins/nemo-evaluator/src/nemo_evaluator/service.py"]
+        "include": [
+          "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
+          "plugins/nemo-evals/src/nemo_evals/service.py"
+        ]
       },
       {
         "pattern": "\\b(client|async_client|sdk|async_sdk|self)\\.evaluator\\b",
@@ -52,27 +72,119 @@
       {
         "pattern": "\\bdef evaluator\\(",
         "replacement": "def evals(",
-        "include": ["packages/nemo_helix_plugin/src/nemo_helix_plugin/client/client.py"]
+        "include": [
+          "packages/nemo_helix_plugin/src/nemo_helix_plugin/client/client.py"
+        ]
       },
       {
         "pattern": "((?:as_service|service_name|_EVALUATOR_SERVICE)\\s*=\\s*)[\"']evaluator[\"']",
         "replacement": "\\1\"evals\"",
-        "exclude": ["packages/nemo_helix_plugin/tests/test_path_rule.py"]
+        "exclude": [
+          "packages/nemo_helix_plugin/tests/test_path_rule.py"
+        ]
       },
       {
         "pattern": "([\"'])evaluator\\1",
         "replacement": "\\1evals\\1",
-        "include": ["agents/nemo-studio-assistant/src/nemo_studio_assistant/register.py", "agents/nemo-studio-assistant/tests/test_nemo_studio_assistant.py"]
+        "include": [
+          "agents/nemo-studio-assistant/src/nemo_studio_assistant/register.py",
+          "agents/nemo-studio-assistant/tests/test_nemo_studio_assistant.py"
+        ]
       },
       {
         "pattern": "([\"'])evaluator\\1",
         "replacement": "\\1evals\\1",
-        "include": ["packages/nemo_helix_ext/src/nemo_helix_ext/cli/manifest.py", "packages/nemo_helix_ext/scripts/docs_generator.py", "packages/nemo_helix_ext/tests/cli/test_app.py", "packages/nemo_helix_ext/tests/cli/test_docs_generator.py", "packages/nemo_helix_plugin/tests/client/test_client_resources.py", "packages/nemo_helix_plugin/tests/evaluator/**"]
+        "include": [
+          "packages/nemo_helix_ext/src/nemo_helix_ext/cli/manifest.py",
+          "packages/nemo_helix_ext/scripts/docs_generator.py",
+          "packages/nemo_helix_ext/tests/cli/test_app.py",
+          "packages/nemo_helix_ext/tests/cli/test_docs_generator.py",
+          "packages/nemo_helix_plugin/tests/client/test_client_resources.py",
+          "packages/nemo_helix_plugin/tests/evaluator/**"
+        ]
       },
       {
         "pattern": "^(\\s*)evaluator:(?=\\s*(?:\\{\\}|$))",
         "replacement": "\\1evals:",
-        "include": ["packages/nhx_platform/config/**", "contrib/auth/authentik/config/**", "e2e/configs/**", "k8s/helm/values.yaml", "docs/evaluator/agent-eval/gym-sandbox-configuration.mdx", "docs/set-up/milvus.mdx"]
+        "include": [
+          "packages/nhx_platform/config/**",
+          "contrib/auth/authentik/config/**",
+          "e2e/configs/**",
+          "k8s/helm/values.yaml",
+          "docs/evaluator/agent-eval/gym-sandbox-configuration.mdx",
+          "docs/set-up/milvus.mdx"
+        ]
+      },
+      {
+        "pattern": "(NEMO_PLUGIN_SERVICES_ALLOWLIST(?:=|:\\s*))evaluator\\b",
+        "replacement": "\\1evals"
+      },
+      {
+        "pattern": "(assert_called_once_with\\([\\\"\\'])evaluator([\\\"\\']\\))",
+        "replacement": "\\1evals\\2",
+        "include": [
+          "plugins/nemo-evaluator/tests/test_agent_evaluate.py",
+          "plugins/nemo-evaluator/tests/test_evaluate_job.py",
+          "plugins/nemo-evals/tests/test_agent_evaluate.py",
+          "plugins/nemo-evals/tests/test_evaluate_job.py"
+        ]
+      },
+      {
+        "pattern": "([\\\"\\']plugin[\\\"\\']:\\s*[\\\"\\'])evaluator([\\\"\\'])",
+        "replacement": "\\1evals\\2",
+        "include": [
+          "plugins/nemo-evaluator/tests/test_service.py",
+          "plugins/nemo-evals/tests/test_service.py"
+        ]
+      },
+      {
+        "pattern": "owner = service\\.name",
+        "replacement": "# Preserve the existing permission namespace for the renamed Evals service.\n    owner = {\"evals\": \"evaluator\"}.get(service.name, service.name)",
+        "include": [
+          "packages/nemo_helix_plugin/src/nemo_helix_plugin/authz_discovery.py"
+        ]
+      },
+      {
+        "pattern": "(status\\[[\\\"\\']plugin[\\\"\\']\\]\\s*==\\s*[\\\"\\'])evaluator([\\\"\\'])",
+        "replacement": "\\1evals\\2",
+        "include": [
+          "e2e/test_evaluator_plugin.py"
+        ]
+      },
+      {
+        "pattern": "(--services[^\\n]*?)\\bevaluator\\b",
+        "replacement": "\\1evals"
+      },
+      {
+        "pattern": "service:evaluator\\b",
+        "replacement": "service:evals",
+        "include": [
+          "packages/nemo_helix_plugin/tests/test_client_provider.py",
+          "packages/nemo_helix_plugin/tests/test_nemo_client_task_auth.py"
+        ]
+      },
+      {
+        "pattern": "([\\\"\\'])evaluator\\1",
+        "replacement": "\\1evals\\1",
+        "include": [
+          "packages/nemo_helix_plugin/tests/test_client_provider.py",
+          "packages/nemo_helix_plugin/tests/test_nemo_client_task_auth.py",
+          "packages/nemo_helix_plugin/tests/test_scheduler.py"
+        ]
+      },
+      {
+        "pattern": "evaluator(?=(?:Create|Get|List|Delete|Cancel|Download|Hello|Update|Replace|Normalize|Evaluate|Stream|Infer|Read|Submit|Say)[A-Z])",
+        "replacement": "evals",
+        "include": [
+          "web/**"
+        ]
+      },
+      {
+        "pattern": "Evaluator(?=(?:Create|Get|List|Delete|Cancel|Download|Hello|Update|Replace|Normalize|Evaluate|Stream|Infer|Read|Submit|Say)[A-Z])",
+        "replacement": "Evals",
+        "include": [
+          "web/**"
+        ]
       }
     ]
   },
@@ -85,6 +197,16 @@
     "paths": {
       "packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk": "packages/nhx_evals_sdk/src/nhx_evals_sdk",
       "packages/nemo_evaluator_sdk": "packages/nhx_evals_sdk"
-    }
+    },
+    "rules": [
+      {
+        "pattern": "nhx_\\[A-Za-z0-9_\\]\\+",
+        "replacement": "nhx_(?!evals_sdk(?:\\\\.|\\\\s|$))[A-Za-z0-9_]+",
+        "include": [
+          "packages/nemo_evaluator_sdk/tests/agent_eval/test_import_hygiene.py",
+          "packages/nhx_evals_sdk/tests/agent_eval/test_import_hygiene.py"
+        ]
+      }
+    ]
   }
 }

@@ -81,9 +81,9 @@ semantics as the existing rename tools. After paths move, use globs covering the
 new locations when verifying segmented work.
 
 The tool scans tracked and non-ignored untracked files, preflights destination
-collisions before editing, skips symlinks, and preserves binary contents while
+collisions before editing, remaps symlink paths and repo-local targets, and preserves binary contents while
 moving their paths. It removes only empty source directories. It does not follow
-symlink targets or rewrite serialized binary artifacts. Profiles should be
+symlinks when reading file contents or rewrite serialized binary artifacts. Profiles should be
 idempotent: `--verify` fails when another application would change any selected
 file or path, and succeeds once the configured transformations are exhausted.
 It does not prove runtime compatibility or detect names absent from the profile.

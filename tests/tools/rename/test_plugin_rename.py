@@ -145,6 +145,35 @@ class PluginRenameTests(unittest.TestCase):
         self.assertEqual(ignored.read_text(), "old_plugin")
         self.assertEqual((self.repo / "plugins/new_plugin/binary.dat").read_bytes(), b"old_plugin\0\xff")
 
+    def test_internal_symlink_moves_and_remaps_its_target(self) -> None:
+        data = json.loads(self.profile.read_text())
+        data["plugin"]["paths"]["skills/old_plugin"] = "skills/new_plugin"
+        self.profile.write_text(json.dumps(data))
+        self.write("skills/old_plugin/SKILL.md", "old_plugin")
+        link = self.repo / "plugins/old_plugin/skill"
+        link.parent.mkdir(parents=True)
+        link.symlink_to("../../skills/old_plugin")
+        result = self.run_rename("--allow-dirty")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        moved = self.repo / "plugins/new_plugin/skill"
+        self.assertTrue(moved.is_symlink())
+        self.assertEqual(moved.readlink(), Path("../../skills/new_plugin"))
+        self.assertEqual((moved / "SKILL.md").read_text(), "new_plugin")
+        self.assertEqual(self.run_rename("--verify").returncode, 0)
+
+    def test_dangling_symlink_target_is_checked_by_verifier(self) -> None:
+        data = json.loads(self.profile.read_text())
+        data["plugin"]["paths"]["skills/old_plugin"] = "skills/new_plugin"
+        self.profile.write_text(json.dumps(data))
+        link = self.repo / "plugins/new_plugin/skill"
+        link.parent.mkdir(parents=True)
+        link.symlink_to("../../skills/old_plugin")
+        self.assertEqual(self.run_rename("--verify").returncode, 1)
+        result = self.run_rename("--allow-dirty")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(link.readlink(), Path("../../skills/new_plugin"))
+        self.assertEqual(self.run_rename("--verify").returncode, 0)
+
     def test_include_exclude_and_tracked_ignored_files(self) -> None:
         self.write(".gitignore", "docs/\n")
         self.write("docs/yes.md", "old_plugin")
@@ -156,6 +185,36 @@ class PluginRenameTests(unittest.TestCase):
         self.assertEqual((self.repo / "docs/yes.md").read_text(), "new_plugin")
         self.assertEqual(excluded.read_text(), "old_plugin")
         self.assertEqual(other.read_text(), "old_plugin")
+
+    def test_evals_preserves_local_evaluator_calls_and_renames_service_lists(self) -> None:
+        self.write(
+            "packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/metrics/retrieval.py", "evaluator.evaluate({})\n"
+        )
+        self.write("plugins/nemo-optimization/driver.py", "evaluator.evaluate(spec)\n")
+        self.write(".github/workflows/ci.yaml", "NEMO_PLUGIN_SERVICES_ALLOWLIST: evaluator\n")
+        self.write("run.sh", "nemo services run --services auth,entities,evaluator\n")
+        self.write(
+            "web/consumer.ts", "evaluatorCreateEvaluateJob; useEvaluatorListEvaluateJobs; EvaluatorTaskDefinition;\n"
+        )
+        self.write("packages/nemo_helix_plugin/src/nemo_helix_plugin/authz_discovery.py", "    owner = service.name\n")
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (self.repo / "packages/nhx_evals_sdk/src/nhx_evals_sdk/metrics/retrieval.py").read_text(),
+            "evaluator.evaluate({})\n",
+        )
+        self.assertEqual((self.repo / "plugins/nemo-optimization/driver.py").read_text(), "evaluator.evaluate(spec)\n")
+        self.assertIn("ALLOWLIST: evals", (self.repo / ".github/workflows/ci.yaml").read_text())
+        self.assertIn("auth,entities,evals", (self.repo / "run.sh").read_text())
+        self.assertEqual(
+            (self.repo / "web/consumer.ts").read_text(),
+            "evalsCreateEvaluateJob; useEvalsListEvaluateJobs; EvaluatorTaskDefinition;\n",
+        )
+        self.assertIn(
+            '{"evals": "evaluator"}.get(service.name, service.name)',
+            (self.repo / "packages/nemo_helix_plugin/src/nemo_helix_plugin/authz_discovery.py").read_text(),
+        )
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
 
     def test_evals_preserves_permissions_entity_kinds_and_job_sources(self) -> None:
         paths = [
