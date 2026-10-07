@@ -63,8 +63,9 @@ active context. Otherwise, choose a model from `nemo models list` and set
 
 In another terminal:
 
+{/* @nemo-docs: allow-nhx-base-url */}
 ```bash
-export NHX_BASE_URL=http://127.0.0.1:8080  # nhx-base-url-allow: targets the platform started above
+export NHX_BASE_URL=http://127.0.0.1:8080  # targets the platform started above
 cd plugins/nemo-agents
 
 printf '%s' "$NVIDIA_API_KEY" | nemo secrets create ngc-api-key --from-file -

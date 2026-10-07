@@ -178,6 +178,7 @@ The `NHX_BASE_URL` environment variable overrides the base URL of every context.
 - **The NeMo CLI and `NemoClient.from_config()`:** leave `NHX_BASE_URL` unset. Setting it, even to a local default, overrides the deployment saved in your context.
 - **Tools that need a URL directly**, such as `curl` or an OpenTelemetry exporter: these can't read the CLI configuration. Examples in this documentation use `${NHX_BASE_URL:-http://localhost:8080}`, which falls back to a local deployment only when the variable is unset. If your context points at a remote deployment, export its URL first. For an authenticated deployment, pass a token from the current context with `nemo auth token`:
 
+  {/* @nemo-docs: allow-nhx-base-url */}
   ```bash
   export NHX_BASE_URL=https://nhx.example.com
   curl -H "Authorization: Bearer $(nemo auth token)" \
