@@ -38,11 +38,13 @@ Both `workspace` and `provider` are required. Other keys inside `nhx_uri_spec` a
 
 ## Worked Example
 
-Audit a NIM endpoint registered as the `nvidia-inference-api` provider in the `default` workspace. `auditor` is an `AuditorPluginResource` built from a typed client (see [SDK Resources](/documentation/vulnerability-scanning/sdk-resources)):
+Audit a NIM endpoint registered as the `nvidia-inference-api` provider in the `default` workspace:
 
 ```python
 from nemo_garak.sdk import GarakPluginResource
+from nemo_helix_plugin.client.client import NemoClient
 
+client = NemoClient.from_config()
 garak = GarakPluginResource(client)
 
 target = garak.targets.create(
