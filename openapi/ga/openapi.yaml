@@ -2440,6 +2440,123 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/git-repositories/find-files:
+    post:
+      tags:
+      - Files
+      summary: Find Files in a Git Repository
+      description: 'Find every file with a given name in the commit a git storage
+        config resolves to.
+
+
+        Runs the same checks as creating a fileset with this storage, without creating
+
+        one. The commit it fetches is cached, so a fileset created from it afterwards
+
+        does not fetch again.'
+      operationId: find_git_repository_files_apis_files_v2_workspaces__workspace__git_repositories_find_files_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FindGitRepositoryFilesRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindGitRepositoryFilesResponse'
+        '400':
+          description: The storage, its secret, or its host was rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '502':
+          description: The repository could not be reached
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/ssh-host-keys/scan:
+    post:
+      tags:
+      - Files
+      summary: Scan SSH Host Keys
+      description: 'Return the public host keys an SSH remote presents, with their
+        fingerprints.
+
+
+        The caller confirms a fingerprint before using the keys as a git fileset''s
+
+        `known_hosts`. Only hosts in the allowed external hosts list are scanned.'
+      operationId: scan_ssh_host_keys_apis_files_v2_workspaces__workspace__ssh_host_keys_scan_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanSshHostKeysRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanSshHostKeysResponse'
+        '400':
+          description: The URL is not an SSH remote, or its host is not in the allowed
+            list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '502':
+          description: The host could not be scanned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: string
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/guardrails/v2/workspaces/{workspace}/checks:
     post:
       tags:
@@ -13061,6 +13178,42 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FindGitRepositoryFilesRequest:
+      properties:
+        storage:
+          allOf:
+          - $ref: '#/components/schemas/GitStorageConfig'
+          description: The storage a git fileset would be created with
+        file_name:
+          type: string
+          minLength: 1
+          pattern: ^[^/]+$
+          title: File Name
+          description: A file name, without a directory, to look for anywhere under
+            the storage path
+      type: object
+      required:
+      - storage
+      - file_name
+      title: FindGitRepositoryFilesRequest
+    FindGitRepositoryFilesResponse:
+      properties:
+        revision:
+          type: string
+          title: Revision
+          description: The commit SHA the storage's revision resolved to
+        paths:
+          items:
+            type: string
+          type: array
+          title: Paths
+          description: Paths of every file with that name, relative to the storage
+            path
+      type: object
+      required:
+      - revision
+      - paths
+      title: FindGitRepositoryFilesResponse
     FinetuningType:
       type: string
       enum:
@@ -19023,6 +19176,32 @@ components:
       required:
       - bucket
       title: S3StorageConfig
+    ScanSshHostKeysRequest:
+      properties:
+        url:
+          type: string
+          title: Url
+          description: SSH remote whose host is scanned, e.g. 'git@gitlab.example.com:org/repo.git'
+      type: object
+      required:
+      - url
+      title: ScanSshHostKeysRequest
+    ScanSshHostKeysResponse:
+      properties:
+        host:
+          type: string
+          title: Host
+          description: The scanned host, with its port when it is not 22
+        keys:
+          items:
+            $ref: '#/components/schemas/SshHostKey'
+          type: array
+          title: Keys
+      type: object
+      required:
+      - host
+      - keys
+      title: ScanSshHostKeysResponse
     SecretRef:
       type: string
       pattern: ^[a-z0-9_-]+(/[a-z0-9_-]+)?$
@@ -19540,6 +19719,26 @@ components:
       required:
       - data
       title: SpansPage
+    SshHostKey:
+      properties:
+        key_type:
+          type: string
+          title: Key Type
+          description: Key algorithm, e.g. 'ssh-ed25519'
+        fingerprint:
+          type: string
+          title: Fingerprint
+          description: SHA256 fingerprint, in the form ssh prints it
+        known_hosts_line:
+          type: string
+          title: Known Hosts Line
+          description: The key as a known_hosts line, ready for `known_hosts`
+      type: object
+      required:
+      - key_type
+      - fingerprint
+      - known_hosts_line
+      title: SshHostKey
     StatusEnum:
       type: string
       enum:
