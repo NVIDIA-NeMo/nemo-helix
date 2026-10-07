@@ -21,7 +21,7 @@ import {
   parseJobTimestamp,
   parsePackageResult,
 } from '@studio/api/agents/packageAgent';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 interface UsePackageAgentParams {
@@ -38,11 +38,13 @@ interface UsePackageAgentParams {
 export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams) => {
   const [jobName, setJobName] = useState<string | undefined>();
   const [submittedAt, setSubmittedAt] = useState<number | undefined>();
+  const queryClient = useQueryClient();
+  const lastJobQueryKey = ['agents', 'package-job', workspace, agentName, 'latest'];
 
   // A reload loses the submitted job name, but not the job: without this the
   // page forgets an image the user watched being built.
   const lastJob = useQuery({
-    queryKey: ['agents', 'package-job', workspace, agentName, 'latest'],
+    queryKey: lastJobQueryKey,
     queryFn: async () => {
       const page = await agentsListPackageJobs(workspace, {
         page_size: 1,
@@ -64,6 +66,8 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
     onSuccess: (job) => {
       setJobName(job.name);
       setSubmittedAt(Date.now());
+      // Another control on the page follows the latest job, so it has to learn about this one.
+      void queryClient.invalidateQueries({ queryKey: lastJobQueryKey });
     },
   });
 

@@ -22,6 +22,7 @@ import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import {
+  AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
   AGENT_OVERVIEW_ENABLED,
@@ -32,6 +33,10 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
+import {
+  BuildThenDeploy,
+  type PendingImageBuild,
+} from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
@@ -177,6 +182,17 @@ export const AgentDetailRoute: FC = () => {
           : { agent: agentName ?? '', image }
       );
     },
+    [agentName]
+  );
+
+  // Scoped like builtImage: the route is reused across agents.
+  const [pendingBuild, setPendingBuild] = useState<
+    { agent: string; build: PendingImageBuild } | undefined
+  >();
+  const pendingBuildForAgent = pendingBuild?.agent === agentName ? pendingBuild?.build : undefined;
+  const reportPendingBuild = useCallback(
+    (build: PendingImageBuild | null) =>
+      setPendingBuild(build && agentName ? { agent: agentName, build } : undefined),
     [agentName]
   );
 
@@ -342,6 +358,7 @@ export const AgentDetailRoute: FC = () => {
                 setCreateDeploymentOpen(true);
               }}
               onImageAvailable={rememberBuiltImage}
+              pendingBuild={pendingBuildForAgent}
             />
           </TabsContent>
 
@@ -398,6 +415,14 @@ export const AgentDetailRoute: FC = () => {
           agentName={agentName}
         />
       )}
+      {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+        <BuildThenDeploy
+          key={agentName}
+          workspace={workspace}
+          agentName={agentName}
+          onPendingChange={reportPendingBuild}
+        />
+      ) : null}
       {createDeploymentOpen && (
         <CreateDeploymentModal
           open

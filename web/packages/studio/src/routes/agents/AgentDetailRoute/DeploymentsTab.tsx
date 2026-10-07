@@ -5,7 +5,9 @@ import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDep
 import { Stack } from '@nvidia/foundations-react-core';
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
+import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentRow } from '@studio/routes/agents/AgentDetailRoute/components/DeploymentRow';
+import { PendingImageBuildRow } from '@studio/routes/agents/AgentDetailRoute/components/PendingImageBuildRow';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
 import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
@@ -31,6 +33,8 @@ interface DeploymentsTabProps {
   isAgentLoading?: boolean;
   onImageBuilt?: (image: string) => void;
   onImageAvailable?: (image: string) => void;
+  /** An image being built for a deployment that does not exist yet. */
+  pendingBuild?: PendingImageBuild;
 }
 
 /** Deployments list with per-deployment actions. */
@@ -50,6 +54,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   isAgentLoading,
   onImageBuilt,
   onImageAvailable,
+  pendingBuild,
 }) => (
   <Stack gap="5" className="w-full">
     <DetailPanel
@@ -71,23 +76,26 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
         ) : null
       }
     >
+      {pendingBuild ? <PendingImageBuildRow workspace={workspace} build={pendingBuild} /> : null}
       {!isDeploymentsLoading && deployments.length === 0 ? (
-        <div className="p-4">
-          <NoHealthyDeploymentsBanner
-            agentName={agentName}
-            isDeploying={isDeploying}
-            onDeploy={onDeploy}
-            canDeploy={canDeploy}
-            message="No deployments for this agent."
-          />
-        </div>
+        pendingBuild ? null : (
+          <div className="p-4">
+            <NoHealthyDeploymentsBanner
+              agentName={agentName}
+              isDeploying={isDeploying}
+              onDeploy={onDeploy}
+              canDeploy={canDeploy}
+              message="No deployments for this agent."
+            />
+          </div>
+        )
       ) : (
         <Stack gap="0">
           {deployments.map((deployment, index) => (
             <DeploymentRow
               key={deployment.name}
               deployment={deployment}
-              isFirst={index === 0}
+              isFirst={index === 0 && !pendingBuild}
               specSource={specSource}
               onChat={onChat}
               onDelete={onDelete}
