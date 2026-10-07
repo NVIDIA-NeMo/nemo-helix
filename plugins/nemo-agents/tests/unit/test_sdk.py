@@ -117,6 +117,16 @@ async def test_async_agents_resource_uses_default_workspace_when_platform_worksp
     assert paths == ["/apis/agents/v2/workspaces/default/jobs/execute"]
 
 
+def test_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
+    with pytest.raises(TypeError, match="AgentsResource requires .*NemoClient"):
+        AgentsResource(object())  # type: ignore[arg-type]
+
+
+def test_async_agents_resource_rejects_legacy_or_unknown_platform_client() -> None:
+    with pytest.raises(TypeError, match="AsyncAgentsResource requires .*AsyncNemoClient"):
+        AsyncAgentsResource(object())  # type: ignore[arg-type]
+
+
 def test_deployments_create_uses_client_workspace_by_default() -> None:
     captured: dict[str, Any] = {}
 
