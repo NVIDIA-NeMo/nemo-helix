@@ -126,14 +126,15 @@ def build_gym_agent_eval_spec() -> Any:
     """Build a sandboxed Gym evaluation for a stored taskset and environment FileSet."""
     from nemo_evaluator.api.schemas import TasksetRef
     from nemo_evaluator.filesets import FilesetRef
-    from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymRunnerTarget
+    from nemo_evaluator.jobs.agent_spec import AgentEvalInputSpec, GymAgentSource, GymRunnerTarget
 
     return AgentEvalInputSpec(
         tasks=TasksetRef("default/my-gym-taskset"),
         target=GymRunnerTarget(
             environment=FilesetRef(root="default/my-gym-environment"),
-            agent="simple_agent",
-            agent_config="responses_api_agents/simple_agent/configs/simple_agent.yaml",
+            source=GymAgentSource(
+                component="simple_agent", config="responses_api_agents/simple_agent/configs/simple_agent.yaml"
+            ),
             resources_server="custom_greeting",
             num_repeats=1,
             concurrency=1,

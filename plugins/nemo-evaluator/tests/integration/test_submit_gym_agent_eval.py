@@ -210,7 +210,12 @@ def test_a_secret_reference_and_agent_ref_name_survive_submission(subprocess_pla
     target = fetched.json()["spec"]["target"]
 
     assert target["env_secrets"] == {"EXTERNAL_MODEL_API_KEY": f"{WORKSPACE}/{secret_name}"}
-    assert target["agent_ref_name"] == "mcqa_simple_agent"
+    # The placement's instance lands on the target's source beside the runner's component.
+    assert target["source"] == {
+        "component": "simple_agent",
+        "config": "responses_api_agents/simple_agent/configs/simple_agent.yaml",
+        "instance": "mcqa_simple_agent",
+    }
 
 
 def test_an_environment_fileset_reaches_the_compiler_from_a_runner(subprocess_platform: str) -> None:

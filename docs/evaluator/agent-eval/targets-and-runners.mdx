@@ -146,7 +146,8 @@ what the setting is *about*:
   only the resolver differs, so a local run resolves it from your environment.
 - **A `GymPlacement`**, passed to `submit`, carries what the deployment decides: `environment` (a
   staged FileSet, requiring sandboxed execution) and `agent_ref_name` (the agent instance a
-  sandboxed host routes rollouts to).
+  sandboxed host routes rollouts to). On the target, the agent is one field, `source`, holding the
+  `component`, its `config`, and that `instance`.
 
 ```python
 evaluator.submit(tasks=..., target=runner, placement=GymPlacement(environment=...))
