@@ -32,6 +32,7 @@ from nhx.core.models.controllers.provider_reconciler import (
     _is_valid_served_model_entity_id,
     _resolve_base_backend_model_id,
 )
+from nhx.core.models.entities import AUTO_DISCOVERED_MODEL_CUSTOM_FIELD
 
 from .conftest import (
     _AsyncPage,
@@ -814,6 +815,7 @@ async def test_ensure_model_entity_creates_new_entity(reconciler):
     body = call.kwargs["body"]
     assert body.name == "test-model"
     assert body.description == "Auto-discovered model from provider test-ns/test-provider"
+    assert body.custom_fields == {AUTO_DISCOVERED_MODEL_CUSTOM_FIELD: True}
     assert body.model_providers == ["test-ns/test-provider"]
     assert body.backend_format == "OPENAI_CHAT"
     assert body.fileset == "test/model"

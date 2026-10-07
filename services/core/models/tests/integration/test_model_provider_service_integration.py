@@ -7,7 +7,7 @@ import pytest
 from nhx.common.api.common import Page
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.core.models.api.service.model_provider_service import ModelProviderService
-from nhx.core.models.entities import Model
+from nhx.core.models.entities import AUTO_DISCOVERED_MODEL_CUSTOM_FIELD, Model
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
@@ -281,6 +281,7 @@ async def test_delete_model_provider_deletes_exclusively_served_model_integratio
             name="provider-model",
             workspace="default",
             model_providers=[f"default/{provider.name}"],
+            custom_fields={AUTO_DISCOVERED_MODEL_CUSTOM_FIELD: True},
         )
     )
     await model_provider_service.update_model_provider_status(
