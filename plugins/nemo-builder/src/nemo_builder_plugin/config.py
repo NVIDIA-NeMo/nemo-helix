@@ -36,8 +36,8 @@ class SandboxConfig(BaseModel):
     image: str | None = Field(
         default=None,
         description=(
-            "The kaniko image the sandbox runs. It must have the layout of kaniko's `debug` image: "
-            "`/kaniko/executor`, and a shell at `/busybox/sh`. Unset refuses every submit."
+            "The kaniko image the sandbox runs, built from `docker/Dockerfile.kaniko`, or any with `/kaniko/executor` "
+            "and a shell at `/busybox/sh`. Unset refuses every submit."
         ),
     )
     cpu: str = Field(default="2", description="CPU request for the sandbox.")
