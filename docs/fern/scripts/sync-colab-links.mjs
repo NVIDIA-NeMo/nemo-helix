@@ -20,6 +20,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "../../..");
 const DOCS_ROOT = join(REPO_ROOT, "docs");
 const NOTEBOOK_ASSETS_ROOT = join(SCRIPT_DIR, "../assets/notebooks");
+const FERN_BASE_PATH = "/nemo-helix";
 const COLAB_PREFIX = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob";
 const argv = process.argv.slice(2);
 const CHECK = argv.includes("--check");
@@ -101,7 +102,7 @@ function notebookAssetRelativePath(notebookPath) {
 }
 
 function downloadUrlFor(notebookPath) {
-  return `/assets/notebooks/${notebookAssetRelativePath(notebookPath)}`;
+  return `${FERN_BASE_PATH}/assets/notebooks/${notebookAssetRelativePath(notebookPath)}`;
 }
 
 async function copyNotebookAsset(notebookPath) {
