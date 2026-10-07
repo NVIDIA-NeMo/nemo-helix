@@ -38,12 +38,21 @@ const HEADLINE_SETTINGS: Record<string, string> = {
   num_generations_per_prompt: 'Rollouts per prompt',
   num_gpus_per_node: 'GPUs per node',
   num_nodes: 'Nodes',
+  weight_decay: 'Weight decay',
+  max_grad_norm: 'Gradient clipping',
+  dropout: 'LoRA dropout',
+  min_learning_rate: 'Min learning rate',
+  warmup_ratio: 'Warmup ratio',
+  precision: 'Precision',
+  ref_policy_kl_penalty: 'KL penalty',
+  distillation_temperature: 'Distillation temperature',
+  tensor_parallel_size: 'Tensor parallel size',
 };
 
 /** Already stated in the header line, so neither shown nor counted below it. */
 const IN_HEADER = new Set(['training.training_type', 'training.finetuning_type', 'training.type']);
 
-const MAX_HEADLINE_SETTINGS = 8;
+const MAX_HEADLINE_SETTINGS = 12;
 
 const headlineLabel = (path: string): string | undefined =>
   HEADLINE_SETTINGS[path.slice(path.lastIndexOf('.') + 1)];
