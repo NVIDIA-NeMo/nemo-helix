@@ -104,6 +104,16 @@ names and task-kind discriminators also remain unchanged. Existing stored jobs
 are not migrated, so jobs with the old sources no longer appear in lists
 filtered by the new sources. This is an intentional breaking change.
 
+The profile also moves `docs/evaluator` to `docs/evals` and updates Fern source
+paths while preserving published navigation slugs. It renames the web SDK service
+configuration, generation scripts, OpenAPI tags, and corresponding consumer
+imports together; regenerate the ignored SDK output before building Studio.
+`Evaluator` classes, local `evaluator` variables, telemetry fields, and existing
+permission namespaces are still valid names, so a raw count of `evaluator`
+matches is not a completeness check. Ignored files such as Python bytecode caches
+are left untouched and can keep old source directories on disk after all tracked
+files have moved. Use `rg` to search source without ignored caches.
+
 After applying a rename, review the diff, regenerate lockfiles with `uv`, run
 `make update-sdk` when API or SDK surfaces change, and validate library imports,
 packaging, plugin discovery, CLI, API routes and authorization. Generated files

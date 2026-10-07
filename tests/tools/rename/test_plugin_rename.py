@@ -152,6 +152,74 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("NeMo Evaluator to NeMo Helix Evals", result.stdout)
         self.assertEqual((self.repo / "README.md").read_text(), "NeMo Evaluator")
 
+    def test_evals_renames_docs_and_web_sdk_contract(self) -> None:
+        self.write("docs/evaluator/index.mdx", "Evaluator plugin SDK: `Evaluator.from_client(client)`\n")
+        self.write("docs/troubleshooting/evaluator.mdx", "evaluator plugin\n")
+        self.write(
+            "docs/fern/versions/latest.yml",
+            "path: ../../evaluator/index.mdx\npath: ../../troubleshooting/evaluator.mdx\n",
+        )
+        self.write("docs/fern/gated-nav.yml", "- section: evaluator\n")
+        self.write("docs/fern/scripts/ipynb-to-mdx.py", r'pattern = r"\]\(\.\./\.\./evaluator/index"' + "\n")
+        self.write("web/packages/sdk/orval/constants.ts", "evaluator: { path: 'evaluator' },\n")
+        self.write(
+            "web/packages/sdk/src/capabilities/fetchers.ts",
+            "import { customFetch as evaluatorFetch } from '../../generated/fetchers/evaluator';\n"
+            "const fetchers = { evaluator: evaluatorFetch };\n",
+        )
+        self.write(
+            "web/packages/sdk/package.json",
+            json.dumps({"scripts": {"gen:evaluator": "tsx ./orval/generate.ts evaluator"}}),
+        )
+        self.write(
+            "web/packages/studio/src/example.ts",
+            "import { evalsListEvaluateJobs } from '@nemo/sdk/generated/evaluator/evaluator-plugin-jobs-routes';\n"
+            "import type { EvaluatorTaskDefinition } from '@nemo/sdk/generated/evaluator/schema';\n"
+            "vi.mock('@nemo/sdk/generated/fetchers/evaluator');\n"
+            "const permission = 'evaluator.create';\n",
+        )
+        self.write(
+            "web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx",
+            "description: 'Work with evaluator jobs', requiredFeatureFlags: ['evaluatorEnabled'],\n",
+        )
+        self.write(
+            "plugins/nemo-evaluator/src/nemo_evaluator/service.py",
+            'tag="Evaluator Plugin Jobs Routes"\nnamespace="evaluator"\nkind="evaluator"\n',
+        )
+        self.write("plugins/nemo-evaluator/README.md", "nemo.cli:evaluator\nEvaluator plugin\n")
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.repo / "docs/evaluator").exists())
+        self.assertTrue((self.repo / "docs/evals/index.mdx").is_file())
+        self.assertTrue((self.repo / "docs/troubleshooting/evals.mdx").is_file())
+        nav = (self.repo / "docs/fern/versions/latest.yml").read_text()
+        self.assertIn("../../evals/index.mdx", nav)
+        self.assertIn("../../troubleshooting/evals.mdx", nav)
+        self.assertEqual((self.repo / "docs/fern/gated-nav.yml").read_text(), "- section: evals\n")
+        self.assertIn("evals/index", (self.repo / "docs/fern/scripts/ipynb-to-mdx.py").read_text())
+        self.assertEqual((self.repo / "web/packages/sdk/orval/constants.ts").read_text(), "evals: { path: 'evals' },\n")
+        scripts = json.loads((self.repo / "web/packages/sdk/package.json").read_text())["scripts"]
+        self.assertEqual(scripts, {"gen:evals": "tsx ./orval/generate.ts evals"})
+        fetchers = (self.repo / "web/packages/sdk/src/capabilities/fetchers.ts").read_text()
+        self.assertIn("../../generated/fetchers/evals", fetchers)
+        self.assertIn("evals: evalsFetch", fetchers)
+        consumer = (self.repo / "web/packages/studio/src/example.ts").read_text()
+        self.assertIn("@nemo/sdk/generated/evals/evals-plugin-jobs-routes", consumer)
+        self.assertIn("@nemo/sdk/generated/fetchers/evals", consumer)
+        self.assertIn("EvaluatorTaskDefinition", consumer)
+        self.assertIn("'evaluator.create'", consumer)
+        catalog = (
+            self.repo / "web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx"
+        ).read_text()
+        self.assertIn("Work with evals jobs", catalog)
+        self.assertIn("'evaluatorEnabled'", catalog)
+        service = (self.repo / "plugins/nemo-evals/src/nemo_evals/service.py").read_text()
+        self.assertIn('tag="Evals Plugin Jobs Routes"', service)
+        self.assertIn('namespace="evaluator"', service)
+        self.assertIn('kind="evaluator"', service)
+        self.assertIn("nemo.cli:evals", (self.repo / "plugins/nemo-evals/README.md").read_text())
+        self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
     def test_symlinks_ignored_files_and_binary_content(self) -> None:
         outside = Path(self.temp.name) / "outside.txt"
         outside.write_text("old_plugin")
