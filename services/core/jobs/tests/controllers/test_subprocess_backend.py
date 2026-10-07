@@ -415,6 +415,22 @@ def test_build_command_leaves_console_script_unchanged_without_virtual_env() -> 
     ]
 
 
+def test_build_command_does_not_resolve_a_path_bearing_command_against_virtual_env_bin(tmp_path) -> None:
+    # Only a bare script name is resolved against venv/bin; a command carrying a path
+    # separator is left to the normal lookup rather than joined under bin/.
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["/usr/bin/env", "nemo-helix"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "/usr/bin/env",
+        "nemo-helix",
+    ]
+
+
 def test_schedule_python_command_does_not_depend_on_runtime_path(
     mock_nhx_client, tmp_path, mock_platform_config, test_step_pending
 ):
