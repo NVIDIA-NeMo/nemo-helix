@@ -55,9 +55,11 @@ Set up the client to connect to your Safe Synthesizer deployment:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_safe_synthesizer_plugin.sdk.resources import SafeSynthesizerResource
 
 # Configure the client
 client = NemoClient.from_config()
+safe_synthesizer = SafeSynthesizerResource(client)
 # set to none by default, update it if you need an hf_token
 hf_secret_name = None
 
@@ -73,12 +75,12 @@ Test the connection to ensure Safe Synthesizer is accessible:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 try:
-    jobs = client.safe_synthesizer.jobs.list(workspace="default")
+    jobs = safe_synthesizer.jobs.list()
     print("✅ Successfully connected to Safe Synthesizer service")
     print(f"Found {len(jobs.items())} existing jobs")
 except Exception as e:
     print(f"❌ Cannot connect to service: {e}")
-    print("Please verify base_url and service status")
+    print("Please verify your CLI context (`nemo config view`) and service status")
 ```
 
 ---
@@ -360,11 +362,11 @@ List and optionally delete completed jobs:
 {/* @nemo-docs: skip-python-type-check */}
 ```python
 # List all jobs
-all_jobs = client.safe_synthesizer.jobs.list(workspace="default")
+all_jobs = safe_synthesizer.jobs.list()
 print(f"Total jobs: {len(all_jobs.items())}")
 
 # Delete this job (optional)
-# client.safe_synthesizer.jobs.list(workspace="default")
+# safe_synthesizer.jobs.list()
 # print(f"✅ Job {job.job_name} deleted")
 ```
 
