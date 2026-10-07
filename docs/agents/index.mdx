@@ -91,8 +91,8 @@ through shared infrastructure.
 
 ### Install Harness Support
 
-The base Agents plugin installs Fabric, Relay support, and the Claude, Codex,
-DeepAgents, and Hermes adapter implementations. It does not install the
+The base Agents plugin installs Fabric, Relay support, and adapter implementations
+compatible with the Python version. It does not install the
 third-party harness packages. Choose an extra when the harness should share the
 NeMo Helix environment:
 
@@ -102,7 +102,7 @@ NeMo Helix environment:
 | Claude Code | `nemo-helix[nemo-agents-plugin-claude]` | `nemo-agents-plugin[claude]` | Claude Agent SDK and NeMo Relay CLI |
 | Codex | `nemo-helix[nemo-agents-plugin-codex]` | `nemo-agents-plugin[codex]` | OpenAI Codex and NeMo Relay CLI |
 | DeepAgents | `nemo-helix[nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[deepagents]` | LangChain Deep Agents |
-| All installable harnesses | `nemo-helix[nemo-agents-plugin-claude,nemo-agents-plugin-codex,nemo-agents-plugin-deepagents]` | `nemo-agents-plugin[all]` | Claude Code, Codex, and DeepAgents |
+| NOOA (Python 3.12–3.13) | `nemo-helix[nemo-agents-plugin-nooa]` | `nemo-agents-plugin[nooa]` | NOOA, NOOA CLI, and NOOA Bench |
 | Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
 
 Install the Agents plugin and one harness with its namespaced NeMo Helix extra.
