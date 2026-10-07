@@ -100,7 +100,7 @@ export const EvaluationSection: FC<EvaluationSectionProps> = ({ targets, selecte
       <Text kind="body/regular/xs" color="secondary">
         The evaluation's prompts and expected answers are staged with the study and re-scored by the
         judge above, so trial scores compare to each other rather than to the numbers this
-        evaluation published. The experiment id is written to metadata.experiment_id, so trials sit
+        evaluation published. The experiment id is written to optimizer.experiment_id, so trials sit
         alongside its evaluations.
       </Text>
     </Stack>
