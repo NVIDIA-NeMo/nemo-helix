@@ -7,6 +7,7 @@ export type StorageBackend = NonNullable<FilesetOutput['storage']['type']>;
 
 const STORAGE_BACKEND_LABELS: Record<StorageBackend, string> = {
   github: 'GitHub',
+  git: 'Git (SSH)',
   huggingface: 'Hugging Face',
   ngc: 'NGC',
   s3: 'S3',

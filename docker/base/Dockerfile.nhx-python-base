@@ -32,6 +32,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libffi-dev \
     libpq-dev \
     libssl-dev \
+    openssh-client \
     postgresql-client \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \

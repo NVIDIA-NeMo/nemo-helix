@@ -9,6 +9,8 @@ These configs can be used by any service that needs to interact with storage bac
 from __future__ import annotations
 
 import os
+import re
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import (
@@ -28,6 +30,7 @@ class StorageConfigType(StrEnum):
     HUGGINGFACE = "huggingface"
     S3 = "s3"
     GITHUB = "github"
+    GIT = "git"
     # AZURE_BLOB = "azure_blob"
     # GCS = "gcs"
     # HTTP = "http"
@@ -269,6 +272,159 @@ class GithubStorageConfig(BaseStorageConfig):
         return {"token": self.token_secret} if self.token_secret else {}
 
 
+# Strict host characters: the allowlist's urlparse stops a host at "?" or "#", but ssh does not.
+_SSH_USER = r"(?P<user>[A-Za-z0-9._-]+)"
+_SSH_HOST = r"(?P<host>[A-Za-z0-9_](?:[A-Za-z0-9_.-]*[A-Za-z0-9_])?\.?)"
+_SSH_PATH_CHAR = r"[^\s\x00-\x1f\x7f]"
+_SSH_REMOTE_URL = re.compile(
+    rf"ssh://(?:{_SSH_USER}@)?{_SSH_HOST}(?::(?P<port>[0-9]{{1,5}}))?/(?P<path>{_SSH_PATH_CHAR}+)", re.ASCII
+)
+# An SCP path may be absolute ("git@host:/srv/git/repo.git"); the leading-dash check below still applies.
+_SCP_REMOTE = re.compile(rf"(?:{_SSH_USER}@)?{_SSH_HOST}:(?P<path>{_SSH_PATH_CHAR}+)", re.ASCII)
+
+
+@dataclass(frozen=True)
+class SshRemote:
+    user: str | None
+    host: str
+    port: int | None
+    path: str
+
+    @property
+    def host_url(self) -> str:
+        """The ``ssh://host[:port]`` authority checked against the external-host allowlist."""
+        return f"ssh://{self.host}:{self.port}" if self.port else f"ssh://{self.host}"
+
+
+def parse_ssh_remote(url: str) -> SshRemote:
+    """Parse ``ssh://[user@]host[:port]/path`` or the SCP form ``[user@]host:path``."""
+    # git percent-decodes ssh:// URLs before connecting, so "%2F" would move the host it reaches.
+    if "%" in url:
+        raise ValueError(f"url must not contain percent-encoding, got {url!r}")
+    # A string with a scheme is a URL to git; reading a failed "ssh://" as SCP form would make "ssh" the host.
+    match = _SSH_REMOTE_URL.fullmatch(url) if "://" in url else _SCP_REMOTE.fullmatch(url)
+    if match is None:
+        raise ValueError(
+            f"url must be an SSH remote like git@host:org/repo.git or ssh://host/org/repo.git, got {url!r}"
+        )
+    parts = match.groupdict()
+    # Git hands these to ssh as arguments, where a leading dash is read as an option.
+    for name in ("user", "host", "path"):
+        if (parts.get(name) or "").startswith("-"):
+            raise ValueError(f"url {name} must not start with '-', got {url!r}")
+    port = parts.get("port")
+    if port and not 1 <= int(port) <= 65535:
+        raise ValueError(f"url port must be between 1 and 65535, got {url!r}")
+    return SshRemote(
+        user=parts["user"],
+        host=parts["host"].lower().removesuffix("."),
+        port=int(port) if port else None,
+        path=parts["path"],
+    )
+
+
+_REF_NAME = re.compile(r"[^\s\x00-\x1f\x7f:^~?*\[\\]+")
+
+
+def _reject_control_chars(field: str, value: str, *, allow_newlines: bool = False) -> str:
+    """Refuse control characters, which git and ssh arguments cannot carry."""
+    allowed = {"\n", "\r", "\t"} if allow_newlines else set()
+    if any((ord(char) < 0x20 or ord(char) == 0x7F) and char not in allowed for char in value):
+        raise ValueError(f"{field} must not contain control characters")
+    return value
+
+
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+_SHA256_COMMIT = re.compile(r"[0-9a-fA-F]{64}")
+
+
+def is_commit_sha(revision: str) -> bool:
+    """Whether *revision* is a full SHA-1 commit id rather than a branch or tag name."""
+    return _COMMIT_SHA.fullmatch(revision) is not None
+
+
+def _normalize_commit_sha(field: str, value: str) -> str:
+    if _SHA256_COMMIT.fullmatch(value):
+        raise ValueError(f"{field} {value!r} is a SHA-256 commit id; only SHA-1 repositories are supported")
+    lowered = value.lower()
+    return lowered if is_commit_sha(lowered) else value
+
+
+def _require_ref_name(field: str, value: str) -> str:
+    """Refuse a revision git could read as an option or a refspec rather than a single ref."""
+    if value.startswith("-") or not _REF_NAME.fullmatch(value):
+        raise ValueError(f"{field} must be a branch, tag, or commit name, got {value!r}")
+    return value
+
+
+class GitStorageConfig(BaseStorageConfig):
+    type: Literal[StorageConfigType.GIT] = StorageConfigType.GIT
+    url: str = Field(
+        description="SSH remote, e.g. 'git@gitlab.example.com:org/repo.git' or 'ssh://host:2222/org/repo.git'"
+    )
+    revision: str = Field(
+        default="HEAD",
+        description="Branch, tag, or commit SHA. 'HEAD' resolves to the remote's default branch.",
+    )
+    original_revision: str | None = Field(
+        default=None,
+        description="The original revision requested by the user before resolution (e.g., 'main'). "
+        "The 'revision' field contains the resolved commit SHA.",
+    )
+    path: str = Field(
+        default="",
+        description="Optional directory within the repository. All paths are relative to it.",
+    )
+    ssh_key_secret: SecretRef = Field(description="Secret holding an unencrypted SSH private key with read access")
+    known_hosts: str = Field(
+        description="known_hosts lines for the remote host, e.g. the output of `ssh-keyscan host`. "
+        "The host key is verified against these and nothing else.",
+    )
+
+    @field_validator("url")
+    @classmethod
+    def require_ssh_remote(cls, v: str) -> str:
+        parse_ssh_remote(v.strip())
+        return v.strip()
+
+    @field_validator("path")
+    @classmethod
+    def strip_path_slashes(cls, v: str) -> str:
+        return _reject_relative_segments("path", _reject_control_chars("path", v).strip("/"))
+
+    @field_validator("revision")
+    @classmethod
+    def require_plain_revision(cls, v: str) -> str:
+        checked = _require_ref_name("revision", _reject_relative_segments("revision", _reject_blank("revision", v)))
+        return _normalize_commit_sha("revision", checked)
+
+    @field_validator("original_revision")
+    @classmethod
+    def require_plain_original_revision(cls, v: str | None) -> str | None:
+        # The fetch fallback hands this to git as a refspec, so it gets the same check as revision.
+        return None if v is None else _require_ref_name("original_revision", v)
+
+    @field_validator("known_hosts")
+    @classmethod
+    def require_known_hosts(cls, v: str) -> str:
+        return _reject_control_chars("known_hosts", _reject_blank("known_hosts", v), allow_newlines=True)
+
+    @property
+    def remote(self) -> SshRemote:
+        return parse_ssh_remote(self.url)
+
+    @property
+    def pinned_revision(self) -> str:
+        return self.revision
+
+    @property
+    def tracked_revision(self) -> str | None:
+        return _tracked_revision(self.revision, self.original_revision)
+
+    def get_secret_references(self) -> dict[str, SecretRef]:
+        return {"ssh_key": self.ssh_key_secret}
+
+
 class NGCStorageConfig(BaseStorageConfig):
     type: Literal[StorageConfigType.NGC] = StorageConfigType.NGC
     org: str = Field(description="NGC organization name")
@@ -375,6 +531,13 @@ class S3StorageConfig(BaseStorageConfig):
         return self.model_copy(deep=True, update={"prefix": new_prefix})
 
 
-StorageConfig = LocalStorageConfig | NGCStorageConfig | HuggingfaceStorageConfig | S3StorageConfig | GithubStorageConfig
+StorageConfig = (
+    LocalStorageConfig
+    | NGCStorageConfig
+    | HuggingfaceStorageConfig
+    | S3StorageConfig
+    | GithubStorageConfig
+    | GitStorageConfig
+)
 
 StorageConfigField = Annotated[StorageConfig, Field(discriminator="type")]

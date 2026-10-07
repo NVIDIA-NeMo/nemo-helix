@@ -5,6 +5,7 @@ import * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
   type FilesetOutput as Dataset,
   type FilesetPurpose,
+  type GitStorageConfig,
   type GithubStorageConfig,
   type HuggingfaceStorageConfig,
   type LocalStorageConfig,
@@ -20,7 +21,8 @@ export type StorageConfig =
   | NGCStorageConfig
   | HuggingfaceStorageConfig
   | S3StorageConfig
-  | GithubStorageConfig;
+  | GithubStorageConfig
+  | GitStorageConfig;
 
 export type DatasetWithId = Dataset & { id: string };
 
