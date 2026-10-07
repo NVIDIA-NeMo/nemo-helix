@@ -63,12 +63,11 @@ def _find_project_root(project_dir: Path | None = None) -> Path:
     return project_dir if project_dir is not None else Path.cwd()
 
 
-# Distributions that ship the platform's own bundled skills. Both names show
-# up depending on whether the user installed the source workspace package
-# (``nemo-helix-ext``) or the vendored SDK wheel (``nemo-helix-sdk``);
-# we collapse both into the friendly ``nemo-helix`` label so the column
-# matches what a user typically thinks of as "the platform".
-_PLATFORM_DISTS = frozenset({"nemo-helix-ext", "nemo-helix-sdk"})
+# Distributions that ship the platform's own bundled skills. The source
+# workspace package (``nemo-helix-ext``) renders under the friendly
+# ``nemo-helix`` label so the column matches what a user typically thinks of
+# as "the platform".
+_PLATFORM_DISTS = frozenset({"nemo-helix-ext"})
 
 
 def _format_skill_source(skill: Skill) -> str:

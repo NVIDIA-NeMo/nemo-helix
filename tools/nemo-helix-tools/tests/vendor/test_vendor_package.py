@@ -307,7 +307,7 @@ nhx-platform-runner = { source = "../../packages/nhx_platform_runner/src/nhx/pla
         """
 [project]
 name = "nemo-evaluator-plugin"
-dependencies = ["nemo-evaluator-sdk", "nemo-helix-sdk", "nhx-common", "pydantic>=2.10.6"]
+dependencies = ["nemo-evaluator-sdk", "core-lib", "nhx-common", "pydantic>=2.10.6"]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -328,7 +328,7 @@ dependencies = ["rich>=14.1.0"]
 
     assert list(optional["nemo-evaluator-plugin"]) == [
         "nemo-evaluator-sdk",
-        "nemo-helix-sdk",
+        "core-lib",
         "nhx-common",
         "pydantic>=2.10.6",
     ]
@@ -384,10 +384,10 @@ dependencies = ["nemo-helix"]
 
 def test_process_bundle_packages_merges_shared_generated_dependency_group(tmp_path: Path, monkeypatch) -> None:
     wrapper_path = tmp_path / "packages/nemo_helix_plugin"
-    sdk_path = tmp_path / "sdk/python/nemo-helix"
+    core_path = tmp_path / "packages/core_lib"
     ext_path = tmp_path / "packages/nemo_helix_ext"
     models_path = tmp_path / "packages/models"
-    (sdk_path / "src/nemo_helix").mkdir(parents=True)
+    (core_path / "src/core_lib").mkdir(parents=True)
     (ext_path / "src/nemo_helix_ext").mkdir(parents=True)
     (models_path / "src/models").mkdir(parents=True)
     wrapper_path.mkdir(parents=True)
@@ -406,19 +406,19 @@ name = "nemo-helix-plugin"
 
 [project.optional-dependencies]
 # Generated from [tool.bundle-package]; do not edit by hand.
-nemo-helix-sdk = ["stale-sdk-dep"]
+core-lib = ["stale-dep"]
 
 [tool.bundle-package]
-nemo-helix-sdk = { source = "../../sdk/python/nemo-helix/src/nemo_helix", module = "nemo_helix" }
-nemo-helix-ext = { source = "../nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", deps_group = "nemo-helix-sdk" }
-models = { source = "../models/src/models", module = "models", deps_group = "nemo-helix-sdk" }
+core-lib = { source = "../core_lib/src/core_lib", module = "core_lib" }
+nemo-helix-ext = { source = "../nemo_helix_ext/src/nemo_helix_ext", module = "nemo_helix_ext", deps_group = "core-lib" }
+models = { source = "../models/src/models", module = "models", deps_group = "core-lib" }
 """.lstrip(),
         encoding="utf-8",
     )
-    (sdk_path / "pyproject.toml").write_text(
+    (core_path / "pyproject.toml").write_text(
         """
 [project]
-name = "nemo-helix-sdk"
+name = "core-lib"
 dependencies = ["docker>=7.0.0", "httpx>=0.23.0"]
 """.lstrip(),
         encoding="utf-8",
@@ -427,7 +427,7 @@ dependencies = ["docker>=7.0.0", "httpx>=0.23.0"]
         """
 [project]
 name = "nemo-helix-ext"
-dependencies = ["nemo-helix-sdk", "rich>=13.7.1"]
+dependencies = ["core-lib", "rich>=13.7.1"]
 """.lstrip(),
         encoding="utf-8",
     )
@@ -446,7 +446,7 @@ dependencies = ["pydantic>=2.10.6"]
     wrapper_updated = tomlkit.parse((wrapper_path / "pyproject.toml").read_text(encoding="utf-8"))
     optional = wrapper_updated["project"]["optional-dependencies"]
 
-    assert list(optional["nemo-helix-sdk"]) == [
+    assert list(optional["core-lib"]) == [
         "docker>=7.0.0",
         "httpx>=0.23.0",
         "rich>=13.7.1",
@@ -733,7 +733,7 @@ agents = "nemo_agents_plugin.skills:skills_dir"
 
 
 [tool.uv.sources]
-nemo-helix-sdk = { workspace = true }
+core-lib = { workspace = true }
 """.lstrip()
 
     updated = vendor_package._annotate_generated_project_entries(
