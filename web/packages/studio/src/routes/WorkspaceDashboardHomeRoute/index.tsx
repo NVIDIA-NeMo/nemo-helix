@@ -13,7 +13,7 @@ import { QuickstartSamplePanel } from '@studio/routes/WorkspaceDashboardHomeRout
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { StatTileRow } from '@studio/routes/WorkspaceDashboardHomeRoute/StatTileRow';
 import {
-  SAMPLE_WORKSPACE,
+  isSampleWorkspace,
   useSampleQuickstartAgent,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import { TriangleAlert } from 'lucide-react';
@@ -24,10 +24,10 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
   const getStartedRef = useRef<HTMLDivElement>(null);
-  const isSampleWorkspace = workspace === SAMPLE_WORKSPACE;
+  const isSample = isSampleWorkspace(workspace);
   // The panel returns null with agents disabled, so gating the fetch on AGENTS_ENABLED sends
   // that case to the regular Quickstart rather than leaving the heading below with no panel.
-  const sample = useSampleQuickstartAgent(workspace, isSampleWorkspace && AGENTS_ENABLED);
+  const sample = useSampleQuickstartAgent(workspace, isSample && AGENTS_ENABLED);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Dashboard' }],
@@ -35,7 +35,7 @@ export const WorkspaceDashboardHomeRoute: FC = () => {
 
   return (
     <GradientBackground>
-      {isSampleWorkspace && (
+      {isSample && (
         <Banner kind="global" status="warning" slotIcon={<TriangleAlert role="img" aria-hidden />}>
           Sample Sandbox. This sandbox can be reset at any time with nemo CLI.
         </Banner>

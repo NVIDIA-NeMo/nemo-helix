@@ -8,8 +8,15 @@ import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import type { QuickstartSampleAgent } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSamplePanel';
 import { useMemo } from 'react';
 
-/** Mirrors `_SAMPLE_WORKSPACE_NAME` in `nemo setup` (`nemo_helix_ext/cli/commands/setup.py`). */
-export const SAMPLE_WORKSPACE = 'sample';
+/**
+ * Mirrors `SAMPLE_WORKSPACE_PREFIX` (`nemo_helix_plugin/workspaces/constants.py`): the sample flow
+ * names each workspace `sample-<uid>`, and the entities service reserves the prefix for it.
+ */
+export const SAMPLE_WORKSPACE_PREFIX = 'sample-';
+
+export const isSampleWorkspace = (workspace: string): boolean =>
+  workspace.startsWith(SAMPLE_WORKSPACE_PREFIX);
+
 /** Mirrors `_SAMPLE_AGENT_NAME` in `nemo setup`, which deploys it into the sample workspace. */
 export const SAMPLE_AGENT_NAME = 'email-security-triage';
 
@@ -20,8 +27,8 @@ const TRANSITIONAL_STATUSES = new Set(['pending', 'starting', 'deleting']);
 const ROUTABLE_SOON_STATUSES = new Set(['pending', 'starting']);
 
 /**
- * `unavailable` is everything that is not a sample to show: disabled, missing (a workspace
- * someone named `sample` by hand, or an incomplete `nemo setup`), forbidden, or failing.
+ * `unavailable` is everything that is not a sample to show: disabled, missing (an incomplete
+ * `nemo setup`), forbidden, or failing.
  * The dashboard falls back to the regular Quickstart for all of them; only `loading` shows neither.
  */
 export type SampleQuickstartAgentState =

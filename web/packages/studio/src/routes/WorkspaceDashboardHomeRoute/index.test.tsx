@@ -14,7 +14,7 @@ import { WorkspaceDashboardHomeRoute } from '@studio/routes/WorkspaceDashboardHo
 import { queryResult } from '@studio/routes/WorkspaceDashboardHomeRoute/testMocks';
 import {
   SAMPLE_AGENT_NAME,
-  SAMPLE_WORKSPACE,
+  SAMPLE_WORKSPACE_PREFIX,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
@@ -52,6 +52,7 @@ vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => ({
 }));
 
 const TEST_WORKSPACE = 'test-workspace';
+const SAMPLE_WORKSPACE = `${SAMPLE_WORKSPACE_PREFIX}1a2b3c4d`;
 
 const renderRoute = (workspace = TEST_WORKSPACE) => {
   const dashboardPath = generatePath(ROUTES.workspace.dashboard, { workspace });
@@ -116,7 +117,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
   });
 
   it('shows the sample sandbox banner only in the sample workspace', async () => {
-    const { unmount } = renderRoute('sample');
+    const { unmount } = renderRoute(SAMPLE_WORKSPACE);
 
     expect(await screen.findByText(/Sample Sandbox\./)).toBeInTheDocument();
     unmount();
@@ -164,6 +165,18 @@ describe('WorkspaceDashboardHomeRoute', () => {
     expect(vi.mocked(useAgentsListDeployments)).toHaveBeenLastCalledWith(
       TEST_WORKSPACE,
       expect.anything(),
+      expect.objectContaining({ query: expect.objectContaining({ enabled: false }) })
+    );
+  });
+
+  it('treats a bare `sample` workspace as a regular workspace', async () => {
+    renderRoute('sample');
+
+    expect(await screen.findByText('Connect an Agent')).toBeInTheDocument();
+    expect(screen.queryByText(/Sample Sandbox/)).not.toBeInTheDocument();
+    expect(vi.mocked(useAgentsGetAgent)).toHaveBeenLastCalledWith(
+      'sample',
+      SAMPLE_AGENT_NAME,
       expect.objectContaining({ query: expect.objectContaining({ enabled: false }) })
     );
   });
@@ -242,7 +255,7 @@ describe('WorkspaceDashboardHomeRoute', () => {
     });
 
     it('falls back to the regular Quickstart when there is no sample agent to show', async () => {
-      // Settled without data: a 404 from a hand-made `sample` workspace, a 403, or a 5xx.
+      // Settled without data: a 404 from an incomplete `nemo setup`, a 403, or a 5xx.
       vi.mocked(useAgentsGetAgent).mockReturnValue({ data: undefined, isFetched: true } as never);
 
       renderRoute(SAMPLE_WORKSPACE);

@@ -6,7 +6,7 @@ import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deplo
 import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   SAMPLE_AGENT_NAME,
-  SAMPLE_WORKSPACE,
+  SAMPLE_WORKSPACE_PREFIX,
   useSampleQuickstartAgent,
 } from '@studio/routes/WorkspaceDashboardHomeRoute/useSampleQuickstartAgent';
 import { renderHook } from '@testing-library/react';
@@ -20,6 +20,7 @@ vi.mock('@nemo/sdk/generated/agents/agent-deployments', async (importOriginal) =
   useAgentsListDeployments: vi.fn(),
 }));
 
+const SAMPLE_WORKSPACE = `${SAMPLE_WORKSPACE_PREFIX}1a2b3c4d`;
 const AGENT = { name: SAMPLE_AGENT_NAME, description: 'Sample email triage agent.' };
 
 const deployment = (suffix: string, status: string) => ({
