@@ -177,6 +177,46 @@ describe('SubmitEvaluationModal dataset from a fileset', () => {
     );
   });
 
+  it('reads every Parquet batch from the source fileset in place when asked', async () => {
+    server.use(
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({
+          data: ['output/part-0.parquet', 'output/part-1.parquet'].map((path) => ({
+            file_ref: `${DEFAULT_WORKSPACE}/generated#${path}`,
+            file_url: `/${path}`,
+            path,
+            size: 10,
+          })),
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await pickFilesetFile(user);
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Evaluate all 2 Parquet files in output/' })
+    );
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({
+      dataset: `${DEFAULT_WORKSPACE}/generated#output/*.parquet`,
+    });
+    expect(vi.mocked(filesUploadFile).mock.calls.map(([, , name]) => name)).not.toContain(
+      'dataset.parquet'
+    );
+  });
+
   it('forgets the fileset file after switching back to upload', async () => {
     const user = userEvent.setup();
     renderModal();

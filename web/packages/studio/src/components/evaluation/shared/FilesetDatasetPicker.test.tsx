@@ -17,6 +17,7 @@ import { useForm, useWatch } from 'react-hook-form';
 interface PickerFormValues {
   fileset: string;
   file: string;
+  batchGlob: string;
 }
 
 const fileEntry = (path: string) => ({
@@ -44,8 +45,11 @@ const mockFilesets = (paths: string[]) => {
 };
 
 const PickerHarness = ({ error }: { error?: string }) => {
-  const { control } = useForm<PickerFormValues>({ defaultValues: { fileset: '', file: '' } });
+  const { control } = useForm<PickerFormValues>({
+    defaultValues: { fileset: '', file: '', batchGlob: '' },
+  });
   const file = useWatch({ control, name: 'file' });
+  const batchGlob = useWatch({ control, name: 'batchGlob' });
   return (
     <>
       <FilesetDatasetPicker<PickerFormValues>
@@ -53,9 +57,11 @@ const PickerHarness = ({ error }: { error?: string }) => {
         control={control}
         filesetName="fileset"
         fileName="file"
+        batchGlobName="batchGlob"
         error={error}
       />
       <output data-testid="form-file">{file}</output>
+      <output data-testid="form-batch-glob">{batchGlob}</output>
     </>
   );
 };
@@ -125,5 +131,44 @@ describe('FilesetDatasetPicker', () => {
     render(<PickerHarness error="File is too large to edit in the browser." />);
 
     expect(await screen.findByText('File is too large to edit in the browser.')).toBeVisible();
+  });
+
+  it('offers every Parquet batch beside the picked file as a glob', async () => {
+    mockFilesets(['out/batch_00000.parquet', 'out/batch_00001.parquet']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'out/batch_00000.parquet');
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Evaluate all 2 Parquet files in out/' })
+    );
+
+    expect(screen.getByTestId('form-batch-glob')).toHaveTextContent('out/*.parquet');
+  });
+
+  it('drops the batch glob when another file is picked', async () => {
+    mockFilesets(['out/batch_00000.parquet', 'out/batch_00001.parquet', 'rows.jsonl']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'out/batch_00000.parquet');
+    await user.click(screen.getByRole('checkbox', { name: /Evaluate all 2 Parquet files/ }));
+    await chooseFile(user, 'rows.jsonl');
+
+    expect(screen.getByTestId('form-batch-glob')).toBeEmptyDOMElement();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('does not offer batches for a lone Parquet file', async () => {
+    mockFilesets(['out/batch_00000.parquet']);
+    const user = userEvent.setup();
+    render(<PickerHarness />);
+
+    await chooseFileset(user, 'generated');
+    await chooseFile(user, 'out/batch_00000.parquet');
+
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   });
 });

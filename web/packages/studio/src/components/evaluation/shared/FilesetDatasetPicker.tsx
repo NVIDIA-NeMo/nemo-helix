@@ -3,7 +3,8 @@
 
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
-import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
+import { Checkbox, FormField, Select, Stack, Text } from '@nvidia/foundations-react-core';
+import { parquetBatchGlob } from '@studio/components/evaluation/shared/parquetBatchGlob';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { type ReactElement } from 'react';
 import {
@@ -28,6 +29,9 @@ interface FilesetDatasetPickerProps<T extends FieldValues> {
   filesetName: Path<T>;
   /** Form field holding the chosen file's path within that fileset. */
   fileName: Path<T>;
+  /** Form field holding a glob over every Parquet batch beside the chosen file, or '' to read
+   *  only that file. */
+  batchGlobName: Path<T>;
   disabled?: boolean;
   /** The chosen file's content is still being read. */
   loading?: boolean;
@@ -39,16 +43,26 @@ export function FilesetDatasetPicker<T extends FieldValues>({
   control,
   filesetName,
   fileName,
+  batchGlobName,
   disabled,
   loading,
   error,
 }: FilesetDatasetPickerProps<T>): ReactElement {
   const fileset: string = useWatch({ control, name: filesetName });
   const { field: fileField } = useController({ control, name: fileName });
+  const { field: batchGlobField } = useController({ control, name: batchGlobName });
+
+  const pickFile = (path: string) => {
+    fileField.onChange(path);
+    batchGlobField.onChange('');
+  };
 
   const filesQuery = useFilesListFilesetFiles(workspace, fileset, undefined, {
     query: { enabled: !!fileset },
   });
+
+  const filesetPaths = (filesQuery.data?.data ?? []).map((file) => file.path);
+  const batches = fileField.value ? parquetBatchGlob(fileField.value, filesetPaths) : null;
 
   const fileItems = (filesQuery.data?.data ?? [])
     .filter((file) => DATASET_FORMATS.includes(formatFromFileName(file.path)))
@@ -64,7 +78,7 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Fileset' }}
         renderOption={filesetOption}
-        onChange={() => fileField.onChange('')}
+        onChange={() => pickFile('')}
         disabled={disabled}
       />
       <FormField
@@ -72,7 +86,9 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         slotHelp={
           noDatasetFiles
             ? 'This fileset has no JSONL, JSON, CSV, or Parquet files.'
-            : 'JSONL, JSON, CSV, or Parquet. If the output is split across several files, only the file you pick is evaluated.'
+            : batches
+              ? 'JSONL, JSON, CSV, or Parquet.'
+              : 'JSONL, JSON, CSV, or Parquet. If the output is split across several files, only the file you pick is evaluated.'
         }
         slotError={error}
         status={error ? 'error' : undefined}
@@ -81,10 +97,26 @@ export function FilesetDatasetPicker<T extends FieldValues>({
           disabled={disabled || !fileset}
           items={fileItems}
           value={fileField.value}
-          onValueChange={fileField.onChange}
+          onValueChange={pickFile}
           placeholder={placeholder}
         />
       </FormField>
+      {batches ? (
+        <Stack gap="density-xs">
+          <Checkbox
+            checked={batchGlobField.value === batches.glob}
+            onCheckedChange={(checked) =>
+              batchGlobField.onChange(checked === true ? batches.glob : '')
+            }
+            disabled={disabled}
+            slotLabel={`Evaluate all ${batches.count} Parquet files in ${batches.dir || 'the fileset root'}`}
+          />
+          <Text className="text-secondary" kind="body/regular/xs">
+            They are read from this fileset rather than copied into the run, so later changes to
+            these files also change re-runs.
+          </Text>
+        </Stack>
+      ) : null}
     </Stack>
   );
 }

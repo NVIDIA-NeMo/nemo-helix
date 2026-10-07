@@ -176,6 +176,7 @@ const submitEvaluationBaseSchema = z.object({
   evaluationName: z.string(),
   datasetFileset: z.string(),
   datasetFile: z.string(),
+  datasetBatchGlob: z.string(),
   parallelism: z.coerce
     .number()
     .int('Use a whole number')
@@ -237,6 +238,7 @@ const makeDefaultValues = (
   evaluationName: sourceEvaluation ?? '',
   datasetFileset: '',
   datasetFile: '',
+  datasetBatchGlob: '',
   parallelism: DEFAULT_PARALLELISM,
   ...EXPERIMENT_SETTINGS_DEFAULTS,
 });
@@ -319,6 +321,8 @@ const discardSeeded = async (
 interface UploadedEvalInputs {
   dataset: File;
   datasetName: string;
+  /** Read the dataset in place from this ref instead of copying ``dataset`` into the run. */
+  datasetRef?: string;
   spec: DatasetEvalSpec;
   /** Serialization the config was uploaded in; the stored file keeps it. */
   configFormat: EvalConfigFormat;
@@ -341,7 +345,7 @@ const loadPersistedSpec = async (
     const judgeModel = formData.judgeModel || null;
     const spec: DatasetEvalSpec = {
       ...uploads.spec,
-      dataset: `${workspace}/${name}#${uploads.datasetName}`,
+      dataset: uploads.datasetRef ?? `${workspace}/${name}#${uploads.datasetName}`,
       metrics: judgeModel
         ? uploads.spec.metrics.map((m) => injectJudgeModel(m, judgeModel))
         : uploads.spec.metrics,
@@ -358,7 +362,9 @@ const loadPersistedSpec = async (
       throw err;
     }
     try {
-      await filesUploadFile(workspace, name, uploads.datasetName, uploads.dataset, signal);
+      if (!uploads.datasetRef) {
+        await filesUploadFile(workspace, name, uploads.datasetName, uploads.dataset, signal);
+      }
       await filesUploadFile(
         workspace,
         name,
@@ -483,6 +489,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
 
   const datasetFileset = useWatch({ control, name: 'datasetFileset' });
   const datasetFilePath = useWatch({ control, name: 'datasetFile' });
+  const datasetBatchGlob = useWatch({ control, name: 'datasetBatchGlob' });
   const isFilesetSource = datasetSource === DATASET_SOURCE_FILESET;
   // Downloaded raw rather than through useDatasetFileContent, which hands Parquet back as JSONL
   // text; the run stores the file as-is so the evaluator reads it with its own loader.
@@ -507,6 +514,10 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
       ? {
           dataset: activeDatasetPick.file,
           datasetName: activeDatasetPick.storedName,
+          datasetRef:
+            isFilesetSource && datasetBatchGlob
+              ? `${workspace}/${datasetFileset}#${datasetBatchGlob}`
+              : undefined,
           spec: configPick.spec,
           configFormat: configPick.format ?? 'json',
         }
@@ -1062,6 +1073,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                       clearDatasetPick();
                       setValue('datasetFileset', '');
                       setValue('datasetFile', '');
+                      setValue('datasetBatchGlob', '');
                       setDatasetSource(value as DatasetSource);
                     }}
                     items={DATASET_SOURCE_ITEMS}
@@ -1073,6 +1085,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                       control={control}
                       filesetName="datasetFileset"
                       fileName="datasetFile"
+                      batchGlobName="datasetBatchGlob"
                       disabled={isPending}
                       loading={filesetFile.isFetching}
                       error={datasetError}
