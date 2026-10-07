@@ -68,8 +68,8 @@ def is_plugin_managed(path: Path) -> bool:
     return first_line[0] in (DOCKERFILE_SENTINEL, DOCKERIGNORE_SENTINEL)
 
 
-def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool, bool]:
-    """Return the Platform extra, Hermes isolation flag, and Pi (Node) harness flag."""
+def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | None = None) -> tuple[str, bool, bool]:
+    """Return the Platform extra and Hermes isolation flag for the default harness."""
     try:
         payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
@@ -85,11 +85,15 @@ def resolve_fabric_harness_install(agent_config: Path) -> tuple[str, bool, bool]
     kind = selected.get("kind") if isinstance(selected, Mapping) else None
     if not isinstance(kind, str):
         return "nemo-agents-plugin", False, False
-    return (
-        _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"),
-        kind in _HERMES_HARNESS_KINDS,
-        kind in _PI_HARNESS_KINDS,
-    )
+    if python_version is not None and kind in {
+        "nooa",
+        "nooa-bench-agent",
+        "nvidia.fabric.nooa",
+        "nvidia.fabric.nooa.bench-agent",
+    }:
+        if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
+            raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
+    return _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"), kind in _HERMES_HARNESS_KINDS, kind in _PI_HARNESS_KINDS
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -800,7 +804,9 @@ def render_fabric_dockerfile(
         shared.contract_version,
         pins_contract_version=template_path is None and not wheel_filename,
     )
-    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(agent_config)
+    platform_extra, install_hermes, install_pi = resolve_fabric_harness_install(
+        agent_config, python_version=shared.python_version if template_path is None else None
+    )
     params = FabricRenderParams(
         **{f.name: getattr(shared, f.name) for f in fields(shared)},
         wheel_filename=wheel_filename,
