@@ -2265,6 +2265,7 @@ jobs:
       - name: Run Hermes integration tests
         run: make test-agents-hermes
         env:
+          ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
   deployments-openshell-tests:
