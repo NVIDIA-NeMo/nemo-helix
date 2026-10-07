@@ -27,6 +27,12 @@ clusters:
   base_url: http://localhost:8080/
 - name: production-cluster
   base_url: https://nhx.example.com/
+users:
+- name: local-user
+  type: no-auth
+- name: production-user
+  type: oauth
+  token: <saved by nemo auth login>
 contexts:
 - name: local
   cluster: local-cluster
