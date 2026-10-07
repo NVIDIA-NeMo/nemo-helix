@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 from filesets import FilesetPathError, parse_fileset_ref
-from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -78,7 +78,7 @@ class GenerateJob(NemoJob):
         spec: BaseModel,
         entity_client: object,
         job_name: str | None,
-        async_sdk: AsyncHelixClient,
+        async_sdk: AsyncNemoClient,
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
@@ -92,7 +92,7 @@ class GenerateJob(NemoJob):
             ds_workspace, fileset_name, _ = parse_fileset_ref(spec.data_source, workspace_fallback=workspace)
         except FilesetPathError as e:
             raise HelixJobCompilationError(f"Invalid data_source format: {spec.data_source!r}") from e
-        files = client_from_platform(async_sdk, AsyncFilesClient)
+        files = AsyncFilesClient.from_client(async_sdk)
         try:
             await files.get_fileset(name=fileset_name, workspace=ds_workspace)
         except ClientNotFoundError as e:
@@ -117,7 +117,7 @@ class GenerateJob(NemoJob):
                     "Expected 'workspace/provider_name' format."
                 )
             provider_workspace, provider_name = parts
-            models = client_from_platform(async_sdk, AsyncModelsClient)
+            models = AsyncModelsClient.from_client(async_sdk)
             try:
                 provider = (await models.get_provider(name=provider_name, workspace=provider_workspace)).data()
             except ClientNotFoundError as e:
@@ -145,7 +145,7 @@ class GenerateJob(NemoJob):
                 spec.pretrained_model_job, workspace_fallback=workspace
             )
             try:
-                jobs_client = client_from_platform(async_sdk, AsyncJobsClient)
+                jobs_client = AsyncJobsClient.from_client(async_sdk)
                 await jobs_client.get_job_result(name="adapter", job=model_job, workspace=model_workspace)
             except ClientNotFoundError as e:
                 raise HelixJobCompilationError(

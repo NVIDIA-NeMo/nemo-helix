@@ -9,7 +9,7 @@ Add users to workspaces, assign roles, and control who can access your resources
 
 <Note>
 
-The SDK examples on this page use `NeMoHelix()` with no arguments so that the client reads your active CLI context (set by `nemo auth login`). That is the right pattern for authorization workflows: you act as your logged-in identity and pass the workspace explicitly in each API call. For the standard local initialization pattern, see [CLI and SDK initialization](/documentation/get-started#nemo-setup).
+The SDK examples on this page use `NemoClient.from_config()` with no arguments so that the client reads your active CLI context (set by `nemo auth login`). That is the right pattern for authorization workflows: you act as your logged-in identity and pass the workspace explicitly in each API call. For the standard local initialization pattern, see [CLI and SDK initialization](/documentation/get-started#nemo-setup).
 
 </Note>
 ## Creating Workspaces
@@ -33,13 +33,14 @@ nemo config set --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-workspace = client.workspaces.create(
-    name="ml-team", description="Machine learning team workspace"
-)
+workspace = client.workspaces.create_workspace(
+    body=CreateWorkspaceRequest(name="ml-team", description="Machine learning team workspace")
+).data()
 ```
 
 </Tab>
@@ -87,23 +88,27 @@ nemo workspaces members create --principal alice@example.com --roles Editor --wo
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
 # Add a member with Editor role
-client.workspaces.members.create(
-    workspace="ml-team", principal="alice@example.com", roles=["Editor"]
+client.workspaces.create_workspace_member(
+    workspace="ml-team",
+    body=CreateWorkspaceMemberRequest(principal="alice@example.com", roles=["Editor"]),
 )
 
 # Add a member with Viewer role (read-only)
-client.workspaces.members.create(
-    workspace="ml-team", principal="bob@example.com", roles=["Viewer"]
+client.workspaces.create_workspace_member(
+    workspace="ml-team",
+    body=CreateWorkspaceMemberRequest(principal="bob@example.com", roles=["Viewer"]),
 )
 
 # Add a member with Admin role (full control)
-client.workspaces.members.create(
-    workspace="ml-team", principal="charlie@example.com", roles=["Admin"]
+client.workspaces.create_workspace_member(
+    workspace="ml-team",
+    body=CreateWorkspaceMemberRequest(principal="charlie@example.com", roles=["Admin"]),
 )
 ```
 
@@ -155,11 +160,11 @@ nemo workspaces members list --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-members = client.workspaces.members.list(workspace="ml-team")
+members = client.workspaces.list_workspace_members(workspace="ml-team").data()
 
 for member in members.data:
     print(f"{member.principal}: {member.roles}")
@@ -184,13 +189,16 @@ nemo workspaces members update bob@example.com --roles Editor --workspace ml-tea
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import UpdateWorkspaceMemberRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
 # Promote a Viewer to Editor
-client.workspaces.members.update(
-    workspace="ml-team", principal_id="bob@example.com", roles=["Editor"]
+client.workspaces.update_workspace_member(
+    workspace="ml-team",
+    principal_id="bob@example.com",
+    body=UpdateWorkspaceMemberRequest(roles=["Editor"]),
 )
 ```
 
@@ -213,11 +221,11 @@ nemo workspaces members delete alice@example.com --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-client.workspaces.members.delete(workspace="ml-team", principal_id="alice@example.com")
+client.workspaces.delete_workspace_member(workspace="ml-team", principal_id="alice@example.com")
 ```
 
 </Tab>
@@ -260,11 +268,14 @@ nemo workspaces members create --principal "*" --roles Viewer --workspace shared
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-client.workspaces.members.create(workspace="shared-models", principal="*", roles=["Viewer"])
+client.workspaces.create_workspace_member(
+    workspace="shared-models", body=CreateWorkspaceMemberRequest(principal="*", roles=["Viewer"])
+)
 ```
 
 </Tab>
@@ -286,11 +297,14 @@ nemo workspaces members create --principal "*" --roles Editor --workspace shared
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-client.workspaces.members.create(workspace="shared-datasets", principal="*", roles=["Editor"])
+client.workspaces.create_workspace_member(
+    workspace="shared-datasets", body=CreateWorkspaceMemberRequest(principal="*", roles=["Editor"])
+)
 ```
 
 </Tab>
@@ -312,11 +326,11 @@ nemo workspaces members delete "*" --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
-client.workspaces.members.delete(workspace="ml-team", principal_id="*")
+client.workspaces.delete_workspace_member(workspace="ml-team", principal_id="*")
 ```
 
 </Tab>
@@ -359,17 +373,18 @@ nemo workspaces members delete alice@example.com --workspace ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
 # Add another admin first
-client.workspaces.members.create(
-    workspace="ml-team", principal="charlie@example.com", roles=["Admin"]
+client.workspaces.create_workspace_member(
+    workspace="ml-team", body=CreateWorkspaceMemberRequest(principal="charlie@example.com", roles=["Admin"])
 )
 
 # Now you can remove yourself
-client.workspaces.members.delete(workspace="ml-team", principal_id="alice@example.com")
+client.workspaces.delete_workspace_member(workspace="ml-team", principal_id="alice@example.com")
 ```
 
 </Tab>
@@ -410,20 +425,21 @@ nemo workspaces delete ml-team
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix import NeMoHelix, ConflictError
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
 
-client = NeMoHelix()
+client = NemoClient.from_config()
 
 try:
-    client.workspaces.delete("ml-team")
+    client.workspaces.delete_workspace(name="ml-team").data()
 except ConflictError as e:
     print(f"Cannot delete workspace: {e}")
     # Delete resources first, then retry
-    projects = client.projects.list(workspace="ml-team")
-    for project in projects.data:
-        client.projects.delete(project.name, workspace="ml-team")
+    projects = client.projects.list_projects(workspace="ml-team").items()
+    for project in projects:
+        client.projects.delete_project(name=project.name, workspace="ml-team")
     # Now delete the workspace
-    client.workspaces.delete("ml-team")
+    client.workspaces.delete_workspace(name="ml-team").data()
 ```
 
 </Tab>

@@ -94,4 +94,48 @@ FROM runtime AS smoke-test
 RUN --mount=type=bind,source=docker/scripts/smoke-test-cpu-tasks.py,target=/tmp/smoke-test-cpu-tasks.py,readonly \
     /app/.venv/bin/python /tmp/smoke-test-cpu-tasks.py
 
+# OpenShell variant. OpenShell ignores ENTRYPOINT, runs the
+# workload as a non-root user named `sandbox`, resets PATH, and needs iproute2 (and
+# nftables for full policy enforcement) for its supervisor. Values mirror
+# nemo_deployments_plugin.backends.openshell.sandbox_profile.PROFILE; they are
+# hardcoded on purpose so this stage stays self-contained.
+# There is no put_archive or init container on OpenShell, so the launcher is baked
+# at the default JobExecutionProfileConfig.launcher_tool_path. /app/.venv stays
+# read-only: chowning it would duplicate the venv layer, and PYTHONDONTWRITEBYTECODE
+# is already set. /var/run/scratch holds the default task/job/config storage paths.
+FROM runtime AS openshell
+USER 0
+# runtime has already run cve-cleanup.sh: perl is purged (debconf stays registered
+# but cannot run, which breaks the iproute2 postinst) and /usr/bin/tar is busybox,
+# which dpkg-deb cannot drive. Borrow GNU tar from the builder, restore perl+debconf
+# only for this layer, then rerun the same cleanup so no perl ships.
+RUN --mount=type=bind,from=builder,source=/usr/bin/tar,target=/usr/bin/tar \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --reinstall \
+        perl-base debconf iproute2 nftables && \
+    sh /usr/bin/cve-cleanup.sh && \
+    test -x /usr/sbin/ip && test -x /usr/sbin/nft && \
+    groupadd --system sandbox && \
+    useradd --system --gid sandbox --create-home --home-dir /home/sandbox --shell /bin/bash sandbox && \
+    mkdir -p /var/run/scratch/task /var/run/scratch/job /var/run/scratch/config && \
+    chown -R sandbox:sandbox /var/run/scratch
+COPY --chmod=0755 --from=nhx-jobs-launcher /artifacts/jobs-launcher /tools/jobs-launcher
+ENV USERNAME=sandbox \
+    HOME=/home/sandbox
+
+FROM openshell AS openshell-smoke-test
+# Mimic the OpenShell launch contract: non-root `sandbox` user, PATH reset to the
+# venv only, no ENTRYPOINT. The launcher must run the CLI and propagate the wrapped
+# exit code; the sandbox user must be able to write the job storage paths.
+USER sandbox
+RUN set -eu; \
+    env -i HOME=/home/sandbox PATH=/app/.venv/bin /tools/jobs-launcher run -- nemo-helix --help >/dev/null; \
+    rc=0; env -i PATH=/app/.venv/bin /tools/jobs-launcher run -- /usr/bin/sh -c 'exit 7' || rc=$?; \
+    test "$rc" -eq 7; \
+    for d in /var/run/scratch/task /var/run/scratch/job /var/run/scratch/config /home/sandbox /tmp; do \
+        touch "$d/.w" && rm "$d/.w"; \
+    done; \
+    test -x /usr/sbin/ip; \
+    test -x /usr/sbin/nft
+
 FROM runtime

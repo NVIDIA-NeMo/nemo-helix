@@ -27,6 +27,7 @@ from nemo_evaluator.jobs.metric_resolution import (
 from nemo_evaluator.jobs.publication import publish_row_eval_result
 from nemo_evaluator.jobs.publication_spec import RowPublicationSpec
 from nemo_evaluator.jobs.result_persistence import persist_evaluate_result
+from nemo_evaluator.jobs.run_outcome import STATUS_DETAILS_KEY, RunOutcome, report_run_outcome, row_eval_outcome
 from nemo_evaluator.jobs.token_usage import report_row_evaluation_usage
 from nemo_evaluator.jobs.utils import async_client_from_sync_client, job_evaluator, run_with_isolated_async_client
 from nemo_evaluator.metric_refs import MetricRefOrInline
@@ -97,6 +98,7 @@ class EvaluationRunResult:
     metrics: list[Metric]
     artifact_url: str
     output: dict[str, object]
+    outcome: RunOutcome
 
 
 def _resolve_run_dataset(
@@ -298,7 +300,7 @@ class _EvaluateJobBase(NemoJob):
             submit_spec.metrics,
             workspace=workspace,
             entity_client=entity_client,
-            async_sdk=async_sdk,
+            async_client=async_sdk,
         )
         return EvaluateSpec(
             metrics=metrics,
@@ -370,48 +372,46 @@ class _EvaluateJobBase(NemoJob):
         ctx.results.save(RUN_METADATA_RESULT_NAME, result_files.run_metadata)
         ctx.results.save(ARTIFACTS_RESULT_NAME, result_files.artifacts_dir, ignore_patterns=RESULT_IGNORE_PATTERNS)
 
-        # TODO: Implement progress reporting hook in SDK - AALGO-149
-        # self.report_progress(
-        #     ctx,
-        #     work_done=1,
-        #     work_total=1,
-        #     status="completed",
-        # )
-
-        output = {
-            "status": "completed",
+        outcome = row_eval_outcome(result)
+        if outcome.failed:
+            logger.error(outcome.message)
+        output: dict[str, object] = {
+            "status": "failed" if outcome.failed else "completed",
             "artifact": artifact.model_dump(),
+            STATUS_DETAILS_KEY: outcome.details(),
         }
+        if outcome.failed:
+            output["reason"] = outcome.message
         return EvaluationRunResult(
             result=result,
             started_at=started_at,
             metrics=metrics,
             artifact_url=artifact.artifact_url,
             output=output,
+            outcome=outcome,
         )
 
     @staticmethod
-    def _persist_result(
-        result: EvaluationArtifactResult,
+    def _record_outcome(
+        run: EvaluationRunResult,
         *,
         spec: EvaluateSpec,
-        metrics: list[Metric],
         ctx: JobContext,
-        artifact_url: str,
         async_client: AsyncNemoClient | None,
     ) -> None:
+        report_run_outcome(run.outcome, ctx=ctx, async_client=async_client)
         # Persist the queryable result record (aggregate scores); per-row detail lives in the fileset
         # bundle referenced by `artifact`. Best-effort: the authoritative output (result artifacts) is
         # already saved above, so a persistence failure must not fail an otherwise-successful eval —
         # log and continue.
         try:
             persist_evaluate_result(
-                result,
+                run.result,
                 target=spec.target,
                 dataset_ref=spec.dataset.root if isinstance(spec.dataset, FilesetRef) else None,
-                metric_types=[metric_type_name(metric) for metric in metrics],
+                metric_types=[metric_type_name(metric) for metric in run.metrics],
                 ctx=ctx,
-                bundle_ref=artifact_url,
+                bundle_ref=run.artifact_url,
                 async_client=async_client,
             )
         except Exception:
@@ -460,12 +460,10 @@ class _EvaluateJobBase(NemoJob):
         dataset = _resolve_run_dataset(spec.dataset, ctx=ctx, client=client)
         run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
         with async_client_from_sync_client(client) as async_client:
-            self._persist_result(
-                run.result,
+            self._record_outcome(
+                run,
                 spec=spec,
-                metrics=run.metrics,
                 ctx=ctx,
-                artifact_url=run.artifact_url,
                 async_client=async_client,
             )
             self._publish_result(
@@ -507,12 +505,10 @@ class AsyncEvaluateJob(_EvaluateJobBase):
         spec = EvaluateSpec.model_validate(config)
         dataset = _resolve_run_dataset_async(spec.dataset, ctx=ctx, async_client=async_client)
         run = self._run_evaluator(spec, ctx=ctx, dataset=dataset)
-        self._persist_result(
-            run.result,
+        self._record_outcome(
+            run,
             spec=spec,
-            metrics=run.metrics,
             ctx=ctx,
-            artifact_url=run.artifact_url,
             async_client=async_client,
         )
         self._publish_result(

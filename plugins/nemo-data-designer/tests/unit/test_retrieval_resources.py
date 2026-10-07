@@ -26,7 +26,7 @@ def test_fileset_corpus_must_match_job_workspace(tmp_path: Path) -> None:
         _download_fileset(
             "other/documents",
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -39,7 +39,7 @@ def test_local_corpus_path_is_preview_only(tmp_path: Path) -> None:
         materialize_corpus(
             str(corpus),
             dest=tmp_path / "unused",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
             allow_local_path=True,
         )
@@ -50,7 +50,7 @@ def test_local_corpus_path_is_preview_only(tmp_path: Path) -> None:
         materialize_corpus(
             str(corpus),
             dest=tmp_path / "unused",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -120,7 +120,7 @@ def test_hf_corpus_rejects_path_traversal(tmp_path: Path, corpus: str) -> None:
         materialize_corpus(
             corpus,
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -131,7 +131,7 @@ def test_hf_corpus_requires_retrieval_extra(tmp_path: Path, monkeypatch: pytest.
         materialize_corpus(
             "hf://org/dataset",
             dest=tmp_path / "corpus",
-            sdk=Mock(),
+            client=Mock(),
             workspace="default",
         )
 
@@ -158,7 +158,7 @@ def test_hf_corpus_passes_token_to_snapshot_download(tmp_path: Path, monkeypatch
     materialize_corpus(
         "hf://org/private-dataset",
         dest=tmp_path / "corpus",
-        sdk=Mock(),
+        client=Mock(),
         workspace="default",
         hf_token="hf_secret_value",
     )
@@ -183,7 +183,7 @@ def test_hf_file_uri_includes_filename_in_allow_patterns(tmp_path: Path, monkeyp
     staged = materialize_corpus(
         "hf://org/dataset@abc123/nv_pp_dd_sdg.json",
         dest=dest,
-        sdk=Mock(),
+        client=Mock(),
         workspace="default",
     )
 
@@ -216,7 +216,7 @@ async def test_resolve_hf_token_reads_named_secret(reference: str, expected_work
         return Mock(data=Mock(return_value=Mock(value="hf_secret_value")))
 
     secrets = Mock(access_secret=access_secret)
-    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform", return_value=secrets):
+    with patch("nemo_data_designer_plugin.retrieval.secrets.AsyncSecretsClient.from_client", return_value=secrets):
         token = await resolve_hf_token(Mock(), reference, "shared")
 
     assert token == "hf_secret_value"
@@ -225,7 +225,7 @@ async def test_resolve_hf_token_reads_named_secret(reference: str, expected_work
 
 @pytest.mark.asyncio
 async def test_resolve_hf_token_rejects_malformed_secret_reference() -> None:
-    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform") as client:
+    with patch("nemo_data_designer_plugin.retrieval.secrets.AsyncSecretsClient.from_client") as client:
         with pytest.raises(NDDInvalidConfigError, match="formatted incorrectly"):
             await resolve_hf_token(Mock(), "too/many/parts", "default")
 
@@ -254,7 +254,7 @@ async def test_resolve_hf_token_maps_missing_or_denied_secret_to_invalid_config(
         raise error
 
     secrets = Mock(access_secret=access_secret)
-    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform", return_value=secrets):
+    with patch("nemo_data_designer_plugin.retrieval.secrets.AsyncSecretsClient.from_client", return_value=secrets):
         with pytest.raises(NDDInvalidConfigError, match=message):
             await resolve_hf_token(Mock(), "default/hf-token", "shared")
 
@@ -270,7 +270,7 @@ async def test_resolve_hf_token_maps_unexpected_secret_error_to_internal_error(
         )
 
     secrets = Mock(access_secret=access_secret)
-    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform", return_value=secrets):
+    with patch("nemo_data_designer_plugin.retrieval.secrets.AsyncSecretsClient.from_client", return_value=secrets):
         with caplog.at_level(logging.ERROR, logger="nemo_data_designer_plugin.retrieval.secrets"):
             with pytest.raises(NDDInternalError, match="unexpected error occurred"):
                 await resolve_hf_token(Mock(), "default/hf-token", "shared")
@@ -281,6 +281,6 @@ async def test_resolve_hf_token_maps_unexpected_secret_error_to_internal_error(
 
 @pytest.mark.asyncio
 async def test_resolve_hf_token_without_reference_skips_secrets_service() -> None:
-    with patch("nemo_data_designer_plugin.retrieval.secrets.client_from_platform") as client:
+    with patch("nemo_data_designer_plugin.retrieval.secrets.AsyncSecretsClient.from_client") as client:
         assert await resolve_hf_token(Mock(), None, "default") is None
     client.assert_not_called()

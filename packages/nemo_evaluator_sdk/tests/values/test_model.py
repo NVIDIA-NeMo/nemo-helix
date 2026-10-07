@@ -95,12 +95,13 @@ class TestModelDefaultHeaders:
         with pytest.raises(
             ValidationError,
             match="default_headers cannot include authentication headers .*model.api_key_secret",
-        ):
+        ) as excinfo:
             Model(
                 url="https://judge.example.test/v1/chat/completions",
                 name="judge-model",
-                default_headers={header_name: "blocked"},
+                default_headers={header_name: "LEAKME"},
             )
+        assert "LEAKME" not in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "header_name",

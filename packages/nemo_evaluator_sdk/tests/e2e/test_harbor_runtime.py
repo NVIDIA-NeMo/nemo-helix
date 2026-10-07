@@ -113,7 +113,7 @@ async def test_sdk_runs_harbor_hello_world_natively(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_harbor_resumes_a_partial_job_with_a_custom_agent_dir(tmp_path: Path) -> None:
-    """Regression for AALGO-430 — a real Harbor resume with ``agent_dir`` set.
+    """Regression test — a real Harbor resume with ``agent_dir`` set.
 
     This is the case every faked-``Job`` test misses, and the reason the bug went
     unnoticed: the scoped agent import path used to carry a fresh uuid per run, so
@@ -248,7 +248,7 @@ async def test_nemo_fabric_agent_runs_deepagents_on_nemotron_inside_harbor(tmp_p
                     }
                 },
             },
-            "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+            "fabric_package": "nemo-fabric[deepagents]==0.4.0",
             "fabric_workspace": "/app",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},

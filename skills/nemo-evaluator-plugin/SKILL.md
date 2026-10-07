@@ -51,11 +51,11 @@ metric for a rubric, RAG workflow, or tool-calling evaluation.
 | Need | Interface |
 | --- | --- |
 | Fast metric iteration without NeMo Helix | `nemo_evaluator_sdk.Evaluator` |
-| Dataset-driven platform job | `client.evaluator.submit(...)` or `nemo evaluator evaluate` |
+| Dataset-driven platform job | `evaluator.submit(...)` or `nemo evaluator evaluate` |
 | Multiple inline/stored metric refs in one job | `nemo evaluator evaluate` with an `EvaluateInputSpec` |
-| Task-driven platform job | `client.evaluator.submit(tasks=..., target=<runner>)` or `nemo evaluator agent-evaluate` |
+| Task-driven platform job | `evaluator.submit(tasks=..., target=<runner>)` or `nemo evaluator agent-evaluate` |
 | Retrieval-driven platform job | `nemo evaluator retrieve-eval` |
-| Reusable platform definitions and result indexes | `client.evaluator.metrics`, `.tasks`, `.tasksets`, `.eval_results`, `.agent_eval_results` |
+| Reusable platform definitions and result indexes | `evaluator.metrics`, `.tasks`, `.tasksets`, `.eval_results`, `.agent_eval_results` |
 
 Default to the plugin-specific job commands for durable platform evaluation:
 `nemo evaluator evaluate`, `nemo evaluator agent-evaluate`, and
@@ -166,7 +166,10 @@ target is a `ModelTarget`, `AgentTarget`, `FabricRunnerTarget`,
 
 A `FabricRunnerTarget`'s `source` is an inline config (`{"kind": "fabric",
 "source": {"config": {...}}}`) or a registered agent (`nemo agents create`):
-`{"kind": "fabric", "source": {"agent": "<name>"}}`. At submit time the service resolves
+`{"kind": "fabric", "source": {"agent": "<name>"}}`. A `HarborRunnerTarget`'s `source`
+takes the same registered-agent shape (`{"kind": "harbor", "source": {"agent":
+"<name>"}}`) to run it inside each task container, next to a built-in agent
+(`{"name": "oracle"}`) or your own (`{"import_path": "pkg:Agent"}`). At submit time the service resolves
 the agent exactly as a deployment would — models bound to the workspace
 Inference Gateway, no credentials in the spec — and runs it fresh for every
 trial; it never calls an existing deployment. An optional `environment` (the

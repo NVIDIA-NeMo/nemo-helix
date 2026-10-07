@@ -48,6 +48,8 @@ HARBOR_CARRIED_VALUES = {
     "artifacts": ["/app/output"],
     "trace_dir": "/app/traces",
     "reward_key": "score",
+    "agent_setup_timeout_multiplier": 12.0,
+    "agent_timeout_multiplier": 5.0,
 }
 HARBOR_REJECTED_VALUES = {
     "job_name": "existing-job",
@@ -55,9 +57,7 @@ HARBOR_REJECTED_VALUES = {
     "quiet": False,
     "agent_dir": Path("local-agent"),
     "timeout_multiplier": 2.0,
-    "agent_timeout_multiplier": 2.0,
     "verifier_timeout_multiplier": 2.0,
-    "agent_setup_timeout_multiplier": 2.0,
     "environment_build_timeout_multiplier": 2.0,
 }
 
@@ -76,15 +76,6 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
         **HARBOR_CARRIED_VALUES,
     }
-
-
-def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
-    runner = HarborAgentTaskRunner(
-        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
-    )
-    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
-    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
-        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 _FAKE_KEY = "sk-not-a-real-key-0123456789"
@@ -118,6 +109,15 @@ def test_nested_harbor_target_error_does_not_echo_the_value():
         )
     assert "plaintext credentials" in str(excinfo.value)
     assert _FAKE_KEY not in str(excinfo.value)
+
+
+def test_a_harbor_runner_without_an_import_path_submits_its_built_in_agent(tmp_path):
+    runner = HarborAgentTaskRunner(
+        config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name="codex", agent_model_name="m")
+    )
+    assert runner_to_target(runner).source == HarborBuiltinAgentSource(name="codex", model_name="m")
+    with pytest.raises(UnsubmittableRunnerError, match="selects no agent"):
+        runner_to_target(HarborAgentTaskRunner(config=HarborRuntimeConfig(jobs_dir=tmp_path, agent_name=None)))
 
 
 def test_every_harbor_runtime_field_has_a_submission_policy():
@@ -206,6 +206,22 @@ def test_a_gym_runner_describes_itself_as_a_submittable_target() -> None:
     # counterpart, listed in one place so a new wire-only field is a deliberate addition here
     # rather than a puzzling failure.
     assert target.model_dump(exclude=WIRE_ONLY_TARGET_FIELDS) == config.model_dump()
+
+
+def test_gym_runner_submission_carries_refs_but_not_custom_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Resolver:
+        def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
+            return "PRIVATE_SRC"
+
+    monkeypatch.setenv("PRIVATE_SRC", "private-value")
+    config = GymRuntimeConfig(
+        agent="a", agent_config="a.yaml", resources_server="r", env_secrets={"KEY": SecretRef("ws/key")}
+    )
+    target = runner_to_target(GymAgentTaskRunner(config=config, secret_resolver=Resolver()))
+    assert target.env_secrets == {"KEY": SecretRef("ws/key")}
+    serialized = target.model_dump_json()
+    assert "private-value" not in serialized
+    assert "PRIVATE_SRC" not in serialized
 
 
 def test_every_field_actually_travels_rather_than_defaulting() -> None:

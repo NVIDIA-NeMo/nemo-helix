@@ -115,9 +115,29 @@ docs-watch: ## Start Fern docs dev plus a repo-level watcher for docs/** changes
 docs-check: ## Validate the Fern docs (fern check + validate-mdx + gated-link check)
 	cd docs/fern && npm run check
 
+DOCS_TYPED_SNIPPET_PATHS := \
+	docs/anonymizer/tutorials/preview.mdx \
+	docs/auth/authorization/plugin-authorization.mdx \
+	docs/auth/authorization/policy-engine.mdx \
+	docs/customizer/tutorials/embedding-customization-job.mdx \
+	docs/customizer/tutorials/grpo-environment-packages.mdx \
+	docs/data-designer/cli.mdx \
+	docs/data-designer/index.mdx \
+	docs/data-designer/retrieval-sdg.mdx \
+	docs/data-designer/tutorials/basics.mdx \
+	docs/data-designer/tutorials/seeding.mdx \
+	docs/evaluator/agent-eval/gym-runner.mdx \
+	docs/evaluator/agent-eval/index.mdx \
+	docs/pysdk/client/index.mdx \
+	docs/safe-synthesizer/about/jobs.mdx \
+	docs/safe-synthesizer/about/reference.mdx \
+	docs/safe-synthesizer/tutorials/differential-privacy.mdx \
+	docs/safe-synthesizer/tutorials/safe-synthesizer-101.mdx
+
 .PHONY: docs-lint-snippets
-docs-lint-snippets: ## Syntax-check Python fenced snippets across all docs
+docs-lint-snippets: ## Syntax-check all Python fenced snippets and type-check curated executable docs
 	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py docs --no-type-check
+	$(UV) run --frozen python docs/_scripts/lint_python_snippets.py $(DOCS_TYPED_SNIPPET_PATHS)
 
 .PHONY: docs-check-python-snippets
 docs-check-python-snippets: ## Syntax-check and type-check Python snippets in one doc (DOCS_PATH=...)
@@ -315,7 +335,7 @@ clean: clean-python ## Clean the NeMo Helix DB, files, and Python virtual enviro
 .PHONY: update-licenses
 update-licenses: ## Update the third_party/license.txt file with the latest licenses
 	$(UV) sync --inexact
-	$(UV) run --frozen nemo-helix-sdk-tools license generate
+	$(UV) run --frozen nemo-helix-tools license generate
 
 .PHONY: check-licenses
 check-licenses: ## Check that license files are up to date
@@ -324,7 +344,7 @@ check-licenses: ## Check that license files are up to date
 	export PATH="$$HOME/.local/bin:$$PATH" && \
 	$(MAKE) update-licenses && \
 	diff third_party/licenses.jsonl "$${LICENSE_DIR}/$${LICENSE_NAME}" && \
-	$(UV) run --frozen nemo-helix-sdk-tools license find-missing
+	$(UV) run --frozen nemo-helix-tools license find-missing
 
 CMD_COPYRIGHT_HEADER_FIXER := $(UV) run python tools/lint/copyright_fixer.py
 .PHONY: update-copyright-headers
@@ -367,7 +387,7 @@ check-github-scripts: test-github-scripts lint-github-scripts ## Test, lint, and
 
 .PHONY: vendor
 vendor: ## Refresh the nemo-helix wheel metadata generated from [tool.bundle-package]
-	$(UV) run --no-sync nemo-helix-sdk-tools vendor bundle-metadata
+	$(UV) run --no-sync nemo-helix-tools vendor bundle-metadata
 
 # ============================================================================
 # Python Testing Targets

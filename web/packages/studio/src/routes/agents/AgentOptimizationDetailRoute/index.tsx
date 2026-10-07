@@ -16,13 +16,17 @@ import { TrialsDataView } from '@studio/components/dataViews/OptimizationJobsDat
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { fetchStudyResults } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
+import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
+import {
+  fetchStudyResults,
+  type Trial,
+} from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
 import { StudyStatTiles } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyStatTiles';
 import { getAgentOptimizationsTabRoute, getAgentsListRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { useQuery } from '@tanstack/react-query';
 import { ScrollText } from 'lucide-react';
-import { type FC, useEffect } from 'react';
+import { type FC, useCallback, useEffect, useState } from 'react';
 
 /** Statuses that will not change again, so polling can stop. */
 const TERMINAL_STATUSES = new Set<HelixJobStatus>(['completed', 'error', 'cancelled']);
@@ -32,6 +36,10 @@ const QUEUED_STATUSES = new Set<HelixJobStatus>(['created', 'pending']);
 export const AgentOptimizationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { optimizeJobName: jobName } = useRequiredPathParams([ROUTE_PARAMS.optimizeJobName]);
+  const jobKey = `${workspace}/${jobName}`;
+  const [deployTarget, setDeployTarget] = useState<{ jobKey: string; trial: Trial } | null>(null);
+  const deployTrial = deployTarget?.jobKey === jobKey ? deployTarget.trial : null;
+  const onDeploy = useCallback((trial: Trial) => setDeployTarget({ jobKey, trial }), [jobKey]);
 
   const {
     data: job,
@@ -187,7 +195,13 @@ export const AgentOptimizationDetailRoute: FC = () => {
         ) : (
           <>
             <StudyStatTiles results={results} />
-            <TrialsDataView results={results} />
+            <TrialsDataView results={results} onDeploy={onDeploy} />
+            <DeployTrialModal
+              workspace={workspace}
+              job={job}
+              trial={deployTrial}
+              onClose={() => setDeployTarget(null)}
+            />
           </>
         )}
       </Stack>

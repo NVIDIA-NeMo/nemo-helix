@@ -450,7 +450,7 @@ def _reward_stats_from_summary(
     ``verifier_result.rewards`` exists, so a trial that crashed before the verifier ran appears in
     ``exception_stats`` alone. The SDK synthesises ``0.0`` for it (see ``HarborRewardMetric``), so it
     also lands in ``task_metric_values`` — ``gamma__a`` below is exactly that case. Reconciling the
-    two is AALGO-441, not this helper.
+    two is covered by a separate test, not this helper.
     """
     key = f"{metric_type}.{output_name}"
     stats: dict[str, dict[float, list[str]]] = {}
@@ -464,14 +464,14 @@ def _reward_stats_from_summary(
 
 @pytest.mark.asyncio
 async def test_harbor_reward_stats_is_derivable_from_summary_task_metric_values(tmp_path: Path) -> None:
-    """The summary alone reproduces Harbor's ``reward_stats``, which is what AALGO-310 exists to enable.
+    """The summary alone reproduces Harbor's ``reward_stats``, which the summary exists to enable.
 
     Harbor groups rewards by ``trial_name`` and keys them by the raw ``float | int``. Both were out of
     reach while values were bare numbers indexed by position; now that each record names its trial,
-    AALGO-441 can rebuild the real shape without re-walking ``result.scores``.
+    A consumer can rebuild the real shape without re-walking ``result.scores``.
 
     ``exception_stats`` is now covered too, by
-    :func:`test_harbor_exception_stats_is_read_straight_off_the_summary` below (AALGO-428).
+    :func:`test_harbor_exception_stats_is_read_straight_off_the_summary` below.
     """
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -508,7 +508,7 @@ async def test_harbor_reward_stats_is_derivable_from_summary_task_metric_values(
 
 @pytest.mark.asyncio
 async def test_harbor_exception_stats_is_read_straight_off_the_summary(tmp_path: Path) -> None:
-    """AALGO-428: ``summary.error_trial_ids`` *is* Harbor's ``exception_stats``, not an approximation.
+    """``summary.error_trial_ids`` *is* Harbor's ``exception_stats``, not an approximation.
 
     The proof is the absence of a helper. ``reward_stats`` needs ``_reward_stats_from_summary`` above
     to re-key task-major records into Harbor's shape; this needs nothing — the field is already
@@ -927,7 +927,7 @@ def test_runtime_config_accepts_kwargs_that_only_look_credential_shaped() -> Non
             "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"},
             "api_key": None,
             # An issued-token prefix counts only on a value long enough to be one.
-            "fabric_package": "nemo-fabric[codex]==0.3.0",
+            "fabric_package": "nemo-fabric[codex]==0.4.0",
             "model": "sk-tiny",
             # A marker must stand as a word in the path, so a tokenizer is not a token.
             "tokenizer": "o200k_base",
@@ -1089,7 +1089,7 @@ async def test_changed_inputs_discard_the_job_dir(tmp_path: Path, monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_under_covered_job_resumes_with_agent_dir_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Regression for AALGO-430. This used to discard unconditionally: the scoped
+    # Regression test. This used to discard unconditionally: the scoped
     # import path carried a fresh uuid per run, so Harbor's JobConfig never matched
     # and it raised FileExistsError instead of resuming. Now the path is
     # content-addressed, so an unchanged agent resumes and keeps completed Docker
@@ -1113,7 +1113,7 @@ async def test_under_covered_job_resumes_when_harbor_can(tmp_path: Path, monkeyp
     # Inputs unchanged, some attempts missing, agent_dir unset — Harbor's
     # AgentConfig is deterministic, so it resumes per trial. Discarding would throw
     # away completed Docker work for nothing. The agent_dir-set case above now
-    # behaves identically (AALGO-430).
+    # behaves identically.
     config, job_dir, task = _seed_cached_job(tmp_path)
     config = config.model_copy(update={"n_attempts": 2})
     _stamp_for(config, task, job_dir)  # stamp matches the new config
@@ -1732,7 +1732,7 @@ def _scoped_path(agent_dir: Path) -> str:
 def test_scoped_import_path_is_stable_for_unchanged_contents(tmp_path: Path) -> None:
     # The import path lands in Harbor's JobConfig, which Harbor compares field-by-field
     # when deciding whether a job dir may be resumed. A per-run random suffix made that
-    # comparison fail every time, so Harbor could never resume (AALGO-430).
+    # comparison fail every time, so Harbor could never resume.
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     (agent_dir / "wrapper.py").write_text("x = 1\n")
@@ -1792,7 +1792,7 @@ def test_same_named_identical_agents_do_not_repoint_an_open_scope(tmp_path: Path
     # Deliberately NOT fixed by hashing the resolved path into the package name: that
     # would make the name location-dependent, so the same agent evaluated from a
     # different path would produce a different JobConfig and Harbor would refuse to
-    # resume — reintroducing AALGO-430. The trees are byte-identical here, so keeping
+    # resume — reintroducing the resume bug. The trees are byte-identical here, so keeping
     # the first path is correct.
     from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import _AGENT_PACKAGE_REFCOUNTS
 
@@ -2946,28 +2946,6 @@ def test_a_trial_with_no_trace_artifact_has_no_standard_trace(tmp_path: Path) ->
     assert trial.get_evidence("trace:otlp") is None
 
 
-@pytest.mark.parametrize(
-    ("source_name", "legacy_name"),
-    [
-        (
-            "nemo_evaluator_sdk.agent_eval.runtimes.harbor.trial_adapter",
-            "nemo_helix.beta.evaluator.agent_eval.runtimes.harbor.trial_adapter",
-        ),
-        (
-            "nemo_evaluator_sdk.agent_eval.trials",
-            "nemo_helix.beta.evaluator.agent_eval.trials",
-        ),
-    ],
-)
-def test_legacy_harbor_trial_contract_import_resolves_to_source_module(source_name: str, legacy_name: str) -> None:
-    source = importlib.import_module(source_name)
-    legacy = importlib.import_module(legacy_name)
-    assert source.__file__ is not None
-    assert legacy.__file__ is not None
-
-    assert Path(legacy.__file__).resolve() == Path(source.__file__).resolve()
-
-
 def test_atif_trajectory_supplies_the_final_answer(tmp_path: Path) -> None:
     trial = _trial_with_trajectory(tmp_path, _atif_trajectory_payload())
 
@@ -3333,11 +3311,8 @@ async def test_missing_secret_fails_before_the_job_dir_is_touched(
 
 
 class _FixedSource:
-    def find_env_name(self, secret_ref: SecretRef, env_name: str) -> str | None:
+    def env_var_for(self, secret_ref: SecretRef, env_name: str) -> str:
         return "CUSTOM_SRC"
-
-    def missing_secret_message(self, secret_ref: SecretRef, env_name: str) -> str:
-        return "unused"
 
 
 class _ValueOnlyResolver:

@@ -3,9 +3,7 @@
 
 """Shared request/response types for the Evaluator service.
 
-Single source of truth for the HTTP contract. Replaces the Stainless-generated
-evaluator types and the hand-written ``nemo_evaluator.sdk`` resource layer's
-direct ``NeMoHelix._client`` usage.
+Single source of truth for the HTTP contract.
 """
 
 from __future__ import annotations

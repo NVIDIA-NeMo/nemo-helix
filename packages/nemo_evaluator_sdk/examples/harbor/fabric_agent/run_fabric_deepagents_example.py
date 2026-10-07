@@ -30,6 +30,7 @@ from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NVIDIA_MODEL_BASE_URL
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import SecretRef
 from pydantic import JsonValue
@@ -77,7 +78,7 @@ def fabric_config_for(model: str, api_key_env: str) -> dict[str, JsonValue]:
 async def _main(jobs_dir: Path, *, model: str, api_key_env: str, job_name: str | None) -> None:
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_config": fabric_config_for(model, api_key_env),
-        "fabric_package": "nemo-fabric[deepagents]==0.3.0",
+        "fabric_package": "nemo-fabric[deepagents]==0.4.0",
         # The task image's working directory; Fabric's default `/testbed` does not exist there.
         "fabric_workspace": "/app",
     }
@@ -122,9 +123,10 @@ def main() -> None:
     args = parser.parse_args()
     api_key_env = api_key_env_for(args.model, args.api_key_env)
     # Fail before any work with a one-line message; the runner applies the same lookup.
-    resolver = LocalSecretResolver()
-    if resolver.find_env_name(SecretRef(api_key_env)) is None:
-        raise SystemExit(resolver.missing_secret_message(SecretRef(api_key_env)))
+    try:
+        LocalSecretResolver().env_var_for(SecretRef(api_key_env))
+    except MissingSecretError as error:
+        raise SystemExit(str(error)) from None
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     asyncio.run(_main(args.jobs_dir, model=args.model, api_key_env=api_key_env, job_name=args.job_name))
 

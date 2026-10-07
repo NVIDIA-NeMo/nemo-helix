@@ -221,14 +221,16 @@ harnesses:
       api_key_env: <credential-env-var-if-needed>
       base_url: <provider-base-url-if-needed>
       temperature: 0.0
-    settings:
       max_tokens: 512
+    settings:
       reasoning_config:
         effort: none
 ```
 
 If `base_url` is needed, put it directly in the model block, not under
 `settings`.
+The same goes for `top_p` and `max_tokens`: they are model fields, and the
+adapter applies them when the harness supports them.
 
 Use `nemo-model-selection` for every harness. It must verify the exact model
 against that harness's model contract before returning it: Responses for

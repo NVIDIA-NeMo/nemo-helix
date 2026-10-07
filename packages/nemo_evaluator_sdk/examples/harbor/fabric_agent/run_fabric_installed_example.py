@@ -28,6 +28,7 @@ from pathlib import Path
 
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_agent import NVIDIA_MODEL_BASE_URL
 from nemo_evaluator_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig, run_harbor_eval
+from nemo_evaluator_sdk.resolver_protocols import MissingSecretError
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values import SecretRef
 from pydantic import JsonValue
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 BARE_HELLO_WORLD_DATASET_DIR = Path(__file__).resolve().parent / "bare_hello_world_dataset"
 FABRIC_INSTALLED_AGENT = "nemo_evaluator_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
 DEFAULT_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.3.0"
+DEFAULT_FABRIC_PACKAGE = "nemo-fabric[deepagents,relay]==0.4.0"
 
 
 #: Credential variable and endpoint for the providers this example knows how to reach.
@@ -140,9 +141,10 @@ def main() -> None:
     args = parser.parse_args()
     api_key_env = api_key_env_for(args.model, args.api_key_env)
     # Fail before any work with a one-line message; the runner applies the same lookup.
-    resolver = LocalSecretResolver()
-    if resolver.find_env_name(SecretRef(api_key_env)) is None:
-        raise SystemExit(resolver.missing_secret_message(SecretRef(api_key_env)))
+    try:
+        LocalSecretResolver().env_var_for(SecretRef(api_key_env))
+    except MissingSecretError as error:
+        raise SystemExit(str(error)) from None
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     asyncio.run(
         _main(

@@ -8,12 +8,14 @@ from typing import Iterator
 from unittest.mock import AsyncMock, Mock
 
 import aiohttp
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from multidict import CIMultiDict, CIMultiDictProxy
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix.types.inference.virtual_model import VirtualModel
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -25,6 +27,7 @@ from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProvider
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from nhx.core.inference_gateway.config import DebugModelProvider, config
 from nhx.core.inference_gateway.service import InferenceGatewayService
+from nhx.testing.client import mock_async_nemo_client
 
 
 def default_model_infos() -> list[ModelProviderInfo]:
@@ -42,7 +45,7 @@ def default_model_infos() -> list[ModelProviderInfo]:
                         served_model_name="meta/llama-3.2-1b-instruct",
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             ),
         ),
         ModelProviderInfo(
@@ -59,7 +62,7 @@ def default_model_infos() -> list[ModelProviderInfo]:
                         served_model_name="meta/llama-3.2-1b-instruct",
                     )
                 ],
-                status="READY",
+                status=ModelProviderStatus.READY,
             ),
             secret_value="fake_secret_value",
         ),
@@ -75,7 +78,7 @@ def new_model_infos() -> list[ModelProviderInfo]:
                 host_url="http://localhost:8080",
                 created_at=datetime.now(),
                 updated_at=datetime.now(),
-                status="READY",
+                status=ModelProviderStatus.READY,
             ),
         ),
     ]
@@ -106,19 +109,12 @@ def autoprovisioned_vms_for_cache(model_cache: ModelCache) -> list[VirtualModel]
     keying plus the request-side rewrite of ``parse_model_entity_ref`` to surface composite
     LoRA ids through whichever VirtualModel the operator manually associated with them.
     """
-    now = datetime.fromisoformat("2026-01-01T00:00:00+00:00")
     return [
         VirtualModel(
-            id=f"{workspace}/{name}",
-            entity_id=f"{workspace}/{name}",
             workspace=workspace,
             name=name,
-            parent=workspace,
-            db_version=1,
             default_model_entity=f"{workspace}/{name}",
             autoprovisioned=True,
-            created_at=now,
-            updated_at=now,
         )
         for (workspace, name) in model_cache.model_entity_info_map.keys()
         if "&adapters/" not in name
@@ -146,7 +142,7 @@ def middleware_registry() -> MiddlewareRegistry:
 
 @pytest.fixture
 def app_and_client(
-    mocker, model_cache, virtual_model_cache, middleware_registry, mock_proxy_client, mock_nhx_sdk
+    mocker, model_cache, virtual_model_cache, middleware_registry, mock_proxy_client, mock_client
 ) -> Iterator[tuple[FastAPI, TestClient]]:
     """
     This is a joint fixture for both a fastapi app and client. The reason they are combined
@@ -171,7 +167,7 @@ def app_and_client(
     )
 
     service = InferenceGatewayService()
-    mocker.patch.object(service.dependency_provider, "get_sdk_client", return_value=mock_nhx_sdk)
+    mocker.patch.object(service.dependency_provider, "get_service_nemo_client", return_value=mock_client)
     app = service.app
     app.dependency_overrides[global_http_client] = lambda: mock_proxy_client
     app.dependency_overrides[global_model_cache] = lambda: model_cache
@@ -230,10 +226,22 @@ def mock_proxy_client(mock_proxy_response):
 
 
 @pytest.fixture
-def mock_nhx_sdk():
-    """Create a mock async NeMo Helix SDK client.
+def mock_client():
+    """Create an async platform client whose every list endpoint returns an empty page."""
 
-    This mocks AsyncNeMoHelix for use with the inference gateway.
-    """
-    m = AsyncMock()
-    return m
+    def _handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "data": [],
+                "pagination": {
+                    "page": 1,
+                    "page_size": 200,
+                    "current_page_size": 0,
+                    "total_pages": 0,
+                    "total_results": 0,
+                },
+            },
+        )
+
+    return mock_async_nemo_client(_handler, AsyncNemoClient)

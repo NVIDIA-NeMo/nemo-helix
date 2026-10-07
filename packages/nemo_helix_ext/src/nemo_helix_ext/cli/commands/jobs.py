@@ -452,11 +452,11 @@ def _render_lifecycle_code(
 @handle_errors
 def cancel_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Cancel a platform job."""
+    """Cancel a platform job by name or ID."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
@@ -657,10 +657,10 @@ def create_jobs(
 @handle_errors
 def delete_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
-    """Delete a platform job."""
+    """Delete a platform job by name or ID."""
     state: CLIContext = ctx.obj
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
     if handle_code_generation(["jobs"], "delete", kwargs, "json", state):
@@ -913,11 +913,11 @@ def list_execution_profiles_jobs(
 @handle_errors
 def pause_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Pause a platform job."""
+    """Pause a platform job by name or ID."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
@@ -942,11 +942,11 @@ def pause_jobs(
 @handle_errors
 def resume_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Resume a paused platform job."""
+    """Resume a paused platform job by name or ID."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
@@ -971,11 +971,11 @@ def resume_jobs(
 @handle_errors
 def retrieve_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Get a platform job by name."""
+    """Get a platform job by name or ID."""
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 

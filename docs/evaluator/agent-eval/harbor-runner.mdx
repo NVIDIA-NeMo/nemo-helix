@@ -185,13 +185,13 @@ write fails after preparation, `TaskPublicationError.prepared_task` retains the 
 for retry through `replace`, without reuploading. The original error is available as its cause.
 A lost task-write response remains an error; retrying `create` may conflict if it committed.
 
-If you already have a generated SDK instance, use the supported factory:
+If you already have a typed platform client, use the supported factory:
 
 ```python
-from nemo_helix_plugin.sdk import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(base_url="http://localhost:8080")
-evaluator = Evaluator.from_sdk(sdk)
+client = NemoClient(base_url="http://localhost:8080")
+evaluator = Evaluator.from_client(client)
 ```
 
 Async resources provide the same workflow with awaited `create` and `replace` calls:
@@ -202,11 +202,11 @@ import asyncio
 from pathlib import Path
 
 from nemo_evaluator.sdk.resources import AsyncEvaluator
-from nemo_helix_plugin.sdk import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 async def publish_task_async() -> None:
-    async with AsyncNeMoHelix(base_url="http://localhost:8080") as async_sdk:
-        async_evaluator = AsyncEvaluator.from_sdk(async_sdk)
+    async with AsyncNemoClient(base_url="http://localhost:8080") as async_client:
+        async_evaluator = AsyncEvaluator.from_client(async_client)
         task = discover_harbor_tasks("./my_task")[0]
         stored_task = await async_evaluator.tasks.replace(
             task.id.replace("/", "-"), task=task, workspace="default",
@@ -653,7 +653,7 @@ Loose wrapper source through `agent_dir` is supported only by standalone `nemo-e
 It is not supported by submitted `nemo-evaluator` plugin jobs.
 
 For example, NeMo Fabric's
-[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.3.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
+[`FabricAgent`](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.4.0/sdk/python/nemo-fabric-runtime/src/nemo_fabric/integrations/harbor/fabric_agent.py)
 is one of Harbor's [existing agents](https://www.harborframework.com/docs/agents#existing-agents);
 its constructor requires `fabric_adapter_id` and accepts `fabric_package` and `fabric_telemetry`. For a
 complete, runnable version with a Nemotron model, see
@@ -665,7 +665,7 @@ config = HarborRuntimeConfig(
     agent_import_path="nemo_fabric.integrations.harbor:FabricAgent",
     agent_kwargs={
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.3.0",
+        "fabric_package": "nemo-fabric[codex]==0.4.0",
         "fabric_telemetry": "relay",
     },
 )
@@ -686,7 +686,7 @@ source directory:
     "source": {"import_path": "nemo_fabric.integrations.harbor:FabricAgent"},
     "agent_kwargs": {
       "fabric_adapter_id": "nvidia.fabric.codex",
-      "fabric_package": "nemo-fabric[codex]==0.3.0"
+      "fabric_package": "nemo-fabric[codex]==0.4.0"
     },
     "env_secrets": {
       "OPENAI_API_KEY": "my-workspace/openai-key"

@@ -93,7 +93,7 @@ class AgentEvalTask(BaseModel):
     @field_validator("id")
     @classmethod
     def _id_must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value.strip():
             raise ValueError("task id must not be empty")
         return value
 

@@ -8,10 +8,12 @@
 # Builds Python wheels for:
 #   - causal-conv1d (CUDA extension required by mamba-ssm)
 #   - mamba-ssm     (selective state space model)
+#   - magi-attention (context-parallel attention, Automodel `magi` dependency group)
 #   - av + opencv-python-headless + decord2 (FFmpeg 8.1.2 bundled wheels for nspect / VLM)
 #   - rl-cuda-ext-wheel (CPython 3.13 / torch 2.13.0+cu130 extensions for nhx-rl-base)
 #
-# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc.
+# causal-conv1d / mamba-ssm only ship source on PyPI and require nvcc; magi-attention is
+# git-only and compiles CUDA kernels against the NGC torch.
 # av / opencv wheels bundle FFmpeg; upstream PyPI wheels lag nspect 8.1.2.
 # The cp311/cp312 causal-conv1d and mamba-ssm targets stay for Automodel and Unsloth.
 # Build those via the nhx-automodel-gpu-wheels bake group.
@@ -20,6 +22,8 @@
 # Build args:
 #   CAUSAL_CONV1D_VERSION  - git tag to build              (default: v1.5.3)
 #   MAMBA_22_COMMIT        - git SHA or tag to build
+#   MAGI_ATTENTION_COMMIT  - MagiAttention git SHA (match Automodel's [tool.uv.sources] rev)
+#   NVSHMEM_VERSION        - nvidia-nvshmem-cu13 for magi-attention (match nhx-automodel-base)
 #   CUDA_VERSION           - CUDA devel image version      (default: 12.8.1)
 #   TORCH_CUDA_ARCH_LIST   - semicolon-separated SM targets (default: "8.0;8.6;9.0")
 #   FFMPEG_VERSION         - FFmpeg for av/opencv wheels   (default: 8.1.2)
@@ -32,7 +36,7 @@
 ARG CUDA_VERSION=12.8.1
 # FROM args for the rl-cuda-ext-wheel stages. They must be global (before the
 # first FROM) or the FROM lines see them as empty.
-ARG RL_CUDA_EXT_BASE=nvcr.io/nvidia/cuda-dl-base:26.07-cuda13.3-devel-ubuntu24.04
+ARG RL_CUDA_EXT_BASE=nvcr.io/nvidia/cuda-dl-base:26.09-cuda13.4-devel-ubuntu24.04
 ARG RL_CUDA_EXT_PYTHON=3.13.15
 
 # =============================================================================
@@ -110,8 +114,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends software-proper
 
 COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
 
-# special builder for CUDA 13.3 (Automodel/Customizer/Unsloth on NGC 26.07)
+# special builder for CUDA 13.3 (Automodel/Customizer on NGC 26.07)
 FROM nvcr.io/nvidia/pytorch:26.07-py3 AS mamba-wheel-base-py312-cu13.3
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.14 /uv /usr/local/bin/uv
+
+# special builder for CUDA 13.4 (Unsloth on NGC 26.09)
+FROM nvcr.io/nvidia/pytorch:26.09-py3 AS mamba-wheel-base-py312-cu13.4
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -178,6 +193,21 @@ RUN mkdir -p /wheels && \
     CAUSAL_CONV1D_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
     rm -rf /src/causal-conv1d
 
+# =============================================================================
+# causal-conv1d wheel — Python 3.12 - Using CUDA 13.4 (NGC PyTorch 26.09)
+# =============================================================================
+FROM  mamba-wheel-base-py312-cu13.4 AS causal-conv1d-wheel-builder-py312-cu13.4
+
+ARG CAUSAL_CONV1D_VERSION=v1.5.3
+
+RUN mkdir -p /wheels && \
+    git clone --depth 1 --branch ${CAUSAL_CONV1D_VERSION} \
+    https://github.com/Dao-AILab/causal-conv1d.git /src/causal-conv1d && \
+    cd /src/causal-conv1d && \
+    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
+    CAUSAL_CONV1D_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/causal-conv1d
+
 # The final causal-conv1d-wheel image contains:
 #   - causal_conv1d-*-cp311-*.whl  (for Python 3.11 consumers)
 #   - causal_conv1d-*-cp312-*.whl  (for Python 3.12 consumers)
@@ -187,6 +217,7 @@ COPY --from=causal-conv1d-wheel-builder /wheels /wheels
 COPY --from=causal-conv1d-wheel-builder-py312 /wheels /wheels
 COPY --from=causal-conv1d-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=causal-conv1d-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
+COPY --from=causal-conv1d-wheel-builder-py312-cu13.4 /wheels /wheels/cu13.4
 
 # =============================================================================
 # mamba-ssm 2.2.5 wheel — Python 3.11 (for nhx-safe-synthesizer-tasks)
@@ -273,12 +304,31 @@ RUN mkdir -p /wheels && \
     rm -rf /src/mamba
 
 
+# =============================================================================
+# mamba-ssm 2.3.0 wheel — Python 3.12 - Using CUDA 13.4 (NGC PyTorch 26.09)
+# =============================================================================
+FROM mamba-wheel-base-py312-cu13.4 AS mamba-ssm-23-wheel-builder-py312-cu13.4
+
+ARG MAMBA_23_COMMIT=v2.3.0
+
+RUN mkdir -p /wheels && \
+    git clone https://github.com/state-spaces/mamba.git /src/mamba && \
+    cd /src/mamba && \
+    git checkout ${MAMBA_23_COMMIT} && \
+    sed -i "/triton/d" setup.py && \
+    sed -i "/triton/d" pyproject.toml && \
+    sed -i 's/-std=c++17/-std=c++20/g' setup.py && \
+    MAMBA_FORCE_BUILD=TRUE uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/mamba
+
+
 # The final mamba-ssm-wheel image contains:
 #   - mamba_ssm-2.2.5-cp311-*.whl  (from MAMBA_22_COMMIT=6b32be06, for Python 3.11 consumers)
 #   - mamba_ssm-2.2.5-cp312-*.whl  (from MAMBA_22_COMMIT=6b32be06, for Python 3.12 consumers)
 #   - mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Python 3.12 consumers)
 #   - cu13.1.1/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Unsloth on CUDA 13.1.1)
-#   - cu13.3/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Automodel/Customizer/Unsloth on CUDA 13.3)
+#   - cu13.3/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Automodel/Customizer on CUDA 13.3)
+#   - cu13.4/mamba_ssm-2.3.0-cp312-*.whl  (from v2.3.0, for Unsloth on CUDA 13.4 / NGC 26.09)
 # Consumers must pin both version AND Python tag glob to select the correct wheel.
 FROM scratch AS mamba-ssm-wheel
 COPY --from=mamba-ssm-wheel-builder /wheels /wheels
@@ -286,6 +336,50 @@ COPY --from=mamba-ssm-25-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312 /wheels /wheels
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.1.1 /wheels /wheels/cu13.1.1
 COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
+COPY --from=mamba-ssm-23-wheel-builder-py312-cu13.4 /wheels /wheels/cu13.4
+
+# =============================================================================
+# magi-attention wheel — Python 3.12 (for Python 3.12 consumers) - Using CUDA 13.3
+# =============================================================================
+FROM mamba-wheel-base-py312-cu13.3 AS magi-attention-wheel-builder-py312-cu13.3
+
+ARG MAGI_ATTENTION_COMMIT=d7ea8afd44c790b65fab68a04a6a0fdd5adbf182
+ARG NVSHMEM_VERSION=3.6.5
+
+# Automodel's docker/Dockerfile installs the RDMA headers and NVSHMEM before it builds
+# MagiAttention. Without NVSHMEM, magi_attn_comm still compiles its internode kernels and
+# fails. MagiAttention finds NVSHMEM through the nvidia.nvshmem package and records its lib
+# dir as the extension's RPATH, so nhx-automodel-base installs the same NVSHMEM_VERSION with
+# the system pip, at the same path.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --allow-change-held-packages rdma-core libibverbs-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir "nvidia-nvshmem-cu13==${NVSHMEM_VERSION}"
+
+RUN git config --global http.version HTTP/1.1 && \
+    git config --global http.postBuffer 524288000 && \
+    git init /src/magi-attention && \
+    git -C /src/magi-attention remote add origin https://github.com/SandAI-org/MagiAttention.git && \
+    git -C /src/magi-attention fetch --depth 1 origin ${MAGI_ATTENTION_COMMIT} && \
+    git -C /src/magi-attention checkout --detach FETCH_HEAD && \
+    cutlass_sha=$(git -C /src/magi-attention rev-parse 'HEAD:magi_attention/csrc/cutlass') && \
+    git clone --filter=blob:none --sparse --no-checkout https://github.com/NVIDIA/cutlass.git /src/magi-attention/magi_attention/csrc/cutlass && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass sparse-checkout set include tools/util/include && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass fetch --depth 1 origin "$cutlass_sha" && \
+    git -C /src/magi-attention/magi_attention/csrc/cutlass checkout --detach FETCH_HEAD
+RUN mkdir -p /wheels && \
+    pip install --no-cache-dir versioningit && \
+    cd /src/magi-attention && \
+    MAGI_ATTENTION_BUILD_COMPUTE_CAPABILITY="90,100" \
+    MAGI_ATTENTION_PREBUILD_FFA=0 \
+    uv build --wheel --no-build-isolation --out-dir=/wheels . && \
+    rm -rf /src/magi-attention
+
+# The final magi-attention-wheel image contains:
+#   - cu13.3/magi_attention-*-cp312-*.whl  (for Automodel on CUDA 13.3)
+FROM scratch AS magi-attention-wheel
+COPY --from=magi-attention-wheel-builder-py312-cu13.3 /wheels /wheels/cu13.3
 
 # =============================================================================
 # FFmpeg / VLM wheels (manylinux_2_28) — av + opencv-python-headless + decord2
@@ -430,7 +524,7 @@ COPY --from=opencv-headless-wheel-builder-py313 /wheels /wheels
 COPY --from=decord2-wheel-builder-py313 /wheels /wheels
 
 # =============================================================================
-# RL CUDA extension wheels — CPython 3.13.15, CUDA 13.3
+# RL CUDA extension wheels — CPython 3.13.15, CUDA 13.4
 #
 # One platform build emits nine wheels under /wheels. Each package is its own
 # stage off a shared base so BuildKit compiles them in parallel. mamba-ssm

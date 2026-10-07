@@ -37,13 +37,20 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import typer
 from nemo_helix_plugin._base import _NamedPlugin
-from nemo_helix_plugin.cli_renderer import CLIRenderer
-from nemo_helix_plugin.function import NemoFunction
-from nemo_helix_plugin.job import NemoJob
+
+if TYPE_CHECKING:
+    # Deferred to keep CLI startup fast: these are used ONLY in type annotations
+    # (`type[NemoFunction]`, `-> type[CLIRenderer] | None`), never at runtime, and
+    # `from __future__ import annotations` makes those annotations strings. Importing
+    # them eagerly pulled nemo_helix_plugin.job -> client -> fastapi/pydantic into every
+    # `nemo` invocation (including `--help`).
+    from nemo_helix_plugin.cli_renderer import CLIRenderer
+    from nemo_helix_plugin.function import NemoFunction
+    from nemo_helix_plugin.job import NemoJob
 
 # Help flags every ``nemo`` command answers to.
 HELP_OPTION_NAMES = ("--help", "-h")

@@ -58,7 +58,7 @@ runner = GymAgentTaskRunner(
         resources_server="mcqa",
     )
 )
-job = client.evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
+job = evaluator.submit(tasks=TasksetRef("my-suite"), target=runner)
 job.wait_until_done()
 ```
 
@@ -165,10 +165,14 @@ kept next to the qualified `agent` ref. The agent runs fresh for every trial;
 an existing deployment is never called.
 
 ```python
-from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget
+from nemo_evaluator.jobs.agent_spec import RegisteredAgentSource, FabricRunnerTarget, HarborRunnerTarget
 
-target = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+on_host = FabricRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))  # or "workspace/name"
+in_task_containers = HarborRunnerTarget(source=RegisteredAgentSource(agent="calculator-agent"))
 ```
+
+On Harbor the resolved agent runs as the SDK's installed Fabric agent with its
+config in `agent_kwargs.fabric_config`; a registered source has no `model_name`.
 
 There is no model override — a different model is a different registered
 agent. To reshape the run, pass `environment=` (an `EnvironmentSpecInline`, the
@@ -261,7 +265,7 @@ Set `agent_ref_name` when the package registers that agent under a different
 instance name. Use `env_secrets`, not `env_vars`, for credentials; sandboxed
 jobs reject credential-shaped plaintext environment variables.
 
-From a live runner, `client.evaluator.submit(tasks=..., target=runner,
+From a live runner, `evaluator.submit(tasks=..., target=runner,
 placement=GymPlacement(...))` builds this target without rebuilding it by hand.
 `env_secrets` lives on `GymRuntimeConfig` (it means the same locally, resolved
 from your environment); `environment` and `agent_ref_name` live on the
@@ -278,23 +282,27 @@ without invoking the original model, agent, or runner. Keep stable `task_id`
 values so trials match task definitions.
 
 Individual trials are stored in the run bundle, not as queryable result entities.
-Retrieve the run index, download its bundle, and hydrate `trials.jsonl`:
+Retrieve the run index, download its bundle, and hydrate `trials.jsonl`. The index record names the
+bundle in `stored.bundle_ref`:
 
 ```python
 from nemo_evaluator_sdk.agent_eval.persistence import read_trials
 
-stored = client.evaluator.agent_eval_results.retrieve("<result-name>")
-client.files.download(remote_path=stored.bundle_ref, local_path="previous-run")
-trials = read_trials("previous-run")
+stored = evaluator.agent_eval_results.retrieve("<result-name>")
+print(stored.bundle_ref)
 ```
 
-CLI equivalent for downloading the bundle:
+Download the bundle with the CLI, then read the trials from the extracted directory:
 
 ```bash
 nemo jobs results download agent-eval-results \
   --job <job-name> --output-file agent-eval-results.tar.gz
 mkdir -p previous-run
 tar -xzf agent-eval-results.tar.gz -C previous-run --strip-components=1
+```
+
+```python
+trials = read_trials("previous-run")
 ```
 
 Pass the hydrated `trials` with the same task definitions and omit `target`.
@@ -328,13 +336,13 @@ defaults to the run's `work_dir` (`AgentEvalRunConfig.work_dir`); pass
 
 Use the in-memory result for programmatic follow-up and the bundle for
 inspection, sharing, or rescoring. Platform jobs persist the bundle and create
-a queryable record under `client.evaluator.agent_eval_results`.
+a queryable record under `evaluator.agent_eval_results`.
 
 A platform job hands back an `AgentEvaluatorJobResource`, which is not the
 dataset-driven job handle: it offers `name`, `job`, `get_job_status()`,
 `check_if_complete()`, and `wait_until_done()`, but no `get_result()` or
 `download_artifacts()`. Read the scores through
-`client.evaluator.agent_eval_results`.
+`evaluator.agent_eval_results`.
 
 Inspect failed and partial trials and score diagnostics before interpreting
 aggregate values; a high mean with low coverage can hide missing or failed

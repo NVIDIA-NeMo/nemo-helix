@@ -20,7 +20,11 @@ Both modes lay evidence out the same way — ``fabric_result.json``, ``workspace
 ``traces/`` under one per-task dir — and map it through one trial-building step, so a metric sees the
 same ``result``, ``trace`` and ``workspace`` evidence whichever mode produced the trial.
 
-Per-task settings (workspace, model, trajectory capture) are composed onto a copy of the supplied
+Model overrides and secret bindings are prepared before any task in one ``run_tasks(tasks, config)``
+call starts. A setup error then stops the whole evaluation before tasks or image building, rather
+than failing individual trials. Each new call resolves references again: sandbox tasks use the values
+read during setup, while host adapters read values later through the selected environment-variable
+names. Per-task settings (workspace and trajectory capture) are composed onto a copy of the prepared
 config. Fabric removed profile overlays in 0.1.0rc2, so a run is described by exactly one complete
 typed config, and the evaluator-owned per-task settings are authoritative simply by being applied last.
 
@@ -40,7 +44,11 @@ import copy
 import json
 import logging
 import math
+import os
 import shutil
+import tempfile
+import time
+import tomllib
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +57,11 @@ from uuid import uuid4
 
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric import _common
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric._sandbox_execution import SandboxExecution
+from nemo_evaluator_sdk.agent_eval.runtimes.fabric.env import (
+    host_fabric_config,
+    model_fabric_config,
+    validate_fabric_env,
+)
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.image import ensure_fabric_image
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_receiver import OTLPReceiver
 from nemo_evaluator_sdk.agent_eval.runtimes.fabric.otlp_writer import (
@@ -64,11 +77,13 @@ from nemo_evaluator_sdk.agent_eval.runtimes.fabric.skills import (
     SkillProvenance,
     SkillSet,
     install_skills,
+    is_codex_adapter,
     relocate_skills_into_workspace,
     resolve_skill_mode,
     workspace_rooted_skills,
 )
 from nemo_evaluator_sdk.agent_eval.runtimes.sandbox.base import SandboxProvider
+from nemo_evaluator_sdk.agent_eval.runtimes.secrets import env_secret_values
 from nemo_evaluator_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nemo_evaluator_sdk.agent_eval.trials import (
     AgentEvalTrial,
@@ -78,7 +93,7 @@ from nemo_evaluator_sdk.agent_eval.trials import (
     TrialMeasurements,
 )
 from nemo_evaluator_sdk.agent_eval.workspace_seeds import SEED_FILES_INPUT_KEY, seed_workspace
-from nemo_evaluator_sdk.resolver_protocols import SecretResolver
+from nemo_evaluator_sdk.resolver_protocols import EnvSecretSource
 from nemo_evaluator_sdk.resolvers import LocalSecretResolver
 from nemo_evaluator_sdk.values.common import SecretRef
 from nemo_evaluator_sdk.values.evidence import (
@@ -119,6 +134,9 @@ _RESULT_FILENAME = "fabric_result.json"
 # root is added to the task config's ``skills.paths``. For codex self-injection the skill lands in the
 # workspace instead (no path added).
 _SKILL_SUBDIR = "skill"
+_CODEX_HOME_PREFIX = "nemo-eval-codex-home-"
+_CODEX_LOGIN_FILES = ("auth.json", ".credentials.json")
+_CODEX_KEYRING_STORE_MODES = frozenset({"keyring", "auto"})
 # Sentinel skill path attached only to probe Fabric's capability planner for the selected adapter's
 # skills routing (see ``_resolve_skill_mode``). Never staged and need not exist on disk — the planner
 # just reports how it would route a skill for this adapter.
@@ -136,7 +154,8 @@ class FabricAgentRuntime:
     ``examples/fabric_harness_runtimes.py`` for full Codex and Hermes config examples.
 
     Pass ``sandbox=`` to run each task inside a sandbox from that provider instead of on the host.
-    ``image`` and ``secrets`` only apply there; ``base_dir`` only applies on the host.
+    ``image`` only applies there; ``base_dir`` only applies on the host. ``env_secrets`` works in
+    both modes; local lookup uses :class:`LocalSecretResolver` unless ``secret_resolver`` is supplied.
     """
 
     def __init__(
@@ -153,16 +172,15 @@ class FabricAgentRuntime:
         skills: Sequence[AgentSkill] | None = None,
         sandbox: SandboxProvider | None = None,
         image: str | None = None,
-        secrets: Mapping[str, SecretRef] | None = None,
+        env_secrets: Mapping[str, SecretRef] | None = None,
+        secret_resolver: EnvSecretSource | None = None,
     ) -> None:
         if sandbox is None:
             if image is not None:
                 raise ValueError("image= selects the sandbox image; pass sandbox=<SandboxProvider> with it")
-            if secrets:
-                raise ValueError("secrets= are injected into a sandbox; pass sandbox=<SandboxProvider> with them")
         elif base_dir is not None:
             raise ValueError("base_dir is not supported in sandbox mode: the config is seeded into /in")
-        self._config = _common.to_mapping(config)
+        self._config = copy.deepcopy(_common.to_mapping(config))
         self._model = model
         self._base_dir = Path(base_dir).expanduser() if base_dir is not None else None
         self._work_root = Path(work_root).expanduser() if work_root is not None else None
@@ -175,12 +193,15 @@ class FabricAgentRuntime:
         # Optional prebuilt image: the trial runs inside it, so it must contain the Fabric CLI + adapter.
         # None -> stock harness-agnostic image built on first run.
         self._image = image
-        # ``secrets`` maps the env-var name a Fabric harness reads its credential from (declared by the
-        # adapter's ``requirements.env``) to a SecretRef. The runner only *declares* them; the resolver
-        # is owned by the orchestrator (see ``resolve_secrets``), mirroring ``MetricWithSecrets``.
-        self._secrets = dict(secrets or {})
-        self._resolved_env: dict[str, str] = {}
-        self._secrets_resolved = False
+        self._env_secrets = dict(env_secrets or {})
+        self._secret_resolver = secret_resolver if secret_resolver is not None else LocalSecretResolver()
+        self._logged_shared_codex_home = False
+        validate_fabric_env(self._config, self._env_secrets)
+        if self._env_secrets and not isinstance(self._secret_resolver, EnvSecretSource):
+            raise TypeError(
+                f"{type(self._secret_resolver).__name__} can't name an env var holding a secret. Fabric env_secrets "
+                "need an env-backed resolver (LocalSecretResolver locally; the platform supplies its own)."
+            )
 
     def with_skills(self, skills: Sequence[AgentSkill]) -> FabricAgentRuntime:
         """Return a copy of this runtime with ``skills`` *added* to its skill set; ``self`` is not modified.
@@ -205,35 +226,24 @@ class FabricAgentRuntime:
         """
         return self.with_skills([skill])
 
-    async def resolve_secrets(self, secret_resolver: SecretResolver) -> None:
-        """Resolve declared ``SecretRef``\\ s to values, keyed by the env var each harness reads.
-
-        Mirrors ``MetricWithSecrets.resolve_secrets``: the resolver is owned by the orchestrator (the
-        AgentEvaluator / execution backend), not the runner. Call before :meth:`run_tasks`; a standalone
-        ``run_tasks`` falls back to local env resolution when this was not called.
-        """
-        env: dict[str, str] = {}
-        for env_var, secret_ref in self._secrets.items():
-            value = await secret_resolver.resolve_secret(secret_ref)
-            if value is None:
-                raise ValueError(f"could not resolve secret {secret_ref.root!r} for env var {env_var!r}")
-            env[env_var] = value
-        self._resolved_env = env
-        self._secrets_resolved = True
-
     def _adapter_id(self) -> str:
         """Harness adapter selected by the Fabric config (empty when unset)."""
         harness = self._config.get("harness")
         adapter_id = harness.get("adapter_id") if isinstance(harness, Mapping) else None
         return str(adapter_id) if adapter_id is not None else ""
 
-    def _effective_model(self) -> str | None:
-        """The model a run will actually use, mirroring :meth:`_compose_config`'s precedence.
+    def _require_codex_home_isolation(self, agent_config: FabricConfig) -> bool:
+        if not is_codex_adapter(self._adapter_id()):
+            return False
+        environment = agent_config.environment
+        return environment is None or "CODEX_HOME" not in (environment.env or {})
 
-        ``_compose_config`` only overwrites the config's default model when ``self._model`` is set, so
-        a model supplied purely through ``config`` is what runs. Reporting ``self._model`` alone would
-        record ``None`` for those runs, giving two runs with *different* models identical provenance —
-        the one thing this metadata exists to prevent.
+    def _effective_model(self) -> str | None:
+        """Report the explicit model override or configured default model in run metadata.
+
+        ``model_fabric_config`` applies a non-empty override during shared host or sandbox setup.
+        Otherwise, report the model from ``config['models']['default']``. Recording only the override
+        would lose the configured model's identity when the caller omits the ``model`` argument.
         """
         if self._model:
             return self._model
@@ -245,7 +255,7 @@ class FabricAgentRuntime:
     def runner_info(self) -> RunnerInfo:
         """Identify this runner and the Fabric settings that shape its results.
 
-        Records the sandbox provider's name only — never ``self._secrets``, which is persisted nowhere.
+        Records the sandbox provider and secret references, never credential values.
         """
         return RunnerInfo(
             name=self._runtime_name,
@@ -260,6 +270,7 @@ class FabricAgentRuntime:
                 "capture_trajectory": self._capture_trajectory,
                 "sandbox": self._sandbox.name if self._sandbox is not None else None,
                 "image": self._image,
+                "env_secrets": {name: ref.root for name, ref in self._env_secrets.items()},
             },
         )
 
@@ -268,6 +279,11 @@ class FabricAgentRuntime:
         tasks: Sequence[AgentEvalTask],
         config: AgentEvalRunConfig | None = None,
     ) -> Sequence[AgentEvalTrial]:
+        """Run all supplied tasks as one evaluation, validating shared settings before execution.
+
+        Resolve secret bindings and the model override once for this call; each task gets its own
+        workspace and config copy. A shared configuration error raises before any task starts.
+        """
         resolved_config = config or AgentEvalRunConfig()
         # Assign a run id once per run so two runs (e.g. an A/B baseline vs. skilled variant) written
         # under the same work_root/output_dir land in distinct, non-colliding evidence trees. Callers
@@ -325,7 +341,9 @@ class FabricAgentRuntime:
             from nemo_fabric import Fabric, FabricConfig  # ty: ignore[unresolved-import]
         except ImportError as exc:
             raise RuntimeError(_MISSING_FABRIC_MSG) from exc
-        agent_config = FabricConfig.from_mapping(self._config)
+        agent_config = FabricConfig.from_mapping(
+            host_fabric_config(self._config, self._env_secrets, self._secret_resolver, model=self._model)
+        )
         # Fail fast (once) if trajectory capture is requested but the nemo-relay gateway isn't
         # importable, rather than failing every task the same way inside the per-task guard.
         if self._capture_trajectory:
@@ -338,18 +356,16 @@ class FabricAgentRuntime:
         return Fabric(), agent_config
 
     async def _open_sandbox(self, provider: SandboxProvider) -> SandboxExecution:
+        agent_config = model_fabric_config(self._config, model=self._model)
+        env = env_secret_values(self._env_secrets, self._secret_resolver)
         if self._image is None:
             # Build-if-missing; a first build compiles nemo-fabric (minutes), so keep it off the event loop.
             self._image = await asyncio.to_thread(ensure_fabric_image)
-        if self._secrets and not self._secrets_resolved:
-            # No orchestrator resolved our secrets (standalone run) — fall back to local env resolution.
-            await self.resolve_secrets(LocalSecretResolver())
         return SandboxExecution(
-            config=self._config,
+            config=agent_config,
             provider=provider,
             image=self._image,
-            env=self._resolved_env,
-            model=self._model,
+            env=env,
             timeout_s=self._timeout_s,
             capture_trajectory=self._capture_trajectory,
             trajectory_extra=self._trajectory_extra,
@@ -390,6 +406,8 @@ class FabricAgentRuntime:
         workspace_dir.mkdir(parents=True, exist_ok=True)
         run = _common.TaskRun(workspace_dir=workspace_dir, relay_dir=evidence_dir / _RELAY_SUBDIR)
         trace_receiver: OTLPReceiver | None = None
+        codex_home: Path | None = None
+        codex_env: dict[str, str] | None = None
         try:
             # Inside the guarded block: a port it cannot bind costs this trial its trace, like any
             # other per-task failure, rather than aborting every task in the gather.
@@ -414,9 +432,24 @@ class FabricAgentRuntime:
                 run.skill_provenances = installation.provenances
                 skill_paths = installation.skill_paths
 
+            if self._require_codex_home_isolation(agent_config):
+                # Not offloaded: an await before ``codex_home`` is set would let a cancellation leak it.
+                codex_home, codex_env = _make_codex_home()
+                if codex_env["CODEX_HOME"] != str(codex_home) and not self._logged_shared_codex_home:
+                    self._logged_shared_codex_home = True
+                    logger.info(
+                        "The base Codex login is in the OS keyring, so Codex trials share %s and get only "
+                        "their own SQLite state.",
+                        _base_codex_home(),
+                    )
             # ``add_skill_path`` appends, so config-declared skills survive.
             task_config = self._compose_config(
-                agent_config, evidence_dir, workspace_dir, task=task, trace_receiver=trace_receiver
+                agent_config,
+                evidence_dir,
+                workspace_dir,
+                task=task,
+                trace_receiver=trace_receiver,
+                codex_env=codex_env,
             )
             for skill_path in skill_paths:
                 task_config.add_skill_path(skill_path)
@@ -455,6 +488,10 @@ class FabricAgentRuntime:
                     fold_exports(traces_dir(evidence_dir))
                 except Exception as exc:  # noqa: BLE001 - any fold failure costs the trace, not the trial
                     logger.warning("Could not fold the OTLP trace for task %s: %s", task.id, exc)
+            if codex_home is not None:
+                cancellation = await _remove_codex_home_to_completion(codex_home)
+                if cancellation is not None:
+                    raise cancellation
         return run
 
     async def _finish_task(
@@ -613,12 +650,13 @@ class FabricAgentRuntime:
         workspace_dir: Path,
         task: AgentEvalTask,
         trace_receiver: OTLPReceiver | None = None,
+        codex_env: dict[str, str] | None = None,
     ) -> FabricConfig:
         # nemo_fabric is already imported+validated in ``_open_host``; this is a cached sys.modules
         # lookup, not a re-load, so the type is used where it's constructed instead of threaded down.
-        from nemo_fabric import EnvironmentConfig, ModelConfig  # ty: ignore[unresolved-import]
+        from nemo_fabric import EnvironmentConfig  # ty: ignore[unresolved-import]
 
-        # Copy the base config and apply this task's workspace, model, and trajectory settings directly
+        # Copy the prepared base config and apply this task's workspace and trajectory settings directly
         # onto it. These land last, so they override anything the supplied config declared.
         cfg = agent_config.model_copy(deep=True)
 
@@ -628,12 +666,9 @@ class FabricAgentRuntime:
         environment = cfg.environment or EnvironmentConfig(provider="local")
         environment.provider = environment.provider or "local"
         environment.workspace = str(workspace_dir.resolve())
+        if codex_env:
+            environment.env = {**(environment.env or {}), **codex_env}
         cfg.environment = environment
-
-        # Apply the model as the config's default (mirrors nemo_fabric.integrations.harbor).
-        if self._model:
-            provider = self._model.split("/", maxsplit=1)[0] if "/" in self._model else "openai"
-            cfg.models["default"] = ModelConfig(provider=provider, model=self._model)
 
         if self._capture_trajectory:
             # Enable Relay's ATIF/ATOF file exporter under this task's durable evidence dir, and pin the
@@ -679,6 +714,200 @@ class FabricAgentRuntime:
         # vs. skilled); run_tasks always populates it, so the fallback only guards a direct call.
         run_id = config.run_id or _new_run_id()
         return Path(root) / _common.safe_path_name(run_id) / _common.task_subdir_name(index, task.id)
+
+
+def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:
+    """Remove the Codex-injected skill subtree from ``workspace_dir`` and prune emptied parents.
+
+    ``location`` is workspace-relative (``.agents/skills/<name>``). Best-effort: the skill was already
+    captured in the run's trajectory, so SkillUsedMetric (which reads the trace, not the workspace) is
+    unaffected, and any filesystem error here must not fail an otherwise-successful trial.
+    """
+    if not workspace_dir.is_dir():
+        return
+    workspace_root = workspace_dir.resolve()
+    injected = (workspace_dir / location).resolve()
+    # Guard against a location escaping the workspace (defensive; provenance is evaluator-authored).
+    if workspace_root not in injected.parents or not injected.exists():
+        return
+    shutil.rmtree(injected, ignore_errors=True)
+    # Prune now-empty reserved parents (``.agents/skills``, ``.agents``) but never the workspace itself.
+    parent = injected.parent
+    while parent != workspace_root and parent.is_dir():
+        try:
+            parent.rmdir()  # only succeeds while empty
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _atif_path(run: _common.TaskRun) -> Path | None:
+    """The ATIF trajectory to grade this task from: the promoted artifact, else Relay's own output.
+
+    Relay's filename template is per-session, so more than one file can land under ``relay/`` when
+    subagents emit their own sessions. Picking one under-reports and summing double-counts a root
+    that already aggregates, so anything other than a single match reports nothing rather than a
+    wrong trajectory.
+    """
+    if run.result is not None:
+        for artifact in run.result.artifacts:
+            if artifact.kind == _common.ATIF_ARTIFACT_KIND:
+                return Path(artifact.path)
+    if not run.relay_dir.is_dir():
+        return None
+    matches = sorted(run.relay_dir.rglob(_common.ATIF_FILENAME_TEMPLATE.format(session_id="*")))
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        logger.warning("Fabric token capture: %d ATIF trajectories under %s; skipping", len(matches), run.relay_dir)
+    return None
+
+
+def _atif_measurements(path: Path | None) -> TrialMeasurements:
+    """Build typed measurements from a Relay ATIF trajectory.
+
+    Each field is resolved on its own: a valid trajectory-level ``final_metrics``
+    value wins; when absent, the matching per-step values are summed. An
+    explicitly invalid final value or step contributor poisons only that field.
+    This per-field fallback matters most on timeout, when Relay may flush a
+    partial trajectory.
+
+    ``cache_creation_tokens`` has no ATIF source and stays unset. A missing or
+    unreadable trajectory yields empty measurements and never fails the trial.
+    """
+    if path is None:
+        return TrialMeasurements()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("Fabric token capture: unreadable ATIF trajectory %s (%s)", path, exc)
+        return TrialMeasurements()
+    if not isinstance(payload, Mapping):
+        return TrialMeasurements()
+
+    final_metrics = payload.get("final_metrics")
+    final = final_metrics if isinstance(final_metrics, Mapping) else {}
+    fields = {
+        "prompt_tokens": ("total_prompt_tokens", "prompt_tokens", False),
+        "completion_tokens": ("total_completion_tokens", "completion_tokens", False),
+        "cache_read_tokens": ("total_cached_tokens", "cached_tokens", False),
+        "cost_usd": ("total_cost_usd", "cost_usd", True),
+    }
+    resolved: dict[str, int | float] = {}
+    for sdk_key, (final_key, step_key, is_float) in fields.items():
+        if final_key in final and final[final_key] is not None:
+            value = final[final_key]
+            if _valid_atif_measurement(value, is_float=is_float):
+                resolved[sdk_key] = float(value) if is_float else int(value)
+            else:
+                logger.warning(
+                    "Fabric token capture: invalid %s=%r in %s; omitting %s", final_key, value, path, sdk_key
+                )
+            continue
+        value, valid = _sum_step_metric(payload, step_key, is_float=is_float)
+        if valid and value is not None:
+            resolved[sdk_key] = value
+        elif not valid:
+            logger.warning("Fabric token capture: invalid step %s in %s; omitting %s", step_key, path, sdk_key)
+    return TrialMeasurements.model_validate(resolved)
+
+
+def _sum_step_metric(payload: Mapping[str, Any], key: str, *, is_float: bool) -> tuple[int | float | None, bool]:
+    """Sum one per-step ATIF metric, poisoning an explicitly invalid contributor."""
+    values: list[int | float] = []
+    steps = payload.get("steps")
+    if steps is None:
+        return None, True
+    if not isinstance(steps, list):
+        return None, False
+    for step in steps:
+        metrics = step.get("metrics") if isinstance(step, Mapping) else None
+        if not isinstance(metrics, Mapping) or key not in metrics or metrics[key] is None:
+            continue
+        value = metrics[key]
+        if not _valid_atif_measurement(value, is_float=is_float):
+            return None, False
+        values.append(value)
+    if not values:
+        return None, True
+    try:
+        total = math.fsum(float(value) for value in values) if is_float else sum(int(value) for value in values)
+    except OverflowError:
+        return None, False
+    if not _valid_atif_measurement(total, is_float=is_float):
+        return None, False
+    return (float(total) if is_float else int(total), True)
+
+
+def _valid_atif_measurement(value: Any, *, is_float: bool) -> bool:
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        return False
+    if not is_float and not isinstance(value, int):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _new_run_id() -> str:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+    return f"fabric-{timestamp}-{uuid4().hex[:8]}"
+
+
+def _base_codex_home() -> Path:
+    configured = os.environ.get("CODEX_HOME")
+    return Path(configured).expanduser().absolute() if configured else Path.home() / ".codex"
+
+
+def _base_login_in_keyring(base: Path) -> bool:
+    try:
+        config = tomllib.loads((base / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    return config.get("cli_auth_credentials_store") in _CODEX_KEYRING_STORE_MODES
+
+
+def _make_codex_home() -> tuple[Path, dict[str, str]]:
+    """Create a trial's throwaway Codex home; return it with the env that points Codex at it."""
+    base = _base_codex_home()
+    home = Path(tempfile.mkdtemp(prefix=_CODEX_HOME_PREFIX))
+    if _base_login_in_keyring(base):
+        return home, {"CODEX_HOME": str(base), "CODEX_SQLITE_HOME": str(home)}
+    try:
+        for name in _CODEX_LOGIN_FILES:
+            if (base / name).is_file():
+                (home / name).symlink_to(base / name)
+    except BaseException:
+        _remove_codex_home(home)
+        raise
+    return home, {"CODEX_HOME": str(home), "CODEX_SQLITE_HOME": str(home)}
+
+
+_CODEX_HOME_REMOVAL_DELAYS_S = (0.0, 0.5, 1.0, 2.0)
+
+
+def _remove_codex_home(home: Path) -> None:
+    for delay in _CODEX_HOME_REMOVAL_DELAYS_S:
+        time.sleep(delay)
+        shutil.rmtree(home, ignore_errors=True)
+        if not home.exists():
+            return
+    logger.warning("Could not fully remove the Codex home %s; Codex was still writing to it.", home)
+
+
+async def _remove_codex_home_to_completion(home: Path) -> asyncio.CancelledError | None:
+    """Remove ``home`` even if the caller is cancelled meanwhile; return that cancellation to re-raise."""
+    removal = asyncio.ensure_future(asyncio.to_thread(_remove_codex_home, home))
+    cancellation: asyncio.CancelledError | None = None
+    while True:
+        try:
+            await asyncio.shield(removal)
+            return cancellation
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
+            if removal.done():
+                return cancellation
 
 
 def _remove_injected_bundle(workspace_dir: Path, location: str) -> None:

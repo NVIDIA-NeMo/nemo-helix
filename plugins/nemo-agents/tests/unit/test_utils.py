@@ -875,7 +875,7 @@ class TestResolveOutput:
         """``_upload_to_fileset`` uploads through a typed Files manager."""
         manager = Mock()
         manager_cls = Mock(return_value=manager)
-        monkeypatch.setattr("nemo_agents_plugin.jobs.evaluate_agent.client_from_platform", Mock())
+        monkeypatch.setattr("nemo_agents_plugin.jobs.evaluate_agent.FilesClient.from_client", Mock())
         monkeypatch.setattr("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileSystem", Mock())
         monkeypatch.setattr("nemo_agents_plugin.jobs.evaluate_agent.FilesetFileManager", manager_cls)
 
@@ -1434,14 +1434,14 @@ def _virtual_model_sdk(virtual_models: _RecordingVirtualModels) -> NemoClient:
 def _adapt_virtual_model_stub(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_agents_plugin import utils as utils_module
 
-    real_client_from_platform = utils_module.client_from_platform
+    real_from_client = utils_module.VirtualModelsClient.from_client
 
-    def _client_from_platform(sdk: object, client_cls: type[object]) -> object:
-        if isinstance(sdk, _StubSDKWithVirtualModels):
-            return sdk.virtual_models
-        return cast(Any, real_client_from_platform)(sdk, client_cls)
+    def _from_client(client: object) -> object:
+        if isinstance(client, _StubSDKWithVirtualModels):
+            return client.virtual_models
+        return cast(Any, real_from_client)(client)
 
-    monkeypatch.setattr(utils_module, "client_from_platform", _client_from_platform)
+    monkeypatch.setattr(utils_module.VirtualModelsClient, "from_client", _from_client)
 
 
 class TestValidateLLMModels:

@@ -17,13 +17,13 @@ The Evaluator plugin SDK uses inline model objects from `nemo_evaluator_sdk`. Pa
 import os
 
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 ```
 
 ## Inline Model
@@ -58,9 +58,14 @@ For `nemo_evaluator_sdk.Evaluator` runs, the `SecretRef` root names an environme
 For remote `evaluator.submit(...)` jobs, the `SecretRef` root must name a NeMo Helix secret in the target workspace. Create the secret before submitting the job:
 
 ```python
-client.secrets.create(
-    name="nvidia-api-key",
-    value=os.environ["NVIDIA_API_KEY"],
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr(os.environ["NVIDIA_API_KEY"]),
+    ),
 )
 ```
 
@@ -193,7 +198,7 @@ An inline `Model` carries the resolved endpoint details. Always pass an inline `
 ```python
 from nemo_evaluator_sdk import Model, RunConfigOnlineModel, SecretRef
 
-model_entity = client.models.retrieve("my-model", workspace="default")
+model_entity = client.models.get_model(name="my-model", workspace="default").data()
 model = Model(
     url=client.models.get_model_entity_route_openai_url(model_entity),
     name="my-model",

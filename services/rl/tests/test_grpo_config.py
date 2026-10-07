@@ -27,6 +27,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_conf
 from nhx.rl.tasks.training.backends.nemo_rl.sandbox_config import (
     DEFAULT_ROLLOUT_CHUNK_SIZE,
     DEFAULT_ROLLOUT_MAX_IN_FLIGHT,
+    SANDBOX_CREATE_REQUEST_TIMEOUT_S,
 )
 
 
@@ -596,13 +597,31 @@ def test_sandbox_server_protocol_reaches_the_host_provider(
     step, _ = _prepared_step(tmp_path)
     assert step.gym is not None
 
-    # Unset leaves NeMo-RL's default in place rather than asserting one here.
+    # Unset leaves NeMo-RL's https default in place rather than asserting one here.
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
-    assert sandbox["host_provider_options"] == {}
+    assert "protocol" not in sandbox["host_provider_options"]["connection"]
 
     step.gym.sandbox_server_protocol = "http"
     sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
-    assert sandbox["host_provider_options"] == {"connection": {"protocol": "http"}}
+    assert sandbox["host_provider_options"]["connection"]["protocol"] == "http"
+
+
+def test_the_sdk_request_timeout_covers_the_hosts_ready_wait(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cold node pulls the Gym host image inside the create request.
+
+    The OpenSandbox server holds that request open until the pod is Running, for up to its own
+    create timeout, while the SDK gives up after 30s unless told otherwise. NeMo-RL forwards
+    ``connection.request_timeout_s`` to the SDK but never defaults it, so the compiled config has
+    to, and to longer than the host is allowed to wait so the response itself fits.
+    """
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+
+    sandbox = compile_grpo_config(step, job_ctx)["env"]["nemo_gym"]["sandbox"]
+
+    assert sandbox["host_provider_options"]["connection"]["request_timeout_s"] == SANDBOX_CREATE_REQUEST_TIMEOUT_S
 
 
 def test_generation_sampling_comes_from_the_grpo_hyperparameters(

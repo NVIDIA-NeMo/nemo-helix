@@ -9,12 +9,7 @@ from data_designer.config.default_model_settings import get_default_providers
 from data_designer.engine.model_provider import ModelProvider as NDDModelProvider
 from data_designer.engine.model_provider import ModelProviderRegistry, resolve_model_provider_registry
 from data_designer_nemo.errors import NDDInternalError, NDDInvalidConfigError
-from nemo_helix_plugin.client.adapter import (
-    AsyncHelixClient,
-    SyncHelixClient,
-    client_from_platform,
-    platform_default_headers,
-)
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoTransportError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from nemo_helix_plugin.models.types import ModelProvider as NHXModelProvider
@@ -65,7 +60,7 @@ def _make_local_model_provider_registry() -> ModelProviderRegistry | None:
 
 @dataclass
 class ModelProviderCollection:
-    sdk: AsyncHelixClient
+    client: AsyncNemoClient
     default_workspace: str
 
     # key = user-supplied provider name
@@ -107,11 +102,11 @@ class ModelProviderCollection:
         if nhx_provider is None:
             return
 
-        models = client_from_platform(self.sdk, AsyncModelsClient)
+        models = AsyncModelsClient.from_client(self.client)
         ndd_provider = NDDModelProvider(
             name=user_supplied_provider_name,
             endpoint=models.get_provider_route_openai_url(nhx_provider),
-            extra_headers={k: v for k, v in platform_default_headers(self.sdk).items() if isinstance(v, str)},
+            extra_headers={k: v for k, v in self.client.default_headers.items() if isinstance(v, str)},
         )
         providers = (ndd_provider, nhx_provider)
         self.providers[user_supplied_provider_name] = providers
@@ -121,7 +116,7 @@ class ModelProviderCollection:
         self, user_supplied_provider_name: str, workspace: str, provider_name: str
     ) -> NHXModelProvider | None:
         try:
-            return await get_nhx_provider_async(self.sdk, workspace, provider_name)
+            return await get_nhx_provider_async(self.client, workspace, provider_name)
         except (NotFoundError, PermissionDeniedError):
             self.config_errors.append(
                 f"Cannot access provider {user_supplied_provider_name!r}. Check that it exists and you have access to it."
@@ -170,7 +165,7 @@ class ModelProviderCollection:
 async def make_model_provider_registry(
     model_configs: list[dd.ModelConfig],
     *,
-    sdk: AsyncHelixClient,
+    client: AsyncNemoClient,
     default_workspace: str,
 ) -> ModelProviderRegistry | None:
     """Creates a ModelProviderRegistry that can be passed to the Data Designer library
@@ -182,19 +177,19 @@ async def make_model_provider_registry(
     Raises:
         NDDInvalidConfigError or NDDInternalError
     """
-    collection = ModelProviderCollection(sdk, default_workspace)
+    collection = ModelProviderCollection(client, default_workspace)
     for model_config in model_configs:
         await collection.add(model_config)
 
     return collection.get_model_provider_registry()
 
 
-def get_nhx_provider(sdk: SyncHelixClient, workspace: str, provider_name: str) -> NHXModelProvider:
-    models = client_from_platform(sdk, ModelsClient)
+def get_nhx_provider(client: NemoClient, workspace: str, provider_name: str) -> NHXModelProvider:
+    models = ModelsClient.from_client(client)
     return models.get_provider(workspace=workspace, name=provider_name).data()
 
 
-async def get_nhx_provider_async(sdk: AsyncHelixClient, workspace: str, provider_name: str) -> NHXModelProvider:
-    models = client_from_platform(sdk, AsyncModelsClient)
+async def get_nhx_provider_async(client: AsyncNemoClient, workspace: str, provider_name: str) -> NHXModelProvider:
+    models = AsyncModelsClient.from_client(client)
     response = await models.get_provider(workspace=workspace, name=provider_name)
     return response.data()

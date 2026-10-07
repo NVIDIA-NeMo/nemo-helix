@@ -10,6 +10,31 @@ from nemo_evaluator_sdk.retrieval.nim_ranking import NimRankingClient, NimRankin
 from nemo_evaluator_sdk.values.models import Model, RankingInference
 
 
+def _igw_wrapped_404(request: httpx.Request) -> httpx.Response:
+    """What current Inference Gateway returns when the upstream provider answers 404."""
+    return httpx.Response(
+        424,
+        request=request,
+        json={
+            "detail": (
+                "Model provider 'nvidia' at upstream 'https://integrate.api.nvidia.com/v1' rejected the request "
+                "for model 'default/reranker' with HTTP status 404. This is a client-side error and will not "
+                'resolve by retrying. Upstream response: {"detail":"Not Found"}'
+            )
+        },
+    )
+
+
+def _legacy_igw_wrapped_404(request: httpx.Request) -> httpx.Response:
+    """What older Inference Gateway releases returned when the upstream provider answered 404."""
+    return httpx.Response(502, request=request, json={"detail": 'Backend returned 404: {"detail":"Not Found"}'})
+
+
+IGW_WRAPPED_404 = pytest.mark.parametrize(
+    "wrapped_404", [_igw_wrapped_404, _legacy_igw_wrapped_404], ids=["igw-424", "legacy-igw-502"]
+)
+
+
 @pytest.mark.asyncio
 async def test_ranking_client_posts_v1_ranking_and_accepts_logits() -> None:
     requests: list[httpx.Request] = []
@@ -81,18 +106,15 @@ async def test_ranking_client_strips_legacy_reranking_suffix_before_fallback() -
     assert ranker.resolved_path == "/rerank"
 
 
+@IGW_WRAPPED_404
 @pytest.mark.asyncio
-async def test_ranking_client_falls_back_to_hosted_rerank_contract() -> None:
+async def test_ranking_client_falls_back_to_hosted_rerank_contract(wrapped_404) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.url.path.endswith("/ranking"):
-            return httpx.Response(
-                502,
-                request=request,
-                json={"detail": 'Backend returned 404: {"detail":"Not Found"}'},
-            )
+            return wrapped_404(request)
         return httpx.Response(
             200,
             request=request,
@@ -153,18 +175,15 @@ async def test_ranking_client_falls_back_to_model_specific_ranking_route() -> No
     assert resolved.inference.path == "/ranking/nvidia/qwen3-vl-reranker-8b"
 
 
+@IGW_WRAPPED_404
 @pytest.mark.asyncio
-async def test_ranking_client_falls_back_to_model_specific_retrieval_route() -> None:
+async def test_ranking_client_falls_back_to_model_specific_retrieval_route(wrapped_404) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if "/retrieval/" not in request.url.path:
-            return httpx.Response(
-                502,
-                request=request,
-                json={"detail": 'Backend returned 404: {"detail":"Not Found"}'},
-            )
+            return wrapped_404(request)
         return httpx.Response(
             200,
             request=request,
@@ -197,18 +216,35 @@ async def test_ranking_client_falls_back_to_model_specific_retrieval_route() -> 
     assert resolved.inference.path == "/retrieval/publisher/reranker/reranking"
 
 
+@pytest.mark.parametrize(
+    ("status_code", "detail"),
+    [
+        pytest.param(
+            424,
+            "Model provider 'nvidia' rejected the request for model 'default/reranker' with HTTP status 401.",
+            id="igw-424-upstream-401",
+        ),
+        pytest.param(
+            424,
+            "The upstream model provider rejected the request with HTTP status 403.",
+            id="igw-424-upstream-403",
+        ),
+        pytest.param(
+            424,
+            "Could not fetch secret for provider default/nvidia; secret not found or unreachable",
+            id="igw-424-unresolved-secret",
+        ),
+        pytest.param(502, "Backend returned 401: invalid credential", id="legacy-igw-502-upstream-401"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_ranking_client_does_not_fall_back_after_auth_failure() -> None:
+async def test_ranking_client_does_not_fall_back_after_auth_failure(status_code: int, detail: str) -> None:
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal attempts
         attempts += 1
-        return httpx.Response(
-            502,
-            request=request,
-            json={"detail": "Backend returned 401: invalid credential"},
-        )
+        return httpx.Response(status_code, request=request, json={"detail": detail})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(httpx.HTTPStatusError):

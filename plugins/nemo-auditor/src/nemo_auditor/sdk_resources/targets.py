@@ -3,7 +3,7 @@
 
 """SDK sub-resources for ``AuditTarget`` CRUD.
 
-Mounted as ``client.auditor.targets`` (sync) and on the async client. Each
+Exposed as ``AuditorPluginResource.targets`` and its async twin. Each
 method maps 1:1 onto the CLI verbs at ``nemo auditor targets <verb>`` and
 the FastAPI routes in :mod:`nemo_auditor.api.v2.targets`.
 """

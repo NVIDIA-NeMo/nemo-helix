@@ -42,6 +42,7 @@ class _IntakeMethods:
     update_experiment = method(endpoints.update_experiment)
     create_evaluation = method(endpoints.create_evaluation)
     create_evaluator_result = method(endpoints.create_evaluator_result)
+    list_evaluations = method(endpoints.list_evaluations)
     get_evaluation = method(endpoints.get_evaluation)
     update_evaluation = method(endpoints.update_evaluation)
     patch_evaluation = method(endpoints.patch_evaluation)

@@ -64,6 +64,7 @@ from nemo_helix_ext.cli.telemetry.events import OnboardingStepEvent, TaskStatusE
 from nemo_helix_ext.client.tls import HttpxTLSConfig, httpx_tls_config_from_env
 from nemo_helix_ext.config.config import Config
 from nemo_helix_ext.config.models import DEFAULT_BASE_URL, ConfigFile, ConfigParams, LocalServicesConfig, NoAuthUser
+from nemo_helix_ext.config.urls import display_url
 from nemo_helix_ext.local.install import services_extra_install_command
 from nemo_helix_ext.local.process import (
     PortConflict,
@@ -192,12 +193,29 @@ _PROBE_CONFIGS: dict[str, ProbeConfig] = {
 }
 
 
+class KeyValidationStatus(StrEnum):
+    """Outcome categories for an API key validation probe."""
+
+    VALID = "valid"
+    REJECTED = "rejected"
+    INCONCLUSIVE = "inconclusive"
+
+
 @dataclass(frozen=True)
 class KeyValidationResult:
     """Outcome of an API key validation probe."""
 
-    passed: bool
-    message: str
+    status: KeyValidationStatus
+    message: str = ""
+
+    @property
+    def passed(self) -> bool:
+        """True when setup may continue without treating the key as rejected.
+
+        ``INCONCLUSIVE`` is fail-open (same posture as non-2xx probes for OpenAI
+        and other auth-required list endpoints). Only ``REJECTED`` blocks auto setup.
+        """
+        return self.status != KeyValidationStatus.REJECTED
 
 
 @dataclass(frozen=True)
@@ -237,7 +255,17 @@ _AUTO_ENV_VARS: tuple[tuple[str, str], ...] = (
 _KEY_VALIDATION_TIMEOUT = 10.0
 _KEY_REJECTED_STATUS_CODES = (401, 403)
 _KEY_REJECTED_MESSAGE = "API key validation failed. The provider rejected the credentials."
+_KEY_UNVERIFIED_SUFFIX = "Credentials were neither accepted nor rejected."
 _PROBE_DETAIL_MAX_CHARS = 200
+# Key validation uses a smaller candidate budget than post-setup model selection.
+_KEY_VALIDATION_CHAT_MAX_ATTEMPTS = 3
+
+_KEY_VALIDATION_ACTIONS: tuple[tuple[str, str], ...] = (
+    ("continue", "Continue without verifying the key"),
+    ("reenter", "Re-enter API key"),
+    ("abort", "Abort setup"),
+)
+
 
 # Catalog listing is not entitlement-scoped; only a successful chat request counts.
 _MODEL_PROBE_TIMEOUT = 20.0
@@ -389,7 +417,7 @@ def _prompt_remote_base_url(*, default_url: str = "", certificate_authority: str
         if _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
             return base_url
 
-        console.print(f"{CROSS} Unable to connect to NeMo Helix at {base_url}.")
+        console.print(f"{CROSS} Unable to connect to NeMo Helix at {display_url(base_url)}.")
 
 
 def _resolve_setup_workspace(cli_context: CLIContext, workspace: str | None) -> str:
@@ -763,7 +791,7 @@ def _wait_for_models_impl(
                     provider_msg = getattr(provider, "status_message", None) or ""
 
                     if _NON_COMPLIANT_MARKER in provider_msg:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(
                             f"\n  {WARN} Provider '{provider_name}'{url_hint} returned a non-OpenAI "
                             f"compliant response from GET /v1/models."
@@ -776,7 +804,7 @@ def _wait_for_models_impl(
                         return []
 
                     if provider_status in _PROVIDER_UNHEALTHY_STATUSES:
-                        url_hint = f" ({host_url})" if host_url else ""
+                        url_hint = f" ({display_url(host_url)})" if host_url else ""
                         console.print(f"\n  {WARN} Provider '{provider_name}'{url_hint} is in {provider_status} state.")
                         if provider_msg:
                             console.print(f"  {provider_msg}")
@@ -1076,7 +1104,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
     """Ask how to proceed when a configured remote Platform is already reachable."""
     hostname = _platform_host_label(base_url)
     action = prompt_choice(
-        message=f"Platform reachable at {hostname} ({base_url}). What would you like to do?",
+        message=f"Platform reachable at {hostname} ({display_url(base_url)}). What would you like to do?",
         options=[
             (_RemoteConnectionChoice.CONTINUE, "Continue with this remote Platform"),
             (_RemoteConnectionChoice.START_LOCAL, "Start local services instead"),
@@ -1085,7 +1113,7 @@ def _prompt_reachable_remote_connection(base_url: str) -> Literal["ready", "conn
         default=_RemoteConnectionChoice.CONTINUE,
     )
     if action == _RemoteConnectionChoice.CONTINUE:
-        console.print(f"{CHECK} Platform already running at {base_url}\n")
+        console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
         return "ready"
     if action == _RemoteConnectionChoice.CHANGE_REMOTE:
         return "connect_remote"
@@ -1277,14 +1305,14 @@ def _maybe_start_services(
 
     if already_running and start_services is not True:
         if _is_local_base_url(base_url) or auto:
-            console.print(f"{CHECK} Platform already running at {base_url}\n")
+            console.print(f"{CHECK} Platform already running at {display_url(base_url)}\n")
             return "ready"
         return _prompt_reachable_remote_connection(base_url)
 
     should_start = start_services
     if should_start is None:
         if auto:
-            console.print(f"{CROSS} Cannot reach platform at {base_url}")
+            console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
             console.print("  Start the platform first, or pass --start-services:")
             console.print("    [cyan]nemo setup --auto --start-services[/cyan]")
             console.print("    [cyan]nemo services run[/cyan]")
@@ -1292,7 +1320,7 @@ def _maybe_start_services(
         if not _is_local_base_url(base_url):
             return "connect_remote"
         action = prompt_choice(
-            message=f"Platform not reachable at {base_url}. Start local services?",
+            message=f"Platform not reachable at {display_url(base_url)}. Start local services?",
             options=[
                 ("yes", "Yes, start services now"),
                 ("remote", "No, I want to connect to a remote Platform instance"),
@@ -1305,7 +1333,7 @@ def _maybe_start_services(
         should_start = action == "yes"
 
     if not should_start:
-        console.print(f"{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"{CROSS} Cannot reach platform at {display_url(base_url)}")
         console.print("  Start the platform first:")
         console.print("    [cyan]nemo services run[/cyan]   (local development)")
         raise typer.Exit(1)
@@ -1368,7 +1396,7 @@ def _maybe_start_services(
             console.print(f"  {DOCKER_PREFLIGHT_MESSAGE}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform running at {base_url} (pid {proc.pid})\n")
+    console.print(f"{CHECK} Platform running at {display_url(base_url)} (pid {proc.pid})\n")
     return "ready"
 
 
@@ -1842,7 +1870,7 @@ def _upload_sample_eval_config(files_client: FilesClient, workspace: str) -> boo
 
 def _print_sample_setup_complete(base_url: str, *, complete: bool) -> None:
     """Print the sample workspace completion card."""
-    studio_url = f"{base_url.rstrip('/')}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
+    studio_url = f"{display_url(base_url)}/studio/workspaces/{_SAMPLE_WORKSPACE_NAME}/dashboard"
     remove_command = f"nemo workspaces delete {_SAMPLE_WORKSPACE_NAME}"
     if complete:
         status = f"{CHECK} [green bold]Sample workspace ready[/green bold]"
@@ -2113,7 +2141,7 @@ def _maybe_deploy_sample_agent(
         headers=headers,
         certificate_authority=certificate_authority,
     ):
-        console.print(f"  {WARN} Agents API not ready at {base_url}, skipping sample agent deployment")
+        console.print(f"  {WARN} Agents API not ready at {display_url(base_url)}, skipping sample agent deployment")
         return False
 
     try:
@@ -2189,6 +2217,63 @@ def _collect_credential(provider: KnownProvider) -> str:
     return key.strip()
 
 
+def _reprompt_api_key(label: str) -> str:
+    """Ask the user to enter a different API key during interactive validation."""
+    key = prompt_password(
+        f"{label} API key: ",
+        validator=non_empty_validator("API key"),
+    )
+    return key.strip()
+
+
+def _confirm_interactive_api_key(
+    *,
+    provider_name: str,
+    host_url: str,
+    api_key: str,
+    auth_header_format: str | None,
+    default_extra_headers: dict[str, str] | None,
+    label: str,
+) -> str:
+    """Validate ``api_key`` interactively; re-prompt or continue on non-valid outcomes.
+
+    Returns the API key to register. Raises ``typer.Exit`` on abort; ``UserCancelled``
+    from prompts propagates to the interactive setup handler.
+    """
+    current_key = api_key
+    while True:
+        console.print("\n  Validating API key...")
+        key_result = _validate_api_key(
+            provider_name,
+            host_url,
+            current_key,
+            auth_header_format=auth_header_format,
+            default_extra_headers=default_extra_headers,
+        )
+        if key_result.status == KeyValidationStatus.VALID:
+            console.print(f"  {CHECK} API key validated")
+            return current_key
+
+        if key_result.status == KeyValidationStatus.REJECTED:
+            console.print(f"  {CROSS} {escape(key_result.message)}")
+            console.print("  Enter a different API key, or cancel to exit.")
+            current_key = _reprompt_api_key(label)
+            continue
+
+        console.print(f"  {WARN} {escape(key_result.message)}")
+        action = prompt_choice(
+            "API key could not be verified. What next?",
+            options=_KEY_VALIDATION_ACTIONS,
+            default="reenter",
+            indent=2,
+        )
+        if action == "continue":
+            return current_key
+        if action == "abort":
+            raise typer.Exit(1)
+        current_key = _reprompt_api_key(label)
+
+
 def _register_provider_interactive(
     clients: SetupClients,
     *,
@@ -2220,7 +2305,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
     else:
         _create_provider(
             clients,
@@ -2231,7 +2316,7 @@ def _register_provider_interactive(
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+        console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
 
 def _probe_response_detail(resp: httpx.Response) -> str:
@@ -2272,19 +2357,31 @@ def _catalog_model_ids(resp: httpx.Response) -> list[str]:
 
 
 def _nvidia_build_chat_candidates(model_ids: list[str]) -> list[str]:
+    """Return a short list of chat models for key validation (NVIDIA-first, smallest first)."""
     chat_ids = [model_id for model_id in model_ids if _is_usable_chat_model_entity(model_id)]
-    ordered = _order_candidates_by_size(chat_ids, largest_first=True)
-    return ordered[:_MODEL_PROBE_MAX_ATTEMPTS]
+    ordered = _order_candidates_by_size(chat_ids, largest_first=False)
+    return ordered[:_KEY_VALIDATION_CHAT_MAX_ATTEMPTS]
+
+
+def _inconclusive_message(summary: str, resp: httpx.Response | None = None) -> str:
+    """Build fail-open copy that never blames the key for an unverified probe."""
+    base = f"Could not verify API key: {summary} {_KEY_UNVERIFIED_SUFFIX}"
+    if resp is None:
+        return base
+    return _with_probe_detail(base, resp)
 
 
 def _probe_status_result(resp: httpx.Response) -> KeyValidationResult:
     if resp.status_code in _KEY_REJECTED_STATUS_CODES:
-        return KeyValidationResult(passed=False, message=_with_probe_detail(_KEY_REJECTED_MESSAGE, resp))
+        return KeyValidationResult(
+            status=KeyValidationStatus.REJECTED,
+            message=_with_probe_detail(_KEY_REJECTED_MESSAGE, resp),
+        )
     if resp.is_success:
-        return KeyValidationResult(passed=True, message="")
+        return KeyValidationResult(status=KeyValidationStatus.VALID)
     return KeyValidationResult(
-        passed=True,
-        message=_with_probe_detail(f"Provider probe received HTTP {resp.status_code}.", resp),
+        status=KeyValidationStatus.INCONCLUSIVE,
+        message=_inconclusive_message(f"probe received HTTP {resp.status_code}.", resp),
     )
 
 
@@ -2298,10 +2395,13 @@ def _nvidia_build_chat_probe(
     """POST chat completions to catalog candidates until auth is proven or exhausted."""
     candidates = _nvidia_build_chat_candidates(_catalog_model_ids(catalog_resp))
     if not candidates:
-        return KeyValidationResult(passed=True, message="Provider catalog listed no usable chat models.")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message("provider catalog listed no usable chat models."),
+        )
 
     chat_url = f"{host_url.rstrip('/')}/v1/chat/completions"
-    last_warning = "Provider probe did not find a callable chat model."
+    last_warning = _inconclusive_message("probe did not find a callable chat model.")
     for model_id in candidates:
         body = {
             "model": model_id,
@@ -2312,18 +2412,18 @@ def _nvidia_build_chat_probe(
             chat_resp = httpx.request("POST", chat_url, headers=headers, json=body, timeout=timeout)
         except httpx.TimeoutException:
             logger.debug("NVIDIA Build chat probe timed out for '%s'", model_id)
-            last_warning = "Provider probe timed out."
+            last_warning = _inconclusive_message("provider probe timed out.")
             continue
         except Exception as exc:
             logger.debug("NVIDIA Build chat probe failed for '%s': %s", model_id, exc)
-            last_warning = f"Provider probe failed ({exc})."
+            last_warning = _inconclusive_message(f"provider probe failed ({exc}).")
             continue
         if chat_resp.status_code in _KEY_REJECTED_STATUS_CODES:
             return _probe_status_result(chat_resp)
         if chat_resp.is_success:
-            return KeyValidationResult(passed=True, message="")
+            return KeyValidationResult(status=KeyValidationStatus.VALID)
         last_warning = _probe_status_result(chat_resp).message
-    return KeyValidationResult(passed=True, message=last_warning)
+    return KeyValidationResult(status=KeyValidationStatus.INCONCLUSIVE, message=last_warning)
 
 
 def _validate_api_key(
@@ -2338,19 +2438,22 @@ def _validate_api_key(
     """Probe the provider with the API key to detect auth failures early.
 
     Makes a lightweight request to an auth-required endpoint.
-    Returns ``passed=False`` only on a definitive 401/403 credential rejection.
+    Returns ``REJECTED`` only on a definitive 401/403 credential rejection.
     Unavailable probe targets, other HTTP statuses, network errors, and unknown
-    providers are treated as *passed* (with a warning message) so setup can
-    still register the provider.
+    providers are ``INCONCLUSIVE`` (fail-open) so setup can still register the
+    provider after an explicit warning.
     """
     if not api_key:
-        return KeyValidationResult(passed=True, message="")
+        return KeyValidationResult(status=KeyValidationStatus.VALID)
 
     probe = _PROBE_CONFIGS.get(provider_name)
     if probe is None:
         return KeyValidationResult(
-            passed=True,
-            message=f"No validation probe configured for provider '{provider_name}'; skipping key check.",
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=(
+                f"Could not verify API key: no validation probe configured for "
+                f"provider '{provider_name}'. {_KEY_UNVERIFIED_SUFFIX}"
+            ),
         )
 
     headers: dict[str, str] = {}
@@ -2378,14 +2481,20 @@ def _validate_api_key(
         if resp.is_success:
             if provider_name == "nvidia-build":
                 return _nvidia_build_chat_probe(host_url, headers, resp, timeout=timeout)
-            return KeyValidationResult(passed=True, message="")
+            return KeyValidationResult(status=KeyValidationStatus.VALID)
         return _probe_status_result(resp)
     except httpx.TimeoutException:
         logger.debug("API key validation timed out for '%s'", provider_name)
-        return KeyValidationResult(passed=True, message="Provider probe timed out.")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message("provider probe timed out."),
+        )
     except Exception as exc:
         logger.debug("API key validation failed for '%s': %s", provider_name, exc)
-        return KeyValidationResult(passed=True, message=f"Provider probe failed ({exc}).")
+        return KeyValidationResult(
+            status=KeyValidationStatus.INCONCLUSIVE,
+            message=_inconclusive_message(f"provider probe failed ({exc})."),
+        )
 
 
 def _select_model_pair(
@@ -2484,11 +2593,11 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
             auth_header_format=auth_header_format,
             default_extra_headers=default_extra_headers,
         )
-        if not key_result.passed:
+        if key_result.status == KeyValidationStatus.REJECTED:
             console.print(f"  {CROSS} {escape(key_result.message)}")
             console.print(f"  Check the value of ${key_var} and try again.")
             raise typer.Exit(1)
-        if key_result.message:
+        if key_result.status == KeyValidationStatus.INCONCLUSIVE:
             console.print(f"  {WARN} {escape(key_result.message)}")
 
         secret_name = f"{provider_name}-api-key"
@@ -2509,7 +2618,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Updated provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Updated provider '{provider_name}' ({display_url(host_url)})")
         else:
             _create_provider(
                 clients,
@@ -2520,7 +2629,7 @@ def _auto_setup(clients: SetupClients, workspace: str) -> str | None:
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
             )
-            console.print(f"  {CHECK} Registered provider '{provider_name}' ({host_url})")
+            console.print(f"  {CHECK} Registered provider '{provider_name}' ({display_url(host_url)})")
 
         return provider_name
 
@@ -2717,10 +2826,10 @@ def setup_command(
         raise typer.Exit(0) from None
 
     if not _check_platform_reachable_with_retries(base_url, certificate_authority=certificate_authority):
-        console.print(f"\n{CROSS} Cannot reach platform at {base_url}")
+        console.print(f"\n{CROSS} Cannot reach platform at {display_url(base_url)}")
         raise typer.Exit(1)
 
-    console.print(f"{CHECK} Platform reachable at {base_url}\n")
+    console.print(f"{CHECK} Platform reachable at {display_url(base_url)}\n")
 
     # Ensure the config file exists on disk so later Config.write() calls
     # (e.g. saving the default model) can find the cluster and context.
@@ -2902,22 +3011,16 @@ def _run_interactive_mode(
         provider_name, host_url, api_key, auth_header_format, default_extra_headers = _interactive_collect_provider()
 
         if api_key:
-            console.print("\n  Validating API key...")
-            key_result = _validate_api_key(
-                provider_name,
-                host_url,
-                api_key,
+            known = _KNOWN_PROVIDERS_BY_NAME.get(provider_name)
+            label = known.label if known is not None else provider_name
+            api_key = _confirm_interactive_api_key(
+                provider_name=provider_name,
+                host_url=host_url,
+                api_key=api_key,
                 auth_header_format=auth_header_format,
                 default_extra_headers=default_extra_headers,
+                label=label,
             )
-            if not key_result.passed:
-                console.print(f"  {CROSS} {escape(key_result.message)}")
-                console.print("  Please check your API key and run [cyan]nemo setup[/cyan] again.")
-                raise typer.Exit(1)
-            if key_result.message:
-                console.print(f"  {WARN} {escape(key_result.message)}")
-            else:
-                console.print(f"  {CHECK} API key validated")
 
         console.print("\n[bold]Step 3: Register model provider[/bold]\n")
         _register_provider_interactive(
@@ -3046,7 +3149,10 @@ def _print_setup_complete(
     if not _verify_platform_health(base_url, certificate_authority=certificate_authority):
         raise typer.Exit(1)
 
-    lines = [f"[bold]Provider:[/bold] {provider_name}"]
+    lines = [
+        f"[bold]Platform:[/bold] {display_url(base_url)}",
+        f"[bold]Provider:[/bold] {provider_name}",
+    ]
     if default_model:
         lines.append(f"[bold]Default model:[/bold] {_display_model_name(default_model)}")
     if fast_model:

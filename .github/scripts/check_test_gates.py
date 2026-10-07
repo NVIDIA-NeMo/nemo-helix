@@ -34,18 +34,13 @@ ALLOWED_UNSET = {
     "NHX_INSIGHTS_E2E": "needs a live Insights deployment",
     "TRACE_FIXTURE_LIVE_CODEX": "regenerates fixtures against a live Codex CLI",
     "SCALED_EVALS_TEST_DATABASE_URL": "needs a live Postgres for the scaled-evals migration tests",
+    "NHX_E2E_SANDBOXED_GYM": "needs a sandbox-capable deployment with OpenSandbox; the Gym e2e Kind cluster has none",
 }
 
 #: Directory names that are not this repository's source: installed packages and build caches. Their
 #: tests are not ours to gate, and parsing them is pure noise. Matched as whole path *components*, so
 #: keep these specific -- an everyday word here would silently exempt real directories.
 NOT_OURS = frozenset({".venv", ".flox", "node_modules", "site-packages", ".git"})
-
-#: Generated trees, excluded by path prefix rather than by component name. The Stainless-generated
-#: SDK lives under `sdk/python`; a gate it emitted would not be ours to set, and failing the build
-#: over one would leave no fix available. `tools/nemo-helix-sdk-tools/tests/sdk` is *not* this --
-#: it is first-party, which is why a bare "sdk" component match would be wrong.
-VENDORED_ROOTS = ("sdk/python",)
 
 #: What pytest itself collects, per `python_files` in pytest.ini. Scanning only one of them would
 #: leave gates in the other invisible to this check while pytest still skipped the tests.
@@ -162,9 +157,6 @@ def orphaned_gates(test_root: Path, workflow_dir: Path) -> dict[str, list[Path]]
     candidates = sorted({path for glob in TEST_FILE_GLOBS for path in test_root.rglob(glob)})
     for path in candidates:
         if NOT_OURS.intersection(path.parts):
-            continue
-        posix = path.as_posix()
-        if any(posix.startswith(f"{root}/") or f"/{root}/" in posix for root in VENDORED_ROOTS):
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))

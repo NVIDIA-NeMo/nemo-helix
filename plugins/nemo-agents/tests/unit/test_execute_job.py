@@ -241,7 +241,7 @@ async def test_to_spec_validates_and_canonicalizes_base_workdir() -> None:
     entity_client.get.return_value = _agent()
     sdk = _sdk_with_files()
 
-    with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+    with patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files):
         spec = await ExecuteAgentJob.to_spec(
             ExecuteAgentJobConfig(agent="calc", input="hello", workdir=AgentWorkdir(base_workdir="source#project")),
             workspace="default",
@@ -316,7 +316,7 @@ async def test_to_spec_rejects_single_file_base_workdir() -> None:
 
     with pytest.raises(ValueError, match="non-empty directory"):
         sdk = _sdk_with_files(data=[])
-        with patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files):
+        with patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files):
             await ExecuteAgentJob.to_spec(
                 ExecuteAgentJobConfig(
                     agent="calc",
@@ -1113,7 +1113,7 @@ def test_run_downloads_and_registers_input_workdir(ctx: JobContext) -> None:
         return FabricRuntimeResult(status="succeeded", response="done")
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
     ):
@@ -1159,7 +1159,7 @@ def test_run_clears_stale_input_workdir_before_materializing(ctx: JobContext) ->
         return FabricRuntimeResult(status="succeeded")
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch("nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref", side_effect=_download),
         patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", _invoke),
     ):
@@ -1208,7 +1208,7 @@ def test_run_failed_download_does_not_register_partial_result(ctx: JobContext) -
     sdk = MagicMock()
 
     with (
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.FilesClient.from_client", return_value=sdk.files),
         patch(
             "nemo_agents_plugin.tasks.execute.workdir._download_fileset_ref",
             side_effect=RuntimeError("download failed"),
@@ -1333,7 +1333,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
     fake_jobs = SimpleNamespace(create_job=_create_job)
     with (
         patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=fake_jobs),
-        patch("nemo_agents_plugin.jobs.execute.client_from_platform", return_value=sdk.files),
+        patch("nemo_agents_plugin.jobs.execute.AsyncFilesClient.from_client", return_value=sdk.files),
     ):
         response = TestClient(app).post(
             "/apis/agents/v2/workspaces/default/jobs/execute",

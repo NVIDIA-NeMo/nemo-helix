@@ -47,13 +47,14 @@ For a local SDK run, this runner is **not** zero-dependency — it shells out to
 ## Install NeMo Gym
 
 ```bash
-uv venv ~/gym-env --python 3.13.14
-uv pip install --python ~/gym-env/bin/python nemo-gym tiktoken
+uv venv ~/gym-env --python 3.13.15
+uv pip install --python ~/gym-env/bin/python "nemo-gym==0.5.0" tiktoken
 export PATH="$HOME/gym-env/bin:$PATH"
 ```
 
-Gym goes in **its own environment**, with that environment's `bin` on `PATH`. Gym imports Ray at
-module load, and `nemo-helix` excludes Ray by constraint, so the two generally cannot share a
+NeMo Gym 0.5.0 requires Python 3.13.14 or newer. Pin the Gym version so the local runner matches the
+NeMo Helix job image. Install Gym into **its own environment** and put that environment's `bin` on `PATH`. Gym imports Ray
+at module load, and `nemo-helix` excludes Ray by constraint, so the two generally cannot share a
 virtualenv.
 
 <Note>
@@ -165,7 +166,7 @@ So `num_repeats=2` over a 5-row dataset yields 5 tasks and 10 trials.
 | `concurrency` | no | concurrent rollouts during collection — tune to your model endpoint's limits |
 | `hydra_params` | no | parameters merged into Gym's Hydra config, e.g. `{"model": {"temperature": 0.7}}` |
 | `env_vars` | no | environment variables set on the `gym` invocation |
-| `env_secrets` | no | `{ENV_NAME: secret-ref}` for values that must not be written down — resolved locally from your environment, and by the platform for a submitted job |
+| `env_secrets` | no | `{ENV_NAME: secret-ref}` for values that must not be written down — local runs look for `MY_WORKSPACE_*` first, then the bare variable name; submitted jobs use platform secrets |
 | `reward_key` | no | key read from each rollout record (default `reward`) |
 | `startup_timeout_s` | no | max wait for `gym env start` readiness |
 | `collection_timeout_s` | no | max wait for collection; `None` is unbounded |
@@ -183,6 +184,7 @@ Platform job specs use `GymRunnerTarget`, the serializable counterpart of the lo
   that are not built into the runtime image.
 - `agent_ref_name` identifies the agent instance registered inside the sandbox when that instance
   name differs from the `agent` component name.
+
 
 They live on the placement because the local `gym` CLI has no equivalent of either — it stages
 no packages and resolves its agent from Hydra config — so a runner carrying them would hold fields
@@ -330,9 +332,11 @@ from nemo_evaluator_sdk.agent_eval.runtimes.gym import (
     GymRuntimeConfig,
     discover_gym_tasks,
 )
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_evaluator.sdk import Evaluator
 
-client = NeMoHelix(base_url="http://localhost:8080", workspace="default")
+client = NemoClient(base_url="http://localhost:8080", workspace="default")
+evaluator = Evaluator.from_client(client)
 
 runner = GymAgentTaskRunner(
     config=GymRuntimeConfig(
@@ -353,7 +357,7 @@ names = []
 for index, task in enumerate(tasks):
     name = f"mcqa-{index}"
     names.append(name)
-    client.evaluator.tasks.create(
+    evaluator.tasks.create(
         name,
         task=TaskInput(
             spec=EvaluatorTaskDefinition(
@@ -366,9 +370,9 @@ for index, task in enumerate(tasks):
         ),
     )
 
-client.evaluator.tasksets.create("mcqa-suite", taskset=TasksetInput(tasks=[TaskRef(n) for n in names]))
+evaluator.tasksets.create("mcqa-suite", taskset=TasksetInput(tasks=[TaskRef(n) for n in names]))
 
-job = client.evaluator.submit(tasks=TasksetRef("mcqa-suite"), target=runner)
+job = evaluator.submit(tasks=TasksetRef("mcqa-suite"), target=runner)
 job.wait_until_done()
 ```
 
@@ -387,11 +391,11 @@ that names neither the runner nor the field.
 
 The returned handle is an `AgentEvaluatorJobResource`. Unlike a dataset-driven job it has no
 `get_result()` or `download_artifacts()`. Wait for completion, then read the queryable record through
-`client.evaluator.agent_eval_results` or download the named `agent-eval-results` job result. See
+`evaluator.agent_eval_results` or download the named `agent-eval-results` job result. See
 [Reading Results](/documentation/evaluate-models/agent-eval/reading-results#results-from-platform-jobs).
 
-The async client takes the same call — `await client.evaluator.submit(tasks=..., target=runner)` on
-an `AsyncNeMoHelix`, returning an `AsyncAgentEvaluatorJobResource` with the same status and polling
+The async client takes the same call — `await async_evaluator.submit(tasks=..., target=runner)` on
+an `AsyncEvaluator`, returning an `AsyncAgentEvaluatorJobResource` with the same status and polling
 methods. See [SDK Resources](/documentation/evaluate-models/sdk-resources).
 
 Submitting from the live runner is not the only route. The same evaluation can be described as an
@@ -421,8 +425,10 @@ adds `stage-environment` before `agent-evaluate` on a sandbox-enabled deployment
 - **Custom environments require platform support.** Package the environment as a FileSet and use
   sandboxed execution; `environment` and `agent_ref_name` are `GymPlacement` fields supplied at
   submission, so a live `GymAgentTaskRunner` cannot carry them. `env_secrets` is *not* in that
-  group — it lives on `GymRuntimeConfig` and resolves locally from your environment, so it works
-  the same way in both places.
+  group — it lives on `GymRuntimeConfig`. Local runs look for the workspace-prefixed environment
+  variable first, then the bare name. Pass `secret_resolver=` to `GymAgentTaskRunner` for a custom
+  `EnvSecretSource` that names the environment variable holding each secret. Submitted jobs carry
+  only the references and resolve them with the platform's source.
 - **No retries and no re-run cache.** A failed rollout is not retried, and nothing is reused between
   runs: every run collects from scratch, and refuses to run into a directory that already holds Gym
   rollout output — rollouts, the failures sidecar, or model-call captures. (An existing empty

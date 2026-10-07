@@ -79,7 +79,7 @@ class AccessLog:
     Example usage:
         with create_test_client(MyService, access_log=True, client_type=ClientContext) as ctx:
             ctx.access_log.clear()  # Clear setup requests
-            client_from_platform(ctx.sdk, WorkspacesClient).list_workspaces()
+            WorkspacesClient.from_client(ctx.client).list_workspaces()
             assert ctx.access_log.has_request(path_contains="/workspaces", method="GET")
             for req in ctx.access_log.filter(path_contains="/entities/"):
                 assert req.principal_id == "expected-user@example.com"

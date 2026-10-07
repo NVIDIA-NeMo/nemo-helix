@@ -27,13 +27,14 @@ At a high level, the fine-tuning workflow consists of the following steps:
 
 ## Container Images
 
-Fine-tuning jobs run in container images published to NVIDIA NGC. Use the image tag that matches your NeMo Helix release:
+Fine-tuning jobs run in container images published to NVIDIA NGC. Use the image tag that matches your NeMo Helix deployment release:
 
 | Image | Purpose |
 |-------|---------|
 | `nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<image-tag>` | Shared CPU task steps (file I/O, model entity, model spec) for all customization backends |
-| `nvcr.io/nvidia/nemo-helix/nhx-automodel-training:<image-tag>` | Automodel GPU training step |
-| `nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>` | Unsloth GPU training step |
+| `nvcr.io/nvidia/nemo-helix/nhx-automodel-training:<image-tag>` | Automodel GPU training step (Docker) |
+| `nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>` | Unsloth GPU training step (Docker) |
+| `nvcr.io/nvidia/nemo-helix/nhx-rl-training:<image-tag>` | RL (DPO and GRPO) GPU training and Gym sandbox on Kubernetes/Ray |
 
 These public images can be pulled directly from `nvcr.io`:
 
@@ -41,9 +42,10 @@ These public images can be pulled directly from `nvcr.io`:
 docker pull nvcr.io/nvidia/nemo-helix/nhx-customizer-tasks:<image-tag>
 docker pull nvcr.io/nvidia/nemo-helix/nhx-automodel-training:<image-tag>
 docker pull nvcr.io/nvidia/nemo-helix/nhx-unsloth-training:<image-tag>
+docker pull nvcr.io/nvidia/nemo-helix/nhx-rl-training:<image-tag>
 ```
 
-Most users do not need to pull these images manually. NeMo Helix resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
+Most users do not need to pull these images manually. NeMo Helix resolves them from the configured platform image registry and tag. Pull or mirror them when you are operating a self-managed deployment, preloading an air-gapped environment, or validating registry access. Automodel and Unsloth images are used by the Docker job backend. For air-gapped or registry-restricted deployments, preload or mirror `nhx-rl-training` on the Kubernetes cluster that runs Ray. If your environment requires authenticated registry pulls, authenticate to `nvcr.io` with an NGC API key before pulling or mirroring the images.
 
 ---
 
@@ -129,7 +131,7 @@ Learn how to start a LoRA customization job using a custom dataset.
 </Card>
 <Card title="Start a Full SFT Customization Job" href="/documentation/customizer-reference/tutorials/sft-customization-job">
 
-Learn how to start a SFT customization job using a custom dataset.
+Learn how to start an SFT customization job using a custom dataset.
 
 <small><span class="md-tag">nemo-customizer</span></small>
 

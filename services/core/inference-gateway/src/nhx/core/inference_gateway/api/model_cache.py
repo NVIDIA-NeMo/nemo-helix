@@ -9,14 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Awaitable, Callable
 
-from nemo_helix import APIConnectionError, APIStatusError, AsyncNeMoHelix
-from nemo_helix.types.inference import ModelProvider, ServedModelMapping
-from nemo_helix_plugin.client.adapter import client_from_platform
-from nemo_helix_plugin.client.errors import NemoHTTPError as PluginHTTPError
-from nemo_helix_plugin.client.errors import NemoTransportError as PluginTransportError
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.models.client import AsyncModelsClient
-from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.models.types import ModelEntity, ModelProvider, ServedModelMapping
 from nhx.common.entities.utils import parse_model_entity_ref
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
 from nhx.core.inference_gateway.api.proxy import retrieve_secret_value
@@ -231,20 +228,19 @@ def _to_plugin_backend_format(value: object | None) -> BackendFormat | None:
     return None
 
 
-def model_provider_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], Awaitable[list[ModelProvider]]]:
+def model_provider_getter_from_client(client: AsyncNemoClient) -> Callable[[], Awaitable[list[ModelProvider]]]:
+    models_client = AsyncModelsClient.from_client(client).with_headers(MARK_INTERNAL_REQUEST_HEADERS)
+
     async def _model_provider_getter() -> list[ModelProvider]:
         try:
-            # SDK returns AsyncPaginator - iterate through all pages to get all providers
-            resp = models_sdk.inference.providers.list(
+            resp = await models_client.list_providers(
                 workspace="-",  # Cross-workspace query
-                page_size=200,
-                extra_headers=MARK_INTERNAL_REQUEST_HEADERS,
+                query_params={"page_size": 200},
             )
-            providers = [provider async for provider in resp]
-            return providers
-        except APIConnectionError as exc:
+            return [provider async for provider in resp.items()]
+        except NemoTransportError as exc:
             raise ModelProviderRefreshError(f"Error connecting to models service: {exc}") from exc
-        except APIStatusError as exc:
+        except NemoHTTPError as exc:
             raise ModelProviderRefreshError(
                 f"Error refreshing from models service: {exc.status_code}, {exc.body}"
             ) from exc
@@ -252,19 +248,19 @@ def model_provider_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], A
     return _model_provider_getter
 
 
-def model_entity_getter_from_sdk(models_sdk: AsyncNeMoHelix) -> Callable[[], Awaitable[list[ModelEntity]]]:
+def model_entity_getter_from_client(client: AsyncNemoClient) -> Callable[[], Awaitable[list[ModelEntity]]]:
+    models_client = AsyncModelsClient.from_client(client)
+
     async def _model_entity_getter() -> list[ModelEntity]:
         try:
-            # SDK returns AsyncPaginator - iterate through all pages to get all model entities.
-            resp = await client_from_platform(models_sdk, AsyncModelsClient).list_models(
+            resp = await models_client.list_models(
                 workspace="-",  # Cross-workspace query
                 query_params={"page_size": 200, "verbose": False},
             )
-            models = [model async for model in resp.items()]
-            return models
-        except PluginTransportError as exc:
+            return [model async for model in resp.items()]
+        except NemoTransportError as exc:
             raise ModelProviderRefreshError(f"Error connecting to models service: {exc}") from exc
-        except PluginHTTPError as exc:
+        except NemoHTTPError as exc:
             raise ModelProviderRefreshError(f"Error refreshing model entities from models service: {exc}") from exc
 
     return _model_entity_getter
@@ -295,7 +291,7 @@ def debug_model_provider_getter(
 async def refresh_model_cache(
     model_cache: ModelCache,
     model_provider_getter: Callable[[], Awaitable[list[ModelProvider]]],
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     model_entity_getter: Callable[[], Awaitable[list[ModelEntity]]] | None = None,
     virtual_model_cache: VirtualModelCache | None = None,
     middleware_registry: MiddlewareRegistry | None = None,
@@ -329,7 +325,7 @@ async def refresh_model_cache(
         await refresh_model_provider_info(
             model_cache=model_cache,
             model_info=model_info,
-            secrets_sdk=secrets_sdk,
+            client=client,
         )
 
     # Rebuild the entity map only when the provider layer changed since the last cycle. ModelCache
@@ -349,7 +345,7 @@ async def refresh_model_cache(
 
     if virtual_model_cache is not None:
         try:
-            await refresh_virtual_model_cache(virtual_model_cache, secrets_sdk, registry=middleware_registry)
+            await refresh_virtual_model_cache(virtual_model_cache, client, registry=middleware_registry)
         except VirtualModelCacheRefreshError:
             logger.exception("Failed to refresh VirtualModel cache; stale entries will be used until next cycle")
 
@@ -357,7 +353,7 @@ async def refresh_model_cache(
 async def refresh_model_provider_info(
     model_cache: ModelCache,
     model_info: ModelProviderInfo,
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
 ):
     now = datetime.now()
     model_provider = model_info.model_provider
@@ -365,13 +361,13 @@ async def refresh_model_provider_info(
     api_key_secret_name = model_provider.api_key_secret_name
     secret_value_diff = now - model_info.secret_value_updated_at
     if api_key_secret_name and (secret_value_diff.total_seconds() > model_cache.secret_value_ttl):
-        await _refresh_secret_value(model_info, secrets_sdk, api_key_secret_name)
+        await _refresh_secret_value(model_info, client, api_key_secret_name)
         model_info.secret_value_updated_at = now
 
     model_cache.update_model_info(model_info)
 
 
-async def _refresh_secret_value(model_info: ModelProviderInfo, secrets_sdk: AsyncNeMoHelix, api_key_secret_name: str):
+async def _refresh_secret_value(model_info: ModelProviderInfo, client: AsyncNemoClient, api_key_secret_name: str):
     """
     For a given model provider, update the cached secret value. This function
     mutates the passed-in model_info.
@@ -381,7 +377,7 @@ async def _refresh_secret_value(model_info: ModelProviderInfo, secrets_sdk: Asyn
         model_info.secret_value = await retrieve_secret_value(
             workspace=model_provider.workspace,
             secret_name=api_key_secret_name,
-            secrets_sdk=secrets_sdk,
+            client=client,
         )
         logger.debug(f"Updated secret cache for model provider: {model_provider.workspace}/{model_provider.name}")
     except Exception:
@@ -397,7 +393,7 @@ async def _async_pause(delay: float) -> None:
 async def refresh_model_cache_task(
     model_cache: ModelCache,
     model_provider_getter: Callable[[], Awaitable[list[ModelProvider]]],
-    secrets_sdk: AsyncNeMoHelix,
+    client: AsyncNemoClient,
     sleep_duration_s: int,
     max_consecutive_failures: int = 10,
     model_entity_getter: Callable[[], Awaitable[list[ModelEntity]]] | None = None,
@@ -409,7 +405,7 @@ async def refresh_model_cache_task(
     Args:
         model_cache: The cache to refresh
         model_provider_getter: Function to fetch model providers
-        secrets_sdk: SDK client for accessing secrets service
+        client: Platform client used to read secrets and list VirtualModels
         sleep_duration_s: Interval between refresh attempts in seconds
         max_consecutive_failures: Maximum number of consecutive failures before raising an exception
 
@@ -426,7 +422,7 @@ async def refresh_model_cache_task(
             await refresh_model_cache(
                 model_cache,
                 model_provider_getter,
-                secrets_sdk,
+                client,
                 model_entity_getter=model_entity_getter,
                 virtual_model_cache=virtual_model_cache,
                 middleware_registry=middleware_registry,

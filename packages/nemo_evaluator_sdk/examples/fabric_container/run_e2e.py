@@ -3,8 +3,8 @@
 
 """Live end-to-end: run a real Fabric task inside a Docker sandbox via FabricAgentRuntime(sandbox=...).
 
-Constructs the runtime directly (the plugin `_resolve_target` wiring is not yet in place — see
-AALGO-321) and drives one task through the hermes harness. The sandbox image is provisioned opaquely
+Constructs the runtime directly (the plugin `_resolve_target` wiring is not yet in place)
+and drives one task through the hermes harness. The sandbox image is provisioned opaquely
 (build-if-missing) on first run from published wheels — no Dockerfile to write and no source checkout.
 Requires a running Docker daemon and NVIDIA_API_KEY.
 """
@@ -50,7 +50,7 @@ async def main() -> int:
             runtime=RuntimeConfig(input_schema="chat", output_schema="message"),
         ),
         sandbox=DockerSandboxProvider(),
-        secrets={"NVIDIA_API_KEY": SecretRef(root="NVIDIA_API_KEY")},
+        env_secrets={"NVIDIA_API_KEY": SecretRef(root="NVIDIA_API_KEY")},
     )
 
     task = AgentEvalTask(

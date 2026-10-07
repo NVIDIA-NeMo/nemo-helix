@@ -1480,8 +1480,10 @@ async def test_live_generation_ignore_request_failure_records_failed_trial() -> 
     assert result.trials[0].status is AgentEvalTrialStatus.FAILED
     assert result.trials[0].output is None
     assert result.trials[0].metadata["error"] == "inference boom"
+    assert result.trials[0].error == TrialError(type="RuntimeError", message="inference boom")
     assert result.scores[0].status is AgentEvalScoreStatus.FAILED
     assert result.summary.metric_coverage["constant_metric"]["score"].failed == 1
+    assert result.summary.error_trial_ids == {"RuntimeError": [result.trials[0].id]}
 
     # Without ignore_request_failure the run aborts on the first failed request.
     with pytest.raises(RuntimeError, match="inference boom"):

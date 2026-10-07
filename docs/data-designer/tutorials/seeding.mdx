@@ -18,6 +18,7 @@ For more detail about seed dataset behavior, see the [open-source library's vers
 
 Use `HuggingFaceSeedSource` to load data from HuggingFace:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import data_designer.config as dd
 
@@ -35,6 +36,7 @@ dd.HuggingFaceSeedSource(
 
 Use `FilesetFileSeedSource` to load data through the Files API.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 
@@ -59,38 +61,41 @@ This example generates realistic patient medical notes by seeding with publicly 
 
 Upload the symptom-to-diagnosis dataset to a Files API Fileset:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import os
 import tempfile
 import urllib.request
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.files.client import FilesClient
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
 WORKSPACE = "default"
 FILESET_NAME = "seed-data"
 FILE_PATH = "symptom_to_diagnosis.csv"
 
 base_url = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NeMoHelix(base_url=base_url, workspace=WORKSPACE)
+client = NemoClient(base_url=base_url, workspace=WORKSPACE)
+files_client = FilesClient.from_client(client)
 
 # Create fileset
-client.files.filesets.create(name=FILESET_NAME)
+files_client.create_fileset(body=CreateFilesetRequest(name=FILESET_NAME))
 
 # Download and upload seed data
 with tempfile.NamedTemporaryFile(suffix=".csv") as tmpfile:
     url = "https://raw.githubusercontent.com/NVIDIA/GenerativeAIExamples/refs/heads/main/nemo/NeMo-Data-Designer/data/gretelai_symptom_to_diagnosis.csv"
     urllib.request.urlretrieve(url, tmpfile.name)
 
-    client.files.upload(
-        fileset=FILESET_NAME,
-        local_path=tmpfile.name,
-        remote_path=FILE_PATH,
-    )
+    with open(tmpfile.name, "rb") as fh:
+        files_client.upload_file(name=FILESET_NAME, path=FILE_PATH, content=fh.read())
 ```
 
 ### Step 2: Build Configuration
 
 Define your models and create a config builder:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 import data_designer.config as dd
 
@@ -115,6 +120,7 @@ config_builder = dd.DataDesignerConfigBuilder(model_configs)
 
 Add the seed data to your configuration:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 
@@ -129,6 +135,7 @@ config_builder.with_seed_dataset(
 
 Add columns that reference and extend the seed data:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Patient details
 config_builder.add_column(
@@ -243,6 +250,7 @@ Respond with only the notes, no other text.
 
 For CLI execution, save the configuration in `medical_notes.py` and expose a `load_config_builder()` function that returns the `config_builder`.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 def load_config_builder() -> dd.DataDesignerConfigBuilder:
     return config_builder
@@ -264,13 +272,15 @@ nemo data-designer create medical_notes.py --workspace default --num-records 30
 
 Create a client:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Using the client instance from Step 1
-data_designer = client.data_designer
+data_designer = DataDesignerResource(client)
 ```
 
 Use the `preview` method for rapid iteration:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 preview = data_designer.preview(config_builder)
 
@@ -289,6 +299,7 @@ preview.analysis.to_report()
 
 When you're satisfied with the preview, submit a larger generation job:
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
 # Defaulting to 30 for demo speed purposes. Happy with the output? Scale it up!
 job = data_designer.create(config_builder, num_records=30)

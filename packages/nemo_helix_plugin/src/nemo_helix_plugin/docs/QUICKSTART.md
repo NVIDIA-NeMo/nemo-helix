@@ -146,7 +146,7 @@ class ProcessJob(NemoJob):
         return {"status": "done", "result": cfg.input.upper()}
 
     @classmethod
-    async def compile(cls, *, workspace, spec, entity_client, job_name, sdk, profile=None, options=None):
+    async def compile(cls, *, workspace, spec, entity_client, job_name, async_sdk, profile=None, options=None):
         # Build a HelixJobSpec here — see JOB.md (Compilation) for details.
         ...
 ```

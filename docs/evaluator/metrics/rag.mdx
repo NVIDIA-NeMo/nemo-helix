@@ -52,13 +52,13 @@ from nemo_evaluator_sdk.metrics.ragas import (
     ResponseRelevancyMetric,
 )
 from nemo_evaluator.sdk import Evaluator
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-evaluator: Evaluator = client.evaluator  # this object is an Evaluator resource
+evaluator = Evaluator.from_client(client)
 ```
 
 Use `evaluator.submit(metric=metric, dataset=dataset)` for a durable platform job. For local in-process iteration without the platform, use `nemo_evaluator_sdk.Evaluator` directly:
@@ -75,10 +75,15 @@ def submit_evaluation(evaluator, metric, dataset):
 If using external endpoints that require authentication, such as NVIDIA Build endpoints, create a secret first:
 
 ```python
-client.secrets.create(
-    name="nvidia-api-key",
-    value="nvapi-YOUR_API_KEY_HERE",
-    description="NVIDIA Build API key for RAG metrics",
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(
+        name="nvidia-api-key",
+        value=SecretStr("nvapi-YOUR_API_KEY_HERE"),
+        description="NVIDIA Build API key for RAG metrics",
+    ),
 )
 ```
 
@@ -893,8 +898,15 @@ for row in result.row_scores:
 Store API keys as secrets for secure authentication:
 
 ```python
-client.secrets.create(name="judge-api-key", value="<your-judge-key>")
-client.secrets.create(name="embedding-api-key", value="<your-embedding-key>")
+from pydantic import SecretStr
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="judge-api-key", value=SecretStr("<your-judge-key>")),
+)
+client.secrets.create_secret(
+    body=HelixSecretCreateRequest(name="embedding-api-key", value=SecretStr("<your-embedding-key>")),
+)
 ```
 
 Reference secrets by name in your metric configuration. For `nemo_evaluator_sdk.Evaluator` versus submitted-job behavior, see [Model API Authentication](/documentation/evaluate-models/metrics/model-configuration#model-api-authentication).

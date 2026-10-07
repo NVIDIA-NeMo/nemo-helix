@@ -14,10 +14,10 @@ because the compiler call convention and profile resolution are backend-specific
 from __future__ import annotations
 
 import asyncio
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.jobs.api_factory import HelixJobSpec
+from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
@@ -32,6 +32,12 @@ from nhx.unsloth.schemas import UnslothJobOutput
 from pydantic import BaseModel
 
 
+class UnslothJobsListFilter(BaseJobsListFilter):
+    """Unsloth jobs only. ``backend`` is the literal stored on the job spec."""
+
+    backend: Literal["unsloth"] = "unsloth"
+
+
 class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
     """GPU Unsloth fine-tuning job under the customization router (submit-only)."""
 
@@ -40,6 +46,7 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
     job_collection_path: ClassVar[str | None] = "/unsloth/jobs"
     input_spec_schema: ClassVar[type[UnslothJobInput] | None] = UnslothJobInput
     spec_schema: ClassVar[type[UnslothJobOutput] | None] = UnslothJobOutput
+    jobs_list_filter: ClassVar[type[UnslothJobsListFilter]] = UnslothJobsListFilter
     runtime_label: ClassVar[str] = "Unsloth"
 
     @classmethod

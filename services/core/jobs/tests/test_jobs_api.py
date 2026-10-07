@@ -70,7 +70,7 @@ def expected_translated_executor_dump() -> Dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_create_job_using_sdk(async_client: AsyncNemoClient):
+async def test_create_job_using_typed_client(async_client: AsyncNemoClient):
     jobs = AsyncJobsClient.from_client(async_client)
     job = (
         await jobs.create_job(
@@ -92,7 +92,7 @@ async def test_create_job_using_sdk(async_client: AsyncNemoClient):
                                     # `translate_cpu_container_steps_to_subprocess`) can
                                     # produce a non-empty subprocess command. Real plugin
                                     # compilers always set both; mirroring that here keeps
-                                    # the SDK round-trip path realistic.
+                                    # the client round-trip path realistic.
                                     "container": {
                                         "image": "test-image",
                                         "entrypoint": ["python", "-m"],
@@ -693,6 +693,53 @@ async def test_job_lifecycle_single_step(test_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_job_accepts_both_id_and_name(test_client: AsyncClient):
+    """GET /jobs/{name} resolves by the job's ID as well as its name.
+
+    ``jobs list`` leads with the ``id`` field, so passing that ``id`` to GET
+    must not 404 just because the endpoint is keyed by name.
+    """
+    req = CreateHelixJobRequest(
+        name="id-or-name-job",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[HelixJobStepSpec(name="step1", executor=TestConstants.TEST_EXECUTOR, config={})]
+        ),
+    )
+    response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs", json=req.model_dump())
+    assert response.status_code == 201
+    created = response.json()
+    job_id = created["id"]
+    job_name = created["name"]
+    assert job_id != job_name
+
+    # By name (the documented path).
+    by_name = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
+    assert by_name.status_code == 200
+    assert by_name.json()["id"] == job_id
+
+    # By ID (the value `jobs list` surfaces first) — previously a 404.
+    by_id = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}")
+    assert by_id.status_code == 200
+    assert by_id.json()["id"] == job_id
+    assert by_id.json()["name"] == job_name
+
+    # The /status subresource resolves by ID too, since it shares get_job.
+    status_by_id = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}/status")
+    assert status_by_id.status_code == 200
+
+    # A mutation endpoint (cancel) resolves by ID as well — not just name.
+    cancel_by_id = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_id}/cancel")
+    assert cancel_by_id.status_code == 200
+    assert cancel_by_id.json()["id"] == job_id
+
+    # A genuinely-unknown identifier still 404s.
+    missing = await test_client.get("/apis/jobs/v2/workspaces/default/jobs/platform-job-nope")
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_job_lifecycle_multi_step(test_client: AsyncClient):
     req = CreateHelixJobRequest(
         name="test-job",
@@ -1017,12 +1064,12 @@ async def test_job_paging(test_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_job_request: CreateHelixJobRequest):
     jobs = AsyncJobsClient.from_client(async_client)
-    sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+    job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     resp = (
         await jobs.create_job_result(
             name="result-name1",
             workspace=DEFAULT_WORKSPACE,
-            job=sdk_job_resp.name,
+            job=job_resp.name,
             body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
@@ -1030,12 +1077,12 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
         )
     ).data()
     assert resp.name == "result-name1"
-    assert resp.job == sdk_job_resp.id
+    assert resp.job == job_resp.id
     resp2 = (
         await jobs.create_job_result(
             name="result-name2",
             workspace=DEFAULT_WORKSPACE,
-            job=sdk_job_resp.name,
+            job=job_resp.name,
             body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#myartifact",
                 artifact_storage_type=FileStorageType.FILESET,
@@ -1043,14 +1090,14 @@ async def test_job_result_crud(async_client: AsyncNemoClient, sample_platform_jo
         )
     ).data()
     assert resp2.name == "result-name2"
-    assert resp2.job == sdk_job_resp.id
+    assert resp2.job == job_resp.id
 
-    results = (await jobs.list_job_results(name=sdk_job_resp.name, workspace=DEFAULT_WORKSPACE)).data()
+    results = (await jobs.list_job_results(name=job_resp.name, workspace=DEFAULT_WORKSPACE)).data()
     assert len(results.data) == 2
     result2 = next(r for r in results.data if "result-name2" == r.name)
 
     another_result_2 = (
-        await jobs.get_job_result(name=result2.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
+        await jobs.get_job_result(name=result2.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
     ).data()
     assert result2 == another_result_2
     # The result's namespace is inherited from the parent job, not from the create request
@@ -1076,12 +1123,12 @@ async def test_job_result_download(
     mock_result_manager._path = tmp_file
 
     jobs = AsyncJobsClient.from_client(async_client)
-    sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+    job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
     result = (
         await jobs.create_job_result(
             name="result-name1",
             workspace=DEFAULT_WORKSPACE,
-            job=sdk_job_resp.name,
+            job=job_resp.name,
             body=HelixJobResultCreateRequest(
                 artifact_url="default/test-fileset#result_name1",
                 artifact_storage_type=FileStorageType.FILESET,
@@ -1092,11 +1139,11 @@ async def test_job_result_download(
     with patch(
         "nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager
     ) as factory:
-        download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
+        download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
         download_bytes = await download.read()
 
     call_kwargs = factory.call_args.kwargs
-    assert call_kwargs["job_name"] == sdk_job_resp.name
+    assert call_kwargs["job_name"] == job_resp.name
     assert call_kwargs["workspace"] == DEFAULT_WORKSPACE
     assert isinstance(call_kwargs["files_client"], AsyncFilesClient)
     assert call_kwargs["files_client"]._http is test_client
@@ -1113,7 +1160,7 @@ async def test_job_result_download(
     mock_result_manager._path = tmp_dir
 
     with patch("nemo_helix_plugin.jobs.result_manager.async_result_manager_factory", return_value=mock_result_manager):
-        download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=sdk_job_resp.name)
+        download = await jobs.download_job_result(name=result.name, workspace=DEFAULT_WORKSPACE, job=job_resp.name)
         tar_content = await download.read()
 
     # ensure we're returning the appropriate tar file
@@ -1142,8 +1189,8 @@ async def test_job_status_details_crud(
 
     # Create a job
     jobs = AsyncJobsClient.from_client(async_client)
-    sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
-    job_name = sdk_job_resp.name  # API URLs use job name, not ID
+    job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+    job_name = job_resp.name  # API URLs use job name, not ID
 
     ### Test patching a job status details
     # Post a status update like we would from a job
@@ -1603,8 +1650,8 @@ async def test_job_status_timestamps(
 ):
     """Test that created_at and updated_at are present at job, step, and task levels in status response."""
     jobs = AsyncJobsClient.from_client(async_client)
-    sdk_job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
-    job_name = sdk_job_resp.name
+    job_resp = (await jobs.create_job(workspace=DEFAULT_WORKSPACE, body=sample_platform_job_request)).data()
+    job_name = job_resp.name
 
     # Activate the step so the job is in a meaningful state
     response = await test_client.patch(

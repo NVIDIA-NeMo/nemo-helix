@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir \
       "langgraph>=1.2,<2" \
       "langchain-core>=1.4,<2" \
       "langchain-openai>=1.1.9,<2.0" \
-      "nemo-relay[langgraph]>=0.8,<1.0" \
+      "nemo-relay[langgraph]>=0.9.3,<0.10" \
       "fastapi>=0.115,<1.0" \
       "uvicorn>=0.30,<1.0"
 

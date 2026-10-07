@@ -15,7 +15,7 @@ from nhx.core.models.config import config as models_config
 from nhx.core.models.controllers.context import ModelContext
 from nhx.core.models.controllers.models_controller import NON_TERMINAL_STATES, ModelsController
 
-from .conftest import _AsyncPage, _ModelResponse, make_async_models_client
+from .conftest import _AsyncPage, _ModelResponse, patch_typed_clients
 
 
 def _filter_status(kwargs: Mapping[str, object]) -> str | None:
@@ -38,63 +38,28 @@ def _close_coro(awaitable: object) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _patch_typed_model_client(mock_models_sdk):
-    """Route ``client_from_platform(sdk, AsyncModelsClient)`` in the models controller
-    and entity cache back to a typed ``AsyncModelsClient`` mock on
-    ``mock_models_sdk.models_client``, so tests drive ``get_model``/``list_models``
-    directly instead of the legacy SDK resource."""
-    mock_models_sdk.models_client = make_async_models_client()
-    mock_models_sdk.virtual_models_client = MagicMock()
-    mock_models_sdk.virtual_models_client.list_virtual_models = AsyncMock(return_value=_AsyncPage([]))
-    mock_models_sdk.virtual_models_client.create_virtual_model = AsyncMock(return_value=_ModelResponse())
-    mock_models_sdk.virtual_models_client.delete_virtual_model = AsyncMock(return_value=_ModelResponse())
-    mock_models_sdk.gateway_provider_client = MagicMock()
-    mock_models_sdk.gateway_provider_client.get_provider_models = AsyncMock()
-
-    def _client_from_platform(sdk, cls):
-        match cls.__name__:
-            case "AsyncModelsClient":
-                return sdk.models_client
-            case "AsyncVirtualModelsClient":
-                return sdk.virtual_models_client
-            case "AsyncInferenceGatewayProviderClient":
-                return sdk.gateway_provider_client
-        raise AssertionError(f"Unexpected typed client class: {cls.__name__}")
-
-    with (
-        patch(
-            "nhx.core.models.controllers.models_controller.client_from_platform",
-            side_effect=_client_from_platform,
-        ),
-        patch(
-            "nhx.core.models.controllers.entity_cache.client_from_platform",
-            side_effect=_client_from_platform,
-        ),
-        patch(
-            "nhx.core.models.controllers.deployment_reconciler.client_from_platform",
-            side_effect=_client_from_platform,
-        ),
-        patch(
-            "nhx.core.models.controllers.provider_reconciler.client_from_platform",
-            side_effect=_client_from_platform,
-        ),
-    ):
+def _patch_typed_model_client():
+    """Resolve the typed clients built by the controller and reconcilers to the
+    mocks carried on the ``mock_client`` fixture."""
+    with patch_typed_clients():
         yield
 
 
-def test_controller_initialization(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry, assert_helpers):
+def test_controller_initialization(
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry, assert_helpers
+):
     """Test that ModelsController initializes correctly."""
     # Create controller
     controller = ModelsController(backend_registry=mock_backend_registry)
 
     # Verify initialization
     assert_helpers.assert_controller_initialized(controller, mock_backend_registry)
-    assert_helpers.assert_sdk_initialized_correctly(mock_sdk_class_patch)
+    assert_helpers.assert_client_initialized_correctly(mock_client_factory_patch)
     assert controller._provider_reconciler._controller_config is models_config.controller
 
 
 def test_step_with_no_deployments(
-    mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry, assert_helpers
+    mock_client_factory_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry, assert_helpers
 ):
     """Test step() when no deployments are found."""
     # Mock asyncio.run to return empty list
@@ -111,7 +76,7 @@ def test_step_with_no_deployments(
 
 
 def test_step_with_deployments(
-    mock_sdk_class_patch,
+    mock_client_factory_patch,
     mock_get_config_patch,
     mock_asyncio_run_patch,
     mock_backend_registry,
@@ -134,7 +99,7 @@ def test_step_with_deployments(
 
 
 def test_step_with_exception(
-    mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry, assert_helpers
+    mock_client_factory_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry, assert_helpers
 ):
     """Test step() when an exception occurs."""
 
@@ -155,28 +120,26 @@ def test_step_with_exception(
     assert_helpers.assert_controller_healthy(controller, is_healthy=False)
 
 
-# SDK Call Tests
+# Client Call Tests
 
 
 @pytest.mark.asyncio
-async def test_get_non_terminal_deployments_calls_sdk(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry, sample_deployment
+async def test_get_non_terminal_deployments_calls_client(
+    mock_get_config_patch, mock_client, mock_backend_registry, sample_deployment
 ):
-    """Test that retrieve_non_terminal_deployments calls SDK with correct statuses."""
+    """Test that retrieve_non_terminal_deployments calls client with correct statuses."""
     # Setup typed-client mock responses.
-    mock_models_sdk.models_client.list_deployments = AsyncMock(
-        side_effect=lambda **kwargs: _AsyncPage([sample_deployment])
-    )
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=lambda **kwargs: _AsyncPage([sample_deployment]))
 
-    # Create controller and inject mock SDK
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    # Create controller and inject mock client
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
         deployment_contexts = await controller.retrieve_non_terminal_deployments()
 
-        # Verify SDK was called for each non-terminal status
-        assert mock_models_sdk.models_client.list_deployments.call_count == len(NON_TERMINAL_STATES)
+        # Verify client was called for each non-terminal status
+        assert mock_client.models_client.list_deployments.call_count == len(NON_TERMINAL_STATES)
 
         # Verify we got ModelContext objects back
         assert len(deployment_contexts) > 0
@@ -186,12 +149,12 @@ async def test_get_non_terminal_deployments_calls_sdk(
 
 
 @pytest.mark.asyncio
-async def test_get_non_terminal_deployments_handles_sdk_errors(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+async def test_get_non_terminal_deployments_handles_client_errors(
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
-    """Test that retrieve_non_terminal_deployments handles SDK errors gracefully."""
+    """Test that retrieve_non_terminal_deployments handles client errors gracefully."""
 
-    # Setup SDK mock to raise exception on first call, succeed on others
+    # Setup client mock to raise exception on first call, succeed on others
     def side_effect(**kwargs):
         status = _filter_status(kwargs)
         if status == "CREATED":
@@ -199,10 +162,10 @@ async def test_get_non_terminal_deployments_handles_sdk_errors(
         return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=side_effect)
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=side_effect)
 
-    # Create controller and inject mock SDK
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    # Create controller and inject mock client
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
@@ -214,7 +177,7 @@ async def test_get_non_terminal_deployments_handles_sdk_errors(
 
 @pytest.mark.asyncio
 async def test_get_non_terminal_deployments_with_multiple_deployments(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry, sample_deployment, sample_deployment_ready
+    mock_get_config_patch, mock_client, mock_backend_registry, sample_deployment, sample_deployment_ready
 ):
     """Test that retrieve_non_terminal_deployments processes multiple deployments."""
     # Add required fields for deployment fixture to work with ModelContext
@@ -226,7 +189,7 @@ async def test_get_non_terminal_deployments_with_multiple_deployments(
     sample_deployment_ready.config_version = None
     sample_deployment_ready.model_provider_id = None
 
-    # Setup SDK mock responses - return different deployments for each status
+    # Setup client mock responses - return different deployments for each status
     def list_side_effect(**kwargs):
         status = _filter_status(kwargs)
         if status == "CREATED":
@@ -236,10 +199,10 @@ async def test_get_non_terminal_deployments_with_multiple_deployments(
         return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
 
-    # Create controller and inject mock SDK
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    # Create controller and inject mock client
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call retrieve_non_terminal_deployments
@@ -255,26 +218,26 @@ async def test_get_non_terminal_deployments_with_multiple_deployments(
 
 
 @pytest.mark.asyncio
-async def test_get_model_providers_calls_sdk(mock_get_config_patch, mock_models_sdk, mock_backend_registry):
-    """Test that get_model_providers calls SDK to list providers."""
-    # Setup SDK mock responses
+async def test_get_model_providers_calls_client(mock_get_config_patch, mock_client, mock_backend_registry):
+    """Test that get_model_providers calls client to list providers."""
+    # Setup client mock responses
     mock_provider = MagicMock()
     mock_provider.name = "test-provider"
     mock_provider.workspace = "test-ns"
     mock_provider.model_deployment_id = None
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    # Create controller and inject mock SDK
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    # Create controller and inject mock client
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Call get_model_providers
         provider_contexts = await controller.retrieve_model_providers()
 
-        # Verify SDK was called
-        mock_models_sdk.models_client.list_providers.assert_called_once()
+        # Verify client was called
+        mock_client.models_client.list_providers.assert_called_once()
 
         # Verify we got ModelContext objects back
         assert provider_contexts is not None
@@ -284,9 +247,9 @@ async def test_get_model_providers_calls_sdk(mock_get_config_patch, mock_models_
 
 
 @pytest.mark.asyncio
-async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mock_models_sdk, mock_backend_registry):
+async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mock_client, mock_backend_registry):
     """Test that async_controller_step calls both reconcilers."""
-    # Setup SDK mocks
+    # Setup client mocks
     mock_deployment = MagicMock()
     mock_deployment.status = "CREATED"
     mock_deployment.config = None
@@ -296,7 +259,7 @@ async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mo
     mock_provider = MagicMock()
     mock_provider.model_deployment_id = None
 
-    # Mock SDK to return deployment only for CREATED status
+    # Mock client to return deployment only for CREATED status
     def list_deployments_side_effect(**kwargs):
         status = _filter_status(kwargs)
         if status == "CREATED":
@@ -304,11 +267,11 @@ async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mo
         return _AsyncPage([])
 
     # Use MagicMock (not AsyncMock) because .list() returns an async iterator, not a coroutine
-    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_deployments_side_effect)
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=list_deployments_side_effect)
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    # Create controller and inject mock SDK
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    # Create controller and inject mock client
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         # Mock the reconciler methods to track calls
@@ -336,13 +299,13 @@ async def test_async_controller_step_calls_reconcilers(mock_get_config_patch, mo
 
 @pytest.mark.asyncio
 async def test_async_controller_step_runs_provider_reconciler_with_no_providers(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """The provider reconciler still runs with an empty list so VM orphan cleanup can execute."""
-    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -357,13 +320,13 @@ async def test_async_controller_step_runs_provider_reconciler_with_no_providers(
 
 @pytest.mark.asyncio
 async def test_async_controller_step_skips_provider_reconciler_when_provider_listing_fails(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """A provider list failure must not look like a successful empty list to cleanup."""
-    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
-    mock_models_sdk.models_client.list_providers = AsyncMock(side_effect=RuntimeError("providers unavailable"))
+    mock_client.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_providers = AsyncMock(side_effect=RuntimeError("providers unavailable"))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -382,7 +345,7 @@ async def test_async_controller_step_skips_provider_reconciler_when_provider_lis
 
 
 def test_step_handles_cancelled_error(
-    mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry
 ):
     """Test that step() handles CancelledError gracefully without raising."""
 
@@ -402,7 +365,7 @@ def test_step_handles_cancelled_error(
 
 
 def test_step_skips_when_stop_signal_set(
-    mock_sdk_class_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_asyncio_run_patch, mock_backend_registry
 ):
     """Test that step() skips execution when stop signal is already set."""
     stop_signal = threading.Event()
@@ -415,7 +378,7 @@ def test_step_skips_when_stop_signal_set(
     mock_asyncio_run_patch.assert_not_called()
 
 
-def test_cancel_step_no_op_when_no_task(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_cancel_step_no_op_when_no_task(mock_client_factory_patch, mock_get_config_patch, mock_backend_registry):
     """Test that cancel_step() is a no-op when no step is running."""
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -424,7 +387,7 @@ def test_cancel_step_no_op_when_no_task(mock_sdk_class_patch, mock_get_config_pa
     assert controller._current_task is None
 
 
-def test_cancel_step_no_op_when_loop_closed(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_cancel_step_no_op_when_loop_closed(mock_client_factory_patch, mock_get_config_patch, mock_backend_registry):
     """Test that cancel_step() is a no-op when event loop is closed."""
     controller = ModelsController(backend_registry=mock_backend_registry)
     controller._loop.close()
@@ -438,7 +401,9 @@ def test_cancel_step_no_op_when_loop_closed(mock_sdk_class_patch, mock_get_confi
     mock_task.cancel.assert_not_called()
 
 
-def test_cancel_step_schedules_task_cancellation(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_cancel_step_schedules_task_cancellation(
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
+):
     """Test that cancel_step() schedules task.cancel() via call_soon_threadsafe."""
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -455,7 +420,9 @@ def test_cancel_step_schedules_task_cancellation(mock_sdk_class_patch, mock_get_
     controller._loop.call_soon_threadsafe.assert_called_once_with(mock_task.cancel)
 
 
-def test_cancel_step_no_op_when_task_already_done(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_cancel_step_no_op_when_task_already_done(
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
+):
     """Test that cancel_step() is a no-op when the task is already done."""
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -470,7 +437,7 @@ def test_cancel_step_no_op_when_task_already_done(mock_sdk_class_patch, mock_get
     controller._loop.call_soon_threadsafe.assert_not_called()
 
 
-def test_shutdown_closes_loop_and_backends(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_shutdown_closes_loop_and_backends(mock_client_factory_patch, mock_get_config_patch, mock_backend_registry):
     """Test that shutdown() closes the event loop and shuts down all backends."""
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -480,7 +447,7 @@ def test_shutdown_closes_loop_and_backends(mock_sdk_class_patch, mock_get_config
     mock_backend_registry.shutdown_all_backends.assert_called_once()
 
 
-def test_shutdown_idempotent(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+def test_shutdown_idempotent(mock_client_factory_patch, mock_get_config_patch, mock_backend_registry):
     """Test that calling shutdown() twice does not raise."""
     controller = ModelsController(backend_registry=mock_backend_registry)
 
@@ -499,13 +466,13 @@ def test_shutdown_idempotent(mock_sdk_class_patch, mock_get_config_patch, mock_b
 
 @pytest.mark.asyncio
 async def test_retrieve_model_entity_for_config_uses_model_entity_id_when_set(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """When config.model_entity_id is set, it takes precedence over nim_deployment."""
     mock_entity = MagicMock()
     mock_entity.workspace = "my-ws"
     mock_entity.name = "my-model"
-    mock_models_sdk.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
+    mock_client.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
 
     config = MagicMock()
     config.model_entity_id = "my-ws/my-model"
@@ -514,33 +481,33 @@ async def test_retrieve_model_entity_for_config_uses_model_entity_id_when_set(
     config.model_spec.model_name = "other-model"
     config.model_spec.model_revision = None
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
     assert result is mock_entity
-    mock_models_sdk.models_client.get_model.assert_awaited_once_with(name="my-model", workspace="my-ws")
+    mock_client.models_client.get_model.assert_awaited_once_with(name="my-model", workspace="my-ws")
 
 
 @pytest.mark.asyncio
 async def test_retrieve_model_entity_for_config_uses_model_entity_id_with_revision(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """When config.model_entity_id includes @revision, revision is passed to retrieve."""
     mock_entity = MagicMock()
-    mock_models_sdk.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
+    mock_client.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
 
     config = MagicMock()
     config.model_entity_id = "my-ws/my-model@v2"
     config.model_spec = MagicMock()
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
     assert result is mock_entity
-    mock_models_sdk.models_client.get_model.assert_awaited_once_with(name="my-model@v2", workspace="my-ws")
-    call = mock_models_sdk.models_client.get_model.await_args
+    mock_client.models_client.get_model.assert_awaited_once_with(name="my-model@v2", workspace="my-ws")
+    call = mock_client.models_client.get_model.await_args
     assert call is not None
     call_kw = call.kwargs
     assert call_kw["name"] == "my-model@v2"
@@ -549,11 +516,11 @@ async def test_retrieve_model_entity_for_config_uses_model_entity_id_with_revisi
 
 @pytest.mark.asyncio
 async def test_retrieve_model_entity_for_config_falls_back_to_nim_deployment_when_no_model_entity_id(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """When config.model_entity_id is not set, entity is derived from nim_deployment."""
     mock_entity = MagicMock()
-    mock_models_sdk.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
+    mock_client.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
 
     config = MagicMock()
     config.model_entity_id = None
@@ -562,38 +529,38 @@ async def test_retrieve_model_entity_for_config_falls_back_to_nim_deployment_whe
     config.model_spec.model_name = "nim-model"
     config.model_spec.model_revision = "v1"
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
     assert result is mock_entity
-    mock_models_sdk.models_client.get_model.assert_awaited_once_with(name="nim-model@v1", workspace="nim-ns")
+    mock_client.models_client.get_model.assert_awaited_once_with(name="nim-model@v1", workspace="nim-ns")
 
 
 @pytest.mark.asyncio
 async def test_retrieve_model_entity_for_config_returns_none_when_no_nim_deployment_and_no_model_entity_id(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """When neither model_entity_id nor nim_deployment has model info, returns None."""
     config = MagicMock()
     config.model_entity_id = None
     config.model_spec = None
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
     assert result is None
-    mock_models_sdk.models_client.get_model.assert_not_awaited()
+    mock_client.models_client.get_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_retrieve_model_entity_for_config_invalid_model_entity_id_falls_back_to_nim_deployment(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """When model_entity_id is set but unparseable (e.g. no slash), fall back to nim_deployment."""
     mock_entity = MagicMock()
-    mock_models_sdk.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
+    mock_client.models_client.get_model = AsyncMock(return_value=_ModelResponse(mock_entity))
 
     config = MagicMock()
     config.model_entity_id = "bogus"
@@ -602,12 +569,12 @@ async def test_retrieve_model_entity_for_config_invalid_model_entity_id_falls_ba
     config.model_spec.model_name = "fallback-model"
     config.model_spec.model_revision = None
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller._retrieve_model_entity_for_config(config)
 
     assert result is mock_entity
-    mock_models_sdk.models_client.get_model.assert_awaited_once_with(name="fallback-model", workspace="fallback-ns")
+    mock_client.models_client.get_model.assert_awaited_once_with(name="fallback-model", workspace="fallback-ns")
 
 
 # =============================================================================
@@ -616,21 +583,21 @@ async def test_retrieve_model_entity_for_config_invalid_model_entity_id_falls_ba
 
 
 @pytest.mark.asyncio
-async def test_retrieve_error_deployments_calls_sdk(mock_get_config_patch, mock_models_sdk, mock_backend_registry):
-    """Test that retrieve_error_deployments calls SDK with ERROR filter."""
+async def test_retrieve_error_deployments_calls_client(mock_get_config_patch, mock_client, mock_backend_registry):
+    """Test that retrieve_error_deployments calls client with ERROR filter."""
     mock_deployment = MagicMock()
     mock_deployment.status = "ERROR"
 
-    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([mock_deployment]))
+    mock_client.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([mock_deployment]))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller.retrieve_error_deployments()
 
     assert len(result) == 1
     assert result[0] == mock_deployment
 
-    mock_models_sdk.models_client.list_deployments.assert_called_once_with(
+    mock_client.models_client.list_deployments.assert_called_once_with(
         workspace="-",
         query_params={
             "filter": json.dumps({"status": "ERROR"}),
@@ -641,13 +608,13 @@ async def test_retrieve_error_deployments_calls_sdk(mock_get_config_patch, mock_
 
 
 @pytest.mark.asyncio
-async def test_retrieve_error_deployments_handles_sdk_error(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+async def test_retrieve_error_deployments_handles_client_error(
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
-    """Test that retrieve_error_deployments returns empty list on SDK error."""
-    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=Exception("API Error"))
+    """Test that retrieve_error_deployments returns empty list on client error."""
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=Exception("API Error"))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
         result = await controller.retrieve_error_deployments()
 
@@ -655,7 +622,7 @@ async def test_retrieve_error_deployments_handles_sdk_error(
 
 
 @pytest.mark.asyncio
-async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_models_sdk, mock_backend_registry):
+async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_client, mock_backend_registry):
     """Test that async_controller_step invokes gc_error_deployments."""
     mock_error_deployment = MagicMock()
     mock_error_deployment.status = "ERROR"
@@ -672,10 +639,10 @@ async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_models
             return _AsyncPage([mock_error_deployment])
         return _AsyncPage([])
 
-    mock_models_sdk.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
+    mock_client.models_client.list_deployments = AsyncMock(side_effect=list_side_effect)
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -693,16 +660,16 @@ async def test_async_controller_step_calls_gc(mock_get_config_patch, mock_models
 
 @pytest.mark.asyncio
 async def test_async_controller_step_skips_gc_when_no_error_deployments(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
+    mock_get_config_patch, mock_client, mock_backend_registry
 ):
     """Test that gc_error_deployments is not called when there are no ERROR deployments."""
     mock_provider = MagicMock()
     mock_provider.model_deployment_id = None
 
-    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
+    mock_client.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([mock_provider]))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -716,16 +683,14 @@ async def test_async_controller_step_skips_gc_when_no_error_deployments(
 
 
 @pytest.mark.asyncio
-async def test_async_controller_step_stop_signal_skips_gc(
-    mock_get_config_patch, mock_models_sdk, mock_backend_registry
-):
+async def test_async_controller_step_stop_signal_skips_gc(mock_get_config_patch, mock_client, mock_backend_registry):
     """Test that GC is skipped when stop signal is set before GC runs."""
     stop_signal = threading.Event()
 
-    mock_models_sdk.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
-    mock_models_sdk.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_deployments = AsyncMock(return_value=_AsyncPage([]))
+    mock_client.models_client.list_providers = AsyncMock(return_value=_AsyncPage([]))
 
-    with patch("nhx.core.models.controllers.models_controller.get_async_platform_sdk", return_value=mock_models_sdk):
+    with patch("nhx.core.models.controllers.models_controller.get_async_nemo_client", return_value=mock_client):
         controller = ModelsController(backend_registry=mock_backend_registry, stop_signal=stop_signal)
 
         controller._deployment_reconciler.reconcile_deployments = AsyncMock()
@@ -746,7 +711,7 @@ async def test_async_controller_step_stop_signal_skips_gc(
 
 @pytest.mark.asyncio
 async def test_step_refreshes_the_entity_cache_for_each_writing_phase(
-    mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
 ):
     """Each phase that writes Model Entities must start from a fresh snapshot.
 
@@ -775,7 +740,7 @@ async def test_step_refreshes_the_entity_cache_for_each_writing_phase(
 
 @pytest.mark.asyncio
 async def test_step_flushes_before_refreshing_after_provider_listing_failure(
-    mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
 ):
     """Bailing out mid-step must not leave staged changes behind for the next step."""
     controller = ModelsController(backend_registry=mock_backend_registry)
@@ -796,7 +761,9 @@ async def test_step_flushes_before_refreshing_after_provider_listing_failure(
 
 
 @pytest.mark.asyncio
-async def test_step_emits_heartbeats_between_phases(mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry):
+async def test_step_emits_heartbeats_between_phases(
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
+):
     """A step reports progress as it moves between phases."""
     controller = ModelsController(backend_registry=mock_backend_registry)
     beats: list[int] = []
@@ -817,7 +784,7 @@ async def test_step_emits_heartbeats_between_phases(mock_sdk_class_patch, mock_g
 
 @pytest.mark.asyncio
 async def test_step_flushes_when_deployment_reconciliation_raises(
-    mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
 ):
     """A raising deployment phase must still apply what it staged.
 
@@ -841,7 +808,7 @@ async def test_step_flushes_when_deployment_reconciliation_raises(
 
 @pytest.mark.asyncio
 async def test_step_flushes_when_provider_reconciliation_raises(
-    mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
 ):
     """Same guarantee for the provider phase."""
     controller = ModelsController(backend_registry=mock_backend_registry)
@@ -864,7 +831,7 @@ async def test_step_flushes_when_provider_reconciliation_raises(
 
 @pytest.mark.asyncio
 async def test_step_aborts_before_reconciliation_when_the_entity_cache_cannot_load(
-    mock_sdk_class_patch, mock_get_config_patch, mock_backend_registry
+    mock_client_factory_patch, mock_get_config_patch, mock_backend_registry
 ):
     """An unreadable entity list stops the step rather than reconciling blind."""
     controller = ModelsController(backend_registry=mock_backend_registry)

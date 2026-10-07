@@ -16,12 +16,14 @@ from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, Endpoi
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.runner.deployments_backend import (
     DeploymentsRunnerBackend,
+    ImageEntrypointUnsupportedError,
     ReservedSecretEnvVarError,
     UnreachableGatewayURLError,
     build_container_resources,
     build_deployment_config,
     executor_for_mode,
     map_status,
+    openshell_platform_egress_url,
     require_executor_matches_mode,
     resolve_agent_gateway_url,
     rewrite_config_base_urls,
@@ -31,7 +33,6 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
@@ -48,7 +49,7 @@ requires_hermes_adapter = pytest.mark.skipif(
         ("STARTING", "starting"),
         ("READY", "running"),
         ("FAILED", "failed"),
-        ("LOST", "failed"),
+        ("LOST", "starting"),
         ("DELETING", "deleting"),
         ("SUCCEEDED", "failed"),
         ("UNKNOWN", "starting"),
@@ -85,6 +86,20 @@ def test_resolve_k8s_without_internal_base_url_raises() -> None:
         resolve_agent_gateway_url("http://localhost:8080", mode="k8s")
 
 
+def test_resolve_openshell_uses_platform_egress_url() -> None:
+    assert (
+        resolve_agent_gateway_url(
+            "http://localhost:8080", mode="openshell", platform_egress_url="http://host.docker.internal:8080/"
+        )
+        == "http://host.docker.internal:8080"
+    )
+
+
+def test_resolve_openshell_without_platform_egress_raises() -> None:
+    with pytest.raises(UnreachableGatewayURLError, match="no platform_egress"):
+        resolve_agent_gateway_url("http://localhost:8080", mode="openshell")
+
+
 def test_resolve_rejects_subprocess_mode() -> None:
     with pytest.raises(ValueError, match="container deployment modes"):
         resolve_agent_gateway_url("http://localhost:8080", mode="subprocess")
@@ -99,6 +114,10 @@ def test_resolve_override_wins_verbatim_for_every_mode() -> None:
         resolve_agent_gateway_url(
             "http://localhost:8080", mode="k8s", override="http://igw:8080/", internal_base_url="http://ignored:8080"
         )
+        == "http://igw:8080"
+    )
+    assert (
+        resolve_agent_gateway_url("http://localhost:8080", mode="openshell", override="http://igw:8080/")
         == "http://igw:8080"
     )
 
@@ -222,12 +241,23 @@ def test_executor_for_mode_prefers_mode_specific() -> None:
         default_executor="default-exec",
         docker_executor="docker-exec",
         k8s_executor="k8s-exec",
+        openshell_executor="openshell-exec",
     )
     assert executor_for_mode(cfg, "docker") == "docker-exec"
     assert executor_for_mode(cfg, "k8s") == "k8s-exec"
+    assert executor_for_mode(cfg, "openshell") == "openshell-exec"
 
 
-def _executors(*pairs: tuple[str, str], default: str | None = None) -> Any:
+def test_executor_for_mode_openshell_falls_back_to_default() -> None:
+    cfg = DeploymentsRunnerConfig(default_executor="default-exec", docker_executor="docker-exec")
+    assert executor_for_mode(cfg, "openshell") == "default-exec"
+
+
+def _executors(
+    *pairs: tuple[str, str],
+    default: str | None = None,
+    configs: dict[str, dict[str, Any]] | None = None,
+) -> Any:
     """A standalone DeploymentsConfig.
 
     Not ``DeploymentsConfig.get()``: that is a cached singleton, and assigning to
@@ -235,8 +265,9 @@ def _executors(*pairs: tuple[str, str], default: str | None = None) -> Any:
     """
     from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 
+    configs = configs or {}
     return DeploymentsConfig(
-        executors=[ExecutorConfigEntry(name=n, backend=b) for n, b in pairs],
+        executors=[ExecutorConfigEntry(name=n, backend=b, config=configs.get(n, {})) for n, b in pairs],
         default_executor=default,
     )
 
@@ -251,17 +282,91 @@ def test_k8s_mode_on_a_docker_executor_is_refused(monkeypatch: pytest.MonkeyPatc
         require_executor_matches_mode("default-exec", "k8s")
 
 
-def test_k8s_mode_on_a_non_deployable_backend_omits_the_mode_suggestion(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_openshell_mode_on_an_openshell_executor_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
     from nemo_deployments_plugin.config import DeploymentsConfig
 
-    # 'openshell' is a deployments-plugin backend but not a DeploymentMode, so
-    # the error must not suggest deploying with a mode that can't validate.
+    cfg = _executors(("openshell-local", "openshell"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    require_executor_matches_mode("openshell-local", "openshell")
+
+
+def test_openshell_mode_on_a_docker_executor_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(("local-docker", "docker"), default="local-docker")
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    with pytest.raises(ValueError, match="runs on 'docker'") as exc_info:
+        require_executor_matches_mode(None, "openshell")
+    assert "deployments.openshell_executor" in str(exc_info.value)
+
+
+def test_k8s_mode_on_an_openshell_executor_suggests_openshell_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
     cfg = _executors(("default-exec", "openshell"))
     monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
 
     with pytest.raises(ValueError, match="runs on 'openshell'") as exc_info:
         require_executor_matches_mode("default-exec", "k8s")
+    assert "deploy with deployment_mode 'openshell'" in str(exc_info.value)
+
+
+def test_k8s_mode_on_a_non_deployable_backend_omits_the_mode_suggestion(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    # A backend key that is not a DeploymentMode must not be suggested as one.
+    cfg = _executors(("default-exec", "some-future-backend"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    with pytest.raises(ValueError, match="runs on 'some-future-backend'") as exc_info:
+        require_executor_matches_mode("default-exec", "k8s")
     assert "deploy with deployment_mode" not in str(exc_info.value)
+
+
+def test_openshell_platform_egress_url_reads_executor_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-k8s", "openshell"),
+        configs={"openshell-k8s": {"platform_egress": {"host": "nhx-api.nemo.svc", "port": 8080}}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url("openshell-k8s") == "http://nhx-api.nemo.svc:8080"
+
+
+def test_openshell_platform_egress_url_defaults_to_docker_driver_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(("openshell-local", "openshell"))
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url("openshell-local") == "http://host.docker.internal:8080"
+
+
+@pytest.mark.parametrize(
+    ("pairs", "configs", "executor"),
+    [
+        ((("openshell-local", "openshell"),), {"openshell-local": {"platform_egress": None}}, "openshell-local"),
+        ((("local-docker", "docker"),), {}, "local-docker"),
+        ((("openshell-local", "openshell"),), {}, "not-configured"),
+    ],
+    ids=["egress-null", "not-openshell", "unknown-executor"],
+)
+def test_openshell_platform_egress_url_is_none_without_a_route(
+    monkeypatch: pytest.MonkeyPatch,
+    pairs: tuple[tuple[str, str], ...],
+    configs: dict[str, dict[str, Any]],
+    executor: str,
+) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(*pairs, configs=configs)
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+
+    assert openshell_platform_egress_url(executor) is None
 
 
 def test_k8s_mode_accepts_a_k8s_capable_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -646,6 +751,52 @@ def test_build_deployment_config_fabric_can_preserve_image_entrypoint() -> None:
     assert container.readiness_probe.http_get.path == "/health"
 
 
+def test_build_deployment_config_fabric_openshell_uses_absolute_venv_python() -> None:
+    cfg = build_deployment_config(
+        name="fabric-dep",
+        workspace="default",
+        image="fabric-runtime:latest",
+        port=8000,
+        agent_config=_FABRIC_AGENT_CONFIG,
+        platform_base_url="http://host.docker.internal:8080",
+        config_mount_path="/tmp/nemo/config.yaml",
+        mode="openshell",
+    )
+    container = cfg.containers[0]
+    assert container.command == ["/workspace/.venv/bin/python"]
+    assert container.args[:2] == ["-m", "nemo_agents_plugin.fabric.server"]
+    assert "/tmp/nemo/agent.yaml" in container.args
+
+
+def test_build_deployment_config_nat_openshell_uses_absolute_venv_nat() -> None:
+    cfg = build_deployment_config(
+        name="nat-dep",
+        workspace="default",
+        image="nat-runtime:latest",
+        port=8000,
+        agent_config={"workflow": {"_type": "react_agent"}},
+        platform_base_url="http://host.docker.internal:8080",
+        config_mount_path="/tmp/nemo/config.yaml",
+        mode="openshell",
+    )
+    assert cfg.containers[0].command == ["/workspace/.venv/bin/nat", "start", "fastapi"]
+
+
+def test_build_deployment_config_openshell_rejects_image_entrypoint() -> None:
+    with pytest.raises(ImageEntrypointUnsupportedError, match="does not run the image ENTRYPOINT"):
+        build_deployment_config(
+            name="fabric-dep",
+            workspace="default",
+            image="fabric-runtime:latest",
+            port=8000,
+            agent_config=_FABRIC_AGENT_CONFIG,
+            platform_base_url="http://host.docker.internal:8080",
+            config_mount_path="/tmp/nemo/config.yaml",
+            mode="openshell",
+            use_image_entrypoint=True,
+        )
+
+
 def test_build_deployment_config_fabric_k8s_uses_fabric_entrypoint() -> None:
     cfg = build_deployment_config(
         name="fabric-dep",
@@ -756,19 +907,19 @@ def _backend(**deployments_kwargs: Any) -> DeploymentsRunnerBackend:
     return DeploymentsRunnerBackend(agents)
 
 
-def test_entity_client_adapts_sdk_to_typed_entities_client() -> None:
+def test_entity_client_builds_typed_entities_client() -> None:
     backend = _backend()
-    sdk = MagicMock()
+    client = MagicMock()
     typed_client = MagicMock()
     entity_client = MagicMock()
 
     with (
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
-            return_value=sdk,
+            "nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client",
+            return_value=client,
         ),
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.client_from_platform",
+            "nemo_agents_plugin.runner.deployments_backend.AsyncEntitiesClient.from_client",
             return_value=typed_client,
         ) as mock_adapter,
         patch(
@@ -778,7 +929,7 @@ def test_entity_client_adapts_sdk_to_typed_entities_client() -> None:
     ):
         result = backend._entity_client()
 
-    mock_adapter.assert_called_once_with(sdk, AsyncEntitiesClient)
+    mock_adapter.assert_called_once_with(client)
     mock_entity_client.assert_called_once_with(typed_client)
     assert result is entity_client
 
@@ -883,6 +1034,112 @@ async def test_create_deployment_k8s_without_internal_url_fails() -> None:
         )
     assert info.status == "failed"
     assert "internal api service" in info.error.lower()
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("local-docker", "docker"),
+        ("openshell-local", "openshell"),
+        default="local-docker",
+        configs={"openshell-local": {"platform_egress": {"host": "host.docker.internal", "port": 8080}}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    config = {
+        "llms": {
+            "llm": {
+                "_type": "openai",
+                "base_url": "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1",
+            }
+        }
+    }
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config=config, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    created_dep = entities.create.await_args_list[1].args[0]
+    baked = yaml.safe_load(created_config.config_files[0].content)
+    assert baked["llms"]["llm"]["base_url"] == (
+        "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
+    )
+    assert created_config.labels["nemo.agents/mode"] == "openshell"
+    assert created_config.containers[0].command[0] == "/workspace/.venv/bin/nat"
+    assert created_dep.executor == "openshell-local"
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_without_platform_egress_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-local", "openshell"),
+        configs={"openshell-local": {"platform_egress": None}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "failed"
+    assert "no platform_egress" in info.error
+    entities.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_override_wins_without_platform_egress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nemo_deployments_plugin.config import DeploymentsConfig
+
+    cfg = _executors(
+        ("openshell-local", "openshell"),
+        configs={"openshell-local": {"platform_egress": None}},
+    )
+    monkeypatch.setattr(DeploymentsConfig, "get", classmethod(lambda cls: cfg))
+    backend = _backend(
+        default_image="fabric:latest",
+        openshell_executor="openshell-local",
+        gateway_url_override="http://igw.example:8080",
+    )
+    entities = AsyncMock()
+    backend._entities = entities
+    with patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"):
+        info = await backend.create_deployment(
+            workspace="default", name="hello-dep", config={}, port=0, deployment_mode="openshell"
+        )
+    assert info.status == "starting"
+    created_config = entities.create.await_args_list[0].args[0]
+    assert next(e.value for e in created_config.containers[0].env if e.name == "NHX_BASE_URL") == (
+        "http://igw.example:8080"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_openshell_rejects_image_entrypoint_before_entity_create() -> None:
+    backend = _backend(default_image="fabric:latest", openshell_executor="openshell-local")
+    entities = AsyncMock()
+    backend._entities = entities
+    info = await backend.create_deployment(
+        workspace="default",
+        name="hello-dep",
+        config={},
+        port=0,
+        deployment_mode="openshell",
+        use_image_entrypoint=True,
+    )
+    assert info.status == "failed"
+    assert "use_image_entrypoint is not supported" in info.error
     entities.create.assert_not_awaited()
 
 
@@ -1424,16 +1681,16 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
         ConfigFile(path="/tmp/nemo/agent.yaml", content=yaml.safe_dump(config, sort_keys=False)),
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
-    sdk = MagicMock()
+    client = MagicMock()
     files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
-            return_value=sdk,
+            "nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client",
+            return_value=client,
         ),
-        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
+        patch("nemo_agents_plugin.runner.deployments_backend.AsyncFilesClient.from_client", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1479,16 +1736,16 @@ async def test_create_deployment_fabric_k8s_stages_fileset_artifacts() -> None:
         ConfigFile(path="/tmp/nemo/agent.yaml", content=yaml.safe_dump(config, sort_keys=False)),
         ConfigFile(path="/tmp/nemo/skills/review/SKILL.md", content="# Review\n"),
     ]
-    sdk = MagicMock()
+    client = MagicMock()
     files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
-            return_value=sdk,
+            "nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client",
+            return_value=client,
         ),
-        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
+        patch("nemo_agents_plugin.runner.deployments_backend.AsyncFilesClient.from_client", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,
@@ -1522,16 +1779,16 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
         "skills": {"paths": ["skills/review"]},
         "harnesses": {"main": {"kind": "codex", "settings": {}}},
     }
-    sdk = MagicMock()
+    client = MagicMock()
     files_client = object()
 
     with (
         patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://localhost:8080"),
         patch(
-            "nemo_agents_plugin.runner.deployments_backend.get_async_platform_sdk",
-            return_value=sdk,
+            "nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client",
+            return_value=client,
         ),
-        patch("nemo_agents_plugin.runner.deployments_backend.client_from_platform", return_value=files_client),
+        patch("nemo_agents_plugin.runner.deployments_backend.AsyncFilesClient.from_client", return_value=files_client),
         patch(
             "nemo_agents_plugin.runner.deployments_backend.stage_fabric_ethos_config_files",
             new_callable=AsyncMock,

@@ -59,10 +59,12 @@ Both backends accept the same `integrations` object on the job spec. Add a `wand
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_customizer.sdk import Customization
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
-client = NeMoHelix(base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"), workspace="default")
+client = NemoClient(base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"), workspace="default")
+customization = Customization.from_client(client)
 
 spec = AutomodelJobInput(
     model="default/qwen3-1.7b",
@@ -73,13 +75,13 @@ spec = AutomodelJobInput(
         "wandb": {
             "project": "my-finetuning-project",
             "entity": "my-team",
-                "tags": ["fine-tuning", "qwen"],
+            "tags": ["fine-tuning", "qwen"],
             "api_key_secret": "my-wandb-key",
         }
     },
 )
 
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name="my-job")
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-job")
 ```
 
 The `api_key_secret` field references a stored secret containing your `WANDB_API_KEY`. Use the secret name (e.g., `"my-wandb-key"`) to resolve it from the request workspace. To create the secret, see [Weights & Biases Keys](/documentation/get-started/core-concepts/manage-secrets).
@@ -116,7 +118,7 @@ spec = AutomodelJobInput(
     },
 )
 
-job = client.customization.automodel.jobs.create(spec=spec, workspace="default", name="my-job")
+job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-job")
 ```
 
 | Field | Description |

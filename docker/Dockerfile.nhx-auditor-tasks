@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable --no-dev --package=nemo-auditor-plugin
 
 # Set environment variables
-ENV PYTHONPATH=/app/plugins/nemo-auditor/src:/app/packages/nhx_common/src:/app/sdk/python/nemo-helix/src
+ENV PYTHONPATH=/app/plugins/nemo-auditor/src:/app/packages/nhx_common/src
 ENV PATH="/app/.venv/bin:$PATH"
 
 RUN uv venv --no-project --python /usr/local/bin/python /app/.garak_venv
@@ -183,7 +183,7 @@ COPY --from=auditor-runtime-tools /usr/bin/ /usr/bin/
 WORKDIR /app/plugins/nemo-auditor
 
 # note: PY_VERSION is set within the container
-ENV PYTHONPATH=/app/plugins/nemo-auditor/src:/app/packages/nhx_common/src:/app/sdk/python/nemo-helix/src
+ENV PYTHONPATH=/app/plugins/nemo-auditor/src:/app/packages/nhx_common/src
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Copy installed packages and application

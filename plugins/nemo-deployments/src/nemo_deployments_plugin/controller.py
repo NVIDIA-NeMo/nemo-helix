@@ -19,12 +19,12 @@ from nemo_deployments_plugin.reconciler.prerequisite import parse_deployment_ref
 from nemo_deployments_plugin.reconciler.volume_mounts import collect_volume_mount_names
 from nemo_deployments_plugin.reconciler.volume_reconciler import VolumeReconciler
 from nemo_deployments_plugin.types import NON_TERMINAL_DEPLOYMENT_STATUSES, NON_TERMINAL_VOLUME_STATUSES
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator
-from nemo_helix_plugin.sdk_provider import get_async_platform_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +74,14 @@ class DeploymentsController(NemoController):
         self._controller_config = config.controller
         self._interval_seconds = float(config.controller.interval_seconds)
 
-        sdk = get_async_platform_sdk(as_service="deployments", internal=True)
-        entities_api = client_from_platform(sdk, AsyncEntitiesClient)
+        client: AsyncNemoClient = get_async_nemo_client(as_service="deployments", internal=True)
+        entities_api = AsyncEntitiesClient.from_client(client)
         self._entities = NemoEntitiesClient(entities_api)
 
         specs = [ExecutorSpec(name=e.name, backend=e.backend, config=e.config) for e in config.executors]
         if specs:
             registry = ExecutorRegistry.from_config(
-                sdk,
+                client,
                 specs,
                 default_executor=config.default_executor,
             )

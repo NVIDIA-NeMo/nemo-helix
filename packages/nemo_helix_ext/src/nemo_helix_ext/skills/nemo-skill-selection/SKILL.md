@@ -85,14 +85,59 @@ relevant rows as a numbered list.
 
 ## Pre-flight
 
-Before handing off, run a host-wide platform scan. Three signals, in order — the first one that fires wins:
+Before handing off, find out which platform the CLI points at. `nemo setup` can connect the active context to a remote cluster, so do not assume `localhost:8080`:
 
 ```bash
-# 1. Ground truth: is anything listening on the canonical port?
-lsof -iTCP:8080 -sTCP:LISTEN 2>/dev/null
+# 0. Which platform does the active context use? Honors NHX_BASE_URL and NHX_CURRENT_CONTEXT.
+#    With no config file at the default path, this resolves to http://localhost:8080.
+#    Prints "no-config" only when there is no CLI install, or NHX_CONFIG_FILE names a missing file.
+if [ -x .venv/bin/python ]; then
+  NHX_URL=$(.venv/bin/python -c '
+from nemo_helix_ext.config.config import get_context
+try:
+    print(str(get_context().cluster.base_url).rstrip("/"))
+except FileNotFoundError:
+    print("no-config")
+') || { echo "CONFIG_ERROR (see error above)"; exit 1; }
+else
+  NHX_URL=no-config
+fi
+echo "$NHX_URL"
+```
+
+If this prints `CONFIG_ERROR`, the CLI config exists but the active context cannot be resolved (for example, `NHX_CURRENT_CONTEXT` names a missing context). Stop and show the user the error. Do not fall through to the local scan, and do not route to `setup`; suggest `nemo config view --all-contexts` and `nemo config use-context <name>`.
+
+`nemo --help` prints the same information on its first line (`Active context: <name> (workspace: <ws>, platform: <url>)`), and `nemo config view` shows the full active context.
+
+### Remote platform
+
+If `NHX_URL` is set and its host is not `localhost`, `127.0.0.1`, or `::1`, the user has already run `nemo setup` against a remote cluster. Probe only that URL. Do not use the local port and process scans below, and do not suggest `nemo setup` as an install step.
+
+```bash
+for path in /health/ready /cluster-info; do
+  code=$(curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL$path" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "no-response")
+  echo "$path $code"
+done
+```
+
+| What you observe | Hand off to | Why |
+|---|---|---|
+| Either path returns `200` | the requested downstream skill | Remote platform is configured and reachable. Tell the user which URL and context you are using. |
+| Neither path returns `200` | **stop, do not hand off yet** | The configured remote is unreachable from here (VPN, sandbox network policy, expired credentials, or cluster down). Report the URL and codes, then ask the user to check it. Offer `nemo config view` to inspect or `nemo config use-context <name>` to switch contexts. |
+
+### Local platform
+
+If `NHX_URL` is local (or `no-config`), run a host-wide platform scan. Three signals, in order — the first one that fires wins:
+
+```bash
+[ "$NHX_URL" = no-config ] && NHX_URL=http://localhost:8080
+LOCAL_PORT=$(python3 -c 'import sys; from urllib.parse import urlsplit; print(urlsplit(sys.argv[1]).port or 8080)' "$NHX_URL")
+
+# 1. Ground truth: is anything listening on the configured port?
+lsof -iTCP:"$LOCAL_PORT" -sTCP:LISTEN 2>/dev/null
 
 # 2. Functional check: does the platform readiness endpoint answer?
-curl -sS --connect-timeout 2 --max-time 5 http://localhost:8080/health/ready -o /dev/null -w "%{http_code}\n" 2>/dev/null || echo "no-response"
+curl -sS --connect-timeout 2 --max-time 5 "$NHX_URL/health/ready" -o /dev/null -w "%{http_code}\n" 2>/dev/null || echo "no-response"
 
 # 3. Conflict check: other platform processes / data dirs / configs on this host?
 ps -eo pid=,user=,comm=,args= 2>/dev/null \
@@ -106,11 +151,28 @@ Interpretation:
 | What you observe | Hand off to | Why |
 |---|---|---|
 | (1) returns a listener AND (2) returns `200` | the requested downstream skill | Platform is up and ready. Skip `setup`. |
-| (1) returns a listener but (2) returns `no-response` or non-200 | `nemo-status` | Something is bound to :8080 but the platform is not ready. Do not start a second platform. |
+| (1) returns a listener but (2) returns `no-response` or non-200 | `nemo-status` | Something is bound to the platform port but the platform is not ready. Do not start a second platform. |
 | (1) empty but (3) finds another `nemo services` process OR more than one data dir / config | **stop, do not hand off yet** | Another install on this host, possibly on a different port. Surface only the redacted PID, user, and executable inventory emitted above. Ask whether to tear that one down first, pick a different port + data dir, or abort. Two installs writing to the same `~/.config/nhx/config.yaml` is how users end up with one Studio frontend pointing at the wrong backend. |
-| (1), (2), and (3) all empty | `setup` | Clean machine, no platform installed. |
+| (1), (2), and (3) all empty | `setup`, after [Starting the platform from a sandboxed agent](#starting-the-platform-from-a-sandboxed-agent) | Clean machine, no platform running. Check whether you can host it before anything runs `nemo setup` or `nemo services run`. |
 
 Read-only callers (this skill, `nemo-status`, the build/try pre-flights) should not trust `nemo services status` or `nemo services ls` as an up-check. Both report stale "running" from a held instance lock after the underlying process has died. The lock reconciles automatically the next time `nemo services run` is invoked, but until that happens, `lsof` is ground truth. (Tracking a CLI-side fix for this so we can drop the workaround from skills.)
+
+## Starting the platform from a sandboxed agent
+
+The platform is a long-running server. Coding agents often run shell commands inside a sandbox (for example the macOS Seatbelt sandbox in Claude Code) that denies listening sockets, so `nemo services run` and `nemo setup --start-services` fail there no matter which port you pick. Even where the bind is allowed, a server started from an agent's shell inherits its sandbox and usually dies with the session. Probe before starting anything:
+
+```bash
+python3 -c "import socket; s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen(1); print('LISTEN_OK')" 2>&1 | tail -1
+```
+
+Port 0 can never be taken, so `PermissionError: [Errno 1] Operation not permitted` means this shell may not host the platform. `LISTEN_OK` means it can. Any other output (for example, `python3` not found) is inconclusive; resolve it before deciding. If `nemo services run` already failed with `Not permitted to listen on ...`, the CLI ran this check for you.
+
+When the probe confirms a denial, or the user wants the platform to outlive this session, **stop and ask the user** how the platform should be hosted. Do not retry on other ports, do not hunt for a process holding the port, and do not bypass the sandbox on your own. Learn enough about the environment to make the options concrete (OS, whether this is a laptop or a shared server, whether Docker is available, whether a platform already runs elsewhere), then offer:
+
+- **The user starts it in their own terminal.** They run `nemo setup` (first time) or `nemo services start` (later) outside the agent. Continue once `curl -sf http://localhost:8080/health/ready` answers from your shell.
+- **You run it outside the sandbox for this session.** Only if your harness supports it and the user explicitly approves. The server stops when the session ends.
+- **A persistent service.** A user-level service manager (a `systemd --user` unit on Linux, a launchd agent on macOS) or a container the user already runs. Ask which one they use before writing any unit or compose file; it needs the same environment as an interactive start (provider API keys, `NHX_DATA_DIR` if set).
+- **An existing platform elsewhere.** Point `NHX_BASE_URL` at it and skip local startup.
 
 ## What to announce
 
@@ -151,7 +213,7 @@ Which one fits what you're trying to do?
 For things outside this catalog (for example, "show me how Switchyard routes between models"), point at the relevant repo skill (`nemo-evaluator`, `nemo-auditor`, etc.) or tell the user no skill claims that intent yet. Do not invent a path.
 
 If the pre-flight finds no platform but the user insists they have installed one: ask them to report
-the output of `lsof -iTCP:8080 -sTCP:LISTEN` and the redacted scan below from the shell where they ran
+the output of `lsof -iTCP:<port> -sTCP:LISTEN` (the port from `NHX_URL`, usually `8080`) and the redacted scan below from the shell where they ran
 setup. The platform may be bound to a non-default port, or the install may be in a venv whose `nemo`
 binary is not on `PATH`.
 
@@ -179,6 +241,7 @@ Do not proactively suggest Studio as the path for anything a skill already cover
 
 - **One skill at a time.** Do not load more than one downstream skill in the same turn. Each downstream skill is a full procedure with its own context budget.
 - **Install must happen before any skill can do useful work.** Build, try, and status all assume the platform is up. If the user has not run the CLI install (`make bootstrap` + `nemo setup`), the skills cannot work around that; hand them to `setup` for instructions.
+- **A sandboxed shell cannot host the platform.** `Not permitted to listen on ...` from `nemo services run` or `nemo setup` is a sandbox denial, not a port conflict. Follow [Starting the platform from a sandboxed agent](#starting-the-platform-from-a-sandboxed-agent) and ask the user how to host it.
 - **NeMo Helix is the product name.** Capital N, e, M, o, P. Not "nemo" or "Nemo." NAT on first mention is "NVIDIA NeMo Agent Toolkit (NAT)."
 - **Model customization** for chat/SFT/RL goes to the `nemo-customizer` plugin skill when `nemo-customizer-plugin` (and a training backend) are installed. **Embedding and reranking recipes** (domain corpus, retrieval SDG, `bi_encoder` / `cross_encoder`, `retrieve-eval`) go to `nemo-retrieval-recipes`. If those skills are not available, tell the user to enable the plugins and install skills — do not improvise training with an external library.
 - **Execution compatibility.** New Platform configs must select a supported

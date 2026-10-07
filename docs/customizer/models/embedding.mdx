@@ -99,23 +99,28 @@ Score the fine-tuned model and the base model on the same frozen `eval_beir` spl
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
 
-client = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+gateway = InferenceGatewayClient.from_client(client)
 
-response = client.inference.gateway.provider.post(
-    "v1/embeddings",
+response = gateway.provider_post(
     name="embed-tuned",
     workspace="default",
-    body={
-        "model": "default/nemotron-3-embed-1b-tuned",
-        "input": ["What is the capital of France?"],
-        "input_type": "query",
-    },
-)
+    trailing_uri="v1/embeddings",
+    body=JsonBody(
+        {
+            "model": "default/nemotron-3-embed-1b-tuned",
+            "input": ["What is the capital of France?"],
+            "input_type": "query",
+        }
+    ),
+).data()
 print(len(response["data"][0]["embedding"]))
 ```
 

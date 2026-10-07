@@ -14,7 +14,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
-from nemo_helix_plugin.client.types import PreparedRequest
+from nemo_helix_plugin.client.types import PreparedRequest, RetryPolicy
 from nemo_helix_plugin.client_provider import NemoClientProvider
 from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
 from nemo_helix_plugin.jobs.client import JobsClient
@@ -174,6 +174,73 @@ class TestAsyncConstruction:
         client = cf.get_async_nemo_client()
 
         assert isinstance(client._http._transport, _AsyncHelixEndpointRoutingTransport)
+
+
+# ---------------------------------------------------------------------------
+# Transport tuning and retry
+# ---------------------------------------------------------------------------
+
+
+class TestTransportOptions:
+    def test_sync_timeout_and_retry_are_client_options(self):
+        retry = RetryPolicy(max_retries=5)
+        client = cf.get_nemo_client(timeout=12.5, retry=retry)
+        assert client._timeout == 12.5
+        assert client.retry is retry
+
+    async def test_async_timeout_retry_and_follow_redirects(self):
+        retry = RetryPolicy(max_retries=2)
+        client = cf.get_async_nemo_client(
+            as_service="models",
+            internal=True,
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_connections=7),
+            follow_redirects=True,
+            retry=retry,
+        )
+        assert client._timeout == httpx.Timeout(30.0)
+        assert client.retry is retry
+        assert client._http.follow_redirects is True
+        await client.close()
+
+    def test_defaults_use_default_retry_policy(self):
+        client = cf.get_nemo_client()
+        assert client.retry is cf.DEFAULT_RETRY_POLICY
+        assert client._timeout is None
+
+    def test_retry_none_disables_retries(self):
+        client = cf.get_nemo_client(retry=None)
+        assert client.retry is None
+
+    def test_explicit_http_client_ignores_transport_tuning(self):
+        with httpx.Client(follow_redirects=False) as explicit:
+            client = cf.get_nemo_client(http_client=explicit, follow_redirects=True, timeout=3.0)
+            assert client._http is explicit
+            assert client._timeout == 3.0
+
+
+# ---------------------------------------------------------------------------
+# On-behalf-of delegation of an existing client
+# ---------------------------------------------------------------------------
+
+
+class TestOnBehalfOf:
+    def test_delegates_service_client_and_shares_transport(self):
+        base = cf.get_async_nemo_client(as_service="agents", internal=True)
+        delegated = cf.get_nemo_client_on_behalf_of(base, Principal(id="owner@example.com", groups=["team"]))
+
+        assert delegated._http is base._http
+        assert delegated.default_headers["X-NHX-Principal-Id"] == "service:agents"
+        assert delegated.default_headers["X-NHX-Internal"] == "true"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of"] == "owner@example.com"
+        assert delegated.default_headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "team"
+        assert "X-NHX-Principal-On-Behalf-Of" not in base.default_headers
+
+    def test_matches_factory_on_behalf_of(self):
+        principal = Principal(id="owner@example.com", email="owner@example.com", groups=["a", "b"])
+        built = cf.get_nemo_client(as_service="agents", internal=True, on_behalf_of=principal)
+        derived = cf.get_nemo_client_on_behalf_of(cf.get_nemo_client(as_service="agents", internal=True), principal)
+        assert derived.default_headers == built.default_headers
 
 
 # ---------------------------------------------------------------------------
@@ -505,7 +572,7 @@ class TestTaskClientWorkloadIdentity:
         assert client.base_url == "http://other-platform:7000"
 
     def test_uds_does_not_bootstrap_workload_identity(self, monkeypatch, tmp_path, _stub_exchange):
-        # Matches get_task_sdk exactly: with the WI token file set the task path
+        # With the WI token file set the task path
         # delegates to get_nemo_client(internal=True); on UDS transport that skips
         # bearer exchange and propagates the env principal as its own identity
         # (no service principal, no bearer auth).
@@ -556,3 +623,160 @@ class TestUdsTransport:
         Configuration.clear_cache()
         client = cf.get_nemo_client()
         assert client.base_url == "http://platform:8080"
+
+
+# ---------------------------------------------------------------------------
+# Default retry policy
+# ---------------------------------------------------------------------------
+
+
+def _retry_sink(statuses: list[int]) -> tuple[list[httpx.Request], httpx.Client]:
+    """HTTP client whose handler replays the given statuses in order, then 200."""
+    sink: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sink.append(request)
+        status = statuses.pop(0) if statuses else 200
+        return httpx.Response(status, json={"ok": True}, request=request)
+
+    return sink, httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def _async_retry_sink(statuses: list[int]) -> tuple[list[httpx.Request], httpx.AsyncClient]:
+    """Async counterpart of :func:`_retry_sink`."""
+    sink: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        sink.append(request)
+        status = statuses.pop(0) if statuses else 200
+        return httpx.Response(status, json={"ok": True}, request=request)
+
+    return sink, httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+class TestDefaultRetryPolicy:
+    def test_sync_client_uses_default_policy(self):
+        client = cf.get_nemo_client()
+        assert client._retry is cf.DEFAULT_RETRY_POLICY
+
+    def test_async_client_uses_default_policy(self):
+        client = cf.get_async_nemo_client()
+        assert client._retry is cf.DEFAULT_RETRY_POLICY
+
+    def test_retries_rate_limit_then_succeeds(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([429, 429])
+
+        client = cf.get_nemo_client(http_client=http_client)
+        result = client.send(_get("/apis/entities/v2/foo"))
+
+        assert result.http_response.status_code == 200
+        assert len(sink) == 3
+
+    def test_retries_server_error_then_succeeds(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([503, 503])
+
+        client = cf.get_nemo_client(http_client=http_client)
+        result = client.send(_get("/apis/entities/v2/foo"))
+
+        assert result.http_response.status_code == 200
+        assert len(sink) == 3
+
+    def test_retries_request_timeout_and_conflict(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([408, 409])
+
+        client = cf.get_nemo_client(http_client=http_client)
+        result = client.send(_get("/apis/entities/v2/foo"))
+
+        assert result.http_response.status_code == 200
+        assert len(sink) == 3
+
+    def test_does_not_retry_other_4xx(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([400])
+
+        client = cf.get_nemo_client(http_client=http_client)
+        with pytest.raises(Exception):
+            client.send(_get("/apis/entities/v2/foo"))
+
+        assert len(sink) == 1
+
+    def test_gives_up_after_two_retries(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([503, 503, 503, 503])
+
+        client = cf.get_nemo_client(http_client=http_client)
+        with pytest.raises(Exception):
+            client.send(_get("/apis/entities/v2/foo"))
+
+        assert len(sink) == 3  # initial + 2 retries
+
+    def test_retry_after_header_honored(self, monkeypatch: pytest.MonkeyPatch):
+        sleeps: list[float] = []
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", sleeps.append)
+        sink: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sink.append(request)
+            if len(sink) < 3:
+                return httpx.Response(429, json={}, request=request, headers={"Retry-After": "0.001"})
+            return httpx.Response(200, json={"ok": True}, request=request)
+
+        client = cf.get_nemo_client(http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        result = client.send(_get("/apis/entities/v2/foo"))
+
+        assert result.http_response.status_code == 200
+        assert len(sink) == 3
+        assert sleeps == [0.001, 0.001]
+
+    def test_x_should_retry_false_stops_retry(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sink.append(request)
+            return httpx.Response(429, json={}, request=request, headers={"x-should-retry": "false"})
+
+        client = cf.get_nemo_client(http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        with pytest.raises(Exception):
+            client.send(_get("/apis/entities/v2/foo"))
+
+        assert len(sink) == 1
+
+    def test_with_retry_override_disables_retries(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("nemo_helix_plugin.client.client.time.sleep", lambda _: None)
+        sink, http_client = _retry_sink([429, 429])
+
+        client = cf.get_nemo_client(http_client=http_client).with_retry(RetryPolicy(max_retries=0))
+        with pytest.raises(Exception):
+            client.send(_get("/apis/entities/v2/foo"))
+
+        assert len(sink) == 1
+
+    async def test_async_retries_rate_limit_then_succeeds(self, monkeypatch: pytest.MonkeyPatch):
+        async def _no_sleep(_: float) -> None:
+            return None
+
+        monkeypatch.setattr("nemo_helix_plugin.client.client.asyncio.sleep", _no_sleep)
+        sink, http_client = _async_retry_sink([429, 429])
+
+        client = cf.get_async_nemo_client(http_client=http_client)
+        result = await client.send(_get("/apis/entities/v2/foo"))
+
+        assert result.http_response.status_code == 200
+        assert len(sink) == 3
+
+    async def test_async_gives_up_after_two_retries(self, monkeypatch: pytest.MonkeyPatch):
+        async def _no_sleep(_: float) -> None:
+            return None
+
+        monkeypatch.setattr("nemo_helix_plugin.client.client.asyncio.sleep", _no_sleep)
+        sink, http_client = _async_retry_sink([503, 503, 503])
+
+        client = cf.get_async_nemo_client(http_client=http_client)
+        with pytest.raises(Exception):
+            await client.send(_get("/apis/entities/v2/foo"))
+
+        assert len(sink) == 3

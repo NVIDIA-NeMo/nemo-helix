@@ -174,7 +174,7 @@ class SayHelloJob(NemoJob):
         return {"result": f"Hello, {cfg.name}!"}
 
     @classmethod
-    async def compile(cls, *, workspace, spec, entity_client, job_name, sdk, profile=None, options=None):
+    async def compile(cls, *, workspace, spec, entity_client, job_name, async_sdk, profile=None, options=None):
         # See the plugin-job skill for compile() details.
         ...
 ```
@@ -280,7 +280,7 @@ discover_entry_points.cache_clear()
 
 - **No `__init__.py`**: The package directory does not need one. Do not add it.
 - **`name` must match entry-point key**: For jobs, `NemoJob.name` is the suffix after the dot, not the full key.
-- **Both `nemo-helix-plugin` AND `nemo-helix` required**: `nemo-helix-plugin` provides the ABCs; `nemo-helix` provides `get_entity_client` and SDK features.
+- **Both `nemo-helix-plugin` AND `nemo-helix` required**: `nemo-helix-plugin` provides the ABCs; `nemo-helix` provides the platform runtime (`get_entity_client`, typed-client providers, services).
 - **Install with `-e` (editable)**: `uv pip install -e .` — non-editable installs require reinstall on every change.
 - **`discover.cache_clear()` in tests**: Any test that mocks entry-points must call both `discover.cache_clear()` and `discover_entry_points.cache_clear()` to avoid stale caches between tests.
 - **`packages = ["src/nemo_my_plugin"]` in hatchling config**: Without this, the wheel will not include the `nhx` namespace package correctly.

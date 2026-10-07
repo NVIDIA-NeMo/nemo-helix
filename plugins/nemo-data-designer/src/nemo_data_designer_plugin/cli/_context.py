@@ -18,8 +18,8 @@ import data_designer.config as dd
 import typer
 from data_designer.cli.ui import print_error
 from data_designer.cli.utils.config_loader import ConfigLoadError, load_config_builder
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
 from nemo_helix_plugin.cli_state import resolve_local_cli_sdks
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 OutputFormat = Literal["text", "json"]
 
@@ -33,32 +33,32 @@ def load_builder_or_exit(config_source: str) -> dd.DataDesignerConfigBuilder:
         raise typer.Exit(code=1) from e
 
 
-def resolve_sdks_or_exit(typer_ctx: typer.Context) -> tuple[NeMoHelix | None, AsyncNeMoHelix | None]:
+def resolve_clients_or_exit(typer_ctx: typer.Context) -> tuple[NemoClient | None, AsyncNemoClient | None]:
     """Resolve the CLI's SDK pair, exiting 1 when neither is configured."""
-    sdk, async_sdk = resolve_local_cli_sdks(typer_ctx)
-    sdk = cast("NeMoHelix | None", sdk)
-    async_sdk = cast("AsyncNeMoHelix | None", async_sdk)
+    client, async_client = resolve_local_cli_sdks(typer_ctx)
+    client = cast("NemoClient | None", client)
+    async_client = cast("AsyncNemoClient | None", async_client)
 
-    if sdk is None and async_sdk is None:
+    if client is None and async_client is None:
         print_error(
             "No NeMo Helix SDK is available. Run `nemo` from a configured environment "
             "or supply credentials via the top-level CLI."
         )
         raise typer.Exit(code=1)
 
-    return sdk, async_sdk
+    return client, async_client
 
 
 def resolve_workspace(
     workspace: str | None,
     *,
-    sdk: NeMoHelix | None,
-    async_sdk: AsyncNeMoHelix | None,
+    client: NemoClient | None,
+    async_client: AsyncNemoClient | None,
 ) -> str:
     """Pick the workspace to resolve against: explicit flag, then SDK default, then ``"default"``."""
     return (
         workspace
-        or (getattr(sdk, "workspace", None) if sdk is not None else None)
-        or (getattr(async_sdk, "workspace", None) if async_sdk is not None else None)
+        or (getattr(client, "workspace", None) if client is not None else None)
+        or (getattr(async_client, "workspace", None) if async_client is not None else None)
         or "default"
     )

@@ -150,6 +150,29 @@ class TestBuildCSP:
         assert _directive(csp, "connect-src") == "'self' https://a.example.com https://b.example.com"
 
 
+class TestSPAFallback:
+    """Client-side routes must fall back to index.html, including extension-bearing ones."""
+
+    def test_extensionless_route_falls_back_to_index(self, client: TestClient):
+        response = client.get("/studio/workspaces/default/filesets/kern")
+        assert response.status_code == 200
+        assert response.text == "<html><body>hello</body></html>"
+
+    def test_extension_route_falls_back_for_navigation(self, client: TestClient):
+        """A file preview URL ending in .md is a client route, not a static asset."""
+        response = client.get(
+            "/studio/workspaces/default/filesets/kern/file/failure-classes/2026-10-04/report.md",
+            headers={"Accept": "text/html"},
+        )
+        assert response.status_code == 200
+        assert response.text == "<html><body>hello</body></html>"
+
+    def test_missing_asset_still_404s_for_asset_fetch(self, client: TestClient):
+        """Script/link fetches (Accept: */*) must not receive index.html for missing files."""
+        response = client.get("/studio/assets/missing.js")
+        assert response.status_code == 404
+
+
 class TestHasFileExtension:
     """Tests for the _has_file_extension method."""
 

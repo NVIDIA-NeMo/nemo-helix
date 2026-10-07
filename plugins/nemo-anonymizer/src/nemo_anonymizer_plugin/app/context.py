@@ -15,7 +15,7 @@ from nemo_anonymizer_plugin.app.input import (
     prepare_anonymizer_input_async,
     validate_anonymizer_input_source,
 )
-from nemo_helix_plugin.client.adapter import AsyncHelixClient
+from nemo_helix_plugin.client.client import AsyncNemoClient
 
 
 def require_model_configs_for_execution(model_configs: list[dd.ModelConfig] | None) -> list[dd.ModelConfig]:
@@ -28,8 +28,8 @@ def require_model_configs_for_execution(model_configs: list[dd.ModelConfig] | No
 
 
 class AnonymizerContext:
-    def __init__(self, sdk: AsyncHelixClient, workspace: str):
-        self._sdk = sdk
+    def __init__(self, client: AsyncNemoClient, workspace: str):
+        self._client = client
         self._workspace = workspace
 
     async def make_model_providers(
@@ -38,7 +38,7 @@ class AnonymizerContext:
     ) -> list[DDModelProvider] | None:
         registry = await make_model_provider_registry(
             model_configs,
-            sdk=self._sdk,
+            client=self._client,
             default_workspace=self._workspace,
         )
         if registry is None:
@@ -48,7 +48,7 @@ class AnonymizerContext:
     async def prepare_input(self, data: AnonymizerInputSpec) -> PreparedAnonymizerInput:
         return await prepare_anonymizer_input_async(
             data,
-            sdk=self._sdk,
+            sdk=self._client,
             workspace=self._workspace,
             allow_local_paths=False,
         )
@@ -58,7 +58,7 @@ class AnonymizerContext:
 
 
 def create_anonymizer_context(
-    sdk: AsyncHelixClient,
+    client: AsyncNemoClient,
     workspace: str,
 ) -> AnonymizerContext:
-    return AnonymizerContext(sdk, workspace)
+    return AnonymizerContext(client, workspace)

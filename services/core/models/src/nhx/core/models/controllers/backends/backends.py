@@ -6,7 +6,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
-from nemo_helix import AsyncNeMoHelix
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.models.types import ModelDeploymentStatus
 from nhx.core.models.controllers.context import ModelContext
 from pydantic import BaseModel
@@ -34,16 +34,16 @@ class ServiceBackend(ABC):
 
     def __init__(
         self,
-        nhx_sdk: AsyncNeMoHelix,
+        client: AsyncNemoClient,
         config: Dict[str, Any],
     ) -> None:
         """Initialize the service backend.
 
         Args:
-            nhx_sdk: NeMo Helix SDK client for API interactions (includes secrets access)
+            client: Typed platform client for API interactions (includes secrets access)
             config: Backend-specific configuration dictionary
         """
-        self._nhx_sdk = nhx_sdk
+        self._client = client
         self._config = config
         self.init()
 

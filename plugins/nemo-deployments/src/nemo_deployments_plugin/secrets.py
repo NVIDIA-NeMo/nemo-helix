@@ -8,8 +8,7 @@ from __future__ import annotations
 import os
 
 from nemo_deployments_plugin.entities import DeploymentConfig, EnvVar, SecretRef
-from nemo_helix import AsyncNeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -28,10 +27,10 @@ def platform_ngc_secret_ref() -> SecretRef | None:
     return SecretRef(workspace=parts[0], name=parts[1])
 
 
-async def resolve_secret_ref(sdk: AsyncNeMoHelix, secret_ref: SecretRef) -> str | None:
+async def resolve_secret_ref(client: AsyncNemoClient, secret_ref: SecretRef) -> str | None:
     """Resolve a Platform secret value without logging reference or value data."""
     try:
-        secrets = client_from_platform(sdk, AsyncSecretsClient)
+        secrets = AsyncSecretsClient.from_client(client)
         response = (await secrets.access_secret(name=secret_ref.name, workspace=secret_ref.workspace)).data()
         if response.value:
             return response.value
@@ -42,7 +41,7 @@ async def resolve_secret_ref(sdk: AsyncNeMoHelix, secret_ref: SecretRef) -> str 
     return None
 
 
-async def resolve_deployment_config_secrets(sdk: AsyncNeMoHelix, config: DeploymentConfig) -> DeploymentConfig:
+async def resolve_deployment_config_secrets(client: AsyncNemoClient, config: DeploymentConfig) -> DeploymentConfig:
     """Return an execution-only copy whose secret references have plaintext values.
 
     Used by substrates that cannot mount a managed secret object (docker,
@@ -54,14 +53,14 @@ async def resolve_deployment_config_secrets(sdk: AsyncNeMoHelix, config: Deploym
     for container in (*resolved.init_containers, *resolved.containers):
         env: list[EnvVar] = []
         for item in container.env:
-            resolved_item = await _resolve_env_var(sdk, item)
+            resolved_item = await _resolve_env_var(client, item)
             if resolved_item is not None:
                 env.append(resolved_item)
         container.env = env
     return resolved
 
 
-async def resolve_deployment_secret_env(sdk: AsyncNeMoHelix, config: DeploymentConfig) -> dict[str, str]:
+async def resolve_deployment_secret_env(client: AsyncNemoClient, config: DeploymentConfig) -> dict[str, str]:
     """Collect resolved secret values for every ``secret_ref`` env var.
 
     Used by the k8s substrate to materialize a single per-deployment ``Secret``
@@ -79,13 +78,13 @@ async def resolve_deployment_secret_env(sdk: AsyncNeMoHelix, config: DeploymentC
         for item in container.env:
             if item.secret_ref is None:
                 continue
-            value = await _resolve_secret_value(sdk, item)
+            value = await _resolve_secret_value(client, item)
             if value is not None:
                 secret_env[item.name] = value
     return secret_env
 
 
-async def _resolve_env_var(sdk: AsyncNeMoHelix, item: EnvVar) -> EnvVar | None:
+async def _resolve_env_var(client: AsyncNemoClient, item: EnvVar) -> EnvVar | None:
     """Resolve a secret-backed environment variable to a plaintext ``EnvVar``.
 
     Non-secret vars pass through unchanged. Secret vars that resolve to ``None``
@@ -93,13 +92,13 @@ async def _resolve_env_var(sdk: AsyncNeMoHelix, item: EnvVar) -> EnvVar | None:
     """
     if item.secret_ref is None:
         return item
-    value = await _resolve_secret_value(sdk, item)
+    value = await _resolve_secret_value(client, item)
     if value is None:
         return None
     return EnvVar(name=item.name, value=value)
 
 
-async def _resolve_secret_value(sdk: AsyncNeMoHelix, item: EnvVar) -> str | None:
+async def _resolve_secret_value(client: AsyncNemoClient, item: EnvVar) -> str | None:
     """Resolve the plaintext value for a secret-backed env var.
 
     NGC credentials are best-effort: when neither the configured secret nor the
@@ -110,7 +109,7 @@ async def _resolve_secret_value(sdk: AsyncNeMoHelix, item: EnvVar) -> str | None
     """
     if item.secret_ref is None:
         raise SecretResolutionError(f"Environment variable {item.name!r} has no secret reference to resolve")
-    value = await resolve_secret_ref(sdk, item.secret_ref)
+    value = await resolve_secret_ref(client, item.secret_ref)
     if value is not None:
         return value
 

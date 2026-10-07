@@ -38,7 +38,7 @@ def _mock_http_response(status_code: int) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_checks_each_locale() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock()
     config = _make_config(
@@ -46,43 +46,43 @@ async def test_ensure_nemotron_personas_filesets_checks_each_locale() -> None:
         _make_person_sampler_column("person_jp", "ja_JP"),
     )
 
-    with patch("data_designer_nemo.person_sampling.client_from_platform", return_value=mock_files):
-        await ensure_nemotron_personas_filesets(config, sdk)
+    with patch("data_designer_nemo.person_sampling.AsyncFilesClient.from_client", return_value=mock_files):
+        await ensure_nemotron_personas_filesets(config, client)
 
     assert mock_files.get_fileset.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_error_for_missing_fileset() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=NotFoundError(_mock_http_response(404)))
     config = _make_config(_make_person_sampler_column("person", "en_US"))
 
-    with patch("data_designer_nemo.person_sampling.client_from_platform", return_value=mock_files):
+    with patch("data_designer_nemo.person_sampling.AsyncFilesClient.from_client", return_value=mock_files):
         with pytest.raises(NDDInternalError):
-            await ensure_nemotron_personas_filesets(config, sdk)
+            await ensure_nemotron_personas_filesets(config, client)
 
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_error_for_permission_error() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=PermissionDeniedError(_mock_http_response(403)))
     config = _make_config(_make_person_sampler_column("person", "en_US"))
 
-    with patch("data_designer_nemo.person_sampling.client_from_platform", return_value=mock_files):
+    with patch("data_designer_nemo.person_sampling.AsyncFilesClient.from_client", return_value=mock_files):
         with pytest.raises(NDDInternalError):
-            await ensure_nemotron_personas_filesets(config, sdk)
+            await ensure_nemotron_personas_filesets(config, client)
 
 
 @pytest.mark.asyncio
 async def test_ensure_nemotron_personas_filesets_raises_internal_error_on_other_errors() -> None:
-    sdk = AsyncMock(spec=AsyncNemoClient)
+    client = AsyncMock(spec=AsyncNemoClient)
     mock_files = MagicMock()
     mock_files.get_fileset = AsyncMock(side_effect=RuntimeError("something went wrong"))
     config = _make_config(_make_person_sampler_column("person", "en_US"))
 
-    with patch("data_designer_nemo.person_sampling.client_from_platform", return_value=mock_files):
+    with patch("data_designer_nemo.person_sampling.AsyncFilesClient.from_client", return_value=mock_files):
         with pytest.raises(NDDInternalError):
-            await ensure_nemotron_personas_filesets(config, sdk)
+            await ensure_nemotron_personas_filesets(config, client)

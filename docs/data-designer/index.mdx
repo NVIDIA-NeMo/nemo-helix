@@ -19,12 +19,6 @@ The plugin is built on the open-source [NVIDIA NeMo Data Designer library](https
 
 Data Designer separates **configuration** from **execution**.
 
-<Note>
-
-The code snippets below are for conceptual demonstration purposes only.
-For runnable examples, see the [tutorials](/documentation/design-synthetic-data/tutorials).
-
-</Note>
 ### 1. Build Configurations
 
 Use `data_designer.config` to define the dataset you want to generate:
@@ -43,8 +37,20 @@ model_configs = [
 
 # Build configuration
 config_builder = dd.DataDesignerConfigBuilder(model_configs)
-config_builder.add_column(dd.SamplerColumnConfig(...))
-config_builder.add_column(dd.LLMTextColumnConfig(...))
+config_builder.add_column(
+    dd.SamplerColumnConfig(
+        name="sentiment",
+        sampler_type=dd.SamplerType.CATEGORY,
+        params=dd.CategorySamplerParams(values=["positive", "negative"]),
+    )
+)
+config_builder.add_column(
+    dd.LLMTextColumnConfig(
+        name="review",
+        prompt="Write one short " + "{0}{0} sentiment {1}{1}".format("{", "}") + " product review.",
+        model_alias="text",
+    )
+)
 ```
 
 Configuration code describes the dataset schema, columns, dependencies, constraints, seed data, processors, profilers, and inference settings.
@@ -83,7 +89,7 @@ Learn through examples: basics, seeding, and more.
 </Card>
 <Card title="Migration Guide" href="/documentation/design-synthetic-data/migrating-from-standalone-library">
 
-Learn about differences between the standalone library and the NeMo Helix plugin.
+Learn about differences between the standalone library and NeMo Helix plugin.
 
 </Card>
 <Card title="Library Documentation" href="https://docs.nvidia.com/nemo/datadesigner/v0.9.3/getting-started/welcome">

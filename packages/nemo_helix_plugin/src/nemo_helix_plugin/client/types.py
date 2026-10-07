@@ -272,7 +272,7 @@ class ConflictResolver(Protocol):
 # Unknown parameters in an endpoint signature trigger a ``TypeError``
 # at decoration time.
 BLESSED_CLIENT_PARAMS: dict[str, type] = {
-    # Declared but not yet acted on by the client — see AIRCORE-866.
+    # Declared but not yet acted on by the client.
     "exist_ok": bool,
 }
 
@@ -321,6 +321,18 @@ class RetryPolicy:
     retry_all_server_errors: bool = False
     respect_retry_decision_headers: bool = False
     respect_retry_after_headers: bool = False
+
+
+# The retry contract the generated ``NeMoHelix`` SDK applied by default. Clients
+# that replace a ``NeMoHelix`` use it to keep the same resilience against
+# transient gateway errors.
+PLATFORM_DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    retryable_status_codes=(408, 409, 429),
+    retry_all_server_errors=True,
+    respect_retry_decision_headers=True,
+    respect_retry_after_headers=True,
+)
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import pytest
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nhx.common.secrets.encryption import (
@@ -50,7 +49,7 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
     assert created_secret.name == secret_name
     assert created_secret.id is not None
 
-    secrets = client_from_platform(client_context.sdk, SecretsClient)
+    secrets = SecretsClient.from_client(client_context.client)
 
     # Retrieve the secret through the API and validate that it can be decrypted correctly
     retrieved_secret = secrets.get_secret(name=secret_name, workspace="default").data()

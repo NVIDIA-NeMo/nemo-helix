@@ -3,14 +3,18 @@
 
 import asyncio
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import httpx
 import pytest
 from deepagents.backends import FilesystemBackend
 from deepagents.middleware.skills import _list_skills_with_errors
 from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.translator import translate_agent_config
+from nemo_helix_plugin.client.client import NemoClient
 from nemo_studio_assistant import register
 from nemo_studio_assistant.fabric_compat import (
     apply_deepagents_mcp_env_compatibility,
@@ -19,6 +23,7 @@ from nemo_studio_assistant.fabric_compat import (
     virtualize_skill_sources,
 )
 from nemo_studio_assistant.mcp_server import create_server
+from nhx.testing import mock_nemo_client
 
 AGENT_ROOT = Path(__file__).parents[1]
 ETHOS_ROOT = AGENT_ROOT.parent / "nemo-studio-assistant-ethos"
@@ -34,17 +39,17 @@ EVAL_CASE_COVERAGE: dict[str, tuple[str, tuple[EvalCall, ...], list[object]]] = 
     "Show the details for the default workspace without making any changes.": (
         "details for the default workspace",
         (("workspaces", "retrieve", '{"name":"default"}'),),
-        [{"name": "default", "description": "Default workspace"}],
+        ["default"],
     ),
     "List all workspaces on the platform": (
         "list of workspaces",
         (("workspaces", "list", None),),
-        [[{"name": "default"}, {"name": "research"}]],
+        [["default", "research"]],
     ),
     "List the available models and inference providers using the platform API.": (
         "list of available models and inference providers",
         (("models", "list", None), ("inference.providers", "list", None)),
-        [[{"name": "model-a"}], [{"name": "provider-a"}]],
+        [["model-a"], ["provider-a"]],
     ),
 }
 
@@ -316,64 +321,121 @@ def test_mcp_server_exposes_expected_tools() -> None:
     assert "Never pass predicted refusal text" in blocked_schema["description"]
 
 
-def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[SimpleNamespace, dict[str, object]]:
-    state: dict[str, object] = {"configs": {}, "virtual_models": {}, "checks": []}
+_TIMESTAMP = "2026-01-01T00:00:00Z"
+_WORKSPACES = "/apis/entities/v2/workspaces"
+_MODELS = "/apis/models/v2/workspaces/default"
+_GUARDRAILS = "/apis/guardrails/v2/workspaces/default"
+_INFERENCE_GATEWAY = "/apis/inference-gateway/v2/workspaces/default"
+_PAGINATION = {"page": 1, "page_size": 10, "current_page_size": 0, "total_pages": 1, "total_results": 0}
 
-    class NotFoundError(Exception):
-        status_code = 404
+Route = Callable[[httpx.Request], httpx.Response]
 
-    def retrieve_config(name: str, *, workspace: str) -> object:
-        configs = state["configs"]
-        assert isinstance(configs, dict)
-        if name not in configs:
-            raise NotFoundError
-        return configs[name]
 
-    def create_config(**kwargs: object) -> object:
-        configs = state["configs"]
-        assert isinstance(configs, dict)
-        configs[str(kwargs["name"])] = kwargs
-        return kwargs
+def _page(items: list[dict[str, Any]]) -> httpx.Response:
+    pagination = {**_PAGINATION, "current_page_size": len(items), "total_results": len(items)}
+    return httpx.Response(200, json={"data": items, "pagination": pagination})
 
-    def retrieve_virtual_model(name: str, *, workspace: str) -> object:
-        virtual_models = state["virtual_models"]
-        assert isinstance(virtual_models, dict)
-        if name not in virtual_models:
-            raise NotFoundError
-        return virtual_models[name]
 
-    def create_virtual_model(**kwargs: object) -> object:
-        virtual_models = state["virtual_models"]
-        assert isinstance(virtual_models, dict)
-        virtual_models[str(kwargs["name"])] = kwargs
-        return kwargs
+def _workspace(name: str) -> dict[str, Any]:
+    return {
+        "id": f"ws-{name}",
+        "name": name,
+        "description": f"{name} workspace",
+        "created_at": _TIMESTAMP,
+        "updated_at": _TIMESTAMP,
+    }
 
+
+def _entity(name: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "id": f"id-{name}",
+        "name": name,
+        "workspace": "default",
+        "created_at": _TIMESTAMP,
+        "updated_at": _TIMESTAMP,
+        **fields,
+    }
+
+
+def _not_found(_request: httpx.Request) -> httpx.Response:
+    return httpx.Response(404, json={"detail": "not found"})
+
+
+class _FakeHelix:
+    """An in-memory platform answering typed-client requests by ``(method, path)``."""
+
+    def __init__(self, routes: dict[tuple[str, str], Route] | None = None) -> None:
+        self.routes: dict[tuple[str, str], Route] = dict(routes or {})
+        self.requests: list[httpx.Request] = []
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self.routes.get((request.method, request.url.path), _not_found)(request)
+
+    def client(self, workspace: str = "default") -> NemoClient:
+        return mock_nemo_client(self.handle, NemoClient, workspace=workspace)
+
+    def calls(self, method: str, path: str) -> list[httpx.Request]:
+        return [request for request in self.requests if (request.method, request.url.path) == (method, path)]
+
+    def mutations(self) -> list[httpx.Request]:
+        return [request for request in self.requests if request.method != "GET"]
+
+
+def _json_route(payload: Any, status: int = 200) -> Route:
+    return lambda _request: httpx.Response(status, json=payload)
+
+
+def _ok_helix(method: str, path: str, payload: Any = None, status: int = 200) -> _FakeHelix:
+    return _FakeHelix({(method, path): _json_route(payload if payload is not None else {}, status)})
+
+
+def _guardrail_workflow_client(check_statuses: list[str]) -> tuple[NemoClient, dict[str, Any]]:
+    state: dict[str, Any] = {"configs": {}, "virtual_models": {}, "checks": []}
     statuses = iter(check_statuses)
 
-    def check(**kwargs: object) -> dict[str, str]:
-        checks = state["checks"]
-        assert isinstance(checks, list)
-        checks.append(kwargs)
-        return {"status": next(statuses)}
+    def get_config(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json=state["configs"][name]) if name in state["configs"] else _not_found(request)
 
-    def list_models(*, workspace: str) -> list[dict[str, str]]:
-        virtual_models = state["virtual_models"]
-        assert isinstance(virtual_models, dict)
-        return [{"id": f"{workspace}/{name}"} for name in virtual_models]
+    def create_config(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        state["configs"][body["name"]] = {**_entity(body["name"]), **body, "data": body.get("data") or {}}
+        return httpx.Response(201, json=state["configs"][body["name"]])
 
-    client = SimpleNamespace(
-        guardrail=SimpleNamespace(
-            configs=SimpleNamespace(retrieve=retrieve_config, create=create_config),
-            check=check,
-        ),
-        inference=SimpleNamespace(
-            virtual_models=SimpleNamespace(retrieve=retrieve_virtual_model, create=create_virtual_model),
-            gateway=SimpleNamespace(
-                openai=SimpleNamespace(v1=SimpleNamespace(models=SimpleNamespace(list=list_models)))
-            ),
-        ),
-    )
-    return client, state
+    def get_virtual_model(request: httpx.Request) -> httpx.Response:
+        name = request.url.path.rsplit("/", 1)[-1]
+        if name not in state["virtual_models"]:
+            return _not_found(request)
+        return httpx.Response(200, json=state["virtual_models"][name])
+
+    def create_virtual_model(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        state["virtual_models"][body["name"]] = {**_entity(body["name"]), **body}
+        return httpx.Response(201, json=state["virtual_models"][body["name"]])
+
+    def check(request: httpx.Request) -> httpx.Response:
+        state["checks"].append(json.loads(request.content))
+        return httpx.Response(200, json={"status": next(statuses)})
+
+    def list_models(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": f"default/{name}"} for name in state["virtual_models"]]})
+
+    platform = _FakeHelix()
+    platform.routes = {
+        ("POST", f"{_GUARDRAILS}/checks"): check,
+        ("POST", f"{_GUARDRAILS}/configs"): create_config,
+        ("GET", f"{_GUARDRAILS}/configs/no-fruit"): get_config,
+        ("GET", f"{_INFERENCE_GATEWAY}/virtual-models/guarded-model"): get_virtual_model,
+        ("POST", f"{_INFERENCE_GATEWAY}/virtual-models"): create_virtual_model,
+        ("GET", f"{_INFERENCE_GATEWAY}/openai/-/v1/models"): list_models,
+    }
+    state["platform"] = platform
+    return platform.client(), state
+
+
+def _install_client(monkeypatch: pytest.MonkeyPatch, client: NemoClient, workspace: str = "default") -> None:
+    monkeypatch.setattr(register, "_clients", {workspace: client})
 
 
 def test_deploy_guardrail_uses_one_approval_and_reports_milestones(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -390,7 +452,7 @@ def test_deploy_guardrail_uses_one_approval_and_reports_milestones(monkeypatch: 
         callbacks.append((tool_name, arguments))
         return {"behavior": "allow"} if tool_name == "approval_prompt" else {"status": "rendered"}
 
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, client)
     monkeypatch.setattr(register, "_call_studio_tool", callback)
 
     response = json.loads(
@@ -427,7 +489,11 @@ def test_deploy_guardrail_uses_one_approval_and_reports_milestones(monkeypatch: 
         "allowed_check",
         "virtual_model_ready",
     ]
-    assert len(state["checks"]) == 2
+    assert [check["guardrails"] for check in state["checks"]] == [{"config_id": "default/no-fruit"}] * 2
+    assert [check["messages"][0]["content"] for check in state["checks"]] == [
+        "Tell me about bananas.",
+        "Tell me about the moon.",
+    ]
     assert set(state["virtual_models"]) == {"guarded-model"}
 
 
@@ -446,7 +512,7 @@ def test_deploy_guardrail_preserves_created_virtual_model_when_routing_is_delaye
         callbacks.append((tool_name, arguments))
         return {"behavior": "allow"} if tool_name == "approval_prompt" else {"status": "rendered"}
 
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, client)
     monkeypatch.setattr(register, "_call_studio_tool", callback)
     monkeypatch.setattr(register, "_routable_virtual_model", lambda *_args: False)
 
@@ -490,7 +556,7 @@ def test_deploy_guardrail_returns_original_result_for_duplicate_run(monkeypatch:
         callbacks.append(tool_name)
         return {"behavior": "allow"} if tool_name == "approval_prompt" else {"status": "rendered"}
 
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, client)
     monkeypatch.setattr(register, "_call_studio_tool", callback)
     arguments = {
         "policy": "Do not discuss fruit.",
@@ -595,7 +661,7 @@ def test_deploy_guardrail_stops_before_virtual_model_when_validation_fails(
         callbacks.append((tool_name, arguments))
         return {"behavior": "allow"} if tool_name == "approval_prompt" else {"status": "rendered"}
 
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, client)
     monkeypatch.setattr(register, "_call_studio_tool", callback)
 
     response = json.loads(
@@ -703,7 +769,7 @@ def test_deploy_guardrail_selects_backend_inside_fast_path(monkeypatch: pytest.M
             return {"behavior": "allow"}
         return {"status": "rendered"}
 
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, client)
     monkeypatch.setattr(register, "_call_studio_tool", callback)
 
     response = json.loads(
@@ -763,22 +829,87 @@ def test_studio_link_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> No
     assert "callback unavailable" in response["message"]
 
 
-def test_read_only_nemo_api_calls_sdk_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
-    resource = SimpleNamespace(list=lambda: [SimpleNamespace(name="default")])
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=resource)})
+def test_read_only_nemo_api_calls_platform_without_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _ok_helix("GET", _WORKSPACES, {"data": [_workspace("default")], "pagination": _PAGINATION})
+    _install_client(monkeypatch, platform.client())
 
     response = json.loads(register.nemo_api("workspaces", "list", workspace="default"))
 
-    assert response == ["namespace(name='default')"]
+    assert [item["name"] for item in response["data"]] == ["default"]
+    assert [request.method for request in platform.requests] == ["GET"]
 
 
 def test_nemo_api_accepts_object_params(monkeypatch: pytest.MonkeyPatch) -> None:
-    resource = SimpleNamespace(retrieve=lambda **kwargs: kwargs)
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=resource)})
+    platform = _ok_helix("GET", f"{_WORKSPACES}/default", _workspace("default"))
+    _install_client(monkeypatch, platform.client())
 
     response = json.loads(register.nemo_api("workspaces", "retrieve", params={"name": "default"}, workspace="default"))
 
-    assert response == {"name": "default"}
+    assert response["name"] == "default"
+    assert response["description"] == "default workspace"
+
+
+def test_nemo_api_maps_params_onto_path_query_and_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix(
+        {
+            ("GET", f"{_MODELS}/models"): lambda _request: _page([_entity("model-a")]),
+            ("POST", f"{_WORKSPACES}"): _json_route(_workspace("demo"), 201),
+        }
+    )
+    _install_client(monkeypatch, platform.client())
+
+    listed = json.loads(register.nemo_api("models", "list", params={"page_size": 5}, workspace="default"))
+    assert [item["name"] for item in listed["data"]] == ["model-a"]
+    assert dict(platform.requests[0].url.params) == {"page_size": "5"}
+
+    monkeypatch.setattr(register, "_call_studio_tool", lambda *_args, **_kwargs: {"behavior": "allow"})
+    created = json.loads(
+        register.nemo_api(
+            "workspaces",
+            "create",
+            params={"name": "demo", "description": "A demo"},
+            studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a",
+            workspace="default",
+        )
+    )
+    assert created["name"] == "demo"
+    assert json.loads(platform.requests[1].content) == {"name": "demo", "description": "A demo"}
+
+
+def test_nemo_api_maps_fileset_params_onto_file_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    path = "/apis/files/v2/workspaces/default/filesets/harbor/-/verify.txt"
+    uploaded = {"file_ref": "ref", "file_url": "url", "path": "verify.txt", "size": 4}
+    platform = _FakeHelix(
+        {
+            ("PUT", path): _json_route(uploaded),
+            ("GET", path): lambda _request: httpx.Response(200, content=b"text"),
+        }
+    )
+    _install_client(monkeypatch, platform.client())
+    monkeypatch.setattr(register, "_call_studio_tool", lambda *_args, **_kwargs: {"behavior": "allow"})
+
+    upload = json.loads(
+        register.nemo_api(
+            "files",
+            "upload_content",
+            params={"content": "text", "remote_path": "verify.txt", "fileset": "harbor"},
+            studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a",
+            workspace="default",
+        )
+    )
+    download = json.loads(
+        register.nemo_api(
+            "files",
+            "download_content",
+            params={"remote_path": "verify.txt", "fileset": "harbor"},
+            studio_session_id="90a877d5-19f6-49a8-bf09-d0020ae0833a",
+            workspace="default",
+        )
+    )
+
+    assert upload["path"] == "verify.txt"
+    assert platform.calls("PUT", path)[0].content == b"text"
+    assert download == "text"
 
 
 def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
@@ -791,8 +922,8 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
         approval_requested = True
         return {"behavior": "allow"}
 
-    guardrail = SimpleNamespace(check=lambda **_kwargs: {})
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
     response = register.nemo_api(
         "guardrail",
@@ -805,41 +936,43 @@ def test_invalid_guardrail_config_action_returns_exact_path_before_approval(
     assert "resource='guardrail.configs'" in response
     assert "resource='guardrail' is only for action='check'" in response
     assert approval_requested is False
+    assert platform.requests == []
 
 
-def test_repeated_sdk_path_errors_trip_api_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=SimpleNamespace(check=lambda: {}))})
+def test_repeated_api_path_errors_trip_api_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_client(monkeypatch, _FakeHelix().client())
     session_id = "90a877d5-19f6-49a8-bf09-d0020ae0833a"
 
     first = register.nemo_api("guardrails", "list", studio_session_id=session_id, workspace="default")
     second = register.nemo_api("input_guardrail", "list", studio_session_id=session_id, workspace="default")
     third = register.nemo_api("guardrail_policy", "list", studio_session_id=session_id, workspace="default")
 
-    assert first.startswith("Error: SDKPathError:")
-    assert second.startswith("Error: SDKPathError:")
+    assert first.startswith("Error: ApiPathError:")
+    assert second.startswith("Error: ApiPathError:")
     assert third.startswith("Error circuit breaker: 3 consecutive nemo_api calls failed")
-    assert "Stop retrying or guessing SDK paths and parameters" in third
+    assert "Stop retrying or guessing API paths and parameters" in third
 
 
-def test_repeated_sdk_parameter_errors_trip_api_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
-    guardrail = SimpleNamespace(check=lambda *, messages, model: {"messages": messages, "model": model})
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+def test_repeated_parameter_errors_trip_api_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix()
+    _install_client(monkeypatch, platform.client())
 
     first = register.nemo_api("guardrail", "check", '{"config_id":"bad"}', workspace="default")
     second = register.nemo_api("guardrail", "check", '{"input":"bad"}', workspace="default")
     third = register.nemo_api("guardrail", "check", '{"config":"bad"}', workspace="default")
 
-    assert first.startswith("Guardrail validation stopped: TypeError:")
-    assert second.startswith("Guardrail validation stopped: TypeError:")
+    assert first.startswith("Guardrail validation stopped: ValidationError:")
+    assert second.startswith("Guardrail validation stopped: ValidationError:")
     assert third.startswith("Guardrail validation stopped: 3 validation attempts failed")
     assert "do not attach it to a VirtualModel" in third
+    assert platform.requests == []
 
 
 def test_guardrail_check_uses_workspace_from_params_when_outer_argument_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guardrail = SimpleNamespace(check=lambda **_kwargs: {"status": "blocked"})
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+    platform = _FakeHelix({("POST", f"{_GUARDRAILS}/checks"): _json_route({"status": "blocked"})})
+    _install_client(monkeypatch, platform.client())
 
     response = json.loads(
         register.nemo_api(
@@ -849,7 +982,8 @@ def test_guardrail_check_uses_workspace_from_params_when_outer_argument_is_missi
         )
     )
 
-    assert response == {"status": "blocked"}
+    assert response["status"] == "blocked"
+    assert json.loads(platform.requests[0].content)["model"] == "default/model"
 
 
 def test_guardrail_check_missing_workspace_counts_as_validation_failure() -> None:
@@ -865,8 +999,8 @@ def test_guardrail_check_missing_workspace_counts_as_validation_failure() -> Non
 
 
 def test_guardrail_check_rejects_unexpected_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    guardrail = SimpleNamespace(check=lambda **_kwargs: {"status": "unknown"})
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+    platform = _FakeHelix({("POST", f"{_GUARDRAILS}/checks"): _json_route({"status": "unknown"})})
+    _install_client(monkeypatch, platform.client())
 
     response = register.nemo_api(
         "guardrail",
@@ -880,12 +1014,8 @@ def test_guardrail_check_rejects_unexpected_status(monkeypatch: pytest.MonkeyPat
 
 
 def test_guardrail_model_preflight_calls_chat_completion() -> None:
-    calls: list[dict[str, object]] = []
-    client = SimpleNamespace(
-        inference=SimpleNamespace(
-            gateway=SimpleNamespace(model=SimpleNamespace(post=lambda **kwargs: calls.append(kwargs)))
-        )
-    )
+    platform = _ok_helix("POST", f"{_INFERENCE_GATEWAY}/model/model-a/-/v1/chat/completions", {"choices": []})
+    client = platform.client()
 
     REAL_PREFLIGHT_GUARDRAIL_MODEL(
         client,
@@ -900,44 +1030,42 @@ def test_guardrail_model_preflight_calls_chat_completion() -> None:
         "session-a",
     )
 
-    assert calls == [
-        {
-            "workspace": "default",
-            "name": "model-a",
-            "trailing_uri": "v1/chat/completions",
-            "body": {
-                "model": "default/model-a",
-                "messages": [{"role": "user", "content": "Reply with OK."}],
-                "max_tokens": 1,
-                "temperature": 0,
-            },
-        }
-    ]
+    assert len(platform.requests) == 1
+    assert json.loads(platform.requests[0].content) == {
+        "model": "default/model-a",
+        "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 1,
+        "temperature": 0,
+    }
 
 
 def test_guardrail_model_preflight_surfaces_provider_failure() -> None:
-    def fail(**_kwargs: object) -> None:
-        raise RuntimeError("provider offline")
+    platform = _ok_helix(
+        "POST",
+        f"{_INFERENCE_GATEWAY}/model/model-a/-/v1/chat/completions",
+        {"detail": "provider offline"},
+        status=503,
+    )
 
-    client = SimpleNamespace(inference=SimpleNamespace(gateway=SimpleNamespace(model=SimpleNamespace(post=fail))))
-
-    with pytest.raises(register.ModelPreflightError, match="model 'default/model-a' is unavailable"):
+    with pytest.raises(register.ModelPreflightError, match="model 'default/model-a' is unavailable") as exc_info:
         REAL_PREFLIGHT_GUARDRAIL_MODEL(
-            client,
+            platform.client(),
             "default",
             {"model": "default/model-a"},
             "session-a",
         )
 
+    assert "provider offline" in str(exc_info.value)
 
-def test_successful_sdk_call_resets_api_error_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
-    guardrail = SimpleNamespace(configs=SimpleNamespace(list=lambda: [{"name": "fruit-blocker"}]))
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+
+def test_successful_api_call_resets_api_error_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    platform = _FakeHelix({("GET", f"{_GUARDRAILS}/configs"): lambda _request: _page([_entity("fruit-blocker")])})
+    _install_client(monkeypatch, platform.client())
     register._api_error_streaks["workspace:default"] = 2
 
     response = json.loads(register.nemo_api("guardrail.configs", "list", workspace="default"))
 
-    assert response == [{"name": "fruit-blocker"}]
+    assert [item["name"] for item in response["data"]] == ["fruit-blocker"]
     assert register._api_error_streaks == {}
 
 
@@ -949,8 +1077,8 @@ def test_guardrail_check_does_not_request_mutation_approval(monkeypatch: pytest.
         approval_requested = True
         return {"behavior": "allow"}
 
-    guardrail = SimpleNamespace(check=lambda **_kwargs: {"status": "blocked"})
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(guardrail=guardrail)})
+    platform = _FakeHelix({("POST", f"{_GUARDRAILS}/checks"): _json_route({"status": "blocked"})})
+    _install_client(monkeypatch, platform.client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
 
     response = json.loads(
@@ -962,7 +1090,7 @@ def test_guardrail_check_does_not_request_mutation_approval(monkeypatch: pytest.
         )
     )
 
-    assert response == {"status": "blocked"}
+    assert response["status"] == "blocked"
     assert approval_requested is False
 
 
@@ -976,38 +1104,38 @@ def test_eval_case_uses_expected_read_only_tool_paths(monkeypatch: pytest.Monkey
     expected_output, calls, expected_results = EVAL_CASE_COVERAGE[case["input_message"]]
     assert case["expected_output"] == expected_output
 
-    client = SimpleNamespace(
-        workspaces=SimpleNamespace(
-            retrieve=lambda name: {"name": name, "description": "Default workspace"},
-            list=lambda: [{"name": "default"}, {"name": "research"}],
-        ),
-        models=SimpleNamespace(list=lambda: [{"name": "model-a"}]),
-        inference=SimpleNamespace(providers=SimpleNamespace(list=lambda: [{"name": "provider-a"}])),
+    platform = _FakeHelix(
+        {
+            ("GET", f"{_WORKSPACES}/default"): _json_route(_workspace("default")),
+            ("GET", _WORKSPACES): lambda _request: _page([_workspace("default"), _workspace("research")]),
+            ("GET", f"{_MODELS}/models"): lambda _request: _page([_entity("model-a")]),
+            ("GET", f"{_MODELS}/providers"): lambda _request: _page([_entity("provider-a", host_url="http://x")]),
+        }
     )
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, platform.client())
 
     results = [
         json.loads(register.nemo_api(resource, action, params, workspace="default"))
         for resource, action, params in calls
     ]
 
-    assert results == expected_results
+    def names(result: Any) -> Any:
+        if isinstance(result, dict) and "data" in result:
+            return [item["name"] for item in result["data"]]
+        return result["name"] if isinstance(result, dict) else result
+
+    assert [names(result) for result in results] == expected_results
+    assert platform.mutations() == []
 
 
 def test_mutating_nemo_api_requires_studio_session(monkeypatch: pytest.MonkeyPatch) -> None:
-    called = False
-
-    def create(**_kwargs: object) -> object:
-        nonlocal called
-        called = True
-        return {}
-
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=SimpleNamespace(create=create))})
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
 
     response = register.nemo_api("workspaces", "create", '{"name": "demo"}', workspace="default")
 
     assert response.startswith("Denied:")
-    assert called is False
+    assert platform.requests == []
 
 
 def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1018,15 +1146,16 @@ def test_mutating_nemo_api_uses_studio_approval(monkeypatch: pytest.MonkeyPatch)
         approvals.append((session, tool_name, arguments, kwargs))
         return {"behavior": "allow"}
 
-    resource = SimpleNamespace(create=lambda **kwargs: kwargs)
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=resource)})
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("demo"), status=201)
+    _install_client(monkeypatch, platform.client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
 
     response = json.loads(
         register.nemo_api("workspaces", "create", '{"name": "demo"}', studio_session_id=session_id, workspace="default")
     )
 
-    assert response == {"name": "demo"}
+    assert response["name"] == "demo"
+    assert json.loads(platform.requests[0].content) == {"name": "demo"}
     assert approvals[0][0:2] == (session_id, "approval_prompt")
     assert approvals[0][2]["input"] == {
         "resource": "workspaces",
@@ -1047,8 +1176,8 @@ def test_mutating_nemo_api_uses_edited_approved_input(monkeypatch: pytest.Monkey
         updated_input["params"] = '{"name": "approved"}'
         return {"behavior": "allow", "updatedInput": updated_input}
 
-    resource = SimpleNamespace(create=lambda **kwargs: kwargs)
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=resource)})
+    platform = _ok_helix("POST", _WORKSPACES, _workspace("approved"), status=201)
+    _install_client(monkeypatch, platform.client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
 
     response = json.loads(
@@ -1057,7 +1186,8 @@ def test_mutating_nemo_api_uses_edited_approved_input(monkeypatch: pytest.Monkey
         )
     )
 
-    assert response == {"name": "approved"}
+    assert response["name"] == "approved"
+    assert json.loads(platform.requests[0].content) == {"name": "approved"}
 
 
 def test_mutating_nemo_api_revalidates_approved_guardrail_check(
@@ -1078,11 +1208,13 @@ def test_mutating_nemo_api_revalidates_approved_guardrail_check(
             },
         }
 
-    client = SimpleNamespace(
-        workspaces=SimpleNamespace(create=lambda **_kwargs: {}),
-        guardrail=SimpleNamespace(check=lambda **_kwargs: {"status": "unknown"}),
+    platform = _FakeHelix(
+        {
+            ("POST", _WORKSPACES): _json_route(_workspace("original"), 201),
+            ("POST", f"{_GUARDRAILS}/checks"): _json_route({"status": "unknown"}),
+        }
     )
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    _install_client(monkeypatch, platform.client())
     monkeypatch.setattr(register, "_call_studio_tool", approve)
     monkeypatch.setattr(
         register,
@@ -1099,13 +1231,12 @@ def test_mutating_nemo_api_revalidates_approved_guardrail_check(
     )
 
     assert preflight_calls == [("default", {"model": "default/model-a", "messages": []})]
+    assert platform.calls("POST", _WORKSPACES) == []
     assert "unexpected status 'unknown'" in response
     assert "Do not attach this unvalidated guardrail" in response
 
 
 def test_mutating_nemo_api_rejects_approved_workspace_change(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-
     def approve(_session: str, _tool_name: str, arguments: dict[str, object], **_kwargs: object) -> dict[str, object]:
         input_value = arguments["input"]
         assert isinstance(input_value, dict)
@@ -1113,16 +1244,9 @@ def test_mutating_nemo_api_rejects_approved_workspace_change(monkeypatch: pytest
         updated_input["workspace"] = "other"
         return {"behavior": "allow", "updatedInput": updated_input}
 
-    def resource_for(workspace: str) -> SimpleNamespace:
-        return SimpleNamespace(create=lambda **_kwargs: calls.append(workspace))
-
+    platforms = {"default": _ok_helix("POST", _WORKSPACES), "other": _ok_helix("POST", _WORKSPACES)}
     monkeypatch.setattr(
-        register,
-        "_clients",
-        {
-            "default": SimpleNamespace(workspaces=resource_for("default")),
-            "other": SimpleNamespace(workspaces=resource_for("other")),
-        },
+        register, "_clients", {workspace: platform.client(workspace) for workspace, platform in platforms.items()}
     )
     monkeypatch.setattr(register, "_call_studio_tool", approve)
 
@@ -1135,7 +1259,7 @@ def test_mutating_nemo_api_rejects_approved_workspace_change(monkeypatch: pytest
     )
 
     assert response == "Denied: mutation approval cannot change the request workspace"
-    assert calls == []
+    assert all(platform.requests == [] for platform in platforms.values())
 
 
 @pytest.mark.parametrize(("field", "value"), [("resource", []), ("action", 7)])
@@ -1185,7 +1309,7 @@ def test_mutating_nemo_api_validates_params_before_approval(monkeypatch: pytest.
 
 
 def test_nemo_api_rejects_non_object_params(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(register, "_clients", {"default": SimpleNamespace(workspaces=SimpleNamespace(list=lambda: []))})
+    _install_client(monkeypatch, _FakeHelix().client())
 
     response = register.nemo_api("workspaces", "list", '["not", "an", "object"]', workspace="default")
 
@@ -1194,21 +1318,31 @@ def test_nemo_api_rejects_non_object_params(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_nemo_api_uses_request_workspace_for_each_client(monkeypatch: pytest.MonkeyPatch) -> None:
     created_workspaces: list[str] = []
+    seen_paths: list[str] = []
 
-    def create_client(**kwargs: object) -> object:
-        workspace = str(kwargs["workspace"])
+    def build_client(*, base_url: str, workspace: str) -> NemoClient:
         created_workspaces.append(workspace)
-        return SimpleNamespace(models=SimpleNamespace(list=lambda: [workspace]))
 
+        def handle(request: httpx.Request) -> httpx.Response:
+            seen_paths.append(request.url.path)
+            return _page([_entity(f"model-in-{workspace}", workspace=workspace)])
+
+        return mock_nemo_client(handle, NemoClient, workspace=workspace)
+
+    monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     monkeypatch.setattr(register, "_clients", {})
-    monkeypatch.setattr(register, "NeMoHelix", create_client)
+    monkeypatch.setattr(register, "build_direct_nemo_client", build_client)
 
     first = json.loads(register.nemo_api("models", "list", workspace="first"))
     second = json.loads(register.nemo_api("models", "list", workspace="second"))
 
-    assert first == ["first"]
-    assert second == ["second"]
+    assert first["data"][0]["name"] == "model-in-first"
+    assert second["data"][0]["name"] == "model-in-second"
     assert created_workspaces == ["first", "second"]
+    assert seen_paths == [
+        "/apis/models/v2/workspaces/first/models",
+        "/apis/models/v2/workspaces/second/models",
+    ]
 
 
 def test_nemo_api_requires_request_workspace() -> None:
@@ -1226,7 +1360,7 @@ def test_get_client_prefers_platform_base_url(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setenv("NHX_BASE_URL", "http://platform:8080")
     monkeypatch.setenv("NEMO_BASE_URL", "http://model-gateway:8000")
-    monkeypatch.setattr(register, "NeMoHelix", fake_client)
+    monkeypatch.setattr(register, "build_direct_nemo_client", fake_client)
     monkeypatch.setattr(register, "_clients", {})
 
     register._get_client("default")
@@ -1234,61 +1368,63 @@ def test_get_client_prefers_platform_base_url(monkeypatch: pytest.MonkeyPatch) -
     assert created_with == {"workspace": "default", "base_url": "http://platform:8080"}
 
 
+def test_get_client_reads_the_active_cli_context_without_a_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_with: dict[str, object] = {}
+
+    def fake_client(**kwargs: object) -> object:
+        created_with.update(kwargs)
+        return object()
+
+    monkeypatch.delenv("NHX_BASE_URL", raising=False)
+    monkeypatch.delenv("NEMO_BASE_URL", raising=False)
+    monkeypatch.setattr(register, "build_nemo_client", fake_client)
+    monkeypatch.setattr(register, "_clients", {})
+
+    register._get_client("default")
+
+    assert created_with == {"workspace": "default"}
+
+
+_JOB_STATUS = {
+    "id": "job-id",
+    "name": "job-1",
+    "status": "completed",
+    "status_details": {},
+    "error_details": None,
+    "steps": [],
+    "created_at": _TIMESTAMP,
+    "updated_at": _TIMESTAMP,
+}
+
+
 @pytest.mark.parametrize(
-    ("service", "client", "expected"),
+    ("service", "path", "payload"),
     [
-        (
-            "evaluator",
-            SimpleNamespace(
-                evaluator=SimpleNamespace(
-                    get_job_resource=lambda name: SimpleNamespace(
-                        get_job_status=lambda: {"name": name, "status": "done"}
-                    )
-                )
-            ),
-            {"name": "job-1", "status": "done"},
-        ),
-        (
-            "data_designer",
-            SimpleNamespace(
-                data_designer=SimpleNamespace(
-                    get_job_resource=lambda name: SimpleNamespace(
-                        get_job_status=lambda: {"name": name, "status": "done"}
-                    )
-                )
-            ),
-            {"name": "job-1", "status": "done"},
-        ),
-        (
-            "auditor",
-            SimpleNamespace(auditor=SimpleNamespace(get_job=lambda name: {"name": name, "status": "done"})),
-            {"name": "job-1", "status": "done"},
-        ),
-        (
-            "customization.automodel",
-            SimpleNamespace(
-                customization=SimpleNamespace(
-                    automodel=SimpleNamespace(
-                        jobs=SimpleNamespace(
-                            get_job_resource=lambda name: SimpleNamespace(
-                                get_status=lambda: {"name": name, "status": "done"}
-                            )
-                        )
-                    )
-                )
-            ),
-            {"name": "job-1", "status": "done"},
-        ),
+        ("evaluator", "/apis/evaluator/v2/workspaces/default/evaluate/jobs/job-1/status", _JOB_STATUS),
+        ("data_designer", "/apis/data-designer/v2/workspaces/default/jobs/create/job-1/status", _JOB_STATUS),
+        ("auditor", "/apis/auditor/v2/workspaces/default/jobs/audit/job-1", {"name": "job-1", "status": "completed"}),
+        ("customization.automodel", "/apis/jobs/v2/workspaces/default/jobs/job-1/status", _JOB_STATUS),
     ],
 )
-def test_check_status_uses_service_job_resource(
-    monkeypatch: pytest.MonkeyPatch, service: str, client: object, expected: dict[str, str]
+def test_check_status_reads_the_service_job(
+    monkeypatch: pytest.MonkeyPatch, service: str, path: str, payload: dict[str, Any]
 ) -> None:
-    monkeypatch.setattr(register, "_clients", {"default": client})
+    platform = _ok_helix("GET", path, payload)
+    _install_client(monkeypatch, platform.client())
 
     response = json.loads(register.check_status(service, "job-1", workspace="default"))
 
-    assert response == expected
+    assert response["name"] == "job-1"
+    assert response["status"] == "completed"
+    assert [request.url.path for request in platform.requests] == [path]
+
+
+def test_check_status_reports_platform_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_client(monkeypatch, _FakeHelix().client())
+
+    response = register.check_status("evaluator", "missing", workspace="default")
+
+    assert response.startswith("Error: NotFoundError:")
 
 
 def test_studio_callback_url_validates_session(monkeypatch: pytest.MonkeyPatch) -> None:

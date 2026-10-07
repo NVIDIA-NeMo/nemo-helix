@@ -33,7 +33,6 @@ from typing import Any
 import pytest
 from nemo_deployments_plugin.backends.labels import container_name as plugin_container_name
 from nemo_deployments_plugin.backends.labels import docker_volume_name
-from nemo_helix.types.inference.virtual_model import VirtualModel as SDKVirtualModel
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.inference_gateway.types import JsonBody
@@ -44,6 +43,7 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
     CreateModelDeploymentConfigRequest,
@@ -322,15 +322,9 @@ def _inject_vm_and_plugins(
     registry.response_middleware_calls[(workspace, vm_name)] = [_make_call(k) for k, _ in response_plugins]
     registry.post_response_middleware_calls[(workspace, vm_name)] = []
 
-    vm = SDKVirtualModel(
-        id=f"{workspace}/{vm_name}",
-        entity_id=f"{workspace}/{vm_name}",
+    vm = VirtualModel(
         name=vm_name,
         workspace=workspace,
-        parent=workspace,
-        db_version=1,
-        created_at="2026-01-01T00:00:00Z",
-        updated_at="2026-01-01T00:00:00Z",
         default_model_entity=default_model_entity,
     )
     existing = list(vm_cache.virtual_model_map.values())

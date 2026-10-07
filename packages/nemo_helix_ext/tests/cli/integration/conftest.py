@@ -18,9 +18,7 @@ from typing import Generator
 
 import pytest
 from click.testing import Result
-from nemo_helix import NeMoHelix
 from nemo_helix_ext.cli.core.context import CLIContext
-from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
@@ -49,7 +47,7 @@ def assert_exit_code() -> Callable[[Result, int], None]:
 
 @pytest.fixture(scope="module")
 def client_context() -> Generator[ClientContext, None, None]:
-    """ClientContext with the Auth, Files and Models services and ASGI-backed SDK clients."""
+    """ClientContext with the Auth, Files and Models services and ASGI-backed typed clients."""
     with create_test_client(AuthService, FilesService, ModelsService, client_type=ClientContext) as context:
         yield context
 
@@ -61,25 +59,19 @@ def http_client(client_context: ClientContext) -> TestClient:
 
 
 @pytest.fixture(scope="module")
-def sdk(client_context: ClientContext) -> NeMoHelix:
-    """SDK client backed by the test client."""
-    return client_context.sdk
-
-
-@pytest.fixture(scope="module")
-def nemo_client(sdk: NeMoHelix) -> NemoClient:
+def nemo_client(client_context: ClientContext) -> NemoClient:
     """Typed platform client sharing the ASGI-backed transport; what the CLI holds at runtime."""
-    return client_from_platform(sdk, NemoClient)
+    return client_context.client
 
 
 @pytest.fixture(scope="module")
-def files_client(sdk: NeMoHelix) -> FilesClient:
-    """Provide a FilesClient derived from the SDK."""
-    return client_from_platform(sdk, FilesClient)
+def files_client(nemo_client: NemoClient) -> FilesClient:
+    """Provide a FilesClient sharing the test client's transport."""
+    return FilesClient.from_client(nemo_client)
 
 
 @pytest.fixture
-def random_workspace(sdk: NeMoHelix) -> str:
+def random_workspace(nemo_client: NemoClient) -> str:
     """
     Create a random workspace for tests.
 
@@ -87,7 +79,7 @@ def random_workspace(sdk: NeMoHelix) -> str:
     service dependency to make tests faster, but that requires unique workspace names for isolation.
     """
     workspace_name = f"test-{uuid.uuid4().hex[:8]}"
-    client_from_platform(sdk, WorkspacesClient).create_workspace(
+    WorkspacesClient.from_client(nemo_client).create_workspace(
         body=CreateWorkspaceRequest(name=workspace_name, description=f"Test Workspace {workspace_name}")
     ).data()
     return workspace_name

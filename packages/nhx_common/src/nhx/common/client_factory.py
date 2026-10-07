@@ -3,9 +3,9 @@
 
 """Rich NemoClient factory backed by platform internals.
 
-This is the :class:`~nemo_helix_plugin.client.client.NemoClient` sibling of
-:mod:`nhx.common.sdk_factory`.  It builds typed clients that reuse the same
-platform machinery the SDK factory uses:
+Builds :class:`~nemo_helix_plugin.client.client.NemoClient` /
+:class:`~nemo_helix_plugin.client.client.AsyncNemoClient` handles for services,
+controllers, and tasks running inside the platform, using:
 
 - base URL from :class:`~nhx.common.config.Configuration`;
 - per-service URL routing via :class:`~nhx.common.platform_endpoint.HelixEndpoint`;
@@ -21,17 +21,39 @@ discovers it automatically whenever ``nhx-common`` is installed.
 from __future__ import annotations
 
 import logging
+from typing import TypeVar
 
 import httpx
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient, NemoClientRuntime
+from nemo_helix_plugin.client.client import AsyncNemoClient, BaseNemoClient, NemoClient, NemoClientRuntime
 from nemo_helix_plugin.client.constants import is_workload_identity_token_file_set
+from nemo_helix_plugin.client.types import RetryPolicy
 from nhx.common.auth.models import Principal
 from nhx.common.auth.tasks import principal_from_env
 from nhx.common.client_runtime import build_platform_client_runtime
-from nhx.common.platform_client_context import HelixClientContext, build_platform_client_context
+from nhx.common.platform_client_context import (
+    DELEGATED_PRINCIPAL_HEADERS,
+    PRINCIPAL_OBO_HEADER,
+    HelixClientContext,
+    build_platform_client_context,
+    delegated_principal_headers,
+)
 from nhx.common.platform_endpoint import HelixEndpoint, resolve_platform_endpoint
 
 logger = logging.getLogger(__name__)
+
+#: Default retry behavior for platform clients, matching the generated SDK's
+#: contract: up to 2 retries with exponential backoff on request timeouts
+#: (408), lock conflicts (409), rate limits (429) and server errors (>=500),
+#: honoring the server's ``Retry-After`` and ``x-should-retry`` verdicts.
+DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    retryable_status_codes=(408, 409, 429),
+    retry_all_server_errors=True,
+    respect_retry_after_headers=True,
+    respect_retry_decision_headers=True,
+)
+
+ClientT = TypeVar("ClientT", bound=BaseNemoClient)
 
 
 def _unrouted_endpoint(context: HelixClientContext) -> HelixEndpoint:
@@ -53,24 +75,28 @@ def _sync_nemo_http_client(
     context: HelixClientContext,
     http_client: httpx.Client | None,
     base_url: str | None,
+    *,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
 ) -> httpx.Client:
-    if base_url is None:
-        return context.runtime_context.sync_nemo_http_client(http_client=http_client)
     if http_client is not None:
         return http_client
-    return _unrouted_endpoint(context).sync_sdk_http_client()
+    endpoint = context.endpoint if base_url is None else _unrouted_endpoint(context)
+    return endpoint.sync_sdk_http_client(limits=limits, follow_redirects=follow_redirects)
 
 
 def _async_nemo_http_client(
     context: HelixClientContext,
     http_client: httpx.AsyncClient | None,
     base_url: str | None,
+    *,
+    limits: httpx.Limits | None,
+    follow_redirects: bool | None,
 ) -> httpx.AsyncClient:
-    if base_url is None:
-        return context.runtime_context.async_nemo_http_client(http_client=http_client)
     if http_client is not None:
         return http_client
-    return _unrouted_endpoint(context).async_sdk_http_client()
+    endpoint = context.endpoint if base_url is None else _unrouted_endpoint(context)
+    return endpoint.async_sdk_http_client(limits=limits, follow_redirects=follow_redirects)
 
 
 def get_nemo_client(
@@ -81,6 +107,10 @@ def get_nemo_client(
     workspace: str | None = None,
     http_client: httpx.Client | None = None,
     base_url: str | None = None,
+    timeout: float | httpx.Timeout | None = None,
+    limits: httpx.Limits | None = None,
+    follow_redirects: bool | None = None,
+    retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
 ) -> NemoClient:
     """Build a sync :class:`NemoClient` configured with platform internals.
 
@@ -97,12 +127,20 @@ def get_nemo_client(
         http_client: Optional sync HTTP client; defaults to an endpoint-aware client.
         base_url: Optional platform base URL; defaults to the configured endpoint.
             Requests go to it directly instead of through service endpoint routing.
+        timeout: Per-request timeout applied by the client (also honoured when
+            ``http_client`` is shared).
+        limits: Connection-pool limits for the HTTP client built by this factory.
+            Ignored when ``http_client`` is supplied.
+        follow_redirects: Redirect policy for the HTTP client built by this
+            factory. Ignored when ``http_client`` is supplied.
+        retry: Client-level retry policy; defaults to :data:`DEFAULT_RETRY_POLICY`.
+            ``None`` disables retries.
 
     Note:
         OTEL trace-propagation headers are captured once, at construction, from
         the current request context.  Build a fresh client per request scope
         rather than caching one across requests, or its ``traceparent`` will be
-        stale (mirrors ``get_platform_sdk``).
+        stale.
     """
     context = build_platform_client_context(
         base_url=base_url,
@@ -118,7 +156,11 @@ def get_nemo_client(
         workspace=workspace,
         auth=context.nemo_client_auth(),
         default_headers=context.default_headers_or_none(),
-        http_client=_sync_nemo_http_client(context, http_client, base_url),
+        timeout=timeout,
+        retry=retry,
+        http_client=_sync_nemo_http_client(
+            context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
+        ),
         client_runtime=_nemo_client_runtime(context, base_url),
     )
 
@@ -131,6 +173,10 @@ def get_async_nemo_client(
     workspace: str | None = None,
     http_client: httpx.AsyncClient | None = None,
     base_url: str | None = None,
+    timeout: float | httpx.Timeout | None = None,
+    limits: httpx.Limits | None = None,
+    follow_redirects: bool | None = None,
+    retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
@@ -151,8 +197,30 @@ def get_async_nemo_client(
         workspace=workspace,
         auth=context.nemo_client_auth(),
         default_headers=context.default_headers_or_none(),
-        http_client=_async_nemo_http_client(context, http_client, base_url),
+        timeout=timeout,
+        retry=retry,
+        http_client=_async_nemo_http_client(
+            context, http_client, base_url, limits=limits, follow_redirects=follow_redirects
+        ),
         client_runtime=_nemo_client_runtime(context, base_url),
+    )
+
+
+def get_nemo_client_on_behalf_of(client: ClientT, on_behalf_of: str | Principal) -> ClientT:
+    """Return a copy of *client* that acts on behalf of *on_behalf_of*.
+
+    Replaces any ``X-NHX-Principal-On-Behalf-Of*`` / ``X-NHX-Subject-*`` default
+    headers on *client* with the delegated identity and keeps every other
+    header. The copy shares the transport of *client* and keeps its type, so a
+    typed service client (e.g. ``AsyncSecretsClient``) stays typed.
+
+    Delegation is expressed with trusted headers. A client that authenticates
+    with a service workload token carries its delegated identity in the token;
+    build that one with ``get_async_nemo_client(as_service=..., on_behalf_of=...)``
+    instead.
+    """
+    return client.without_headers((PRINCIPAL_OBO_HEADER, *DELEGATED_PRINCIPAL_HEADERS)).with_headers(
+        delegated_principal_headers(on_behalf_of)
     )
 
 
@@ -164,8 +232,7 @@ def get_task_nemo_client(
 ) -> NemoClient:
     """Build a sync :class:`NemoClient` for use inside a task container.
 
-    NemoClient counterpart of :func:`nhx.common.sdk_factory.get_task_sdk`:
-    reads the job creator's principal from ``NHX_PRINCIPAL`` and authenticates
+    Reads the job creator's principal from ``NHX_PRINCIPAL`` and authenticates
     as ``service:{service_name}`` while acting on behalf of that creator, or --
     when ``NHX_WORKLOAD_IDENTITY_TOKEN_FILE`` is set -- bootstraps
     workload-identity bearer-token exchange (via :func:`get_nemo_client` with

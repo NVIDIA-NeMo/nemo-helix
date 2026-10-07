@@ -3,8 +3,7 @@
 
 """Typed endpoint definitions for the Evaluator service.
 
-Single source of truth for the HTTP contract. Replaces the hand-written
-``nemo_evaluator.sdk`` resource layer's direct ``NeMoHelix._client`` usage.
+Single source of truth for the HTTP contract.
 
 The evaluator's high-level ``submit()`` convenience method (with its overloaded
 signatures for row vs. taskset evaluation) stays in the SDK layer — it packages

@@ -84,6 +84,7 @@ from nemo_agents_plugin.entities import (
     AgentSession,
     SessionStatus,
     ethos_fileset_name,
+    supports_image_entrypoint,
 )
 from nemo_agents_plugin.leaderboard.cli import register_leaderboard_commands
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
@@ -123,7 +124,6 @@ from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_page
 from nemo_helix_plugin.cli_progress import request_progress
 from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
 from nemo_helix_plugin.cli_warnings import collect_warnings
-from nemo_helix_plugin.client.adapter import SyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
     NemoClientError,
@@ -136,7 +136,7 @@ from nemo_helix_plugin.client.errors import (
 from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoResponse
 from nemo_helix_plugin.discovery import AGENT_CLI_GROUP, discover_entry_points
 from nemo_helix_plugin.files.client import FilesClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from typer.main import get_command as _typer_get_command
 
 logger = logging.getLogger(__name__)
@@ -1172,13 +1172,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         mode: str = typer.Option(
             "subprocess",
             "--mode",
-            help="Runtime backend: subprocess (default), docker, or k8s.",
+            help="Runtime backend: subprocess (default), docker, k8s, or openshell.",
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes (falls back to deployments.default_image).",
+            help="Container image for docker/k8s/openshell modes (falls back to deployments.default_image).",
         ),
         use_image_entrypoint: bool = typer.Option(
             False,
@@ -1227,9 +1227,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
         scripted pipelines that prefer to poll separately via ``nemo agents
         deployments wait``.
 
-        Container modes (``--mode docker|k8s``) compile to the nemo-deployments
+        Container modes (``--mode docker|k8s|openshell``) compile to the nemo-deployments
         plugin. Requires a configured deployments executor (``deployments.executors``
-        / ``agents.deployments.docker_executor`` or ``k8s_executor``). Container
+        / ``agents.deployments.docker_executor``, ``k8s_executor``, or ``openshell_executor``). Container
         endpoint gateway routing and the full k8s runtime contract (in-cluster
         inference gateway, wheel staging) are still evolving — docker mode is the
         supported local path today.
@@ -1240,10 +1240,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if image and mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if use_image_entrypoint and mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if use_image_entrypoint and not supports_image_entrypoint(mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
 
         base_url = _resolve_base_url()
@@ -1306,14 +1306,18 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--mode",
             help=(
-                "Runtime backend: subprocess, docker, or k8s. Auto-detected from the existing deployment when omitted."
+                "Runtime backend: subprocess, docker, k8s, or openshell. "
+                "Auto-detected from the existing deployment when omitted."
             ),
         ),
         image: Optional[str] = typer.Option(
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s modes. Auto-detected from the existing deployment when omitted.",
+            help=(
+                "Container image for docker/k8s/openshell modes. "
+                "Auto-detected from the existing deployment when omitted."
+            ),
         ),
         use_image_entrypoint: Optional[bool] = typer.Option(
             None,
@@ -1422,10 +1426,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
-            typer.echo("--image requires --mode docker or k8s.", err=True)
+            typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if resolved_use_entrypoint and resolved_mode == "subprocess":
-            typer.echo("--use-image-entrypoint requires --mode docker or k8s.", err=True)
+        if resolved_use_entrypoint and not supports_image_entrypoint(resolved_mode):
+            typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
         if resolved_environment is not None and not str(resolved_environment).strip():
             resolved_environment = None
@@ -1687,6 +1691,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             no_truncate=no_truncate,
             columns=columns,
             all_pages=all_pages,
+            project_display_rows=_project_deployment_display_endpoints,
         )
 
     @deps_app.command(name="get")
@@ -2116,17 +2121,48 @@ def _register_environment_commands(app: typer.Typer) -> None:
 # ---------------------------------------------------------------------------
 
 _TERMINAL_STATUSES = {"running", "failed"}
+_TABULAR_LIST_FORMATS = frozenset({"table", "markdown", "csv"})
+_HTTP_ENDPOINT_PROTOCOLS = frozenset({"http", "https"})
 
 
 def _deployment_address(dep: dict[str, Any]) -> str:
-    """Best-effort address for CLI output (loopback endpoint or first projected URL)."""
+    """Address shown for a deployment: scalar endpoint, else a projected URL.
+
+    Container modes leave ``endpoint`` empty and store the routable address in
+    ``endpoints``. Prefer the first HTTP(S) URL, then any URL, so displayed
+    output matches the address invoke would use.
+    """
     endpoint = dep.get("endpoint")
     if isinstance(endpoint, str) and endpoint:
         return endpoint
+    fallback = ""
     for ep in dep.get("endpoints") or []:
-        if isinstance(ep, dict) and ep.get("url"):
-            return str(ep["url"])
-    return ""
+        if not isinstance(ep, dict):
+            continue
+        url = ep.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        if ep.get("protocol") in _HTTP_ENDPOINT_PROTOCOLS:
+            return url
+        if not fallback:
+            fallback = url
+    return fallback
+
+
+def _project_deployment_display_endpoints(response: Any) -> None:
+    """Copy a display URL onto in-memory list rows. Does not persist the entity."""
+    items = response.get("data") if isinstance(response, dict) else getattr(response, "data", None)
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if isinstance(item, dict):
+            address = _deployment_address(item)
+            if address:
+                item["endpoint"] = address
+        elif isinstance(item, BaseModel):
+            address = _deployment_address(item.model_dump(mode="json"))
+            if address:
+                item.endpoint = address
 
 
 def _wait_for_deployment(
@@ -2748,8 +2784,13 @@ def _print_list(
     no_truncate: bool | None,
     columns: str | None,
     all_pages: bool,
+    project_display_rows: Callable[[Any], None] | None = None,
 ) -> None:
-    """Run one ``AgentsClient`` list *method* and render it like every other ``nemo`` list command."""
+    """Run one ``AgentsClient`` list *method* and render it like every other ``nemo`` list command.
+
+    *project_display_rows*, when given, rewrites the collected rows in memory before
+    table, markdown, or CSV rendering; JSON and YAML output keep the server's rows.
+    """
     resolved_output_format = resolve_output_format(ctx, output_format)
     check_output_columns_with_format(columns, resolved_output_format)
     if resolved_output_format == "code":
@@ -2766,6 +2807,8 @@ def _print_list(
         "GET agent API",
         lambda: collect_offset_pages(getattr(client, method)(**kwargs), all_pages=all_pages),
     )
+    if project_display_rows is not None and resolved_output_format in _TABULAR_LIST_FORMATS:
+        project_display_rows(result)
     format_output(
         result,
         is_list=True,
@@ -2960,14 +3003,14 @@ def _collect_text_agent_artifacts(
 
 def _clear_existing_ethos_artifacts(
     *,
-    sdk: SyncHelixClient,
+    client: NemoClient,
     fileset: str,
     workspace: str,
 ) -> None:
     """Remove the previous executable snapshot while preserving durable Ethos."""
 
     preserved = {ETHOS_FILENAME}
-    files_client = client_from_platform(sdk, FilesClient)
+    files_client = FilesClient.from_client(client)
 
     try:
         existing = files_client.list_files(name=fileset, workspace=workspace).data().data
@@ -2987,6 +3030,11 @@ def _clear_existing_ethos_artifacts(
 
 _LIVE_DEPLOYMENT_STATUSES = frozenset({"pending", "starting", "running"})
 """Deployment statuses that represent a live deployment worth undeploying."""
+
+_USE_IMAGE_ENTRYPOINT_MODE_ERROR = (
+    "--use-image-entrypoint requires --mode docker or k8s. The openshell sandbox does not run "
+    "the image ENTRYPOINT/CMD, so --mode openshell needs the platform-injected serve command."
+)
 
 
 def _redeploy_recovery_hint(agent: str, agent_config: Path, *, stage: str, workspace: str) -> None:
@@ -3163,7 +3211,7 @@ def _upload_ethos_fileset(
         # fileset. The durable Ethos contract survives even when it is absent
         # from this executable snapshot.
         _clear_existing_ethos_artifacts(
-            sdk=sdk,
+            client=sdk,
             fileset=fileset,
             workspace=workspace,
         )

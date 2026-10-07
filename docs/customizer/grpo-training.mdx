@@ -10,7 +10,7 @@ GRPO (Group Relative Policy Optimization) trains a model against a **reward envi
 
 That last part is why GRPO behaves differently from every other customization method here: the learning signal is the *spread* of rewards inside a group. If every response to a prompt earns the same score, that prompt contributes nothing.
 
-GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
+GRPO runs on the `rl` backend, the same one that runs DPO, and requires a NeMo Helix deployment configured with `platform.runtime: kubernetes` — it provisions a Ray cluster and has no local Docker fallback.
 
 ## What you need
 
@@ -82,7 +82,7 @@ There are two installs at job start:
 | --- | --- | --- |
 | `native-v1` | A package index, resolved from the server's `requirements.txt` | Yes |
 | `wheels-v1` | The package's `wheels/`, for anything it vendors | No, **if the closure also covers step 1** |
-| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | Yes — see below |
+| `adapter-wheels-v1` | The package's `wheels/`, plus the agent harness's own requirements | No, when built by the converter |
 
 A `wheels-v1` job runs with no egress only when `wheels/` carries all of:
 
@@ -164,10 +164,11 @@ Use the same directory layout as `native-v1` — the server's own tree, copied f
 
 A `verifiers` environment — a Prime Intellect hub package, for example — is the one case with a scripted path. `pi-to-gym-conversion` downloads the package, vendors its full wheel closure, writes the configs and manifest, and builds the prompt JSONL.
 
-Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only. From a platform install the converter is on `PATH`; from this repository:
+Run it on a machine with internet access. Training clusters have no hub egress and consume uploaded FileSets only. From a source checkout, create a dedicated conversion environment once so the optional `conversion` dependencies are installed without changing the Platform runtime environment. Keep it separate because conversion installs the downloaded hub package and `verifiers` into the interpreter that runs the converter; using the repo `.venv` can both prune those packages on the next sync and pollute the platform development environment.
 
 ```bash
-uv run --package nhx-rl pi-to-gym-conversion \
+UV_PROJECT_ENVIRONMENT=.venv-conversion uv sync --package nhx-rl --extra conversion
+.venv-conversion/bin/pi-to-gym-conversion \
   --hub-id primeintellect/ascii-tree \
   --hub-version 0.1.5 \
   --out-dir ./ascii-tree-pkg \
@@ -507,7 +508,7 @@ GRPO fails at submit, before any GPU is claimed, unless the platform operator ha
 | --- | --- |
 | `NHX_SANDBOX_CLUSTER_CAPABLE=true` (Helm: `sandboxClusterCapable`) | Declares that OpenSandbox is installed. The platform chart does **not** install it. GRPO defaults to sandboxed Gym (`NHX_RL_SANDBOXED_GYM_DEFAULT`) and fails closed without this |
 | `NHX_RL_JOB_STORAGE_PVC_CLAIM` | The Gym sandbox mounts the job-storage claim itself to read the downloaded environment and dataset, and only learns the claim by name |
-| `NHX_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — which is every `native-v1` package, and every `adapter-wheels-v1` one |
+| `NHX_RL_SANDBOX_ALLOW_INTERNET` | Needed whenever an environment's venv build has to reach a package index — every `native-v1` package and any wheels package whose closure is incomplete. Converter-built `adapter-wheels-v1` packages do not need it at job start. |
 | `NHX_RL_SANDBOX_PUBLIC_DNS_ALLOW` | Extra hosts, consulted only when the above is on. The built-in allowance covers `*.com` and `*.org`, so a host on another TLD (for example `hub.primeintellect.ai`) must be named |
 
 If a submit fails on either of the first two, that is a platform configuration gap, not a problem with your package. Neither is settable per job.

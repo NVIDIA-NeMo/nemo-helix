@@ -30,9 +30,11 @@ import {
   type AgentEvaluateJobsListFilter,
   AgentEvaluateJobsSortField,
 } from '@nemo/sdk/generated/evaluator/schema';
-import { Button } from '@nvidia/foundations-react-core';
+import { Button, Flex } from '@nvidia/foundations-react-core';
 import { agentNameForJob, evalConfigName } from '@studio/api/evaluation/agent-evaluations';
+import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
+import { EvalRunOutcomeBadge } from '@studio/components/evaluation/EvalRunOutcomeBanner';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getAgentEvaluationDetailRoute, getFilesetRoute } from '@studio/routes/utils';
@@ -174,7 +176,12 @@ export const AgentEvaluationsDataView = () => {
           options: STATUS_OPTIONS_WITH_ALL,
         },
       },
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      cell: ({ row }) => (
+        <Flex align="center" gap="density-xs" className="flex-wrap">
+          <StatusBadge status={row.original.status} />
+          <EvalRunOutcomeBadge outcome={evalRunOutcomeOf(row.original.status_details)} />
+        </Flex>
+      ),
     }),
     accessor((original) => original?.created_at || '', {
       id: 'created_at',

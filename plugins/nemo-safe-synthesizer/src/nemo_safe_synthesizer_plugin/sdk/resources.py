@@ -5,198 +5,175 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-from urllib.parse import quote
+from typing import cast
 
-import httpx
-from nemo_helix import AsyncNeMoHelix, NeMoHelix
-from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.client.adapter import AsyncHelixClient, SyncHelixClient, client_from_platform
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
-from nemo_helix_plugin.jobs.schemas import HelixJobLogPage
+from nemo_helix_plugin.jobs.schemas import HelixJobLogPage, HelixJobStatusResponse
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
-from nemo_safe_synthesizer_plugin.sdk import http_utils
+from nemo_safe_synthesizer_plugin.sdk.client import AsyncSafeSynthesizerClient, SafeSynthesizerClient
+from nemo_safe_synthesizer_plugin.sdk.types import (
+    CreateSafeSynthesizerJobRequest,
+    JsonMap,
+    ListSafeSynthesizerJobsQueryParams,
+    SafeSynthesizerJobResponse,
+)
+
+
+def _create_request(
+    *,
+    spec: JsonMap,
+    name: str | None,
+    project: str | None,
+    description: str | None,
+    ownership: JsonMap | None,
+    custom_fields: JsonMap | None,
+) -> CreateSafeSynthesizerJobRequest:
+    request = CreateSafeSynthesizerJobRequest(spec=spec)
+    # Only fields the caller set are sent; the body serializes with exclude_unset.
+    if name is not None:
+        request.name = name
+    if project is not None:
+        request.project = project
+    if description is not None:
+        request.description = description
+    if ownership is not None:
+        request.ownership = ownership
+    if custom_fields is not None:
+        request.custom_fields = custom_fields
+    return request
+
+
+def _list_query_params(params: dict[str, object]) -> ListSafeSynthesizerJobsQueryParams | None:
+    query_params = {key: value for key, value in params.items() if value is not None}
+    return cast(ListSafeSynthesizerJobsQueryParams, query_params) or None
+
+
+def _log_query_params(params: dict[str, object]) -> JobLogsQueryParams | None:
+    query_params = {key: value for key, value in params.items() if value is not None}
+    return cast(JobLogsQueryParams, query_params) or None
 
 
 class SafeSynthesizerJobsResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
-        self._platform = platform
-        self._http_client = platform._client
+    def __init__(self, client: NemoClient) -> None:
+        self._client = client
+        self._safe_synthesizer = SafeSynthesizerClient.from_client(client)
+        self._jobs = JobsClient.from_client(client)
 
     def create(
         self,
         *,
-        spec: dict[str, Any],
+        spec: JsonMap,
         workspace: str | None = None,
         name: str | None = None,
         project: str | None = None,
         description: str | None = None,
-        ownership: dict[str, object] | None = None,
-        custom_fields: dict[str, object] | None = None,
+        ownership: JsonMap | None = None,
+        custom_fields: JsonMap | None = None,
         timeout: float | None = None,
-    ) -> Any:
+    ) -> SafeSynthesizerJobResponse:
         """Create a Safe Synthesizer platform job through the plugin route."""
-        payload: dict[str, Any] = {"spec": spec}
-        if name is not None:
-            payload["name"] = name
-        if project is not None:
-            payload["project"] = project
-        if description is not None:
-            payload["description"] = description
-        if ownership is not None:
-            payload["ownership"] = ownership
-        if custom_fields is not None:
-            payload["custom_fields"] = custom_fields
-
-        response = self._http_client.post(
-            http_utils.url(self._platform, "/v2/workspaces/{workspace}/jobs", workspace),
-            json=payload,
-            headers=http_utils.platform_default_headers(self._platform),
-            timeout=timeout,
+        body = _create_request(
+            spec=spec,
+            name=name,
+            project=project,
+            description=description,
+            ownership=ownership,
+            custom_fields=custom_fields,
         )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
+        safe_synthesizer = self._safe_synthesizer.with_options(timeout=timeout)
+        return safe_synthesizer.create_job(workspace=self._client.resolve_workspace(workspace), body=body).data()
 
-    def list(self, *, workspace: str | None = None, **params: Any) -> Any:
+    def list(
+        self, *, workspace: str | None = None, **params: object
+    ) -> NemoPaginatedResponse[SafeSynthesizerJobResponse]:
         """List Safe Synthesizer jobs."""
-        response = self._http_client.get(
-            http_utils.url(self._platform, "/v2/workspaces/{workspace}/jobs", workspace),
-            params={key: value for key, value in params.items() if value is not None},
-            headers=http_utils.platform_default_headers(self._platform),
+        return self._safe_synthesizer.list_jobs(
+            workspace=self._client.resolve_workspace(workspace),
+            query_params=_list_query_params(params),
         )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
 
-    def retrieve(self, name: str, *, workspace: str | None = None) -> Any:
+    def retrieve(self, name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
         """Retrieve one Safe Synthesizer job by name."""
-        response = self._http_client.get(
-            http_utils.url(
-                self._platform,
-                f"/v2/workspaces/{{workspace}}/jobs/{quote(name, safe='')}",
-                workspace,
-            ),
-            headers=http_utils.platform_default_headers(self._platform),
-        )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
+        return self._safe_synthesizer.get_job(workspace=self._client.resolve_workspace(workspace), name=name).data()
 
-    def get_status(self, name: str, *, workspace: str | None = None) -> Any:
+    def get_status(self, name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
         """Retrieve Safe Synthesizer job status."""
-        return client_from_platform(self._platform, JobsClient).get_job_status(name=name, workspace=workspace).data()
+        return self._jobs.get_job_status(name=name, workspace=workspace).data()
 
-    def get_logs(
-        self,
-        name: str,
-        *,
-        workspace: str | None = None,
-        **params: Any,
-    ) -> Any:
+    def get_logs(self, name: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
         """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
-        query_params = {key: value for key, value in params.items() if value is not None}
-        page = (
-            client_from_platform(self._platform, JobsClient)
-            .list_job_logs(
-                name=name,
-                workspace=workspace,
-                query_params=cast(JobLogsQueryParams, query_params) or None,
-            )
-            .page()
-        )
+        page = self._jobs.list_job_logs(name=name, workspace=workspace, query_params=_log_query_params(params)).page()
         return HelixJobLogPage(data=page.items, **page.metadata)
 
 
 class SafeSynthesizerResource:
     """Sync SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: NeMoHelix) -> None:
-        self._platform = platform
-        self.jobs = SafeSynthesizerJobsResource(platform)
+    def __init__(self, client: NemoClient) -> None:
+        self.jobs = SafeSynthesizerJobsResource(client)
 
 
 class AsyncSafeSynthesizerJobsResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer.jobs``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
-        self._platform = platform
-        self._http_client = platform._client
+    def __init__(self, client: AsyncNemoClient) -> None:
+        self._client = client
+        self._safe_synthesizer = AsyncSafeSynthesizerClient.from_client(client)
+        self._jobs = AsyncJobsClient.from_client(client)
 
     async def create(
         self,
         *,
-        spec: dict[str, Any],
+        spec: JsonMap,
         workspace: str | None = None,
         name: str | None = None,
         project: str | None = None,
         description: str | None = None,
-        ownership: dict[str, object] | None = None,
-        custom_fields: dict[str, object] | None = None,
+        ownership: JsonMap | None = None,
+        custom_fields: JsonMap | None = None,
         timeout: float | None = None,
-    ) -> Any:
+    ) -> SafeSynthesizerJobResponse:
         """Create a Safe Synthesizer platform job through the plugin route."""
-        payload: dict[str, Any] = {"spec": spec}
-        if name is not None:
-            payload["name"] = name
-        if project is not None:
-            payload["project"] = project
-        if description is not None:
-            payload["description"] = description
-        if ownership is not None:
-            payload["ownership"] = ownership
-        if custom_fields is not None:
-            payload["custom_fields"] = custom_fields
-
-        response = await self._http_client.post(
-            http_utils.url(self._platform, "/v2/workspaces/{workspace}/jobs", workspace),
-            json=payload,
-            headers=http_utils.platform_default_headers(self._platform),
-            timeout=timeout,
-        )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
-
-    async def list(self, *, workspace: str | None = None, **params: Any) -> Any:
-        """List Safe Synthesizer jobs."""
-        response = await self._http_client.get(
-            http_utils.url(self._platform, "/v2/workspaces/{workspace}/jobs", workspace),
-            params={key: value for key, value in params.items() if value is not None},
-            headers=http_utils.platform_default_headers(self._platform),
-        )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
-
-    async def retrieve(self, name: str, *, workspace: str | None = None) -> Any:
-        """Retrieve one Safe Synthesizer job by name."""
-        response = await self._http_client.get(
-            http_utils.url(
-                self._platform,
-                f"/v2/workspaces/{{workspace}}/jobs/{quote(name, safe='')}",
-                workspace,
-            ),
-            headers=http_utils.platform_default_headers(self._platform),
-        )
-        _raise_for_status(response)
-        return _object_from_mapping(response.json())
-
-    async def get_status(self, name: str, *, workspace: str | None = None) -> Any:
-        """Retrieve Safe Synthesizer job status."""
-        jobs = client_from_platform(self._platform, AsyncJobsClient)
-        return (await jobs.get_job_status(name=name, workspace=workspace)).data()
-
-    async def get_logs(
-        self,
-        name: str,
-        *,
-        workspace: str | None = None,
-        **params: Any,
-    ) -> Any:
-        """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
-        query_params = {key: value for key, value in params.items() if value is not None}
-        response = await client_from_platform(self._platform, AsyncJobsClient).list_job_logs(
+        body = _create_request(
+            spec=spec,
             name=name,
-            workspace=workspace,
-            query_params=cast(JobLogsQueryParams, query_params) or None,
+            project=project,
+            description=description,
+            ownership=ownership,
+            custom_fields=custom_fields,
+        )
+        safe_synthesizer = self._safe_synthesizer.with_options(timeout=timeout)
+        response = await safe_synthesizer.create_job(workspace=self._client.resolve_workspace(workspace), body=body)
+        return response.data()
+
+    async def list(
+        self, *, workspace: str | None = None, **params: object
+    ) -> AsyncNemoPaginatedResponse[SafeSynthesizerJobResponse]:
+        """List Safe Synthesizer jobs."""
+        return await self._safe_synthesizer.list_jobs(
+            workspace=self._client.resolve_workspace(workspace),
+            query_params=_list_query_params(params),
+        )
+
+    async def retrieve(self, name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+        """Retrieve one Safe Synthesizer job by name."""
+        response = await self._safe_synthesizer.get_job(workspace=self._client.resolve_workspace(workspace), name=name)
+        return response.data()
+
+    async def get_status(self, name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+        """Retrieve Safe Synthesizer job status."""
+        return (await self._jobs.get_job_status(name=name, workspace=workspace)).data()
+
+    async def get_logs(self, name: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+        """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
+        response = await self._jobs.list_job_logs(
+            name=name, workspace=workspace, query_params=_log_query_params(params)
         )
         page = response.page()
         return HelixJobLogPage(data=page.items, **page.metadata)
@@ -205,54 +182,19 @@ class AsyncSafeSynthesizerJobsResource:
 class AsyncSafeSynthesizerResource:
     """Async SDK namespace mounted as ``client.safe_synthesizer``."""
 
-    def __init__(self, platform: AsyncNeMoHelix) -> None:
-        self._platform = platform
-        self.jobs = AsyncSafeSynthesizerJobsResource(platform)
+    def __init__(self, client: AsyncNemoClient) -> None:
+        self.jobs = AsyncSafeSynthesizerJobsResource(client)
 
 
-def _object_from_mapping(value: Any) -> Any:
-    """Convert JSON objects into attribute-accessible objects recursively."""
-    if isinstance(value, dict):
-        return _SDKObject({str(key): _object_from_mapping(child) for key, child in value.items()})
-    if isinstance(value, list):
-        return [_object_from_mapping(child) for child in value]
-    return value
+def _make_sync_resource(platform: SyncHelixClient) -> SafeSynthesizerResource:
+    return SafeSynthesizerResource(client_from_platform(platform, NemoClient))
 
 
-def _raise_for_status(response: httpx.Response) -> None:
-    """Raise HTTP errors with FastAPI detail text included."""
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        detail = _response_detail(response)
-        if detail:
-            message = f"{e}. Response detail: {detail}"
-            raise httpx.HTTPStatusError(message, request=e.request, response=e.response) from e
-        raise
-
-
-def _response_detail(response: httpx.Response) -> str | None:
-    try:
-        body = response.json()
-    except ValueError:
-        text = response.text.strip()
-        return text or None
-    if isinstance(body, dict) and "detail" in body:
-        return str(body["detail"])
-    return str(body) if body else None
-
-
-class _SDKObject(dict[str, Any]):
-    """Small dict wrapper with attribute access for plugin route responses."""
-
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self[name]
-        except KeyError as e:
-            raise AttributeError(name) from e
+def _make_async_resource(platform: AsyncHelixClient) -> AsyncSafeSynthesizerResource:
+    return AsyncSafeSynthesizerResource(client_from_platform(platform, AsyncNemoClient))
 
 
 safe_synthesizer_sdk_resources = NemoPluginSDKResources(
-    sync_resource=SafeSynthesizerResource,
-    async_resource=AsyncSafeSynthesizerResource,
+    sync_resource=_make_sync_resource,
+    async_resource=_make_async_resource,
 )

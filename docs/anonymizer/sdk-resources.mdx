@@ -7,31 +7,31 @@ description: ""
 ---
 <a id="anonymizer-nhx-sdk-resources"></a>
 
-The `anonymizer.config` module (from the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer)) builds `AnonymizerConfig` objects in a context-agnostic way. Once you are ready to execute that config against the NeMo Helix Anonymizer service, you use objects from the `nemo_helix` SDK. This page describes the NeMo Helix-specific objects.
+The `anonymizer.config` module (from the [NVIDIA NeMo Anonymizer library](https://github.com/NVIDIA-NeMo/Anonymizer)) builds `AnonymizerConfig` objects in a context-agnostic way. Once you are ready to execute that config against the NeMo Helix Anonymizer service, you use objects from the `nemo_helix` SDK. This page describes NeMo Helix-specific objects.
 
 ## AnonymizerResource
 
 The `AnonymizerResource` is the entry point for working with Anonymizer on NeMo Helix. It wraps the streaming preview endpoint and job submission for the plugin service.
 
-A `AnonymizerResource` is accessed directly from a `NeMoHelix` instance:
+A `AnonymizerResource` is accessed directly from a `NemoClient` instance:
 
 ```python
 import os
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
 
-sdk = NeMoHelix(
+client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
-anonymizer = sdk.anonymizer  # AnonymizerResource
+anonymizer = client.anonymizer  # AnonymizerResource
 ```
 
-An `AsyncAnonymizerResource` with the same surface is available via `AsyncNeMoHelix.anonymizer`.
+An `AsyncAnonymizerResource` with the same surface is available via `AsyncNemoClient.anonymizer`.
 
 | Method                                                   | Description                                                                                                              |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | `preview(request, *, workspace=None)`                    | Runs a streaming preview against the plugin service and returns an `AnonymizerPreviewResult` after the stream completes. |
-| `run(request, *, workspace=None, wait_until_done=False)` | Submits an `anonymizer.run` job to the NeMo Helix Jobs worker. Returns an `AnonymizerJobResource`. When `wait_until_done=True`, blocks until the job reaches a terminal state. |
+| `run(request, *, workspace=None, wait_until_done=False)` | Submits an `anonymizer.run` job to NeMo Helix Jobs worker. Returns an `AnonymizerJobResource`. When `wait_until_done=True`, blocks until the job reaches a terminal state. |
 | `get_job_resource(job_name, workspace=None)`             | Returns an `AnonymizerJobResource` for an existing job (by job name).                                                    |
 
 `request` is a `PreviewRequest` or `AnonymizerRequest` instance from `nemo_anonymizer_plugin.app.task_config`. Both accept the same `config`, `data`, `model_configs`, and `selected_models` fields; `PreviewRequest` adds `num_records`.
@@ -58,8 +58,9 @@ Both `preview` and `run` call the plugin service, so they require `model_configs
 
 `AnonymizerResource.run` returns an `AnonymizerJobResource`. You can also use `AnonymizerResource.get_job_resource` to get one for an existing job.
 
+{/* @nemo-docs: skip-python-type-check */}
 ```python
-job = sdk.anonymizer.run(run_request)
+job = client.anonymizer.run(run_request)
 job.wait_until_done()
 results = job.download_artifacts()
 dataset = results.load_dataset()
@@ -81,7 +82,7 @@ The async variant (`AsyncAnonymizerJobResource`) exposes the same surface with `
 `download_artifacts` returns an `AnonymizerJobResults` object that loads parquet / JSON artifacts into memory:
 
 ```python
-job = sdk.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
+job = client.anonymizer.get_job_resource("anonymizer-run-2026-05-12-abc123")
 results = job.download_artifacts()
 dataset = results.load_dataset()
 ```

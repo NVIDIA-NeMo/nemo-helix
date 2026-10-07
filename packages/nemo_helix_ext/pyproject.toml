@@ -7,7 +7,6 @@ description = "The nemo CLI and client-side extensions for NeMo Helix: high-leve
 license = "Apache-2.0"
 authors = [{name = "NVIDIA Corporation"}]
 dependencies = [
-    "nemo-helix-sdk",
     "nemo-helix-plugin",
     "typer>=0.20.0",
     "rich>=13.7.1",
@@ -63,10 +62,6 @@ _nhx = "nemo_helix_ext.cli.app:cli"
 # skills registry has a single load path.
 [project.entry-points."nemo.skills"]
 platform = "nemo_helix_ext.skills:skills_dir"
-
-[tool.uv.sources]
-nhx-testing = { workspace = true }
-nemo-helix-sdk = { workspace = true }
 
 [build-system]
 requires = ["hatchling==1.26.3"]

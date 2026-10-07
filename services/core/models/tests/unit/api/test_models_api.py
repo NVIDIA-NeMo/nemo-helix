@@ -461,8 +461,8 @@ async def test_model_spec_job_transport_failure_does_not_fail_persisted_model(sa
     )
 
     with (
-        patch("nhx.core.models.api.v2.models.get_async_platform_sdk"),
-        patch("nhx.core.models.api.v2.models.client_from_platform", return_value=jobs),
+        patch("nhx.core.models.api.v2.models.get_async_nemo_client", return_value=AsyncMock()),
+        patch("nhx.core.models.api.v2.models.AsyncJobsClient.from_client", return_value=jobs),
     ):
         await start_update_model_spec_job(sample_model_entity)
 

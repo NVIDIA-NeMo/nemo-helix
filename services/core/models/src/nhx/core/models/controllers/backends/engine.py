@@ -38,7 +38,7 @@ def config_engine(config: Any) -> str:
     engine = getattr(config, "engine", None)
     if engine is None:
         return ENGINE_NIM
-    # engine may be an enum or a plain string depending on the SDK model.
+    # engine may be an enum or a plain string depending on the model type.
     return str(getattr(engine, "value", engine)).lower()
 
 

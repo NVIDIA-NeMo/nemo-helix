@@ -4,7 +4,7 @@
 import { PluginContext } from '@studio/plugins/PluginContext';
 import type { LoadedPlugin, PluginNavGroup } from '@studio/plugins/types';
 import { WorkspaceSideNav } from '@studio/routes/WorkspaceLayout/WorkspaceSideNav';
-import { renderRoute, screen } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 
@@ -57,6 +57,13 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
     history: '/workspaces/test-workspace/dashboard',
     routes: [{ path: '/workspaces/:workspace/*', element }],
   });
+};
+
+const findPluginLinkWithIcon = async (name: string) => {
+  const link = screen.getByRole('link', { name });
+  // eslint-disable-next-line testing-library/no-node-access
+  await waitFor(() => expect(link.closest('li')?.querySelector('svg.lucide')).not.toBeNull());
+  return link;
 };
 
 describe('WorkspaceSideNav', () => {
@@ -180,7 +187,7 @@ describe('WorkspaceSideNav', () => {
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('folds a plugin group into the core group of the same name', () => {
+  it('folds a plugin group into the core group of the same name', async () => {
     renderWithPlugins([
       makePlugin('red-team', [
         {
@@ -198,10 +205,10 @@ describe('WorkspaceSideNav', () => {
     ]);
 
     expect(screen.getAllByText('Governance')).toHaveLength(1);
-    expect(screen.getByRole('link', { name: 'Red Team' })).toBeInTheDocument();
+    expect(await findPluginLinkWithIcon('Red Team')).toBeInTheDocument();
   });
 
-  it('appends a plugin group that matches no core group', () => {
+  it('appends a plugin group that matches no core group', async () => {
     renderWithPlugins([
       makePlugin('red-team', [
         {
@@ -219,10 +226,10 @@ describe('WorkspaceSideNav', () => {
     ]);
 
     expect(screen.getAllByText('Red Team')).toHaveLength(1);
-    expect(screen.getByRole('link', { name: 'Probes' })).toBeInTheDocument();
+    expect(await findPluginLinkWithIcon('Probes')).toBeInTheDocument();
   });
 
-  it('keeps a plugin item whose id matches a core item in the merged group', () => {
+  it('keeps a plugin item whose id matches a core item in the merged group', async () => {
     const duplicateKeyWarning = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     renderWithPlugins([
@@ -242,7 +249,7 @@ describe('WorkspaceSideNav', () => {
     ]);
 
     expect(screen.getByRole('link', { name: 'Guardrails' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Red Team Models' })).toBeInTheDocument();
+    expect(await findPluginLinkWithIcon('Red Team Models')).toBeInTheDocument();
     const keyWarnings = duplicateKeyWarning.mock.calls
       .map((args) => args.map(String).join(' '))
       .filter((message) => message.includes('same key'));
@@ -251,7 +258,7 @@ describe('WorkspaceSideNav', () => {
     duplicateKeyWarning.mockRestore();
   });
 
-  it('merges groups of the same name across two plugins', () => {
+  it('merges groups of the same name across two plugins', async () => {
     renderWithPlugins([
       makePlugin('one', [
         {
@@ -272,7 +279,7 @@ describe('WorkspaceSideNav', () => {
     ]);
 
     expect(screen.getAllByText('Governance')).toHaveLength(1);
-    expect(screen.getByRole('link', { name: 'One' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Two' })).toBeInTheDocument();
+    expect(await findPluginLinkWithIcon('One')).toBeInTheDocument();
+    expect(await findPluginLinkWithIcon('Two')).toBeInTheDocument();
   });
 });

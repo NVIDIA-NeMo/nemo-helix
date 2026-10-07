@@ -51,6 +51,25 @@ The selected harness is controlled by `default_harness`. To try another harness
 from the same config today, edit `default_harness` before creating or invoking
 the agent.
 
+## Model parameters
+
+Models can set optional `top_p` and `max_tokens` parameters:
+
+```yaml
+models:
+  default:
+    provider: openai
+    model: openai/gpt-5.4
+    top_p: 0.9
+    max_tokens: 1024
+```
+
+`top_p` must be between 0 and 1, inclusive. `max_tokens` must be a positive
+integer no larger than `18446744073709551615`. Omit either field to keep the
+adapter's default. Support depends on the selected harness and model.
+These fields also work under `harnesses.<name>.model`, which replaces
+`models.default` for the selected harness; individual fields are not merged.
+
 ## Invoke
 
 `agent.yaml` is the telemetry-neutral multi-harness example. Set
@@ -130,7 +149,7 @@ In this example, Claude uses its harness-local Anthropic model config.
 
 Hermes Agent has dependencies that conflict with the NeMo Helix environment, so
 use the repository helper to install Fabric's pinned Hermes source and matching
-adapter in a separate Python 3.12 environment:
+adapter in a separate Python 3.14 environment:
 
 ```bash
 script/dev-install-hermes.sh
