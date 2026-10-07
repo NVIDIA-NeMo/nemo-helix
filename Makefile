@@ -527,6 +527,11 @@ test-agents-nooa: ## Run NOOA adapter integration tests with its optional harnes
 	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
 
+.PHONY: test-agents-claude
+test-agents-claude: ## Run Claude Code adapter integration tests with its optional harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_claude.py
+
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
 	# The openshell extra is not part of the default sync (platform-restricted

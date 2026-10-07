@@ -47,9 +47,7 @@ tools:
 DeepAgents, and Hermes. Adapter-specific options stay under
 `harnesses.<name>.settings`; do not put prompt text there.
 
-The selected harness is controlled by `default_harness`. To try another harness
-from the same config today, edit `default_harness` before creating or invoking
-the agent.
+Each harness example selects its adapter with `default_harness`.
 
 ## Model parameters
 
@@ -72,9 +70,9 @@ These fields also work under `harnesses.<name>.model`, which replaces
 
 ## Invoke
 
-`agent.yaml` is the telemetry-neutral multi-harness example. Set
-`default_harness` to the harness you want to validate, then create, deploy, and
-invoke the agent through NeMo Helix.
+Choose `agent-codex.yaml`, `agent-claude.yaml`, `agent-deepagents.yaml`, or
+`agent-hermes.yaml`, then create, deploy, and invoke the agent through NeMo
+Helix. The commands below use Codex.
 
 ```bash
 make bootstrap-python
@@ -101,7 +99,7 @@ curl -fsS --connect-timeout 2 --max-time 5 \
 
 nemo agents create \
   --name platform-agent \
-  --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent.yaml
+  --agent-config plugins/nemo-agents/examples/nemo-agent-config/agent-codex.yaml
 
 nemo agents deploy \
   --agent platform-agent \
@@ -120,30 +118,32 @@ agent and deployment before recreating them.
 
 ### Codex
 
-Set `default_harness: codex` in `agent.yaml`. Authenticate Codex before
+Use [agent-codex.yaml](agent-codex.yaml). Authenticate Codex before
 invoking:
 
 ```bash
 codex login
 ```
 
-In this example, Codex uses the shared Nemotron model through NeMo Helix IGW.
+In this example, Codex uses the Nemotron model through NeMo Helix IGW.
 
 ### DeepAgents
 
-Set `default_harness: deepagents` in `agent.yaml`. In this example, DeepAgents
-uses the shared Nemotron model through NeMo Helix IGW.
+Use [agent-deepagents.yaml](agent-deepagents.yaml). In this example, DeepAgents
+uses the Nemotron model through NeMo Helix IGW.
 
 ### Claude
 
-Set `default_harness: claude` in `agent.yaml`. Authenticate Claude Code before
+Use [agent-claude.yaml](agent-claude.yaml). Authenticate Claude Code before
 invoking:
 
 ```bash
 claude
 ```
 
-In this example, Claude uses its harness-local Anthropic model config.
+In this example, Claude uses its harness-local Anthropic model config. Run
+`make test-agents-claude` to test invocation, streaming, and sessions against a
+local model stub.
 
 ### Hermes
 
@@ -156,7 +156,7 @@ script/dev-install-hermes.sh
 export ADAPTER_PYTHON="$PWD/.venv-hermes/bin/python"
 ```
 
-Set `default_harness: hermes` in `agent.yaml`. For subprocess deployments,
+Use [agent-hermes.yaml](agent-hermes.yaml). For subprocess deployments,
 export `ADAPTER_PYTHON` before starting NeMo Helix, or restart NeMo Helix after
 exporting it. The NeMo Helix service launches the agent subprocess, so exporting
 `ADAPTER_PYTHON` only in the later CLI shell is not enough.
