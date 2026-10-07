@@ -38,8 +38,16 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
   pendingOutputHeading,
   slotActions,
 }) => {
-  const { result, logs, isPreviewing, isDownloadingModel, downloadMessage, error, hasRun, wasStopped } =
-    preview;
+  const {
+    result,
+    logs,
+    isPreviewing,
+    isDownloadingModel,
+    downloadMessage,
+    error,
+    hasRun,
+    wasStopped,
+  } = preview;
   const { records, textColumn, failedRecords } = result;
   const [recordIndex, setRecordIndex] = useState(0);
   const [pagedRecords, setPagedRecords] = useState(records);
