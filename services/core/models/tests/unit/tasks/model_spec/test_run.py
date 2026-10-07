@@ -223,3 +223,85 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
         fileset="qwen3-fileset",
         workspace="default",
     )
+
+
+def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: Path) -> None:
+    """ONNX-primary filesets keep the task head under alternates/hf, not the root."""
+
+    def _download(**kwargs: Any) -> None:
+        root = Path(kwargs["local_path"])
+        hf_dir = root / "alternates" / "hf"
+        hf_dir.mkdir(parents=True)
+        (root / "model.onnx").write_text("onnx", encoding="utf-8")
+        (hf_dir / "config.json").write_text(
+            '{"architectures": ["LlamaBidirectionalForSequenceClassification"], "model_type": "llama_bidirec"}',
+            encoding="utf-8",
+        )
+
+    files_sdk = MagicMock()
+    files_sdk.list.return_value = SimpleNamespace(
+        data=[
+            SimpleNamespace(path="model.onnx"),
+            SimpleNamespace(path="alternates/hf/config.json"),
+            SimpleNamespace(path="alternates/hf/model.safetensors"),
+            SimpleNamespace(path="alternates/last/config.json"),
+        ]
+    )
+    files_sdk.download.side_effect = _download
+    sdk = cast(NeMoHelix, SimpleNamespace(files=files_sdk))
+
+    model_name = "rel06-rerank-output"
+    model_entity = _model_entity(model_name)
+    models_client = MagicMock()
+    models_client.get_model.return_value = _Response(model_entity)
+
+    def update_model(**kwargs: Any) -> _Response:
+        body = cast(UpdateModelEntityRequest, kwargs["body"])
+        return _Response(model_entity.model_copy(update={"spec": body.spec}))
+
+    models_client.update_model.side_effect = update_model
+    files_client = MagicMock()
+    files_client.get_fileset.return_value = _Response(_fileset(tmp_path))
+
+    def client_factory(_sdk: NeMoHelix, client_cls: type[Any]) -> Any:
+        if client_cls is ModelsClient:
+            return models_client
+        if client_cls is FilesClient:
+            return files_client
+        raise AssertionError(f"Unexpected client class: {client_cls}")
+
+    inferred_spec = _core_model_spec()
+    parallelism_api = types.ModuleType("nhx.core.models.parallelism.api")
+    setattr(parallelism_api, "infer_model_cfg_from_hf", MagicMock(return_value=inferred_spec))
+    setattr(parallelism_api, "find_minimum_gpus_from_metadata", MagicMock(side_effect=[(1, {}), (1, {})]))
+    parallelism_pkg = types.ModuleType("nhx.core.models.parallelism")
+    parallelism_pkg.__path__ = []
+    job_ctx = NHXJobContext(
+        workspace="default",
+        job_id="job-123",
+        attempt_id="attempt-0",
+        step="model-spec",
+        task="model-spec",
+        jobs_url=None,
+        files_url=None,
+        models_url=None,
+        storage_path=tmp_path,
+        config_path=None,
+    )
+
+    with (
+        patch.dict(
+            sys.modules,
+            {
+                "nhx.core.models.parallelism": parallelism_pkg,
+                "nhx.core.models.parallelism.api": parallelism_api,
+            },
+        ),
+        patch("nhx.core.models.tasks.model_spec.run.client_from_platform", side_effect=client_factory),
+    ):
+        runner = ModelSpecRunner(sdk=sdk, job_ctx=job_ctx)
+        result = runner.analyze_checkpoint(ModelSpecTaskConfig(workspace="default", name=model_name))
+
+    assert result.spec is not None
+    assert result.spec.head_type == "cross_encoder"
+    assert result.spec.is_embedding_model is False
