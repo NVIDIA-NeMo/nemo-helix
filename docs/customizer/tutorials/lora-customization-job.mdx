@@ -39,12 +39,17 @@ import re
 import time
 import uuid
 from pathlib import Path
-from nemo_helix import NeMoHelix, ConflictError
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.files.types import CreateFilesetRequest
-from nemo_customizer.sdk import Customization
-from nemo_helix.types.secrets import HelixSecretResponse
+from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+from nemo_helix_plugin.models.types import CreateModelEntityRequest, UpdateModelEntityRequest
+from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecretResponse
+from nemo_customizer.sdk import Customization
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
+from pydantic import SecretStr
+from nemo_helix_plugin.schema import SecretRef
 
 
 def sanitize_name(prefix: str, name: str):
@@ -68,10 +73,6 @@ def max_wait_time_checker(seconds: int, job_name: str = ""):
 
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(
-    base_url=NHX_BASE_URL,
-    workspace="default"
-)
 client = NemoClient(
     base_url=NHX_BASE_URL,
     workspace="default"
@@ -150,24 +151,26 @@ print("Sample completion:", sample["completion"])
 Upload the training and validation JSONL files to a FileSet so the customization job can use them.
 
 ```python
-sdk.files.client.create_fileset(
-    workspace="default",
-    body=CreateFilesetRequest(
-        name=DATASET_NAME,
-        description="SFT training data",
-        cache=True,
-    ),
-    exist_ok=True,
-)
-print(f"Fileset ready: {DATASET_NAME}")
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            description="SFT training data",
+            cache=True,
+        ),
+    ).data()
+    print(f"Created fileset: {DATASET_NAME}")
+except ConflictError:
+    print(f"Fileset '{DATASET_NAME}' already exists, continuing...")
 
-sdk.files.fsspec.put(
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
     lpath=DATASET_PATH,
     rpath=f"default/{DATASET_NAME}/",
-    recursive=True
+    recursive=True,
 )
 print("Training data:")
-print(sdk.files.list(fileset=DATASET_NAME, workspace="default"))
+print(client.files.list_files(name=DATASET_NAME).data())
 
 ```
 
@@ -189,13 +192,15 @@ def create_or_get_secret(name: str, value: str | None, label: str) -> HelixSecre
         print(f"{label} is not set - skipping setting secret")
         return None
     try:
-        secret = sdk.secrets.create(name=name, workspace="default", value=value)
+        secret = client.secrets.create_secret(
+            body=HelixSecretCreateRequest(name=name, value=SecretStr(value)),
+        ).data()
         print(f"Created secret: {name}")
         print(secret.model_dump_json(indent=2))
         return secret
     except ConflictError:
         print(f"Secret '{name}' already exists, continuing...")
-        secret = sdk.secrets.retrieve(name=name, workspace="default")
+        secret = client.secrets.get_secret(name=name).data()
         print(secret.model_dump_json(indent=2))
         return secret
 
@@ -211,47 +216,49 @@ Create a fileset pointing to [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3
 HF_REPO_ID = "Qwen/Qwen3-0.6B"
 MODEL_NAME = "qwen3-0.6b"
 
-storage = HuggingfaceStorageConfig(
-    type="huggingface",
-    repo_id=HF_REPO_ID,
-    repo_type="model",
-    token_secret=hf_secret.name if hf_secret else None,
-)
-base_model_fs = sdk.files.client.create_fileset(
-    workspace="default",
-    body=CreateFilesetRequest(
-        name=MODEL_NAME,
-        description="Qwen3 0.6b base model from Hugging Face",
-        storage=storage,
-        cache=True,
-    ),
-    exist_ok=True,
-).data()
+try:
+    storage = HuggingfaceStorageConfig(
+        repo_id=HF_REPO_ID,
+        repo_type="model",
+        token_secret=SecretRef(hf_secret.name) if hf_secret else None,
+    )
+    base_model_fs = client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=MODEL_NAME,
+            description="Qwen3 0.6b base model from Hugging Face",
+            storage=storage,
+            cache=True,
+        ),
+    ).data()
+except ConflictError:
+    base_model_fs = client.files.get_fileset(name=MODEL_NAME).data()
 
 try:
-    base_model = sdk.models.create(
-        workspace="default",
-        name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-        trust_remote_code=False,
-    )
+    base_model = client.models.create_model(
+        body=CreateModelEntityRequest(
+            name=MODEL_NAME,
+            fileset=f"default/{MODEL_NAME}",
+            trust_remote_code=False,
+        ),
+    ).data()
 except ConflictError:
-    sdk.models.update(
-        workspace="default",
+    client.models.update_model(
         name=MODEL_NAME,
-        fileset=f"default/{MODEL_NAME}",
-        trust_remote_code=False,
+        body=UpdateModelEntityRequest(
+            fileset=f"default/{MODEL_NAME}",
+            trust_remote_code=False,
+        ),
     )
-    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 print(f"Base model fileset: fileset://default/{base_model.name}")
-print(sdk.files.list(fileset=MODEL_NAME, workspace="default"))
+print(client.files.list_files(name=MODEL_NAME).data())
 
 time_check = max_wait_time_checker(600, "Model Spec")
 while not base_model.spec:
     time_check()
     time.sleep(10)
-    base_model = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
+    base_model = client.models.get_model(name=MODEL_NAME).data()
 
 # Clear verbose linear_layers list for cleaner output
 base_model.spec.linear_layers = None
@@ -310,7 +317,7 @@ from IPython.display import clear_output
 time_check = max_wait_time_checker(3600, "Customization Job")
 while True:
     time_check()
-    status = sdk.jobs.get_status(name=job.job.name, workspace="default")
+    status = client.jobs.get_status(name=job.job.name, workspace="default")
     clear_output(wait=True)
     print(f"Job Status: {status.status}")
     step = max_steps = training_phase = None
@@ -344,30 +351,40 @@ deploy_suffix = uuid.uuid4().hex[:4]
 DEPLOYMENT_CONFIG_NAME = f"lora-deploy-cfg-{deploy_suffix}"
 deployment_name = f"lora-deploy-{deploy_suffix}"
 
-deployment_config = sdk.inference.deployment_configs.create(
-    workspace="default",
-    name=DEPLOYMENT_CONFIG_NAME,
-    engine="vllm",
-    model_spec={
-        "model_namespace": "default",
-        "model_name": MODEL_NAME,
-        "lora_enabled": True,
-    },
-    executor_config={
-        "gpu": 1,
-        "image_name": "vllm/vllm-openai",
-        "image_tag": "v0.22.1",
-        "additional_args": ["--max-lora-rank", "32"],
-    },
+from nemo_helix_plugin.models.types import (
+    ContainerExecutorConfig,
+    CreateModelDeploymentConfigRequest,
+    CreateModelDeploymentRequest,
+    Engine,
+    ModelDeploymentConfigModelSpec,
 )
 
-deployment = sdk.inference.deployments.create(
-    workspace="default",
-    name=deployment_name,
-    config=deployment_config.name,
-)
+deployment_config = client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name=DEPLOYMENT_CONFIG_NAME,
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name=MODEL_NAME,
+            lora_enabled=True,
+        ),
+        executor_config=ContainerExecutorConfig(
+            gpu=1,
+            image_name="vllm/vllm-openai",
+            image_tag="v0.22.1",
+            additional_args=["--max-lora-rank", "32"],
+        ),
+    ),
+).data()
 
-model_entity = sdk.models.retrieve(workspace="default", name=MODEL_NAME)
+deployment = client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name=deployment_name,
+        config=deployment_config.name,
+    ),
+).data()
+
+model_entity = client.models.get_model(name=MODEL_NAME).data()
 if model_entity.spec:
     model_entity.spec.linear_layers = None
 print(model_entity.model_dump_json(indent=2))
@@ -388,7 +405,7 @@ print(f"Monitoring deployment '{deployment_name}'... (timeout {TIMEOUT_MINUTES} 
 while True:
     time.sleep(15)
     time_check()
-    deployment_status = sdk.inference.deployments.retrieve(name=deployment_name, workspace="default")
+    deployment_status = client.models.get_deployment(name=deployment_name).data()
     elapsed = time.time() - start_time
     clear_output(wait=True)
     print(f"Deployment: {deployment_name}")
@@ -396,7 +413,7 @@ while True:
     print(f"Elapsed: {int(elapsed // 60)}m {int(elapsed % 60)}s")
     if deployment_status.status in ("RUNNING", "READY"):
         print("\nDeployment is ready!")
-        if not sdk.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
+        if not client.models.wait_for_gateway(deployment_name, workspace="default", timeout=60):
             raise RuntimeError("Inference gateway did not become ready")
         break
     if deployment_status.status in ("FAILED", "ERROR", "TERMINATED"):
@@ -417,17 +434,23 @@ messages = [
     {"role": "user", "content": f"Based on the following context, answer the question.\n\nContext: {context}\n\nQuestion: {question}"}
 ]
 INFERENCE_MODEL_NAME = f"default--{OUTPUT_NAME}"
-response = sdk.inference.gateway.provider.post(
-    "v1/chat/completions",
+from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
+from nemo_helix_plugin.inference_gateway.types import JsonBody
+
+gateway = InferenceGatewayClient.from_client(client)
+response = gateway.provider_post(
     name=deployment_name,
     workspace="default",
-    body={
-        "model": INFERENCE_MODEL_NAME,
-        "messages": messages,
-        "temperature": 0,
-        "max_tokens": 256,
-    }
-)
+    trailing_uri="v1/chat/completions",
+    body=JsonBody(
+        {
+            "model": INFERENCE_MODEL_NAME,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": 256,
+        }
+    ),
+).data()
 print("=" * 60)
 print("MODEL INFERENCE")
 print("=" * 60)

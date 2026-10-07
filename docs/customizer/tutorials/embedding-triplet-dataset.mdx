@@ -40,11 +40,14 @@ import json
 import os
 from pathlib import Path
 from datasets import load_dataset
-from nemo_helix import NeMoHelix
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.files.types import CreateFilesetRequest
+from filesets import FilesetFileSystem
+from nemo_helix_plugin.files.client import FilesClient
 
 NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-sdk = NeMoHelix(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
 
 DATASET_SIZE = int(os.environ.get("SPECTER_ROWS", "3000"))
 VALIDATION_SPLIT = 0.05
@@ -74,25 +77,26 @@ for name, dataset in [("training", splits["train"]), ("validation", splits["test
 ```
 
 ```python
-sdk.files.client.create_fileset(
-    workspace="default",
-    body=CreateFilesetRequest(
-        name=DATASET_NAME,
-        purpose="dataset",
-        description="SPECTER triplets as query/pos_doc/neg_doc JSONL",
-    ),
-    exist_ok=True,
-)
-print("Fileset ready", DATASET_NAME)
+try:
+    client.files.create_fileset(
+        body=CreateFilesetRequest(
+            name=DATASET_NAME,
+            purpose="dataset",
+            description="SPECTER triplets as query/pos_doc/neg_doc JSONL",
+        ),
+    ).data()
+    print("Created fileset", DATASET_NAME)
+except ConflictError:
+    print("Fileset exists", DATASET_NAME)
 
-sdk.files.upload(
-    local_path=f"{DATASET_PATH}/",
-    remote_path="",
-    fileset=DATASET_NAME,
-    workspace="default",
+fs = FilesetFileSystem(client=FilesClient.from_client(client))
+fs.put(
+    lpath=f"{DATASET_PATH}/",
+    rpath=f"default/{DATASET_NAME}/",
+    recursive=True,
 )
 print("Uploaded:")
-print(json.dumps([f.model_dump() for f in sdk.files.list(fileset=DATASET_NAME, workspace="default").data], indent=2))
+print(json.dumps([f.model_dump() for f in client.files.list_files(name=DATASET_NAME).data().data], indent=2))
 print("dataset.training =", f"default/{DATASET_NAME}")
 print("Set that on the Automodel job in the embedding tutorial. model remains default/nemotron-3-embed-1b.")
 
