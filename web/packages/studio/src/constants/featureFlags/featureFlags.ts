@@ -30,18 +30,25 @@ import { z } from 'zod';
 // 2. Add the flag definition to `flagDefinitions` below:
 //    myNewFlag: booleanFlag('VITE_FF_MY_NEW_FLAG', false),
 //
-// 3. Add the flag to the `service/studio/src/nhx/studio/env_mappings.py`. Example:
+// 3. Add the marker line to `web/packages/studio/env/.env.fastapi`:
+//    VITE_FF_MY_NEW_FLAG=STUDIO_UI_VITE_FF_MY_NEW_FLAG
+//    Without this the build bakes in no marker, so step 4 has nothing to substitute
+//    and `studio.feature_flags.my_new_flag` is silently ignored in a deployed Studio.
+//
+// 4. Add the flag to the `service/studio/src/nhx/studio/env_mappings.py`. Example:
 //    EnvMapping(marker="STUDIO_UI_VITE_FF_MY_NEW_FLAG", config_path="studio.feature_flags.my_new_flag", default="false"),
 //
-// 4. Use it in your code:
+// 5. Use it in your code:
 //    import { featureFlags } from '@studio/constants/featureFlags';
 //    if (featureFlags.myNewFlag) { ... }
+//
+// Steps 2-4 are enforced by `registryParity.test.ts`.
 //
 // ## Removing a flag:
 //
 // 1. Remove all usage from the codebase
 // 2. Remove from `flagDefinitions` below
-// 3. Remove from .env files
+// 3. Remove from `.env.fastapi`, `env_mappings.py`, and the .env samples
 //
 // ## Naming conventions:
 //
@@ -72,7 +79,7 @@ export const flagDefinitions = {
   guardrailsEnabled: previewFlag('VITE_FF_GUARDRAILS_ENABLED'),
   inferenceProviderEnabled: previewFlag('VITE_FF_INFERENCE_PROVIDER_ENABLED', true),
   intakeEnabled: previewFlag('VITE_FF_INTAKE_ENABLED', true),
-  membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED'),
+  membersEnabled: previewFlag('VITE_FF_MEMBERS_ENABLED', true),
   modelCompareEnabled: previewFlag('VITE_FF_MODEL_COMPARE_ENABLED'),
   modelEvaluationFormEnabled: previewFlag('VITE_FF_MODEL_EVALUATION_FORM_ENABLED', true),
   monitorEnabled: previewFlag('VITE_FF_MONITOR_ENABLED'),
