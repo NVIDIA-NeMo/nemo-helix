@@ -41,7 +41,6 @@ import {
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
-import { useDatasetFileContent } from '@studio/api/datasets/useDatasetFileContent';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
 import {
@@ -51,6 +50,11 @@ import {
   evaluationFilesetName,
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
+import {
+  DATASET_FILE_ACCEPT,
+  type DatasetInspection,
+  inspectDatasetFile,
+} from '@studio/components/evaluation/inspectDatasetFile';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import '@studio/components/evaluation/evalWizard.css';
 import {
@@ -101,7 +105,7 @@ import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { useDebounce } from 'use-debounce';
@@ -141,9 +145,6 @@ const startItems = (rerunDisabled: boolean) => [
     ),
   },
 ];
-
-/** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
-const DATASET_BASENAME = 'dataset';
 
 const DATASET_SOURCE_UPLOAD = 'upload';
 const DATASET_SOURCE_FILESET = 'fileset';
@@ -247,9 +248,7 @@ interface FilePick {
 }
 
 /** The picked dataset, with the name it will be stored under once it validates. */
-interface DatasetPick extends FilePick {
-  storedName?: string;
-}
+interface DatasetPick extends FilePick, DatasetInspection {}
 
 /** The picked eval config, with its parsed spec once it validates. ``format`` follows the
  *  uploaded extension, not the detected syntax: a file named .yaml is stored as YAML even if
@@ -261,47 +260,6 @@ interface ConfigPick extends FilePick {
 
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
-
-const isRecord = (value: unknown): boolean =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** Validate the dataset and settle the name it is stored under. The evaluator's loader takes
- *  ``.json`` and ``.jsonl`` interchangeably, sniffing a leading ``[`` to tell an array from
- *  line-delimited records — so the name follows the detected content, not the uploaded
- *  extension, and the dataset ref written into the config matches.
- *
- *  Every record must be an object: the evaluator turns each one into a row keyed by its own
- *  fields, and a file of scalars only fails once the job is running. Parsed here rather than
- *  through ``validateFileFormat``, which does not check record shape and would mean reading a
- *  large dataset into memory twice. */
-const inspectDatasetText = (rawText: string): Omit<DatasetPick, 'file'> => {
-  const text = rawText.trim();
-  if (!text) return { error: 'File is empty' };
-
-  let records: unknown[];
-  let format: 'json' | 'jsonl';
-  try {
-    const parsed: unknown = JSON.parse(text);
-    records = Array.isArray(parsed) ? parsed : [parsed];
-    format = 'json';
-  } catch {
-    try {
-      records = text.split('\n').flatMap((line) => (line.trim() ? [JSON.parse(line)] : []));
-      format = 'jsonl';
-    } catch {
-      return { error: 'File is not valid JSON or JSONL' };
-    }
-  }
-
-  if (records.length === 0) return { error: 'File contains no data' };
-  if (!records.every(isRecord)) {
-    return { error: 'Every dataset record must be a JSON object.' };
-  }
-  return { storedName: `${DATASET_BASENAME}.${format}` };
-};
-
-const inspectDatasetFile = async (file: File): Promise<Omit<DatasetPick, 'file'>> =>
-  inspectDatasetText(await file.text());
 
 const fileNameOf = (path: string): string => path.split('/').pop() ?? path;
 
@@ -526,20 +484,19 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const datasetFileset = useWatch({ control, name: 'datasetFileset' });
   const datasetFilePath = useWatch({ control, name: 'datasetFile' });
   const isFilesetSource = datasetSource === DATASET_SOURCE_FILESET;
-  const filesetFile = useDatasetFileContent({
-    workspace,
-    name: datasetFileset,
-    path: datasetFilePath,
-    fullContent: true,
+  // Downloaded raw rather than through useDatasetFileContent, which hands Parquet back as JSONL
+  // text; the run stores the file as-is so the evaluator reads it with its own loader.
+  const filesetFile = useQuery({
+    queryKey: ['evaluation-dataset-pick', workspace, datasetFileset, datasetFilePath],
+    queryFn: async ({ signal }): Promise<DatasetPick> => {
+      const blob = await filesDownloadFile(workspace, datasetFileset, datasetFilePath, signal);
+      const file = new File([blob], fileNameOf(datasetFilePath));
+      return { file, ...(await inspectDatasetFile(file)) };
+    },
     enabled: open && isFilesetSource && !!datasetFileset && !!datasetFilePath,
+    staleTime: Infinity,
   });
-  const filesetPick = useMemo<DatasetPick | null>(() => {
-    if (!isFilesetSource || filesetFile.data === undefined) return null;
-    return {
-      file: new File([filesetFile.data], fileNameOf(datasetFilePath)),
-      ...inspectDatasetText(filesetFile.data),
-    };
-  }, [isFilesetSource, filesetFile.data, datasetFilePath]);
+  const filesetPick = isFilesetSource ? (filesetFile.data ?? null) : null;
   const activeDatasetPick = isFilesetSource ? filesetPick : datasetPick;
 
   const uploads: UploadedEvalInputs | null =
@@ -1122,7 +1079,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                     />
                   ) : (
                     <Upload
-                      accept=".jsonl,.json"
+                      accept={DATASET_FILE_ACCEPT}
                       onValueChange={handleDatasetPicked}
                       onFileRemove={clearDatasetPick}
                       status={datasetError ? 'error' : undefined}
@@ -1130,7 +1087,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                         <FormField
                           name="dataset"
                           slotLabel="Add Dataset"
-                          slotHelp="JSONL, or a JSON array of objects."
+                          slotHelp="JSONL, a JSON array of objects, CSV, or Parquet."
                           slotError={datasetError}
                           status={datasetError ? 'error' : undefined}
                         >

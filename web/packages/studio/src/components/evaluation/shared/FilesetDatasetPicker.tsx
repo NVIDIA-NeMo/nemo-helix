@@ -14,7 +14,7 @@ import {
   useWatch,
 } from 'react-hook-form';
 
-const DATASET_FORMATS = ['json', 'jsonl', 'parquet'];
+const DATASET_FORMATS = ['json', 'jsonl', 'csv', 'parquet'];
 
 const filesetOption = (fileset: { name: string }) => ({
   value: fileset.name,
@@ -71,8 +71,8 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         slotLabel="File"
         slotHelp={
           noDatasetFiles
-            ? 'This fileset has no JSONL, JSON, or Parquet files.'
-            : 'JSONL, JSON, or Parquet. Parquet is converted to JSONL.'
+            ? 'This fileset has no JSONL, JSON, CSV, or Parquet files.'
+            : 'JSONL, JSON, CSV, or Parquet. For output split into batch files, pick one batch.'
         }
         slotError={error}
         status={error ? 'error' : undefined}

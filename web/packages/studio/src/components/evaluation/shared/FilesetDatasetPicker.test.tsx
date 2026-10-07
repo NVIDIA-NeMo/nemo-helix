@@ -95,7 +95,7 @@ describe('FilesetDatasetPicker', () => {
   });
 
   it('lists only dataset formats', async () => {
-    mockFilesets(['rows.jsonl', 'README.md', 'notes.txt']);
+    mockFilesets(['rows.jsonl', 'rows.csv', 'README.md', 'notes.txt']);
     const user = userEvent.setup();
     render(<PickerHarness />);
 
@@ -103,6 +103,7 @@ describe('FilesetDatasetPicker', () => {
     await user.click(await screen.findByRole('combobox', { name: 'File' }));
 
     expect(await screen.findByRole('option', { name: 'rows.jsonl' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'rows.csv' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'README.md' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'notes.txt' })).not.toBeInTheDocument();
   });
@@ -115,7 +116,7 @@ describe('FilesetDatasetPicker', () => {
     await chooseFileset(user, 'generated');
 
     expect(
-      await screen.findByText('This fileset has no JSONL, JSON, or Parquet files.')
+      await screen.findByText('This fileset has no JSONL, JSON, CSV, or Parquet files.')
     ).toBeVisible();
   });
 
