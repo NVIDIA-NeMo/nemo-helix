@@ -72,7 +72,7 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         slotHelp={
           noDatasetFiles
             ? 'This fileset has no JSONL, JSON, CSV, or Parquet files.'
-            : 'JSONL, JSON, CSV, or Parquet. For output split into batch files, pick one batch.'
+            : 'JSONL, JSON, CSV, or Parquet. If the output is split across several files, only the file you pick is evaluated.'
         }
         slotError={error}
         status={error ? 'error' : undefined}

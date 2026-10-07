@@ -7,8 +7,6 @@ import { formatFromFileName, parseDataFile } from '@studio/components/FileRowEdi
 /** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
 const DATASET_BASENAME = 'dataset';
 
-export const DATASET_FILE_ACCEPT = '.jsonl,.json,.csv,.parquet';
-
 /** Either the name a valid dataset is stored under, or why it was rejected. */
 export interface DatasetInspection {
   storedName?: string;

@@ -43,6 +43,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
+import { DATASET_FILE_ACCEPT } from '@studio/components/evaluation/consts';
 import {
   createRunEvaluation,
   evalConfigFilename,
@@ -51,7 +52,6 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import {
-  DATASET_FILE_ACCEPT,
   type DatasetInspection,
   inspectDatasetFile,
 } from '@studio/components/evaluation/inspectDatasetFile';
