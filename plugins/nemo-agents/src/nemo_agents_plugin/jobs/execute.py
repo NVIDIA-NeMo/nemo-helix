@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import stat
+import tempfile
 import time
 from contextlib import nullcontext
 from dataclasses import asdict
@@ -51,6 +52,7 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     routes_inference_through_gateway,
 )
 from nemo_agents_plugin.jobs.job_usage import fabric_output_token_usage
+from nemo_agents_plugin.tasks.execute.outputs import AgentOutputFile, select_output_files
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     materialize_agent_workdir,
@@ -198,6 +200,11 @@ class ExecuteAgentJobConfig(BaseModel):
         default=None,
         description="Optional working directory configuration for the execution.",
     )
+    output_files: list[AgentOutputFile] | None = Field(
+        default=None,
+        description="Exact files and size limits to export from the workspace. Omit to export the entire workspace.",
+    )
+
     timeout_seconds: float = Field(
         default=DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
         gt=0,
@@ -228,6 +235,13 @@ class ExecuteAgentJobConfig(BaseModel):
         default=None,
         description="Optional trusted plugin extension to run during the execute-agent lifecycle.",
     )
+
+    @field_validator("output_files")
+    @classmethod
+    def _validate_output_files(cls, files: list[AgentOutputFile] | None) -> list[AgentOutputFile] | None:
+        if files is not None and len({output.path for output in files}) != len(files):
+            raise ValueError("Output file paths must be unique")
+        return files
 
     @field_validator("agent")
     @classmethod
@@ -516,7 +530,11 @@ class ExecuteAgentJob(NemoJob):
                 )
                 _log_agent_stderr(fabric_dirs.artifacts)
                 self._save_fabric_error_results(
-                    ctx, workspace_dir=fabric_dirs.workspace, artifacts_dir=fabric_dirs.artifacts, error=error
+                    ctx,
+                    workspace_dir=fabric_dirs.workspace,
+                    artifacts_dir=fabric_dirs.artifacts,
+                    error=error,
+                    output_files=step_config.request.output_files,
                 )
                 raise
 
@@ -534,7 +552,22 @@ class ExecuteAgentJob(NemoJob):
                 ctx.storage.ephemeral / FABRIC_RUN_RESULT_FILENAME,
                 asdict(result),
             )
-            output_workdir_ref = ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, fabric_dirs.workspace)
+            try:
+                output_workdir_ref = _save_output_workdir(
+                    ctx,
+                    fabric_dirs.workspace,
+                    step_config.request.output_files,
+                    require_files=result.status in SUCCESSFUL_FABRIC_STATUSES,
+                )
+            except Exception as error:
+                self._save_fabric_error_results(
+                    ctx,
+                    workspace_dir=fabric_dirs.workspace,
+                    artifacts_dir=fabric_dirs.artifacts,
+                    error=error,
+                    output_files=step_config.request.output_files,
+                )
+                raise
             output_artifacts_ref = ctx.results.save(OUTPUT_ARTIFACTS_RESULT_NAME, fabric_dirs.artifacts)
             status = "completed" if result.status in SUCCESSFUL_FABRIC_STATUSES else "failed"
             if status == "completed":
@@ -590,6 +623,7 @@ class ExecuteAgentJob(NemoJob):
         workspace_dir: Path,
         artifacts_dir: Path,
         error: Exception,
+        output_files: list[AgentOutputFile] | None = None,
     ) -> None:
         cause = error.__cause__
         payload = {
@@ -605,13 +639,37 @@ class ExecuteAgentJob(NemoJob):
         ):
             try:
                 if path.exists():
-                    ctx.results.save(name, path)
+                    if name == OUTPUT_WORKDIR_RESULT_NAME:
+                        _save_output_workdir(ctx, path, output_files, require_files=False)
+                    else:
+                        ctx.results.save(name, path)
             except Exception:
                 logger.warning("Failed to save %s after Fabric invocation error.", name, exc_info=True)
         try:
             _save_json_result(ctx, FABRIC_ERROR_RESULT_NAME, ctx.storage.ephemeral / FABRIC_ERROR_FILENAME, payload)
         except Exception:
             logger.warning("Failed to save Fabric error result.", exc_info=True)
+
+
+def _save_output_workdir(
+    ctx: JobContext, workspace: Path, files: list[AgentOutputFile] | None, *, require_files: bool
+) -> ResultRef:
+    if files is None:
+        return ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, workspace)
+    # Staging is outside the agent-writable workspace. Never delete or traverse
+    # scratch files, even when the invocation did not finish normally.
+    with tempfile.TemporaryDirectory(prefix="agent-export-", dir=ctx.storage.ephemeral) as temporary:
+        stage = Path(temporary) / "output"
+        stage.mkdir()
+        try:
+            select_output_files(workspace, stage, files, require_files=require_files)
+        except (OSError, ValueError):
+            if require_files:
+                raise
+            logger.warning("Could not select agent output files after invocation failure.", exc_info=True)
+            stage = Path(temporary) / "empty"
+            stage.mkdir()
+        return ctx.results.save(OUTPUT_WORKDIR_RESULT_NAME, stage)
 
 
 def _log_agent_stderr(artifacts_dir: Path) -> None:

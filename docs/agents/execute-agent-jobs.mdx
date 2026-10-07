@@ -156,6 +156,31 @@ credential, so a private image has to be reachable with those.
 
 ## Track a Job and Fetch Its Results
 
+### Select Workspace Outputs
+
+By default, `output_workdir` contains the whole agent workspace. For jobs that
+create scratch checkouts or caches, declare `output_files` in the execute-job
+specification to export only exact workspace-relative paths:
+
+```json
+"output_files": [
+  {"path": "result.json", "required": true, "max_bytes": 262144},
+  {"path": "checks.log", "max_bytes": 1048576}
+]
+```
+
+Selection applies on success, reported failure, and exceptions. Files must be
+regular files; traversal, symlinks, duplicate paths, and oversized files are
+rejected. Missing required files fail an otherwise successful invocation. When
+the invocation has already failed, its original error is preserved and available
+valid outputs are saved best-effort. An empty list exports an empty workspace;
+omitting the field retains the existing full-workspace export. Scratch files
+are neither traversed nor deleted by output selection.
+
+Both the API accepting the job and its execution image must support this field.
+
+### Follow Execution
+
 An execute job is an ordinary platform job. `nemo agents execute` submits it;
 from there it is tracked and read back like any other job, by name (e.g.
 `"calc-run-1"` below), using the generic `nemo jobs` commands. The Python SDK

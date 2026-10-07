@@ -47,6 +47,7 @@ from nemo_agents_plugin.jobs.execute import (
     _configure_intake_telemetry,
     _log_agent_stderr,
 )
+from nemo_agents_plugin.tasks.execute.outputs import AgentOutputFile
 from nemo_agents_plugin.tasks.execute.workdir import (
     AgentWorkdir,
     AgentWorkdirArtifactMount,
@@ -1270,6 +1271,83 @@ def test_run_fabric_exception_saves_best_effort_error_results(ctx: JobContext) -
     assert payload["fabric_status"] == "error"
 
 
+@pytest.mark.parametrize("outcome", ["succeeded", "failed", "exception", "timeout", "missing"])
+def test_selected_outputs_never_export_scratch(ctx: JobContext, outcome: str) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            output_files=[
+                AgentOutputFile(path="result.json", max_bytes=256, required=True),
+                AgentOutputFile(path="checks.log", max_bytes=256),
+            ],
+        ),
+        agent=_resolved_agent(),
+    )
+
+    async def invoke(request: Any) -> FabricRuntimeResult:
+        workspace = request.base_dir / "workspace"
+        scratch = workspace / "tmp" / "repo"
+        scratch.mkdir(parents=True)
+        for number in range(1000):
+            (scratch / str(number)).write_text("scratch")
+        (workspace / "checks.log").write_text("bounded evidence")
+        if outcome != "missing":
+            (workspace / "result.json").write_text("{}")
+        if outcome == "exception":
+            raise RuntimeError("original invocation error")
+        if outcome == "timeout":
+            raise TimeoutError("original timeout")
+        return FabricRuntimeResult(
+            status="succeeded" if outcome == "missing" else outcome,
+            error="original failure" if outcome == "failed" else None,
+        )
+
+    with patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", invoke):
+        if outcome in {"exception", "timeout", "missing"}:
+            with pytest.raises((RuntimeError, TimeoutError, ValueError), match="original|Required output"):
+                ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+        else:
+            result = ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+            assert result["status"] == ("completed" if outcome == "succeeded" else "failed")
+    exported = ctx.storage.persistent / "results" / OUTPUT_WORKDIR_RESULT_NAME
+    assert {path.name for path in exported.iterdir()} == (
+        {"checks.log"} if outcome == "missing" else {"checks.log", "result.json"}
+    )
+
+
+@pytest.mark.parametrize("kind", ["oversized", "symlink"])
+def test_invalid_outputs_preserve_original_invocation_error(ctx: JobContext, kind: str) -> None:
+    spec = ExecuteAgentStepConfig(
+        request=ExecuteAgentJobConfig(
+            agent="calc",
+            input="hello",
+            output_files=[
+                AgentOutputFile(path="result.json", max_bytes=1, required=True),
+            ],
+        ),
+        agent=_resolved_agent(),
+    )
+
+    async def invoke(request: Any) -> FabricRuntimeResult:
+        output = request.base_dir / "workspace" / "result.json"
+        if kind == "oversized":
+            output.write_text("too large")
+        else:
+            output.symlink_to(request.base_dir / "outside")
+        raise TimeoutError("original deadline")
+
+    with (
+        patch("nemo_agents_plugin.jobs.execute.invoke_agent_config_request_once", invoke),
+        pytest.raises(TimeoutError, match="original deadline"),
+    ):
+        ExecuteAgentJob().run(spec.model_dump(mode="json"), ctx=ctx)
+    exported = ctx.storage.persistent / "results" / OUTPUT_WORKDIR_RESULT_NAME
+    assert list(exported.iterdir()) == []
+    error = json.loads((ctx.storage.persistent / "results" / FABRIC_ERROR_RESULT_NAME).read_text())
+    assert error["message"] == "original deadline"
+
+
 def test_run_fabric_exception_preserves_original_error_if_result_save_fails(ctx: JobContext) -> None:
     spec = ExecuteAgentStepConfig(
         request=ExecuteAgentJobConfig(agent="calc", input="hello"),
@@ -1297,7 +1375,8 @@ def test_run_fabric_exception_preserves_original_error_if_result_save_fails(ctx:
     assert (ctx.storage.persistent / "results" / FABRIC_ERROR_RESULT_NAME).exists()
 
 
-def test_execute_job_create_route_stores_canonical_step_config() -> None:
+@pytest.mark.parametrize("output_files", [None, [{"path": "result.json", "required": True, "max_bytes": 262144}]])
+def test_execute_job_create_route_stores_canonical_step_config(output_files: list[dict[str, Any]] | None) -> None:
     app = FastAPI()
     app.include_router(add_job_routes(ExecuteAgentJob), prefix="/apis/agents/v2/workspaces/{workspace}")
 
@@ -1339,7 +1418,12 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
             "/apis/agents/v2/workspaces/default/jobs/execute",
             json={
                 "name": "execute-1",
-                "spec": {"agent": "calc", "input": "hello", "workdir": {"base_workdir": "source#project"}},
+                "spec": {
+                    "agent": "calc",
+                    "input": "hello",
+                    "workdir": {"base_workdir": "source#project"},
+                    "output_files": output_files,
+                },
             },
         )
 
@@ -1367,6 +1451,7 @@ def test_execute_job_create_route_stores_canonical_step_config() -> None:
         "input": "hello",
         "environment": None,
         "workdir": {"base_workdir": "source#project", "artifact_mounts": []},
+        "output_files": output_files,
         "timeout_seconds": DEFAULT_AGENT_EXECUTION_TIMEOUT_SECONDS,
         "auto_telemetry": True,
         "image": "",

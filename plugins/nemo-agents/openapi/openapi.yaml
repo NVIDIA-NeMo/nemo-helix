@@ -4051,6 +4051,27 @@ components:
         \ than this model narrowing them for everyone. The\n``agents.execute`` job,\
         \ for example, accepts only ``nemo-agents-spec-v1``\nand rejects a config\
         \ that is not a valid agent spec."
+    AgentOutputFile:
+      properties:
+        path:
+          type: string
+          title: Path
+          description: Exact POSIX path relative to the agent workspace; no glob patterns.
+        max_bytes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Bytes
+          description: Maximum number of bytes exported for this file.
+        required:
+          type: boolean
+          title: Required
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - path
+      - max_bytes
+      title: AgentOutputFile
     AgentSession:
       properties:
         name:
@@ -5478,6 +5499,13 @@ components:
           allOf:
           - $ref: '#/components/schemas/AgentWorkdir'
           description: Optional working directory configuration for the execution.
+        output_files:
+          title: Output Files
+          description: Exact files and size limits to export from the workspace. Omit
+            to export the entire workspace.
+          items:
+            $ref: '#/components/schemas/AgentOutputFile'
+          type: array
         timeout_seconds:
           type: number
           exclusiveMinimum: 0.0
