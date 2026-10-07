@@ -9,7 +9,7 @@ kind: Service
 metadata:
   name: {{ include "nhx-api.api-servicename" . }}
   labels:
-    app.kubernetes.io/component: nhx-api
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
   {{- with .Values.api.service.annotations }}
   annotations:
@@ -23,6 +23,6 @@ spec:
       protocol: TCP
       name: http
   selector:
-    app.kubernetes.io/component: nhx-api
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
     {{- include "nemo-helix.selectorLabels" . | nindent 4 }}
 {{- end }}

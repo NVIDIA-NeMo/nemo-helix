@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,14 @@ from rename_common import (
     repo_root,
 )
 
+# Upgrade documentation and regression tests must name the immutable pre-0.7 labels.
+UPGRADE_LABEL_PATHS = {
+    Path("k8s/helm/README.md"),
+    Path("k8s/helm/helm-docs-template/nemo-helm-readme.md.gotmpl"),
+    Path("tests/unit/test_helm_component_labels.py"),
+}
+UPGRADE_LABEL_PATTERN = re.compile(r"(?<![\w.-])nmp-(?:api|core-controller)(?![\w.-])")
+
 
 def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
     if not path.is_file():
@@ -36,7 +45,8 @@ def print_matches(path: Path, predicate: Callable[[str], object]) -> bool:
             # lines to update external source trees during the rename. Added and
             # context lines are still checked.
             continue
-        if predicate(line):
+        checked_line = UPGRADE_LABEL_PATTERN.sub("", line) if path in UPGRADE_LABEL_PATHS else line
+        if predicate(checked_line):
             print(f"{path}:{line_number}:{line}")
             found = True
     return found

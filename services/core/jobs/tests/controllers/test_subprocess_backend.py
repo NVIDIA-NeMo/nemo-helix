@@ -364,6 +364,116 @@ def test_build_command_prefers_virtual_env_python(tmp_path) -> None:
     ]
 
 
+def test_build_command_resolves_console_script_against_virtual_env_bin(tmp_path) -> None:
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_virtual_env_bin(tmp_path) -> None:
+    (tmp_path / "venv" / "bin").mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_resolves_console_script_via_sys_executable_when_virtual_env_unset(tmp_path) -> None:
+    # Direct-binary launch (e.g. `.venv/bin/nemo-helix` under Jenkins/systemd) leaves
+    # VIRTUAL_ENV unset, but the controller still runs from the venv -- sys.executable
+    # points at its bin. Resolve the console script against that dir so the fix holds
+    # whether or not the environment was activated.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    venv_script = bin_dir / "nemo-helix"
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_sys_executable_bin(tmp_path) -> None:
+    # No VIRTUAL_ENV and the script is not in the interpreter's bin dir -> fall through
+    # to the normal PATH lookup unchanged.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
+        "nemo-helix",
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_does_not_resolve_a_path_bearing_command_against_virtual_env_bin(tmp_path) -> None:
+    # Only a bare script name is resolved against venv/bin; a command carrying a path
+    # separator is left to the normal lookup rather than joined under bin/. The bin/
+    # entry below is executable, so without the separator guard the relative command
+    # would be rewritten to it — this asserts it is not.
+    venv_script = tmp_path / "venv" / "bin" / "nemo-helix"
+    venv_script.parent.mkdir(parents=True)
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["./nemo-helix", "run", "task"],
+    )
+
+    assert SubprocessJobBackend._build_command(executor, str(tmp_path / "venv")) == [
+        "./nemo-helix",
+        "run",
+        "task",
+    ]
+
+
 def test_schedule_python_command_does_not_depend_on_runtime_path(
     mock_nemo_client, tmp_path, mock_platform_config, test_step_pending
 ):
