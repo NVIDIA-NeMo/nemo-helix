@@ -4,6 +4,7 @@
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
+import type { RunStrategySubmitSpec } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategySubmitSpec';
 import {
   filesCreateFileset,
   filesDeleteFileset,
@@ -15,22 +16,29 @@ import type { FilesetEntry } from '@studio/api/files/types';
 import { uploadFilesetEntries } from '@studio/api/files/uploadFilesetEntries';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
-export interface LaunchOptimizeStudyParams {
-  workspace: string;
-  agentName: string;
+/** Files picked in the browser, staged into a fresh fileset for this one study. */
+export interface UploadedBundle {
+  kind: 'upload';
   entries: readonly FilesetEntry[];
-  /** The optimize YAML, as a path relative to the bundle root. */
+  /** The strategy's config YAML, as a path relative to the bundle root. */
   optimizeConfig: string;
 }
 
-/**
- * The optimization strategy Studio submits a staged bundle to.
- *
- * `run-strategy` is strategy-agnostic, but the bundle Studio stages here — an optimize YAML plus
- * the assets it references — is the input the `legacy` strategy takes, so the choice is fixed
- * rather than offered as a picker.
- */
-export const STUDIO_OPTIMIZE_STRATEGY = 'legacy';
+/** A fileset that already exists in Files; the study runs from it as-is. */
+export interface ExistingBundle {
+  kind: 'fileset';
+  /** `workspace/name` reference. */
+  fileset: string;
+  optimizeConfig: string;
+}
+
+export interface LaunchOptimizeStudyParams {
+  workspace: string;
+  agentName: string;
+  strategy: string;
+  /** Omitted for strategies that need nothing beyond the agent; the strategy's own schema rejects a missing one. */
+  bundle?: UploadedBundle | ExistingBundle;
+}
 
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
 const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';
@@ -102,11 +110,20 @@ export const optimizeBundleFilesetName = (agentName: string, now = Date.now()): 
 export const launchOptimizeStudy = async ({
   workspace,
   agentName,
-  entries,
-  optimizeConfig,
+  strategy,
+  bundle,
 }: LaunchOptimizeStudyParams): Promise<RunStrategyJob> => {
-  const filesetName = optimizeBundleFilesetName(agentName);
+  const spec: RunStrategySubmitSpec = { strategy, agent: agentName };
 
+  if (bundle?.kind === 'fileset') {
+    spec.optimize_config = bundle.optimizeConfig;
+    spec.optimize_config_fileset = bundle.fileset;
+  }
+  if (bundle?.kind !== 'upload') {
+    return agentOptimizationCreateRunStrategyJob(workspace, { spec });
+  }
+
+  const filesetName = optimizeBundleFilesetName(agentName);
   await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Optimize bundle for ${agentName}`,
@@ -115,14 +132,12 @@ export const launchOptimizeStudy = async ({
   });
 
   try {
-    await uploadFilesetEntries(workspace, filesetName, entries);
-
+    await uploadFilesetEntries(workspace, filesetName, bundle.entries);
     return await agentOptimizationCreateRunStrategyJob(workspace, {
       spec: {
-        strategy: STUDIO_OPTIMIZE_STRATEGY,
-        optimize_config: optimizeConfig,
+        ...spec,
+        optimize_config: bundle.optimizeConfig,
         optimize_config_fileset: `${workspace}/${filesetName}`,
-        agent: agentName,
       },
       custom_fields: { [STUDIO_BUNDLE_FIELD]: filesetName },
     });

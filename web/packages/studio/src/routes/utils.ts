@@ -697,6 +697,12 @@ export const getAgentOptimizationDetailRoute = (workspace: string, optimizeJobNa
   });
 };
 
+/** The study view renders legacy trial results; every other strategy is a plain job. */
+export const getOptimizeJobRoute = (workspace: string, jobName: string, strategy?: string) =>
+  strategy === 'legacy'
+    ? getAgentOptimizationDetailRoute(workspace, jobName)
+    : getWorkspaceJobDetailRoute(workspace, jobName);
+
 export const getAgentDeploymentsListRoute = (workspace: string) => {
   return generatePath(ROUTES.workspace.agentDeploymentsList, { workspace });
 };

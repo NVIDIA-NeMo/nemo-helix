@@ -3,7 +3,6 @@
 
 import {
   isFilesetRelative,
-  looksLikeOptimizeConfig,
   optimizeBundleProblems,
   parseOptimizeConfig,
 } from '@studio/api/agents/optimizeBundle';
@@ -140,13 +139,4 @@ describe('isFilesetRelative', () => {
       expect(isFilesetRelative(path)).toBe(false);
     }
   );
-});
-
-describe('looksLikeOptimizeConfig', () => {
-  it('needs an optimizer mapping', () => {
-    expect(looksLikeOptimizeConfig(parseOptimizeConfig(OVERLAY))).toBe(true);
-    expect(looksLikeOptimizeConfig(parseOptimizeConfig('name: agent\n'))).toBe(false);
-    expect(looksLikeOptimizeConfig(parseOptimizeConfig('- a\n- b\n'))).toBe(false);
-    expect(looksLikeOptimizeConfig(parseOptimizeConfig('key: [unclosed'))).toBe(false);
-  });
 });

@@ -36,8 +36,12 @@ const entryFor = (path: string) => ({ path, file: new File(['x'], path) });
 const params = () => ({
   workspace: 'ws',
   agentName: 'hermes',
-  entries: [entryFor('optimize.yaml'), entryFor('dataset.json')],
-  optimizeConfig: 'optimize.yaml',
+  strategy: 'legacy',
+  bundle: {
+    kind: 'upload' as const,
+    entries: [entryFor('optimize.yaml'), entryFor('dataset.json')],
+    optimizeConfig: 'optimize.yaml',
+  },
 });
 
 /** What the files service returns for a bundle Studio staged. */
@@ -89,6 +93,34 @@ describe('launchOptimizeStudy', () => {
       custom_fields: { studio_bundle_fileset: filesetName },
     });
     expect(filesDeleteFileset).not.toHaveBeenCalled();
+  });
+
+  it('submits an existing fileset without staging anything', async () => {
+    await launchOptimizeStudy({
+      workspace: 'ws',
+      agentName: 'hermes',
+      strategy: 'prompt-master',
+      bundle: { kind: 'fileset', fileset: 'ws/overrides', optimizeConfig: 'agent.yaml' },
+    });
+
+    expect(filesCreateFileset).not.toHaveBeenCalled();
+    expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
+      spec: {
+        strategy: 'prompt-master',
+        agent: 'hermes',
+        optimize_config: 'agent.yaml',
+        optimize_config_fileset: 'ws/overrides',
+      },
+    });
+  });
+
+  it('submits only the agent when no bundle is given', async () => {
+    await launchOptimizeStudy({ workspace: 'ws', agentName: 'hermes', strategy: 'prompt-master' });
+
+    expect(filesCreateFileset).not.toHaveBeenCalled();
+    expect(agentOptimizationCreateRunStrategyJob).toHaveBeenCalledWith('ws', {
+      spec: { strategy: 'prompt-master', agent: 'hermes' },
+    });
   });
 
   it('removes the staged fileset when the submit fails', async () => {

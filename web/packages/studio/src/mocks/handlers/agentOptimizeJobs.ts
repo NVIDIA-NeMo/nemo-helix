@@ -1,11 +1,27 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema';
+import type {
+  OptimizationStrategy,
+  RunStrategyJob,
+} from '@nemo/sdk/generated/agent-optimization/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
+const STRATEGIES_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/strategies`;
+
+export const mockOptimizationStrategies: OptimizationStrategy[] = [
+  { name: 'legacy', description: 'Hyperparameter and GA prompt optimization.' },
+  {
+    name: 'prompt-master',
+    description: 'Rewrite the agent system prompt with an optimizer agent.',
+  },
+  {
+    name: 'strands-harness-optimizer',
+    description: 'Tune a Strands harness against a dataset of expected outputs.',
+  },
+];
 
 /**
  * Two studies for `react-agent` and one for another agent, so a test can prove the request scopes
@@ -30,11 +46,7 @@ export const mockOptimizeJobs: RunStrategyJob[] = [
     created_at: '2026-08-13T09:00:00Z',
     updated_at: '2026-08-13T09:30:00Z',
     // Workspace-qualified reference for the same agent — must still match.
-    spec: {
-      strategy: 'legacy',
-      optimize_config: 'optimize-accuracy.yaml',
-      agent: 'default/react-agent',
-    },
+    spec: { strategy: 'prompt-master', agent: 'default/react-agent' },
   },
   {
     id: 'opt-4400',
@@ -114,6 +126,7 @@ const applyFilter = (jobs: RunStrategyJob[], filter: FilterQuery): RunStrategyJo
 };
 
 export const agentOptimizeJobsHandlers = [
+  http.get(STRATEGIES_URL, () => HttpResponse.json({ data: mockOptimizationStrategies })),
   http.get(OPTIMIZE_JOBS_URL, ({ request, params }) => {
     const url = new URL(request.url);
     const workspace = String(params.workspace);
