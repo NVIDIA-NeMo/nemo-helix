@@ -144,6 +144,7 @@ dev = [
   "nemo-helix-ext",
   "nhx-common",
   "nhx-platform",
+  "nhx-sandbox",
   "nhx-secrets",
   "blockbuster>=1.5.26",
   "ipywidgets>=8.1.9",
@@ -398,6 +399,7 @@ nemo-data-designer-plugin = { workspace = true }
 data-designer-nemo = { workspace = true }
 nemo-evaluator-sdk = { workspace = true }
 nemo-sandboxed-gym = { workspace = true }
+nhx-sandbox = { workspace = true }
 nhx-guardrails = { workspace = true }
 nhx-intake = { workspace = true }
 nhx-jobs = { workspace = true }
@@ -460,6 +462,7 @@ members = [
   "packages/data_designer_nemo",
   "packages/nhx_platform",
   "packages/sandboxed_gym",
+  "packages/nhx_sandbox",
   "services/hello-world",
   "services/studio",
   "services/guardrails",
