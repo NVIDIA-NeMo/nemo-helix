@@ -17,6 +17,7 @@ import {
   outputColumn,
   REWRITTEN_SUFFIX,
 } from '@studio/components/AnonymizerRecordView/parse';
+import { ANONYMIZER_ENABLED } from '@studio/constants/environment';
 import { RecordPager } from '@studio/routes/AnonymizerBuilderRoute/components/RecordPager';
 import type { UseAnonymizerPreview } from '@studio/routes/AnonymizerBuilderRoute/useAnonymizerPreview';
 import {
@@ -37,7 +38,8 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
   pendingOutputHeading,
   slotActions,
 }) => {
-  const { result, logs, isPreviewing, error, hasRun, wasStopped } = preview;
+  const { result, logs, isPreviewing, isDownloadingModel, downloadMessage, error, hasRun, wasStopped } =
+    preview;
   const { records, textColumn, failedRecords } = result;
   const [recordIndex, setRecordIndex] = useState(0);
   const [pagedRecords, setPagedRecords] = useState(records);
@@ -95,6 +97,11 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
       slotFooter={logs.length > 0 ? <Accordion className="w-full" items={logItems} /> : null}
     >
       <Stack className="h-full" gap="density-lg">
+        {ANONYMIZER_ENABLED && isDownloadingModel ? (
+          <Banner kind="inline" status="info">
+            {downloadMessage ?? 'Downloading the PII detector model (first run only)…'}
+          </Banner>
+        ) : null}
         {error ? (
           <Banner kind="inline" status="error">
             {error}

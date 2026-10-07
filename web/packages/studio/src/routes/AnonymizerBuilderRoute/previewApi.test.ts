@@ -54,6 +54,29 @@ describe('parsePreviewFrame', () => {
     });
   });
 
+  it('reads model_download frames for both statuses', () => {
+    expect(
+      parsePreviewFrame('{"kind":"model_download","status":"started","message":"Downloading…"}')
+    ).toEqual({
+      kind: 'model_download',
+      status: 'started',
+      message: 'Downloading…',
+    });
+    expect(
+      parsePreviewFrame('{"kind":"model_download","status":"complete","message":"ready"}')
+    ).toEqual({
+      kind: 'model_download',
+      status: 'complete',
+      message: 'ready',
+    });
+  });
+
+  it('drops a model_download frame with an unknown status', () => {
+    expect(
+      parsePreviewFrame('{"kind":"model_download","status":"bogus","message":"x"}')
+    ).toBeUndefined();
+  });
+
   it('ignores blank lines, malformed JSON, and unknown frame kinds', () => {
     expect(parsePreviewFrame('  ')).toBeUndefined();
     expect(parsePreviewFrame('{not json')).toBeUndefined();

@@ -16,6 +16,7 @@ from nemo_anonymizer_plugin.app.errors import AnonymizerInvalidConfigError
 from nemo_anonymizer_plugin.app.input import AnonymizerInputSpec
 from nemo_anonymizer_plugin.app.model_configs import SelectedModelsOverrides
 from nemo_anonymizer_plugin.functions import _preview_worker as worker_module
+from nemo_anonymizer_plugin.functions import preview as preview_module
 from nemo_anonymizer_plugin.functions._preview_logs import request_callback_cvar
 from nemo_anonymizer_plugin.functions.preview import LogFrame, PreviewFunction, PreviewSpec, TraceDatasetFrame
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -83,6 +84,10 @@ async def test_preview_function_resets_request_log_callback(
     igw_lookup = AsyncMock(return_value=None)
     monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
     monkeypatch.setattr(worker_module, "_make_preview", fake_worker)
+    # The GLiNER detector weights are ensured out-of-band; stub readiness so the
+    # test stays focused on preview frame/callback behavior.
+    monkeypatch.setattr(preview_module, "ensure_gliner_fileset_async", AsyncMock(return_value=None))
+    monkeypatch.setattr(preview_module, "is_gliner_cached", lambda: True)
     async_sdk = AsyncMock(spec=AsyncNemoClient)
 
     frames = [

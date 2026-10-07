@@ -34,6 +34,10 @@ export interface UseAnonymizerPreview {
   readonly result: PreviewResult;
   readonly logs: readonly string[];
   readonly isPreviewing: boolean;
+  /** True while the first-use PII detector weights are downloading. */
+  readonly isDownloadingModel: boolean;
+  /** Human-readable detail for the downloading state, when known. */
+  readonly downloadMessage: string | undefined;
   readonly error: string | undefined;
   readonly hasRun: boolean;
   readonly wasStopped: boolean;
@@ -50,6 +54,8 @@ export const useAnonymizerPreview = ({
   const [result, setResult] = useState<PreviewResult>(EMPTY_RESULT);
   const [logs, setLogs] = useState<string[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isDownloadingModel, setIsDownloadingModel] = useState(false);
+  const [downloadMessage, setDownloadMessage] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [hasRun, setHasRun] = useState(false);
   const [wasStopped, setWasStopped] = useState(false);
@@ -81,6 +87,10 @@ export const useAnonymizerPreview = ({
             setLogs((prev) => [...prev, frame.message]);
           });
           break;
+        case 'model_download':
+          setIsDownloadingModel(frame.status === 'started');
+          setDownloadMessage(frame.status === 'started' ? frame.message : undefined);
+          break;
         case 'trace_dataset':
           setResult((prev) => ({
             ...prev,
@@ -109,6 +119,8 @@ export const useAnonymizerPreview = ({
 
       setResult(EMPTY_RESULT);
       setLogs([]);
+      setIsDownloadingModel(false);
+      setDownloadMessage(undefined);
       setError(undefined);
       setHasRun(true);
       setWasStopped(false);
@@ -122,9 +134,21 @@ export const useAnonymizerPreview = ({
       if (abortRef.current === controller) {
         abortRef.current = null;
         setIsPreviewing(false);
+        setIsDownloadingModel(false);
       }
     }
   }, [workspace, accessToken, getRequest]);
 
-  return { result, logs, isPreviewing, error, hasRun, wasStopped, runPreview, stopPreview };
+  return {
+    result,
+    logs,
+    isPreviewing,
+    isDownloadingModel,
+    downloadMessage,
+    error,
+    hasRun,
+    wasStopped,
+    runPreview,
+    stopPreview,
+  };
 };

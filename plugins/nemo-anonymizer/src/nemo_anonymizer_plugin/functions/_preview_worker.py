@@ -18,6 +18,7 @@ import pandas as pd
 from anonymizer.config.anonymizer_config import AnonymizerConfig, AnonymizerInput
 from anonymizer.interface.anonymizer import Anonymizer
 from data_designer.config.models import ModelProvider as DDModelProvider
+from nemo_anonymizer_plugin.app.gliner_detector import build_gliner_anonymizer, stop_gliner_runtime
 from nemo_anonymizer_plugin.app.upstream_logging import preserve_root_logging
 from nemo_anonymizer_plugin.functions.preview import (
     FailedRecordsFrame,
@@ -40,7 +41,10 @@ def _make_preview(
     anonymizer = _make_anonymizer(model_configs_yaml=model_configs_yaml, dd_providers=dd_providers)
     config: AnonymizerConfig = spec.config
 
-    result = anonymizer.preview(config=config, data=data, num_records=num_records)
+    try:
+        result = anonymizer.preview(config=config, data=data, num_records=num_records)
+    finally:
+        stop_gliner_runtime()
 
     send_frame(PreviewDatasetFrame(records=_to_jsonable_records(result.dataframe)))
     send_frame(
@@ -69,9 +73,9 @@ def _make_anonymizer(
     if not model_configs_yaml:
         raise RuntimeError("Anonymizer preview requires resolved model_configs.")
     with preserve_root_logging():
-        return Anonymizer(
-            model_configs=model_configs_yaml,
-            model_providers=dd_providers,
+        return build_gliner_anonymizer(
+            model_configs_yaml=model_configs_yaml,
+            dd_providers=dd_providers,
         )
 
 
