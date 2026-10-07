@@ -26,18 +26,18 @@ Verify your IdP meets these requirements:
 
 ```yaml
 auth:
- enabled: true
- oidc:
- enabled: true
- issuer: "<your-idp-issuer-url>"
- client_id: "<your-client-id>"
- # Uncomment and adjust if your IdP uses non-standard claim names:
- # email_claim: "email"
- # subject_claim: "sub"
- # Set this to the claim that contains group or entitlement values
- # you will bind to NeMo Helix workspace roles.
- # groups_claim: "groups"
- default_scopes: "platform:read platform:write openid profile email offline_access"
+  enabled: true
+  oidc:
+    enabled: true
+    issuer: "<your-idp-issuer-url>"
+    client_id: "<your-client-id>"
+    # Uncomment and adjust if your IdP uses non-standard claim names:
+    # email_claim: "email"
+    # subject_claim: "sub"
+    # Set this to the claim that contains group or entitlement values
+    # you will bind to NeMo Helix workspace roles.
+    # groups_claim: "groups"
+    default_scopes: "platform:read platform:write openid profile email offline_access"
 ```
 
 Keep short NeMo Helix API scope names in `default_scopes`. If your IdP requires resource-qualified API scopes, such as `api://<app-client-id>/platform:read`, configure the deployment's `scope_prefix` so auth discovery can tell clients which prefix to apply. If you do not want OIDC login tokens to carry API-scope restrictions, omit the `platform:*` scopes; NeMo Helix still enforces role bindings.

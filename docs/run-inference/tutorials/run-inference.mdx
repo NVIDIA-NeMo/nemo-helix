@@ -298,7 +298,7 @@ base_url = client.models.get_openai_route_base_url()
 headers = client.models.get_client_default_headers()
 
 response = completion(
-    model="openai/meta-llama-3-2-1b-instruct",
+    model="openai/default/meta-llama-3-2-1b-instruct",
     messages=[{"role": "user", "content": "Hello!"}],
     api_base=base_url,
     api_key="not-needed",

@@ -27,6 +27,12 @@ Model field
 
 ## Prerequisites
 
+Set the base URL for your NeMo Helix deployment before running the curl examples:
+
+```bash
+export NHX_BASE_URL="${NHX_BASE_URL:-http://localhost:8080}"
+```
+
 Create a guardrail configuration that includes self-check input and output rails.
 
 ```python

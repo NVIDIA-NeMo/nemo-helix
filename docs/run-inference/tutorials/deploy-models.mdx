@@ -1236,7 +1236,7 @@ To enable it, set `models.tool_call_plugin.enabled: true` in the platform config
 <Tab title="Python SDK">
 
 ```python
-from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetRequest
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # 1. Create a fileset for the plugin file
 client.files.client.create_fileset(body=CreateFilesetRequest(name="my-tool-plugin"), exist_ok=True)
@@ -1246,7 +1246,9 @@ client.files.upload(
     remote_path="my_parser.py",
 )
 
-# 2. Reference the plugin fileset in the model's fileset metadata
+# 2. Reference the plugin fileset when creating a new model fileset.
+# Updating metadata on a fileset that already backs an existing model entity
+# does not update that model entity's spec.
 plugin_tool_metadata: dict[str, object] = {
     "model": {
         "tool_calling": {
@@ -1257,9 +1259,21 @@ plugin_tool_metadata: dict[str, object] = {
     }
 }
 
-client.files.client.update_fileset(
-    name="llama-3-2-1b-tool",
-    body=UpdateFilesetRequest(metadata=plugin_tool_metadata),
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="llama-3-2-1b-tool-plugin",
+        storage={
+            "type": "huggingface",
+            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
+            "repo_type": "model",
+        },
+        metadata=plugin_tool_metadata,
+    ),
+    exist_ok=True,
+)
+client.models.create(
+    name="llama-3-2-1b-tool-plugin",
+    fileset="default/llama-3-2-1b-tool-plugin",
 )
 ```
 

@@ -180,7 +180,7 @@ Use the following code to create an evaluation job that skips validation checks.
 
 ```bash
 curl -X 'POST' \
-'https://${EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True' \
+'${EVALUATOR_BASE_URL}/v1/evaluation/jobs?skip_validation_checks=True' \
 -H 'accept: application/json' \
 -H 'Content-Type: application/json' \
 -d '{

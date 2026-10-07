@@ -14,6 +14,12 @@ Platform-managed agents are the canonical consumer: pointing an agent's `llms` b
 
 ## Prerequisites
 
+Set the base URL for your NeMo Helix deployment before running the curl examples:
+
+```bash
+export NHX_BASE_URL="${NHX_BASE_URL:-http://localhost:8080}"
+```
+
 - A guardrail configuration exists in your workspace. See [Manage Configurations](/documentation/guardrail-models/core-concepts/configurations/manage-configurations) to create one.
 - A VirtualModel is configured with `nemo-guardrails` middleware. See [Architecture](/documentation/guardrail-models/core-concepts/architecture) for wiring details.
 
