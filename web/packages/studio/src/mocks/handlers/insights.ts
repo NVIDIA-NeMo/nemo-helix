@@ -11,10 +11,8 @@ import type {
 } from '@nemo/sdk/generated/insights/schema';
 import { getFilesDownloadFileQueryKey } from '@nemo/sdk/generated/platform/files';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
-import {
-  AGENT_ETHOS_FILE,
-  agentSpecFilesetName,
-} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
+import { AGENT_ETHOS_FILE } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { http, HttpResponse } from 'msw';
 
 const INSIGHTS_URL = mockApiUrl(getInsightsListInsightsQueryKey, ':workspace');

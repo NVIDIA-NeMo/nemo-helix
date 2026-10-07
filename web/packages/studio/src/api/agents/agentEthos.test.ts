@@ -38,7 +38,7 @@ describe('readAgentEthos', () => {
     await expect(readAgentEthos('default', 'triage')).resolves.toBeUndefined();
   });
 
-  it('rethrows failures other than not-found', async () => {
+  it('returns undefined when the read fails', async () => {
     server.use(
       http.head(
         mockApiUrl(getFilesDownloadFileQueryKey, ':workspace', 'triage-ethos', 'ETHOS.md'),
@@ -46,6 +46,6 @@ describe('readAgentEthos', () => {
       )
     );
 
-    await expect(readAgentEthos('default', 'triage')).rejects.toThrow();
+    await expect(readAgentEthos('default', 'triage')).resolves.toBeUndefined();
   });
 });

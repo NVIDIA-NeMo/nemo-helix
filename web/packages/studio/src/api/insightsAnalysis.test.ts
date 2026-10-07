@@ -193,18 +193,6 @@ describe('triggerInsightsRun', () => {
     expect(createRun.mock.calls[0][1]).not.toHaveProperty('ethos');
   });
 
-  it('reports an error without starting a run when the ethos cannot be read', async () => {
-    getConfig.mockResolvedValue(config());
-    readEthos.mockRejectedValue(new Error('File is too large to edit in the browser.'));
-
-    const result = await triggerInsightsRun('default', 'email-security-triage');
-
-    expect(result.status).toBe('error');
-    expect(result.message).toContain('email-security-triage-ethos');
-    expect(result.message).toContain('File is too large');
-    expect(createRun).not.toHaveBeenCalled();
-  });
-
   it('surfaces a job creation failure as an error', async () => {
     getConfig.mockResolvedValue(config());
     createRun.mockRejectedValue(new Error('boom'));

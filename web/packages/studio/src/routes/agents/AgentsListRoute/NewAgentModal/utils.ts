@@ -25,8 +25,6 @@ import YAML from 'yaml';
  */
 export const agentSpecFilesetName = (agentName: string): string => `${agentName}-ethos`;
 
-export const AGENT_ETHOS_FILE = 'ETHOS.md';
-
 export const tooManyPickedFiles = (pickedCount: number): string | undefined =>
   pickedCount > MAX_PICKED_FILES
     ? `That selection holds ${pickedCount.toLocaleString()} files, far more than an agent should. Select the agent's own files, or the directory holding them.`

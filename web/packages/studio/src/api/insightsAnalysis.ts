@@ -5,10 +5,6 @@ import { insightsGetAnalysisConfig } from '@nemo/sdk/generated/insights/insights
 import { insightsCreateAnalysisRun } from '@nemo/sdk/generated/insights/insights-analysis-runs';
 import type { AtifIngestRequest } from '@nemo/sdk/generated/platform/schema';
 import { readAgentEthos } from '@studio/api/agents/agentEthos';
-import {
-  AGENT_ETHOS_FILE,
-  agentSpecFilesetName,
-} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { AxiosError } from 'axios';
 
 export type InsightsTriggerStatus = 'started' | 'not-enabled' | 'error';
@@ -117,16 +113,7 @@ export const triggerInsightsRun = async (
     };
   }
 
-  let ethos: string | undefined;
-  try {
-    ethos = await readAgentEthos(workspace, agent);
-  } catch (error) {
-    return {
-      agent,
-      status: 'error',
-      message: `Could not read ${AGENT_ETHOS_FILE} from "${agentSpecFilesetName(agent)}": ${messageOf(error)}`,
-    };
-  }
+  const ethos = await readAgentEthos(workspace, agent);
 
   try {
     const response = await insightsCreateAnalysisRun(workspace, {
