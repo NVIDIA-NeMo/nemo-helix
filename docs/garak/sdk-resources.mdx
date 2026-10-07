@@ -18,14 +18,10 @@ The `GarakPluginResource` is the sync SDK object for working with the NeMo Garak
 It is built explicitly from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_garak.sdk import GarakPluginResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 garak = GarakPluginResource(client)
 ```
 
@@ -208,14 +204,10 @@ The `AsyncGarakPluginResource` provides the same surface for an `AsyncNemoClient
 Async methods must be awaited.
 
 ```python
-import os
 from nemo_garak.sdk import AsyncGarakPluginResource
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
-client = AsyncNemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = AsyncNemoClient.from_config()
 async_garak = AsyncGarakPluginResource(client)
 ```
 

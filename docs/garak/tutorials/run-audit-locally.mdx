@@ -46,15 +46,10 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 Connect to the running platform and reach the garak sub-resource:
 
 ```python
-import os
-
 from nemo_garak.sdk import GarakPluginResource
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 garak = GarakPluginResource(client)
 
 print(garak.plugin_status())
