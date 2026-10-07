@@ -399,14 +399,49 @@ def test_build_command_leaves_console_script_unchanged_when_absent_from_virtual_
     ]
 
 
-def test_build_command_leaves_console_script_unchanged_without_virtual_env() -> None:
+def test_build_command_resolves_console_script_via_sys_executable_when_virtual_env_unset(tmp_path) -> None:
+    # Direct-binary launch (e.g. `.venv/bin/nemo-helix` under Jenkins/systemd) leaves
+    # VIRTUAL_ENV unset, but the controller still runs from the venv -- sys.executable
+    # points at its bin. Resolve the console script against that dir so the fix holds
+    # whether or not the environment was activated.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    venv_script = bin_dir / "nemo-helix"
+    venv_script.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_script.chmod(0o755)
     executor = SubprocessExecutionProvider(
         provider="subprocess",
         profile="default",
         command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
     )
 
-    assert SubprocessJobBackend._build_command(executor, None) == [
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
+        str(venv_script),
+        "run",
+        "task",
+        "--task",
+        "nhx.hello_world.tasks.hello_world",
+    ]
+
+
+def test_build_command_leaves_console_script_unchanged_when_absent_from_sys_executable_bin(tmp_path) -> None:
+    # No VIRTUAL_ENV and the script is not in the interpreter's bin dir -> fall through
+    # to the normal PATH lookup unchanged.
+    bin_dir = tmp_path / "venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    executor = SubprocessExecutionProvider(
+        provider="subprocess",
+        profile="default",
+        command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
+    )
+
+    with patch.object(sys, "executable", str(bin_dir / "python")):
+        result = SubprocessJobBackend._build_command(executor, None)
+
+    assert result == [
         "nemo-helix",
         "run",
         "task",
