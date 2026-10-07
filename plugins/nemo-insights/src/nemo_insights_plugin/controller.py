@@ -70,7 +70,7 @@ class InsightsAnalysisController(NemoController):
     """Submit insights analyzer jobs for enabled agents on a global cadence."""
 
     name: ClassVar[str] = "insights-analysis"
-    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "insights"]
+    dependencies: ClassVar[list[str]] = ["entities", "jobs", "agents", "files", "insights"]
 
     def __init__(self) -> None:
         self._client: AsyncNemoClient | None = None

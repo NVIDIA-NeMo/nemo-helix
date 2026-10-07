@@ -23,12 +23,13 @@ import uuid
 from collections.abc import Awaitable, Mapping
 from typing import Protocol
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_helix_plugin.agents.client import AsyncAgentsClient
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError, NotFoundError
 from nemo_helix_plugin.client.response import AsyncNemoBinaryResponse, NemoResponse
 from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.dependencies import get_nemo_client
@@ -42,7 +43,7 @@ from nemo_insights_plugin._perms import AnalysisRunPerms
 from nemo_insights_plugin.analyst.agent_config import AGENT_CONFIG_FORMAT, build_analyst_agent_config
 from nemo_insights_plugin.authz import scope
 from nemo_insights_plugin.config import InsightsConfig
-from nemo_insights_plugin.entities import AnalysisRun
+from nemo_insights_plugin.entities import AnalysisRun, EthosSource
 from nemo_insights_plugin.schema import AnalysisRunPage, AnalysisRunResponse, CreateAnalysisRunRequest
 from pydantic import TypeAdapter
 
@@ -135,9 +136,11 @@ async def submit_analysis_run(
     # copy of the operator's intent.
     request = await _resolve_model_refs(models_client, request, workspace=workspace)
     if request.ethos is None:
-        request = request.model_copy(
-            update={"ethos": await _stored_ethos(files_client, workspace=workspace, agent=request.agent)}
-        )
+        stored_ethos, ethos_source = await _stored_ethos(files_client, workspace=workspace, agent=request.agent)
+        if stored_ethos is not None:
+            request = request.model_copy(update={"ethos": stored_ethos})
+    else:
+        ethos_source = EthosSource.REQUEST
     run = AnalysisRun(
         name=name or mint_analysis_run_name(),
         workspace=workspace,
@@ -146,12 +149,12 @@ async def submit_analysis_run(
         evaluation_id=request.evaluation_id or "",
         default_model=request.default_model,
         fast_model=request.fast_model,
+        ethos_source=ethos_source,
     )
     try:
         saved = await entity_client.create(run)
     except Exception as exc:
-        safe_agent = request.agent.replace("\r", "").replace("\n", "")
-        logger.exception("Failed to record analysis run for agent '%s'", safe_agent)
+        logger.exception("Failed to record analysis run for agent '%s'", _log_safe(request.agent))
         raise HTTPException(status_code=500, detail="Failed to record the analysis run.") from exc
 
     spec = build_execute_agent_job_config(request, workspace=workspace, run_name=saved.name, base_url=base_url)
@@ -389,22 +392,28 @@ def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str, base_u
     )
 
 
-async def _stored_ethos(client: EthosFileClient, *, workspace: str, agent: str) -> str | None:
+async def _stored_ethos(client: EthosFileClient, *, workspace: str, agent: str) -> tuple[str | None, EthosSource]:
     """Read the agent's ``<agent>-ethos#ETHOS.md``; an unreadable Ethos degrades the run, never blocks it."""
     fileset = f"{agent}-ethos"
+    ref = _log_safe(f"{workspace}/{fileset}#{ETHOS_FILENAME}")
     try:
         content = await (await client.download_file(workspace=workspace, name=fileset, path=ETHOS_FILENAME)).read()
     except NotFoundError:
-        return None
-    except (NemoHTTPError, NemoTransportError) as exc:
-        logger.warning("Could not read %s/%s#%s; running without it: %s", workspace, fileset, ETHOS_FILENAME, exc)
-        return None
+        logger.debug("No stored Ethos at %s", ref)
+        return None, EthosSource.NONE
+    except (NemoClientError, httpx.HTTPError) as exc:
+        logger.warning("Could not read %s; running without it: %s", ref, exc)
+        return None, EthosSource.UNAVAILABLE
     try:
-        text = content.decode("utf-8")
+        text = content.decode("utf-8-sig").strip()
     except UnicodeDecodeError:
-        logger.warning("%s/%s#%s is not UTF-8; running without it", workspace, fileset, ETHOS_FILENAME)
-        return None
-    return text if text.strip() else None
+        logger.warning("%s is not UTF-8; running without it", ref)
+        return None, EthosSource.UNAVAILABLE
+    return (text, EthosSource.STORED) if text else (None, EthosSource.NONE)
+
+
+def _log_safe(value: str) -> str:
+    return value.replace("\r", "").replace("\n", "")
 
 
 def _error_detail(error: NemoHTTPError) -> object:

@@ -36,7 +36,7 @@ from nemo_insights_plugin.analysis_runs import (
     submit_analysis_run,
 )
 from nemo_insights_plugin.config import InsightsConfig
-from nemo_insights_plugin.entities import AnalysisRun
+from nemo_insights_plugin.entities import AnalysisRun, EthosSource
 from nemo_insights_plugin.schema import AnalysisRunPage
 from pydantic import ValidationError
 
@@ -476,45 +476,85 @@ def _submitted_ethos(jobs: _StubExecuteJobs) -> str | None:
     return config.agent.config["harnesses"]["insights"]["settings"].get("ethos")
 
 
-async def test_stored_ethos_is_inlined_when_the_request_has_none() -> None:
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(b"# Ethos\n\nBe careful.", id="plain"),
+        pytest.param(b"\xef\xbb\xbf\n  # Ethos\n\nBe careful.\n\n", id="bom-and-padding"),
+    ],
+)
+async def test_stored_ethos_is_inlined_when_the_request_has_none(content: bytes) -> None:
     jobs = _StubExecuteJobs()
-    files = _StubFiles(content=b"# Ethos\n\nBe careful.")
+    entities = _StubEntities()
+    files = _StubFiles(content=content)
 
-    await create_analysis_run("team-a", _request(), _client(jobs, files=files), _entities(_StubEntities()))
+    await create_analysis_run("team-a", _request(), _client(jobs, files=files), _entities(entities))
 
     assert files.downloads == [("team-a", "demo-agent-ethos", "ETHOS.md")]
     assert _submitted_ethos(jobs) == "# Ethos\n\nBe careful."
+    assert entities.created[0].ethos_source == EthosSource.STORED
 
 
 async def test_request_ethos_wins_over_the_stored_one() -> None:
     jobs = _StubExecuteJobs()
+    entities = _StubEntities()
     files = _StubFiles(content=b"# Stored")
 
-    await create_analysis_run(
-        "default", _request(ethos="# Inline"), _client(jobs, files=files), _entities(_StubEntities())
-    )
+    await create_analysis_run("default", _request(ethos="# Inline"), _client(jobs, files=files), _entities(entities))
 
     assert files.downloads == []
     assert _submitted_ethos(jobs) == "# Inline"
+    assert entities.created[0].ethos_source == EthosSource.REQUEST
 
 
 @pytest.mark.parametrize(
-    "files",
+    ("files", "source"),
     [
-        pytest.param(_StubFiles(), id="missing"),
-        pytest.param(_StubFiles(content=b"  \n"), id="blank"),
-        pytest.param(_StubFiles(content=b"\xff\xfe"), id="not-utf8"),
-        pytest.param(_StubFiles(error=_nemo_http_error(500, {"detail": "boom"})), id="files-error"),
-        pytest.param(_StubFiles(error=_transport_error("GET", "http://platform/apis/files")), id="files-unreachable"),
+        pytest.param(_StubFiles(), EthosSource.NONE, id="missing"),
+        pytest.param(_StubFiles(content=b"\xef\xbb\xbf  \n"), EthosSource.NONE, id="blank"),
+        pytest.param(_StubFiles(content=b"\xff\xfe"), EthosSource.UNAVAILABLE, id="not-utf8"),
+        pytest.param(
+            _StubFiles(error=_nemo_http_error(500, {"detail": "boom"})), EthosSource.UNAVAILABLE, id="files-error"
+        ),
+        pytest.param(
+            _StubFiles(error=_transport_error("GET", "http://platform/apis/files")),
+            EthosSource.UNAVAILABLE,
+            id="files-unreachable",
+        ),
+        pytest.param(
+            _StubFiles(error=httpx.DecodingError("corrupt gzip body")), EthosSource.UNAVAILABLE, id="corrupt-body"
+        ),
     ],
 )
-async def test_run_proceeds_without_an_unusable_stored_ethos(files: _StubFiles) -> None:
+async def test_run_proceeds_without_an_unusable_stored_ethos(
+    files: _StubFiles, source: EthosSource, caplog: pytest.LogCaptureFixture
+) -> None:
     jobs = _StubExecuteJobs()
+    entities = _StubEntities()
 
-    response = await create_analysis_run("default", _request(), _client(jobs, files=files), _entities(_StubEntities()))
+    response = await create_analysis_run("default", _request(), _client(jobs, files=files), _entities(entities))
 
+    assert files.downloads == [("default", "demo-agent-ethos", "ETHOS.md")]
     assert response.job is not None
     assert _submitted_ethos(jobs) is None
+    assert entities.created[0].ethos_source == source
+    warned = any(record.levelname == "WARNING" and "ETHOS.md" in record.getMessage() for record in caplog.records)
+    assert warned is (source == EthosSource.UNAVAILABLE)
+
+
+async def test_unreadable_ethos_warning_strips_line_breaks_from_the_agent(caplog: pytest.LogCaptureFixture) -> None:
+    files = _StubFiles(error=_nemo_http_error(500, {"detail": "boom"}))
+
+    await create_analysis_run(
+        "default",
+        _request(agent="demo\nWARNING forged"),
+        _client(_StubExecuteJobs(), files=files),
+        _entities(_StubEntities()),
+    )
+
+    warnings = [record.getMessage() for record in caplog.records if record.levelname == "WARNING"]
+    assert any("demoWARNING forged-ethos" in message for message in warnings)
+    assert not any("\n" in message for message in warnings)
 
 
 async def test_the_run_captures_the_request_scope() -> None:

@@ -24,6 +24,15 @@ class AnalysisConfigStatus(StrEnum):
     ERROR = "error"
 
 
+class EthosSource(StrEnum):
+    """Where an analysis run's Ethos came from, or why it ran without one."""
+
+    REQUEST = "request"
+    STORED = "stored"
+    NONE = "none"
+    UNAVAILABLE = "unavailable"
+
+
 class Insight(NemoEntity, entity_type="insights_insight"):
     """A persistent problem, theme, or category of issues in the agent under test."""
 
@@ -102,6 +111,14 @@ class AnalysisRun(NemoEntity, entity_type="insights_analysis_run"):
     fast_model: str = Field(
         default="",
         description="Workspace-qualified Model Entity the run used for context summarization.",
+    )
+    ethos_source: EthosSource | None = Field(
+        default=None,
+        description=(
+            "Where the run's Ethos came from: `request` (sent with the run), `stored` (the agent's "
+            "`<agent>-ethos#ETHOS.md`), `none` (no Ethos stored), or `unavailable` (the stored Ethos "
+            "could not be read, so the run went ahead without it). Unset on runs recorded before this was tracked."
+        ),
     )
 
 
