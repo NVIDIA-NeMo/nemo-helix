@@ -115,6 +115,7 @@ runs:
             - 'tools/osv-scanner/**'
             - 'tools/python/**'
           agents-harnesses:
+            - 'script/dev-install-hermes.sh'
             - 'plugins/nemo-agents/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nemo_helix/pyproject.toml'

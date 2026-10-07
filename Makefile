@@ -537,6 +537,13 @@ test-agents-codex: ## Run Codex adapter integration tests with its optional harn
 	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_codex.py
 
+.PHONY: test-agents-hermes
+test-agents-hermes: ## Run Hermes adapter integration tests with its isolated harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra test bash script/dev-install-hermes.sh
+	ADAPTER_PYTHON="$(CURDIR)/.venv-hermes/bin/python" \
+		$(UV) run --frozen --package nemo-agents-plugin --extra test \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_hermes.py
+
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
 	# The openshell extra is not part of the default sync (platform-restricted
