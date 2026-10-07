@@ -9,7 +9,7 @@ import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
 import { getEntityReference, getPartsFromReference } from '@nemo/common/src/namedEntity';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { Banner, Flex, FormField, Grid, Stack, Text } from '@nvidia/foundations-react-core';
+import { Banner, Flex, FormField, Grid, List, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   type DraftInputs,
   estimateTrainingRows,
@@ -26,7 +26,7 @@ import { pickDefaultModelName } from '@studio/util/buildSuggestedModelOptions';
 import { CUSTOMIZER_SCHEMA_LABELS } from '@studio/util/customizerSchema';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import { type FC, type KeyboardEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { useController } from 'react-hook-form';
+import { useController, useWatch } from 'react-hook-form';
 
 const DRAFTING_MODEL_HELP =
   'Writes the draft and needs tool-calling support. This is not the model being fine-tuned.';
@@ -53,9 +53,23 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     filter: { fileset: true },
   });
 
+  // A valid draft replaces the form until Edit; a failed one stays on the form, where
+  // regenerating is one click away. Clearing the draft (a pick changed) returns to the form.
+  const [showResult, setShowResult] = useState(false);
+  const handleDraft = useCallback(
+    (values: CustomizationFormFields | null) => {
+      onDraft(values);
+      setShowResult(values !== null);
+    },
+    [onDraft]
+  );
+  const { form, validation, requestError, isGenerating, retry, generate, clearDraft } =
+    useDescribeWithAi(workspace, handleDraft);
+
+  // The form holds the picks; only the base model's entity, which it cannot, is kept aside.
   const [baseModel, setBaseModel] = useState<ModelEntity | null>(null);
-  const [datasetRef, setDatasetRef] = useState<string | null>(null);
-  const [environmentRef, setEnvironmentRef] = useState<string | null>(null);
+  const datasetRef = useWatch({ control: form.control, name: 'dataset' }) || null;
+  const environmentRef = useWatch({ control: form.control, name: 'environment' });
 
   // The full form's dataset check, without a training type so it detects any format.
   const dataset = useCustomizationDatasetValidation({ fileset: datasetRef ?? undefined });
@@ -75,7 +89,8 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     dataset.encoding.ok
   );
 
-  const pickedEnvironment = isGymDataset ? environmentRef : null;
+  const pickedEnvironment =
+    isGymDataset && environmentRef && environmentRef !== NO_ENVIRONMENT ? environmentRef : null;
   const environmentParts = pickedEnvironment ? getPartsFromReference(pickedEnvironment) : null;
   const environment = useGymEnvironmentManifest({
     workspace: environmentParts?.workspace ?? '',
@@ -117,20 +132,8 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     environment.manifest,
   ]);
 
-  // A valid draft replaces the form until Edit; a failed one stays on the form, where
-  // regenerating is one click away. Clearing the draft (a pick changed) returns to the form.
-  const [showResult, setShowResult] = useState(false);
-  const handleDraft = useCallback(
-    (values: CustomizationFormFields | null) => {
-      onDraft(values);
-      setShowResult(values !== null);
-    },
-    [onDraft]
-  );
-
-  const { form, validation, requestError, isGenerating, retry, generate, clearDraft } =
-    useDescribeWithAi(workspace, inputs, handleDraft);
   const isPreparing = dataset.isPending || isEnvironmentLoading;
+  const isDraftDisabled = isGenerating || isPreparing || !!datasetError || !!environmentError;
 
   // Starts on Studio's suggested chat model, the same pick the Anonymizer and agent
   // creation default to, so the field rarely needs touching.
@@ -155,10 +158,11 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   });
 
   // KUI puts onKeyDown on the textarea's wrapper; the key event bubbles up to it.
+  // requestSubmit ignores the button's disabled state, so the shortcut checks it itself.
   const submitOnModEnter = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      event.currentTarget.closest('form')?.requestSubmit();
+      if (!isDraftDisabled) event.currentTarget.closest('form')?.requestSubmit();
     }
   };
 
@@ -190,7 +194,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
   const failure = requestError ?? (validation?.status === 'invalid' ? validation.errors : null);
 
   return (
-    <form onSubmit={generate} noValidate>
+    <form onSubmit={(event) => generate(inputs, event)} noValidate>
       <Stack gap="density-xl" className="w-full">
         <Grid cols={{ base: 1, md: 2 }} gap="density-xl">
           <FormField
@@ -233,10 +237,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
               }}
               triggerPlaceholder="Select a dataset"
               disabled={isGenerating}
-              onChange={(reference) => {
-                setDatasetRef(reference);
-                clearDraft();
-              }}
+              onChange={clearDraft}
             />
             {datasetError ? (
               <Banner kind="inline" status="error">
@@ -259,10 +260,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
                 leadingOptions={NO_ENVIRONMENT_OPTION}
                 triggerPlaceholder="None"
                 disabled={isGenerating}
-                onChange={(reference) => {
-                  setEnvironmentRef(reference === NO_ENVIRONMENT ? null : reference);
-                  clearDraft();
-                }}
+                onChange={clearDraft}
               />
               {environmentError ? (
                 <Banner kind="inline" status="error">
@@ -318,13 +316,10 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
             ) : (
               <>
                 The draft didn&apos;t pass the checks. Adjust the goal and draft again:
-                <ul className="list-disc pl-density-lg">
-                  {failure.map((error) => (
-                    <li key={error}>
-                      <Text kind="body/regular/sm">{error}</Text>
-                    </li>
-                  ))}
-                </ul>
+                <List
+                  items={failure}
+                  attributes={{ ListItem: { className: 'text-body-regular-md' } }}
+                />
               </>
             )}
           </Banner>
@@ -335,7 +330,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
             type="submit"
             kind="secondary"
             loading={isGenerating}
-            disabled={isGenerating || isPreparing || !!datasetError || !!environmentError}
+            disabled={isDraftDisabled}
           >
             {validation || requestError ? 'Draft again' : 'Draft settings'}
           </LoadingButton>

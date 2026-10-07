@@ -2,7 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { Banner, Button, Flex, Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Banner,
+  Button,
+  Flex,
+  Grid,
+  List,
+  Panel,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import type { DraftSetting } from '@studio/components/CreateCustomizationStart/aiDraft';
 import type { DraftResultProps } from '@studio/components/CreateCustomizationStart/types';
 import { GeneratedConfigPanel } from '@studio/components/CreateFilesetStart/GeneratedConfigPanel';
@@ -54,6 +63,9 @@ const IN_HEADER = new Set(['training.training_type', 'training.finetuning_type',
 
 const MAX_HEADLINE_SETTINGS = 12;
 
+/** KUI's list defaults to a larger size than the panel's text. */
+const MEDIUM_ITEMS = { ListItem: { className: 'text-body-regular-md' } };
+
 const headlineLabel = (path: string): string | undefined =>
   HEADLINE_SETTINGS[path.slice(path.lastIndexOf('.') + 1)];
 
@@ -64,16 +76,6 @@ const headlineSettings = (settings: DraftSetting[]): DraftSetting[] =>
       return label ? [{ ...setting, label }] : [];
     })
     .slice(0, MAX_HEADLINE_SETTINGS);
-
-const BulletList: FC<{ items: string[] }> = ({ items }) => (
-  <ul className="list-disc space-y-density-xs pl-density-lg">
-    {items.map((item) => (
-      <li key={item}>
-        <Text kind="body/regular/sm">{item}</Text>
-      </li>
-    ))}
-  </ul>
-);
 
 /**
  * A draft that passed the checks, laid out like the job details page's run configuration:
@@ -172,11 +174,13 @@ export const DraftResult: FC<DraftResultProps> = ({ summary, config, onEdit }) =
           slotHeading={<Text kind="label/bold/lg">Why these settings</Text>}
         >
           <Stack gap="density-lg">
-            {summary.rationale.length > 0 ? <BulletList items={summary.rationale} /> : null}
+            {summary.rationale.length > 0 ? (
+              <List items={summary.rationale} attributes={MEDIUM_ITEMS} />
+            ) : null}
             {summary.needsFromUser.length > 0 ? (
               <Banner kind="inline" status="info">
                 Before you submit:
-                <BulletList items={summary.needsFromUser} />
+                <List items={summary.needsFromUser} attributes={MEDIUM_ITEMS} />
               </Banner>
             ) : null}
           </Stack>

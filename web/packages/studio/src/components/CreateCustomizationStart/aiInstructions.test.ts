@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { DraftInputs } from '@studio/components/CreateCustomizationStart/aiDraft';
 import {
   buildDraftMessages,
   buildRetryMessages,
@@ -9,8 +10,10 @@ import {
   SKILL_REFERENCES,
 } from '@studio/components/CreateCustomizationStart/aiInstructions';
 import {
+  GYM_DATASET,
   HYBRID_MOE_MODEL,
   INPUTS,
+  PREFERENCE_DATASET,
   SMALL_MODEL,
   SQL_ENVIRONMENT,
 } from '@studio/components/CreateCustomizationStart/testFixtures';
@@ -35,61 +38,72 @@ describe('describeModel', () => {
 });
 
 describe('messages', () => {
-  it('sends the instructions and the picked inputs as one system turn, then the request', () => {
+  it('keeps the instructions in the system turn and the picks with the goal in the user turn', () => {
     const [system, user] = buildDraftMessages('route tickets', INPUTS);
     expect(system.role).toBe('system');
     expect(system.content).toContain('# Fields Studio fills in');
-    expect(system.content).toContain(`## Base model\n${describeModel(SMALL_MODEL)}`);
-    expect(system.content).toContain('## Dataset\ndefault/tickets\n- Format: Chat Completion');
-    expect(system.content).toContain('Training examples: 3000');
-    expect(user).toEqual({ role: 'user', content: 'route tickets' });
+    expect(system.content).not.toContain('# Inputs');
+    expect(user.role).toBe('user');
+    expect(user.content).toContain(`## Base model\n${describeModel(SMALL_MODEL)}`);
+    expect(user.content).toContain('## Dataset\ndefault/tickets\n- Format: Chat Completion');
+    expect(user.content).toContain('Training examples: 3000');
+    expect(String(user.content).endsWith('# Goal\nroute tickets')).toBe(true);
   });
 
   it('shows the row shape without any of the data', () => {
-    const [system] = buildDraftMessages('route tickets', INPUTS);
-    expect(system.content).toContain(
-      '- Row shape (field names and types only):\n{\n  messages: [{'
-    );
+    const [system, user] = buildDraftMessages('route tickets', INPUTS);
+    expect(user.content).toContain('- Row shape (field names and types only):\n{\n  messages: [{');
     expect(system.content).toContain('never the data itself');
   });
 
   it('leaves out the shape when the dataset has no rows', () => {
-    const [system] = buildDraftMessages('route tickets', {
+    const [, user] = buildDraftMessages('route tickets', {
       ...INPUTS,
       dataset: { ...INPUTS.dataset, shape: '' },
     });
-    expect(system.content).not.toContain('- Row shape');
+    expect(user.content).not.toContain('- Row shape');
   });
 
   it('says when the example count is an estimate', () => {
-    const [system] = buildDraftMessages('route tickets', {
+    const [, user] = buildDraftMessages('route tickets', {
       ...INPUTS,
       dataset: { ...INPUTS.dataset, trainingRowCount: 52000, rowCountIsEstimate: true },
     });
-    expect(system.content).toContain(
-      '- Training examples: about 52000 (estimated from file sizes)'
-    );
+    expect(user.content).toContain('- Training examples: about 52000 (estimated from file sizes)');
   });
 
   it('says when no reward environment was picked', () => {
-    const [system] = buildDraftMessages('route tickets', INPUTS);
-    expect(system.content).toContain('## Reward environment (grpo only)\nNot picked.');
+    const [, user] = buildDraftMessages('route tickets', INPUTS);
+    expect(user.content).toContain('## Reward environment (grpo only)\nNot picked.');
   });
 
   it('describes a picked environment from its manifest', () => {
-    const [system] = buildDraftMessages('write sql', { ...INPUTS, environment: SQL_ENVIRONMENT });
-    expect(system.content).toContain(
+    const [, user] = buildDraftMessages('write sql', { ...INPUTS, environment: SQL_ENVIRONMENT });
+    expect(user.content).toContain(
       '## Reward environment (grpo only)\ndefault/sql-env — text2sql: Executes generated SQL and rewards matching result sets.\n- Format: adapter-wheels-v1\n- Agent: verifiers_agent'
     );
   });
 
-  it("embeds every skill reference verbatim, after the user's inputs", () => {
-    const [system] = buildDraftMessages('route tickets', INPUTS);
-    const content = String(system.content);
-    for (const [file, reference] of Object.entries(SKILL_REFERENCES)) {
-      expect(content).toContain(`# Reference: ${file}\n\n${reference}`);
-    }
-    expect(content.indexOf('# Inputs')).toBeLessThan(content.indexOf('# Reference:'));
+  it('embeds only the references for backends that can train the dataset, verbatim', () => {
+    const referenced = (inputs: DraftInputs) => {
+      const content = String(buildDraftMessages('goal', inputs)[0].content);
+      return Object.keys(SKILL_REFERENCES).filter((file) =>
+        content.includes(`# Reference: ${file}\n\n${SKILL_REFERENCES[file]}`)
+      );
+    };
+    expect(referenced(INPUTS)).toEqual([
+      'hyperparameters-automodel.md',
+      'hyperparameters-unsloth.md',
+      'batch-sizing.md',
+    ]);
+    expect(referenced({ ...INPUTS, dataset: GYM_DATASET })).toEqual([
+      'hyperparameters-rl.md',
+      'batch-sizing.md',
+    ]);
+    expect(referenced({ ...INPUTS, dataset: PREFERENCE_DATASET })).toEqual([
+      'hyperparameters-rl.md',
+      'batch-sizing.md',
+    ]);
   });
 
   it('hands validation errors back after replaying the rejected job', () => {

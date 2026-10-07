@@ -55,6 +55,7 @@ jobs:
       e2e: ${{ steps.changes.outputs.e2e }}
       docs: ${{ steps.changes.outputs.docs }}
       web-studio: ${{ steps.changes.outputs.web-studio }}
+      customizer-skill-references: ${{ steps.changes.outputs.customizer-skill-references }}
       github-scripts: ${{ steps.changes.outputs.github-scripts }}
       tools: ${{ steps.changes.outputs.tools }}
       docker: ${{ steps.changes.outputs.docker }}
@@ -1966,7 +1967,13 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin "${{ github.base_ref }}" --depth=1
-            pnpm --filter="...[origin/${{ github.base_ref }}]" run --parallel --if-present test:ci
+            filters=(--filter="...[origin/${{ github.base_ref }}]")
+            # Studio imports these from outside web/, and only its tests resolve the imports:
+            # the `*?raw` module type lets typecheck pass even when a file is gone.
+            if [ "${{ needs.changes.outputs.customizer-skill-references }}" = "true" ]; then
+              filters+=(--filter=nemo-studio-ui)
+            fi
+            pnpm "${filters[@]}" run --parallel --if-present test:ci
           else
             pnpm run --recursive --parallel --if-present test:ci
           fi
