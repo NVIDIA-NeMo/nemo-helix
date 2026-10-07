@@ -85,7 +85,7 @@ The user has picked the base model, the training dataset, and optionally a rewar
 
 # Fields Studio fills in
 - The base model, dataset, and reward environment references are replaced with the user's picks; write any placeholder.
-- Distillation's teacher_model is picked in the form: leave it out and add that step to needs_from_user. Do the same for a GRPO reward environment when none is listed under Inputs.
+- Distillation's teacher_model, and a GRPO reward environment when none is listed under Inputs, are the user's to pick in the form: leave them out of job and add one step to needs_from_user to pick it. Never choose or suggest a specific model or environment for them; if the goal names one, repeat that name as written.
 
 # Answer
 - Name the output (output.name) after the task and the base: lowercase letters, digits, and hyphens, starting with a letter, at most 50 characters.
