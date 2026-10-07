@@ -286,6 +286,7 @@ nemo-agents-plugin = [
   "nemo-fabric-adapters-claude>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-codex>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-deepagents>=0.4.0,<0.5.0",
+  "nemo-fabric-adapters-remote-agent>=0.4.0,<0.5.0",
   "nemo-fabric-adapters-hermes>=0.4.0,<0.5.0; python_version < '3.14'",
 ]
 

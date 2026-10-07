@@ -534,6 +534,8 @@ class TestRenderFabricDockerfile:
         ("kind", "extra"),
         [
             ("claude", "nemo-agents-plugin-claude"),
+            ("remote-agent", "nemo-agents-plugin"),
+            ("nvidia.fabric.remote-agent", "nemo-agents-plugin"),
             ("nvidia.fabric.codex", "nemo-agents-plugin-codex"),
             ("nvidia.fabric.langchain.deepagents", "nemo-agents-plugin-deepagents"),
         ],
