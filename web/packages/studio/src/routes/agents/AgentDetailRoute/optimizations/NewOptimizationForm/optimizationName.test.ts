@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ENTITY_NAME_MAX_LENGTH, ENTITY_NAME_REGEXP } from '@nemo/common/src/utils/entityName';
+import { ENTITY_NAME_REGEXP } from '@nemo/common/src/utils/entityName';
+import { JOB_NAME_MAX_LENGTH } from '@studio/components/evaluation/submitEvaluationJob';
 import { buildOptimizationName } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationName';
 
 const now = new Date(2026, 8, 10, 9, 4, 7);
@@ -22,7 +23,7 @@ describe('buildOptimizationName', () => {
   it('truncates the agent rather than the suffix on a long name', () => {
     const name = buildOptimizationName('a'.repeat(80), 'creativity', now);
 
-    expect(name.length).toBeLessThanOrEqual(ENTITY_NAME_MAX_LENGTH);
+    expect(name.length).toBeLessThanOrEqual(JOB_NAME_MAX_LENGTH);
     expect(name).toMatch(/-creativity-0910-090407$/);
   });
 

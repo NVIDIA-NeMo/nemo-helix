@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { FILESET_NAME_MAX_LENGTH } from '@nemo/common/src/utils/filesetName';
 import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent-optimization/agent-optimization';
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
@@ -89,6 +90,13 @@ describe('launchOptimizeStudy', () => {
       custom_fields: { studio_bundle_fileset: filesetName },
     });
     expect(filesDeleteFileset).not.toHaveBeenCalled();
+  });
+
+  it('keeps the bundle name within a fileset name for a long agent name', () => {
+    const name = optimizeBundleFilesetName(`${'a'.repeat(50)}-b`, 1_700_000_000_000);
+
+    expect(name.length).toBeLessThanOrEqual(FILESET_NAME_MAX_LENGTH);
+    expect(name).toMatch(/^a+-optimize-/);
   });
 
   it('removes the staged fileset when the submit fails', async () => {

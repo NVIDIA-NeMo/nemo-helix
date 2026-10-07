@@ -30,7 +30,6 @@ export interface OptimizationIntent {
   id: IntentId;
   title: string;
   description: string;
-  objective: string;
   parameters: SearchParameter[];
 }
 
@@ -51,7 +50,6 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     title: 'Accuracy',
     description:
       'Pick when a wrong answer costs more than a long one — triage, extraction, anything with a right answer.',
-    objective: "Maximize the evaluation's average score, searching the near-deterministic range.",
     parameters: [parameter('temperature', 'float', 0, 0.6), parameter('top_p', 'float', 0.7, 1)],
   },
   {
@@ -59,7 +57,6 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     title: 'Brevity',
     description:
       'Pick when answers are already correct but rambling, and length is driving your token bill or losing readers.',
-    objective: "Maximize the evaluation's average score across the low-to-middle range.",
     parameters: [
       parameter('temperature', 'float', 0, 0.8),
       parameter('max_tokens', 'int', 128, 768),
@@ -70,7 +67,6 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     title: 'Creativity',
     description:
       'Pick when outputs feel repetitive or templated and you want more variety across similar prompts.',
-    objective: "Maximize the evaluation's average score across the high range, where outputs vary.",
     parameters: [parameter('temperature', 'float', 0.3, 1.5), parameter('top_p', 'float', 0.8, 1)],
   },
   {
@@ -78,7 +74,6 @@ export const OPTIMIZATION_INTENTS: OptimizationIntent[] = [
     title: 'Cost & speed',
     description:
       'Pick when quality already clears the bar and you want the cheapest config that still holds the line.',
-    objective: "Maximize the evaluation's average score across the full range.",
     parameters: [
       parameter('temperature', 'float', 0, 1),
       parameter('max_tokens', 'int', 256, 1024),
