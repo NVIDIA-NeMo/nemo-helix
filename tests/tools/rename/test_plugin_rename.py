@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "tools/rename/rename_plugins.py"
 EVALS = ROOT / "tools/rename/evals.json"
+FIXTURES = ROOT / "tests/tools/rename/fixtures/evals"
 
 
 class PluginRenameTests(unittest.TestCase):
@@ -238,7 +240,7 @@ class PluginRenameTests(unittest.TestCase):
     def test_evals_renames_job_source_consumers_and_existing_overrides(self) -> None:
         self.write(
             "web/packages/studio/src/api/evaluation/evaluator-jobs.ts",
-            (ROOT / "web/packages/studio/src/api/evaluation/evaluator-jobs.ts").read_text(),
+            (FIXTURES / "web/packages/studio/src/api/evaluation/evaluator-jobs.ts.txt").read_text(),
         )
         self.write(
             "jobs.py",
@@ -276,9 +278,10 @@ class PluginRenameTests(unittest.TestCase):
             "packages/nemo_helix_plugin/src/nemo_helix_plugin/client/client.py",
         ]
         for path in paths:
-            self.write(path, (ROOT / path).read_text())
+            self.write(path, (FIXTURES / f"{path}.txt").read_text())
         self.write(
-            "plugins/nemo-evaluator/pyproject.toml", (ROOT / "plugins/nemo-evaluator/pyproject.toml").read_text()
+            "plugins/nemo-evaluator/pyproject.toml",
+            (FIXTURES / "plugins/nemo-evaluator/pyproject.toml.txt").read_text(),
         )
         self.write(
             "packages/nemo_evaluator_sdk/src/nemo_evaluator_sdk/metric.py", "from nemo_evaluator_sdk import Metric\n"
@@ -327,6 +330,34 @@ class PluginRenameTests(unittest.TestCase):
         self.assertIn("evals.agent-evaluate; nemo-evals.agent-evaluate", usage)
         self.assertIn('kind="evaluator"', usage)
         self.assertEqual(self.run_rename("--verify", profile=EVALS).returncode, 0)
+
+    def test_evals_fixture_tests_run_after_applying_rename(self) -> None:
+        shutil.copytree(ROOT / "tools/rename", self.repo / "tools/rename", ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(FIXTURES, self.repo / "tests/tools/rename/fixtures/evals")
+        test_script = self.repo / "tests/tools/rename/test_plugin_rename.py"
+        shutil.copy2(Path(__file__), test_script)
+        for snapshot in FIXTURES.rglob("*.txt"):
+            self.write(str(snapshot.relative_to(FIXTURES)).removesuffix(".txt"), snapshot.read_text())
+        before = {path: path.read_bytes() for path in test_script.parent.rglob("*") if path.is_file()}
+        result = self.run_rename("--allow-dirty", profile=EVALS)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.repo / "plugins/nemo-evaluator").exists())
+        self.assertTrue((self.repo / "plugins/nemo-evals").is_dir())
+        for path, content in before.items():
+            self.assertEqual(path.read_bytes(), content)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(test_script),
+                "PluginRenameTests.test_evals_renames_job_source_consumers_and_existing_overrides",
+                "PluginRenameTests.test_evals_renames_job_sources_and_preserves_permissions_and_entity_kinds",
+            ],
+            cwd=self.repo,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

@@ -121,6 +121,12 @@ uv run --frozen --no-sync python -m unittest discover \
   -s tests/tools/rename -p test_plugin_rename.py -v
 ```
 
+Evals tests read fixed pre-rename snapshots from `tests/tools/rename/fixtures/evals`
+instead of live product files. The profile excludes this directory, so the tests
+retain their original inputs and remain enabled after the real rename. A
+regression applies the rename in a disposable checkout and reruns both snapshot
+tests with the old plugin directory removed.
+
 ## Platform-to-Helix workflow
 
 Use these scripts from the repository root to preview, apply, and verify the NeMo Helix to NeMo Helix rename.
