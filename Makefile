@@ -521,6 +521,9 @@ endif
 
 .PHONY: test-agents-nooa
 test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
+		python -c 'import nooa_cli; import nooa_bench'
 	$(UV) run --frozen --package nemo-agents-plugin --extra nooa --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
 

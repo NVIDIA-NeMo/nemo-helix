@@ -180,8 +180,7 @@ selects `kind: nooa-bench-agent` under `harnesses`. A config uses either
 under `models.default` and target options under `workflow.settings`.
 
 Helix enables Relay for streaming and sessions. Generated containers install the
-NOOA extra and require Python 3.12 or 3.13. Run `make test-agents-nooa` to test
-both adapters against a local model stub.
+NOOA extra and require Python 3.12 or 3.13.
 
 ### Remote Agent
 
