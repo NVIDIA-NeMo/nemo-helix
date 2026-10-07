@@ -10,6 +10,9 @@ navigation:
         contents:
           - page: Setup
             path: ../../get-started/setup.mdx
+          - page: Local Docker and Executors
+            slug: local-docker-and-executors
+            path: ../../get-started/local-docker-and-executors.mdx
           - section: Core Concepts
             path: ../../get-started/concepts/index.mdx
             contents:

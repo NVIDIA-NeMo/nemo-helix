@@ -15,6 +15,7 @@ Install NeMo Helix and start working with AI agents.
 - Python 3.12-3.14
 - An API key from one of: [NVIDIA Build](https://build.nvidia.com), [OpenAI](https://platform.openai.com/api-keys), [Anthropic](https://console.anthropic.com/settings/keys), [Google Gemini](https://aistudio.google.com/apikey), or a local [Ollama](https://ollama.com) instance (no key needed)
 - 16 GB available disk space and 8 GB RAM
+- [Docker](https://docs.docker.com/get-docker/) for the control plane's default local operating mode (`nemo setup --start-services` or default `nemo services run`), because the deployments service defaults to the Docker executor. Remote-deployment, CLI-only, and configs that omit or reconfigure deployments do not require it. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) for when jobs and agents use subprocess instead.
 - For the PyPI install: [uv](https://docs.astral.sh/uv/) `>=0.10.10`, or `pip` in a Python environment
 - For the source checkout install: [Git](https://git-scm.com/), GNU Make, a C compiler, and [Flox](https://flox.dev/docs/install-flox/install) (recommended). A system-toolchain alternative is documented below.
 
@@ -237,6 +238,7 @@ nemo setup --no-install-skills
 | List available models | `nemo models list` |
 | Open the Studio UI | [http://localhost:8080](http://localhost:8080) |
 | Browse docs from the CLI | `nemo docs --list` |
+| Understand Docker vs subprocess locally | [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) |
 | Evaluate a model | [Run LLM-as-a-Judge Evaluation](/documentation/evaluate-models/tutorials/run-llm-as-a-judge-evaluation) |
 | Generate synthetic data | [Data Designer Tutorials](/documentation/design-synthetic-data/tutorials) |
 | Optimize an agent | [Optimize Agents](/documentation/agents/optimize-agents) |
@@ -266,6 +268,14 @@ client = NeMoHelix(
 An asynchronous client is also available. See the [SDK reference](/documentation/reference/python-sdk) for details.
 
 ## Troubleshooting
+
+### Docker daemon not available
+
+Default local startup fails closed when the resolved run starts the deployments service or controller with a Docker-backed `default_executor` and the Docker daemon is unreachable. Install and start Docker, then retry `nemo setup --start-services` or `nemo services run`.
+
+If Intake is selected and `NHX_INTAKE_CLICKHOUSE_URL` is unset, Intake also provisions a local ClickHouse container and needs Docker. Set `NHX_INTAKE_CLICKHOUSE_URL` to an external ClickHouse to skip that path.
+
+For the subprocess-vs-Docker matrix and escape hatches (`--config`, omit deployments), see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
 
 ### Platform won't start
 

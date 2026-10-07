@@ -33,7 +33,7 @@ An execution profile is defined by the following attributes:
 
 - A profile name (`profile`)
 - A compute provider (e.g. `cpu` or `gpu`)
-- An [execution backend](#execution-backends) (e.g. `docker`, `kubernetes_job`, `volcano_job`)
+- An [execution backend](#execution-backends) (e.g. `subprocess`, `docker`, `kubernetes_job`, `volcano_job`)
 
 By default, the NeMo Helix defines a default CPU and default GPU provider to launch CPU and GPU bound jobs.
 
@@ -115,7 +115,7 @@ jobs:
 
 ## Execution Backends
 
-Execution backends launch and manage job tasks. Docker, Kubernetes, and Volcano run tasks in containers; the subprocess backend runs a command directly on the Platform host.
+Execution backends launch and manage job tasks. Docker, Kubernetes, and Volcano run tasks in containers; the subprocess backend runs a command directly on the control plane host.
 
 NeMo Helix currently supports the following execution backends:
 
@@ -124,11 +124,13 @@ NeMo Helix currently supports the following execution backends:
 - Volcano Jobs (`volcano_job`)
 - Subprocess (`subprocess`)
 
+For when the **control plane** itself needs Docker (deployments preflight) versus when jobs use subprocess, see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors). Inspect registered profiles with `nemo jobs list-execution-profiles -f json`.
+
 ### Subprocess
 
-The subprocess backend runs job commands directly on the Platform host. It is useful for trusted local development workloads, but it does not provide container isolation and should not run untrusted code.
+The subprocess backend runs job commands directly on the control plane host. It is useful for trusted local development workloads, but it does not provide container isolation and should not run untrusted code.
 
-With `platform.runtime: docker` or `platform.runtime: none`, NeMo Helix registers `subprocess/default` unless it is explicitly disabled. Kubernetes deployments do not enable it by default. CPU container steps that request a configured subprocess profile are translated to this host backend only when `container.entrypoint` or `container.command` provides a command; otherwise job creation returns HTTP 422.
+With `platform.runtime: docker` or `platform.runtime: none`, NeMo Helix registers `subprocess/default` unless it is explicitly disabled. Kubernetes deployments do not enable it by default. CPU container steps that request a configured subprocess profile are translated to this host backend only when `container.entrypoint` or `container.command` provides a command; otherwise job creation returns HTTP 422. Some local profiles (for example auditor and GPU/customizer) still use Docker even when `subprocess/default` is present.
 
 ```yaml
 jobs:
@@ -145,7 +147,7 @@ jobs:
 
 The NeMo Helix supports Docker as an execution backend for CPU and GPU based jobs. When the shared GPU pool is configured (see below), Docker will use only the configured GPU devices and will not over-schedule jobs if there are not currently enough GPUs available.
 
-With `platform.runtime: docker`, NeMo Helix registers Docker-backed `cpu/default` and `gpu/default` profiles when Docker is available. Docker and `none` runtimes also register `subprocess/default` unless it is explicitly disabled; Kubernetes does not. CPU container steps that request a configured subprocess profile are translated to it only when `container.entrypoint` or `container.command` provides a command; otherwise job creation returns HTTP 422. Configure or select an explicit image-backed profile when a workload must run in a container.
+With `platform.runtime: docker`, NeMo Helix registers Docker-backed `cpu/default` and `gpu/default` profiles when Docker is available. Docker and `none` runtimes also register `subprocess/default` unless it is explicitly disabled; Kubernetes does not. CPU container steps that request a configured subprocess profile are translated to it only when `container.entrypoint` or `container.command` provides a command; otherwise job creation returns HTTP 422. Configure or select an explicit image-backed profile when a workload must run in a container. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors) for how this relates to control plane startup preflight (deployments) versus job backends.
 
 <Tip>
 
