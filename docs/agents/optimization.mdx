@@ -94,8 +94,21 @@ across multiple backend models. The common optimization pattern is to create a
 cheaper model, then evaluate whether the route split preserves application
 quality.
 
-Run `nemo models list` first and replace the placeholders below with model
-entity names from your workspace that use the `OPENAI_CHAT` backend format.
+The `switchyard` optimization strategy automates this for a platform agent: it
+creates one virtual model per (model pair × routing strategy) and saves a copy
+of the agent config per combination, pointed at that virtual model, to the job
+results.
+
+```bash
+nemo agents optimize run-strategy --strategy switchyard --agent my-agent \
+  --spec '{"models": ["default/model-a", "default/model-b"], "routing_strategies": ["random_routing", "stage_router"]}'
+```
+
+See the [Switchyard plugin README](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/plugins/nemo-switchyard/README.md#optimization-strategy)
+for the spec fields and how to fetch the results. To hand-build a single
+virtual model instead, run `nemo models list` first and replace the
+placeholders below with model entity names from your workspace that use the
+`OPENAI_CHAT` backend format.
 
 <Tabs>
 
