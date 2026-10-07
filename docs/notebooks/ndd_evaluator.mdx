@@ -50,7 +50,7 @@ from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 
 # Initialize the client from your current CLI context (does not trigger any action yet)
 client = NemoClient.from_config()
-WORKSPACE = client.workspace
+WORKSPACE = client.resolve_workspace()
 ```
 
 Create a Secret and Model Provider to use models hosted on `build.nvidia.com`.

@@ -89,7 +89,7 @@ from nemo_helix_plugin.client.client import NemoClient
 
 # Create a NemoClient from the current CLI context.
 client = NemoClient.from_config()
-WORKSPACE = client.workspace
+WORKSPACE = client.resolve_workspace()
 evaluator = Evaluator.from_client(client)
 
 # Verify evaluator plugin connectivity.

@@ -75,7 +75,7 @@ FILE_PATH = "symptom_to_diagnosis.csv"
 
 # Connect to the deployment and workspace in your current CLI context
 client = NemoClient.from_config()
-WORKSPACE = client.workspace
+WORKSPACE = client.resolve_workspace()
 files_client = FilesClient.from_client(client)
 
 # Create fileset

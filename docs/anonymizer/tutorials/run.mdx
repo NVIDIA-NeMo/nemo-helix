@@ -57,7 +57,7 @@ from nemo_helix_plugin.client.client import NemoClient
 
 client = NemoClient.from_config()
 anonymizer = AnonymizerResource(client)
-WORKSPACE = client.workspace
+WORKSPACE = client.resolve_workspace()
 MODEL_PROVIDER = os.environ.get("NHX_ANON_PROVIDER", "nvidia-build")
 
 config = AnonymizerConfig(
