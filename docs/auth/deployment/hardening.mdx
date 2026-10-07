@@ -46,9 +46,11 @@ For the security architecture, see [Security Model](/documentation/access-contro
 
 ## Deployment Validation
 
-After applying these settings, verify your deployment:
+After applying these settings, verify your deployment. Set `BASE_URL` to your NeMo Helix endpoint first:
 
 ```bash
+export BASE_URL="${BASE_URL:-http://localhost:8080}"
+
 # 1. Verify auth is enabled
 curl -s ${BASE_URL}/apis/auth/discovery | python -m json.tool
 # Expected: "auth_enabled": true

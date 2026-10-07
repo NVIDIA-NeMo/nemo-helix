@@ -13,6 +13,12 @@ When something goes wrong with authentication or authorization, start here. Prob
 
 **Diagnosis**:
 
+Set `BASE_URL` to your NeMo Helix endpoint before running curl commands:
+
+```bash
+export BASE_URL="${BASE_URL:-http://localhost:8080}"
+```
+
 1. Check if auth is enabled:
 
  ```bash

@@ -15,30 +15,30 @@ You can override the default values for the NeMo Helix chart to make it compatib
 
 1. **Create the OpenShift values file.** Save the following as `openshift-values.yaml`:
 
- ```yaml
- # openshift-values.yaml
+```yaml
+# openshift-values.yaml
 
- podSecurityContext:
- runAsNonRoot: true
- fsGroup: 1000
- seccompProfile:
- type: RuntimeDefault
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
 
- securityContext:
- allowPrivilegeEscalation: false
- capabilities:
- drop:
- - ALL
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
 
- # If using the embedded PostgreSQL, otherwise skip this section
- postgresql:
- securityContext:
- runAsUser: 999
- runAsNonRoot: true
- podSecurityContext:
- runAsNonRoot: true
- fsGroup: 999
- ```
+# If using the embedded PostgreSQL, otherwise skip this section
+postgresql:
+  securityContext:
+    runAsUser: 999
+    runAsNonRoot: true
+  podSecurityContext:
+    runAsNonRoot: true
+    fsGroup: 999
+```
 
 2. **Install** with your custom values and the OpenShift overrides (order matters; later files override earlier). Complete the [Prerequisites](/documentation/kubernetes-deployment/setup/helm/prerequisites) and follow [Install](/documentation/kubernetes-deployment/setup/helm/install), using the provided OpenShift values file.
 
