@@ -16,6 +16,22 @@
     "replacements": {
       "NeMo Evaluator Plugin": "NeMo Helix Evals Plugin",
       "NeMo Evaluator": "NeMo Helix Evals",
+      "Evaluator Plugin": "Evals Plugin",
+      "Evaluator plugin": "Evals plugin",
+      "evaluator plugin": "evals plugin",
+      "Evaluator SDK": "Evals SDK",
+      "evaluator SDK": "evals SDK",
+      "Evaluator service": "Evals service",
+      "evaluator service": "evals service",
+      "Evaluator documentation": "Evals documentation",
+      "Evaluator API Reference": "Evals API Reference",
+      "docs/evaluator": "docs/evals",
+      "../evaluator/": "../evals/",
+      "troubleshooting/evaluator": "troubleshooting/evals",
+      "@nemo/sdk/generated/evaluator": "@nemo/sdk/generated/evals",
+      "@nemo/sdk/generated/fetchers/evaluator": "@nemo/sdk/generated/fetchers/evals",
+      "generated/fetchers/evaluator": "generated/fetchers/evals",
+      "evaluator-plugin-": "evals-plugin-",
       "nemo-evaluator-plugin": "nemo-evals-plugin",
       "nemo-evaluator": "nemo-evals",
       "plugins/nemo-evaluator": "plugins/nemo-evals",
@@ -24,15 +40,67 @@
       "nemo_evaluator": "nemo_evals",
       "/apis/evaluator/": "/apis/evals/",
       "nemo evaluator": "nemo evals",
-      "NEMO_EVALUATOR_": "NEMO_EVALS_"
+      "NEMO_EVALUATOR_": "NEMO_EVALS_",
+      "NHX_EVALUATOR_": "NHX_EVALS_"
     },
     "paths": {
       "plugins/nemo-evaluator/src/nemo_evaluator": "plugins/nemo-evals/src/nemo_evals",
       "plugins/nemo-evaluator": "plugins/nemo-evals",
       "packages/nemo_helix_plugin/src/nemo_helix_plugin/evaluator": "packages/nemo_helix_plugin/src/nemo_helix_plugin/evals",
-      "skills/nemo-evaluator-plugin": "skills/nemo-evals-plugin"
+      "skills/nemo-evaluator-plugin": "skills/nemo-evals-plugin",
+      "docs/evaluator": "docs/evals",
+      "docs/troubleshooting/evaluator.mdx": "docs/troubleshooting/evals.mdx"
     },
     "rules": [
+      {
+        "pattern": "(?<=section: )evaluator\\b",
+        "replacement": "evals",
+        "include": ["docs/fern/gated-nav.yml"]
+      },
+      {
+        "pattern": "\\bevaluator\\b",
+        "replacement": "evals",
+        "include": ["web/packages/studio/src/routes/DashboardLandingRoute/skillActionTemplateCatalog.tsx"]
+      },
+      {
+        "pattern": "\\bnemo\\.(cli|services|sdk|skills):evaluator\\b",
+        "replacement": "nemo.\\1:evals"
+      },
+      {
+        "pattern": "\\bevaluator(?=/(?:index|metrics|agent-eval|tutorials|experiments|sdk-resources|manage-tasks-tasksets|evaluation-approaches))",
+        "replacement": "evals",
+        "include": ["docs/**"]
+      },
+      {
+        "pattern": "\\bevaluator(?=/(?:(?:index|metrics)|\\s*,))",
+        "replacement": "evals",
+        "include": ["docs/fern/README.md"]
+      },
+      {
+        "pattern": "\\bevaluator\\b",
+        "replacement": "evals",
+        "include": ["web/packages/sdk/src/capabilities/**"]
+      },
+      {
+        "pattern": "\\bevaluatorFetch\\b",
+        "replacement": "evalsFetch",
+        "include": ["web/packages/sdk/src/capabilities/fetchers.ts"]
+      },
+      {
+        "pattern": "\\bevaluator(\\s*:\\s*\\{)",
+        "replacement": "evals\\1",
+        "include": ["web/packages/sdk/orval/constants.ts"]
+      },
+      {
+        "pattern": "([\"'])evaluator\\1",
+        "replacement": "\\1evals\\1",
+        "include": ["web/packages/sdk/orval/constants.ts"]
+      },
+      {
+        "pattern": "(?<=gen:)evaluator\\b|(?<=generate\\.ts )evaluator\\b",
+        "replacement": "evals",
+        "include": ["web/packages/sdk/package.json", "web/packages/sdk/README.md"]
+      },
       {
         "pattern": "``EvaluateJob`` keeps the derived default so its\\n#: existing records still match its list\\.",
         "replacement": "``EvaluateJob`` keeps the module-derived default.",
@@ -113,6 +181,7 @@
           "e2e/configs/**",
           "k8s/helm/values.yaml",
           "docs/evaluator/agent-eval/gym-sandbox-configuration.mdx",
+          "docs/evals/agent-eval/gym-sandbox-configuration.mdx",
           "docs/set-up/milvus.mdx"
         ]
       },
