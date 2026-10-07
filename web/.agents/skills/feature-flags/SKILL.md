@@ -27,6 +27,10 @@ The JSON output shows each flag with two cascades:
 
 In both cascades, `override.value` wins when non-null; otherwise `default.value` is used.
 
+The matrix reflects build/deploy configuration only. It does not see per-browser
+localStorage overrides — see [references/local-overrides.md](references/local-overrides.md)
+for that layer, `window.__flags`, and the Chrome-extension contract.
+
 ## Tri-State Values
 
 Flags use three states:
@@ -43,7 +47,7 @@ The `FeatureFlagBadge` component (`src/components/FeatureFlagBadge/index.tsx`) r
 
 ## Adding a New Flag
 
-Four files must be updated:
+Up to five files must be updated:
 
 ### 1. Define the flag in `featureFlags.ts`
 
@@ -55,7 +59,19 @@ myNewFlag: previewFlag('VITE_FF_MY_NEW_FLAG', false),
 
 Use `previewFlag()` for features that may show an "Early Preview" badge. Use `booleanFlag()` only for flags that will never need the preview state (e.g. `tourEnabled`).
 
-### 2. Add the env mapping in `env_mappings.py`
+### 2. Add the runtime marker in `.env.fastapi`
+
+Path: `web/packages/studio/env/.env.fastapi`
+
+```
+VITE_FF_MY_NEW_FLAG=STUDIO_UI_VITE_FF_MY_NEW_FLAG
+```
+
+Vite inlines this literal marker into the bundle; the Studio service rewrites it
+at serve time. **Skip this and the flag works locally but resolves to an empty
+string in every deployed build.**
+
+### 3. Add the env mapping in `env_mappings.py`
 
 Path: `services/studio/src/nhx/studio/env_mappings.py`
 
@@ -69,7 +85,7 @@ EnvMapping(
 
 This controls the deployment default. The `marker` must match `STUDIO_UI_` + the env var name. The `config_path` uses snake_case.
 
-### 3. Add to local env file (optional)
+### 4. Add to local env file (optional)
 
 Path: `web/packages/studio/env/.env.dev.local`
 
@@ -77,7 +93,7 @@ Path: `web/packages/studio/env/.env.dev.local`
 VITE_FF_MY_NEW_FLAG='preview'
 ```
 
-### 4. Add Helm overrides (optional)
+### 5. Add Helm overrides (optional)
 
 Path: `deploy/helm/values/ci/<target>-values.yaml`
 
