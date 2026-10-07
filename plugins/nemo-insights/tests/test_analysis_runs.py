@@ -25,6 +25,7 @@ from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from nemo_insights_plugin.analysis_runs import (
     ANALYSIS_RUN_NAME_PREFIX,
     CreateAnalysisRunRequest,
+    EthosFileClient,
     ExecuteJobClient,
     ModelLookupClient,
     build_execute_agent_job_config,
@@ -134,13 +135,41 @@ class _TypedModelsClient:
         return _TypedResponse(await self._models.retrieve(name, workspace=workspace))
 
 
+class _StubDownload:
+    def __init__(self, content: bytes | None, error: Exception | None) -> None:
+        self._content = content
+        self._error = error
+
+    async def read(self) -> bytes:
+        if self._error is not None:
+            raise self._error
+        assert self._content is not None
+        return self._content
+
+
+class _StubFiles:
+    """The agent's Ethos fileset; absent unless content or an error is given."""
+
+    def __init__(self, content: bytes | None = None, error: Exception | None = None) -> None:
+        self.downloads: list[tuple[str | None, str, str]] = []
+        self._content = content
+        self._error = error if error is not None or content is not None else _nemo_http_error(404, {"detail": "nope"})
+
+    async def download_file(self, *, workspace: str | None = None, name: str, path: str) -> _StubDownload:
+        self.downloads.append((workspace, name, path))
+        return _StubDownload(self._content, self._error)
+
+
 class _StubClient:
     """Minimal stand-in for the request-scoped ``AsyncNemoClient``."""
 
-    def __init__(self, jobs: _StubExecuteJobs, models: _StubModels | None = None) -> None:
+    def __init__(
+        self, jobs: _StubExecuteJobs, models: _StubModels | None = None, files: _StubFiles | None = None
+    ) -> None:
         self.jobs = jobs
         self.agents = type("_Agents", (), {"jobs": type("_Jobs", (), {"execute": jobs})()})()
         self.models = models or _StubModels()
+        self.files = files or _StubFiles()
 
 
 @pytest.fixture(autouse=True)
@@ -152,6 +181,10 @@ def _patch_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "nemo_insights_plugin.analysis_runs.AsyncModelsClient",
         SimpleNamespace(from_client=lambda client: _TypedModelsClient(client.models)),
+    )
+    monkeypatch.setattr(
+        "nemo_insights_plugin.analysis_runs.AsyncFilesClient",
+        SimpleNamespace(from_client=lambda client: client.files),
     )
 
 
@@ -189,9 +222,11 @@ class _StubEntities:
         )
 
 
-def _client(jobs: _StubExecuteJobs, models: _StubModels | None = None) -> AsyncNemoClient:
+def _client(
+    jobs: _StubExecuteJobs, models: _StubModels | None = None, files: _StubFiles | None = None
+) -> AsyncNemoClient:
     """The route only derives typed clients from the platform client; cast past the concrete type."""
-    return cast(AsyncNemoClient, _StubClient(jobs, models))
+    return cast(AsyncNemoClient, _StubClient(jobs, models, files))
 
 
 def _entities(stub: _StubEntities) -> NemoEntitiesClient:
@@ -419,6 +454,7 @@ async def test_scheduler_submission_preserves_name_profile_and_platform_url() ->
         request=_request(),
         agents_client=cast(ExecuteJobClient, _TypedAgentsClient(jobs)),
         models_client=cast(ModelLookupClient, _TypedModelsClient(_StubModels())),
+        files_client=cast(EthosFileClient, _StubFiles()),
         entity_client=_entities(entities),
         name=name,
         profile="cpu-cluster",
@@ -432,6 +468,53 @@ async def test_scheduler_submission_preserves_name_profile_and_platform_url() ->
     assert isinstance(config.agent, AgentInline)
     settings = next(iter(config.agent.config["harnesses"].values()))["settings"]
     assert settings["base_url"] == "https://platform.example.com"
+
+
+def _submitted_ethos(jobs: _StubExecuteJobs) -> str | None:
+    config = ExecuteAgentJobConfig.model_validate(jobs.requests[0].spec)
+    assert isinstance(config.agent, AgentInline)
+    return config.agent.config["harnesses"]["insights"]["settings"].get("ethos")
+
+
+async def test_stored_ethos_is_inlined_when_the_request_has_none() -> None:
+    jobs = _StubExecuteJobs()
+    files = _StubFiles(content=b"# Ethos\n\nBe careful.")
+
+    await create_analysis_run("team-a", _request(), _client(jobs, files=files), _entities(_StubEntities()))
+
+    assert files.downloads == [("team-a", "demo-agent-ethos", "ETHOS.md")]
+    assert _submitted_ethos(jobs) == "# Ethos\n\nBe careful."
+
+
+async def test_request_ethos_wins_over_the_stored_one() -> None:
+    jobs = _StubExecuteJobs()
+    files = _StubFiles(content=b"# Stored")
+
+    await create_analysis_run(
+        "default", _request(ethos="# Inline"), _client(jobs, files=files), _entities(_StubEntities())
+    )
+
+    assert files.downloads == []
+    assert _submitted_ethos(jobs) == "# Inline"
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        pytest.param(_StubFiles(), id="missing"),
+        pytest.param(_StubFiles(content=b"  \n"), id="blank"),
+        pytest.param(_StubFiles(content=b"\xff\xfe"), id="not-utf8"),
+        pytest.param(_StubFiles(error=_nemo_http_error(500, {"detail": "boom"})), id="files-error"),
+        pytest.param(_StubFiles(error=_transport_error("GET", "http://platform/apis/files")), id="files-unreachable"),
+    ],
+)
+async def test_run_proceeds_without_an_unusable_stored_ethos(files: _StubFiles) -> None:
+    jobs = _StubExecuteJobs()
+
+    response = await create_analysis_run("default", _request(), _client(jobs, files=files), _entities(_StubEntities()))
+
+    assert response.job is not None
+    assert _submitted_ethos(jobs) is None
 
 
 async def test_the_run_captures_the_request_scope() -> None:

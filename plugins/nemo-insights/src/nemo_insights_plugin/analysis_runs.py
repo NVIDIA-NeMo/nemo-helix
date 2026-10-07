@@ -29,10 +29,11 @@ from nemo_helix_plugin.agents.types import CreateExecuteJobRequest, JsonObject
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError
-from nemo_helix_plugin.client.response import NemoResponse
+from nemo_helix_plugin.client.response import AsyncNemoBinaryResponse, NemoResponse
 from nemo_helix_plugin.config import get_nemo_config
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.models.client import AsyncModelsClient
 from nemo_helix_plugin.models.types import ModelEntity
 from nemo_helix_plugin.nooa_model_client import supported_backend_format
@@ -49,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 INSIGHTS_ANALYSIS_EXTENSION_KIND = "insights.analysis"
 ANALYSIS_RUN_NAME_PREFIX = "insights-run-"
+ETHOS_FILENAME = "ETHOS.md"
 
 router = APIRouter(tags=["Insights Analysis Runs"])
 _JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
@@ -56,6 +58,12 @@ _JSON_OBJECT_ADAPTER = TypeAdapter(JsonObject)
 
 class ModelLookupClient(Protocol):
     def get_model(self, *, name: str, workspace: str | None = None) -> Awaitable[NemoResponse[ModelEntity]]: ...
+
+
+class EthosFileClient(Protocol):
+    def download_file(
+        self, *, workspace: str | None = None, name: str, path: str
+    ) -> Awaitable[AsyncNemoBinaryResponse]: ...
 
 
 class ExecuteJobClient(Protocol):
@@ -97,6 +105,7 @@ async def create_analysis_run(
         request=request,
         agents_client=AsyncAgentsClient.from_client(client),
         models_client=AsyncModelsClient.from_client(client),
+        files_client=AsyncFilesClient.from_client(client),
         entity_client=entity_client,
         profile=config.analyst.job_profile,
     )
@@ -108,6 +117,7 @@ async def submit_analysis_run(
     request: CreateAnalysisRunRequest,
     agents_client: ExecuteJobClient,
     models_client: ModelLookupClient,
+    files_client: EthosFileClient,
     entity_client: NemoEntitiesClient,
     name: str | None = None,
     profile: str | None = None,
@@ -124,6 +134,10 @@ async def submit_analysis_run(
     # run and submit a job that cannot start, and the request carries the only
     # copy of the operator's intent.
     request = await _resolve_model_refs(models_client, request, workspace=workspace)
+    if request.ethos is None:
+        request = request.model_copy(
+            update={"ethos": await _stored_ethos(files_client, workspace=workspace, agent=request.agent)}
+        )
     run = AnalysisRun(
         name=name or mint_analysis_run_name(),
         workspace=workspace,
@@ -373,6 +387,24 @@ def _inline_analyst(request: CreateAnalysisRunRequest, *, workspace: str, base_u
             ),
         }
     )
+
+
+async def _stored_ethos(client: EthosFileClient, *, workspace: str, agent: str) -> str | None:
+    """Read the agent's ``<agent>-ethos#ETHOS.md``; an unreadable Ethos degrades the run, never blocks it."""
+    fileset = f"{agent}-ethos"
+    try:
+        content = await (await client.download_file(workspace=workspace, name=fileset, path=ETHOS_FILENAME)).read()
+    except NotFoundError:
+        return None
+    except (NemoHTTPError, NemoTransportError) as exc:
+        logger.warning("Could not read %s/%s#%s; running without it: %s", workspace, fileset, ETHOS_FILENAME, exc)
+        return None
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        logger.warning("%s/%s#%s is not UTF-8; running without it", workspace, fileset, ETHOS_FILENAME)
+        return None
+    return text if text.strip() else None
 
 
 def _error_detail(error: NemoHTTPError) -> object:
