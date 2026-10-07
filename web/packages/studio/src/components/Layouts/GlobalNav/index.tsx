@@ -6,7 +6,7 @@ import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
 import { ThemeSwitch } from '@studio/components/Layouts/GlobalNav/components/ThemeSwitch';
 import { UserPopover } from '@studio/components/UserPopover';
-import { FLAG_OVERRIDES_ENABLED, TOUR_ENABLED } from '@studio/constants/environment';
+import { FLAG_OVERRIDES_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPathIfExists } from '@studio/hooks/useWorkspaceFromPath';
 import { AssistantTopBarChat } from '@studio/routes/agents/AssistantChatRoute/AssistantTopBarChat';
@@ -88,11 +88,9 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
         }
         slotEnd={
           <Flex gap="density-md" align="center">
-            {TOUR_ENABLED && (
-              <Suspense>
-                <WelcomeTour />
-              </Suspense>
-            )}
+            <Suspense>
+              <WelcomeTour />
+            </Suspense>
             {shouldMountAssistantTopBarChat && <AssistantTopBarChat />}
             {FLAG_OVERRIDES_ENABLED && (
               <Suspense>

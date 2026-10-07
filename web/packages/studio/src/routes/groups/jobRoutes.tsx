@@ -3,10 +3,9 @@
 
 import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { JOBS_ENABLED } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
-import { gateJobsRoutes, getWorkspaceJobsRoute } from '@studio/routes/utils';
+import { getWorkspaceJobsRoute } from '@studio/routes/utils';
 import { lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
@@ -21,7 +20,7 @@ const JobDetailRoute = lazy(() =>
   }))
 );
 
-export const jobRoutes: RouteObject[] = gateJobsRoutes([
+export const jobRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.jobs,
     element: <JobsRoute />,
@@ -32,18 +31,15 @@ export const jobRoutes: RouteObject[] = gateJobsRoutes([
     element: <JobDetailRoute />,
     errorElement: <RouteErrorPanel title="Job Details" />,
   },
-]);
+];
 
 const NavIcon = ENTITY_ICONS.jobs;
 
-export const getJobSideNavItems = (workspace: string) =>
-  JOBS_ENABLED
-    ? [
-        {
-          id: 'jobs',
-          slotIcon: <NavIcon className={iconColorClass} />,
-          slotLabel: 'Jobs',
-          href: getWorkspaceJobsRoute(workspace),
-        },
-      ]
-    : [];
+export const getJobSideNavItems = (workspace: string) => [
+  {
+    id: 'jobs',
+    slotIcon: <NavIcon className={iconColorClass} />,
+    slotLabel: 'Jobs',
+    href: getWorkspaceJobsRoute(workspace),
+  },
+];
