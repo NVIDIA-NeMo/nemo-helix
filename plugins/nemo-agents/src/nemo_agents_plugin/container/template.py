@@ -145,6 +145,17 @@ PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.4.0"
 PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^0.84.2 @earendil-works/pi-coding-agent@^0.84.2"
 # NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
 PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
+# The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
+# nemo-relay-cli-bin wheel or the npm adapter), so the image fetches it from a
+# pinned Relay 0.9 ref. Kept in lockstep with PI_RELAY_CLI_SPEC's 0.9.x range so
+# the gateway CLI and the extension it loads cannot drift.
+PI_RELAY_EXTENSION_REF = "0.9.0"
+PI_RELAY_EXTENSION_REPO = "https://github.com/NVIDIA/NeMo-Relay.git"
+# Path to the Pi extension package WITHIN the Relay source tree.
+_PI_RELAY_EXTENSION_SRC_SUBDIR = "crates/cli/assets/pi-extension"
+# Stable in-image location the extension is copied to; translator.py defaults
+# harness.settings["relay_extension_path"] here for Relay-enabled Pi agents.
+PI_RELAY_EXTENSION_PATH = "/opt/pi-relay-extension"
 # npm global prefix for the adapter; its descriptor is linked into the Fabric
 # share/ tree so the Rust core's `preinstalled` discovery finds it.
 _PI_NPM_PREFIX = "/opt/pi-adapter"
@@ -343,6 +354,14 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     npm install -g --prefix {{ pi_npm_prefix }} {{ pi_adapter_npm_spec }} {{ pi_sdk_npm_specs }} && \\
     . /workspace/.venv/bin/activate && \\
     uv pip install --no-sources --prerelease=allow "{{ pi_relay_cli_spec }}" && \\
+    git init --quiet /opt/pi-relay-src && \\
+    git -C /opt/pi-relay-src remote add origin {{ pi_relay_extension_repo }} && \\
+    git -C /opt/pi-relay-src fetch --depth 1 origin {{ pi_relay_extension_ref }} && \\
+    git -C /opt/pi-relay-src checkout --quiet --detach FETCH_HEAD && \\
+    test -d "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" && \\
+    cp -r "/opt/pi-relay-src/{{ pi_relay_extension_src_subdir }}" "{{ pi_relay_extension_path }}" && \\
+    rm -rf /opt/pi-relay-src && \\
+    chmod -R a+rX "{{ pi_relay_extension_path }}" && \\
     PI_ADAPTER_DIR="{{ pi_npm_prefix }}/lib/node_modules/nemo-fabric-adapters-pi" && \\
     FABRIC_SHARE="$(/workspace/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("data"))')/share/nemo-fabric/adapters/pi" && \\
     test -f "${PI_ADAPTER_DIR}/pi.fabric-adapter.json" && \\
@@ -547,6 +566,10 @@ def _jinja_env() -> jinja2.Environment:
     template_globals["pi_adapter_npm_spec"] = PI_ADAPTER_NPM_SPEC
     template_globals["pi_sdk_npm_specs"] = PI_SDK_NPM_SPECS
     template_globals["pi_relay_cli_spec"] = PI_RELAY_CLI_SPEC
+    template_globals["pi_relay_extension_repo"] = PI_RELAY_EXTENSION_REPO
+    template_globals["pi_relay_extension_ref"] = PI_RELAY_EXTENSION_REF
+    template_globals["pi_relay_extension_src_subdir"] = _PI_RELAY_EXTENSION_SRC_SUBDIR
+    template_globals["pi_relay_extension_path"] = PI_RELAY_EXTENSION_PATH
     template_globals["pi_npm_prefix"] = _PI_NPM_PREFIX
     return env
 

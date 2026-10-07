@@ -592,6 +592,8 @@ class TestRenderFabricDockerfile:
     def test_pi_harness_installs_node_adapter_and_stages_descriptor(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import (
             PI_ADAPTER_NPM_SPEC,
+            PI_RELAY_EXTENSION_PATH,
+            PI_RELAY_EXTENSION_REF,
             PINNED_NODE_MAJOR,
             get_contract_version,
             render_fabric_dockerfile,
@@ -628,6 +630,14 @@ class TestRenderFabricDockerfile:
         # The descriptor is linked into the Fabric share/ tree for preinstalled discovery.
         assert "share/nemo-fabric/adapters/pi" in result
         assert "pi.fabric-adapter.json" in result
+        # The Relay Pi extension is fetched from the pinned Relay 0.9 ref and staged
+        # in-image (the npm adapter + CLI wheel do not ship it), so a Relay-enabled
+        # Pi agent has an extension to point relay_extension_path at.
+        assert f"fetch --depth 1 origin {PI_RELAY_EXTENSION_REF}" in result
+        assert "crates/cli/assets/pi-extension" in result
+        assert f'cp -r "/opt/pi-relay-src/crates/cli/assets/pi-extension" "{PI_RELAY_EXTENSION_PATH}"' in result
+        # The transient clone is removed so it does not bloat the image layer.
+        assert "rm -rf /opt/pi-relay-src" in result
 
     def test_non_pi_harness_omits_node_install(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile
@@ -648,6 +658,9 @@ class TestRenderFabricDockerfile:
         assert "nodejs" not in result
         assert "nemo-fabric-adapters-pi" not in result
         assert "share/nemo-fabric/adapters/pi" not in result
+        # The Relay Pi extension fetch is likewise Pi-gated.
+        assert "pi-relay-src" not in result
+        assert "crates/cli/assets/pi-extension" not in result
 
     def test_unresolved_contract_version_is_rejected(
         self,
