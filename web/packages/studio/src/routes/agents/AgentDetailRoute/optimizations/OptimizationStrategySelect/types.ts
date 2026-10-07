@@ -15,6 +15,6 @@ export interface OptimizationStrategySelectProps {
   agentName?: string;
   /** Returns to the studies table. */
   onBack: () => void;
-  /** Fired when the user confirms a strategy via the Continue footer. */
-  onContinue: (strategy: OptimizationStrategyId) => void;
+  /** Fired as soon as the user picks a strategy. */
+  onSelect: (strategy: OptimizationStrategyId) => void;
 }

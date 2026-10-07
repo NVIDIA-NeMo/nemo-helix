@@ -47,7 +47,7 @@ export const OptimizationsTab: FC<OptimizationsTabProps> = ({
         <OptimizationStrategySelect
           agentName={agentName}
           onBack={() => onViewChange('table')}
-          onContinue={(strategy) => continueWith[strategy]()}
+          onSelect={(strategy) => continueWith[strategy]()}
         />
       );
     case 'form':

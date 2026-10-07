@@ -38,7 +38,7 @@ describe('AgentDetailRoute optimization form', () => {
     await screen.findByText('brevity-sweep-3');
     await user.click(await screen.findByRole('button', { name: 'Optimize' }));
 
-    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeChecked();
+    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: /Upload a config/ })).toBeInTheDocument();
     expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
@@ -86,7 +86,6 @@ describe('AgentDetailRoute optimization form', () => {
     renderDetail('?tab=optimizations&view=strategy');
 
     await user.click(await screen.findByRole('radio', { name: /Parameter sweep/ }));
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByRole('button', { name: 'Run optimization' })).toBeInTheDocument();
   });
@@ -96,7 +95,6 @@ describe('AgentDetailRoute optimization form', () => {
     renderDetail('?tab=optimizations&view=strategy');
 
     await user.click(await screen.findByRole('radio', { name: /Upload a config/ }));
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Optimize agent' });
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
