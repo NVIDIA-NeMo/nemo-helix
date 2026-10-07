@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nemo_helix_ext.auth.helpers import decode_jwt_claims, discover_nhx_config, generate_unsigned_jwt
+from nemo_helix_ext.auth.helpers import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_ext.cli.app import app
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from typer.testing import CliRunner
 
-from tests.auth_idp.common import require_capability, runtime_tls_config
+from tests.auth_idp.common import discover_runtime_nhx_config, require_capability, runtime_tls_config
 from tests.auth_idp.device_flow import with_url_origin
 from tests.auth_idp.runtime_contract import JsonObject
 
@@ -87,7 +87,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
     require_capability(auth_idp_case, "device_flow")
     require_capability(auth_idp_case, "gateway_authn")
 
-    oidc = discover_nhx_config(auth_idp_runtime.gateway_base_url)
+    oidc = discover_runtime_nhx_config(auth_idp_runtime)
     assert oidc.client_id
     assert oidc.device_authorization_endpoint
     assert oidc.token_endpoint
@@ -136,7 +136,7 @@ def test_cli_api_command_auto_refreshes_expired_device_flow_token(
         token_endpoint=runtime_token_endpoint,
     )
     monkeypatch.setattr(
-        "nemo_helix_ext.client.bootstrap.discover_nhx_config",
+        "nemo_helix_ext.auth.bootstrap.discover_nhx_config",
         lambda *_args, **_kwargs: runtime_oidc,
     )
 

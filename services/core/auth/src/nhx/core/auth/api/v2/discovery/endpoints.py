@@ -5,13 +5,12 @@
 
 import logging
 import time
-from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Request
+from nhx.common.auth.discovery import AuthDiscoveryResponse, OIDCDiscoveryResponse
 from nhx.common.config import get_auth_config
 from nhx.core.auth.api.v2.workload_token_exchange import workload_token_endpoint_url
-from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -21,36 +20,6 @@ router = APIRouter(tags=["Discovery"])
 # There is only one key per issuer so a simple variable + timestamp suffices.
 _idp_discovery_cache: dict | None = None
 _idp_discovery_cache_time: float = 0.0
-
-
-class OIDCDiscoveryResponse(BaseModel):
-    """OIDC discovery response for CLI/SDK."""
-
-    issuer: str
-    authorization_endpoint: str | None = None
-    token_endpoint: str | None = None
-    device_authorization_endpoint: str | None = None
-    userinfo_endpoint: str | None = None
-    client_id: str
-    cli_client_id: str | None = None
-    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
-    device_authorization_requires_device_id: bool = False
-    device_authorization_display_name: str | None = None
-    device_token_request_includes_scope: bool = True
-    default_scopes: str = "openid profile email offline_access"
-    scope_prefix: str | None = None
-    workload_token_exchange_enabled: bool = False
-    workload_client_id: str | None = None
-    workload_token_endpoint: str | None = None
-    workload_audience: str | None = None
-    workload_scope: str | None = None
-
-
-class AuthDiscoveryResponse(BaseModel):
-    """Auth discovery response for CLI/SDK."""
-
-    auth_enabled: bool
-    oidc: OIDCDiscoveryResponse | None = None
 
 
 async def _fetch_idp_discovery(issuer: str, cache_ttl: int) -> dict:

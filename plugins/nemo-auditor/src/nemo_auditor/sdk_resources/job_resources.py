@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, TypeVar
 
+import httpx
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -41,6 +42,30 @@ async def _async_pause(seconds: float) -> None:
 def _job_url(platform: NemoClient | AsyncNemoClient, workspace: str, job_name: str, path: str = "") -> str:
     base = str(platform.base_url).rstrip("/")
     return f"{base}/apis/auditor/v2/workspaces/{workspace}/jobs/audit/{job_name}{path}"
+
+
+def _platform_get(platform: NemoClient, url: str, *, params: dict[str, str] | None = None) -> httpx.Response:
+    headers = platform.request_headers(url=url)
+    if params is None:
+        return platform._client.get(url) if headers is None else platform._client.get(url, headers=headers)
+    return (
+        platform._client.get(url, params=params)
+        if headers is None
+        else platform._client.get(url, params=params, headers=headers)
+    )
+
+
+async def _async_platform_get(
+    platform: AsyncNemoClient, url: str, *, params: dict[str, str] | None = None
+) -> httpx.Response:
+    headers = await platform.request_headers(url=url)
+    if params is None:
+        return await platform._client.get(url) if headers is None else await platform._client.get(url, headers=headers)
+    return (
+        await platform._client.get(url, params=params)
+        if headers is None
+        else await platform._client.get(url, params=params, headers=headers)
+    )
 
 
 @dataclass
@@ -137,13 +162,15 @@ class AuditorJobResource:
 
     def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        resp = self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name))
+        url = _job_url(self._platform, self._workspace, self._job_name)
+        resp = _platform_get(self._platform, url)
         resp.raise_for_status()
         return resp.json()
 
     def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        resp = self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name, "/status"))
+        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
+        resp = _platform_get(self._platform, url)
         resp.raise_for_status()
         return resp.json().get("status")
 
@@ -177,10 +204,8 @@ class AuditorJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            resp = self._platform._client.get(
-                _job_url(self._platform, self._workspace, self._job_name, "/logs"),
-                params=params,
-            )
+            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
+            resp = _platform_get(self._platform, url, params=params)
             resp.raise_for_status()
             response = resp.json()
             for log in response.get("data", []):
@@ -212,9 +237,8 @@ class AuditorJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        resp = self._platform._client.get(
-            _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download"),
-        )
+        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
+        resp = _platform_get(self._platform, url)
         resp.raise_for_status()
         with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
             safe_extract_tar(tar, output_path, error_cls=RuntimeError)
@@ -249,13 +273,15 @@ class AsyncAuditorJobResource:
 
     async def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        resp = await self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name))
+        url = _job_url(self._platform, self._workspace, self._job_name)
+        resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
         return resp.json()
 
     async def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        resp = await self._platform._client.get(_job_url(self._platform, self._workspace, self._job_name, "/status"))
+        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
+        resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
         return resp.json().get("status")
 
@@ -289,10 +315,8 @@ class AsyncAuditorJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            resp = await self._platform._client.get(
-                _job_url(self._platform, self._workspace, self._job_name, "/logs"),
-                params=params,
-            )
+            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
+            resp = await _async_platform_get(self._platform, url, params=params)
             resp.raise_for_status()
             response = resp.json()
             for log in response.get("data", []):
@@ -324,9 +348,8 @@ class AsyncAuditorJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        resp = await self._platform._client.get(
-            _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download"),
-        )
+        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
+        resp = await _async_platform_get(self._platform, url)
         resp.raise_for_status()
         await asyncio.to_thread(
             lambda: _extract_tar(resp.content, output_path),

@@ -10,6 +10,7 @@ import os
 import typing
 from dataclasses import dataclass, field
 
+import httpx
 import typer
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
@@ -107,12 +108,12 @@ class CLIContext:
 
         return ctx.user.get_client_config() if ctx.user else {}
 
-    def get_client(self, timeout: float = 60.0) -> NemoClient:
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
         """
         Get or create the NeMo Helix client.
 
         Args:
-            timeout: Request timeout in seconds (default: 60.0)
+            timeout: Optional request timeout. ``None`` defers to the SDK constructor defaults.
 
         Returns:
             Initialized NemoClient sharing the CLI's configured auth
@@ -142,12 +143,22 @@ class CLIContext:
                 )
         return self._client
 
-    def get_async_client(self, timeout: float = 60.0) -> AsyncNemoClient:
+    def get_http_client(self) -> httpx.Client:
+        """Return the CLI context's shared sync HTTP transport."""
+        return self.get_client()._client
+
+    def get_http_headers(
+        self, headers: typing.Mapping[str, str] | None = None, *, url: str | None = None
+    ) -> dict[str, str] | None:
+        """Return request headers resolved from the CLI context's shared client."""
+        return self.get_client().request_headers(headers, url=url)
+
+    def get_async_client(self, timeout: float | httpx.Timeout | None = None) -> AsyncNemoClient:
         """
         Get or create the async NeMo Helix client.
 
         Args:
-            timeout: Request timeout in seconds (default: 60.0)
+            timeout: Optional request timeout. ``None`` defers to the SDK constructor defaults.
 
         Returns:
             Initialized AsyncNemoClient sharing the CLI's configured auth
@@ -193,11 +204,17 @@ class CLIContext:
             return True
         return "default_headers" not in auth_config and bool(os.environ.get(WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR))
 
-    def typed_client(self, client_cls: type[TypedClientT], timeout: float = 60.0) -> TypedClientT:
+    def typed_client(
+        self, client_cls: type[TypedClientT], timeout: float | httpx.Timeout | None = None
+    ) -> TypedClientT:
         """Return a service client of *client_cls* sharing the CLI client's transport and auth."""
         return client_cls.from_client(self.get_client(timeout=timeout))
 
-    def async_typed_client(self, client_cls: type[AsyncTypedClientT], timeout: float = 60.0) -> AsyncTypedClientT:
+    def async_typed_client(
+        self,
+        client_cls: type[AsyncTypedClientT],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> AsyncTypedClientT:
         """Async twin of :meth:`typed_client`."""
         return client_cls.from_client(self.get_async_client(timeout=timeout))
 

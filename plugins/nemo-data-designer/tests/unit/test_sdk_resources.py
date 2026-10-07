@@ -45,6 +45,7 @@ from nemo_data_designer_plugin.sdk.resources import (
     DataDesignerResource,
     _decode_preview_frame,
 )
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
 from nemo_helix_plugin.data_designer.types import DataDesignerJobResponse
@@ -59,7 +60,7 @@ def platform() -> NemoClient:
 
 @pytest.fixture
 def async_platform() -> AsyncNemoClient:
-    return AsyncNemoClient(base_url="http://testserver", workspace="default", auth="token")
+    return AsyncNemoClient(base_url="http://testserver", workspace="default", auth=StaticToken("token"))
 
 
 @pytest.fixture

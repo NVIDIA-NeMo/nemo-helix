@@ -318,7 +318,8 @@ def main(
         from nemo_helix_ext.cli.commands.auth import AuthError, ensure_valid_token
 
         try:
-            token_valid = ensure_valid_token(ctx.obj.get_sdk_context())
+            sdk_context = ctx.obj.get_sdk_context()
+            token_valid = ensure_valid_token(sdk_context, http_client=ctx.obj.get_http_client())
             if not token_valid:
                 typer.echo(
                     "Error: Your access token has expired and could not be refreshed.\n"

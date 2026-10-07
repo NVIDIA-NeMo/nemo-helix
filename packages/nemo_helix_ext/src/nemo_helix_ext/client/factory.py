@@ -11,22 +11,30 @@ resolution itself lives in :mod:`nemo_helix_ext.client.bootstrap`; typed
 clients are built there with :func:`~nemo_helix_ext.client.bootstrap.build_nemo_client`.
 """
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import httpx
 
-from nemo_helix_ext.client.bootstrap import (
+from nemo_helix_ext.auth.bootstrap import (
     _TOKEN_PROVIDER_CACHE,
     _TOKEN_PROVIDER_CACHE_LOCK,
     AccessTokenProvider,
+    AsyncHttpClientFactory,
+    AuthBootstrapContext,
+    AuthClientConfig,
+    SyncHttpClientFactory,
+    new_deferred_async_auth_client,
+    new_deferred_sync_auth_client,
+)
+from nemo_helix_ext.client.bootstrap import (
     ResolvedBootstrap,
-    _headers_with_seeded_auth,
-    _make_async_auth_event_hook,
-    _make_auth_event_hook,
+    bootstrap_requires_discovery_client,
     resolve_bootstrap,
+    resolve_bootstrap_context,
+    resolve_bootstrap_without_discovery,
     resolve_timeout,
 )
 
@@ -39,13 +47,6 @@ __all__ = [
     "build_async_client_init_kwargs",
     "build_client_init_kwargs",
 ]
-
-_SyncRequestHook = Callable[[httpx.Request], None]
-_AsyncRequestHook = Callable[[httpx.Request], Awaitable[None]]
-_SyncHttpClientFactory = Callable[[_SyncRequestHook, str | Literal[True]], httpx.Client]
-_AsyncHttpClientFactory = Callable[[_AsyncRequestHook, str | Literal[True]], httpx.AsyncClient]
-
-_CONNECTION_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=20)
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,26 @@ def _with_sentinels(headers: Mapping[str, str] | None, sentinels: Mapping[str, o
     return merged or None
 
 
+def _client_init_config(
+    *,
+    bootstrap: ResolvedBootstrap,
+    sentinels: Mapping[str, object],
+    client_config: AuthClientConfig,
+) -> ClientInitConfig:
+    return ClientInitConfig(
+        base_url=bootstrap.base_url,
+        workspace=bootstrap.workspace,
+        default_headers=_with_sentinels(client_config.default_headers, sentinels),
+        http_client=client_config.http_client,
+        client_verify=bootstrap.client_verify,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API: build kwargs
+# ---------------------------------------------------------------------------
+
+
 def build_client_init_kwargs(
     *,
     config_path: Path | None = None,
@@ -95,7 +116,7 @@ def build_client_init_kwargs(
     context_name: str | None = None,
     access_token: str | None = None,
     extra_headers: Mapping[str, object] | None = None,
-    http_client_factory: _SyncHttpClientFactory | None = None,
+    http_client_factory: SyncHttpClientFactory | None = None,
 ) -> ClientInitConfig:
     """Build constructor kwargs for a **sync** client.
 
@@ -104,46 +125,40 @@ def build_client_init_kwargs(
     Bearer token before every request.
     """
     header_values, sentinels = _split_header_sentinels(extra_headers)
-    bootstrap = resolve_bootstrap(
+    bootstrap_context = resolve_bootstrap_context(
         config_path=config_path,
         base_url=base_url,
         context_name=context_name,
         access_token=access_token,
         extra_headers=header_values,
     )
-    if bootstrap.token_provider is None:
-        # Non-OAuth: static headers, no custom http_client needed.
-        return ClientInitConfig(
-            base_url=bootstrap.base_url,
-            workspace=bootstrap.workspace,
-            default_headers=_with_sentinels(bootstrap.default_headers, sentinels),
-            client_verify=bootstrap.client_verify,
+    if not bootstrap_requires_discovery_client(bootstrap_context):
+        bootstrap = resolve_bootstrap_without_discovery(bootstrap_context)
+        return _client_init_config(
+            bootstrap=bootstrap,
+            sentinels=sentinels,
+            client_config=AuthClientConfig(default_headers=bootstrap.default_headers),
         )
 
-    # Seed the default headers with a current token so that code that inspects
-    # headers sees a value. Workload identity only seeds when the request-time
-    # provider already has a token. The event hook overwrites it with a fresh
-    # token on each request.
-    headers = _headers_with_seeded_auth(bootstrap.default_headers, bootstrap.token_provider)
-    hook = _make_auth_event_hook(bootstrap.token_provider)
-    http_client = (
-        http_client_factory(hook, bootstrap.client_verify)
-        if http_client_factory is not None
-        else httpx.Client(
-            event_hooks={"request": [hook], "response": []},
-            timeout=resolve_timeout(None),
-            limits=_CONNECTION_LIMITS,
-            follow_redirects=True,
-            verify=bootstrap.client_verify,
+    auth_client = new_deferred_sync_auth_client(
+        http_client_factory=http_client_factory,
+        client_verify=bootstrap_context.client_verify,
+        timeout=resolve_timeout(None),
+    )
+    try:
+        bootstrap = resolve_bootstrap(bootstrap_context, http_client=auth_client.http_client)
+        client_config = auth_client.resolve(
+            default_headers=bootstrap.default_headers,
+            token_provider=bootstrap.token_provider,
         )
-    )
-    return ClientInitConfig(
-        base_url=bootstrap.base_url,
-        workspace=bootstrap.workspace,
-        default_headers=_with_sentinels(headers, sentinels),
-        http_client=http_client,
-        client_verify=bootstrap.client_verify,
-    )
+        return _client_init_config(
+            bootstrap=bootstrap,
+            sentinels=sentinels,
+            client_config=client_config,
+        )
+    except Exception:
+        auth_client.close()
+        raise
 
 
 def build_async_client_init_kwargs(
@@ -153,7 +168,7 @@ def build_async_client_init_kwargs(
     context_name: str | None = None,
     access_token: str | None = None,
     extra_headers: Mapping[str, object] | None = None,
-    http_client_factory: _AsyncHttpClientFactory | None = None,
+    http_client_factory: AsyncHttpClientFactory | None = None,
 ) -> ClientInitConfig:
     """Build constructor kwargs for an **async** client.
 
@@ -162,38 +177,40 @@ def build_async_client_init_kwargs(
     the refresh in a worker thread so it doesn't block the event loop).
     """
     header_values, sentinels = _split_header_sentinels(extra_headers)
-    bootstrap = resolve_bootstrap(
+    bootstrap_context = resolve_bootstrap_context(
         config_path=config_path,
         base_url=base_url,
         context_name=context_name,
         access_token=access_token,
         extra_headers=header_values,
     )
-    if bootstrap.token_provider is None:
-        return ClientInitConfig(
-            base_url=bootstrap.base_url,
-            workspace=bootstrap.workspace,
-            default_headers=_with_sentinels(bootstrap.default_headers, sentinels),
-            client_verify=bootstrap.client_verify,
-        )
-
-    headers = _headers_with_seeded_auth(bootstrap.default_headers, bootstrap.token_provider)
-    hook = _make_async_auth_event_hook(bootstrap.token_provider)
-    http_client = (
-        http_client_factory(hook, bootstrap.client_verify)
-        if http_client_factory is not None
-        else httpx.AsyncClient(
-            event_hooks={"request": [hook], "response": []},
+    if bootstrap_requires_discovery_client(bootstrap_context):
+        auth_client = new_deferred_async_auth_client(
+            context=AuthBootstrapContext(
+                resolved=bootstrap_context.resolved,
+                config_exists=bootstrap_context.config_exists,
+                config_path=bootstrap_context.config_path,
+                base_url=bootstrap_context.base_url,
+                certificate_authority=bootstrap_context.certificate_authority,
+                default_headers=bootstrap_context.default_headers,
+                access_token=bootstrap_context.access_token,
+            ),
+            http_client_factory=http_client_factory,
+            client_verify=bootstrap_context.client_verify,
             timeout=resolve_timeout(None),
-            limits=_CONNECTION_LIMITS,
-            follow_redirects=True,
-            verify=bootstrap.client_verify,
         )
-    )
-    return ClientInitConfig(
-        base_url=bootstrap.base_url,
-        workspace=bootstrap.workspace,
-        default_headers=_with_sentinels(headers, sentinels),
-        http_client=http_client,
-        client_verify=bootstrap.client_verify,
+        return ClientInitConfig(
+            base_url=bootstrap_context.base_url,
+            workspace=bootstrap_context.resolved.workspace,
+            default_headers=_with_sentinels(bootstrap_context.default_headers, sentinels),
+            http_client=auth_client.http_client,
+            client_verify=bootstrap_context.client_verify,
+        )
+    else:
+        bootstrap = resolve_bootstrap_without_discovery(bootstrap_context)
+
+    return _client_init_config(
+        bootstrap=bootstrap,
+        sentinels=sentinels,
+        client_config=AuthClientConfig(default_headers=bootstrap.default_headers),
     )

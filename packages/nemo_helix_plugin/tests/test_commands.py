@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, ClassVar, cast
@@ -23,13 +24,17 @@ import click
 import httpx
 import pytest
 import typer
-from nemo_helix_plugin.commands import add_function_commands, add_job_commands
+from nemo_helix_ext.cli.core.context import CLIContext
+from nemo_helix_ext.config.models import Cluster, Context, OAuthUser, Preferences
+from nemo_helix_plugin.cli_renderer import CLIRenderer
+from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.commands import _post_function_submit, add_function_commands, add_job_commands
 from nemo_helix_plugin.discovery import discover, discover_manifests
 from nemo_helix_plugin.function import NemoFunction
 from nemo_helix_plugin.function_context import FunctionContext
 from nemo_helix_plugin.functions.frames import Done, Heartbeat
 from nemo_helix_plugin.job import NemoJob
-from pydantic import BaseModel, ValidationInfo, model_validator
+from pydantic import BaseModel, HttpUrl, SecretStr, ValidationInfo, model_validator
 from typer.testing import CliRunner
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -93,6 +98,57 @@ class _BaseUrlState:
 
     def get_base_url(self, default: str | None = None) -> str | None:
         return self._base_url
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return NemoClient(base_url=self._base_url, timeout=timeout)
+
+
+class _SharedSubmitClientState(_BaseUrlState):
+    def __init__(
+        self,
+        base_url: str,
+        client: httpx.Client,
+        default_headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(base_url)
+        self._client = client
+        self._default_headers = default_headers or {"Authorization": "Bearer stale-context-token"}
+        self.timeout: float | httpx.Timeout | None = None
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        self.timeout = timeout
+        return NemoClient(
+            base_url=self._base_url,
+            default_headers=self._default_headers,
+            http_client=self._client,
+            owns_http_client=False,
+        )
+
+    def get_sdk_context(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            user=SimpleNamespace(
+                get_client_config=lambda: {
+                    "default_headers": self._default_headers,
+                }
+            )
+        )
+
+
+class _SubmitCLIContext(CLIContext):
+    def __init__(self, *, base_url: HttpUrl, token: str) -> None:
+        super().__init__(overrides={"access_token": token})
+        self.timeout: float | httpx.Timeout | None = None
+        self._sdk_context = Context(
+            context_name="default",
+            cluster=Cluster(name="test", base_url=base_url),
+            user=OAuthUser(name="test-user", token=SecretStr(token)),
+            workspace="default",
+            preferences=Preferences(),
+        )
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        self.timeout = timeout
+        return super().get_client(timeout)
 
 
 def _typer_context_with_obj(obj: object | None) -> typer.Context:
@@ -907,7 +963,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.commands.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
 
         app = _app_with_functions(_CountFunction)
         result = runner.invoke(
@@ -919,6 +975,103 @@ class TestFunctionSubmitVerb:
         lines = [line for line in result.output.splitlines() if line.strip()]
         kinds = [json.loads(line)["kind"] for line in lines]
         assert kinds == ["heartbeat", "done"]
+
+    def test_submit_reuses_shared_cli_transport_when_available(self, monkeypatch) -> None:
+        requests: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"message": "ok"})
+
+        original_client = httpx.Client
+        posted_clients: list[httpx.Client] = []
+        original_post = _post_function_submit
+
+        def _client_factory(*args, **kwargs):
+            kwargs.setdefault("transport", httpx.MockTransport(_handler))
+            return original_client(*args, **kwargs)
+
+        def _capture_post(
+            url: str,
+            body: dict[str, object],
+            *,
+            headers: dict[str, str],
+            http_client: httpx.Client,
+            timeout: float = 30.0,
+            renderer_cls: type[CLIRenderer] | None = None,
+            cli_kwargs: Mapping[str, Any] | None = None,
+        ) -> None:
+            posted_clients.append(http_client)
+            original_post(
+                url,
+                body,
+                headers=headers,
+                http_client=http_client,
+                timeout=timeout,
+                renderer_cls=renderer_cls,
+                cli_kwargs=cli_kwargs,
+            )
+
+        monkeypatch.setattr("nemo_helix_ext.client.bootstrap.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.commands._post_function_submit", _capture_post)
+        state = _SubmitCLIContext(base_url=HttpUrl("http://localhost:8080"), token="shared-client-token")
+        try:
+            app = _app_with_functions(_GreetFunction)
+            result = runner.invoke(
+                app,
+                ["greet", "submit", "--spec", '{"name": "Ada"}'],
+                obj=state,
+            )
+        finally:
+            if state._client is not None:
+                state._client.close()
+
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == {"message": "ok"}
+        assert state.timeout is None
+        assert state._client is not None
+        assert posted_clients == [state._client.http_client]
+        assert [request.url.path for request in requests] == ["/apis/packages/v2/workspaces/default/greet"]
+        assert requests[0].headers["Authorization"] == "Bearer shared-client-token"
+
+    def test_submit_preserves_resolved_auth_when_shared_transport_has_no_auth(self) -> None:
+        requests: list[httpx.Request] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"message": "ok"})
+
+        with httpx.Client(transport=httpx.MockTransport(_handler)) as http_client:
+            state = _SharedSubmitClientState(
+                "http://localhost:8080",
+                http_client,
+                default_headers={"Authorization": "Bearer configured-token"},
+            )
+            app = _app_with_functions(_GreetFunction)
+            result = runner.invoke(
+                app,
+                ["greet", "submit", "--spec", '{"name": "Ada"}'],
+                obj=state,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert requests[0].headers["Authorization"] == "Bearer configured-token"
+
+    def test_submit_propagates_active_cli_client_failures(self) -> None:
+        class BrokenState(_BaseUrlState):
+            def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+                raise ValueError("client bootstrap failed")
+
+        app = _app_with_functions(_GreetFunction)
+        result = runner.invoke(
+            app,
+            ["greet", "submit", "--spec", '{"name": "Ada"}'],
+            obj=BrokenState("http://test"),
+        )
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, ValueError)
+        assert str(result.exception) == "client bootstrap failed"
 
     def test_submit_returns_exit_code_2_on_http_error(self, monkeypatch) -> None:
         # Regression: ``client.stream`` opens the response unbuffered,
@@ -948,7 +1101,7 @@ class TestFunctionSubmitVerb:
             kwargs.setdefault("transport", transport)
             return original_client(*args, **kwargs)
 
-        monkeypatch.setattr("nemo_helix_plugin.commands.httpx.Client", _client_factory)
+        monkeypatch.setattr("nemo_helix_plugin.client.client.httpx.Client", _client_factory)
 
         app = _app_with_functions(_GreetFunction)
         result = runner.invoke(
@@ -965,7 +1118,7 @@ class TestFunctionSubmitVerb:
         assert "Request: POST http://test/" in combined
         assert "Target:" not in combined
 
-    def test_submit_uses_nhx_base_url_env_without_a_cli_context(self, monkeypatch) -> None:
+    def test_submit_requires_cli_state(self, monkeypatch) -> None:
         captured_url: list[str] = []
 
         def _fake_post(url: str, body: dict, *, headers: dict, timeout: float = 30.0, **_kwargs) -> None:  # noqa: ARG001
@@ -979,8 +1132,10 @@ class TestFunctionSubmitVerb:
             app,
             ["greet", "submit", "--spec", '{"name": "x"}'],
         )
-        assert result.exit_code == 0, result.output
-        assert captured_url[0].startswith("http://from-env:1234/")
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert "No NeMo Helix CLI state" in str(result.exception)
+        assert captured_url == []
 
     def test_non_legacy_function_name_submits_remotely(self, monkeypatch) -> None:
         captured: dict[str, object] = {}
@@ -1493,6 +1648,9 @@ class _ContextState:
     def get_base_url(self, default: str | None = None) -> str:
         del default
         return "http://my-platform:9090"
+
+    def get_client(self, timeout: float | httpx.Timeout | None = None) -> NemoClient:
+        return NemoClient(base_url="http://my-platform:9090", timeout=timeout)
 
     def get_workspace(self) -> str | None:
         return self._workspace

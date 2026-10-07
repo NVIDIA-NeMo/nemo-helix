@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from nemo_helix_ext.cli.app import app
 from nemo_helix_ext.cli.core.context import CLIContext
@@ -27,7 +28,7 @@ class _StubWorkspaces:
         return SimpleNamespace(data=lambda: object())
 
 
-def _typed_client(client_cls: type, timeout: float = 60.0) -> object:
+def _typed_client(client_cls: type, timeout: float | httpx.Timeout | None = None) -> object:
     """Stand in for ``CLIContext.typed_client``: real workspace stub, mocks for everything else."""
     if client_cls is WorkspacesClient:
         return _StubWorkspaces()

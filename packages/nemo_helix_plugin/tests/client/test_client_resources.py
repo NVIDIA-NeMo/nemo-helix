@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.auth import StaticToken
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 
 BASE = "http://test:8000"
@@ -153,12 +154,12 @@ def test_unknown_attribute_still_raises(client_factory) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auth on the raw _client transport
+# Auth headers for raw _client calls
 # ---------------------------------------------------------------------------
 
 
-def test_raw_client_calls_are_authenticated() -> None:
-    """Plugin resources using owner._client bypass send() but keep auth."""
+def test_request_headers_authenticate_raw_client_calls() -> None:
+    """Plugin resources using owner._client can attach auth without transport-level auth."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -170,31 +171,31 @@ def test_raw_client_calls_are_authenticated() -> None:
 
     transport = client._client
     assert isinstance(transport, httpx.Client)
-    transport.get(f"{BASE}/apis/anything")
+    transport.get(f"{BASE}/apis/anything", headers=client.request_headers())
 
     assert seen[0].headers["Authorization"] == "Bearer tok"
 
 
 @pytest.mark.asyncio
-async def test_raw_async_client_calls_are_authenticated() -> None:
+async def test_async_request_headers_authenticate_raw_client_calls() -> None:
     seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         return httpx.Response(200, json={})
 
-    client = AsyncNemoClient(base_url=BASE, auth="tok")
+    client = AsyncNemoClient(base_url=BASE, auth=StaticToken("tok"))
     client._http._transport = httpx.MockTransport(handler)
 
     transport = client._client
     assert isinstance(transport, httpx.AsyncClient)
-    await transport.get(f"{BASE}/apis/anything")
+    await transport.get(f"{BASE}/apis/anything", headers=await client.request_headers())
 
     assert seen[0].headers["Authorization"] == "Bearer tok"
 
 
-def test_transport_auth_does_not_override_explicit_header() -> None:
-    """send() and per-call overrides stay authoritative over transport auth."""
+def test_request_headers_do_not_override_explicit_authorization() -> None:
+    """Per-call overrides stay authoritative over client auth."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -206,7 +207,10 @@ def test_transport_auth_does_not_override_explicit_header() -> None:
 
     transport = client._client
     assert isinstance(transport, httpx.Client)
-    transport.get(f"{BASE}/apis/anything", headers={"Authorization": "Bearer explicit"})
+    transport.get(
+        f"{BASE}/apis/anything",
+        headers=client.request_headers({"Authorization": "Bearer explicit"}),
+    )
 
     assert seen[0].headers["Authorization"] == "Bearer explicit"
 
@@ -218,12 +222,12 @@ def test_no_auth_configured_leaves_transport_unauthenticated() -> None:
 
 
 def test_shared_transport_keeps_auth_across_from_client() -> None:
-    """Resource clients built from a parent share its authenticated transport."""
-    from nemo_helix_plugin.client.auth import TokenProviderAuth
+    """Resource clients built from a parent share the neutral transport and auth provider."""
     from nemo_helix_plugin.models.client import ModelsClient
 
     parent = NemoClient(base_url=BASE, auth="tok")
     child = ModelsClient.from_client(parent)
 
     assert child._http is parent._http
-    assert isinstance(child._http.auth, TokenProviderAuth)
+    assert child._http.auth is None
+    assert child.request_headers() == {"Authorization": "Bearer tok"}

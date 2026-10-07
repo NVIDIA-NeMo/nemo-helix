@@ -515,7 +515,11 @@ def _ensure_platform_auth(cli_context: CLIContext) -> None:
         console.print(f"{CHECK} Using {runtime_token_source}\n")
         return
 
-    authenticated = _login_with_oidc(cli_context, selected_context=context.context_name)
+    authenticated = _login_with_oidc(
+        cli_context,
+        http_client=cli_context.get_http_client(),
+        selected_context=context.context_name,
+    )
     if not authenticated:
         Config.write(
             {"access_token": None, "refresh_token": None},
@@ -526,13 +530,8 @@ def _ensure_platform_auth(cli_context: CLIContext) -> None:
 
 def _platform_request_headers(cli_context: CLIContext) -> dict[str, str] | None:
     """Return authentication headers for direct Platform HTTP requests."""
-    context = cli_context.get_sdk_context()
-    if context.user is None:
-        return None
-    headers = context.user.get_client_config().get("default_headers")
-    if not isinstance(headers, dict):
-        return None
-    return {key: value for key, value in headers.items() if isinstance(key, str) and isinstance(value, str)}
+    headers = cli_context.get_http_headers()
+    return headers if isinstance(headers, dict) else None
 
 
 def _hosted_platform_without_status(base_url: str, *, timeout: float, tls_config: HttpxTLSConfig) -> bool:

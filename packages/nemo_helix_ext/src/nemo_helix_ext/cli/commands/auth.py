@@ -135,7 +135,7 @@ def _parse_access_key_workspace_grants(
     return grants
 
 
-def is_auth_disabled(base_url: str, timeout: float = 3.0, certificate_authority: str | None = None) -> bool:
+def is_auth_disabled(base_url: str, *, http_client: httpx.Client, timeout: float = 3.0) -> bool:
     """Check whether authentication is disabled on the cluster.
 
     Returns:
@@ -144,8 +144,8 @@ def is_auth_disabled(base_url: str, timeout: float = 3.0, certificate_authority:
     try:
         return not discover_nhx_config(
             base_url,
+            http_client=http_client,
             timeout=timeout,
-            certificate_authority=certificate_authority,
         ).auth_enabled
     except httpx.HTTPError as exc:
         raise AuthError(f"Failed to discover auth configuration: {exc}") from exc
@@ -176,7 +176,7 @@ def _config_backed_token_provider(
     refresh_margin_seconds: float = 60,
 ) -> OIDCTokenProvider:
     """Build a provider whose refresh transaction is serialized and persisted."""
-    from nemo_helix_ext.client.bootstrap import (
+    from nemo_helix_ext.auth.bootstrap import (
         _make_config_persister,
         _make_config_token_loader,
         _make_refresh_lock,
@@ -197,7 +197,7 @@ def _config_backed_token_provider(
     )
 
 
-def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> bool:
+def ensure_valid_token(context: Context, *, http_client: httpx.Client, refresh_buffer_seconds: int = 300) -> bool:
     """
     Check if the current token is valid and refresh if needed.
 
@@ -243,7 +243,10 @@ def ensure_valid_token(context: Context, refresh_buffer_seconds: int = 300) -> b
 
     base_url = str(context.cluster.base_url).rstrip("/")
     try:
-        nhx_config = discover_nhx_config(base_url, certificate_authority=context.cluster.certificate_authority)
+        nhx_config = discover_nhx_config(
+            base_url,
+            http_client=http_client,
+        )
     except (httpx.HTTPError, ValueError):
         return exp_dt > now
 
@@ -286,6 +289,7 @@ def auth_callback(ctx: typer.Context) -> None:
 def _login_with_oidc(
     cli_context: CLIContext,
     *,
+    http_client: httpx.Client,
     no_browser: bool = False,
     scope: str | None = None,
     username: str | None = None,
@@ -310,7 +314,7 @@ def _login_with_oidc(
     console.print(f"\nDiscovering auth configuration from {base_url}...")
 
     try:
-        oidc_config = discover_nhx_config(base_url, certificate_authority=certificate_authority)
+        oidc_config = discover_nhx_config(base_url, http_client=http_client)
     except httpx.HTTPError as exc:
         raise AuthError(f"Failed to discover auth configuration: {exc}") from exc
 
@@ -647,7 +651,7 @@ def login(
         base_url = str(context.cluster.base_url).rstrip("/")
 
         try:
-            oidc_config = discover_nhx_config(base_url, certificate_authority=context.cluster.certificate_authority)
+            oidc_config = discover_nhx_config(base_url, http_client=cli_context.get_http_client())
             oidc_client_id = oidc_config.cli_client_id or oidc_config.client_id
             oidc_login_configured = bool(oidc_config.token_endpoint and oidc_client_id)
             if oidc_login_configured:
@@ -687,6 +691,7 @@ def login(
 
     if not _login_with_oidc(
         cli_context,
+        http_client=cli_context.get_http_client(),
         no_browser=no_browser,
         scope=scope,
         username=username,
@@ -712,7 +717,8 @@ def logout(ctx: typer.Context) -> None:
 
     base_url = str(context.cluster.base_url).rstrip("/")
     try:
-        if is_auth_disabled(base_url, certificate_authority=context.cluster.certificate_authority) is True:
+        auth_disabled = is_auth_disabled(base_url, http_client=cli_context.get_http_client())
+        if auth_disabled is True:
             console.print("[yellow]Authentication is disabled on this cluster — nothing to log out from.[/]")
             return
     except AuthError as exc:
@@ -853,7 +859,7 @@ def refresh(ctx: typer.Context) -> None:
     # Fetch client_id from cluster discovery
     base_url = str(context.cluster.base_url).rstrip("/")
     try:
-        oidc_config = discover_nhx_config(base_url, certificate_authority=context.cluster.certificate_authority)
+        oidc_config = discover_nhx_config(base_url, http_client=cli_context.get_http_client())
     except httpx.HTTPError as e:
         raise AuthError(f"Failed to discover auth configuration: {e}") from e
 
@@ -1198,7 +1204,7 @@ def status(ctx: typer.Context) -> None:
     base_url = str(context.cluster.base_url).rstrip("/")
     auth_discovery_error: AuthError | None = None
     try:
-        auth_disabled = is_auth_disabled(base_url, certificate_authority=context.cluster.certificate_authority)
+        auth_disabled = is_auth_disabled(base_url, http_client=cli_context.get_http_client())
     except AuthError as exc:
         logger.debug("Failed to discover auth configuration during status", exc_info=True)
         auth_discovery_error = exc

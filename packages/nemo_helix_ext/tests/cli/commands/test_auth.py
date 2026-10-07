@@ -15,6 +15,7 @@ import pytest
 import yaml
 from nemo_helix_ext.auth.helpers import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_ext.cli.app import app
+from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyCreateRequest,
     AccessKeyCreateResponse,
@@ -57,25 +58,19 @@ def _mock_oidc_config() -> SimpleNamespace:
     )
 
 
-def _discover_auth_enabled(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_auth_enabled(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return SimpleNamespace(auth_enabled=True)
 
 
-def _discover_auth_disabled(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_auth_disabled(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return SimpleNamespace(auth_enabled=False)
 
 
-def _discover_oidc_config(
-    url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-) -> SimpleNamespace:
+def _discover_oidc_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return _mock_oidc_config()
 
 
-def _discover_no_oidc(url: str, timeout: float = 10.0, *, certificate_authority: str | None = None) -> SimpleNamespace:
+def _discover_no_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
     return SimpleNamespace(
         auth_enabled=True,
         issuer=None,
@@ -321,9 +316,7 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
         def force_refresh(self) -> None:
             self._on_tokens_refreshed(self.tokens)
 
-    def discover_refresh_config(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def discover_refresh_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         return SimpleNamespace(
             client_id="test-client-id",
             cli_client_id="test-cli-client-id",
@@ -424,7 +417,7 @@ def test_config_backed_force_refresh_reloads_rotated_token_before_request(
     assert persisted_foo["refresh_token"] == "next-rotated-refresh"
     assert before_refresh + 7200 <= persisted_foo["expires_at"] <= time.time() + 7200
 
-    from nemo_helix_ext.client.bootstrap import _make_config_token_loader
+    from nemo_helix_ext.auth.bootstrap import _make_config_token_loader
 
     loaded_tokens = _make_config_token_loader("foo", oauth_config_file)()
     assert loaded_tokens is not None
@@ -460,13 +453,13 @@ def test_ensure_valid_token_refreshes_expired_opaque_token_from_config(
         ),
     )
 
-    with patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
+    with httpx.Client() as http_client, patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
         mock_refresh.return_value = {
             "access_token": "opaque-current-access",
             "refresh_token": "opaque-rotated-refresh",
             "expires_in": 3600,
         }
-        assert ensure_valid_token(context, refresh_buffer_seconds=300) is True
+        assert ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300) is True
 
     mock_refresh.assert_called_once()
     with open(oauth_config_file) as f:
@@ -500,7 +493,8 @@ def test_ensure_valid_token_rejects_expired_token_when_discovery_is_invalid(
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", invalid_discovery)
 
-    assert ensure_valid_token(context, refresh_buffer_seconds=300) is False
+    with httpx.Client() as http_client:
+        assert ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300) is False
 
 
 def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
@@ -543,8 +537,8 @@ def test_ensure_valid_token_uses_fresh_shared_token_instead_of_stale_refresh(
         ),
     )
 
-    with patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
-        assert ensure_valid_token(stale_context, refresh_buffer_seconds=300) is True
+    with httpx.Client() as http_client, patch("nemo_helix_ext.auth.token_provider.refresh_token_grant") as mock_refresh:
+        assert ensure_valid_token(stale_context, http_client=http_client, refresh_buffer_seconds=300) is True
 
     mock_refresh.assert_not_called()
     with open(oauth_config_file) as f:
@@ -594,8 +588,8 @@ def test_ensure_valid_token_propagates_rotated_token_persistence_failure(
         lambda **_kwargs: FailingProvider(),
     )
 
-    with pytest.raises(AuthError, match="rotated credentials could not be saved"):
-        ensure_valid_token(context, refresh_buffer_seconds=300)
+    with httpx.Client() as http_client, pytest.raises(AuthError, match="rotated credentials could not be saved"):
+        ensure_valid_token(context, http_client=http_client, refresh_buffer_seconds=300)
 
 
 def test_auth_refresh_regenerates_unsigned_token(oauth_config_file: Path) -> None:
@@ -1639,13 +1633,14 @@ def test_auth_login_uses_context_certificate_authority(
     with open(oauth_config_file, "w") as f:
         yaml.safe_dump(config_data, f)
 
-    discover_calls: list[tuple[str, str | None]] = []
+    discover_calls: list[str] = []
+    discovered_with: list[httpx.Client] = []
     password_grant_calls: list[dict] = []
+    shared_http_client = MagicMock(spec=httpx.Client)
 
-    def discover_config(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
-        discover_calls.append((url, certificate_authority))
+    def discover_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
+        discover_calls.append(url)
+        discovered_with.append(http_client)
         return _mock_oidc_config()
 
     def password_grant(**kwargs) -> SimpleNamespace:
@@ -1658,6 +1653,7 @@ def test_auth_login_uses_context_certificate_authority(
         )
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", discover_config)
+    monkeypatch.setattr(CLIContext, "get_http_client", lambda _self: shared_http_client)
     monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_password_grant", password_grant)
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.decode_jwt_claims", _decode_jwt_noop)
 
@@ -1676,7 +1672,8 @@ def test_auth_login_uses_context_certificate_authority(
     )
 
     assert_exit_code(result, 0)
-    assert discover_calls == [("https://foo.example.com", "/tmp/foo-ca.pem")]
+    assert discover_calls == ["https://foo.example.com"]
+    assert discovered_with == [shared_http_client]
     assert password_grant_calls[0]["certificate_authority"] == "/tmp/foo-ca.pem"
 
 
@@ -1774,9 +1771,7 @@ def test_auth_login_unsigned_options_require_unsigned_token() -> None:
 def test_auth_login_unsigned_token_fails_when_oidc_enabled(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def discover_full_oidc(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def discover_full_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         return SimpleNamespace(
             auth_enabled=True,
             issuer="https://idp.example.com",
@@ -1840,9 +1835,7 @@ def test_auth_login_unsigned_token_fails_when_cli_only_oidc_client_is_configured
 def test_auth_login_unsigned_token_allows_partial_oidc_config(
     oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def discover_partial_oidc(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def discover_partial_oidc(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         return SimpleNamespace(
             auth_enabled=True,
             issuer="https://idp.example.com",
@@ -1921,13 +1914,14 @@ class IsAuthDisabledCase:
     ids=lambda c: c.id,
 )
 def test_is_auth_disabled(monkeypatch: pytest.MonkeyPatch, case: IsAuthDisabledCase) -> None:
-    def mock_discover(url: str, timeout: float = 10.0, *, certificate_authority: str | None = None) -> SimpleNamespace:
+    def mock_discover(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         return SimpleNamespace(auth_enabled=case.auth_enabled)
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", mock_discover)
     from nemo_helix_ext.cli.commands.auth import is_auth_disabled
 
-    assert is_auth_disabled("http://localhost:8080") is case.expected
+    with httpx.Client() as http_client:
+        assert is_auth_disabled("http://localhost:8080", http_client=http_client) is case.expected
 
 
 def test_is_auth_disabled_raises_when_discovery_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1935,15 +1929,16 @@ def test_is_auth_disabled_raises_when_discovery_fails(monkeypatch: pytest.Monkey
     from nemo_helix_ext.auth.helpers import AuthError
     from nemo_helix_ext.cli.commands.auth import is_auth_disabled
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)
 
-    with pytest.raises(AuthError, match="Failed to discover auth configuration: Connection refused"):
-        is_auth_disabled("http://localhost:8080")
+    with (
+        httpx.Client() as http_client,
+        pytest.raises(AuthError, match="Failed to discover auth configuration: Connection refused"),
+    ):
+        is_auth_disabled("http://localhost:8080", http_client=http_client)
 
 
 # ---------------------------------------------------------------------------
@@ -1975,9 +1970,7 @@ def test_auth_status_when_cluster_unreachable_shows_local_state(
 ) -> None:
     import httpx
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)
@@ -2019,9 +2012,7 @@ def test_auth_logout_when_cluster_unreachable_clears_local_credentials(
 ) -> None:
     import httpx
 
-    def raise_connect_error(
-        url: str, timeout: float = 10.0, *, certificate_authority: str | None = None
-    ) -> SimpleNamespace:
+    def raise_connect_error(url: str, http_client: httpx.Client, timeout: float = 10.0) -> SimpleNamespace:
         raise httpx.ConnectError("Connection refused")
 
     monkeypatch.setattr("nemo_helix_ext.cli.commands.auth.discover_nhx_config", raise_connect_error)
