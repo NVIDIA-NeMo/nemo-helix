@@ -210,7 +210,7 @@ For LoRA jobs, the adapter is added to the parent Model Entity's `adapters` list
 
 ```python
 # After training completes, retrieve the model to see the adapter
-model = client.models.retrieve(workspace="default", name="qwen3-1.7b")
+model = client.models.get_model(workspace="default", name="qwen3-1.7b").data()
 
 for adapter in model.adapters or []:
     print(f"Adapter: {adapter.name}")

@@ -10,7 +10,7 @@ kind: Deployment
 metadata:
   name: {{ include "nhx-core.controller-servicename" . }}
   labels:
-    app.kubernetes.io/component: nhx-core-controller
+    app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
   annotations:
     {{- with .Values.core.controller.annotations }}
@@ -23,7 +23,7 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/component: nhx-core-controller
+      app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   template:
     metadata:
@@ -33,7 +33,7 @@ spec:
         {{- end }}
         {{- include "nemo-helix.podAnnotations" . | nindent 8 }}
       labels:
-        app.kubernetes.io/component: nhx-core-controller
+        app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
         {{- include "nemo-helix.labels" . | nindent 8 }}
         {{- with .Values.core.controller.podLabels }}
         {{- toYaml . | nindent 8 }}

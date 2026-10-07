@@ -100,9 +100,9 @@ client = NemoClient(
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
-    client.inference.providers.retrieve(provider_id, workspace=provider_workspace)
+    client.models.get_provider(name=provider_id, workspace=provider_workspace)
 else:
-    client.inference.providers.retrieve(provider_name)
+    client.models.get_provider(name=provider_name)
 ```
 
 ---

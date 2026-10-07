@@ -10,7 +10,7 @@ kind: ServiceMonitor
 metadata:
   name: {{ include "nhx-core.controller-servicename" . }}
   labels:
-    app.kubernetes.io/component: nhx-core-controller
+    app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
     {{- with .Values.core.serviceMonitor.labels }}
     {{- toYaml . | nindent 4 }}
@@ -25,7 +25,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: nhx-core-controller
+      app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
       {{- include "nemo-helix.labels" . | nindent 6 }}
   namespaceSelector:
     matchNames:
