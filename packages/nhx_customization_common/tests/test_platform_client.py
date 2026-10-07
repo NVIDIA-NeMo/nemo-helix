@@ -169,14 +169,14 @@ async def test_adapter_base_model_rejects_a_different_base() -> None:
 
 
 class _Jobs:
-    """Jobs client stand-in: returns *jobs* from ``list`` and records how it was called."""
+    """Jobs client stand-in: returns *jobs* from ``list_jobs`` and records how it was called."""
 
     def __init__(self, jobs: list[SimpleNamespace] | None = None, error: Exception | None = None) -> None:
         self._jobs = jobs or []
         self._error = error
         self.calls: list[dict[str, Any]] = []
 
-    async def list(self, **kwargs: Any) -> Self:
+    async def list_jobs(self, **kwargs: Any) -> Self:
         self.calls.append(kwargs)
         return self
 
@@ -202,7 +202,8 @@ async def test_output_name_check_queries_in_flight_customization_jobs_for_that_n
 
     (call,) = jobs.calls
     assert call["workspace"] == "default"
-    assert call["filter"] == {
+    assert call["query_params"]["page_size"] == 100
+    assert call["query_params"]["filter"] == {
         "source": CUSTOMIZATION_JOB_SOURCE,
         "status": {"$in": [status.value for status in HelixJobStatus.non_terminals()]},
         "spec.output.name": "my-lora",

@@ -113,22 +113,6 @@ def test_list_jobs_paginated_items() -> None:
     assert jobs[0].name == "my-job"
 
 
-def test_legacy_get_status_alias_unwraps_response() -> None:
-    mock_http = _mock_http(
-        httpx.Response(
-            200,
-            request=httpx.Request("GET", f"{BASE}/apis/jobs/v2/workspaces/default/jobs/my-job/status"),
-            json=_STATUS_JSON,
-        )
-    )
-    client = JobsClient(base_url=BASE, workspace="default", http_client=mock_http)
-
-    status = client.get_status("my-job")
-
-    assert status.name == "my-job"
-    assert status.status == "created"
-
-
 def test_delete_job_returns_none() -> None:
     mock_http = _mock_http(
         httpx.Response(
