@@ -1636,7 +1636,20 @@ class ModelDeployment(ModelEntityBaseModel):
 class CreateModelDeploymentConfigRequest(BaseModel):
     """Request model for creating a ModelDeploymentConfig."""
 
-    model_config = REQUEST_CONFIG
+    model_config = ConfigDict(
+        regex_engine="python-re",
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "nim-config-v1",
+                    "engine": "nim",
+                    "model_spec": {},
+                    "executor_config": {"gpu": 1},
+                }
+            ]
+        },
+    )
 
     name: str = Field(
         description=f"Name of the deployment configuration. {constants.NAME_PATTERN_DESCRIPTION}",
@@ -1672,7 +1685,19 @@ class CreateModelDeploymentConfigRequest(BaseModel):
 class UpdateModelDeploymentConfigRequest(BaseModel):
     """Request model for updating a ModelDeploymentConfig (creates new version)."""
 
-    model_config = REQUEST_CONFIG
+    model_config = ConfigDict(
+        regex_engine="python-re",
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "engine": "nim",
+                    "model_spec": {},
+                    "executor_config": {"gpu": 1},
+                }
+            ]
+        },
+    )
 
     description: Optional[str] = Field(
         default=None,
