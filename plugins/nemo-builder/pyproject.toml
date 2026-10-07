@@ -19,8 +19,8 @@ dependencies = [
 service = ["nemo-helix"]
 
 [tool.uv.sources]
-nemo-helix = { path = "../../packages/nemo_helix", editable = true }
-nemo-helix-plugin = { path = "../../packages/nemo_helix_plugin", editable = true }
+nemo-helix = { workspace = true }
+nemo-helix-plugin = { workspace = true }
 
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"

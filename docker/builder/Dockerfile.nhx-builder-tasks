@@ -1,0 +1,59 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The image the builder's job steps run in: `nhx-build fetch|supervise|push`, and crane, which the push
+# step pushes with. The push step holds a workspace's registry credential and signing key, so the image
+# carries only the builder and its dependencies, not the task runtime. The sandbox runs Dockerfile.nhx-kaniko's.
+
+ARG NHX_PYTHON_BASE=nhx-python-base
+ARG NHX_PYTHON_IMAGE=python:3.13.15-slim-trixie
+
+FROM gcr.io/go-containerregistry/crane:v0.22.1@sha256:1f968817b95790bed063f71175aa6b8ff879fa17064020415f3e18bb6e6a36e1 AS crane
+
+FROM ${NHX_PYTHON_BASE} AS builder
+COPY --from=nhx-workspace . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --only-group builder-steps --no-editable
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-workspace-sdists.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-builder-tasks && \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-builder-tasks \
+        --lock-file /app/uv.lock \
+        --label app-venv && \
+    uv run --no-project --python /app/.venv/bin/python \
+        /usr/local/bin/collect-cpython-source.py \
+        --python /app/.venv/bin/python \
+        --output /app/.source-distributions/nhx-builder-tasks
+
+# The runtime's own Debian packages, not the builder's build tools.
+FROM ${NHX_PYTHON_IMAGE} AS apt-sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/scripts/collect-apt-sources.sh /usr/local/bin/
+RUN bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-builder-tasks/apt --installed
+
+# nhx-python-base's venv is on this image's interpreter, at the same path.
+FROM ${NHX_PYTHON_IMAGE} AS runtime
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=crane /ko-app/crane /usr/local/bin/crane
+COPY --from=builder /app/.source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
+COPY --from=apt-sources /source-distributions/nhx-builder-tasks/ /usr/share/nemo-helix/source-distributions/nhx-builder-tasks/
+ENV PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV=/app/.venv \
+    PYTHONUNBUFFERED=1
+
+# A missing dependency fails the build rather than a job.
+FROM runtime AS smoke-test
+RUN nhx-build --help 2>&1 | grep -q 'fetch|supervise|push' \
+    && python -c 'import nemo_builder_plugin.run.fetch, nemo_builder_plugin.run.supervise, nemo_builder_plugin.run.push' \
+    && crane version
+
+FROM runtime
