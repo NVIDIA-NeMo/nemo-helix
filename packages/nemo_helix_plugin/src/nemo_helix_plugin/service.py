@@ -98,7 +98,9 @@ class NemoService(_NamedPlugin):
         when it differs from :attr:`name`. Defaults to ``None``, meaning the
         namespace is :attr:`name`. Set only when a service was renamed but its
         existing permissions must keep their original ids; delete it once the
-        permissions migrate.
+        permissions migrate. The value is only honored if
+        ``authz_discovery.LEGACY_PERMISSION_NAMESPACES`` maps this service's
+        :attr:`name` to it; any other value fails the plugin closed.
     """
 
     name: ClassVar[str]

@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import copy
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from fastapi import APIRouter
@@ -47,6 +48,13 @@ from nemo_helix_plugin.service import NemoService
 from starlette.routing import BaseRoute
 
 logger = logging.getLogger(__name__)
+
+# Services allowed to keep a legacy permission namespace that differs from their name, as
+# ``{service name: legacy namespace}``. A plugin's own ``permission_namespace`` is only honored
+# when it matches the entry here, so a plugin cannot claim another service's namespace by
+# declaring it. Add an entry only when a service is renamed and its permission ids must stay;
+# delete it once the permissions migrate.
+LEGACY_PERMISSION_NAMESPACES: Mapping[str, str] = MappingProxyType({"garak": "auditor"})
 
 
 def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:
@@ -332,21 +340,32 @@ def _derive_service_contribution(service: NemoService) -> tuple[AuthzContributio
 
     # Pass 2: validate the catalog. A malformed permission id would 500 the bundle's
     # ``validate_static_authz_data`` if it reached the wire; a permission whose first segment
-    # isn't the service's own namespace (its name, or the declared legacy
-    # ``permission_namespace``) is namespace squatting (it would silently widen the
+    # isn't the service's own namespace (its name, or the legacy
+    # ``permission_namespace`` approved in ``LEGACY_PERMISSION_NAMESPACES``) is namespace squatting (it would silently widen the
     # Viewer/Editor role grants for another service's namespace). Either is a fail-closed
     # error: deny every route and contribute no permissions, so nothing malformed or
     # cross-namespace can reach the merged policy.
     # Role-granted permissions are registered in the catalog above, so the ownership fence below
     # covers them too: a plugin cannot grant a role a permission outside its own namespace.
-    owner = service.permission_namespace or service.name
+    owner = service.name
+    alias_error: str | None = None
+    if service.permission_namespace is not None:
+        if LEGACY_PERMISSION_NAMESPACES.get(service.name) == service.permission_namespace:
+            owner = service.permission_namespace
+        else:
+            alias_error = (
+                f"permission_namespace {service.permission_namespace!r} is not an approved legacy "
+                f"namespace for service {service.name!r} (fail-closed)"
+            )
     malformed = sorted(pid for pid in catalog if not is_valid_permission_id(pid))
     out_of_namespace = sorted(p.id for p in catalog.values() if p.service != owner)
     if malformed:
         errors.append(f"malformed permission id(s) (fail-closed): {malformed}")
     if out_of_namespace:
         errors.append(f"permission id(s) outside the service namespace {owner!r} (fail-closed): {out_of_namespace}")
-    if malformed or out_of_namespace:
+    if alias_error:
+        errors.append(alias_error)
+    if malformed or out_of_namespace or alias_error:
         denied = {path: {method: _deny_binding() for method in methods} for path, methods in bindings.items()}
         return AuthzContribution(permissions={}, endpoints=denied), errors, warnings
 

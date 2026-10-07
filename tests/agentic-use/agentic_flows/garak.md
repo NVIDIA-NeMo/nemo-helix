@@ -142,12 +142,12 @@ The Garak service provides model safety testing, bias detection, and adversarial
 
 ## Documentation References
 
-- Audit overview: docs/garak/index.md
-- SDK resources: docs/garak/sdk-resources.md
-- Targets: docs/garak/targets/index.md
-- Inference Gateway routing: docs/garak/targets/inference-gateway.md
-- Target schema: docs/garak/targets/schema.md
-- Configs: docs/garak/configs/index.md
-- Selecting probes: docs/garak/configs/probes.md
-- Config schema: docs/garak/configs/schema.md
-- Run an audit locally: docs/garak/tutorials/run-audit-locally.md
+- Audit overview: docs/garak/index.mdx
+- SDK resources: docs/garak/sdk-resources.mdx
+- Targets: docs/garak/targets/index.mdx
+- Inference Gateway routing: docs/garak/targets/inference-gateway.mdx
+- Target schema: docs/garak/targets/schema.mdx
+- Configs: docs/garak/configs/index.mdx
+- Selecting probes: docs/garak/configs/probes.mdx
+- Config schema: docs/garak/configs/schema.mdx
+- Run an audit locally: docs/garak/tutorials/run-audit-locally.mdx

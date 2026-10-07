@@ -22,7 +22,7 @@ create` commands below, make sure you have:
   `nemo setup` creates. Substitute another workspace name as needed.
 
 For detailed guides and reference material, see the full garak
-documentation at [`docs/garak/`](../../docs/garak/index.md).
+documentation at [`docs/garak/`](../../docs/garak/index.mdx).
 
 ### Managing configs and targets
 
@@ -47,9 +47,23 @@ nemo garak targets get nemotron-3.5-lightning-30b -w default
 nemo garak configs delete quick-scan -w default
 ```
 
-There is no CLI command for running an audit yet — the local-run path is
-exposed through the SDK (below). The platform jobs service can submit
-audits via the `garak.audit` job entry point.
+### Running an audit
+
+Submit an audit to the platform jobs service with `nemo garak audit`, which is
+backed by the `garak.audit` job entry point. `config` and `target` are required
+and must be supplied through `--spec` or `--spec-file`, as inline payloads or
+workspace-qualified names:
+
+```bash
+nemo garak audit -w default \
+  --spec '{"config": "default/quick-scan", "target": "default/nemotron-3.5-lightning-30b"}'
+
+# Show the input/output schemas
+nemo garak audit explain
+```
+
+Running an audit in-process, without the jobs service, is available through the
+SDK (below).
 
 ## SDK quickstart
 

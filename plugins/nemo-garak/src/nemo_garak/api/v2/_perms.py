@@ -3,9 +3,11 @@
 
 """Typed permission vocabulary for the garak plugin's CRUD routes.
 
-Two sub-namespaces under ``garak`` (one per entity collection). Route handlers
-reference these constants in their ``@path_rule``; the platform derives the permission
-catalog from the routes, so there is no parallel list to keep in sync.
+Two sub-namespaces under the retained legacy ``auditor`` namespace, ``auditor.configs``
+and ``auditor.targets`` (one per entity collection). The service itself is named
+``garak``; see ``GarakPluginService.permission_namespace``. Route handlers reference
+these constants in their ``@path_rule``; the platform derives the permission catalog
+from the routes, so there is no parallel list to keep in sync.
 """
 
 from __future__ import annotations

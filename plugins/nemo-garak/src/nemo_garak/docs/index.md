@@ -11,14 +11,14 @@ The garak plugin is a first-party scaffold for garak functionality. It keeps the
 |---|---|---|
 | CLI | `nemo.cli:garak` | Adds `nemo garak info` and hosts garak job commands. |
 | Service | `nemo.services:garak` | Mounts health status at `/apis/garak/v1/healthz`. |
-| SDK | `nemo.sdk:garak` | Adds `client.garak.plugin_status()`. |
+| SDK | `nemo.sdk:garak` | Adds `GarakPluginResource(client).plugin_status()`. |
 | Job | `nemo.jobs:garak.audit` | Runs a garak scan against a configured target. |
 | Docs | `nemo.docs:garak` | Publishes this reference page. |
 | Skills | `nemo.skills:garak` | Publishes the garak plugin development skill. |
 
 ## Current Job
 
-`garak.audit` is a `NemoJob` stub that accepts a target identifier and an optional list of probe names. The current implementation returns an empty findings list; integration with the garak SDK is intentionally left for the next design pass.
+`garak.audit` is a `NemoJob` that runs the probes selected by an audit config against an audit target. Its input (`AuditInputSpec`) requires both `config` and `target`, each given as an inline entity payload or a workspace-qualified name such as `default/<name>`. It also accepts `max_probe_retries` and `fail_job_on_retries_exhausted`. The job executes each probe with the garak interpreter and returns a `status`, the `probes_complete` and `probes_failed` counts, and the report artifacts under `results`.
 
 ## CLI Examples
 

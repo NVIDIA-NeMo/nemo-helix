@@ -39,8 +39,8 @@ AGENT_HELPERS: dict[str, list[str]] = {
     "data-designer": [
         "To learn more about data designer, run: nemo docs data-designer/index",
     ],
-    "audit": [
-        "To learn more about garak, run: nemo docs audit/index",
+    "garak": [
+        "To learn more about garak, run: nemo docs garak/index",
     ],
     "safe-synthesizer": [
         "To learn more about safe synthesizer, run: nemo docs safe-synthesizer/about/index",
