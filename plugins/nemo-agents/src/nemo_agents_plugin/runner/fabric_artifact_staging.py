@@ -15,8 +15,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+from nemo_agents_plugin.agent_config import IncludeConfig
 from nemo_agents_plugin.entities import (
     AGENT_CONFIG_FILENAME,
+    AGENT_SPEC_DIR_FIELD,
     AGENT_SPEC_FILENAME,
     ETHOS_FILENAME,
     MAX_ETHOS_STAGED_BYTES,
@@ -25,6 +27,8 @@ from nemo_agents_plugin.entities import (
 from nemo_deployments_plugin.entities import ConfigFile
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.files.types import ListFilesQueryParams
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}
@@ -44,21 +48,99 @@ async def _download_fileset(
     workspace: str,
     fileset_name: str,
     local_path: Path,
+    agent_config: dict[str, Any],
 ) -> None:
+    """Download the agent's directory of its fileset, then each of its includes, into *local_path*.
+
+    The agent's directory is the fileset root unless the fileset records another
+    under ``AGENT_SPEC_DIR_FIELD``, as a repository-rooted fileset does.
+    """
     try:
-        listing = (await files_client.list_files(workspace=workspace, name=fileset_name)).data()
+        fileset = (await files_client.get_fileset(workspace=workspace, name=fileset_name)).data()
     except PluginClientNotFoundError as exc:
         raise FabricEthosFilesetNotFound(f"Ethos fileset {workspace}/{fileset_name} was not found") from exc
 
+    spec_dir = _agent_spec_dir(fileset.custom_fields, fileset_name)
+    await _download_tree(
+        files_client, workspace=workspace, fileset_name=fileset_name, source=spec_dir, destination=local_path
+    )
+
+    for include in _agent_includes(agent_config):
+        source = _include_source(spec_dir, include.source, fileset_name)
+        written = await _download_tree(
+            files_client,
+            workspace=workspace,
+            fileset_name=fileset_name,
+            source=source,
+            destination=local_path / Path(*PurePosixPath(include.target).parts),
+            refuse_existing_under=local_path,
+        )
+        if not written:
+            raise FabricArtifactStagingError(
+                f"include source {include.source!r} matches nothing in fileset {fileset_name!r}"
+            )
+
+
+async def _download_tree(
+    files_client: AsyncFilesClient,
+    *,
+    workspace: str,
+    fileset_name: str,
+    source: str,
+    destination: Path,
+    refuse_existing_under: Path | None = None,
+) -> int:
+    """Write the file at *source*, or every file under it, to *destination*; return how many."""
+    query_params: ListFilesQueryParams | None = {"path": source} if source else None
+    listing = (await files_client.list_files(workspace=workspace, name=fileset_name, query_params=query_params)).data()
+
+    written = 0
     for file_info in listing.data:
         relative_path = _fileset_relative_path(file_info.path)
-        response = await files_client.download_file(
-            workspace=workspace,
-            name=fileset_name,
-            path=relative_path.as_posix(),
-        )
+        path = relative_path.as_posix()
+        if source and path != source and not path.startswith(f"{source}/"):
+            continue
+        within_source = PurePosixPath(path[len(source) :].lstrip("/")) if source else relative_path
+        local_file = destination / Path(*within_source.parts) if within_source.parts else destination
+        if refuse_existing_under is not None and await asyncio.to_thread(local_file.exists):
+            raise FabricArtifactStagingError(
+                f"include of {path!r} would overwrite {local_file.relative_to(refuse_existing_under).as_posix()!r}"
+            )
+        response = await files_client.download_file(workspace=workspace, name=fileset_name, path=path)
         content = await response.read()
-        await asyncio.to_thread(_write_downloaded_file, local_path / Path(*relative_path.parts), content)
+        await asyncio.to_thread(_write_downloaded_file, local_file, content)
+        written += 1
+    return written
+
+
+def _agent_spec_dir(custom_fields: dict[str, Any] | None, fileset_name: str) -> str:
+    value = (custom_fields or {}).get(AGENT_SPEC_DIR_FIELD, "")
+    if not isinstance(value, str):
+        raise FabricArtifactStagingError(f"Fileset {fileset_name!r} has a non-string {AGENT_SPEC_DIR_FIELD!r}")
+    if not value.strip("/"):
+        return ""
+    return _fileset_relative_path(value).as_posix()
+
+
+def _agent_includes(agent_config: dict[str, Any]) -> list[IncludeConfig]:
+    raw = agent_config.get("includes") or []
+    if not isinstance(raw, list):
+        raise FabricArtifactStagingError("includes must be a list")
+    try:
+        return [IncludeConfig.model_validate(item) for item in raw]
+    except ValidationError as exc:
+        raise FabricArtifactStagingError(f"Invalid includes entry: {exc}") from exc
+
+
+def _include_source(spec_dir: str, source: str, fileset_name: str) -> str:
+    """Resolve an include against the agent's directory, refusing one that climbs out of the fileset."""
+    resolved = posixpath.normpath(posixpath.join(spec_dir, source))
+    if resolved.startswith("../") or resolved == ".." or posixpath.isabs(resolved):
+        raise FabricArtifactStagingError(
+            f"include source {source!r} climbs out of fileset {fileset_name!r}"
+            + ("" if spec_dir else "; register the agent from its repository root to include files beside it")
+        )
+    return "" if resolved == "." else resolved
 
 
 def _fileset_relative_path(path: str) -> PurePosixPath:
@@ -145,6 +227,7 @@ async def stage_fabric_ethos_dir(
                     workspace=workspace,
                     fileset_name=fileset_name,
                     local_path=tmp_path,
+                    agent_config=agent_config,
                 )
                 await asyncio.to_thread(_copy_downloaded_tree, tmp_path, base_dir, preserved)
         except FabricEthosFilesetNotFound as exc:
@@ -266,7 +349,13 @@ async def stage_fabric_ethos_config_files(
     try:
         with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
             tmp_path = Path(tmp)
-            await _download_fileset(files_client, workspace=workspace, fileset_name=fileset_name, local_path=tmp_path)
+            await _download_fileset(
+                files_client,
+                workspace=workspace,
+                fileset_name=fileset_name,
+                local_path=tmp_path,
+                agent_config=rewritten_agent_config,
+            )
             config_files = _collect_staged_config_files(
                 root=tmp_path,
                 agent_yaml_path=agent_yaml_path,

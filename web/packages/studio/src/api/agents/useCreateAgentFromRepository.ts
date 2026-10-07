@@ -13,6 +13,7 @@ import type { GitStorageConfig, GithubStorageConfig } from '@nemo/sdk/generated/
 import { claimFileset, rollbackFileset } from '@studio/api/agents/agentSpecFileset';
 import {
   AGENT_CONFIG_FILENAME,
+  AGENT_SPEC_DIR_FIELD,
   FABRIC_CONFIG_FORMAT,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
@@ -38,12 +39,19 @@ export class AgentConfigNotFoundError extends Error {
   }
 }
 
-/** Directories under the fileset root holding an agent.yaml, relative to that root. */
-const findAgentDirectories = async (workspace: string, filesetName: string): Promise<string[]> => {
+const joinPath = (...parts: string[]): string => parts.filter(Boolean).join('/');
+
+/** Repository paths of every directory holding an agent.yaml; the repository root is `''`. */
+const findAgentDirectories = async (
+  workspace: string,
+  filesetName: string,
+  filesetRoot: string
+): Promise<string[]> => {
   const { data } = await filesListFilesetFiles(workspace, filesetName);
   return data
     .map((file) => agentDirectoryOf(file.path))
     .filter((directory): directory is string => directory !== undefined)
+    .map((directory) => joinPath(filesetRoot, directory))
     .sort();
 };
 
@@ -53,6 +61,11 @@ export interface CreateAgentFromRepositoryParams {
   storage: GithubStorageConfig | GitStorageConfig;
   /** How the repository is named in the fileset description and error text. */
   sourceLabel: string;
+  /**
+   * The directory holding agent.yaml when the fileset is rooted above it, so the agent can
+   * include files from elsewhere in the repository. Omit when the fileset is the agent's directory.
+   */
+  specDir?: string;
   replaceOrphanedFileset?: boolean;
 }
 
@@ -62,6 +75,7 @@ export const createAgentFromRepository = async ({
   name,
   storage,
   sourceLabel,
+  specDir,
   replaceOrphanedFileset = false,
 }: CreateAgentFromRepositoryParams): Promise<Agent> => {
   const filesetName = agentSpecFilesetName(name);
@@ -72,10 +86,17 @@ export const createAgentFromRepository = async ({
     name: filesetName,
     description: `Agent spec for ${name}, from ${sourceLabel}`,
     storage,
+    ...(specDir ? { custom_fields: { [AGENT_SPEC_DIR_FIELD]: specDir } } : {}),
   });
 
   try {
-    const config = parseAgentConfig(await readAgentConfig(workspace, filesetName, sourceLabel));
+    const config = parseAgentConfig(
+      await readAgentConfig(workspace, filesetName, {
+        configPath: joinPath(specDir ?? '', AGENT_CONFIG_FILENAME),
+        filesetRoot: storage.path ?? '',
+        sourceLabel,
+      })
+    );
 
     return await agentsCreateAgent(workspace, {
       name,
@@ -92,14 +113,20 @@ export const createAgentFromRepository = async ({
 const readAgentConfig = async (
   workspace: string,
   filesetName: string,
-  sourceLabel: string
+  {
+    configPath,
+    filesetRoot,
+    sourceLabel,
+  }: { configPath: string; filesetRoot: string; sourceLabel: string }
 ): Promise<string> => {
   try {
-    const blob = await filesDownloadFile(workspace, filesetName, AGENT_CONFIG_FILENAME);
+    const blob = await filesDownloadFile(workspace, filesetName, configPath);
     return await blob.text();
   } catch (error) {
     if (isNotFoundError(error)) {
-      const directories = await findAgentDirectories(workspace, filesetName).catch(() => null);
+      const directories = await findAgentDirectories(workspace, filesetName, filesetRoot).catch(
+        () => null
+      );
       if (directories)
         throw new AgentConfigNotFoundError(sourceLabel, directories, { cause: error });
     }

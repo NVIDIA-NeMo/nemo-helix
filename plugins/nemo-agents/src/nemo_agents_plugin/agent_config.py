@@ -12,7 +12,8 @@ contract lands.
 
 from __future__ import annotations
 
-from pathlib import Path
+import posixpath
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self
 
 import yaml
@@ -138,6 +139,38 @@ class ToolsConfig(BaseModel):
     blocked: list[str] = Field(default_factory=list)
 
 
+class IncludeConfig(BaseModel):
+    """A file or directory from elsewhere in the agent's fileset, copied into the agent root."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(
+        min_length=1,
+        description="Path relative to agent.yaml's directory; may climb with '..' but not out of the fileset.",
+    )
+    target: str = Field(min_length=1, description="Where the source lands, relative to the agent root.")
+
+    @field_validator("source")
+    @classmethod
+    def _source_is_relative(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if path.is_absolute():
+            raise ValueError(f"include source must be relative to agent.yaml, got {value!r}")
+        if posixpath.normpath(value) == ".":
+            raise ValueError("include source must name something other than the agent directory itself")
+        return value
+
+    @field_validator("target")
+    @classmethod
+    def _target_stays_in_agent_root(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if path.is_absolute() or any(part in ("..", ".") for part in path.parts):
+            raise ValueError(f"include target must be a plain path inside the agent root, got {value!r}")
+        if path.as_posix() == AGENT_CONFIG_FILENAME:
+            raise ValueError(f"include target must not replace {AGENT_CONFIG_FILENAME}")
+        return path.as_posix()
+
+
 class AgentConfig(BaseModel):
     """Platform-owned agent.yaml config for nemo-agents-spec-v1."""
 
@@ -157,6 +190,18 @@ class AgentConfig(BaseModel):
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     environment: EnvironmentConfig = Field(default_factory=EnvironmentConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    includes: list[IncludeConfig] = Field(
+        default_factory=list,
+        description="Files from elsewhere in the agent's fileset to copy into the agent root at deploy time.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_include_targets(self) -> Self:
+        targets = sorted(PurePosixPath(include.target) for include in self.includes)
+        for earlier, later in zip(targets, targets[1:], strict=False):
+            if earlier == later or earlier in later.parents:
+                raise ValueError(f"include targets {earlier.as_posix()!r} and {later.as_posix()!r} overlap")
+        return self
 
     @model_validator(mode="after")
     def _validate_default_harness(self) -> Self:

@@ -680,6 +680,7 @@ async def test_redeploy_after_crash_does_not_merge_previous_fileset(tmp_path: Pa
         workspace: str,
         fileset_name: str,
         local_path: Path,
+        agent_config: dict[str, Any],
     ) -> None:
         await files_client.download(local_path=str(local_path), fileset=fileset_name, workspace=workspace)
 

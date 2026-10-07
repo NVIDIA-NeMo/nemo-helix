@@ -337,3 +337,46 @@ class TestLoadAgentConfig:
 
         with pytest.raises(AgentConfigLoadError, match="Invalid agent config"):
             load_agent_config(config_path)
+
+
+def _with_includes(includes: list[dict]) -> dict:
+    return {**_example_yaml_config(), "includes": includes}
+
+
+def test_includes_accept_sources_beside_the_agent_directory() -> None:
+    config = AgentConfig.model_validate(
+        _with_includes([{"source": "../../landscape/mcp_servers", "target": "tools/mcp_servers/"}])
+    )
+
+    assert [(include.source, include.target) for include in config.includes] == [
+        ("../../landscape/mcp_servers", "tools/mcp_servers")
+    ]
+
+
+def test_includes_default_to_none() -> None:
+    assert AgentConfig.model_validate(_example_yaml_config()).includes == []
+
+
+@pytest.mark.parametrize(
+    "include",
+    [
+        {"source": "/etc", "target": "etc"},
+        {"source": ".", "target": "self"},
+        {"source": "../x", "target": "../escape"},
+        {"source": "../x", "target": "/abs"},
+        {"source": "../x", "target": "agent.yaml"},
+        {"source": "", "target": "x"},
+        {"source": "../x", "target": "x", "mode": "copy"},
+    ],
+)
+def test_includes_reject_unsafe_or_unknown_entries(include: dict) -> None:
+    with pytest.raises(ValidationError):
+        AgentConfig.model_validate(_with_includes([include]))
+
+
+@pytest.mark.parametrize(("first", "second"), [("tools", "tools"), ("tools", "tools/mcp")])
+def test_include_targets_must_not_overlap(first: str, second: str) -> None:
+    with pytest.raises(ValidationError, match="overlap"):
+        AgentConfig.model_validate(
+            _with_includes([{"source": "../a", "target": first}, {"source": "../b", "target": second}])
+        )

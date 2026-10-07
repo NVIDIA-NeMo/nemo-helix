@@ -175,6 +175,10 @@ MAX_ETHOS_STAGED_FILES = 500
 """Maximum number of files an agent Ethos fileset may contain."""
 
 
+# Fileset custom field naming the directory that holds agent.yaml in a repository-rooted fileset.
+AGENT_SPEC_DIR_FIELD = "agent_spec_dir"
+
+
 def ethos_fileset_name(agent_name: str) -> str:
     """Return the conventional fileset name holding an agent's Ethos."""
     return f"{agent_name}-ethos"

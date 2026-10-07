@@ -207,6 +207,35 @@ telemetry:
   project: <agent-name>
 ```
 
+### Files from elsewhere in the repository
+
+An agent registered from a Git repository over SSH can copy files that live
+outside its own directory into its root at deploy time. Use this for stdio MCP
+servers or shared prompts kept beside the agent rather than inside it:
+
+```yaml
+includes:
+  - source: ../../landscape/mcp_servers   # relative to agent.yaml; may climb, not out of the repo
+    target: mcp_servers                   # where it lands inside the agent root
+
+mcp:
+  servers:
+    check:
+      transport: stdio
+      url: python
+      args: [mcp_servers/check_server.py]
+```
+
+- `source` is a file or directory. `target` must stay inside the agent root,
+  must not be `agent.yaml`, and must not overlap another include's target.
+- Deployment fails if a source matches nothing, climbs out of the repository,
+  or would overwrite one of the agent's own files.
+- Only agents registered from a repository root carry the files beside them.
+  An uploaded agent, or one registered from GitHub, can include only files
+  inside its own directory.
+- Container deployments receive included files the same way as the agent's
+  own: text only, within the same size limit.
+
 ### Harness overrides
 
 Use a harness-local model only when that harness should override the default.

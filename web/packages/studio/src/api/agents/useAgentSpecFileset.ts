@@ -12,6 +12,7 @@ import type {
   GitStorageConfig,
   GithubStorageConfig,
 } from '@nemo/sdk/generated/platform/schema';
+import { AGENT_SPEC_DIR_FIELD } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import {
   type UseMutationResult,
@@ -57,8 +58,10 @@ export const agentSpecSource = (
 
   // `type` is optional in the generated types, so it does not narrow the union; `url` does.
   if ('url' in storage) {
+    const specDir = fileset.custom_fields?.[AGENT_SPEC_DIR_FIELD];
+    const directory = typeof specDir === 'string' && specDir ? specDir : path;
     return {
-      repository: path ? `${storage.url}#${path}` : storage.url,
+      repository: directory ? `${storage.url}#${directory}` : storage.url,
       trackedRevision,
       revision,
     };
