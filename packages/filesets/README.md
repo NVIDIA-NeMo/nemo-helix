@@ -90,6 +90,8 @@ api.create_repo(f"{namespace}/{repo_name}", repo_type="model", exist_ok=True)
 
 **After (typed client):**
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Workspaces are typically pre-created, but filesets can be created:
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 

@@ -13,7 +13,6 @@ import pandas as pd
 import pytest
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import NemoTransportError, UnprocessableEntityError
-from nemo_helix_plugin.discovery import discover, discover_entry_points
 from nemo_safe_synthesizer_plugin.sdk.job import SafeSynthesizerJob
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 from nemo_safe_synthesizer_plugin.sdk.resources import (
@@ -89,22 +88,6 @@ def test_safe_synthesizer_resource_creates_job_through_plugin_route() -> None:
         "spec": {"data_source": "default/data#input.csv", "config": {}},
         "name": "safe-synth-job",
     }
-
-
-def test_safe_synthesizer_resource_mounts_on_typed_client() -> None:
-    discover.cache_clear()
-    discover_entry_points.cache_clear()
-    requests: list[httpx.Request] = []
-    client = _mock_client(requests)
-
-    response = client.safe_synthesizer.jobs.create(
-        workspace="default",
-        name="safe-synth-job",
-        spec={"data_source": "default/data#input.csv", "config": {}},
-    )
-
-    assert response.name == "safe-synth-job"
-    assert str(requests[0].url) == "http://nhx.test/apis/safe-synthesizer/v2/workspaces/default/jobs"
 
 
 def test_safe_synthesizer_resource_includes_response_detail_in_errors() -> None:

@@ -4,6 +4,7 @@
 import { FilesetSearchableSelect } from '@nemo/common/src/components/FilesetSearchableSelect';
 import { useFilesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import { FormField, Select, Stack } from '@nvidia/foundations-react-core';
+import { parquetBatchGroups } from '@studio/components/evaluation/shared/parquetBatchGroups';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { type ReactElement } from 'react';
 import {
@@ -14,7 +15,7 @@ import {
   useWatch,
 } from 'react-hook-form';
 
-const DATASET_FORMATS = ['json', 'jsonl', 'parquet'];
+const DATASET_FORMATS = ['json', 'jsonl', 'csv', 'parquet'];
 
 const filesetOption = (fileset: { name: string }) => ({
   value: fileset.name,
@@ -28,6 +29,9 @@ interface FilesetDatasetPickerProps<T extends FieldValues> {
   filesetName: Path<T>;
   /** Form field holding the chosen file's path within that fileset. */
   fileName: Path<T>;
+  /** Form field holding a glob over a folder of Parquet batches when that option is chosen, or ''
+   *  for a single file. ``fileName`` then holds the folder's first batch, which is validated. */
+  batchGlobName: Path<T>;
   disabled?: boolean;
   /** The chosen file's content is still being read. */
   loading?: boolean;
@@ -39,20 +43,46 @@ export function FilesetDatasetPicker<T extends FieldValues>({
   control,
   filesetName,
   fileName,
+  batchGlobName,
   disabled,
   loading,
   error,
 }: FilesetDatasetPickerProps<T>): ReactElement {
   const fileset: string = useWatch({ control, name: filesetName });
   const { field: fileField } = useController({ control, name: fileName });
+  const { field: batchGlobField } = useController({ control, name: batchGlobName });
+
+  const pickFile = (path: string) => {
+    fileField.onChange(path);
+    batchGlobField.onChange('');
+  };
 
   const filesQuery = useFilesListFilesetFiles(workspace, fileset, undefined, {
     query: { enabled: !!fileset },
   });
 
-  const fileItems = (filesQuery.data?.data ?? [])
-    .filter((file) => DATASET_FORMATS.includes(formatFromFileName(file.path)))
-    .map((file) => ({ value: file.path, children: file.path }));
+  const filesetPaths = (filesQuery.data?.data ?? []).map((file) => file.path);
+  const batchGroups = parquetBatchGroups(filesetPaths);
+
+  const fileItems = [
+    ...batchGroups.map((group) => ({
+      value: group.glob,
+      children: `All ${group.count} Parquet files in ${group.dir || 'the fileset root'}`,
+    })),
+    ...filesetPaths
+      .filter((path) => DATASET_FORMATS.includes(formatFromFileName(path)))
+      .map((path) => ({ value: path, children: path })),
+  ];
+
+  const pickItem = (value: string) => {
+    const group = batchGroups.find((candidate) => candidate.glob === value);
+    if (!group) {
+      pickFile(value);
+      return;
+    }
+    fileField.onChange(group.firstPath);
+    batchGlobField.onChange(group.glob);
+  };
 
   const noDatasetFiles = !!fileset && !filesQuery.isLoading && fileItems.length === 0;
   const placeholder = filesQuery.isLoading || loading ? 'Loading files...' : 'Select a file';
@@ -64,15 +94,17 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         useControllerProps={{ control, name: filesetName }}
         formFieldProps={{ slotLabel: 'Fileset' }}
         renderOption={filesetOption}
-        onChange={() => fileField.onChange('')}
+        onChange={() => pickFile('')}
         disabled={disabled}
       />
       <FormField
         slotLabel="File"
         slotHelp={
           noDatasetFiles
-            ? 'This fileset has no JSONL, JSON, or Parquet files.'
-            : 'JSONL, JSON, or Parquet. Parquet is converted to JSONL.'
+            ? 'This fileset has no JSONL, JSON, CSV, or Parquet files.'
+            : batchGlobField.value
+              ? 'Read from this fileset rather than copied into the run, so later changes to these files also change re-runs.'
+              : 'JSONL, JSON, CSV, or Parquet.'
         }
         slotError={error}
         status={error ? 'error' : undefined}
@@ -80,8 +112,8 @@ export function FilesetDatasetPicker<T extends FieldValues>({
         <Select
           disabled={disabled || !fileset}
           items={fileItems}
-          value={fileField.value}
-          onValueChange={fileField.onChange}
+          value={batchGlobField.value || fileField.value}
+          onValueChange={pickItem}
           placeholder={placeholder}
         />
       </FormField>

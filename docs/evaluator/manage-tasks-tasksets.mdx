@@ -41,20 +41,17 @@ definition freely without accumulating versions.
 ## Initialize the SDK
 
 ```python
-import os
-
 from nemo_evaluator.sdk import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 evaluator = Evaluator.from_client(client)
 
 tasks = evaluator.tasks        # EvaluatorTasksResource
 tasksets = evaluator.tasksets  # EvaluatorTasksetsResource
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ## Manage Tasks
 

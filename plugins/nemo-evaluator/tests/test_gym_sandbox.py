@@ -16,10 +16,16 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from nemo_evaluator.api.schemas import AgentRef
 from nemo_evaluator.config import EvaluatorConfig
 from nemo_evaluator.filesets import FilesetRef
-from nemo_evaluator.jobs.agent_spec import GymRunnerTarget
+from nemo_evaluator.jobs.agent_spec import (
+    GymAgentSource,
+    GymRunnerTarget,
+    RegisteredAgentSource,
+)
 from nemo_evaluator.jobs.gym_sandbox import (
+    ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY,
     CollectionTimeoutError,
     SandboxPlan,
     SandboxUnavailableError,
@@ -27,6 +33,7 @@ from nemo_evaluator.jobs.gym_sandbox import (
     collect_within,
     credential_shaped_env_vars,
     gym_global_config,
+    has_staged_environment,
     require_fileset_environment_sandboxed,
     require_fileset_sandbox_storage_identity,
     resolve_sandbox_plan,
@@ -47,7 +54,10 @@ def target(**overrides: Any) -> GymRunnerTarget:
         "resources_server": "mcqa",
     }
     fields.update(overrides)
-    return GymRunnerTarget(**fields)
+    source = GymAgentSource(
+        component=fields.pop("agent"), config=fields.pop("agent_config"), instance=fields.pop("agent_ref_name", None)
+    )
+    return GymRunnerTarget(source=source, **fields)
 
 
 def capable_config(**overrides: Any) -> EvaluatorConfig:
@@ -172,7 +182,7 @@ def test_custom_environment_omits_agent_config_when_the_package_supplies_the_age
 
 
 def test_agent_config_is_required_without_an_environment_package() -> None:
-    with pytest.raises(ValueError, match="agent_config field is required"):
+    with pytest.raises(ValueError, match="source.config` is required"):
         target(agent_config=None)
 
 
@@ -770,3 +780,35 @@ def test_no_plan_in_the_environment_means_gym_runs_colocated(monkeypatch: pytest
     monkeypatch.delenv(GYM_SANDBOX_PLAN_ENVVAR, raising=False)
 
     assert sandbox_plan_from_environment() is None
+
+
+def _registered_target(**overrides: Any) -> GymRunnerTarget:
+    fields: dict[str, Any] = {
+        "source": RegisteredAgentSource(agent=AgentRef(root="dev/calc")),
+        "resources_server": "mcqa",
+        "resolved_config": {"harness": {"adapter_id": "x"}},
+    }
+    fields.update(overrides)
+    return GymRunnerTarget(**fields)
+
+
+def test_a_registered_agent_is_a_staged_environment_even_without_a_fileset() -> None:
+    """The staging step writes its package into the environment tree, so the host must mount that tree."""
+    assert has_staged_environment(_registered_target())
+    assert not has_staged_environment(target())
+    payload = serve_config(_registered_target(), capable_plan(), job_id="job-9")
+    assert payload["environment_path"] == "/job/environment"
+    assert payload["sandbox"]["environment_sub_path"].startswith("jobs/default/job-9/")
+    with pytest.raises(SandboxUnavailableError, match="sandboxed execution"):
+        resolve_sandbox_plan(capable_config(sandboxed_gym_default=False), _registered_target())
+
+
+def test_the_generated_instance_and_config_drive_the_host_composition() -> None:
+    config = gym_global_config(_registered_target())
+    generated = "responses_api_agents/nemo_registered_agent/configs/registered_calc.yaml"
+    assert config["config_paths"][0] == generated
+    assert config["registered_calc"]["responses_api_agents"]["nemo_registered_agent"] == {
+        "resources_server": {"name": "mcqa"}
+    }
+    selection = config[ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY]
+    assert (selection["agent_instance"], selection["agent_config"]) == ("registered_calc", generated)

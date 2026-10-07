@@ -37,15 +37,10 @@ Once created, a project cannot be renamed.
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.projects.types import CreateProjectRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 project = client.projects.create_project(
     workspace="ml-team",
@@ -77,14 +72,9 @@ To list projects in a workspace, call the list endpoint. The response includes p
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 for project in client.projects.list_projects(workspace="ml-team").items():
     print(f"{project.name}: {project.description}")
@@ -109,14 +99,9 @@ To retrieve a specific project by its `name`:
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 project = client.projects.get_project(name="llama-finetune-v2", workspace="ml-team").data()
 ```
@@ -140,15 +125,10 @@ To update a project, only the `description` field can be modified. The `name` ca
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.projects.types import UpdateProjectRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 project = client.projects.update_project(
     name="llama-finetune-v2",
@@ -180,14 +160,9 @@ To delete a project:
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 client.projects.delete_project(name="llama-finetune-v2", workspace="ml-team").data()
 ```

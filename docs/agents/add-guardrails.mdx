@@ -100,17 +100,12 @@ that guardrail stops a given attack.
 <Tab title="Python SDK">
 
 ```python
-import os
-
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, VirtualModelInferenceConfig
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 guardrail_mw = MiddlewareCall(
     name="nemo-guardrails",
@@ -135,6 +130,8 @@ client.inference.virtual_models.create_virtual_model(
 </Tab>
 
 </Tabs>
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ## 2. Point the Agent at the Guarded VirtualModel
 

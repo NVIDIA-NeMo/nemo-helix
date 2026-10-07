@@ -43,7 +43,7 @@ elif [[ "$mode" == sdist ]]; then
     url="$(/opt/venv/bin/python -c '
 import json, sys, urllib.request
 name, version = sys.argv[1], sys.argv[2]
-with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json") as resp:
+with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=60) as resp:
     data = json.load(resp)
 urls = [item["url"] for item in data["urls"] if item["packagetype"] == "sdist"]
 if len(urls) != 1:

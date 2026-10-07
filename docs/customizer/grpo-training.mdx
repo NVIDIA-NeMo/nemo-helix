@@ -193,7 +193,7 @@ ascii-tree-data/
   validation.jsonl                # only with --validation-fraction > 0
 ```
 
-Add `--upload` (with `NHX_BASE_URL` set) to create both FileSets and upload them in the same command.
+Add `--upload` to create both FileSets and upload them in the same command. The converter does not read your CLI context, so export `NHX_BASE_URL` with your deployment URL first.
 
 ### Every package needs a `policy_model` server
 

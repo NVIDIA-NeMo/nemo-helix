@@ -273,17 +273,17 @@ print(provider_url)
 
 ## Verifying Gateway Reachability
 
-The platform exposes two health endpoints at the root of the platform router.
+The platform exposes two health endpoints at the root of the platform router, relative to your platform base URL.
 The inference gateway is reachable through the same platform host, so these are
 the canonical checks for "is the gateway up?":
 
 | Endpoint | Purpose |
 |---|---|
-| `GET {NHX_BASE_URL}/health/ready` | Readiness — returns 200 once dependent services are up |
-| `GET {NHX_BASE_URL}/health/live` | Liveness |
+| `GET /health/ready` | Readiness — returns 200 once dependent services are up |
+| `GET /health/live` | Liveness |
 
 ```bash
-curl -s http://localhost:8080/health/ready
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/health/ready"
 ```
 
 `/v1/health/ready` and `/v1/health/live` are **NIM** endpoints, not gateway

@@ -15,12 +15,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ContextSource(BaseModel):
-    """One build context: a whole fileset, or a directory within one.
+    """One build context: a whole fileset or a directory within one, or a whole archive in a fileset or a directory
+    within that.
 
     ``fileset`` is always ``<workspace>/<name>``, so no fileset's directory can nest inside another's.
     """
 
     fileset: str
+    #: A tar archive in the fileset, which ``fetch`` unpacks. ``context_path`` is then a directory inside it.
+    archive: str | None = None
     context_path: str | None = None
 
     @field_validator("fileset")
@@ -39,6 +42,13 @@ def _relative(part: str) -> PurePosixPath:
     return path
 
 
+def _qualified(fileset: str) -> PurePosixPath:
+    path = _relative(fileset)
+    if len(path.parts) != 2:
+        raise ValueError(f"{fileset!r} is not a qualified fileset reference, <workspace>/<name>")
+    return path
+
+
 @dataclass(frozen=True, slots=True)
 class WorkLayout:
     """Where everything lives in one job's directory on the work volume."""
@@ -46,13 +56,26 @@ class WorkLayout:
     root: PurePosixPath
 
     def fileset(self, name: str) -> PurePosixPath:
-        path = _relative(name)
-        if len(path.parts) != 2:
-            raise ValueError(f"{name!r} is not a qualified fileset reference, <workspace>/<name>")
-        return self.root / "context" / path
+        return self.root / "context" / _qualified(name)
+
+    @property
+    def unpacked(self) -> PurePosixPath:
+        return self.root / "unpacked"
+
+    def archive(self, fileset: str, archive: str) -> PurePosixPath:
+        """Where ``fetch`` unpacks an archive: apart from the fileset's own files, which may include the archive."""
+        return self.unpacked / _qualified(fileset) / _relative(archive)
+
+    @property
+    def downloads(self) -> PurePosixPath:
+        """Where ``fetch`` keeps an archive until it has unpacked it."""
+        return self.root / "downloads"
 
     def context(self, source: ContextSource) -> PurePosixPath:
-        path = self.fileset(source.fileset)
+        if source.archive is not None:
+            path = self.archive(source.fileset, source.archive)
+        else:
+            path = self.fileset(source.fileset)
         return path / _relative(source.context_path) if source.context_path else path
 
     @property
@@ -65,7 +88,9 @@ class WorkLayout:
 
 
 class FetchStepConfig(BaseModel):
-    sources: list[ContextSource] = Field(min_length=1, description="Each distinct source, once.")
+    sources: list[ContextSource] = Field(
+        min_length=1, description="Each distinct source, once. An archive is listed once, to unpack whole."
+    )
 
 
 class SandboxSpec(BaseModel):

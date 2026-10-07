@@ -114,9 +114,12 @@ The UI ships with the plugin, so a missing entry means Studio did not load its
 bundle. Confirm the plugin is registered and the bundle is served:
 
 ```bash
-curl -s $NHX_BASE_URL/apis/plugins
-curl -sI $NHX_BASE_URL/plugin-ui/agent-hardener/index.js
+curl -s "${NHX_BASE_URL:-http://localhost:8080}/apis/plugins"
+curl -sI "${NHX_BASE_URL:-http://localhost:8080}/plugin-ui/agent-hardener/index.js"
 ```
+
+If your CLI context points at a remote deployment, export its URL as `NHX_BASE_URL` before running
+these commands. For details, refer to [When to use `NHX_BASE_URL`](/documentation/reference/cli-reference/connect-to-deployments#when-to-use-nhx-base-url).
 
 The first should list `agent-hardener` with a `bundleUrl`. Then hard-reload the
 browser.

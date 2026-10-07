@@ -86,10 +86,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
 # Configure the client
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Use the provider configured during NeMo Helix setup for PII classification.
 provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
@@ -99,6 +96,8 @@ if "/" in provider_name:
 else:
     client.models.get_provider(name=provider_name)
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 ---
 

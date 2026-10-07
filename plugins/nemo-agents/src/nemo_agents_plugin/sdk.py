@@ -10,6 +10,11 @@ typed ``AgentsClient`` property, so build this resource explicitly from a
 Usage::
 
     from nemo_agents_plugin.sdk import AgentsResource
+    from nemo_agents_plugin.entities import (
+        ComputeResources,
+        ComputeSpecInline,
+        EnvironmentSpecInline,
+    )
     from nemo_helix_plugin.client.client import NemoClient
 
     client = NemoClient(base_url="http://localhost:8000", workspace="default")
@@ -17,7 +22,7 @@ Usage::
 
     # Agent CRUD
     agent = agents.create(name="calculator", config={...})
-    listing = agents.list()
+    all_agents = agents.list()
     agent = agents.get("calculator")
     agents.delete("calculator")
 
@@ -135,6 +140,12 @@ def _contains_default_model_placeholder(value: object) -> bool:
 
 
 def _agents_client_from_client(client: NemoClient) -> AgentsClient:
+    if not isinstance(client, NemoClient):
+        raise TypeError(
+            "AgentsResource requires a nemo_helix_plugin.client.client.NemoClient. "
+            "Legacy nemo_helix.NeMoHelix SDK clients are not supported; migrate by "
+            "constructing NemoClient(base_url=..., workspace=...) and passing that client."
+        )
     agents_client = AgentsClient.from_client(client)
     if agents_client.workspace is None:
         return agents_client.with_workspace(_DEFAULT_WORKSPACE)
@@ -142,6 +153,12 @@ def _agents_client_from_client(client: NemoClient) -> AgentsClient:
 
 
 def _async_agents_client_from_client(async_client: AsyncNemoClient) -> AsyncAgentsClient:
+    if not isinstance(async_client, AsyncNemoClient):
+        raise TypeError(
+            "AsyncAgentsResource requires a nemo_helix_plugin.client.client.AsyncNemoClient. "
+            "Legacy nemo_helix.AsyncNeMoHelix SDK clients are not supported; migrate by "
+            "constructing AsyncNemoClient(base_url=..., workspace=...) and passing that client."
+        )
     async_agents_client = AsyncAgentsClient.from_client(async_client)
     if async_agents_client.workspace is None:
         return async_agents_client.with_workspace(_DEFAULT_WORKSPACE)

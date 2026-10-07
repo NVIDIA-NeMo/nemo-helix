@@ -26,6 +26,16 @@ class TestWhereThingsLive:
     def test_a_cross_workspace_fileset_nests_under_its_workspace(self) -> None:
         assert layout.fileset("other-ws/fs-a") == ROOT / "context/other-ws/fs-a"
 
+    def test_an_archive_unpacks_apart_from_its_filesets_files(self) -> None:
+        """A whole-fileset download may hold the archive file itself, where the unpacked tree can't also be."""
+        unpacked = layout.context(ContextSource(fileset="ws/fs-a", archive="tb/task.tar.gz"))
+        assert unpacked == ROOT / "unpacked/ws/fs-a/tb/task.tar.gz"
+        assert layout.fileset("ws/fs-a") not in unpacked.parents
+
+    def test_a_context_path_with_an_archive_is_inside_the_archive(self) -> None:
+        source = ContextSource(fileset="ws/fs-a", archive="task.tgz", context_path="environment")
+        assert layout.context(source) == layout.archive("ws/fs-a", "task.tgz") / "environment"
+
     def test_outputs_are_one_directory_per_image(self) -> None:
         assert layout.output("demo-1-0") == layout.outputs / "demo-1-0" == ROOT / "out/demo-1-0"
 
@@ -66,6 +76,11 @@ class TestNothingLeavesTheJobDirectory:
     def test_a_context_path_that_escapes_is_refused(self, context_path: str) -> None:
         with pytest.raises(ValueError, match="not a relative path"):
             layout.context(ContextSource(fileset="ws/fs-a", context_path=context_path))
+
+    @pytest.mark.parametrize("archive", ["/etc/x.tar", "../x.tar", "a/../../x.tar"])
+    def test_an_archive_path_that_escapes_is_refused(self, archive: str) -> None:
+        with pytest.raises(ValueError, match="not a relative path"):
+            layout.context(ContextSource(fileset="ws/fs-a", archive=archive))
 
     def test_an_image_name_that_escapes_is_refused(self) -> None:
         with pytest.raises(ValueError, match="not a relative path"):

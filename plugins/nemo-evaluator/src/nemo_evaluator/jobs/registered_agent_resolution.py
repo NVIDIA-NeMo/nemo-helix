@@ -33,6 +33,7 @@ from nemo_evaluator.filesets import FilesetRef
 from nemo_evaluator.jobs.agent_files_snapshot import discard_registered_agent_files, snapshot_registered_agent_files
 from nemo_evaluator.jobs.agent_spec import (
     FabricRunnerTarget,
+    GymRunnerTarget,
     HarborRunnerTarget,
     RegisteredAgentSource,
     Target,
@@ -235,13 +236,13 @@ async def resolve_registered_agent(
     workspace: str,
     async_sdk: AsyncHelixClient | None,
 ) -> Target | None:
-    """Fill a Fabric or Harbor runner target that names a registered agent with what that agent is.
+    """Fill a Fabric, Harbor or Gym runner target that names a registered agent with what that agent is.
 
-    The source keeps its ``agent``, workspace-qualified. A Fabric target gets the config it resolved to as
-    ``resolved_config``; a Harbor target gets it in its kwargs, for the installed Fabric agent its source
-    implies. Either way the job runs the agent fresh per trial without ever looking it up itself.
+    The source keeps its ``agent``, workspace-qualified. A Fabric or Gym target gets the config it resolved
+    to as ``resolved_config``; a Harbor target gets it in its kwargs, for the installed Fabric agent its
+    source implies. Either way the job runs the agent fresh per trial without ever looking it up itself.
     """
-    if not isinstance(target, (FabricRunnerTarget, HarborRunnerTarget)):
+    if not isinstance(target, (FabricRunnerTarget, HarborRunnerTarget, GymRunnerTarget)):
         return target
     source = registered_agent_source(target)
     if source is None or registered_agent_config(target) is not None:
@@ -260,15 +261,40 @@ async def resolve_registered_agent(
         raise
 
 
+def _gym_policy_params(config: dict[str, Any]) -> dict[str, Any]:
+    """Gym ``policy_*`` settings for a registered agent's default model: its gateway route and model name."""
+    default = (config.get("models") or {}).get("default") or {}
+    params: dict[str, Any] = {}
+    if default.get("base_url"):
+        params["policy_base_url"] = default["base_url"]
+    if default.get("model"):
+        params["policy_model_name"] = default["model"]
+    if params:
+        params.setdefault("policy_api_key", "not-used")
+    return params
+
+
 def _fill_target(
-    target: FabricRunnerTarget | HarborRunnerTarget, source: RegisteredAgentSource, agent: _ResolvedRegisteredAgent
-) -> FabricRunnerTarget | HarborRunnerTarget:
+    target: FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget,
+    source: RegisteredAgentSource,
+    agent: _ResolvedRegisteredAgent,
+) -> FabricRunnerTarget | HarborRunnerTarget | GymRunnerTarget:
     """The target with the loaded agent written into it, per runner kind. Pure: no I/O, so it can fail freely."""
     resolved_source = source.model_copy(update={"agent": agent.ref, "files": agent.files})
     env_secrets = _merge_env_secrets(target.env_secrets, agent.env_secrets, agent=agent.ref.root)
     if isinstance(target, FabricRunnerTarget):
         return target.model_copy(
             update={"source": resolved_source, "resolved_config": agent.config, "env_secrets": env_secrets}
+        )
+    if isinstance(target, GymRunnerTarget):
+        hydra_params = {**_gym_policy_params(agent.config), **target.hydra_params}
+        return target.model_copy(
+            update={
+                "source": resolved_source,
+                "resolved_config": agent.config,
+                "hydra_params": hydra_params,
+                "env_secrets": env_secrets,
+            }
         )
 
     adapter_id = agent.config["harness"]["adapter_id"]

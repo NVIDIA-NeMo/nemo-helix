@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
@@ -8,10 +9,12 @@ import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
+import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import { useLocation } from 'react-router';
 
 const workspace = workspace1.workspace;
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
@@ -119,6 +122,16 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
   return { uploaded, created, filesets, deleted, deployments };
 };
 
+const AgentDetailStub = () => {
+  const request = getBuildThenDeployRequest(useLocation().state);
+  return (
+    <>
+      <div>Agent detail page</div>
+      {request ? <div>{`Build then deploy with ${request.mode}`}</div> : null}
+    </>
+  );
+};
+
 const renderModal = () =>
   renderRoute(undefined, {
     history: getAgentsListRoute(workspace),
@@ -127,7 +140,7 @@ const renderModal = () =>
         path: ROUTES.workspace.agentsList,
         element: <NewAgentModal open onClose={vi.fn()} workspace={workspace} />,
       },
-      { path: ROUTES.workspace.agentDetail, element: <div>Agent detail page</div> },
+      { path: ROUTES.workspace.agentDetail, element: <AgentDetailStub /> },
     ],
   });
 
@@ -829,13 +842,36 @@ describe('NewAgentModal deploy after create', () => {
     );
   });
 
-  it('creates without deploying when no runtime can run an agent with no image', async () => {
+  it('builds an image, then deploys, when the only runtimes need one', async () => {
     const user = userEvent.setup();
     serveModeList([
       { mode: 'subprocess', enabled: false, requires_image: false },
       { mode: 'docker', enabled: true, requires_image: true },
       { mode: 'k8s', enabled: true, requires_image: true },
     ]);
+    const { created, deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    expect(await within(dialog).findByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+      'Docker'
+    );
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Build then deploy with docker')).toBeInTheDocument();
+    expect(created).toHaveLength(1);
+    expect(deployments).toEqual([]);
+  });
+
+  it('creates without deploying when the platform can build no image for a runtime that needs one', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: false, requires_image: false },
+      { mode: 'docker', enabled: true, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: true },
+    ]);
+    mockExecutionProfiles([{ profile: 'default', backend: 'docker' }]);
     const { created, deployments } = mockHelix();
 
     renderModal();
@@ -898,7 +934,7 @@ describe('NewAgentModal deploy after create', () => {
     expect(deployments).toEqual([]);
   });
 
-  it('offers only runtimes that can deploy an agent with no image yet', async () => {
+  it('deploys straight away with a runtime that has a default image', async () => {
     const user = userEvent.setup();
     serveModes({ enabled: true, requires_image: false });
     const { deployments } = mockHelix();
@@ -907,15 +943,49 @@ describe('NewAgentModal deploy after create', () => {
     const dialog = await screen.findByRole('dialog');
     await pickAgent(dialog);
     await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
-
-    // Kubernetes has no default image, and a new agent has none of its own.
-    expect(screen.queryByRole('option', { name: 'Kubernetes' })).not.toBeInTheDocument();
     await user.click(await screen.findByRole('option', { name: 'Docker' }));
     await submit(dialog, user);
 
     await waitFor(() =>
       expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'docker' }])
     );
+    expect(screen.queryByText(/Build then deploy/)).not.toBeInTheDocument();
+  });
+
+  it('hands a runtime with no default image to the agent page to build first', async () => {
+    const user = userEvent.setup();
+    serveModes({ enabled: true, requires_image: false });
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+    await user.click(await screen.findByRole('option', { name: 'Kubernetes' }));
+    expect(
+      within(dialog).getAllByText(
+        /Kubernetes runs a container image, and none is set\. Deploying will build an image/
+      )
+    ).not.toHaveLength(0);
+    await submit(dialog, user);
+
+    expect(await screen.findByText('Build then deploy with k8s')).toBeInTheDocument();
+    expect(deployments).toEqual([]);
+  });
+
+  it('leaves out a runtime with no default image when the platform cannot build one', async () => {
+    const user = userEvent.setup();
+    serveModes({ enabled: true, requires_image: false });
+    mockExecutionProfiles([{ profile: 'default', backend: 'docker' }]);
+    mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await user.click(await within(dialog).findByRole('combobox', { name: 'Runtime' }));
+
+    expect(await screen.findByRole('option', { name: 'Docker' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Kubernetes' })).not.toBeInTheDocument();
   });
 
   it('still opens the new agent when deploying it fails', async () => {

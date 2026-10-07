@@ -15,7 +15,8 @@ The [Nemotron embed recipe](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/do
 
 ## Prerequisites
 
-- A running NeMo Helix at `NHX_BASE_URL`, default `http://localhost:8080`
+- A running NeMo Helix and a current CLI context that points at it. See [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). In environments without a CLI configuration, such as Google Colab, set `NHX_BASE_URL` and, for authenticated deployments, `NHX_ACCESS_TOKEN` instead.
+- A current CLI context that uses the `default` workspace, which this tutorial uses. If it uses a different workspace, run `nemo config set --workspace default` first.
 - A corpus fileset of UTF-8 `.txt` or `.md` files, or an `hf://` URI
 - An Inference Gateway chat provider, plus the chat and embedding model names it serves
 - At least 50 documents, and 500 or more for good domain coverage. Below that, Stage 1 can put nearly every query in the test split
@@ -28,10 +29,9 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_data_designer_plugin.sdk.resources import DataDesignerResource
 from nemo_data_designer_plugin.jobs.retrieval_spec import RetrievalGenerateJobConfig
 
-NHX_BASE_URL = os.environ.get("NHX_BASE_URL", "http://localhost:8080")
-client = NemoClient(base_url=NHX_BASE_URL, workspace="default")
+client = NemoClient.from_config()
 data_designer = DataDesignerResource(client)
-print(NHX_BASE_URL)
+print(client.base_url)
 
 ```
 

@@ -699,7 +699,8 @@ paths:
       description: "Create a new workspace.\n\nThe creator is automatically granted\
         \ Admin role on the workspace.\nBy default, this endpoint waits for the Admin\
         \ role to propagate before returning.\nUse `wait_role_propagation=false` to\
-        \ skip waiting (useful for bulk operations).\n\nExample:\n```\nPOST /apis/entities/v2/workspaces\n\
+        \ skip waiting (useful for bulk operations).\n\nNames beginning with `sample-`\
+        \ are reserved for the Agents sample flow.\n\nExample:\n```\nPOST /apis/entities/v2/workspaces\n\
         {\n    \"name\": \"ml-team\",\n    \"description\": \"Machine Learning Team\
         \ workspace\"\n}\n```"
       operationId: create_workspace_apis_entities_v2_workspaces_post

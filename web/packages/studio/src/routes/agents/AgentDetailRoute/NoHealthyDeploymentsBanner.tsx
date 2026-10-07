@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Banner, Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
 import { Loader2 } from 'lucide-react';
 import type { FC } from 'react';
 
@@ -11,6 +12,8 @@ interface NoHealthyDeploymentsBannerProps {
   onDeploy: () => void;
   message?: string;
   canDeploy: boolean;
+  /** Until the agent loads, `canDeploy` is false for every agent, so it cannot be trusted yet. */
+  isAgentPending?: boolean;
 }
 
 export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = ({
@@ -18,6 +21,7 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
   isDeploying,
   onDeploy,
   canDeploy,
+  isAgentPending,
   message = 'No healthy deployments available to chat with.',
 }) => (
   <Banner
@@ -33,14 +37,14 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
         <Button
           kind="secondary"
           size="small"
-          disabled={!agentName || !canDeploy}
+          disabled={!agentName || isAgentPending}
           onClick={onDeploy}
         >
-          Deploy this Agent
+          {canDeploy || isAgentPending ? 'Deploy this Agent' : 'Upload'}
         </Button>
       )
     }
   >
-    {canDeploy ? message : `${message} Integrate this agent with NeMo Helix to enable deployment.`}
+    {canDeploy || isAgentPending ? message : `${message} ${NO_CONFIG_DEPLOY_MESSAGE}`}
   </Banner>
 );

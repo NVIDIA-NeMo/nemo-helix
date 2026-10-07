@@ -213,11 +213,13 @@ class DockerGymHostProvider:
         """Egress a cluster provider would have enforced for this host. Not applied here."""
         return self._egress.get(handle.host_id, ())
 
-    async def _force_remove(self, name: str) -> None:
+    async def _force_remove(self, name: str) -> bool:
         try:
             await self._run("rm", "-f", name)
         except DockerHostError:
             LOGGER.warning("Could not remove Gym host container %s", name)
+            return False
+        return True
 
     async def destroy_host(self, handle: GymHostHandle) -> None:
         await self._force_remove(handle.host_id)
@@ -232,7 +234,8 @@ class DockerGymHostProvider:
         names = [line.strip() for line in listed.splitlines() if line.strip()]
         removed: list[str] = []
         for name in names:
-            await self._force_remove(name)
+            if not await self._force_remove(name):
+                continue
             self._containers.pop(name, None)
             self._egress.pop(name, None)
             removed.append(name)

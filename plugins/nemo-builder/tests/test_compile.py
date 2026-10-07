@@ -52,10 +52,12 @@ def _config(*, registry: str = "reg.example.com", **sandbox: object) -> BuilderC
     return BuilderConfig.model_validate({"registry": registry, "sandbox": {"image": SANDBOX_IMAGE, **sandbox}})
 
 
-def _spec(name: str, *, fileset: str = "fs-a", context_path: str | None = None) -> BuildSpec:
+def _spec(
+    name: str, *, fileset: str = "fs-a", archive: str | None = None, context_path: str | None = None
+) -> BuildSpec:
     return BuildSpec(
         name=name,
-        source=FileSetSource(fileset=fileset, context_path=context_path),
+        source=FileSetSource(fileset=fileset, archive=archive, context_path=context_path),
         output=BuildOutput(repository=f"team/{name}", tag="v1"),
     )
 
@@ -226,7 +228,7 @@ class TestGrouping:
     def test_a_root_request_absorbs_subtree_requests_for_the_same_fileset(self) -> None:
         spec = _compile(_set(_spec("whole"), _spec("subtree", context_path="tests")), config=_config())
         sources = spec.steps[0].config["sources"]
-        assert sources == [{"fileset": "default/fs-a", "context_path": None}]
+        assert sources == [{"fileset": "default/fs-a", "archive": None, "context_path": None}]
 
         groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
         assert [g.source.context_path for g in groups] == [None, "tests"]
@@ -238,9 +240,40 @@ class TestGrouping:
         )
         sources = spec.steps[0].config["sources"]
         assert sources == [
-            {"fileset": "default/fs-a", "context_path": None},
-            {"fileset": "default/fs-b", "context_path": "tests"},
+            {"fileset": "default/fs-a", "archive": None, "context_path": None},
+            {"fileset": "default/fs-b", "archive": None, "context_path": "tests"},
         ]
+
+
+class TestArchives:
+    TASK = "tb/hello-world.tar.gz"
+
+    def test_each_directory_of_an_archive_is_its_own_sandbox(self) -> None:
+        spec = _compile(
+            _set(_spec("env", archive=self.TASK, context_path="environment"), _spec("tests", archive=self.TASK)),
+            config=_config(),
+        )
+        groups = SuperviseStepConfig.model_validate(spec.steps[1].config).groups
+        assert [g.source for g in groups] == [
+            ContextSource(fileset="default/fs-a", archive=self.TASK, context_path="environment"),
+            ContextSource(fileset="default/fs-a", archive=self.TASK),
+        ]
+
+    def test_fetch_unpacks_a_shared_archive_once_and_whole(self) -> None:
+        spec = _compile(
+            _set(
+                _spec("env", archive=self.TASK, context_path="environment"),
+                _spec("tests", archive=self.TASK, context_path="tests"),
+            ),
+            config=_config(),
+        )
+        assert spec.steps[0].config["sources"] == [
+            {"fileset": "default/fs-a", "archive": self.TASK, "context_path": None}
+        ]
+
+    def test_a_whole_fileset_download_does_not_stand_in_for_unpacking(self) -> None:
+        spec = _compile(_set(_spec("whole"), _spec("task", archive=self.TASK)), config=_config())
+        assert [s["archive"] for s in spec.steps[0].config["sources"]] == [None, self.TASK]
 
 
 class TestEachImageHasItsOwnIdentity:

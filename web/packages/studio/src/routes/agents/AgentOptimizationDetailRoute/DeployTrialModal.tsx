@@ -95,8 +95,11 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
   } = useCreateAgentFromTrial({
     onSuccess: (agent) => {
       toast.success(`Agent "${agent.name}" created from trial ${trial?.number}`);
-      void queryClient.invalidateQueries({ queryKey: getAgentsListAgentsQueryKey(workspace) });
-      if (agent.name) navigate(getAgentDetailRoute(workspace, agent.name));
+      const targetWorkspace = agent.workspace ?? workspace;
+      void queryClient.invalidateQueries({
+        queryKey: getAgentsListAgentsQueryKey(targetWorkspace),
+      });
+      if (agent.name) navigate(getAgentDetailRoute(targetWorkspace, agent.name));
     },
   });
 
@@ -189,7 +192,7 @@ export const DeployTrialModal: FC<DeployTrialModalProps> = ({ workspace, job, tr
       title="Deploy trial as a new agent"
       instruction={
         trial && sourceRef
-          ? `Create a new agent from "${sourceRef.name}" using the configuration from trial ${trial.number}. The original agent is not changed.`
+          ? `Create a new agent from "${sourceRef.name}" using the configuration from trial ${trial.number} in workspace "${workspace}". The original agent is not changed.`
           : undefined
       }
       submitButtonText={replaceOrphan ? 'Replace and deploy' : 'Deploy'}

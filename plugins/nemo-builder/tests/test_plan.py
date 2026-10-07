@@ -100,3 +100,18 @@ class TestGroups:
     def test_one_fileset_spelled_two_ways_is_one_group(self) -> None:
         plan = BuildPlan.resolve(_set(_spec("a"), _spec("b", fileset="ws/fs-a")), workspace="ws")
         assert [source for source, _ in plan.groups()] == [ContextSource(fileset="ws/fs-a")]
+
+    def test_an_archive_and_each_directory_in_it_is_its_own_group(self) -> None:
+        def task(name: str, context_path: str | None) -> BuildSpec:
+            source = FileSetSource(fileset="fs-a", archive="task.tar.gz", context_path=context_path)
+            return BuildSpec(name=name, source=source)
+
+        plan = BuildPlan.resolve(
+            _set(task("env", "environment"), task("env-again", "environment"), task("whole", None), _spec("plain")),
+            workspace="ws",
+        )
+        assert [source for source, _ in plan.groups()] == [
+            ContextSource(fileset="ws/fs-a", archive="task.tar.gz", context_path="environment"),
+            ContextSource(fileset="ws/fs-a", archive="task.tar.gz"),
+            ContextSource(fileset="ws/fs-a"),
+        ]

@@ -15,7 +15,6 @@ Guardrail configuration management operations (create, update, retrieve, list, d
 ## Setup
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.guardrail.types import (
     CreateGuardrailConfigRequest,
@@ -23,10 +22,7 @@ from nemo_helix_plugin.guardrail.types import (
     ListGuardrailConfigsQueryParams,
 )
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
 
 ---

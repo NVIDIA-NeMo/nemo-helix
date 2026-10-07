@@ -47,6 +47,11 @@ def fabric_harness_package(adapter_id: str) -> str:
     return " ".join(requirements)
 
 
-def fabric_harness_requirements(adapter_id: str) -> list[str]:
-    """:func:`fabric_harness_package` as a list of specifiers."""
-    return fabric_harness_package(adapter_id).split()
+def fabric_harness_requirements(adapter_id: str, *, companions: bool = True) -> list[str]:
+    """:func:`fabric_harness_package` as a list of specifiers.
+
+    ``companions=False`` returns the harness extra alone, for an installation whose companion versions
+    are fixed by the target environment's own pins rather than by this service's.
+    """
+    requirements = fabric_harness_package(adapter_id).split()
+    return requirements if companions else requirements[:1]

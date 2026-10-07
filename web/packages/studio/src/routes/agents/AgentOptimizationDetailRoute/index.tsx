@@ -17,6 +17,7 @@ import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { DeployTrialModal } from '@studio/routes/agents/AgentOptimizationDetailRoute/DeployTrialModal';
+import { StudyInProgress } from '@studio/routes/agents/AgentOptimizationDetailRoute/StudyInProgress';
 import {
   fetchStudyResults,
   type Trial,
@@ -139,6 +140,9 @@ export const AgentOptimizationDetailRoute: FC = () => {
             <Flex align="center" gap="3" wrap="wrap">
               <Text kind="title/md">{jobName}</Text>
               <StatusBadge status={job.status} />
+              {!isTerminal && (
+                <Spinner size="small" aria-label={isQueued ? 'Study queued' : 'Study running'} />
+              )}
               <Flex align="center" gap="2" wrap="wrap">
                 {job.updated_at && isTerminal && (
                   <Text kind="body/regular/sm" className="text-secondary">
@@ -163,21 +167,7 @@ export const AgentOptimizationDetailRoute: FC = () => {
             </Panel>
           </>
         ) : !isTerminal ? (
-          <Flex
-            direction="col"
-            align="center"
-            justify="center"
-            gap="3"
-            className="min-h-[200px] w-full"
-            data-testid="study-in-progress"
-          >
-            <Spinner size="medium" aria-label={isQueued ? 'Study queued' : 'Study running'} />
-            <Text kind="body/regular/md" className="text-secondary" role="status">
-              {isQueued
-                ? 'Waiting for the study to start. Trials appear once it finishes.'
-                : 'Trials appear once the study finishes.'}
-            </Text>
-          </Flex>
+          <StudyInProgress workspace={workspace} job={job} isQueued={isQueued} />
         ) : isResultsError ? (
           <ErrorMessage
             header="Could not load trials"
