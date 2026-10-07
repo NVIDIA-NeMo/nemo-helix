@@ -589,7 +589,8 @@ export const stripNulls = <T>(value: T): T => {
 
 /** What the form replays. A saved template carries the same spec under `config`. */
 export interface ReplayableJob {
-  spec: CustomizationJob['spec'];
+  /** A job's spec as stored, or one about to be submitted. */
+  spec: CustomizationJob['spec'] | AutomodelJobInput | UnslothJobInput | RlJobInput;
   description?: string | null;
   /**
    * Which arm to replay into. A job has to be inferred from its spec, but a saved template
