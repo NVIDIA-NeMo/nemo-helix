@@ -12,14 +12,13 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "../../..");
 const DOCS_ROOT = join(REPO_ROOT, "docs");
-const NOTEBOOK_ASSETS_ROOT = join(SCRIPT_DIR, "../assets/notebooks");
 const COLAB_PREFIX = "https://colab.research.google.com/github/NVIDIA-NeMo/nemo-helix/blob";
 const argv = process.argv.slice(2);
 const CHECK = argv.includes("--check");
@@ -92,22 +91,8 @@ function colabUrlFor(notebookPath) {
   return `${COLAB_PREFIX}/${COLAB_REF}/${notebookSourcePath(notebookPath)}`;
 }
 
-function safeAssetSegment(value) {
-  return value.replace(/[^A-Za-z0-9._-]/g, "-");
-}
-
-function notebookAssetRelativePath(notebookPath) {
-  return `${safeAssetSegment(COLAB_REF)}/${notebookSourcePath(notebookPath).replace(/^docs\//, "")}`;
-}
-
 function downloadUrlFor(notebookPath) {
-  return `/assets/notebooks/${notebookAssetRelativePath(notebookPath)}`;
-}
-
-async function copyNotebookAsset(notebookPath) {
-  const assetPath = join(NOTEBOOK_ASSETS_ROOT, notebookAssetRelativePath(notebookPath));
-  await mkdir(dirname(assetPath), { recursive: true });
-  await copyFile(notebookPath, assetPath);
+  return `./${notebookFilename(notebookPath)}`;
 }
 
 function notebookFilename(notebookPath) {
@@ -201,10 +186,6 @@ async function main() {
     const notebookPath = (await pathExists(adjacentNotebook)) ? adjacentNotebook : null;
     const hasNotebookViewer = NOTEBOOK_VIEWER_RE.test(source);
     NOTEBOOK_VIEWER_RE.lastIndex = 0;
-
-    if (notebookPath) {
-      await copyNotebookAsset(notebookPath);
-    }
 
     const updated = hasNotebookViewer
       ? syncNotebookViewerColabUrl(source, notebookPath)

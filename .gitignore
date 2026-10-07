@@ -150,7 +150,6 @@ site/
 # Generated Fern-only public API reference spec
 docs/fern/openapi/openapi.public.yaml
 docs/fern/generated/
-docs/fern/assets/notebooks/
 docs/fern/versions/[0-9]*.yml
 docs/fern/versions/v[0-9]*.yml
 
