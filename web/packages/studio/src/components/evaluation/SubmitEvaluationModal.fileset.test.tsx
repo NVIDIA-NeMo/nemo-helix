@@ -311,6 +311,51 @@ describe('SubmitEvaluationModal uploaded Parquet dataset', () => {
     );
   });
 
+  it('stores several uploaded Parquet files as parts of one dataset', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
+    await user.upload(screen.getByLabelText('Add Dataset'), [
+      parquetFile(PARQUET.twoRows, 'a.parquet'),
+      parquetFile(PARQUET.twoRows, 'b.parquet'),
+    ]);
+    await user.upload(
+      screen.getByLabelText('Select Evaluator Config'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => expect(evaluatorCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evaluatorCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({ dataset: expect.stringMatching(/#dataset\/\*\.parquet$/) });
+    expect(
+      vi
+        .mocked(filesUploadFile)
+        .mock.calls.map(([, , name, file]) => [name, (file as File).name])
+        .filter(([name]) => name.startsWith('dataset'))
+    ).toEqual([
+      ['dataset/part-0.parquet', 'a.parquet'],
+      ['dataset/part-1.parquet', 'b.parquet'],
+    ]);
+  });
+
+  it('refuses to combine Parquet with another format', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await openDatasetStep(user);
+    await user.upload(screen.getByLabelText('Add Dataset'), [
+      parquetFile(PARQUET.twoRows, 'a.parquet'),
+      new File(['prompt,expected\nhi,hi\n'], 'b.csv'),
+    ]);
+
+    expect(await screen.findByText('Only Parquet files can be added together.')).toBeVisible();
+  });
+
   it('keeps Submit from sending a fileset dataset that was never picked', async () => {
     const user = userEvent.setup();
     renderModal();

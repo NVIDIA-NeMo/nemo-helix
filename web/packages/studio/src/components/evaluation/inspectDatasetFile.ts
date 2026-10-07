@@ -102,3 +102,43 @@ export const inspectDatasetFile = async (file: File): Promise<DatasetInspection>
       return inspectJsonText(await file.text());
   }
 };
+
+/** A file copied into the run's fileset under the name the eval config reads it by. */
+export interface StoredDatasetFile {
+  name: string;
+  file: File;
+}
+
+/** The picked files and what they are stored as. ``storedName`` is the path the eval config
+ *  reads, which is a glob over the parts when several Parquet files make up one dataset. */
+export interface InspectedDataset extends DatasetInspection {
+  stored: StoredDatasetFile[];
+}
+
+/** Validate one dataset file, or several Parquet files the evaluator reads as one dataset. */
+export const inspectDatasetFiles = async (files: readonly File[]): Promise<InspectedDataset> => {
+  if (files.length === 1) {
+    const [file] = files;
+    const inspection = await inspectDatasetFile(file);
+    return {
+      ...inspection,
+      stored: inspection.storedName ? [{ name: inspection.storedName, file }] : [],
+    };
+  }
+
+  if (!files.every((file) => formatFromFileName(file.name) === 'parquet')) {
+    return { error: 'Only Parquet files can be added together.', stored: [] };
+  }
+  const inspections = await Promise.all(files.map(inspectParquet));
+  const failedIndex = inspections.findIndex(({ error }) => error);
+  if (failedIndex >= 0) {
+    return { error: `${files[failedIndex].name}: ${inspections[failedIndex].error}`, stored: [] };
+  }
+  return {
+    storedName: `${DATASET_BASENAME}/*.parquet`,
+    stored: files.map((file, index) => ({
+      name: `${DATASET_BASENAME}/part-${index}.parquet`,
+      file,
+    })),
+  };
+};

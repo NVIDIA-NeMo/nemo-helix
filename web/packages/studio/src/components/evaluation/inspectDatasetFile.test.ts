@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { inspectDatasetFile } from '@studio/components/evaluation/inspectDatasetFile';
+import {
+  inspectDatasetFile,
+  inspectDatasetFiles,
+} from '@studio/components/evaluation/inspectDatasetFile';
 import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
 
 const textFile = (content: string, name: string): File => new File([content], name);
@@ -98,5 +101,54 @@ describe('inspectDatasetFile', () => {
     expect(await inspectDatasetFile(textFile('  \n', 'rows.jsonl'))).toEqual({
       error: 'File is empty',
     });
+  });
+});
+
+describe('inspectDatasetFiles', () => {
+  it('stores a single file under its inspected name', async () => {
+    const file = textFile('[{"a": 1}]', 'rows.json');
+
+    expect(await inspectDatasetFiles([file])).toEqual({
+      storedName: 'dataset.json',
+      stored: [{ name: 'dataset.json', file }],
+    });
+  });
+
+  it('stores nothing for a single file that fails inspection', async () => {
+    expect(await inspectDatasetFiles([textFile('[]', 'rows.json')])).toEqual({
+      error: 'File contains no data',
+      stored: [],
+    });
+  });
+
+  it('stores several Parquet files as parts read through one glob', async () => {
+    const first = parquetFile(PARQUET.twoRows, 'a.parquet');
+    const second = parquetFile(PARQUET.twoRows, 'b.parquet');
+
+    expect(await inspectDatasetFiles([first, second])).toEqual({
+      storedName: 'dataset/*.parquet',
+      stored: [
+        { name: 'dataset/part-0.parquet', file: first },
+        { name: 'dataset/part-1.parquet', file: second },
+      ],
+    });
+  });
+
+  it('refuses to combine non-Parquet files', async () => {
+    expect(
+      await inspectDatasetFiles([
+        parquetFile(PARQUET.twoRows, 'a.parquet'),
+        textFile('{"a": 1}', 'b.jsonl'),
+      ])
+    ).toEqual({ error: 'Only Parquet files can be added together.', stored: [] });
+  });
+
+  it('names the Parquet part that fails inspection', async () => {
+    expect(
+      await inspectDatasetFiles([
+        parquetFile(PARQUET.twoRows, 'a.parquet'),
+        parquetFile(PARQUET.empty, 'b.parquet'),
+      ])
+    ).toEqual({ error: 'b.parquet: File contains no data', stored: [] });
   });
 });
