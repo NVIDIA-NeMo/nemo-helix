@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { readParquetRows } from '@studio/api/datasets/filesetParquetRows';
-import { formatFromFileName, parseDataFile } from '@studio/components/FileRowEditor/parse';
+import {
+  formatFromFileName,
+  parseCsvGrid,
+  parseDataFile,
+} from '@studio/components/FileRowEditor/parse';
 
 /** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
 const DATASET_BASENAME = 'dataset';
@@ -55,8 +59,24 @@ const inspectJsonText = (rawText: string): DatasetInspection => {
   return storedAs(records, format);
 };
 
+const isBlankLine = (cells: readonly string[]): boolean => cells.length === 1 && cells[0] === '';
+
+// The evaluator reads CSV with pyarrow's defaults, which refuse both of these.
 const inspectCsvText = (text: string): DatasetInspection => {
   if (!text.trim()) return { error: 'File is empty' };
+
+  const [header, ...body] = parseCsvGrid(text);
+  if ([header, ...body].some((cells) => cells.some((cell) => /[\r\n]/.test(cell)))) {
+    return { error: 'CSV values cannot span more than one line.' };
+  }
+  const raggedIndex = body.findIndex(
+    (cells) => !isBlankLine(cells) && cells.length !== header.length
+  );
+  if (raggedIndex >= 0) {
+    return {
+      error: `Row ${raggedIndex + 1} has ${body[raggedIndex].length} values but the header has ${header.length}.`,
+    };
+  }
   return storedAs(parseDataFile(text, 'csv'), 'csv');
 };
 

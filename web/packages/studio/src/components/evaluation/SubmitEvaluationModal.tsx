@@ -43,6 +43,7 @@ import {
 } from '@nvidia/foundations-react-core';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { isConflictError } from '@studio/api/evaluation/eval-config-fileset';
+import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import { DATASET_FILE_ACCEPT } from '@studio/components/evaluation/consts';
 import {
   createRunEvaluation,
@@ -103,7 +104,7 @@ import {
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { FormProvider, type SubmitHandler, useForm, useWatch } from 'react-hook-form';
@@ -262,8 +263,6 @@ interface ConfigPick extends FilePick {
 
 const configFormatForFile = (name: string): EvalConfigFormat =>
   /\.ya?ml$/i.test(name) ? 'yaml' : 'json';
-
-const fileNameOf = (path: string): string => path.split('/').pop() ?? path;
 
 interface SubmitEvaluationModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
@@ -493,17 +492,31 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const isFilesetSource = datasetSource === DATASET_SOURCE_FILESET;
   // Downloaded raw rather than through useDatasetFileContent, which hands Parquet back as JSONL
   // text; the run stores the file as-is so the evaluator reads it with its own loader.
-  const filesetFile = useQuery({
-    queryKey: ['evaluation-dataset-pick', workspace, datasetFileset, datasetFilePath],
-    queryFn: async ({ signal }): Promise<DatasetPick> => {
-      const blob = await filesDownloadFile(workspace, datasetFileset, datasetFilePath, signal);
-      const file = new File([blob], fileNameOf(datasetFilePath));
-      return { file, ...(await inspectDatasetFile(file)) };
-    },
-    enabled: open && isFilesetSource && !!datasetFileset && !!datasetFilePath,
-    staleTime: Infinity,
+  const filesetFile = useFilesetFile({
+    workspace,
+    fileset: datasetFileset,
+    path: datasetFilePath,
+    enabled: open && isFilesetSource,
   });
-  const filesetPick = isFilesetSource ? (filesetFile.data ?? null) : null;
+  const downloadedFile = filesetFile.data;
+  const filesetInspection = useQuery({
+    queryKey: [
+      'evaluation-dataset-pick',
+      workspace,
+      datasetFileset,
+      datasetFilePath,
+      filesetFile.dataUpdatedAt,
+    ],
+    queryFn: downloadedFile
+      ? async (): Promise<DatasetPick> => ({
+          file: downloadedFile,
+          ...(await inspectDatasetFile(downloadedFile)),
+        })
+      : skipToken,
+    gcTime: 0,
+  });
+  const isLoadingFilesetFile = filesetFile.isFetching || filesetInspection.isFetching;
+  const filesetPick = isFilesetSource ? (filesetInspection.data ?? null) : null;
   const activeDatasetPick = isFilesetSource ? filesetPick : datasetPick;
 
   const uploads: UploadedEvalInputs | null =
@@ -571,9 +584,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
   const datasetError =
     activeDatasetPick?.error ??
     (isFilesetSource ? filesetFile.error?.message : undefined) ??
-    (submitAttempted && !activeDatasetPick && !filesetFile.isFetching
-      ? 'Add a dataset'
-      : undefined);
+    (submitAttempted && !activeDatasetPick && !isLoadingFilesetFile ? 'Add a dataset' : undefined);
   const configError =
     configPick?.error ??
     (submitAttempted && !configPick ? 'Select an evaluator config' : undefined);
@@ -1087,7 +1098,7 @@ export const SubmitEvaluationModal: FC<SubmitEvaluationModalProps> = ({
                       fileName="datasetFile"
                       batchGlobName="datasetBatchGlob"
                       disabled={isPending}
-                      loading={filesetFile.isFetching}
+                      loading={isLoadingFilesetFile}
                       error={datasetError}
                     />
                   ) : (

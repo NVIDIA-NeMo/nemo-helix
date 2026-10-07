@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useDownloadFileAsArrayBuffer } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
+import {
+  useDownloadFileAsArrayBuffer,
+  useFetchFileAsArrayBuffer,
+} from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import { renderHook } from '@testing-library/react';
 
@@ -110,5 +113,48 @@ describe('useDownloadFileAsArrayBuffer', () => {
     handlers?.onError?.(new Error('transport failure'));
 
     await expect(promise).resolves.toBeNull();
+  });
+});
+
+describe('useFetchFileAsArrayBuffer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers = undefined;
+
+    mockUseWorkers.mockReturnValue({
+      createWorker: ((_worker: unknown, opts: Handlers) => {
+        handlers = opts;
+      }) as unknown as ReturnType<typeof useWorkers>['createWorker'],
+    } as unknown as ReturnType<typeof useWorkers>);
+  });
+
+  const fetchFile = () =>
+    renderHook(() => useFetchFileAsArrayBuffer()).result.current({
+      workspace: 'ws',
+      datasetName: 'ds',
+      path: 'data/a.txt',
+    });
+
+  it('resolves to the arrayBuffer when the worker reports done', async () => {
+    const buffer = new ArrayBuffer(4);
+
+    const promise = fetchFile();
+    handlers?.onMessage({ data: { done: true, arrayBuffer: buffer } });
+
+    await expect(promise).resolves.toBe(buffer);
+  });
+
+  it('rejects with the error the worker reports', async () => {
+    const promise = fetchFile();
+    handlers?.onMessage({ data: { done: true, error: 'Unable to find base file.' } });
+
+    await expect(promise).rejects.toThrow('Unable to find base file.');
+  });
+
+  it('rejects when the worker fires onError', async () => {
+    const promise = fetchFile();
+    handlers?.onError?.(new ErrorEvent('error', { message: 'transport failure' }));
+
+    await expect(promise).rejects.toThrow('transport failure');
   });
 });

@@ -3,7 +3,7 @@
 
 import { ProgressBar } from '@nvidia/foundations-react-core';
 import { CreateWorkerOptions, WorkersContextValue } from '@studio/providers/workers/types';
-import { WorkersContext } from '@studio/providers/workers/useWorkers';
+import { WorkersContext } from '@studio/providers/workers/WorkersContext';
 import { FC, PropsWithChildren, useState } from 'react';
 
 export const WorkersProvider: FC<PropsWithChildren> = ({ children }) => {

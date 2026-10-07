@@ -43,6 +43,30 @@ describe('inspectDatasetFile', () => {
     });
   });
 
+  it('rejects a CSV value that spans lines', async () => {
+    expect(
+      await inspectDatasetFile(textFile('prompt,expected\n"line one\nline two",hi\n', 'rows.csv'))
+    ).toEqual({ error: 'CSV values cannot span more than one line.' });
+  });
+
+  it('rejects a CSV row with more values than the header', async () => {
+    expect(
+      await inspectDatasetFile(textFile('prompt,expected\nhi,hi\na,b,c\n', 'rows.csv'))
+    ).toEqual({ error: 'Row 2 has 3 values but the header has 2.' });
+  });
+
+  it('rejects a CSV row with fewer values than the header', async () => {
+    expect(await inspectDatasetFile(textFile('prompt,expected\nhi\n', 'rows.csv'))).toEqual({
+      error: 'Row 1 has 1 values but the header has 2.',
+    });
+  });
+
+  it('accepts blank lines between CSV rows', async () => {
+    expect(
+      await inspectDatasetFile(textFile('prompt,expected\nhi,hi\n\nyo,yo\n', 'rows.csv'))
+    ).toEqual({ storedName: 'dataset.csv' });
+  });
+
   it('rejects a CSV with only a header', async () => {
     expect(await inspectDatasetFile(textFile('prompt,expected\n', 'rows.csv'))).toEqual({
       error: 'File contains no data',

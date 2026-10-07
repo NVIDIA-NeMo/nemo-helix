@@ -16,6 +16,7 @@ import {
 } from '@nemo/sdk/generated/platform/files';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import { SubmitEvaluationModal } from '@studio/components/evaluation/SubmitEvaluationModal';
+import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
@@ -42,6 +43,13 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   filesDownloadFile: vi.fn(),
   filesUploadFile: vi.fn(),
   filesDeleteFileset: vi.fn(),
+}));
+
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer:
+    () =>
+    async ({ workspace, datasetName, path }: DownloadFileAsArrayBufferArgs) =>
+      (await filesDownloadFile(workspace, datasetName, path)).arrayBuffer(),
 }));
 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
