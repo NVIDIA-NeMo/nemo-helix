@@ -734,6 +734,8 @@ def test_atif_mapping_keeps_tool_error_on_tool_span() -> None:
     [
         ("bash", "Exit code 0\n[error] is a line returned by a successful diagnostic command."),
         ("read", "## Overview\nThe report quotes a test log line marked [ERROR]."),
+        ("read", "[error] is how this file begins."),
+        ("Read_File", "[ERROR] first line of a log file"),
     ],
 )
 def test_atif_mapping_does_not_treat_returned_content_as_tool_error(tool_name: str, content: str) -> None:
@@ -833,7 +835,7 @@ def test_atif_mapping_tool_result_error_metadata_and_fallback(
                     "step_id": 1,
                     "source": "agent",
                     "message": "using a tool",
-                    "tool_calls": [{"tool_call_id": "call-1", "function_name": "read"}],
+                    "tool_calls": [{"tool_call_id": "call-1", "function_name": "bash"}],
                     "observation": {"results": [{"source_call_id": "call-1", "content": content}]},
                     "extra": extra,
                 }

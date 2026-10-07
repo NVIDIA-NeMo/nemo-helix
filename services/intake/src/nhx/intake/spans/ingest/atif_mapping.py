@@ -394,7 +394,7 @@ def _tool_call_to_span(
     """Map one ATIF tool call to a span under its owning step."""
     raw_tool_call = _model_dict(tool_call)
     result = _observation_result_for_tool_call(step, tool_call.tool_call_id)
-    error_message = _tool_result_error_message(step, result)
+    error_message = _tool_result_error_message(step, result, tool_call.function_name)
     external_span_id = stable_id(
         workspace,
         default_session_id,
@@ -428,7 +428,7 @@ def _tool_call_to_span(
         external_parent_span_id=external_parent_span_id,
         kind=SpanKind.TOOL,
         name=tool_call.function_name,
-        status=SpanStatus.ERROR if _tool_result_is_error(step, result) else SpanStatus.SUCCESS,
+        status=SpanStatus.ERROR if _tool_result_is_error(step, result, tool_call.function_name) else SpanStatus.SUCCESS,
         start_time=tool_started_at,
         end_time=_clamped_end(tool_started_at, invocation_ended_at),
         attributes_string=attribute_bags.string,
@@ -987,7 +987,11 @@ def _datetime_from_value(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
-def _tool_result_is_error(step: AtifStep, result: AtifObservationResult | None) -> bool:
+# Tools whose result is file content, so text in it says nothing about tool failure.
+_CONTENT_RETURNING_TOOLS = frozenset({"read", "read_file"})
+
+
+def _tool_result_is_error(step: AtifStep, result: AtifObservationResult | None, tool_name: str | None = None) -> bool:
     """Recognize supported ATIF producer error markers."""
     # These markers are emitted by the Claude-Code Harbor trajectories we ingest today.
     # ATIF itself does not define a normalized tool-result error field.
@@ -1000,6 +1004,9 @@ def _tool_result_is_error(step: AtifStep, result: AtifObservationResult | None) 
         tool_result_is_error = step.extra.get("tool_result_is_error")
         if isinstance(tool_result_is_error, bool):
             return tool_result_is_error
+    # Without a trusted signal, file content must not be inspected for error markers.
+    if tool_name is not None and tool_name.lower() in _CONTENT_RETURNING_TOOLS:
+        return False
     content = _result_text(result)
     if content is None:
         return False
@@ -1018,9 +1025,11 @@ def _tool_result_is_error(step: AtifStep, result: AtifObservationResult | None) 
     return exit_code != 0 and any(line.lstrip().startswith("[error]") for line in remainder.splitlines())
 
 
-def _tool_result_error_message(step: AtifStep, result: AtifObservationResult | None) -> str | None:
+def _tool_result_error_message(
+    step: AtifStep, result: AtifObservationResult | None, tool_name: str | None = None
+) -> str | None:
     """Extract an error message from a failed observation result."""
-    if not _tool_result_is_error(step, result):
+    if not _tool_result_is_error(step, result, tool_name):
         return None
     content = _result_text(result)
     if content is not None:
