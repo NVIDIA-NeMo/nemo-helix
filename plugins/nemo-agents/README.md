@@ -63,6 +63,8 @@ Platform environment:
 | NOOA (Python 3.12–3.13) | `nemo-helix[nemo-agents-plugin-nooa]` | `nemo-agents-plugin[nooa]` | NOOA, NOOA CLI, and NOOA Bench |
 | Hermes | `nemo-helix[nemo-agents-plugin]`, then install Hermes separately | `nemo-agents-plugin`, then install Hermes separately | Hermes is not included in an extra |
 
+See the [NOOA examples](examples/nemo-agent-config/README.md#nooa) for CodingAgent and BenchAgent configuration.
+
 Remote Agent requires no harness extra. See the [Remote Agent example](examples/nemo-agent-config/README.md#remote-agent) for endpoint configuration and limitations.
 
 Install the Agents plugin and one harness with its namespaced Platform extra.

@@ -10,7 +10,7 @@ from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
-from nemo_agents_plugin.agent_config import AgentConfig
+from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import FabricSessionRegistry
@@ -31,11 +31,6 @@ pytestmark = [
 def nooa_config(request: pytest.FixtureRequest, httpserver: HTTPServer, monkeypatch: pytest.MonkeyPatch) -> AgentConfig:
     monkeypatch.setenv("NOOA_TEST_API_KEY", "test-key")
     coding = request.param == "coding"
-    selection = (
-        {"workflow": {"target_id": "nvidia.nooa.coding-agent"}}
-        if coding
-        else {"default_harness": "bench", "harnesses": {"bench": {"kind": "nooa-bench-agent"}}}
-    )
     code = (
         'self.message("hello"); return_result(kind="DONE", explanation="answered")'
         if coding
@@ -83,24 +78,14 @@ def nooa_config(request: pytest.FixtureRequest, httpserver: HTTPServer, monkeypa
     httpserver.expect_request(
         "/v1/chat/completions", method="POST", headers={"Authorization": "Bearer test-key"}
     ).respond_with_handler(model)
-    return AgentConfig.model_validate(
-        {
-            "config_format": "nemo-agents-spec-v1",
-            "name": "nooa-test",
-            **selection,
-            "models": {
-                "default": {
-                    "provider": "openai",
-                    "model": "test-model",
-                    "api_key_env": "NOOA_TEST_API_KEY",
-                    "base_url": httpserver.url_for("/v1"),
-                    "settings": {"client_type": "completion"},
-                }
-            },
-            "environment": {"workspace": ".", "artifacts": "./artifacts"},
-            "telemetry": {"enabled": False},
-        }
+    config = load_agent_config(
+        Path(__file__).parents[2] / f"examples/nemo-agent-config/agent-nooa-{request.param}.yaml"
     )
+    config.models["default"].provider = "openai"
+    config.models["default"].model = "test-model"
+    config.models["default"].api_key_env = "NOOA_TEST_API_KEY"
+    config.models["default"].base_url = httpserver.url_for("/v1")
+    return config
 
 
 @pytest.mark.asyncio
