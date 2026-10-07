@@ -317,6 +317,39 @@ describe('applyTrialToAgentConfig', () => {
     expect(next.instructions).toEqual({ system: { content: 'New.', mode: 'replace' } });
   });
 
+  it('accepts a system instruction mode listed before its content', () => {
+    const { config: next } = applyTrialToAgentConfig(
+      specAgent(),
+      trial({ mode: 'replace', instructions: 'New.' }),
+      study({
+        mode: { path: 'instructions.system.mode' },
+        instructions: { path: 'instructions.system.content' },
+      })
+    );
+
+    expect(next.instructions).toEqual({ system: { mode: 'replace', content: 'New.' } });
+  });
+
+  it('rejects a system instruction mode with no content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ mode: 'replace' }),
+        study({ mode: { path: 'instructions.system.mode' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
+  it('rejects blank system instruction content', () => {
+    expect(() =>
+      applyTrialToAgentConfig(
+        specAgent(),
+        trial({ instructions: '   ' }),
+        study({ instructions: { path: 'instructions.system.content' } })
+      )
+    ).toThrow(/non-empty system instruction content/);
+  });
+
   it.each(['instructions.system.extra', 'instructions.user.content', 'instructions.system'])(
     'rejects the instructions path %s that the platform spec does not define',
     (path) => {

@@ -234,6 +234,7 @@ export const applyTrialToAgentConfig = (
     agentModelSegments(config, modelKey) ??
     (overlayModels.has(modelKey) ? ['models', modelKey] : undefined);
 
+  let setsSystemInstruction = false;
   for (const param of trial.params) {
     const entry = searchSpace.get(param.name);
     if (!entry) {
@@ -244,10 +245,13 @@ export const applyTrialToAgentConfig = (
     const [root, modelKey, ...field] = segments;
 
     if (root !== 'models' || !modelKey) {
-      if (isHelixAgent(config) && !isSpecInstructionPath(segments)) {
-        throw new Error(
-          `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings and system instructions are supported.`
-        );
+      if (isHelixAgent(config)) {
+        if (!isSpecInstructionPath(segments)) {
+          throw new Error(
+            `Cannot apply "${entry.path}" to a ${FABRIC_CONFIG_FORMAT} agent; only model settings and system instructions are supported.`
+          );
+        }
+        setsSystemInstruction = true;
       }
       setAt(next, segments, value);
       continue;
@@ -263,6 +267,13 @@ export const applyTrialToAgentConfig = (
     if (!studyModel) continue;
     if (field.length > 0) setAt(studyModel, field, value);
     else if (isPlainObject(value)) studyModels.set(modelKey, structuredClone(value));
+  }
+
+  if (setsSystemInstruction) {
+    const content = getAt(next, ['instructions', 'system', 'content']);
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error('The trial leaves the agent without non-empty system instruction content.');
+    }
   }
 
   const modelDifferences = [...studyModels].flatMap(([modelKey, studyModel]) => {
