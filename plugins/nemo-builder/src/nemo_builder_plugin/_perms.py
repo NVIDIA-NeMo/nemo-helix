@@ -18,3 +18,6 @@ class BuildPerms(PermissionSet, namespace="builder.builds"):
 class ContainerImagePerms(PermissionSet, namespace="builder.container-images"):
     LIST = perm("List container images")
     READ = perm("Read a container image")
+    #: Held by whoever may submit a build, since the push step completes as the submitter. Anything
+    #: that says it acts for the submitter may do the same: nothing ties the call to the image's own job.
+    COMPLETE = perm("Complete a pending container image")
