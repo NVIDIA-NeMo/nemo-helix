@@ -141,9 +141,7 @@ invoking:
 claude
 ```
 
-In this example, Claude uses its harness-local Anthropic model config. Run
-`make test-agents-claude` to test invocation, streaming, and sessions against a
-local model stub.
+In this example, Claude uses its harness-local Anthropic model config.
 
 ### Hermes
 
