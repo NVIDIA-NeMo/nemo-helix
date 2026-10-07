@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { BadgeProps } from '@nvidia/foundations-react-core';
+import type { BadgeProps, Flex } from '@nvidia/foundations-react-core';
 import type { LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 export interface StartOptionTag {
   label: string;
@@ -47,17 +47,16 @@ export interface StartTemplateGroup {
   accent?: string;
 }
 
-export interface StartPageProps {
-  heading: string;
-  headingDescription: string;
+export interface StartOptionCardsProps {
   options: StartOption[];
   /** The selected option id. Templates are chosen separately, inside the detail panel. */
   value: string | null;
   onChange: (value: string) => void;
   /** Locks the options and the panel. Set while a selection is being acted on. */
   disabled?: boolean;
-  /** The selected option's own panel, rendered under the cards. */
-  slotDetail?: ReactNode;
+}
+
+export interface StartFooterProps {
   continueLabel?: ReactNode;
   continueLoading?: boolean;
   canContinue: boolean;
@@ -66,6 +65,16 @@ export interface StartPageProps {
   blockedHint?: string;
   /** Actions on the current selection, rendered at the start of the footer. */
   slotFooterStart?: ReactNode;
+  attributes?: {
+    FlexContainer?: ComponentProps<typeof Flex>;
+  };
+}
+
+export interface StartPageProps extends StartOptionCardsProps, StartFooterProps {
+  heading: string;
+  headingDescription: string;
+  /** The selected option's own panel, rendered under the cards. */
+  slotDetail?: ReactNode;
   /** Rendered above the cards, where it stays in view — an error banner, typically. */
   slotBanner?: ReactNode;
 }

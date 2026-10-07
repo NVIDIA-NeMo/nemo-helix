@@ -33,7 +33,7 @@ export interface NewOptimizationFormProps {
   agentName?: string;
   evals: AgentEvaluationRow[];
   isEvalsPending: boolean;
-  /** Returns to the studies table; also the target of the breadcrumb above the header. */
+  /** Returns to the strategy picker; the target of the back button above the header. */
   onBack: () => void;
   /**
    * Starts the study from the validated answers. A rejection is shown beside the run button, so
@@ -46,8 +46,8 @@ export interface NewOptimizationFormProps {
  * Configure a numeric HPO study for one agent.
  *
  * Renders in place of the studies table rather than in a modal: the form carries a run summary
- * beside it, which does not survive a dialog's width, and its own breadcrumb is what returns to
- * the list.
+ * beside it, which does not survive a dialog's width, and its own back button is what returns to
+ * the strategy picker it was chosen from.
  *
  * The user answers three questions — what to tune for, what to score against, how many trials.
  * Nothing here asks for a config path or a fileset; those are derived on submit.
@@ -152,7 +152,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       <Stack gap="density-xl" className="w-full">
         <Button kind="tertiary" className="w-fit px-0" onClick={onBack}>
           <ChevronLeft className="size-4" aria-hidden />
-          Optimizations
+          Back
         </Button>
 
         <Stack gap="density-sm">

@@ -31,20 +31,21 @@ const renderDetail = (search = '?tab=optimizations') =>
   });
 
 describe('AgentDetailRoute optimization form', () => {
-  it('promotes Optimize to the primary action and opens the form in the tab', async () => {
+  it('promotes Optimize to the primary action and opens the strategy picker in the tab', async () => {
     const user = userEvent.setup();
     renderDetail();
 
     await screen.findByText('brevity-sweep-3');
     await user.click(await screen.findByRole('button', { name: 'Optimize' }));
 
-    expect(await screen.findByText('New optimization')).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Upload a config/ })).toBeInTheDocument();
     expect(screen.queryByText('brevity-sweep-3')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Optimize' })).toBeDisabled();
   });
 
-  it('opens the form from the empty state', async () => {
+  it('opens the strategy picker from the empty state', async () => {
     const user = userEvent.setup();
     server.use(
       http.get(OPTIMIZE_JOBS_URL, () =>
@@ -67,32 +68,66 @@ describe('AgentDetailRoute optimization form', () => {
     });
     await user.click(within(emptyState).getByRole('button', { name: 'Optimize' }));
 
-    expect(await screen.findByText('New optimization')).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
   });
 
-  it('opens the form when arriving with ?action=optimize', async () => {
+  it('opens the strategy picker when arriving with ?action=optimize', async () => {
     renderRoute(undefined, {
       history: getAgentOptimizeRoute(workspace, agentName),
       routes: [{ path: ROUTES.workspace.agentDetail, element: <AgentDetailRoute /> }],
     });
 
-    expect(await screen.findByText('New optimization')).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
   });
 
-  it('returns to the table from the form breadcrumb', async () => {
+  it('continues to the form from the parameter sweep strategy', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    renderDetail('?tab=optimizations&view=strategy');
+
+    await user.click(await screen.findByRole('radio', { name: /Parameter sweep/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByRole('button', { name: 'Run optimization' })).toBeInTheDocument();
+  });
+
+  it('opens the upload modal from the upload strategy, and stays on the picker when it closes', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=strategy');
+
+    await user.click(await screen.findByRole('radio', { name: /Upload a config/ }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Optimize agent' });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Optimize agent' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Upload a config/ })).toBeInTheDocument();
+  });
+
+  it('returns to the table from the strategy picker', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=strategy');
 
     await user.click(await screen.findByRole('button', { name: 'Optimizations' }));
 
     expect(await screen.findByText('brevity-sweep-3')).toBeInTheDocument();
-    expect(screen.queryByText('New optimization')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Parameter sweep/ })).not.toBeInTheDocument();
+  });
+
+  it('returns to the strategy picker from the form', async () => {
+    const user = userEvent.setup();
+    renderDetail('?tab=optimizations&view=form');
+
+    await user.click(await screen.findByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByRole('radio', { name: /Parameter sweep/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run optimization' })).not.toBeInTheDocument();
   });
 
   it('regenerates the name when the intent changes, until the user types one', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    renderDetail('?tab=optimizations&view=form');
 
     await screen.findByDisplayValue(new RegExp(`^${agentName}-accuracy-`));
 
@@ -108,7 +143,7 @@ describe('AgentDetailRoute optimization form', () => {
 
   it('reshapes the search space when the intent changes', async () => {
     const user = userEvent.setup();
-    renderDetail('?tab=optimizations&view=new');
+    renderDetail('?tab=optimizations&view=form');
 
     expect(await screen.findByText(/temperature 0\.0–0\.6/)).toBeInTheDocument();
 
@@ -118,7 +153,7 @@ describe('AgentDetailRoute optimization form', () => {
   });
 
   it('holds the run closed while the form is unanswered', async () => {
-    renderDetail('?tab=optimizations&view=new');
+    renderDetail('?tab=optimizations&view=form');
 
     expect(
       await screen.findByText('Pick an evaluation to score trials against.')

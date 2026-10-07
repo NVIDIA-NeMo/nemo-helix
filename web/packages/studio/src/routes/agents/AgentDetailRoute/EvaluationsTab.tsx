@@ -6,14 +6,13 @@ import type { EvalJobRow } from '@studio/api/evaluation/utils';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import { ExperimentsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/ExperimentsTable';
 import { groupByExperiment } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
+import { VIEW_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { type FC, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
 
 const VIEW_EVALUATIONS = 'evaluations';
 const VIEW_EXPERIMENTS = 'experiments';
-/** `tab` already belongs to the agent's outer tabs, so this view gets its own parameter. */
-const VIEW_SEARCH_PARAM = 'view';
 
 const VIEW_ITEMS = [
   { value: VIEW_EVALUATIONS, children: 'Evaluations' },
