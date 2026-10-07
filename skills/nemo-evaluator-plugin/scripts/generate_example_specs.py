@@ -96,6 +96,7 @@ def build_llm_as_judge_spec() -> dict[str, Any]:
                 description="How well the response helps the user.",
                 minimum=0,
                 maximum=JUDGE_MAX_SCORE,
+                is_integer=True,
                 parser=JSONScoreParser(json_path="helpfulness"),
             )
         ],

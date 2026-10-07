@@ -505,7 +505,7 @@ class TestLLMJudgeMetric:
                 "type": "object",
                 "properties": {
                     "helpfulness": {
-                        "type": "integer",
+                        "type": "number",
                         "minimum": 1,
                         "maximum": 5,
                     }
@@ -1174,6 +1174,7 @@ class TestGenerateStructuredOutput:
                     name="accuracy",
                     minimum=1,
                     maximum=5,
+                    is_integer=True,
                     parser=JSONScoreParser(json_path="score"),
                 )
             ],
@@ -1209,7 +1210,7 @@ class TestGenerateStructuredOutput:
         assert generate_structured_output(metric) == {
             "schema": {
                 "type": "object",
-                "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "properties": {"score": {"type": "number", "minimum": 1, "maximum": 5}},
                 "required": ["score"],
             }
         }
@@ -1226,8 +1227,33 @@ class TestGenerateStructuredOutput:
         assert generate_structured_output(metric) == {
             "schema": {
                 "type": "object",
-                "properties": {"score": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "properties": {"score": {"type": "number", "minimum": 1, "maximum": 5}},
                 "required": ["score"],
+            }
+        }
+
+    def test_range_from_json_integer_bounds_allows_fractional_scores(self):
+        metric = LLMJudgeMetric.model_validate(
+            llm_judge_param_dict({"scores": [{"name": "behaviour", "minimum": 0, "maximum": 1}]})
+        )
+        assert generate_structured_output(metric) == {
+            "schema": {
+                "type": "object",
+                "properties": {"behaviour": {"type": "number", "minimum": 0, "maximum": 1}},
+                "required": ["behaviour"],
+            }
+        }
+
+    def test_integer_range_generates_integer_schema(self):
+        metric = LLMJudgeMetric(
+            model=_make_model(),
+            scores=[RangeScore(name="accuracy", minimum=1, maximum=5, is_integer=True)],
+        )
+        assert generate_structured_output(metric) == {
+            "schema": {
+                "type": "object",
+                "properties": {"accuracy": {"type": "integer", "minimum": 1, "maximum": 5}},
+                "required": ["accuracy"],
             }
         }
 
