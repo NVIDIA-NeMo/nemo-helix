@@ -529,11 +529,17 @@ test-agents-nooa: ## Run NOOA adapter integration tests with its optional harnes
 
 .PHONY: test-agents-claude
 test-agents-claude: ## Run Claude Code adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
+		python -c 'import claude_agent_sdk'
 	$(UV) run --frozen --package nemo-agents-plugin --extra claude --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_claude.py
 
 .PHONY: test-agents-codex
 test-agents-codex: ## Run Codex adapter integration tests with its optional harness installed
+	# Fail on missing harnesses instead of passing with every test skipped.
+	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
+		python -c 'import openai_codex'
 	$(UV) run --frozen --package nemo-agents-plugin --extra codex --extra test \
 		pytest -v plugins/nemo-agents/tests/integration/test_fabric_codex.py
 
