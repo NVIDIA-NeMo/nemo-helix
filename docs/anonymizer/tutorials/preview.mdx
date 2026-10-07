@@ -26,11 +26,12 @@ Complete the [tutorials prerequisites](/documentation/anonymize-data/tutorials#p
 
 `preview` runs the Anonymizer pipeline on a small number of records and streams results back from the plugin service. The Python SDK collects the stream into a `pandas` DataFrame; the basic CLI streams NDJSON frames to stdout.
 
-The plugin emits four frame kinds:
+The plugin emits these frame kinds:
 
 | Frame              | Purpose                                                                              |
 |--------------------|--------------------------------------------------------------------------------------|
 | `log`              | Pipeline log lines forwarded from the library.                                       |
+| `model_download`   | First-run only: emitted while the PII detector model downloads (`started`/`complete`). |
 | `preview_dataset`  | User-facing anonymized records. The final dataset you usually care about.            |
 | `trace_dataset`    | Internal trace records used by `display_record` in notebooks.                        |
 | `failed_records`   | Per-record failures with reasons. Emitted only when at least one record failed.      |

@@ -107,6 +107,35 @@ async def test_preview_function_resets_request_log_callback(
 
 
 @pytest.mark.asyncio
+async def test_preview_function_emits_error_frame_when_model_download_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    igw_lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(context_module, "make_model_provider_registry", igw_lookup)
+    monkeypatch.setattr(preview_module, "ensure_gliner_fileset_async", AsyncMock(return_value=None))
+    # Cold cache + a failing download: the stream must surface an Error frame, not die silently.
+    monkeypatch.setattr(preview_module, "is_gliner_cached", lambda: False)
+
+    def _boom(_base_url: str) -> None:
+        raise RuntimeError("files unreachable")
+
+    monkeypatch.setattr(preview_module, "prewarm_gliner_cache", _boom)
+
+    frames = [
+        frame
+        async for frame in PreviewFunction().run(
+            _preview_spec(),
+            ctx=FunctionContext(workspace="team-a"),
+            async_sdk=AsyncMock(spec=AsyncNemoClient),
+        )
+    ]
+
+    kinds = [frame.model_dump()["kind"] for frame in frames]
+    assert kinds == ["model_download", "log", "log", "error"]
+    assert "files unreachable" in frames[-1].model_dump()["message"]
+
+
+@pytest.mark.asyncio
 async def test_preview_function_rejects_selected_models_without_model_configs() -> None:
     spec = _preview_spec().model_copy(
         update={

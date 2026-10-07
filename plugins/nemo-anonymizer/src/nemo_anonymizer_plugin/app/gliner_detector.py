@@ -178,7 +178,11 @@ def _align_fileset_cache_to_upstream_repo(fileset_snapshot: Path) -> None:
     upstream_snapshot.parent.mkdir(parents=True, exist_ok=True)
     if upstream_snapshot.exists() or upstream_snapshot.is_symlink():
         return
-    upstream_snapshot.symlink_to(fileset_snapshot.resolve(), target_is_directory=True)
+    try:
+        upstream_snapshot.symlink_to(fileset_snapshot.resolve(), target_is_directory=True)
+    except FileExistsError:
+        # A concurrent cold-start preview aligned it first; the link now exists.
+        pass
 
 
 def prewarm_gliner_cache(base_url: str, *, on_download_start: Callable[[], None] | None = None) -> None:

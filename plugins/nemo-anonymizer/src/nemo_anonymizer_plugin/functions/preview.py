@@ -137,7 +137,15 @@ class PreviewFunction(NemoFunction[PreviewSpec]):
             )
             yield ModelDownloadFrame(status="started", message=download_message)
             yield LogFrame(level="info", message=download_message)
-            await anyio.to_thread.run_sync(prewarm_gliner_cache, str(async_sdk.base_url))
+            try:
+                await anyio.to_thread.run_sync(prewarm_gliner_cache, str(async_sdk.base_url))
+            except Exception as exc:
+                # The download runs after the first frame is sent, so the framework
+                # can no longer turn this into an HTTP error — surface it as an
+                # in-stream Error frame instead of letting the stream die silently.
+                yield LogFrame(level="error", message=f"Failed to download the PII detector model: {exc}")
+                yield Error(message=str(exc), details={"type": type(exc).__name__})
+                return
             yield ModelDownloadFrame(status="complete", message="PII detector model ready.")
 
         async with _prepare_input(anon_ctx, spec.data) as prepared_input:
