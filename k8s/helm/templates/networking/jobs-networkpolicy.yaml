@@ -32,7 +32,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: nhx-api
+              app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
               {{- include "nemo-helix.selectorLabels" . | nindent 14 }}
       ports:
         - protocol: TCP

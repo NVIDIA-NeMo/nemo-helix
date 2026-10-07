@@ -3,6 +3,8 @@
 
 import pytest
 from nemo_helix_plugin.client.adapter import client_from_platform
+from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.entities.types import EntityCreateInput
 from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nhx.common.secrets.encryption import (
@@ -37,20 +39,26 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
 
     # Envelope encrypt the secret value
     encrypted_data, encrypted_dek, provider_name = envelope_encrypt(old_encryptor, secret_value)
-    secret = HelixSecret(
-        name=secret_name,
+    # Seed the persisted pre-0.7 type independently of the current Python class name.
+    entities = client_from_platform(client_context.sdk, EntitiesClient)
+    created_secret = entities.create_entity(
         workspace="default",
-        description="Test secret created via EntityClient",
-    )
-    secret._data = encrypted_data
-    secret._encrypted_dek = encrypted_dek
-    secret._secret_provider = provider_name
-
-    created_secret = await client_context.entity_client.create(secret)
+        entity_type="platform_secret",
+        body=EntityCreateInput(
+            name=secret_name,
+            data={
+                "description": "Test secret created via EntityClient",
+                "_data": encrypted_data,
+                "_encrypted_dek": encrypted_dek,
+                "_secret_provider": provider_name,
+            },
+        ),
+    ).data()
     assert created_secret.name == secret_name
     assert created_secret.id is not None
 
     secrets = client_from_platform(client_context.sdk, SecretsClient)
+    assert [secret.name for secret in secrets.list_secrets(workspace="default").items()] == [secret_name]
 
     # Retrieve the secret through the API and validate that it can be decrypted correctly
     retrieved_secret = secrets.get_secret(name=secret_name, workspace="default").data()
@@ -73,6 +81,12 @@ async def test_access_old_secret_with_old_provider_can_be_accessed(
         workspace="default",
     ).data()
     assert new_created_secret.name == new_secret_name
+    assert (
+        entities.get_entity_by_name(workspace="default", entity_type="platform_secret", name=new_secret_name)
+        .data()
+        .name
+        == new_secret_name
+    )
 
     # Access the new secret and verify decryption
     new_accessed_secret = secrets.access_secret(name=new_secret_name, workspace="default").data()
