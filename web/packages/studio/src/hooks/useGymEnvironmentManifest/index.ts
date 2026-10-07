@@ -32,6 +32,12 @@ const ENVIRONMENT_FORMATS = ['native-v1', 'wheels-v1', 'adapter-wheels-v1'] as c
 
 type EnvironmentFormat = (typeof ENVIRONMENT_FORMATS)[number];
 
+/** The YAML is user-authored, so `adapter.agent` may be any type. */
+const agentOf = (yaml: NemoEnvironmentYaml): string | undefined => {
+  const agent: unknown = yaml.adapter?.agent;
+  return typeof agent === 'string' ? agent.trim() || undefined : undefined;
+};
+
 const isKnownFormat = (value: string | undefined): value is EnvironmentFormat =>
   !!value && (ENVIRONMENT_FORMATS as readonly string[]).includes(value);
 
@@ -121,7 +127,7 @@ const collectManifestIssues = (yaml: NemoEnvironmentYaml, packagePaths: string[]
     );
   }
 
-  if (format === 'adapter-wheels-v1' && !yaml.adapter?.agent?.trim()) {
+  if (format === 'adapter-wheels-v1' && !agentOf(yaml)) {
     issues.push('adapter.agent is required for adapter-wheels-v1.');
   }
 
@@ -215,7 +221,7 @@ export const useGymEnvironmentManifest = ({
     return {
       manifest: {
         format: yaml.format ?? 'unknown',
-        agent: yaml.adapter?.agent?.trim() || undefined,
+        agent: agentOf(yaml),
         envName: meta.name ?? 'unknown',
         description: meta.description || undefined,
         hubId: meta.hub_id || undefined,

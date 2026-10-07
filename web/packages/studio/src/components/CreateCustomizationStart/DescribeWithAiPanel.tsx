@@ -66,10 +66,11 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     filesetName: environmentParts?.name ?? '',
   });
   const isEnvironmentLoading = !!pickedEnvironment && environment.isPending;
+  const environmentError = pickedEnvironment ? environment.error : null;
 
   const inputs = useMemo<DraftInputs | null>(() => {
     if (!baseModel || !datasetRef || dataset.isPending || dataset.discoveryError) return null;
-    if (isEnvironmentLoading) return null;
+    if (isEnvironmentLoading || environmentError) return null;
     return {
       model: baseModel,
       dataset: {
@@ -95,6 +96,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
     trainingRowCount,
     rowCountIsEstimate,
     isEnvironmentLoading,
+    environmentError,
     pickedEnvironment,
     environment.manifest,
   ]);
@@ -218,23 +220,30 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
           </Stack>
 
           {isGymDataset ? (
-            <FilesetSearchableSelect
-              workspace={workspace}
-              purpose="environment"
-              useControllerProps={{ control: form.control, name: 'environment' }}
-              formFieldProps={{
-                slotLabel: 'Reward environment',
-                slotHelp:
-                  'Detected a NeMo Gym dataset. Optionally pick the environment that scores its rollouts — or pick it later in the form.',
-              }}
-              leadingOptions={NO_ENVIRONMENT_OPTION}
-              triggerPlaceholder="None"
-              disabled={isGenerating}
-              onChange={(reference) => {
-                setEnvironmentRef(reference === NO_ENVIRONMENT ? null : reference);
-                clearDraft();
-              }}
-            />
+            <Stack gap="density-md">
+              <FilesetSearchableSelect
+                workspace={workspace}
+                purpose="environment"
+                useControllerProps={{ control: form.control, name: 'environment' }}
+                formFieldProps={{
+                  slotLabel: 'Reward environment',
+                  slotHelp:
+                    'Detected a NeMo Gym dataset. Optionally pick the environment that scores its rollouts — or pick it later in the form.',
+                }}
+                leadingOptions={NO_ENVIRONMENT_OPTION}
+                triggerPlaceholder="None"
+                disabled={isGenerating}
+                onChange={(reference) => {
+                  setEnvironmentRef(reference === NO_ENVIRONMENT ? null : reference);
+                  clearDraft();
+                }}
+              />
+              {environmentError ? (
+                <Banner kind="inline" status="error">
+                  {`Couldn't read the environment: ${getErrorMessage(environmentError)}`}
+                </Banner>
+              ) : null}
+            </Stack>
           ) : null}
         </Grid>
 
@@ -300,7 +309,7 @@ export const DescribeWithAiPanel: FC<DescribeWithAiPanelProps> = ({ workspace, o
             type="submit"
             kind="secondary"
             loading={isGenerating || isPreparing}
-            disabled={isGenerating || isPreparing || !!dataset.discoveryError}
+            disabled={isGenerating || isPreparing || !!dataset.discoveryError || !!environmentError}
           >
             {validation || requestError ? 'Draft again' : 'Draft settings'}
           </LoadingButton>
