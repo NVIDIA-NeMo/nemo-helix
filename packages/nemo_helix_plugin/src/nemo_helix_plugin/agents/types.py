@@ -307,6 +307,62 @@ class CreateAgentRequest(BaseModel):
     config_format: str = Field(default=NAT_WORKFLOW_CONFIG_FORMAT, description="Config format identifier.")
 
 
+class CreateSampleAgentRequest(BaseModel):
+    """Model to use when provisioning the packaged email security sample."""
+
+    model: str = Field(description="Workspace-qualified model entity, for example default/my-model.")
+
+
+class SampleAgentResponse(BaseModel):
+    """Provisioned sample agent and its workspace and deployment state."""
+
+    status: Literal["created", "resumed", "already_exists"]
+    workspace: str
+    studio_url: str = Field(description="Studio path relative to the platform origin.")
+    agent: str
+    deployment: str
+    deployment_status: DeploymentStatus
+
+
+SampleAgentComponent: TypeAlias = Literal["workspace", "agent", "deployment", "dataset", "evaluation_config"]
+SampleAgentComponentStatus: TypeAlias = Literal["created", "existing", "submitted", "uploaded", "updated"]
+
+
+class SampleAgentStreamEvent(BaseModel):
+    """One NDJSON frame from sample-agent provisioning."""
+
+    kind: Literal["progress", "done", "error"]
+    component: SampleAgentComponent | None = None
+    status: SampleAgentComponentStatus | None = None
+    workspace: str | None = None
+    result: SampleAgentResponse | None = None
+    message: str | None = None
+    status_code: int | None = None
+    failed_step: str | None = None
+    retryable: bool | None = None
+
+
+class SampleAgentRetryDetail(BaseModel):
+    """Workspace retained when sample provisioning fails and can be retried."""
+
+    workspace: str
+    studio_url: str = Field(description="Studio path relative to the platform origin.")
+    failed_step: Literal["agent deployment", "sample files"]
+    retryable: Literal[True]
+
+
+class SampleAgentConflictResponse(BaseModel):
+    """Error response when the existing deployment locks a different model."""
+
+    detail: str
+
+
+class SampleAgentRetryResponse(BaseModel):
+    """Error response for a retryable sample provisioning failure."""
+
+    detail: SampleAgentRetryDetail
+
+
 class CreateDeploymentRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/deployments``."""
 
