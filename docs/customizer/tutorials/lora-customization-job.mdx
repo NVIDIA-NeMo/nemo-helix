@@ -26,7 +26,7 @@ Before starting this tutorial, ensure you have:
 
 ### 1. Initialize SDK
 
-The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+The SDK connects to the deployment in your current CLI context, using its base URL, default workspace, and credentials. To connect to another deployment, refer to [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments). These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
 
 In environments without a CLI configuration file, such as Google Colab, set `NHX_BASE_URL` (and `NHX_ACCESS_TOKEN` for an authenticated deployment) before you create the client. `NemoClient.from_config()` reads both:
 

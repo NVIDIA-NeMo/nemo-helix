@@ -83,6 +83,8 @@ spec = AutomodelJobInput(
 job = customization.automodel.jobs.create(spec=spec, workspace="default", name="my-job")
 ```
 
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
+
 The `api_key_secret` field references a stored secret containing your `WANDB_API_KEY`. Use the secret name (e.g., `"my-wandb-key"`) to resolve it from the request workspace. To create the secret, see [Weights & Biases Keys](/documentation/get-started/core-concepts/manage-secrets).
 
 | Field | Description |
