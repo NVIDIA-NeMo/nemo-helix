@@ -40,9 +40,9 @@ const NON_CONTENT_ROUTES = new Set([
 const SURROUNDING_SLASHES = /^\/+|\/+$/g;
 const GIT_SUFFIX = /\.git$/;
 
-const trimSlashes = (value: string): string => value.replace(SURROUNDING_SLASHES, '');
+export const trimSlashes = (value: string): string => value.replace(SURROUNDING_SLASHES, '');
 
-const dropGitSuffix = (value: string): string => value.replace(GIT_SUFFIX, '');
+export const dropGitSuffix = (value: string): string => value.replace(GIT_SUFFIX, '');
 
 /**
  * Where the host ends. An `@` before this is `user@host` userinfo; one after it opens a ref,
@@ -158,7 +158,7 @@ export const githubStorageConfig = (
 });
 
 /** A starting point for the agent name, which the user can still edit before submitting. */
-export const agentNameFromSource = (source: GitHubAgentSource): string => {
+export const agentNameFromSource = (source: Pick<GitHubAgentSource, 'repo' | 'path'>): string => {
   const candidate = source.path ? (source.path.split('/').pop() ?? source.repo) : source.repo;
   return candidate
     .toLowerCase()

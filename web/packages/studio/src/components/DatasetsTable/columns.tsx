@@ -83,11 +83,10 @@ export function makeDatasetsTableColumns({
 
             options: [
               { value: '', label: 'All' },
-              { value: StorageConfigType.local, label: 'Local' },
-              { value: StorageConfigType.ngc, label: 'NGC' },
-              { value: StorageConfigType.huggingface, label: 'Hugging Face' },
-              { value: StorageConfigType.s3, label: 'S3' },
-              { value: StorageConfigType.github, label: 'GitHub' },
+              ...Object.values(StorageConfigType).map((type) => ({
+                value: type,
+                label: formatStorageBackendLabel(type) ?? type,
+              })),
             ],
           },
         },

@@ -47,6 +47,7 @@ export const uploadAgentFormSchema = z.object({
   name: agentNameSchema,
   repoUrl: z.string().trim().default(''),
   secretKey: z.string().default(''),
+  sshKeySecret: z.string().default(''),
   deploy: z.boolean().default(true),
   deploymentMode: z.nativeEnum(DeploymentModeAvailabilityMode).default('subprocess'),
 });
@@ -55,3 +56,18 @@ export const UPLOAD_AGENT_FORM_DEFAULTS = {
   name: '',
   ...uploadAgentFormSchema.omit({ name: true }).parse({}),
 };
+
+/** Shown in the Repository field's info popover. */
+export const REPOSITORY_EXAMPLES: readonly { label: string; value: string }[] = [
+  { label: 'GitHub repository', value: 'github.com/acme/agents' },
+  { label: 'GitHub branch and directory', value: 'github.com/acme/agents@main#agents/support' },
+  { label: 'SSH remote', value: 'git@gitlab.example.com:acme/agents.git' },
+  {
+    label: 'SSH on a custom port, with a branch',
+    value: 'ssh://git@gitlab.example.com:2222/acme/agents.git@release/1.0',
+  },
+  {
+    label: 'SSH with a tag and directory',
+    value: 'git@gitlab.example.com:acme/agents.git@v2.1#agents/support',
+  },
+];
