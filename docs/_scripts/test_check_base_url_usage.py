@@ -127,6 +127,12 @@ def test_checks_notebook_cells(tmp_path: Path) -> None:
     assert [(v.path.name, v.line) for v in violations] == [("tutorial.ipynb", 3)]
 
 
+def test_accepts_explicit_notebook_path(tmp_path: Path) -> None:
+    notebook = {"cells": [{"cell_type": "code", "source": ['os.getenv("NHX_BASE_URL")\n']}]}
+    path = _write(tmp_path, "tutorial.ipynb", json.dumps(notebook))
+    assert [(v.path.name, v.line) for v in check_paths([path])] == [("tutorial.ipynb", 1)]
+
+
 def test_skips_generated_docs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     generated = _write(
         tmp_path, "reference.mdx", "```shell\nNHX_BASE_URL=https://nhx.example.com nemo setup --auto\n```\n"

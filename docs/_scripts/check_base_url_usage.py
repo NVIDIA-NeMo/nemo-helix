@@ -179,12 +179,12 @@ def check_block(block: CodeBlock, *, notebook: bool = False) -> list[Violation]:
 
 def check_paths(paths: Iterable[Path]) -> list[Violation]:
     path_list = list(paths)
-    files = find_doc_files(path_list)
+    notebooks = [path for path in path_list if path.is_file() and path.suffix == ".ipynb"]
+    files = find_doc_files(path for path in path_list if path not in notebooks)
+    files.extend(notebooks)
     for path in path_list:
         if path.is_dir():
             files.extend(p for p in path.rglob("*.ipynb") if "node_modules" not in p.parts)
-        elif path.suffix == ".ipynb":
-            files.append(path)
 
     violations: list[Violation] = []
     for path in sorted(set(files)):
