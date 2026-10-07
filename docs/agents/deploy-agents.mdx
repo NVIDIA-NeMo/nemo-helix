@@ -28,11 +28,17 @@ A-Z), digits (0-9), underscores, hyphens, and dots. For example:
 deployment. The default is `subprocess`; `docker` and `k8s` run the agent as a
 durable container through the deployments plugin.
 
-| Mode | Runs as | Survives a platform restart | Requires |
+| Mode | Runs as | Survives a control plane restart | Requires |
 | ------ | --------- | ----------------------------- | ---------- |
-| `subprocess` (default) | A local FastAPI server on the platform host | No | Nothing extra |
+| `subprocess` (default) | A local FastAPI server on the control plane host | No | Nothing extra for the agent process |
 | `docker` | A Docker container | Yes | A container image and a configured `docker` executor |
 | `k8s` | A Kubernetes Deployment + Service | Yes | A container image and a configured `k8s` executor |
+
+<Note>
+
+Subprocess agent deploy does not mean the control plane can start without Docker. Default local startup still starts the deployments controller with a Docker-backed executor for model deployments on the control plane. Agent deploys use an executor that matches their mode: `--mode docker` requires a Docker-backed executor, and `--mode k8s` requires a `k8s` executor. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
+</Note>
 
 In every mode the agent is reached the same way — through the Agents gateway,
 which resolves the agent's active deployment and proxies the request, so
