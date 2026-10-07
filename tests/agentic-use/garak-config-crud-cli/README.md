@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak Config CRUD Operations (CLI)
+# garak Config CRUD Operations (CLI)
 
 Tests the agent's ability to perform CRUD operations on garak configurations using the NeMo Helix CLI.
 

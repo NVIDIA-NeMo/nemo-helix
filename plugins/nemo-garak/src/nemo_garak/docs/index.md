@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak Plugin Reference
+# garak Plugin Reference
 
 The garak plugin is a first-party scaffold for garak functionality. It keeps the plugin identity separate from the legacy garak service while providing the basic surfaces needed for SDK-backed jobs.
 

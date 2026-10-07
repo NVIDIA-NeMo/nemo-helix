@@ -12,7 +12,7 @@ metadata:
   author: NeMo Helix Team <nemo-helix@nvidia.com>
 ---
 
-# NeMo Garak CLI Reference
+# NeMo garak CLI Reference
 
 ## Environment
 

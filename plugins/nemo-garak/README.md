@@ -1,10 +1,10 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo Garak Plugin
+# NeMo garak Plugin
 
-A NeMo Helix plugin which provides Garak, an LLM
-vulnerability scanner service powered by [Garak](https://github.com/NVIDIA/garak)
+A NeMo Helix plugin which provides garak, an LLM
+vulnerability scanner service powered by [garak](https://github.com/NVIDIA/garak)
 
 ## CLI quickstart
 

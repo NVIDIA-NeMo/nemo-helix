@@ -332,7 +332,7 @@ nemo files upload <local> <fileset> --remote-path <remote>
 nemo files filesets create <name>
 nemo files filesets list
 
-# Garak (jailbreak robustness check on a candidate model)
+# garak (jailbreak robustness check on a candidate model)
 nemo garak targets create <target> -d '{"model": "<new-model>", "type": "<type>"}'
 nemo garak audit --spec '{"config": "default/<config>", "target": "default/<target>"}'
 ```

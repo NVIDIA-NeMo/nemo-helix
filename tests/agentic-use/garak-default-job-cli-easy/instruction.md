@@ -19,7 +19,7 @@ Using the `nemo` CLI, create an audit target, create an audit config, and run an
 2. Create an audit config named `default`
 3. Run an audit using the `default` config and the `audit-target` target
 
-Note: The audit may take a long time to complete. If the local Garak runtime is unavailable, capture the CLI error after invoking the audit command.
+Note: The audit may take a long time to complete. If the local garak runtime is unavailable, capture the CLI error after invoking the audit command.
 
 ## Available CLI Commands
 

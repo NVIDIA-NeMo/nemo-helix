@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak Target CRUD Operations - CLI Eval
+# garak Target CRUD Operations - CLI Eval
 
-This Harbor eval tests that a coding agent can perform CRUD (Create, Read, Update, Delete) operations on Garak targets using the NeMo Helix CLI.
+This Harbor eval tests that a coding agent can perform CRUD (Create, Read, Update, Delete) operations on garak targets using the NeMo Helix CLI.
 
 ## What It Tests
 

@@ -2,19 +2,19 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "NeMo Garak NeMo Helix SDK Resources"
+title: "NeMo garak NeMo Helix SDK Resources"
 description: ""
 ---
 <a id="garak-nhx-sdk-resources"></a>
 
-The NeMo Garak plugin mounts a Python SDK surface on the `NemoClient` through `GarakPluginResource(client)`.
+The NeMo garak plugin mounts a Python SDK surface on the `NemoClient` through `GarakPluginResource(client)`.
 This page documents that surface: how to manage audit configurations and targets in the entity store, and how to run an audit in-process using the local execution path.
 
 The CRUD methods exposed on `garak.configs` and `garak.targets` are 1:1 mirrors of the [audit configuration](/documentation/vulnerability-scanning/configurations) and [audit target](/documentation/vulnerability-scanning/targets) lifecycle and use the same `AuditConfig` and `AuditTarget` pydantic schemas the entity store persists.
 
 ## GarakPluginResource
 
-The `GarakPluginResource` is the sync SDK object for working with the NeMo Garak plugin.
+The `GarakPluginResource` is the sync SDK object for working with the NeMo garak plugin.
 It is built explicitly from a `NemoClient` instance:
 
 ```python

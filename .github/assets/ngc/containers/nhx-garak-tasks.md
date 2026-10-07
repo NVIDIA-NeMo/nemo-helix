@@ -2,11 +2,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-description: Job runner for NeMo Garak, part of NeMo Helix
+description: Job runner for NeMo garak, part of NeMo Helix
 ---
-## NeMo Garak Tasks Container
+## NeMo garak Tasks Container
 
-This container provides job support for NeMo Garak.  It is designed to run as part of NeMo Helix.
+This container provides job support for NeMo garak.  It is designed to run as part of NeMo Helix.
 
 ### Resources
 

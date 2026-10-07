@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak Target CRUD Operations (CLI)
+# garak Target CRUD Operations (CLI)
 
 You have access to the `nemo` CLI for NeMo Helix operations. Note: MCP tools are not available in this environment - you must use the CLI.
 
@@ -9,7 +9,7 @@ The `nemo` CLI is available at `/app/.venv/bin/nemo`. The CLI connects to the lo
 
 ## Task
 
-Complete the following Garak target operations using the `nemo` CLI.
+Complete the following garak target operations using the `nemo` CLI.
 
 1. **Create** an audit target named `harbor-audit-target` that points to a model endpoint. Use the following details:
    - Model: `mock-model-endpoint`

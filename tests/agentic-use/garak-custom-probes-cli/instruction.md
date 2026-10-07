@@ -22,7 +22,7 @@ Using the `nhx` CLI, create a custom audit configuration with specific selected 
 5. **Run an audit** using the `custom-probes-config` config and the `custom-audit-target` target
 6. **Review the CLI output** for result artifact paths or errors
 
-Note: The audit may take a long time to complete in this environment. If the local Garak runtime is unavailable, capture the CLI error after invoking the audit command. The important thing is that the target and custom config are created correctly and that the audit command is invoked with both of them.
+Note: The audit may take a long time to complete in this environment. If the local garak runtime is unavailable, capture the CLI error after invoking the audit command. The important thing is that the target and custom config are created correctly and that the audit command is invoked with both of them.
 
 ## Available CLI Commands
 

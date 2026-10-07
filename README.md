@@ -125,7 +125,7 @@ Things you can ask it to do, once the platform is running:
 
 ## What's here today
 
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), Garak (red-teaming via garak), Anonymizer (PII handling for training data).
+- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), garak (red-teaming via garak), Anonymizer (PII handling for training data).
 - **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. Harbor-backed eval suites for regression testing.
 - **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
 - **Build agents.** NVIDIA NeMo Agent Toolkit (NAT) for LangGraph-based agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.

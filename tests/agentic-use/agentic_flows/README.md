@@ -28,7 +28,7 @@ Each service has a dedicated markdown file documenting flows that primarily use 
 | [evaluator.md](evaluator.md) | Evaluator | 5 | Medium |
 | [customizer.md](customizer.md) | Customizer | 6 | Medium |
 | [guardrails.md](guardrails.md) | Guardrails | 2 | Medium |
-| [garak.md](garak.md) | Garak | 4 | Medium |
+| [garak.md](garak.md) | garak | 4 | Medium |
 | [data-designer.md](data-designer.md) | Data Designer | 3 | Medium |
 | [safe-synthesizer.md](safe-synthesizer.md) | Safe Synthesizer | 1 | Low |
 | [intake.md](intake.md) | Intake | 4 | Low |
@@ -72,8 +72,8 @@ Each flow includes:
 - Chat Completions via IGW (inference)
 - MockLLM Provider in IGW (inference)
 - Basic Content Safety Check (guardrails)
-- Garak Target CRUD Operations (garak)
-- Garak Config CRUD Operations (garak)
+- garak Target CRUD Operations (garak)
+- garak Config CRUD Operations (garak)
 - Data Designer - Configure Models (data-designer)
 - Intake Entry Submission (intake)
 

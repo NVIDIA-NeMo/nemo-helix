@@ -1,9 +1,9 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Garak Service Agentic Flows
+# garak Service Agentic Flows
 
-The Garak service provides model safety testing, bias detection, and adversarial robustness evaluation using tools like Garak for red-teaming.
+The garak service provides model safety testing, bias detection, and adversarial robustness evaluation using tools like garak for red-teaming.
 
 **PIC**: Paul Parkanzky
 **Priority**: Medium
@@ -14,8 +14,8 @@ The Garak service provides model safety testing, bias detection, and adversarial
 
 | # | Flow Name | Complexity | MCP Eval | CLI Eval | Description | Source |
 |---|-----------|------------|----------|----------|-------------|--------|
-| 22 | Garak Target CRUD Operations | 2 | No | `garak-target-crud-cli` | Create, list, get, update, and delete a Garak target. Targets define the model endpoint to audit (e.g., build.nvidia.com, local NIM, NeMo NIM Proxy). | POR |
-| 23 | Garak Config CRUD Operations | 2 | No | `garak-config-crud-cli` | Create, list, get, update, and delete a Garak configuration. Configs define which probes to run during an audit. | POR |
+| 22 | garak Target CRUD Operations | 2 | No | `garak-target-crud-cli` | Create, list, get, update, and delete a garak target. Targets define the model endpoint to audit (e.g., build.nvidia.com, local NIM, NeMo NIM Proxy). | POR |
+| 23 | garak Config CRUD Operations | 2 | No | `garak-config-crud-cli` | Create, list, get, update, and delete a garak configuration. Configs define which probes to run during an audit. | POR |
 | 24 | Run Default Audit Job | 3 | No | `garak-default-job-cli` | Create a target, use the built-in "default" audit config, run an audit job. Monitor job status and retrieve basic results/logs. | POR |
 | 25 | Custom Audit with Selected Probes | 4 | No | `garak-custom-probes-cli` | Create a custom audit config selecting specific probes (e.g., 3 targeted probes instead of default). Run audit job, retrieve detailed results and hit logs. | POR |
 
@@ -23,7 +23,7 @@ The Garak service provides model safety testing, bias detection, and adversarial
 
 ## Flow Details
 
-### 22. Garak Target CRUD Operations
+### 22. garak Target CRUD Operations
 
 **Complexity**: 2 (Simple)
 
@@ -53,7 +53,7 @@ The Garak service provides model safety testing, bias detection, and adversarial
 
 ---
 
-### 23. Garak Config CRUD Operations
+### 23. garak Config CRUD Operations
 
 **Complexity**: 2 (Simple)
 

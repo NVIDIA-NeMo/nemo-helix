@@ -13,7 +13,7 @@ NeMo Helix uses modular plugins for the infrastructure agents need to run at sca
 
 ## What You Can Do
 
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), Garak (red-teaming via garak), Anonymizer (PII handling for training data).
+- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), garak (red-teaming via garak), Anonymizer (PII handling for training data).
 - **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. [Harbor](https://www.harborframework.com/)-backed eval suites for regression testing.
 - **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
 - **Build agents.** Create platform-managed agents with agent.yaml, with legacy support for NAT-based LangGraph agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
@@ -53,12 +53,12 @@ flowchart TB
         Guardrails["Guardrails"]
         Evaluator["Evaluator"]
         FineTuning["Fine Tuning"]
-        Garak["Garak"]
+        garak["garak"]
         DataDesigner["Data Designer"]
         Anonymizer["Anonymizer"]
         SafeSynthesizer["Safe Synthesizer"]
         Agents ~~~ Optimization ~~~ Guardrails
-        Evaluator ~~~ FineTuning ~~~ Garak
+        Evaluator ~~~ FineTuning ~~~ garak
         DataDesigner ~~~ Anonymizer ~~~ SafeSynthesizer
     end
 
