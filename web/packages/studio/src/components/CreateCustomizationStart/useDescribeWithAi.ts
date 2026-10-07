@@ -24,6 +24,18 @@ import { z } from 'zod';
 export const ERROR_NO_TOOL_CALL =
   'The model replied without drafting a config. Try again, or pick a model with tool-calling support.';
 
+export const ERROR_INPUTS_NOT_READY =
+  "Studio hasn't finished reading the base model or dataset. Pick them again, then draft.";
+
+const CONTEXT_HINT =
+  "The drafting instructions may not fit in this model's context window. Pick a drafting model with a larger context.";
+
+/** Providers word it differently: "maximum context length", "context_length_exceeded", "too long". */
+const CONTEXT_ERROR = /context|too long|maximum.*tokens/i;
+
+/** Low, so the structured job comes out consistent and fewer drafts need a retry. */
+const TEMPERATURE = 0.2;
+
 /**
  * Rounds of handing validation errors back to the model before showing them, as the skill's
  * agent does when a submit is rejected.
@@ -50,7 +62,8 @@ interface DescribeWithAiState {
   isGenerating: boolean;
   /** Which automatic fix round is running: 0 for the first draft, up to MAX_RETRIES. */
   retry: number;
-  generate: (event?: FormEvent) => Promise<void>;
+  /** Validates the form, then drafts from `inputs` — null until the picks have been read. */
+  generate: (inputs: DraftInputs | null, event?: FormEvent) => Promise<void>;
   /** Drops the current draft, for when the picks it was built around change. */
   clearDraft: () => void;
 }
@@ -59,13 +72,9 @@ interface DescribeWithAiState {
  * Drafts a starting config for the picked model and dataset. `onDraft` fires after every
  * run — with form values when the draft loads, null otherwise — so a failed regeneration
  * clears an earlier success.
- *
- * `inputs` is null until the picked model and dataset have both been read; the panel keeps
- * Generate disabled until then.
  */
 export const useDescribeWithAi = (
   workspace: string,
-  inputs: DraftInputs | null,
   onDraft: (values: CustomizationFormFields | null) => void
 ): DescribeWithAiState => {
   const form = useForm<DescribeWithAiFormValues>({
@@ -85,8 +94,11 @@ export const useDescribeWithAi = (
   useEffect(() => () => runRef.current?.abort(), []);
 
   const runGeneration = useCallback(
-    async ({ model, prompt }: DescribeWithAiFormValues) => {
-      if (!inputs) return;
+    async ({ model, prompt }: DescribeWithAiFormValues, inputs: DraftInputs | null) => {
+      if (!inputs) {
+        setRequestError(ERROR_INPUTS_NOT_READY);
+        return;
+      }
       runRef.current?.abort();
       const run = new AbortController();
       runRef.current = run;
@@ -106,6 +118,7 @@ export const useDescribeWithAi = (
             messages,
             tools: [draftCustomizationJobTool],
             tool_choice: 'required',
+            temperature: TEMPERATURE,
             signal: run.signal,
           })) as ChatCompletion;
           if (run.signal.aborted) return;
@@ -126,13 +139,14 @@ export const useDescribeWithAi = (
         }
       } catch (error) {
         if (run.signal.aborted) return;
-        setRequestError(getErrorMessage(error, 'Generation failed.'));
+        const message = getErrorMessage(error, 'Generation failed.');
+        setRequestError(CONTEXT_ERROR.test(message) ? `${message} ${CONTEXT_HINT}` : message);
         setValidation(null);
       } finally {
         setIsGenerating(false);
       }
     },
-    [chatCompletion, inputs, onDraft, workspace]
+    [chatCompletion, onDraft, workspace]
   );
 
   const clearDraft = useCallback(() => {
@@ -147,7 +161,8 @@ export const useDescribeWithAi = (
     requestError,
     isGenerating,
     retry,
-    generate: form.handleSubmit(runGeneration),
+    generate: (inputs, event) =>
+      form.handleSubmit((values) => runGeneration(values, inputs))(event),
     clearDraft,
   };
 };
