@@ -26,7 +26,7 @@ export interface UseSubmitOptimizationParams {
 }
 
 /**
- * The submit path behind {@link NewOptimizationForm}: stage the selected evaluation's rows beside
+ * The submit path behind {@link NewOptimizationForm}: stage the selected evaluation's data beside
  * a generated optimize config, start the study, and open it.
  *
  * Rejects with a user-facing message on any failure; the form shows it beside the run button.
@@ -48,7 +48,7 @@ export const useSubmitOptimization = ({
       );
       if (!target) throw new Error('The selected evaluation is no longer available.');
 
-      const [rows, agent] = await Promise.all([
+      const [evaluationData, agent] = await Promise.all([
         queryClient.fetchQuery(studyRowsQueryOptions(workspace, target.evaluation)),
         agentsGetAgent(workspace, agentName),
       ]);
@@ -57,7 +57,7 @@ export const useSubmitOptimization = ({
         workspace,
         agentName,
         name: values.name,
-        entries: buildStudyBundle({ workspace, values, rows, agentModel }),
+        entries: buildStudyBundle({ workspace, values, evaluationData, agentModel }),
         optimizeConfig: OPTIMIZE_CONFIG_PATH,
       });
 

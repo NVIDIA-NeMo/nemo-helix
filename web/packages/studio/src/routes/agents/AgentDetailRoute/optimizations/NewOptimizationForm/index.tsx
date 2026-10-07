@@ -70,7 +70,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
       intent: DEFAULT_INTENT,
       budget: 'standard',
       experimentId: '',
-      judgeModel: '',
       searchSpace: intentById(DEFAULT_INTENT).parameters,
     },
   });
@@ -96,7 +95,6 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   const budget = budgetById(watch('budget'));
   const searchSpace = watch('searchSpace');
   const experimentId = watch('experimentId');
-  const judgeModel = watch('judgeModel');
 
   // Regenerate when the intent changes, since the intent is part of the name — and when the agent
   // finally resolves, which is what leaves the initial name empty.
@@ -125,15 +123,13 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
     ? 'No agent selected.'
     : !experimentId
       ? 'Pick an evaluation to score trials against.'
-      : !judgeModel
-        ? 'Pick a judge model to score trials with.'
-        : nameError
-          ? 'Fix the name before running.'
-          : errors.searchSpace
-            ? 'Fix the search space before running.'
-            : !onSubmit
-              ? 'Running a study from here is not available yet.'
-              : undefined;
+      : nameError
+        ? 'Fix the name before running.'
+        : errors.searchSpace
+          ? 'Fix the search space before running.'
+          : !onSubmit
+            ? 'Running a study from here is not available yet.'
+            : undefined;
 
   const [submitError, setSubmitError] = useState<string | undefined>();
 
@@ -197,11 +193,11 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
             <Stepper
               layout="vertical"
               aria-label="Optimization setup"
-              activeStep={experimentId && judgeModel ? 3 : 1}
+              activeStep={experimentId ? 3 : 1}
               items={[
                 {
                   slotHeading: 'What are you tuning for?',
-                  slotDescription: 'Pick one — it sets the objective and the parameters we sweep',
+                  slotDescription: 'Pick one — it sets the parameters we sweep',
                   slotSuccessIndicator: 1,
                   slotContent: <IntentSection />,
                 },
