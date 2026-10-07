@@ -143,6 +143,7 @@ export const EditSecretModal: FC<EditSecretModalProps> = ({ workspace, secret, o
           <TextInput value="••••••••••••••••••••••••••••••••••••••••" disabled />
         </FormField>
         <ControlledTextInput
+          masked
           useControllerProps={{ control, name: 'value' }}
           name="value"
           label="New Value"
