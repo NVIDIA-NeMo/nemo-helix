@@ -100,19 +100,9 @@ ENV_MAPPINGS: list[EnvMapping] = [
         default="false",
     ),
     EnvMapping(
-        marker="STUDIO_UI_VITE_FF_COPILOT_STUDIO_ENABLED",
-        config_path="studio.feature_flags.copilot_studio_enabled",
-        default="false",
-    ),
-    EnvMapping(
         marker="STUDIO_UI_VITE_FF_CUSTOMIZER_ENABLED",
         config_path="studio.feature_flags.customizer_enabled",
         default="true",
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_DASHBOARD_ENABLED",
-        config_path="studio.feature_flags.dashboard_enabled",
-        default="false",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_DASHBOARD_SANDBOX_ENABLED",
@@ -208,11 +198,6 @@ ENV_MAPPINGS: list[EnvMapping] = [
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_SETTINGS_ENABLED", config_path="studio.feature_flags.settings_enabled", default="true"
-    ),
-    EnvMapping(
-        marker="STUDIO_UI_VITE_FF_TOOL_CALLING_ENABLED",
-        config_path="studio.feature_flags.tool_calling_enabled",
-        default="false",
     ),
     EnvMapping(
         marker="STUDIO_UI_VITE_FF_TOUR_ENABLED", config_path="studio.feature_flags.tour_enabled", default="true"

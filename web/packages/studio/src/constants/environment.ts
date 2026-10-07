@@ -38,16 +38,13 @@ export const AGENT_OVERVIEW_ENABLED = featureFlags.agentOverviewEnabled !== fals
 export const AGENTS_ENABLED = featureFlags.agentsEnabled !== false;
 export const ANONYMIZER_ENABLED = featureFlags.anonymizerEnabled !== false;
 export const BASE_MODELS_ENABLED = featureFlags.baseModelsEnabled !== false;
-export const ASSISTANT_STUDIO_ENABLED =
-  featureFlags.assistantStudioEnabled !== false || featureFlags.copilotStudioEnabled !== false;
+export const ASSISTANT_STUDIO_ENABLED = featureFlags.assistantStudioEnabled !== false;
 export const CUSTOMIZER_ENABLED = featureFlags.customizerEnabled !== false;
-export const DASHBOARD_ENABLED = featureFlags.dashboardEnabled !== false;
 export const DASHBOARD_SANDBOX_ENABLED = featureFlags.dashboardSandboxEnabled !== false;
-// The /dashboard route is reachable if any variant behind it is enabled — kept as one derived
-// constant so the three flags can't drift out of sync across the route table, the side-nav
+// The /dashboard route is reachable if either variant behind it is enabled — kept as one derived
+// constant so the two flags can't drift out of sync across the route table, the side-nav
 // link, and the default-landing redirect (each of which needs this exact condition).
-export const DASHBOARD_ROUTE_ENABLED =
-  DASHBOARD_ENABLED || ASSISTANT_STUDIO_ENABLED || DASHBOARD_SANDBOX_ENABLED;
+export const DASHBOARD_ROUTE_ENABLED = ASSISTANT_STUDIO_ENABLED || DASHBOARD_SANDBOX_ENABLED;
 export const DATA_DESIGNER_ENABLED = featureFlags.dataDesignerEnabled !== false;
 export const DATASETS_ENABLED = featureFlags.datasetsEnabled !== false;
 export const DEPLOYMENTS_ENABLED = featureFlags.deploymentsEnabled !== false;
@@ -68,7 +65,6 @@ export const SAFE_SYNTHESIZER_ENABLED = featureFlags.safeSynthesizerEnabled !== 
 export const SECRETS_ENABLED = featureFlags.secretsEnabled !== false;
 export const SETTINGS_ENABLED = featureFlags.settingsEnabled !== false;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
-export const TOOL_CALLING_ENABLED = featureFlags.toolCallingEnabled !== false;
 export const TOUR_ENABLED = featureFlags.tourEnabled !== false;
 
 // Vars used by OpenTelemetry
