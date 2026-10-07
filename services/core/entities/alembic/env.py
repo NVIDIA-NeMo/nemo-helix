@@ -18,7 +18,8 @@ load_dotenv()
 config = context.config
 # Use DatabaseConfig only when URL wasn't already set (e.g. by startup or tests).
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", DatabaseConfig().sqlalchemy_database_url())
+    # Escape "%" for ConfigParser interpolation (URL-encoded passwords).
+    config.set_main_option("sqlalchemy.url", DatabaseConfig().sqlalchemy_database_url().replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # When running inside the NeMo Helix, the root logger already has a structlog
