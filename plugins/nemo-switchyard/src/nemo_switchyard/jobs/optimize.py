@@ -9,9 +9,9 @@ class variable and delegates ``compile`` and ``run`` to it.
 
 For every (capable, efficient) pair of the acceptable models and every routing strategy the run
 creates one Inference Gateway VirtualModel carrying a single ``nemo-switchyard`` request
-middleware call, then writes the agent's ``nemo-agents-spec-v1`` config rewritten to use that
+middleware call, then saves a copy of the agent's ``nemo-agents-spec-v1`` config pointed at that
 VirtualModel into the job's results.  The stored agent is never modified and no VirtualModel is
-deleted.
+deleted; one that already exists is accepted only when it routes exactly as requested.
 
 Keep this module light: it is imported by every ``discover_jobs()`` call, so it must not pull in
 ``nemo_switchyard.middleware`` (Rust bindings) or ``nemo_agents_plugin``.
@@ -121,6 +121,8 @@ class SwitchyardOptimizeJob(NemoJob):
         agent_label = f"{agent_ref.workspace}/{agent_ref.name}"
         source = fetch_agent_config(sdk, workspace=agent_ref.workspace, name=agent_ref.name)
         combos = build_combinations(spec, agent_name=agent_ref.name)
+        # Rewritten before the loop so an agent config with nothing to route creates no VirtualModel.
+        rewritten = [rewrite_agent_config(source, f"{spec.workspace}/{combo.virtual_model}") for combo in combos]
 
         virtual_models_client = client_from_platform(sdk, VirtualModelsClient)
         results_dir = ctx.storage.ephemeral / STRATEGY_NAME / "results"
@@ -129,14 +131,11 @@ class SwitchyardOptimizeJob(NemoJob):
         results_dir.mkdir(parents=True)
 
         index = []
-        for combo in combos:
+        for combo, agent_config in zip(combos, rewritten, strict=True):
             logger.info("Creating VirtualModel %s/%s (%s)", spec.workspace, combo.virtual_model, combo.config_type)
-            virtual_models_client.create_virtual_model(
-                workspace=spec.workspace, body=virtual_model_request(combo), exist_ok=True
-            )
+            ensure_virtual_model(virtual_models_client, workspace=spec.workspace, combo=combo)
             filename = f"agent-{combo.virtual_model}.yaml"
-            rewritten = rewrite_agent_config(source, f"{spec.workspace}/{combo.virtual_model}")
-            (results_dir / filename).write_text(yaml.safe_dump(rewritten, sort_keys=False), encoding="utf-8")
+            (results_dir / filename).write_text(yaml.safe_dump(agent_config, sort_keys=False), encoding="utf-8")
             index.append({**asdict(combo), "agent_config": filename})
         summary = {"strategy": STRATEGY_NAME, "agent": agent_label, "workspace": spec.workspace, "combinations": index}
         (results_dir / INDEX_FILENAME).write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -162,6 +161,18 @@ def fetch_agent_config(sdk: NemoClient, *, workspace: str, name: str) -> dict[st
             "rewrites the model blocks of those only."
         )
     return config
+
+
+def ensure_virtual_model(client: VirtualModelsClient, *, workspace: str, combo: Combination) -> None:
+    """Create the VirtualModel; accept an existing one only when it already routes exactly as requested."""
+    request = virtual_model_request(combo)
+    existing = client.create_virtual_model(workspace=workspace, body=request, exist_ok=True).data()
+    if [m.model for m in existing.models] != combo.models or existing.request_middleware != request.request_middleware:
+        raise LocalRunError(
+            f"VirtualModel '{workspace}/{combo.virtual_model}' already exists but routes differently from this "
+            f"request; delete it (`nemo inference virtual-models delete {combo.virtual_model}`) or change the agent "
+            "or model list, then re-run."
+        )
 
 
 def virtual_model_request(combo: Combination) -> CreateVirtualModelRequest:

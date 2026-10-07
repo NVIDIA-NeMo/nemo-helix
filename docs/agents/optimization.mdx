@@ -93,8 +93,9 @@ cheaper model, then evaluate whether the route split preserves application
 quality.
 
 The `switchyard` optimization strategy automates this for a platform agent: it
-creates one virtual model per (model pair × routing strategy) and writes a
-rewritten agent config per combination to the job results.
+creates one virtual model per (model pair × routing strategy) and saves a copy
+of the agent config per combination, pointed at that virtual model, to the job
+results.
 
 ```bash
 nemo agents optimize run-strategy --strategy switchyard --agent my-agent \

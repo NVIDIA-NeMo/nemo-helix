@@ -25,6 +25,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
+from nemo_helix_plugin.virtual_models.types import VirtualModel, VirtualModelInferenceConfig
 from nemo_switchyard.jobs import optimize as optimize_module
 from nemo_switchyard.jobs.optimize import INDEX_FILENAME, RESULT_NAME, TASK_MODULE, SwitchyardOptimizeJob
 from nemo_switchyard.schemas.optimize import SwitchyardOptimizeSpec
@@ -52,13 +53,23 @@ def ctx(tmp_path: Path) -> JobContext:
 
 
 @contextlib.contextmanager
-def platform(*execution_profiles: Any, agent: dict[str, Any] | None = None) -> Iterator[MagicMock]:
+def platform(
+    *execution_profiles: Any, agent: dict[str, Any] | None = None, existing: VirtualModel | None = None
+) -> Iterator[MagicMock]:
     async def _get_execution_profiles() -> Any:
         return SimpleNamespace(data=lambda: list(execution_profiles))
+
+    def _create_virtual_model(**call: Any) -> Any:
+        body = call["body"]
+        created = existing or VirtualModel(
+            name=body.name, workspace=call["workspace"], models=body.models, request_middleware=body.request_middleware
+        )
+        return SimpleNamespace(data=lambda: created)
 
     client = MagicMock()
     client.get_execution_profiles = _get_execution_profiles
     client.get_agent.return_value.data.return_value = SimpleNamespace(config=agent)
+    client.create_virtual_model.side_effect = _create_virtual_model
     with patch.object(optimize_module, "client_from_platform", return_value=client):
         yield client
 
@@ -76,7 +87,8 @@ async def compile_spec(profile: str | None = None) -> Any:
 
 def test_declares_the_strategy() -> None:
     strategy = declared_strategy(SwitchyardOptimizeJob)
-    assert strategy is not None and strategy.name == "switchyard"
+    assert strategy is not None
+    assert strategy.name == "switchyard"
 
 
 async def test_compile_prefers_the_subprocess_executor_and_stamps_the_workspace() -> None:
@@ -123,7 +135,8 @@ def test_run_creates_one_virtual_model_per_combination(ctx: JobContext) -> None:
     assert [body.name for body in bodies] == ["calc-random-routing-1", "calc-stage-router-1"]
     assert [m.model for m in bodies[0].models] == ["default/a", "default/b"]
     (call,) = bodies[1].request_middleware
-    assert (call.name, call.config_type) == ("nemo-switchyard", "stage_router")
+    assert call.name == "nemo-switchyard"
+    assert call.config_type == "stage_router"
     assert call.config["models"] == {"capable": ["default/a"], "efficient": ["default/b"]}
     assert result["virtual_models"] == ["calc-random-routing-1", "calc-stage-router-1"]
 
@@ -132,7 +145,9 @@ def test_run_writes_one_agent_config_each_and_an_index(ctx: JobContext, tmp_path
     with platform(agent=SOURCE_AGENT):
         result = run_job(ctx)
 
-    assert (result["status"], result["agent"], result["result"]["name"]) == ("completed", "team/calc", RESULT_NAME)
+    assert result["status"] == "completed"
+    assert result["agent"] == "team/calc"
+    assert result["result"]["name"] == RESULT_NAME
     saved = tmp_path / "job-results" / RESULT_NAME
     rewritten = yaml.safe_load((saved / "agent-calc-random-routing-1.yaml").read_text(encoding="utf-8"))
     assert rewritten["models"]["default"]["model"] == "default/calc-random-routing-1"
@@ -149,3 +164,23 @@ def test_run_writes_one_agent_config_each_and_an_index(ctx: JobContext, tmp_path
 def test_run_refuses_an_agent_that_is_not_spec_v1(ctx: JobContext, config: dict[str, Any]) -> None:
     with platform(agent=config), pytest.raises(LocalRunError, match="nemo-agents-spec-v1"):
         SwitchyardOptimizeJob().run({**SPEC, "workspace": "default"}, ctx=ctx, sdk=MagicMock())
+
+
+def test_run_refuses_an_existing_virtual_model_that_routes_differently(ctx: JobContext) -> None:
+    stale = VirtualModel(
+        name="calc-random-routing-1",
+        workspace="default",
+        models=[VirtualModelInferenceConfig(model="default/a"), VirtualModelInferenceConfig(model="default/c")],
+    )
+    with platform(agent=SOURCE_AGENT, existing=stale), pytest.raises(LocalRunError, match="routes differently"):
+        run_job(ctx)
+
+
+def test_run_creates_no_virtual_model_when_the_agent_has_nothing_to_route(ctx: JobContext) -> None:
+    with (
+        platform(agent={**SOURCE_AGENT, "models": {}}) as client,
+        pytest.raises(LocalRunError, match="nothing to rewrite"),
+    ):
+        run_job(ctx)
+
+    client.create_virtual_model.assert_not_called()

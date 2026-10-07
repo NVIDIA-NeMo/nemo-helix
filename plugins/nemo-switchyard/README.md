@@ -105,17 +105,17 @@ headers are never forwarded.
 The plugin also ships the `switchyard` strategy for `nemo agents optimize`.
 Given a platform agent, a list of acceptable models and a list of routing
 strategies, the job creates one VirtualModel per (model pair × routing
-strategy) and writes the agent's `nemo-agents-spec-v1` config rewritten to use
-that VirtualModel into the job's results. The stored agent is never modified
-and no VirtualModel is deleted.
+strategy) and saves a copy of the agent's `nemo-agents-spec-v1` config per
+combination, pointed at that VirtualModel, to the job's results. The stored
+agent is never modified and no VirtualModel is deleted.
 
 `models` is ordered from most capable to most efficient: every pair `(i < j)`
 routes with `models[i]` as the capable/strong model and `models[j]` as the
 efficient/weak one. VirtualModels are named
 `<agent>-<routing-strategy>-<pair-index>` in the submission workspace. An
-existing VirtualModel with that name is reused as-is, so a re-run with new
-thresholds or judge does not update it: delete it first (or change the agent
-or model list) to apply new settings.
+existing VirtualModel with that name is reused only when its models and
+middleware config already match the request; otherwise the run fails and asks
+you to delete it (or change the agent or model list) before re-running.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
