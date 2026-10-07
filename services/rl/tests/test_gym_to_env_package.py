@@ -19,6 +19,52 @@ def _touch_wheels(directory: Path, *names: str) -> None:
         (directory / name).touch()
 
 
+def test_referenced_servers_contribute_requirements_and_not_their_trees(tmp_path: Path) -> None:
+    gym = tmp_path / "Gym"
+    selected = gym / "resources_servers" / "math_with_judge"
+    selected.mkdir(parents=True)
+    (selected / "requirements.txt").write_text("math-verify==0.8.0\n", encoding="utf-8")
+    agent = gym / "responses_api_agents" / "simple_agent"
+    agent.mkdir(parents=True)
+    (agent / "app.py").write_text("pass\n", encoding="utf-8")
+    (agent / "requirements.txt").write_text("-e nemo-gym[dev] @ ../../\nhttpx==0.28.1\n", encoding="utf-8")
+    model = gym / "responses_api_models" / "vllm_model"
+    model.mkdir(parents=True)
+    (model / "pyproject.toml").write_text(
+        '[project]\nname = "vllm-model"\nversion = "0.0.1"\ndependencies = ["nemo-gym[dev]", "nixl==0.1.0"]\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "pkg"
+    out.mkdir()
+    config = out / "math_with_judge.yaml"
+    config.write_text(
+        "math_with_judge:\n"
+        "  resources_servers:\n"
+        "    math_with_judge:\n"
+        "      entrypoint: app.py\n"
+        "math_with_judge_simple_agent:\n"
+        "  responses_api_agents:\n"
+        "    simple_agent:\n"
+        "      entrypoint: app.py\n",
+        encoding="utf-8",
+    )
+    policy = out / "policy_model.yaml"
+    policy.write_text(
+        "policy_model:\n  responses_api_models:\n    vllm_model:\n      entrypoint: app.py\n",
+        encoding="utf-8",
+    )
+
+    lines = MODULE.referenced_server_requirements(
+        gym,
+        [config, policy],
+        Path("resources_servers/math_with_judge"),
+    )
+
+    assert lines == ["httpx==0.28.1", "nixl==0.1.0"]
+    assert not (out / "responses_api_agents").exists()
+    assert not (out / "responses_api_models").exists()
+
+
 def test_server_closure_uses_the_selected_server_only(tmp_path: Path) -> None:
     server = tmp_path / "resources_servers" / "math_with_judge"
     server.mkdir(parents=True)
@@ -148,7 +194,7 @@ def test_package_info_version_keeps_the_prerelease_suffix(tmp_path: Path) -> Non
     assert MODULE.nemo_gym_version(tmp_path) == "0.7.0rc0"
 
 
-def test_locked_versions_use_nemo_gym_openai_when_the_lock_has_two(tmp_path: Path) -> None:
+def test_locked_versions_pin_the_lock_and_the_gym_edge(tmp_path: Path) -> None:
     (tmp_path / "uv.lock").write_text(
         """
 [[package]]
@@ -169,11 +215,37 @@ version = "2.44.0"
 [[package]]
 name = "ray"
 version = "2.56.1"
+
+[[package]]
+name = "aiohttp"
+version = "3.14.3"
+
+[[package]]
+name = "torch"
+version = "2.11.0"
+
+[[package]]
+name = "torch"
+version = "2.13.0"
 """,
         encoding="utf-8",
     )
 
-    ray, openai = MODULE.locked_distribution_versions(tmp_path)
+    pins = MODULE.locked_package_versions(tmp_path)
 
-    assert ray == "2.56.1"
-    assert openai == "2.44.0"
+    assert pins == {"openai": "2.44.0", "ray": "2.56.1", "aiohttp": "3.14.3"}
+    assert MODULE.lock_requirement_lines(pins, ["ray[default]>=2.56.1"]) == [
+        "aiohttp==3.14.3",
+        "openai==2.44.0",
+        "ray==2.56.1",
+    ]
+    assert MODULE.lock_requirement_lines({"setuptools": "84.0.0", "aiohttp": "3.14.3"}, ["setuptools<81"]) == [
+        "aiohttp==3.14.3",
+    ]
+    assert MODULE.align_requirement_to_lock("aiohttp>=3.14.1", {"aiohttp": "3.14.3"}) == "aiohttp>=3.14.1"
+    assert MODULE.lock_requirement_lines(
+        {"math-verify": "0.9.0", "latex2sympy2-extended": "1.11.0", "aiohttp": "3.14.3"},
+        ["math-verify==0.8.0"],
+        {"math-verify": {"latex2sympy2-extended"}},
+        expand_dependencies_of=["math-verify==0.8.0"],
+    ) == ["aiohttp==3.14.3"]

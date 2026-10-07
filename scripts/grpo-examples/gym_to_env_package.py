@@ -49,6 +49,7 @@ import yaml
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import InvalidWheelFilename, canonicalize_name, parse_wheel_filename
+from packaging.version import Version
 
 GYM_REPO = "https://github.com/NVIDIA-NeMo/Gym"
 
@@ -117,6 +118,86 @@ def resolve_server(gym_root: Path, server: str) -> Path:
             "it as a server, and would silently run a built-in of the same name instead."
         )
     return rel
+
+
+def referenced_servers(config_files: list[Path]) -> list[tuple[str, str]]:
+    """Implementations named under a server type in the packaged configs.
+
+    The instance key is not the directory Gym starts. ``math_with_judge_simple_agent`` runs
+    ``responses_api_agents/simple_agent``, and ``policy_model`` runs
+    ``responses_api_models/vllm_model``.
+    """
+    found: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for cfg in config_files:
+        doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+        if not isinstance(doc, dict):
+            continue
+        for instance in doc.values():
+            if not isinstance(instance, dict):
+                continue
+            for server_type, impls in instance.items():
+                if server_type not in SERVER_TYPES or not isinstance(impls, dict):
+                    continue
+                for impl in impls:
+                    key = (server_type, str(impl))
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(key)
+    return found
+
+
+def _kept_requirement_line(stripped: str) -> str | None:
+    """Drop blanks, comments, the editable Gym checkout, and ``nemo-gym`` itself."""
+    if not stripped or stripped.startswith("#") or "../.." in stripped:
+        return None
+    name = re.split(r"[\s\[<>=!~;@]", stripped.removeprefix("-e").strip(), maxsplit=1)[0]
+    if canonicalize_name(name) == "nemo-gym":
+        return None
+    return stripped
+
+
+def server_declared_requirements(server_dir: Path) -> list[str]:
+    """Requirements a server venv installs, from ``requirements.txt`` or ``pyproject.toml``."""
+    requirements = server_dir / "requirements.txt"
+    pyproject = server_dir / "pyproject.toml"
+    if requirements.is_file() and pyproject.is_file():
+        raise SystemExit(f"{server_dir} has both requirements.txt and pyproject.toml")
+    if requirements.is_file():
+        return server_requirement_lines(server_dir)
+    if not pyproject.is_file():
+        raise SystemExit(
+            f"{server_dir} has neither requirements.txt nor pyproject.toml. Gym would not recognise it as a server."
+        )
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
+    lines = []
+    for dependency in project.get("dependencies", []):
+        kept = _kept_requirement_line(str(dependency).strip())
+        if kept:
+            lines.append(kept)
+    return lines
+
+
+def referenced_server_requirements(gym_root: Path, config_files: list[Path], selected: Path) -> list[str]:
+    """Requirements of implementations the configs name, read from the Gym checkout.
+
+    The training image already has these trees. The package keeps the selected server
+    and leaves the others in the image; their pins still have to be in the wheelhouse
+    because each server venv installs offline.
+    """
+    lines: list[str] = []
+    for server_type, impl in referenced_servers(config_files):
+        rel = Path(server_type) / impl
+        if rel == selected:
+            continue
+        source = gym_root / rel
+        if not source.is_dir():
+            raise SystemExit(
+                f"{rel.as_posix()} is named in the packaged config, but {source} does not exist. "
+                "The training image resolves this server from its Gym checkout."
+            )
+        lines.extend(server_declared_requirements(source))
+    return lines
 
 
 def copy_server(gym_root: Path, out_dir: Path, rel: Path) -> Path:
@@ -238,13 +319,9 @@ def server_requirement_lines(pkg_server_dir: Path) -> list[str]:
         return []
     lines = []
     for raw in reqs.read_text(encoding="utf-8").splitlines():
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#") or "../.." in stripped:
-            continue
-        name = re.split(r"[\s\[<>=!~;@]", stripped.removeprefix("-e").strip(), maxsplit=1)[0]
-        if canonicalize_name(name) == "nemo-gym":
-            continue
-        lines.append(stripped)
+        kept = _kept_requirement_line(raw.strip())
+        if kept:
+            lines.append(kept)
     return lines
 
 
@@ -459,38 +536,122 @@ def nemo_gym_version(gym_root: Path) -> str:
     return nemo_gym_version_text(info.read_text(encoding="utf-8"))
 
 
-def locked_distribution_versions(rl_root: Path) -> tuple[str, str]:
-    """Ray and openai versions the image's nemo-gym environment installs.
+def locked_package_versions(rl_root: Path) -> dict[str, str]:
+    """Every version ``uv.lock`` resolved for the image.
 
-    ``uv.lock`` can carry more than one openai (sglang pins another). The version on the
-    nemo-gym package is the one Gym stamps into every per-server venv. Ray has a single
-    locked version, and nemo-gym does not repeat it on the dependency edge.
+    A library locked once is pinned to that version. A library locked more than once (the
+    training image carries a second openai for sglang) uses the version recorded on the
+    nemo-gym dependency edge. Packages the lock does not give a single version for are left
+    out, so the constraint file stays solvable.
     """
-    packages = tomllib.loads((rl_root / "uv.lock").read_text(encoding="utf-8")).get("package", [])
+    lock = rl_root / "uv.lock"
+    if not lock.is_file():
+        raise SystemExit(f"{rl_root} has no uv.lock")
+    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
     nemo_gym = next((pkg for pkg in packages if pkg.get("name") == "nemo-gym"), None)
     if nemo_gym is None:
-        raise SystemExit(f"{rl_root / 'uv.lock'} has no nemo-gym package")
+        raise SystemExit(f"{lock} has no nemo-gym package")
 
-    def dep_version(name: str) -> str | None:
-        versions = {
-            dep["version"] for dep in nemo_gym.get("dependencies", []) if dep.get("name") == name and "version" in dep
-        }
+    by_name: dict[str, set[str]] = {}
+    for pkg in packages:
+        name = pkg.get("name")
+        version = pkg.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            by_name.setdefault(name, set()).add(version)
+
+    gym_edge: dict[str, set[str]] = {}
+    for dep in nemo_gym.get("dependencies", []):
+        name = dep.get("name")
+        version = dep.get("version")
+        if isinstance(name, str) and isinstance(version, str):
+            gym_edge.setdefault(name, set()).add(version)
+
+    pins: dict[str, str] = {}
+    for name, versions in by_name.items():
         if len(versions) == 1:
-            return versions.pop()
-        return None
+            pins[name] = next(iter(versions))
+            continue
+        chosen = gym_edge.get(name, set())
+        if len(chosen) == 1:
+            pins[name] = next(iter(chosen))
+    return pins
 
-    def unique_version(name: str) -> str | None:
-        versions = {pkg["version"] for pkg in packages if pkg.get("name") == name and "version" in pkg}
-        if len(versions) == 1:
-            return versions.pop()
-        return None
 
-    ray = dep_version("ray") or unique_version("ray")
-    openai = dep_version("openai") or unique_version("openai")
-    missing = [name for name, value in (("ray", ray), ("openai", openai)) if not value]
-    if missing:
-        raise SystemExit(f"{rl_root / 'uv.lock'} does not pin a single {' and '.join(missing)} version for nemo-gym")
-    return ray, openai
+def _skipped_lock_pins(pins: dict[str, str], overrides: list[str]) -> set[str]:
+    by_canonical = {canonicalize_name(name): version for name, version in pins.items()}
+    skipped: set[str] = set()
+    for item in overrides:
+        requirement = Requirement(item)
+        name = canonicalize_name(requirement.name)
+        locked = by_canonical.get(name)
+        if locked is None:
+            continue
+        if requirement.url or (requirement.specifier and Version(locked) not in requirement.specifier):
+            skipped.add(name)
+    return skipped
+
+
+def lock_requirement_lines(
+    pins: dict[str, str],
+    overrides: list[str],
+    dependencies: dict[str, set[str]] | None = None,
+    *,
+    expand_dependencies_of: list[str] | None = None,
+) -> list[str]:
+    """``name==version`` constraints for the lock.
+
+    A version override that excludes the locked release replaces it. A floor that still
+    contains the locked release keeps the pin, so the package cannot float past the image.
+    A URL override replaces the distribution entirely. ``expand_dependencies_of`` also
+    drops direct dependencies of those overrides, which were resolved for the replaced
+    version. Other overrides do not unpin their dependencies.
+    """
+    skipped = _skipped_lock_pins(pins, overrides)
+    if dependencies and expand_dependencies_of:
+        for name in _skipped_lock_pins(pins, expand_dependencies_of):
+            skipped.update(dependencies.get(name, ()))
+    return [f"{name}=={version}" for name, version in sorted(pins.items()) if canonicalize_name(name) not in skipped]
+
+
+def lock_package_dependencies(rl_root: Path) -> dict[str, set[str]]:
+    """Direct dependency names for each package in ``uv.lock``, canonicalized."""
+    lock = rl_root / "uv.lock"
+    packages = tomllib.loads(lock.read_text(encoding="utf-8")).get("package", [])
+    dependencies: dict[str, set[str]] = {}
+    for pkg in packages:
+        name = pkg.get("name")
+        if not isinstance(name, str):
+            continue
+        deps = dependencies.setdefault(canonicalize_name(name), set())
+        for dep in pkg.get("dependencies") or []:
+            dep_name = dep.get("name") if isinstance(dep, dict) else None
+            if isinstance(dep_name, str):
+                deps.add(canonicalize_name(dep_name))
+    return dependencies
+
+
+def align_requirement_to_lock(requirement_line: str, pins: dict[str, str]) -> str:
+    """Use the locked version when a generated requirement excludes it.
+
+    Server ``requirements.txt`` lines are not passed here. Gym installs that file as
+    written, so those pins are overrides and the lock constraint yields instead.
+    """
+    requirement = Requirement(requirement_line)
+    locked = next(
+        (version for name, version in pins.items() if canonicalize_name(name) == canonicalize_name(requirement.name)),
+        None,
+    )
+    if locked is None or not requirement.specifier or Version(locked) in requirement.specifier:
+        return requirement_line
+    extras = f"[{','.join(requirement.extras)}]" if requirement.extras else ""
+    return f"{requirement.name}{extras}=={locked}"
+
+
+def _required_lock_pin(pins: dict[str, str], name: str, rl_root: Path) -> str:
+    version = pins.get(name)
+    if not version:
+        raise SystemExit(f"{rl_root / 'uv.lock'} does not pin a single {name} version for nemo-gym")
+    return version
 
 
 def vendor_wheels(
@@ -501,6 +662,7 @@ def vendor_wheels(
     openai_version: str,
     nemo_rl_root: Path,
     gym_root: Path,
+    extra_requirements: list[str] | None = None,
 ) -> Path:
     """Resolve and download the offline closure for the selected server.
 
@@ -509,8 +671,9 @@ def vendor_wheels(
     the build host omits a linux-only dependency (sqlalchemy's greenlet) and can add a
     darwin-only one. ``pip download`` then fetches exactly those pins for the target tags.
 
-    The closure is that server's ``requirements.txt``, the pins Gym adds to every
-    sub-venv, and ``nemo-gym[dev]`` from the ``nemo_gym`` library wheel. setuptools is
+    The closure is that server's ``requirements.txt``, the requirements of every other
+    server the packaged configs name, the pins Gym adds to every sub-venv, and
+    ``nemo-gym[dev]`` from the ``nemo_gym`` library wheel. setuptools is
     capped below 81, the release that removed ``pkg_resources``: Gym pins hydra 1.3,
     which imports it at import time.
     """
@@ -524,12 +687,31 @@ def vendor_wheels(
         gym_wheel = build_library_gym_wheel(gym_root, Path(built))
         staged = wheels / gym_wheel.name
         shutil.copy2(gym_wheel, staged)
-    requirements = [
+    pins = locked_package_versions(nemo_rl_root)
+    server_lines = set(server_requirement_lines(pkg_server_dir))
+    server_lines.update(extra_requirements or [])
+    requirement_lines = [
         f"nemo-gym[dev] @ file://{staged}",
         *server_closure_requirements(pkg_server_dir, ray_version, openai_version),
     ]
+    seen = set(requirement_lines)
+    for line in extra_requirements or []:
+        if line not in seen:
+            requirement_lines.append(line)
+            seen.add(line)
+    requirements = [
+        line if line in server_lines else align_requirement_to_lock(line, pins) for line in requirement_lines
+    ]
 
     overrides, constraints = rl_dependency_policy(nemo_rl_root)
+    constraints.extend(
+        lock_requirement_lines(
+            pins,
+            [*overrides, *server_lines],
+            lock_package_dependencies(nemo_rl_root),
+            expand_dependencies_of=list(server_lines),
+        )
+    )
     with tempfile.TemporaryDirectory(prefix="closure-") as tmp:
         req_in = Path(tmp) / "requirements.in"
         req_in.write_text("\n".join(requirements) + "\n", encoding="utf-8")
@@ -656,7 +838,7 @@ def main() -> int:
         "--nemo-rl-root",
         type=Path,
         help="NeMo-RL checkout the training image is built from (wheels-v1). Its "
-        "[tool.uv] limits the wheelhouse, and its uv.lock supplies the ray and openai pins. "
+        "[tool.uv] limits the wheelhouse, and its uv.lock pins every library the image shares with it. "
         "The caller fetches the commit NEMO_RL_REF pins.",
     )
     parser.add_argument(
@@ -693,6 +875,15 @@ def main() -> int:
     ]
     policy_relpath = policy_model_relpath(args.format, rel)
     policy_model = write_policy_model_config(args.out_dir, args.format, rel)
+    extra_requirements = (
+        referenced_server_requirements(
+            gym_root,
+            [args.out_dir / path for path in config_paths] + [policy_model],
+            rel,
+        )
+        if args.format == "wheels-v1"
+        else []
+    )
     nemo_rl_root = None
     ray_version = openai_version = gym_version = None
     wheels = None
@@ -700,10 +891,12 @@ def main() -> int:
         if args.nemo_rl_root is None:
             raise SystemExit("wheels-v1 needs --nemo-rl-root, the NeMo-RL checkout at the commit NEMO_RL_REF pins.")
         nemo_rl_root = args.nemo_rl_root.expanduser().resolve()
-        ray_version, openai_version = locked_distribution_versions(nemo_rl_root)
+        pins = locked_package_versions(nemo_rl_root)
+        ray_version = _required_lock_pin(pins, "ray", nemo_rl_root)
+        openai_version = _required_lock_pin(pins, "openai", nemo_rl_root)
         gym_version = nemo_gym_version(gym_root)
         print(
-            f"image pins: nemo-gym={gym_version} ray={ray_version} openai={openai_version} from {nemo_rl_root}",
+            f"image pins: nemo-gym={gym_version} lock_packages={len(pins)} from {nemo_rl_root}",
             flush=True,
         )
         wheels = vendor_wheels(
@@ -714,6 +907,7 @@ def main() -> int:
             openai_version,
             nemo_rl_root,
             gym_root,
+            extra_requirements,
         )
     manifest = write_manifest(args.out_dir, args.format, policy_relpath, config_paths, name, args.description)
 
