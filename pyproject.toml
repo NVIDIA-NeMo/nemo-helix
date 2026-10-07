@@ -628,6 +628,9 @@ extra-paths = [
   "plugins/_temporary-scaled-evals/src",
   # Source path for the Insights analyst plugin.
   "plugins/nemo-insights/src",
+  # prompt-master plugin is not a workspace member; add its src so ty can
+  # resolve prompt_master_plugin imports when checking plugin test files.
+  "plugins/prompt-master/src",
   # nemo-builder isn't a workspace member; its tests import the package under test.
   "plugins/nemo-builder/src",
   # Source path for nemo-sandboxed-gym; its tests import the package under test.

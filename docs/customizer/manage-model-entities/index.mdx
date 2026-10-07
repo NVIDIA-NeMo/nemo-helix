@@ -63,7 +63,6 @@ Complete example of setting up a model for customization:
 
 </Tip>
 ```python
-import os
 import time
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import ConflictError
@@ -71,10 +70,7 @@ from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 # Step 1: Create FileSet from Hugging Face
 try:
@@ -118,6 +114,8 @@ print(f" Architecture: {model.spec.family}")
 print(f" Parameters: {model.spec.base_num_parameters:,}")
 print(f" Layers: {model.spec.num_layers}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 After the Model Entity is ready (has a `spec`), you can use it in customization jobs with `model: "default/qwen3-1.7b"`.
 

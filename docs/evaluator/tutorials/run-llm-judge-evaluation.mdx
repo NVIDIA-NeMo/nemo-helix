@@ -70,38 +70,30 @@ Before you begin, here is a quick overview of the resources you will use:
 
 ---
 
-## 1. Initialize the SDK and Create a Workspace
+## 1. Create a Workspace and Initialize the SDK
 
-Create a dedicated workspace for this tutorial to keep your resources isolated from other projects:
+Create a dedicated workspace for this tutorial to keep your resources isolated from other projects, and make it the default workspace for your current CLI context:
+
+```bash
+nemo workspaces create llm-as-judge-tutorial
+nemo config set --workspace llm-as-judge-tutorial
+```
+
+If the workspace already exists from a previous run, the create command reports a conflict; continue with the second command. To return to your original workspace after the tutorial, run `nemo config set --workspace default`.
+
+Create a client from your current CLI context. It connects to the deployment and workspace saved in the context, using the credentials from `nemo auth login`. For details, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
 
 ```python
-import os
-import uuid
-
 from nemo_evaluator.sdk import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
 
-# Workspace for this tutorial.
-WORKSPACE = "llm-as-judge-tutorial"
-
-# Create a NemoClient to interact with NeMo Helix.
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace=WORKSPACE,
-)
+# Create a NemoClient from the current CLI context.
+client = NemoClient.from_config()
+WORKSPACE = client.resolve_workspace()
 evaluator = Evaluator.from_client(client)
 
-# Create the workspace
-from nemo_helix_plugin.client.errors import ConflictError
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
-
-try:
-    client.workspaces.create_workspace(body=CreateWorkspaceRequest(name=WORKSPACE))
-    print(f"Workspace '{WORKSPACE}' created")
-except ConflictError:
-    print(f"Workspace '{WORKSPACE}' already exists, continuing...")
-
 # Verify evaluator plugin connectivity.
+print(f"Using workspace '{WORKSPACE}' at {client.base_url}")
 print(evaluator.plugin_status())
 ```
 
@@ -117,6 +109,8 @@ Get your `NVIDIA_API_KEY` to access the models on NVIDIA Build:
     - Steps: click "Generate API Key"
 
 ```python
+import os
+
 # Export NVIDIA_API_KEY before running this tutorial.
 # For quick local testing only:
 # os.environ["NVIDIA_API_KEY"] = "<your-nvidia-api-key>"
@@ -698,7 +692,13 @@ Workspaces cannot be deleted while they contain resources. The code above delete
 
 ### Connection refused or "Cannot connect to host"
 
-The platform isn't running. Start it with:
+Check that your current CLI context points at the deployment you expect:
+
+```bash
+nemo config view
+```
+
+If you're using a local deployment, the platform might not be running. Start it with:
 
 ```bash
 nemo services run
@@ -712,7 +712,7 @@ curl -s http://localhost:8080/health/ready
 
 ### Workspace already exists
 
-If you're re-running the tutorial, delete the existing workspace first:
+If you're re-running the tutorial and want to start fresh, delete the existing workspace first:
 
 ```python
 client.workspaces.delete_workspace(name=WORKSPACE)

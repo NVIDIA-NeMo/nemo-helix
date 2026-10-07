@@ -68,6 +68,9 @@ MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
 NEMO_GYM_EXTRA_ROOTS_ENV_KEY = "NEMO_GYM_EXTRA_ROOTS"
+#: Writable copy of the image Gym checkout. ``gym_host.sh`` stages it here before this process starts.
+IMAGE_GYM_SRC_ENV_KEY = "SANDBOXED_GYM_SRC_DIR"
+DEFAULT_IMAGE_GYM_SRC = "/tmp/gym-src/Gym"
 #: Which agent, resources server, and model to run. Gym has no schema for this key, so
 #: the host pops it and rewrites ``config_paths`` before Gym parses the dict.
 ENVIRONMENT_COMPONENT_SELECTION_CONFIG_KEY = "_nhx_environment_component_selection"
@@ -544,18 +547,28 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         sys.path.insert(0, wheels_install_dir)
 
 
-def _prepend_environment_search_root(environment_root: str) -> None:
-    """Search the mounted environment package before Gym's built-in paths.
+def _image_gym_search_root() -> str | None:
+    """Gym checkout the host script copied out of the training image, when that copy exists."""
+    root = os.environ.get(IMAGE_GYM_SRC_ENV_KEY, DEFAULT_IMAGE_GYM_SRC)
+    if os.path.isdir(root):
+        return os.path.realpath(root)
+    return None
 
-    Gym looks up config files in ``NEMO_GYM_EXTRA_ROOTS`` first. If the package is
-    not at the front of that list, Gym loads the image's agent or resources server
-    instead, and the job scores the wrong environment. Any extra roots already set
-    stay after the package so they still work as backups.
+
+def _prepend_environment_search_root(environment_root: str) -> None:
+    """Search the mounted package, then the image Gym checkout, then operator roots.
+
+    Gym resolves a server directory from ``NEMO_GYM_EXTRA_ROOTS`` before the install root.
+    The library wheel is first on ``PYTHONPATH``, so that install root has no server trees.
+    Servers the package does not ship, such as ``simple_agent`` and ``vllm_model``, resolve
+    from the image checkout. The package stays first so a server it does ship wins.
     """
-    # Preserve operator-provided roots as fallbacks; changing their relative order could
-    # select a different image-bundled component.
     existing = [root for root in os.environ.get(NEMO_GYM_EXTRA_ROOTS_ENV_KEY, "").split(os.pathsep) if root]
-    roots = [environment_root, *existing]
+    image_root = _image_gym_search_root()
+    roots = [environment_root]
+    if image_root:
+        roots.append(image_root)
+    roots.extend(existing)
     deduplicated = list(dict.fromkeys(roots))
     os.environ[NEMO_GYM_EXTRA_ROOTS_ENV_KEY] = os.pathsep.join(deduplicated)
 
@@ -958,6 +971,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             body = self._await_results(future, started)
+        except OSError:
+            raise
         except BaseException as exc:  # noqa: BLE001
             # Headers are already sent. An exception here must still become an error body,
             # or the proxy forwards a 200 with no payload. Stdout is what the job can see.

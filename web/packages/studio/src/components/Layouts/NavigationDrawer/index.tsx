@@ -21,7 +21,7 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
   const { pathname } = useLocation();
   // Each header's open/closed choice belongs to the user: persisted per id in localStorage, it
   // outlives navigation and the browser session, and only a click ever changes it. Headers the
-  // user has never touched fall through to `defaultOpen`, which opens the current section.
+  // user has never touched fall through to `defaultOpen`, which is open unless an item opts out.
   const [accordionState = {}, setAccordionState] = useLocalStorage<Record<string, boolean>>(
     NAV_ACCORDION_STATE_KEY,
     {}

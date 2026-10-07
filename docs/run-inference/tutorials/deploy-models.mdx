@@ -9,6 +9,8 @@ description: ""
 
 Deploy models from NGC or HuggingFace. Register external providers like OpenAI or NVIDIA Build.
 
+Model deployments on the control plane use the deployments plugin (Docker, Kubernetes, or OpenShell executors — no subprocess backend). The default local config uses the Docker executor, so local model serving needs a running Docker daemon. See [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
+
 <Note>
 
 Resource names for deployments, deployment configs, and providers must contain only letters (a-z, A-Z), digits (0-9), underscores, hyphens, and dots. For example: `llama-3.1-8b`, `my-custom-model`, `qwen-fs-config`.
@@ -373,20 +375,25 @@ nemo chat -m default/qwen-2-5-1-5b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # (Optional) Create a HuggingFace token secret for private models.
 # Public models like Qwen do not require a token.
 client.secrets.create(name="hf-token-secret", value=os.environ["HF_TOKEN"])
 
 # Create a fileset pointing to the HuggingFace model.
 # "token_secret" is optional — only needed for private/gated models.
-client.files.filesets.create(
-    name="qwen-2-5-1-5b",
-    storage={
-        "type": "huggingface",
-        "repo_id": "Qwen/Qwen2.5-1.5B-Instruct",
-        "repo_type": "model",
-        "token_secret": "hf-token-secret",
-    },
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="qwen-2-5-1-5b",
+        storage={
+            "type": "huggingface",
+            "repo_id": "Qwen/Qwen2.5-1.5B-Instruct",
+            "repo_type": "model",
+            "token_secret": "hf-token-secret",
+        },
+    ),
+    exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
@@ -484,15 +491,20 @@ nemo chat -m default/qwen3-1-7b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a fileset pointing to the HuggingFace model.
 # Qwen models are public — token_secret is optional.
-client.files.filesets.create(
-    name="qwen3-1-7b",
-    storage={
-        "type": "huggingface",
-        "repo_id": "Qwen/Qwen3-1.7B",
-        "repo_type": "model",
-    },
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="qwen3-1-7b",
+        storage={
+            "type": "huggingface",
+            "repo_id": "Qwen/Qwen3-1.7B",
+            "repo_type": "model",
+        },
+    ),
+    exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
@@ -603,26 +615,34 @@ nemo inference gateway provider post v1/chat/completions qwen3-lora-deployment \
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Base model fileset + entity (skip if already created above)
-client.files.filesets.create(
-    name="qwen3-1-7b",
-    storage={
-        "type": "huggingface",
-        "repo_id": "Qwen/Qwen3-1.7B",
-        "repo_type": "model",
-    },
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="qwen3-1-7b",
+        storage={
+            "type": "huggingface",
+            "repo_id": "Qwen/Qwen3-1.7B",
+            "repo_type": "model",
+        },
+    ),
+    exist_ok=True,
 )
 
 client.models.create(name="qwen3-1-7b", fileset="default/qwen3-1-7b")
 
 # Fileset for the LoRA adapter weights
-client.files.filesets.create(
-    name="linear-algebra-lora",
-    storage={
-        "type": "huggingface",
-        "repo_id": "premjatin/qwen-linear-algebra-coder",
-        "repo_type": "model",
-    },
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="linear-algebra-lora",
+        storage={
+            "type": "huggingface",
+            "repo_id": "premjatin/qwen-linear-algebra-coder",
+            "repo_type": "model",
+        },
+    ),
+    exist_ok=True,
 )
 
 # Deployment config with LoRA enabled.
@@ -786,15 +806,20 @@ nemo chat -m default/qwen-2-5-14b 'Hello!' \
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a fileset pointing to the HuggingFace model
 # Qwen models are public — token_secret is optional
-client.files.filesets.create(
-    name="qwen-2-5-14b",
-    storage={
-        "type": "huggingface",
-        "repo_id": "Qwen/Qwen2.5-14B-Instruct",
-        "repo_type": "model",
-    },
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="qwen-2-5-14b",
+        storage={
+            "type": "huggingface",
+            "repo_id": "Qwen/Qwen2.5-14B-Instruct",
+            "repo_type": "model",
+        },
+    ),
+    exist_ok=True,
 )
 
 # Register a model entity referencing the fileset
@@ -979,6 +1004,8 @@ Set `chat_template` and tool calling configuration with fileset `metadata.model.
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 
 # Create fileset with chat template and tool calling config via metadata
 tool_metadata: dict[str, object] = {
@@ -998,14 +1025,17 @@ tool_metadata: dict[str, object] = {
     }
 }
 
-client.files.filesets.create(
-    name="llama-3-2-1b-tool",
-    storage={
-        "type": "huggingface",
-        "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
-        "repo_type": "model"
-    },
-    metadata=tool_metadata,
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="llama-3-2-1b-tool",
+        storage={
+            "type": "huggingface",
+            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
+            "repo_type": "model"
+        },
+        metadata=tool_metadata,
+    ),
+    exist_ok=True,
 )
 
 # Register model entity referencing the fileset
@@ -1142,6 +1172,8 @@ nemo wait inference deployment llama-tool-deployment-v2
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest
+
 # Create a new fileset with the updated tool calling config via metadata
 tool_metadata_v2: dict[str, object] = {
     "model": {
@@ -1152,14 +1184,17 @@ tool_metadata_v2: dict[str, object] = {
     }
 }
 
-client.files.filesets.create(
-    name="llama-3-2-1b-tool-v2",
-    storage={
-        "type": "huggingface",
-        "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
-        "repo_type": "model",
-    },
-    metadata=tool_metadata_v2,
+client.files.client.create_fileset(
+    body=CreateFilesetRequest(
+        name="llama-3-2-1b-tool-v2",
+        storage={
+            "type": "huggingface",
+            "repo_id": "meta-llama/Llama-3.2-1B-Instruct",
+            "repo_type": "model",
+        },
+        metadata=tool_metadata_v2,
+    ),
+    exist_ok=True,
 )
 
 # Create a new model entity referencing the new fileset
@@ -1203,8 +1238,10 @@ To enable it, set `models.tool_call_plugin.enabled: true` in the platform config
 <Tab title="Python SDK">
 
 ```python
+from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetRequest
+
 # 1. Create a fileset for the plugin file
-client.files.filesets.create(name="my-tool-plugin")
+client.files.client.create_fileset(body=CreateFilesetRequest(name="my-tool-plugin"), exist_ok=True)
 client.files.upload(
     fileset="my-tool-plugin",
     local_path="my_parser.py",
@@ -1222,9 +1259,9 @@ plugin_tool_metadata: dict[str, object] = {
     }
 }
 
-client.files.filesets.update(
-    "llama-3-2-1b-tool",
-    metadata=plugin_tool_metadata,
+client.files.client.update_fileset(
+    name="llama-3-2-1b-tool",
+    body=UpdateFilesetRequest(metadata=plugin_tool_metadata),
 )
 ```
 

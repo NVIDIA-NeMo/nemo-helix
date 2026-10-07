@@ -137,11 +137,9 @@ describe('WorkspaceSideNav', () => {
     expect(screen.queryByText('Custom Models')).not.toBeInTheDocument();
   });
 
-  it('orders the Models children as the model funnel', async () => {
-    const user = userEvent.setup();
+  it('orders the Models children as the model funnel', () => {
     renderSideNav();
 
-    await user.click(disclosure('Models'));
     const labels = screen
       .getAllByRole('link')
       .map((link) => link.textContent?.trim())
@@ -150,27 +148,28 @@ describe('WorkspaceSideNav', () => {
     expect(labels).toEqual(MODEL_FUNNEL);
   });
 
-  it('expands only the parent owning the current nested route', () => {
+  it('starts every parent expanded regardless of the current route', () => {
     renderSideNav('/workspaces/test-workspace/agents/monitor');
 
-    expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Models')).toHaveAttribute('aria-expanded', 'false');
+    for (const parent of ['Agents', 'Models', 'Datasets']) {
+      expect(disclosure(parent)).toHaveAttribute('aria-expanded', 'true');
+    }
   });
 
-  it('keeps a manually opened Datasets open after the route moves elsewhere', async () => {
+  it('keeps a manually collapsed Datasets collapsed after the route moves elsewhere', async () => {
     const user = userEvent.setup();
     renderSideNav();
 
     // Datasets has no landing page of its own, so its whole row is the disclosure control and a
-    // plain click on the label opens it.
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
-    await user.click(disclosure('Datasets'));
+    // plain click on the label collapses it.
     expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
+    await user.click(disclosure('Datasets'));
+    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
 
-    // The manual open is the user's preference now; navigating elsewhere does not undo it.
+    // The manual collapse is the user's preference now; navigating elsewhere does not undo it.
     await user.click(screen.getByRole('link', { name: 'Agents' }));
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'true');
-    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'true');
+    expect(disclosure('Datasets')).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('keeps a chevron-collapsed parent collapsed when the route comes back to it', async () => {
@@ -180,7 +179,6 @@ describe('WorkspaceSideNav', () => {
     await user.click(disclosure('Agents'));
     expect(disclosure('Agents')).toHaveAttribute('aria-expanded', 'false');
 
-    await user.click(disclosure('Models'));
     await user.click(screen.getByRole('link', { name: 'Model Catalog' }));
     await user.click(screen.getByRole('link', { name: 'Agents' }));
     // The collapse is a saved preference; returning to the section must not reopen it.

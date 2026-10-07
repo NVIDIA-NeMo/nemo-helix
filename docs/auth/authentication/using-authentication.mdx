@@ -98,16 +98,18 @@ for workspace in client.workspaces.list_workspaces().items():
     print(workspace.name)
 ```
 
-If you need explicit token control (for example, a token from a CI system or environment variable), pass it via `auth`:
+In CI jobs or containers without a CLI configuration file, set `NHX_BASE_URL` and `NHX_ACCESS_TOKEN` instead; `from_config()` reads them. For more about CLI contexts and these overrides, see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments).
+
+If you need explicit token control (for example, a token your CI system issues at runtime), construct the client directly and pass the token via `auth`:
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
+token = "<access-token>"  # for example, read from your CI system's secret store
 client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
+    base_url="https://nhx.company.com",
     workspace="default",
-    auth=os.environ.get("NHX_ACCESS_TOKEN"),
+    auth=token,
 )
 ```
 

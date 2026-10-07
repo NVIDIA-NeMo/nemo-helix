@@ -534,7 +534,7 @@ COPY --from=decord2-wheel-builder-py313 /wheels /wheels
 #
 # docker/rl/scripts/sync-rl-cuda-wheels.py copies the git commits and sdist
 # versions below from NeMo-RL's pyproject.toml at NEMO_RL_REF.
-# NeMo-RL commit: 3f05fc8abe69d0ffa786767cdc5335a52c612c65
+# NeMo-RL commit: 62d76953283a44021031025f7f545a808f492a1b
 # =============================================================================
 FROM python:${RL_CUDA_EXT_PYTHON}-slim-bookworm AS rl-cuda-ext-cpython
 

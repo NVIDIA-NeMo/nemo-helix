@@ -33,7 +33,7 @@ from typing import Any, Protocol, cast
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.client import FilesClient
-from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig
+from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
 from nemo_helix_plugin.files.types import CreateFilesetRequest, FilesetPurpose
 from nemo_helix_plugin.models.types import CreateModelEntityRequest
 from nemo_helix_plugin.schema import SecretRef
@@ -267,7 +267,9 @@ def _create_model(
     name = fileset_name_for(source, prefix="model")
     if is_huggingface_id(source):
         token = SecretRef(hf_token_secret) if hf_token_secret else None
-        storage = HuggingfaceStorageConfig(repo_id=source, repo_type="model", token_secret=token)
+        storage = HuggingfaceStorageConfig(
+            type=StorageConfigType.HUGGINGFACE, repo_id=source, repo_type="model", token_secret=token
+        )
         _create_fileset(
             files,
             name=name,

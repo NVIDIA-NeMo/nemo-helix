@@ -17,14 +17,10 @@ The `Evaluator` resource is the sync SDK object for working with the Evaluator p
 Build it from a `NemoClient` instance:
 
 ```python
-import os
 from nemo_evaluator.sdk import Evaluator
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 evaluator = Evaluator.from_client(client)
 ```
 
@@ -75,14 +71,10 @@ The `AsyncEvaluator` resource provides the same Evaluator plugin surface for `As
 Async methods must be awaited:
 
 ```python
-import os
 from nemo_evaluator.sdk import AsyncEvaluator
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
-async_client = AsyncNemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+async_client = AsyncNemoClient.from_config()
 async_evaluator = AsyncEvaluator.from_client(async_client)
 ```
 

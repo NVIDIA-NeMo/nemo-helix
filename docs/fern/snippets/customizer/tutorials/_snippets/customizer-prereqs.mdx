@@ -11,14 +11,12 @@ Before starting, make sure you have:
 
 - NeMo Helix installed and deployed (see [Setup](/documentation/get-started))
 - The PyPI `nemo-helix` wrapper package installed (`pip install "nemo-helix[all]"`). If you are working from a source checkout, run `make bootstrap` from the repository root instead.
+- A current CLI context that points at your deployment (see [Connect with CLI Contexts](/documentation/reference/cli-reference/connect-to-deployments))
 - (Optional) Weights & Biases account and API key for enhanced visualization
 
 **Set up environment variables:**
 
 ```bash
-# Set the base URL for NeMo Helix
-export NHX_BASE_URL="http://localhost:8080" # Or your deployed platform URL
-
 # Optional: Weights & Biases for experiment tracking
 export WANDB_API_KEY="<your-wandb-api-key>"
 ```
@@ -26,13 +24,11 @@ export WANDB_API_KEY="<your-wandb-api-key>"
 **Initialize the SDK:**
 
 ```python
-import os
 from nemo_helix_plugin.client.client import NemoClient
 
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 ```
+
+These examples use the `default` workspace. If your current CLI context uses a different workspace, run `nemo config set --workspace default` first.
 
 </Accordion>

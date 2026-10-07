@@ -7,6 +7,7 @@ import {
   TooltipProvider,
 } from '@nvidia/foundations-react-core';
 import { BreadcrumbsProvider } from '@studio/providers/breadcrumbs/BreadcrumbsProvider';
+import { WorkersProvider } from '@studio/providers/workers/WorkersProvider';
 import { MockWorkspaceProvider } from '@studio/tests/mocks/MockWorkspaceProvider';
 import { TestQueryClient } from '@studio/tests/util/TestQueryClient';
 import { QueryClientConfig, QueryClientProvider } from '@tanstack/react-query';
@@ -38,7 +39,9 @@ export const TestProviders = ({ options, children }: PropsWithChildren<Props>) =
             <MockToastProvider>
               <MockWorkspaceProvider>
                 <BreadcrumbsProvider>
-                  <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+                  <WorkersProvider>
+                    <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+                  </WorkersProvider>
                 </BreadcrumbsProvider>
               </MockWorkspaceProvider>
             </MockToastProvider>

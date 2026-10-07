@@ -92,7 +92,6 @@ If omitted, column classification is skipped and PII detection falls back to heu
 Here's an example showing a complete job configuration using the Python SDK:
 
 ```python
-import os
 import time
 
 import pandas as pd
@@ -101,10 +100,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_safe_synthesizer_plugin.sdk.job_builder import SafeSynthesizerJobBuilder
 
 df = pd.DataFrame({"text": [f"sample record {i}" for i in range(200)]})
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 builder = (
     SafeSynthesizerJobBuilder(client)

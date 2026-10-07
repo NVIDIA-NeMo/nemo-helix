@@ -117,7 +117,6 @@ For **platform jobs**, set `pretrained_model_job` in the job spec to a completed
 The `SafeSynthesizerJobBuilder` provides a high-level interface for common workflows:
 
 ```python
-import os
 import time
 
 import pandas as pd
@@ -136,10 +135,7 @@ df = pd.DataFrame(
         * 50
     }
 )
-client = NemoClient(
-    base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
-    workspace="default",
-)
+client = NemoClient.from_config()
 
 builder = (
     SafeSynthesizerJobBuilder(client)
@@ -150,6 +146,8 @@ builder = (
 )
 job = builder.create_job(name=f"my-job-{int(time.time())}")
 ```
+
+<Markdown src="/snippets/_snippets/tutorials/default-workspace-note.mdx" />
 
 The builder does the following:
 

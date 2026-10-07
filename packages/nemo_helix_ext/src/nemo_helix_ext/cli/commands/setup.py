@@ -80,7 +80,7 @@ from nemo_helix_ext.ui.prompts import (
     prompt_confirm,
     prompt_multiselect,
     prompt_password,
-    prompt_select,
+    prompt_search_select,
     prompt_text,
     provider_name_validator,
 )
@@ -2249,17 +2249,25 @@ def _select_model_pair(
     if suggested is None:
         console.print(f"  {WARN} None of the discovered models served a test request; choose a model explicitly.")
 
-    default_model = prompt_select(
+    default_model = prompt_search_select(
         "Choose your default model (used for quality-critical agent work):",
         choices=display_models,
         default=suggested.default if suggested else None,
-        hint="Press Enter to accept the default." if suggested else "Choose a model you can access.",
+        hint="Press Enter to accept the default, or type to search."
+        if suggested
+        else "Type to search models you can access.",
     )
-    fast = prompt_select(
+    fast_default = suggested.fast if suggested else default_model
+    fast_hint = (
+        "Press Enter to reuse the default model, or type to search."
+        if fast_default == default_model
+        else "Press Enter to accept the suggested fast model, or type to search."
+    )
+    fast = prompt_search_select(
         "Choose your fast model (used for latency-sensitive agent work):",
         choices=display_models,
-        default=suggested.fast if suggested else default_model,
-        hint="Press Enter to reuse the default model.",
+        default=fast_default,
+        hint=fast_hint,
     )
     return ModelPair(default=default_model, fast=fast)
 

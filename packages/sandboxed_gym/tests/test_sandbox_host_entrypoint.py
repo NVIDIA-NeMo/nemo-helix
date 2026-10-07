@@ -176,6 +176,36 @@ def _run_gym_host(paths: dict[str, Path], gym_rw: Path) -> subprocess.CompletedP
     )
 
 
+def test_the_staged_path_is_published_for_search_root_discovery(tmp_path: Path) -> None:
+    paths = _fake_host(tmp_path)
+    recorded = tmp_path / "recorded-src"
+    python = paths["venv"] / "bin" / "python"
+    python.write_text(
+        '#!/bin/sh\nprintf \'%s\\n\' "$SANDBOXED_GYM_SRC_DIR" > "$RECORDED"\n',
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    gym_rw = tmp_path / "custom-gym" / "Gym"
+
+    result = subprocess.run(
+        [
+            "/bin/sh",
+            str(gym_host_script_path(git_root=str(paths["root"]))),
+            str(paths["venv"]),
+            str(paths["root"]),
+            str(gym_rw),
+            str(paths["runtime"]),
+        ],
+        env={**os.environ, "SANDBOXED_GYM_TREE": str(paths["tree"]), "RECORDED": str(recorded)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert recorded.read_text(encoding="utf-8") == f"{gym_rw}\n"
+
+
 def test_the_gym_tree_is_staged_where_pythonpath_expects_it(tmp_path: Path) -> None:
     paths = _fake_host(tmp_path)
     gym_rw = tmp_path / "gym-src" / "Gym"
