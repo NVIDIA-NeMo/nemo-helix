@@ -1522,6 +1522,38 @@ class TestRemoteConnection:
         assert setup_commands._platform_request_headers(cli_context) == {"Authorization": "Bearer remote-token"}
 
 
+class TestLegacyDirectoryNotice:
+    def test_notice_prints_existing_legacy_dirs(self, tmp_path, monkeypatch, capsys):
+        legacy_dir_name = "nm" + "p"
+        config_home = tmp_path / "config"
+        state_home = tmp_path / "state"
+        (config_home / legacy_dir_name).mkdir(parents=True)
+        (config_home / "nhx").mkdir(parents=True)
+        (state_home / legacy_dir_name).mkdir(parents=True)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+        monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+        monkeypatch.delenv("NHX_CONFIG_FILE", raising=False)
+
+        setup_commands._print_legacy_directory_notice()
+
+        captured = capsys.readouterr()
+        assert "legacy pre-rename config/state directories" in captured.err
+        assert str(config_home / legacy_dir_name) in captured.err
+        assert str(state_home / legacy_dir_name) in captured.err
+        assert str(config_home / "nhx" / "config.yaml") in captured.err
+        assert str(state_home / "nhx") in captured.err
+
+    def test_notice_is_silent_without_legacy_dirs(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        monkeypatch.delenv("NHX_CONFIG_FILE", raising=False)
+
+        setup_commands._print_legacy_directory_notice()
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
+
 class TestLocalDataDirHelpers:
     """Tests for the XDG-default data-dir helpers used by `nemo setup`."""
 

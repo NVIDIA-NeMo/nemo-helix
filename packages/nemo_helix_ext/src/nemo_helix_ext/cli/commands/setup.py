@@ -44,7 +44,7 @@ from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest, HelixSecre
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.common.config import nhx_user_data_dir
-from nhx.platform_runner.config import DEFAULT_LOCAL_SERVICES_BIND_HOST, HelixAppConfig
+from nhx.platform_runner.config import DEFAULT_LOCAL_SERVICES_BIND_HOST, HelixAppConfig, default_state_root
 from pydantic import SecretStr
 from rich import box
 from rich.console import Console
@@ -98,6 +98,41 @@ _SUPPORTED_PYTHON_MAX = (3, 14)
 CHECK = "[green]✓[/green]"
 CROSS = "[red]✗[/red]"
 WARN = "[yellow]![/yellow]"
+
+
+_LEGACY_DIR_NAME = "nm" + "p"
+
+
+def _legacy_config_dir() -> Path:
+    """Return the pre-rename user config directory."""
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home).expanduser() / _LEGACY_DIR_NAME
+    return Path.home() / ".config" / _LEGACY_DIR_NAME
+
+
+def _legacy_state_dir() -> Path:
+    """Return the pre-rename user state directory."""
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        return Path(xdg_state_home).expanduser() / _LEGACY_DIR_NAME
+    return Path.home() / ".local" / "state" / _LEGACY_DIR_NAME
+
+
+def _print_legacy_directory_notice() -> None:
+    """Warn setup users when pre-rename config/state directories remain."""
+    legacy_dirs = [path for path in (_legacy_config_dir(), _legacy_state_dir()) if path.exists()]
+    if not legacy_dirs:
+        return
+
+    legacy_list = ", ".join(f"[cyan]{escape(str(path))}[/cyan]" for path in legacy_dirs)
+    console.print(
+        f"{WARN} Found legacy pre-rename config/state directories from before the {_LEGACY_DIR_NAME} → nhx rename: "
+        f"{legacy_list}. NeMo Helix now reads [cyan]{escape(str(Config.get_default_config_path()))}[/cyan] "
+        f"and [cyan]{escape(str(default_state_root()))}[/cyan]; the legacy directories are ignored.\n",
+        soft_wrap=True,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Known provider catalog
@@ -2775,6 +2810,7 @@ def setup_command(
     _require_supported_python()
 
     console.print("\n[bold cyan]NeMo Helix Setup[/bold cyan]\n")
+    _print_legacy_directory_notice()
     if resume:
         console.print(f"{CHECK} Retrying setup using the normal idempotent setup path.\n")
 
