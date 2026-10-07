@@ -794,3 +794,21 @@ def test_workflow_rejects_harness_override() -> None:
         translate_agent_config(config, harness_name="codex")
     with pytest.raises(FabricTranslationError, match="Workflow requires models.default"):
         translate_agent_config(config)
+
+
+@pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa.bench-agent"])
+def test_nooa_bench_harness_selection(kind: str) -> None:
+    config = AgentConfig.model_validate(
+        {
+            "config_format": "nemo-agents-spec-v1",
+            "name": "nooa-bench",
+            "default_harness": "bench",
+            "harnesses": {"bench": {"kind": kind}},
+            "models": {"default": {"provider": "openai", "model": "test-model"}},
+        }
+    )
+    translated = translate_agent_config(config)
+    assert translated.workflow is None
+    assert translated.harness is not None
+    assert translated.harness.adapter_id == "nvidia.fabric.nooa.bench-agent"
+    assert translated.harness.resolution == "preinstalled"

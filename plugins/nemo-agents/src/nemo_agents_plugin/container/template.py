@@ -69,7 +69,7 @@ def is_plugin_managed(path: Path) -> bool:
 
 
 def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | None = None) -> tuple[str, bool, bool]:
-    """Return the Platform extra and Hermes isolation flag for the default harness."""
+    """Return the Platform extra and Hermes isolation flag for the selected agent."""
     try:
         payload = yaml.safe_load(agent_config.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
@@ -83,17 +83,17 @@ def resolve_fabric_harness_install(agent_config: Path, *, python_version: str | 
         harnesses.get(default_harness) if isinstance(harnesses, Mapping) and isinstance(default_harness, str) else None
     )
     kind = selected.get("kind") if isinstance(selected, Mapping) else None
+    workflow = payload.get("workflow")
+    if isinstance(workflow, Mapping):
+        target_id = workflow.get("target_id")
+        kind = _FABRIC_WORKFLOW_ADAPTERS.get(target_id) if isinstance(target_id, str) else None
     if not isinstance(kind, str):
         return "nemo-agents-plugin", False, False
-    if python_version is not None and kind in {
-        "nooa",
-        "nooa-bench-agent",
-        "nvidia.fabric.nooa",
-        "nvidia.fabric.nooa.bench-agent",
-    }:
+    platform_extra = _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin")
+    if python_version is not None and platform_extra == "nemo-agents-plugin-nooa":
         if re.fullmatch(r"3\.(12|13)(?:\.\d+)?", python_version) is None:
             raise ValueError(f"NOOA requires Python 3.12 or 3.13; got {python_version!r}. Set --python-version 3.13.")
-    return _FABRIC_HARNESS_INSTALLS.get(kind, "nemo-agents-plugin"), kind in _HERMES_HARNESS_KINDS, kind in _PI_HARNESS_KINDS
+    return platform_extra, kind in _HERMES_HARNESS_KINDS, kind in _PI_HARNESS_KINDS
 
 
 # -- Defaults ---------------------------------------------------------------
@@ -172,7 +172,15 @@ _FABRIC_HARNESS_INSTALLS = {
     "codex": "nemo-agents-plugin-codex",
     "nvidia.fabric.codex": "nemo-agents-plugin-codex",
     "deepagents": "nemo-agents-plugin-deepagents",
+    "nooa": "nemo-agents-plugin-nooa",
+    "nooa-bench-agent": "nemo-agents-plugin-nooa",
+    "nvidia.fabric.nooa": "nemo-agents-plugin-nooa",
+    "nvidia.fabric.nooa.bench-agent": "nemo-agents-plugin-nooa",
     "nvidia.fabric.langchain.deepagents": "nemo-agents-plugin-deepagents",
+}
+_FABRIC_WORKFLOW_ADAPTERS = {
+    "nvidia.nooa.coding-agent": "nvidia.fabric.nooa",
+    "nvidia.nooa.arc-solver": "nvidia.fabric.nooa",
 }
 _HERMES_HARNESS_KINDS = {"hermes", "nvidia.fabric.hermes"}
 _PI_HARNESS_KINDS = {"pi", "nvidia.fabric.pi"}

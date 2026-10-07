@@ -23,6 +23,7 @@ HARNESS_ADAPTER_IDS = {
     "hermes": "nvidia.fabric.hermes",
     "remote-agent": "nvidia.fabric.remote-agent",
     "pi": "nvidia.fabric.pi",
+    "nooa-bench-agent": "nvidia.fabric.nooa.bench-agent",
 }
 
 # A harness kind carrying this prefix is already a fully-qualified Fabric
