@@ -1,19 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Trigger-side helper for the Helix agent dispatch workflow.
-//
-// Parses the trigger token from a PR comment, reacts 👀 to acknowledge, and sends
-// a `repository_dispatch` to the worker repo carrying the PR context the agent
-// needs. Fire-and-forget: it does not wait for the agent.
-//
-// The envelope `client_payload` is the documented contract agents conform to:
-//   { trigger, repo, pr_number, comment_id, comment_body, comment_author,
-//     head_sha, base_ref, head_ref }
-// The worker resolves `trigger` + `repo` against dispatch-registry.yaml and
-// forwards this payload (plus a minted GitHub token) into the agent job.
+// Trigger-side helper for the Helix agent dispatch workflow: parse the `/helix-*`
+// token from a PR comment, react 👀, and fire a `repository_dispatch` to the worker
+// (fire-and-forget). Envelope contract + architecture: see HELIX_AGENT_DISPATCH.md.
 
 const EVENT_TYPE = "helix-agent";
+// Bound the forwarded comment: repository_dispatch caps client_payload at 64KB.
+const MAX_COMMENT_BODY = 10000;
 
 function parseTrigger(body) {
   // First whitespace-delimited token, if it looks like `/helix-<name>`.
@@ -36,9 +30,10 @@ async function dispatchAgent({ core, github, context, env }) {
     repo: context.payload.repository?.full_name,
     pr_number: issue?.number,
     comment_id: comment?.id,
-    comment_body: comment?.body,
+    comment_body: (comment?.body ?? "").slice(0, MAX_COMMENT_BODY),
     comment_author: comment?.user?.login,
-    // The PR head SHA pins the review target; filled by the worker from the PR if absent.
+    // Revision fields are worker-populated (it resolves them from the PR); the
+    // producer always emits null here.
     head_sha: null,
     base_ref: null,
     head_ref: null,

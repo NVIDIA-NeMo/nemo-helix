@@ -32,16 +32,19 @@ NeMo Helix  →  pi agent job  →  gh CLI + token  →  reply on the PR thread
 
 ## The dispatch contract (envelope)
 
-`client_payload` forwarded trigger→worker and handed to the agent as its job `input`:
+The trigger emits this `client_payload` (`repository_dispatch`). Revision fields are
+emitted `null` and the worker backfills them from the PR:
 
 ```json
 { "trigger": "/helix-review", "repo": "owner/name", "pr_number": 2653,
   "comment_id": 42, "comment_body": "/helix-review", "comment_author": "benmccown",
-  "head_sha": "<pinned>", "github_token_env": "GH_TOKEN" }
+  "head_sha": null, "base_ref": null, "head_ref": null }
 ```
 
-The GitHub token VALUE is injected into the job's secret env under `github_token_env`
-(never serialized into the payload). Agents read `GH_TOKEN` to drive the `gh` CLI.
+The worker then builds the agent's job `input` from this envelope: it resolves
+`head_sha` (and refs) from the PR, and adds `github_token_env` (the env-var NAME the
+token lands under). The token VALUE is injected into the job's secret env under that
+name — never serialized into the payload. Agents read `GH_TOKEN` to drive the `gh` CLI.
 
 ## Onboarding a new GitHub-triggered agent (~3 edits)
 

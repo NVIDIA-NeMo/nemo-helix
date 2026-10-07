@@ -1,17 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Generic GitHub -> NeMo Helix agent trigger.
-#
-# Fires on a PR comment that starts with a registered trigger token (e.g.
-# `/helix-review`). On a match it reacts 👀 to the comment and sends a
-# `repository_dispatch` to the worker repo, which dispatches the mapped Helix
-# agent job. Fire-and-forget: this workflow does NOT wait for or post the result
-# — the agent replies on the thread itself.
-#
-# This is a thin, reusable front door. The trigger -> agent mapping lives in the
-# worker repo's dispatch-registry.yaml; here we only recognize the token prefix
-# and forward context.
+# Generic GitHub -> NeMo Helix agent trigger: a `/helix-*` PR comment reacts 👀 and
+# fires a `repository_dispatch` to the worker repo (fire-and-forget; the agent replies
+# itself). Architecture + the trigger->agent mapping: see HELIX_AGENT_DISPATCH.md.
 
 name: Helix agent dispatch
 
@@ -25,12 +17,13 @@ permissions:
 jobs:
   dispatch:
     name: Dispatch Helix agent
-    # Only PR comments (not issue comments) whose body starts with a `/helix-` trigger.
-    # The authoritative trigger->agent mapping is resolved worker-side; this guard
-    # just avoids dispatching on unrelated chatter.
+    # Gate on: a PR comment (not an issue), a `/helix-` trigger token, AND a commenter
+    # with write access — issue_comment runs in the base repo with its secrets, so an
+    # author_association check is what stops an arbitrary user from firing the agent.
     if: >-
       github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/helix-')
+      startsWith(github.event.comment.body, '/helix-') &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
     steps:
       - name: Check out workflow revision
