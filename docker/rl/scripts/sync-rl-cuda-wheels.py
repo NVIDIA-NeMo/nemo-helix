@@ -6,10 +6,10 @@
 RUN THIS WHEN THE PIN FOR RL CHANGES DEPS.
 Then regenerate Dockerfile.python-wheels.
 
-Checks out NEMO_RL_REF from docker/rl/Dockerfile.nhx-rl-base, reads the git
-revisions and version pins from that commit's pyproject.toml, and writes them
-into docker/base/Dockerfile.python-wheels. NeMo-RL's own files stay as they
-are. nhx-rl-base installs the built wheels with uv pip, outside uv.lock.
+Checks out NEMO_RL_REF from docker-bake.hcl, reads the git revisions and
+version pins from that commit's pyproject.toml, and writes them into
+docker/base/Dockerfile.python-wheels. NeMo-RL's own files stay as they are.
+nhx-rl-base installs the built wheels with uv pip, outside uv.lock.
 
     docker/rl/scripts/sync-rl-cuda-wheels.py [path-to-NeMo-RL]
 
@@ -26,6 +26,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]  # Assumes NeMo-RL is a sibling of this repo.
 RL_DOCKERFILE = REPO / "docker" / "rl" / "Dockerfile.nhx-rl-base"
+BAKE_HCL = REPO / "docker-bake.hcl"
 WHEELS_DOCKERFILE = REPO / "docker" / "base" / "Dockerfile.python-wheels"
 
 # (pyproject source name, Dockerfile env, clone URL as written in the Dockerfile)
@@ -111,8 +112,9 @@ def checkout(repo: Path, url: str, ref: str) -> str:
 def main() -> int:
     nemo = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else REPO.parent / "NeMo-RL"
     rl = RL_DOCKERFILE.read_text()
+    bake = BAKE_HCL.read_text()
     url = one(r"^ARG NEMO_RL_REPO=(\S+)", rl, "NEMO_RL_REPO")
-    ref = one(r"^ARG NEMO_RL_REF=(\S+)", rl, "NEMO_RL_REF")
+    ref = one(r'variable "NEMO_RL_REF" \{\s*default = "([^"]+)"', bake, "NEMO_RL_REF")
     sha = checkout(nemo, url, ref)
     print(f"NeMo-RL {ref} -> {sha}")
 

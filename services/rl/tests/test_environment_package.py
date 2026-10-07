@@ -1291,7 +1291,7 @@ def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) 
     override = Path(compile_cmd[compile_cmd.index("--override") + 1])
     constraint = Path(compile_cmd[compile_cmd.index("--constraint") + 1])
     assert override.read_text(encoding="utf-8") == "fastapi[standard]>=0.133.0,<0.137.0\n"
-    assert constraint.read_text(encoding="utf-8") == "urllib3>=2.7.0\n"
+    assert constraint.read_text(encoding="utf-8") == "urllib3>=2.7.0\nopenai==2.6.1\nray==2.56.1\n"
 
 
 def test_setuptools_override_keeps_the_pkg_resources_ceiling(tmp_path: Path) -> None:

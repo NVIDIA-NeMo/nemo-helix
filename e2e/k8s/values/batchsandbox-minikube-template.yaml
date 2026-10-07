@@ -32,6 +32,9 @@ data:
           # limits. These match platformConfig.rl.sandbox_resources (2 CPU, 4Gi).
           containers:
             - name: sandbox
+              volumeMounts:
+                - name: dshm
+                  mountPath: /dev/shm
               resources:
                 requests:
                   cpu: "2"
@@ -42,3 +45,8 @@ data:
           tolerations:
             - key: nvidia.com/gpu
               operator: Exists
+          volumes:
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 1Gi

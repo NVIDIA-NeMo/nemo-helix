@@ -1055,7 +1055,11 @@ def job_route_factory(
             ),
             parsed: ParsedFilter = Depends(make_filter_dep(TypedJobsListFilter)),
         ) -> Page[TypedJobResponse]:
-            f"""List all jobs for the {service_name} microservice."""
+            f"""List all jobs for the {service_name} microservice.
+
+            If the plugin provides a jobs_list_filter, additional fields with string defaults are automatically
+            applied to the job listing as AND filters.
+            """
 
             # Enforce schema-level value validation (status enum, datetime
             # operators) on the parsed tree. ``make_filter_dep`` only checks
@@ -1079,9 +1083,9 @@ def job_route_factory(
             # when the user filter has a logical root ($or/$and/$not), since the
             # downstream parser short-circuits on the first logical operator.
             parsed.and_with(ComparisonOperation(operator=FilterOperator.EQ, field="source", value=service_name))
-            # Fields a backend adds on top of BaseJobsListFilter, with a default,
-            # are the spec values that identify that backend. ``backend: Literal["rl"] = "rl"``
-            # becomes ``spec.backend == "rl"``.
+            # Fields a plugin adds on top of BaseJobsListFilter, with a default,
+            # are the spec values that identify that plugin, or other default filters.
+            # i.e. ``backend: Literal["rl"] = "rl"`` becomes ``spec.backend == "rl"``.
             for name, info in TypedJobsListFilter.model_fields.items():
                 if name in BaseJobsListFilter.model_fields or not isinstance(info.default, str):
                     continue

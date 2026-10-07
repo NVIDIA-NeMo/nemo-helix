@@ -560,7 +560,7 @@ nemo files filesets create my-nemotron-personas-dataset-en_us \
 "type": "ngc",
 "org": "nvidia",
 "team": "nemotron-personas",
-"resource": "nemotron-personas-dataset-en_us",
+"target": "nemotron-personas-dataset-en_us",
 "version": "0.0.2",
 "api_key_secret": "my-ngc-api-key"
 }'
@@ -582,6 +582,8 @@ client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create a secret to store your NGC API key
 secret = client.secrets.create_secret(
@@ -647,6 +649,8 @@ client = NemoClient(
     base_url=os.environ.get("NHX_BASE_URL", "http://localhost:8080"),
     workspace="default",
 )
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create a secret to store your HuggingFace token (needed for gated and private repos)
 secret = client.secrets.create_secret(
@@ -760,6 +764,8 @@ from pydantic import SecretStr
 from nemo_helix_plugin.files.storage_config import S3StorageConfig
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
+
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 
 # Create secrets to store your S3 credentials
 access_key = client.secrets.create_secret(
