@@ -10,7 +10,7 @@ from nhx.common.api.filter import FilterOperation
 from nhx.common.auth import AuthContext
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.entities.utils import parse_entity_ref
-from nhx.core.models.entities import AUTO_DISCOVERED_MODEL_CUSTOM_FIELD, Model
+from nhx.core.models.entities import Model
 from nhx.core.models.entities import ModelProvider as ModelProviderEntity
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
@@ -23,11 +23,6 @@ from nhx.core.models.schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _is_auto_discovered_model(model: Model) -> bool:
-    """Return whether provider auto-discovery explicitly marked a model as owned."""
-    return model.custom_fields.get(AUTO_DISCOVERED_MODEL_CUSTOM_FIELD) is True
 
 
 class ModelProviderValidationError(Exception):
@@ -295,7 +290,7 @@ class ModelProviderService:
             return _entity_to_schema(created)
 
     async def delete_model_provider(self, request: DeleteModelProviderRequest) -> bool:
-        """Delete a provider and its exclusively served, auto-discovered models."""
+        """Delete a provider and models that have no remaining providers."""
         logger.debug("Deleting model provider", extra={"workspace": request.workspace, "provider_name": request.name})
 
         try:
@@ -324,7 +319,7 @@ class ModelProviderService:
         return True
 
     async def _cleanup_model_entities(self, provider: ModelProviderEntity, provider_id: str) -> None:
-        """Delete exclusive auto-discovered models and unlink models that must remain."""
+        """Delete orphaned models and unlink models that have other providers."""
         if not provider.served_models:
             logger.debug("No served_models, skipping model entity cleanup", extra={"provider_id": provider_id})
             return
@@ -342,30 +337,24 @@ class ModelProviderService:
                 model_workspace, model_name = ref.workspace, ref.name
                 model = await self.entity_client.get(Model, workspace=model_workspace, name=model_name)
 
-                if provider_id in model.model_providers:
-                    remaining_providers = [p for p in model.model_providers if p != provider_id]
-                    auto_discovered = _is_auto_discovered_model(model)
-                    if remaining_providers or provider.model_deployment_id is not None or not auto_discovered:
+                remaining_providers = [p for p in model.model_providers if p != provider_id]
+                if remaining_providers:
+                    if provider_id in model.model_providers:
                         model.model_providers = remaining_providers
                         await self.entity_client.update(model)
                         logger.info(
                             "Removed provider from retained model entity",
                             extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
                         )
-                    else:
-                        await self.entity_client.delete(
-                            Model,
-                            model.name,
-                            workspace=model_workspace,
-                            expected_db_version=model.db_version,
-                        )
-                        logger.info(
-                            "Deleted model entity served exclusively by provider",
-                            extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
-                        )
                 else:
-                    logger.debug(
-                        "Provider not in model entity model_providers",
+                    await self.entity_client.delete(
+                        Model,
+                        model.name,
+                        workspace=model_workspace,
+                        expected_db_version=model.db_version,
+                    )
+                    logger.info(
+                        "Deleted model entity with no remaining providers",
                         extra={"provider_id": provider_id, "model_entity_id": served_model.model_entity_id},
                     )
             except EntityNotFoundError:

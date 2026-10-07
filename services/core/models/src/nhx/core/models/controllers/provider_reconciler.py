@@ -40,7 +40,6 @@ from nhx.core.models.app import (
 from nhx.core.models.config import ControllerConfig
 from nhx.core.models.controllers.context import ModelContext
 from nhx.core.models.controllers.entity_cache import ModelEntityCache
-from nhx.core.models.entities import AUTO_DISCOVERED_MODEL_CUSTOM_FIELD
 from nhx.core.models.schemas import BackendFormat
 
 logger = getLogger(__name__)
@@ -1278,7 +1277,6 @@ class ModelProviderReconciler:
                 model_name,
                 description=f"Auto-discovered model from provider {provider_id}",
                 backend_format=_infer_backend_format(model_name),
-                custom_fields={AUTO_DISCOVERED_MODEL_CUSTOM_FIELD: True},
             )
             self._entity_cache.stage_provider_link(model_workspace, model_name, provider_id)
             self._entity_cache.stage_field_updates(

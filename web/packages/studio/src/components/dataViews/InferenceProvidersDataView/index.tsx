@@ -278,7 +278,7 @@ export const InferenceProvidersDataView: FC<InferenceProvidersDataViewProps> = (
           title={`Delete inference provider: ${modalProvider.name}`}
           confirmationText={modalProvider.name}
           onClose={handleModalClose}
-          description="Deleting this inference provider will also delete its auto-discovered model entities unless another provider serves them. Are you sure you want to proceed?"
+          description="Deleting this inference provider will also delete its model entities unless another provider serves them. Are you sure you want to proceed?"
         />
       )}
 
