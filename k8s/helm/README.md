@@ -8,7 +8,7 @@
 Documentation can be found at: https://docs.nvidia.com/nemo-helix.
 For deployment instructions, see https://docs.nvidia.com/nemo-helix/documentation/kubernetes-deployment/setup.
 
-## Upgrading existing installations
+## Upgrading installations from before the rename
 
 Kubernetes Deployment selectors are immutable. If your existing component labels
 differ from the chart defaults, set `api.componentLabel` and
