@@ -9,7 +9,7 @@ kind: Role
 metadata:
   name: {{ include "nhx-core.controllerServiceAccountName" . }}
   labels:
-    app.kubernetes.io/component: nhx-core-controller
+    app.kubernetes.io/component: {{ .Values.core.controller.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
 rules:
 - apiGroups: [""]

@@ -10,12 +10,12 @@ kind: NetworkPolicy
 metadata:
   name: {{ printf "%s-api-ingress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
   labels:
-    app.kubernetes.io/component: nhx-api
+    app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
     {{- include "nemo-helix.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/component: nhx-api
+      app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
       {{- include "nemo-helix.selectorLabels" . | nindent 6 }}
   policyTypes:
     - Ingress
