@@ -3,6 +3,120 @@
 
 # NeMo Helix rename HOW-TO
 
+## Reusable package and plugin renames
+
+`rename_packages.py` accepts a JSON profile with a required `package` section and
+an optional `library` section. Use `library` for a companion SDK; omit it for a
+plugin with no separate library. The existing Platform-to-Helix scripts below
+remain a separate workflow. The new tool needs Git and Python 3.10 or newer and
+uses only the Python standard library.
+
+The Evals profile implements these mappings:
+
+| Surface | Before | After |
+| --- | --- | --- |
+| Product | NeMo Evaluator | NeMo Helix Evals |
+| Plugin distribution | nemo-evaluator-plugin | nemo-evals-plugin |
+| Plugin directory | plugins/nemo-evaluator | plugins/nemo-evals |
+| Implementation module | nemo_evaluator | nemo_evals |
+| CLI and service | evaluator | evals |
+| API prefix | /apis/evaluator/ | /apis/evals/ |
+| Typed client module | nemo_helix_plugin.evaluator | nemo_helix_plugin.evals |
+| Typed client property | client.evaluator | client.evals |
+| Library distribution | nemo-evaluator-sdk | nhx-evals-sdk |
+| Library module and directory | nemo_evaluator_sdk | nhx_evals_sdk |
+
+Permission namespaces (`evaluator.*`), authorization scope, entity type names,
+stored task-kind discriminators and the three job source tags stay unchanged.
+The profile explicitly pins row-evaluation's source to `nemo-evaluator`, since
+otherwise changing the implementation module would change the derived source.
+
+Preview, apply, and verify from the repository root:
+
+```bash
+tools/rename/rename-to-nemo-evals.sh --dry-run
+tools/rename/rename-to-nemo-evals.sh
+tools/rename/rename-to-nemo-evals.sh --verify
+```
+
+All invocations accept `--repo-dir /path/to/checkout`. Apply requires a clean
+worktree unless `--allow-dirty` is explicitly supplied. Inspect existing changes
+before using that option. Re-running apply resumes a partial rename; it does not
+stage files or commit. The wrapper resolves its profile relative to itself, so
+it can target a different checkout without copying the scripts there.
+
+For another plugin, create a profile and invoke:
+
+```bash
+uv run --frozen --no-sync python tools/rename/rename_packages.py \
+  --profile /path/to/profile.json --dry-run
+```
+
+Minimal profile, without a companion library:
+
+```json
+{
+  "name": "Example plugin rename",
+  "exclude": ["tools/rename/**", "tests/tools/rename/**"],
+  "package": {
+    "replacements": {
+      "old_plugin": "new_plugin",
+      "plugins/old-plugin": "plugins/new-plugin"
+    },
+    "paths": {
+      "plugins/old-plugin/src/old_plugin": "plugins/new-plugin/src/new_plugin",
+      "plugins/old-plugin": "plugins/new-plugin"
+    }
+  }
+}
+```
+
+Each section supports:
+
+- `replacements`: literal content mappings, applied together with longest matches
+  first. Library and package mappings share this pass, preventing a shorter
+  plugin module name from swallowing its SDK name.
+- `paths`: repository-relative file or directory prefix mappings. The longest
+  matching prefix wins. Include nested module directories explicitly; content
+  mappings and path mappings are independent.
+- `rules`: ordered regex content rules with `pattern`, `replacement` (Python
+  regex replacement syntax), and optional `include` / `exclude` glob lists.
+  These run after literal mappings. Rules match the file's path before it moves.
+
+Top-level `exclude` globs protect fixtures, profiles and other intentional old
+names. `notes` prints follow-up requirements in preview, apply and verification.
+`--include-glob` and `--exclude-glob` further restrict files using the same
+semantics as the existing rename tools. After paths move, use globs covering the
+new locations when verifying segmented work.
+
+The tool scans tracked and non-ignored untracked files, preflights destination
+collisions before editing, skips symlinks, and preserves binary contents while
+moving their paths. It removes only empty source directories. It does not follow
+symlink targets or rewrite serialized binary artifacts. Profiles should be
+idempotent: `--verify` fails when another application would change any selected
+file or path, and succeeds once the configured transformations are exhausted.
+It does not prove runtime compatibility or detect names absent from the profile.
+
+After applying Evals, review the diff, regenerate lockfiles with `uv`, run
+`make update-sdk`, and validate library imports, packaging, plugin discovery,
+CLI, API routes and authorization. Generated files receive mechanical edits;
+they still need regeneration from their authoritative sources. Review service
+configuration, UI consumers and external integration references as well.
+
+Include this limitation in the eventual MR description: existing cloudpickle
+metric bundles and compiled job specifications may reference the removed Python
+module names. This rename supplies no compatibility aliases or data migrations
+for those artifacts.
+
+Run the new tool's isolated integration tests without bootstrapping the platform:
+
+```bash
+uv run --frozen --no-sync python -m unittest discover \
+  -s tests/tools/rename -p test_package_rename.py -v
+```
+
+## Platform-to-Helix workflow
+
 Use these scripts from the repository root to preview, apply, and verify the NeMo Helix to NeMo Helix rename.
 
 ## Prerequisites
