@@ -1108,9 +1108,8 @@ def test_mcp_tools_list_includes_feature_flag_enabled_destinations(monkeypatch: 
     assert "chat with or try a model" in studio_link_tool["description"]
 
 
-@pytest.mark.parametrize("feature_flag", ["assistant_studio_enabled", "copilot_studio_enabled"])
-def test_assistant_destinations_accept_current_and_legacy_feature_flags(feature_flag: str):
-    enabled_destinations = studio_links.enabled_destinations({feature_flag: True})
+def test_assistant_studio_flag_enables_assistant_and_dashboard_destinations():
+    enabled_destinations = studio_links.enabled_destinations({"assistant_studio_enabled": True})
 
     assert "assistant" in enabled_destinations
     assert "dashboard" in enabled_destinations
@@ -1122,6 +1121,14 @@ def test_evals_feature_flags_gate_assistant_destinations():
     enabled = studio_links.enabled_destinations({"evals_enabled": True, "evals_benchmarks_enabled": True})
     assert "evaluation" in enabled
     assert "evaluation_benchmarks" in enabled
+
+
+def test_dashboard_destination_follows_the_sandbox_dashboard_flag():
+    """Studio's DASHBOARD_ROUTE_ENABLED also opens /dashboard for the sandbox variant alone."""
+    enabled_destinations = studio_links.enabled_destinations({"dashboard_sandbox_enabled": True})
+
+    assert "dashboard" in enabled_destinations
+    assert "assistant" not in enabled_destinations
 
 
 def test_build_studio_system_prompt_preserves_empty_enabled_destinations():

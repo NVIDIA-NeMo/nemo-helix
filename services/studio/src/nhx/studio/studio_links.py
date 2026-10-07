@@ -426,13 +426,15 @@ _STUDIO_LINK_DESTINATION_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
     "settings": ("settings_enabled",),
     "members": ("members_enabled",),
     "experiment": ("experiment",),
+    "assistant": ("assistant_studio_enabled",),
     "experiment_group": ("experiment",),
     "experiment_detail": ("experiment",),
 }
 
+# Mirrors Studio's own DASHBOARD_ROUTE_ENABLED in web/packages/studio/src/constants/environment.ts:
+# the /dashboard page exists if either variant behind it is enabled.
 _STUDIO_LINK_DESTINATION_ANY_FEATURE_FLAGS: dict[str, tuple[str, ...]] = {
-    "assistant": ("assistant_studio_enabled", "copilot_studio_enabled"),
-    "dashboard": ("dashboard_enabled", "assistant_studio_enabled", "copilot_studio_enabled"),
+    "dashboard": ("assistant_studio_enabled", "dashboard_sandbox_enabled"),
 }
 
 _STUDIO_FEATURE_FLAG_MAPPINGS = {
