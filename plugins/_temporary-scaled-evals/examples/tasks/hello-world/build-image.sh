@@ -10,6 +10,7 @@
 # Usage:
 #   ./build-image.sh <target>      # reads TASK_IMAGE from targets/<target>.env
 #   TASK_IMAGE=... ./build-image.sh # explicit image
+#   TARGET_PLATFORM=linux/arm64 ... # override the remote cluster platform
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -28,8 +29,13 @@ if [[ -n "$TARGET" ]]; then
 fi
 
 : "${TASK_IMAGE:?set TASK_IMAGE (e.g. in examples/agent-sandbox/targets/<target>.env)}"
+TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 
 TASK_DIR="$(cd task && pwd)"
-docker build -f "${TASK_DIR}/environment/Dockerfile" -t "$TASK_IMAGE" "${TASK_DIR}/environment"
-docker push "$TASK_IMAGE"
+docker buildx build \
+  --platform "$TARGET_PLATFORM" \
+  -f "${TASK_DIR}/environment/Dockerfile" \
+  -t "$TASK_IMAGE" \
+  --push \
+  "${TASK_DIR}/environment"
 echo "pushed $TASK_IMAGE"
