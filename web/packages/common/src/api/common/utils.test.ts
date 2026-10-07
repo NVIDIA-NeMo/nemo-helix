@@ -341,20 +341,33 @@ describe('swallowConflict', () => {
 });
 
 describe('isForbiddenError', () => {
-  it('returns true for an axios-shaped 403', () => {
-    expect(isForbiddenError({ response: { status: 403 } })).toBe(true);
-  });
+  /** What axios raises for a response status; `isForbiddenError` tests `instanceof AxiosError`. */
+  const axiosStatus = (status: number) => {
+    const config: InternalAxiosRequestConfig = { headers: new AxiosHeaders() };
+    return new AxiosError('Request failed', String(status), config, undefined, {
+      status,
+      statusText: '',
+      data: {},
+      headers: {},
+      config,
+    });
+  };
 
-  it('returns true for a bare 403 status', () => {
-    expect(isForbiddenError({ status: 403 })).toBe(true);
+  it('returns true for an axios 403', () => {
+    expect(isForbiddenError(axiosStatus(403))).toBe(true);
   });
 
   it('returns false for other statuses', () => {
-    expect(isForbiddenError({ response: { status: 401 } })).toBe(false);
-    expect(isForbiddenError({ response: { status: 500 } })).toBe(false);
+    expect(isForbiddenError(axiosStatus(401))).toBe(false);
+    expect(isForbiddenError(axiosStatus(500))).toBe(false);
   });
 
-  it('returns false for non-HTTP errors', () => {
+  it('returns false for an axios error with no response', () => {
+    expect(isForbiddenError(new AxiosError('Network Error', 'ERR_NETWORK'))).toBe(false);
+  });
+
+  it('returns false for non-axios errors', () => {
+    expect(isForbiddenError({ response: { status: 403 } })).toBe(false);
     expect(isForbiddenError(new Error('network down'))).toBe(false);
     expect(isForbiddenError(undefined)).toBe(false);
     expect(isForbiddenError(null)).toBe(false);

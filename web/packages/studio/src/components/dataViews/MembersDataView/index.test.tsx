@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_QUERY_RETRY_COUNT } from '@studio/api/queryClient';
 import { MembersDataView } from '@studio/components/dataViews/MembersDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
@@ -97,7 +98,8 @@ describe('MembersDataView', () => {
 
       renderComponent();
 
-      await waitFor(() => expect(requestCount).toBeGreaterThan(1), {
+      // The full budget, so dropping back to a single retry fails here.
+      await waitFor(() => expect(requestCount).toBe(DEFAULT_QUERY_RETRY_COUNT + 1), {
         timeout: XL_SELECTOR_TIMEOUT,
       });
       expect(

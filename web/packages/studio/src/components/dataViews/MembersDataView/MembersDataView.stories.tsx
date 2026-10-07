@@ -4,9 +4,12 @@
 import type { WorkspaceMemberListResponse } from '@nemo/sdk/generated/platform/schema';
 import type { Meta, StoryObj } from '@storybook/react';
 import { MembersDataView } from '@studio/components/dataViews/MembersDataView';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { http, HttpResponse } from 'msw';
 
-const MEMBERS_API = '/apis/entities/v2/workspaces/:workspace/members';
+// Same base the generated client requests against, so the handlers still match when
+// VITE_PLATFORM_BASE_URL points somewhere other than the Storybook origin.
+const MEMBERS_API = `${PLATFORM_BASE_URL}/apis/entities/v2/workspaces/:workspace/members`;
 
 const membersPage: WorkspaceMemberListResponse = {
   data: [
