@@ -85,6 +85,32 @@ def test_harbor_catalog_and_compose_image_advertise_the_same_runners() -> None:
     assert "selectable-versions.txt" in dockerfile
     assert "for version in $(cat /opt/harbor/selectable-versions.txt)" in dockerfile
     assert 'test -x "${runner}/.venv/bin/harbor"' in dockerfile
+    harbor_target = dockerfile.split("AS harbor\n", 1)[1].split("\nFROM ", 1)[0]
+    assert 'uv pip install -r "/opt/harbor/requirements/${version}.txt"' in harbor_target
+    assert "ARG SANDBOX_K8S=true" in harbor_target
+    assert "import harbor.environments.opensandbox, opensandbox" in harbor_target
+    assert "0.20.0" not in harbor_target
+    assert "COPY packages/nhx_sandbox /tmp/nhx_sandbox" in harbor_target
+    assert "uv pip install /tmp/nhx_sandbox" in harbor_target
+    assert "sandboxed_gym" not in harbor_target
+
+
+def test_harbor_runner_requirements_match_the_catalog() -> None:
+    catalog = json.loads((PLUGIN_ROOT / "src/scaled_evals/data/harbor_runner_qualifications.json").read_text())
+    selectable = {version for version, release in catalog["releases"].items() if release["selectable"]}
+    requirements_dir = PLUGIN_ROOT / "harbor-runners"
+
+    assert {path.stem for path in requirements_dir.glob("*.txt")} == selectable
+    for version in selectable:
+        extras = catalog["releases"][version].get("extras", [])
+        lines = [
+            line
+            for line in (requirements_dir / f"{version}.txt").read_text().splitlines()
+            if line and not line.startswith("#")
+        ]
+        harbor = f"harbor[{','.join(extras)}]" if extras else "harbor"
+        assert lines[0] == f"{harbor}=={version}"
+        assert [line.split("==", 1)[0] for line in lines[1:]] == extras
 
 
 def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:
