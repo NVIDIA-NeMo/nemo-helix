@@ -30,10 +30,9 @@ from requests.exceptions import Timeout as RequestsTimeout
 logger = logging.getLogger(__name__)
 
 # Skip Docker backends only for daemon/connection failures after probe_docker()
-# was True, or when init raises CapabilityUnavailableError. ValidationError and
+# was True. CapabilityUnavailableError has its own handler. ValidationError and
 # other programming/config errors must still fail startup.
 _DOCKER_BACKEND_INIT_SKIPPABLE_ERRORS = (
-    CapabilityUnavailableError,
     DockerException,
     RequestsConnectionError,
     RequestsTimeout,
