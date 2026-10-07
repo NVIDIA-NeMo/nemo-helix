@@ -519,6 +519,11 @@ endif
 	@echo "Running tests for package: $(PACKAGE)..."
 	$(UV) run --frozen pytest -v packages/$(PACKAGE)/tests/
 
+.PHONY: test-agents-nooa
+test-agents-nooa: ## Run NOOA adapter integration tests with its optional harness installed
+	$(UV) run --frozen --package nemo-agents-plugin --extra nooa \
+		pytest -v plugins/nemo-agents/tests/integration/test_fabric_nooa.py
+
 .PHONY: test-deployments-openshell
 test-deployments-openshell: ## Run OpenShell deployment backend unit tests with the platform-restricted [openshell] extra installed
 	# The openshell extra is not part of the default sync (platform-restricted
