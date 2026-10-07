@@ -24,6 +24,7 @@ interface DeploymentsTabProps {
   onViewLogs: (deployment: AgentDeployment) => void;
   /** Deploying requires a Platform-managed agent config (Fabric integration). */
   canDeploy: boolean;
+  isAgentPending?: boolean;
   /** Where the agent's files come from, to link each staged commit and mark stale ones. */
   specSource?: AgentSpecSource;
   workspace: string;
@@ -48,6 +49,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   onDelete,
   onViewLogs,
   canDeploy,
+  isAgentPending,
   specSource,
   workspace,
   canPackage,
@@ -85,6 +87,7 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
               isDeploying={isDeploying}
               onDeploy={onDeploy}
               canDeploy={canDeploy}
+              isAgentPending={isAgentPending}
               message="No deployments for this agent."
             />
           </div>
